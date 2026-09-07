@@ -89,6 +89,7 @@ export function resolveModelShortcutBindings<Route extends ModelSearchRoute>(
         backendProfileId: route.backendProfileId,
         modelId: route.modelId,
         reasoningEffort: route.reasoningEffort ?? null,
+        ...(route.configuration ? { configuration: route.configuration } : {}),
       }),
       route,
     ]),

@@ -114,6 +114,39 @@ function currentRoute(): ComposerModelRoute {
 }
 
 describe("model chooser active route", () => {
+  it("restores the starred access, mode, effort and speed after reopening from another configuration", async () => {
+    const selection = providerNativeModelSelection({ providerId: "codex", modelId: "team-alpha",
+      reasoningEffort: "high", providerOptions: { fastMode: "priority" } });
+    const fastRoute: ComposerModelRoute = { ...currentRoute(),
+      backendProfileId: selection.backendProfileId, selection,
+      supportsNativeFastModeControl: true, responseSpeed: "Fast",
+      continuationIdentity: continuationIdentityForSelection(selection),
+    };
+    const initial = render(<ModelChooser routes={[fastRoute]} selectedRoute={fastRoute}
+      configuration={{ accessMode: "full", interactionMode: "plan", fastMode: true }} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    initial.unmount();
+
+    const normalRoute: ComposerModelRoute = { ...fastRoute, responseSpeed: "Standard",
+      selection: { ...selection, providerOptions: {}, reasoningEffort: null }, reasoningEffort: null };
+    const onSelect = vi.fn();
+    render(<ModelChooser routes={[normalRoute]} selectedRoute={normalRoute}
+      configuration={{ accessMode: "supervised", interactionMode: "build", fastMode: false }} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const option = screen.getByTitle("Team Alpha").closest("button")!;
+    expect(option).toHaveTextContent("Full access");
+    expect(option).toHaveTextContent("Plan");
+    expect(option).not.toHaveAttribute("aria-current", "true");
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
+    expect(onSelect.mock.calls[0]![0]).toMatchObject({
+      configuration: { accessMode: "full", interactionMode: "plan", fastMode: true },
+      selection: { reasoningEffort: "high", providerOptions: { fastMode: "priority" } },
+      continuationIdentity: { performanceModeIdentity: "fast:priority" },
+    });
+  });
+
   beforeEach(() => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,

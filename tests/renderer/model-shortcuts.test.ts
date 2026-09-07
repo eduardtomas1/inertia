@@ -65,6 +65,18 @@ function event(
 }
 
 describe("model shortcut resolution", () => {
+  it("keeps access and interaction variants independently selectable by shortcut", () => {
+    const profiles = [
+      reference("agent", { configuration: { accessMode: "full", interactionMode: "plan" } }),
+      reference("agent", { configuration: { accessMode: "supervised", interactionMode: "build" } }),
+    ];
+    const favorites = resolveModelFavorites(profiles, [route("agent")]);
+    const visible = favorites.flatMap(({ route: match }) => match ? [match] : []);
+    expect(resolveModelShortcutBindings(favorites, visible, { platform: "linux" })
+      .map(({ key, route: match }) => [key, match.configuration]))
+      .toEqual([["1", profiles[0]!.configuration], ["2", profiles[1]!.configuration]]);
+  });
+
   it("assigns distinct shortcuts to high and xhigh favorites on one model", () => {
     const high = reference("gpt-5.6-sol", { reasoningEffort: "high" });
     const xhigh = reference("gpt-5.6-sol", { reasoningEffort: "xhigh" });

@@ -15,11 +15,12 @@ const budgets = {
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
   // detachment ownership live here while their larger UI stays deferred.
-  // Prompt-history recall, cancellation recovery, Gemini-aware routing, and
-  // Zod 4.5 validation hardening measure 731.6 KiB on Linux x64; the detached
-  // route measures 559.8 KiB. Keep less than 2 KiB of headroom on each.
-  mainWorkbenchFirstLoadJavaScript: 733 * kibibyte,
-  detachedChatFirstLoadJavaScript: 561 * kibibyte,
+  // Complete favorite profiles add validation and restore access, mode and
+  // response speed across draft, split and detached chats. The workbench
+  // measures 734.9 KiB and detached route 561.8 KiB on macOS ARM64.
+  // Keep less than 2 KiB of headroom on each.
+  mainWorkbenchFirstLoadJavaScript: 736 * kibibyte,
+  detachedChatFirstLoadJavaScript: 563 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -51,11 +52,9 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // The provider-queue, project-picker, draft-ownership, prompt-history,
-  // exact-focus, Gemini routing, and Zod 4.5 validator core measures 1,969.9
-  // KiB on macOS ARM64 after the lifecycle merge. Every deferred surface retains
-  // its strict independent ceiling.
-  coreJavaScript: 1_971 * kibibyte,
+  // The core including complete favorite profiles measures 1,973.4 KiB on
+  // macOS ARM64. Every deferred surface retains its independent ceiling.
+  coreJavaScript: 1_974 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

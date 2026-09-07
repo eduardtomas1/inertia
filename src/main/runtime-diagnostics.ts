@@ -1,4 +1,5 @@
 import { parseRuntimeOwnedProcessDiagnostic, type RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
+import { parseRuntimeFailureDiagnosticMessage } from "../node/runtime-failure-diagnostic.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -143,6 +144,7 @@ export function sanitizeRuntimeDiagnosticText(value: unknown): string | undefine
 }
 
 function runtimeFailureSummary(value: unknown): string | undefined {
+  if (parseRuntimeFailureDiagnosticMessage(value)) return value as string;
   const text = sanitizeRuntimeDiagnosticText(value);
   if (!text) return undefined;
   const exactSummaries = [

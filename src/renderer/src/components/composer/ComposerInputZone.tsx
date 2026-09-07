@@ -63,6 +63,7 @@ export interface ComposerInputZoneProps {
   previewContextUrl?: string | null;
   previewContextSelected: boolean;
   onTogglePreviewContext: () => void;
+  onDismissPreviewContext: () => void;
   attachments: ChatAttachment[];
   attachmentsDisabled?: boolean;
   pendingAttachmentIds?: ReadonlySet<string>;
@@ -123,6 +124,7 @@ export function ComposerInputZone({
   previewContextUrl,
   previewContextSelected,
   onTogglePreviewContext,
+  onDismissPreviewContext,
   attachments,
   attachmentsDisabled = false,
   pendingAttachmentIds,
@@ -336,21 +338,34 @@ export function ComposerInputZone({
           </div>
         )}
         {previewContextUrl && (
-          <button
-            type="button"
+          <div
             className={clsx(
               "composer-preview-context",
               previewContextSelected && "is-selected",
             )}
-            aria-pressed={previewContextSelected}
-            onClick={onTogglePreviewContext}
           >
-            <span>
-              <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
-              <small>{previewContextUrl}</small>
-            </span>
-            <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
-          </button>
+            <button
+              type="button"
+              className="composer-preview-context-toggle"
+              aria-pressed={previewContextSelected}
+              onClick={onTogglePreviewContext}
+            >
+              <span>
+                <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
+                <small>{previewContextUrl}</small>
+              </span>
+              <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
+            </button>
+            <button
+              type="button"
+              className="composer-preview-context-dismiss"
+              aria-label={previewContextSelected ? "Remove attached preview" : "Dismiss preview suggestion"}
+              title={previewContextSelected ? "Remove attached preview" : "Dismiss preview suggestion"}
+              onClick={onDismissPreviewContext}
+            >
+              <X size={12} />
+            </button>
+          </div>
         )}
         <ComposerAttachmentList
           attachments={attachments}

@@ -2,6 +2,10 @@ name: Intel native guardian phase diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      standalone_only:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,12 +23,16 @@ jobs:
         with:
           persist-credentials: false
       - name: Install locked dependencies
+        if: inputs.standalone_only != true
         uses: ./.github/actions/install-dependencies
       - name: Build the native application bundle
+        if: inputs.standalone_only != true
         run: npm run build:packaged
       - name: Prepare Electron binary
+        if: inputs.standalone_only != true
         run: node -e "console.log(require('electron'))"
       - name: Repeat Kimi with its neighboring isolated fixture
+        if: inputs.standalone_only != true
         run: npm exec -- playwright test tests/e2e/kimi-terminal-auth.spec.ts tests/e2e/core-bridge-smoke.spec.ts --project=isolated --repeat-each=6 --max-failures=1 --output=test-results/macos-kimi
       - name: Compare private Apple Git and resolved toolchain metadata
         if: always()

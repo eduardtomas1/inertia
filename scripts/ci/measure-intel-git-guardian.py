@@ -38,11 +38,15 @@ with tempfile.TemporaryDirectory(prefix="inertia-native-git-phase-") as temporar
 
     def run_case(case):
         binary, scenario, repeat = case
+        temporary_directory = root / f"temporary-{binary}-{scenario}-{repeat}"
+        temporary_directory.mkdir(mode=0o700)
+        case_environment = {**environment, "TMPDIR": str(temporary_directory),
+                            "TMP": str(temporary_directory), "TEMP": str(temporary_directory)}
         command = "/usr/bin/git" if binary == "apple-shim" else actual_git
         args = ["rev-parse", "--show-toplevel"] if scenario.startswith("rev-parse") else ["cat-file", "--batch"]
         child = subprocess.Popen(
             [str(guardian), "watch", str(os.getpid()), "--", command, *args],
-            cwd=repository, env=environment, stdin=subprocess.PIPE,
+            cwd=repository, env=case_environment, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         )
         started = time.monotonic()
@@ -65,8 +69,9 @@ with tempfile.TemporaryDirectory(prefix="inertia-native-git-phase-") as temporar
                 selector.register(stream, selectors.EVENT_READ)
             while child.poll() is None or selector.get_map():
                 now = time.monotonic()
-                cancel_delay = 0.02 if scenario == "rev-parse-cancel" else 0.1
-                if scenario != "rev-parse-complete" and executed is not None and not stopped and now - executed >= cancel_delay:
+                should_stop = (scenario == "rev-parse-timeout" and now - started >= 3
+                               or scenario == "cat-file-cancel" and executed is not None and now - executed >= 0.1)
+                if should_stop and not stopped:
                     if child.poll() is None:
                         os.kill(child.pid, signal.SIGTERM)
                     stopped = True
@@ -115,9 +120,9 @@ with tempfile.TemporaryDirectory(prefix="inertia-native-git-phase-") as temporar
         }
 
     cases = [(binary, scenario, repeat) for repeat in range(2)
-             for scenario in ["rev-parse-complete", "rev-parse-cancel", "cat-file-cancel"]
+             for scenario in ["rev-parse-complete", "rev-parse-timeout", "cat-file-cancel"]
              for binary in ["apple-shim", "resolved-toolchain"]]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(run_case, cases))
     output = Path("test-results/macos-kimi/standalone-git-comparison.json")
     output.parent.mkdir(parents=True, exist_ok=True)

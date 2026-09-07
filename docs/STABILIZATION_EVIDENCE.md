@@ -424,6 +424,65 @@ took 94.45 seconds. This Linux result does not substitute for the next hosted
 Windows/macOS run. The independent portable suite also passed: 1,210 tests,
 two existing skips, all 77 files, 147.34 seconds.
 
+## Natural terminal exit and asynchronous ownership retirement
+
+The next hosted run, [34118357458](https://github.com/eduardtomas1/inertia/actions/runs/34118357458),
+tested `8697b317cdace664f21cb0978fbf6d53baad59a9`. The corrected unit and
+portable expectations passed on all platforms. Both Linux and Windows native
+lanes and all four Windows unit shards passed. macOS ARM64 progressed through
+unit, packaging and display-sensitive tests, then failed the new native Kimi
+terminal-login scenario. Its trace identifies the first failure as the missing
+`Connection flow complete` state, before any turn or restart. A later forced
+fixture-close error replaced that assertion in the console summary. The saved
+trace does not expose enough ownership data to establish its exact native
+interleaving; it must not be presented as conclusive root-cause evidence.
+
+Investigation did independently reproduce a real product race: normal PTY exit
+can precede asynchronous retirement of its exact durable guardian claim. The
+terminal manager treated a synchronous `confirmStopped() === false` as final
+failure, even though the registry was still completing its admission/retirement
+promise. A composed regression uses the production Darwin registry, private
+journal and terminal manager, with only native identity observations and signals
+substituted. It fails before the fix and proves the durable claim is removed
+before installation release and terminal completion afterward.
+
+Natural sign-in exit now uses tracked disposal and the existing close deadline
+to await that exact proof. It never signals the exited PID, releases installation
+authority exactly once, and publishes completion only afterward. Close,
+replacement or shutdown during this wait changes completion to cancellation;
+shutdown can tighten but cannot renew the deadline. Expiry, rejected proof or
+failed installation retirement still quarantine the session and block success.
+Late proof and duplicate exits cannot revive it. Existing deadline helpers were
+extracted without changing their logic; no guardian policy, timeout, retry,
+coverage threshold or source-size budget was weakened.
+
+The E2E scenario now closes its fixture in a separate teardown hook, preserving
+the first assertion alongside any cleanup failure. On failure it attaches only
+synthetic invocation metadata and RPC method names, never provider credentials
+or prompt bodies. Its login, three sends, restart, exact process retirement and
+durable ownership assertions remain intact.
+
+Local validation of the new product code:
+
+- 74 focused terminal tests, including 18 sign-in lifecycle cases, passed.
+- `npm run check` passed 7,471 tests, 77 existing skips and all 704 active files,
+  with every quality gate and unchanged bundle budgets.
+- `npm run test:portable` passed 1,220 tests, two existing skips and all 77 files.
+- All-source coverage passed the same 7,471 tests: statements 80.33%, branches
+  75.21%, functions 81.67%, lines 83.25%, against unchanged thresholds.
+- The separately rerun final quality gate passed all lint, architecture and
+  TypeScript checks after the focused test assertions were finalized.
+- The actual rebuilt Linux Electron app passed native Kimi login, two sends,
+  restart, a third send, zero remaining owners and clean shutdown (34.4 seconds).
+  The full isolated desktop suite then passed 60 tests with four existing
+  platform skips (2.8 minutes). These used synthetic providers, private profiles
+  and a private virtual display; the user's live app and profile were untouched.
+
+The earlier packaged artifact is evidence for its recorded source revision,
+not a package containing this later terminal change. Fresh hosted macOS results
+are still required; local Linux execution and the composed Darwin regression
+do not substitute for native macOS proof.
+
 ## Final evidence
 
 Local Linux results above include a real isolated installed-update fixture;

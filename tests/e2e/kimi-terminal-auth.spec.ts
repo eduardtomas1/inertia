@@ -111,6 +111,29 @@ async function completeTurn(app: AppFixture, request: string): Promise<void> {
   await expect(turn.getByText("Synthetic Kimi answer after terminal login.", { exact: true })).toBeVisible();
 }
 
+let activeFixture: { app: AppFixture; wirePath: string } | undefined;
+
+test.afterEach(async () => {
+  const testInfo = test.info();
+  const fixture = activeFixture;
+  activeFixture = undefined;
+  if (!fixture) return;
+  try {
+    if (testInfo.status !== testInfo.expectedStatus) {
+      // Only the synthetic executable writes this wire: invocation metadata
+      // and RPC method names, never provider credentials or prompt bodies.
+      const wire = await wireEvents(fixture.wirePath).catch(() => []);
+      await testInfo.attach("kimi-authentication-wire", {
+        body: Buffer.from(JSON.stringify(wire, null, 2)), contentType: "application/json",
+      });
+    }
+  } finally {
+    // Teardown is a separate test hook so a cleanup failure cannot replace
+    // the original login/turn/restart assertion in the reported result.
+    await fixture.app.close();
+  }
+});
+
 test("connects Kimi through a native login-only PTY then admits fresh ACP turns and restart", async () => {
   test.setTimeout(90_000);
   let conversationId = "";
@@ -146,42 +169,41 @@ test("connects Kimi through a native login-only PTY then admits fresh ACP turns 
       } finally { store.close(); }
     },
   });
-  try {
-    await app.page.getByRole("button", { name: "Settings", exact: true }).click();
-    await app.page.getByRole("button", { name: "Providers", exact: true }).click();
-    const kimi = app.page.getByRole("button", { name: "Configure Kimi Code" });
-    await expect(kimi).toContainText("Sign in required", { timeout: 20_000 });
-    await kimi.click();
-    await app.page.locator(".provider-settings-editor").getByRole("button", { name: "Connect", exact: true }).click();
-    const dialog = app.page.getByRole("dialog", { name: "Connect Kimi Code" });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("Connection flow complete", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Done", exact: true }).click();
-    await expect(dialog).toBeHidden();
-    await expect(kimi).toContainText("Configured");
-    const loginEvents = await wireEvents(wirePath);
-    const login = loginEvents.filter(event => event.kind === "login");
-    expect(login).toEqual([expect.objectContaining({ args: ["acp", "--login"], tty: true })]);
-    const priorInitialize = loginEvents.find(event => event.kind === "rpc" && event.method === "initialize");
-    expect(priorInitialize).toMatchObject({ terminalAuth: true, signedIn: false });
-    expect(priorInitialize?.pid).not.toBe(login[0]?.pid);
-    await app.page.getByRole("button", { name: "Workspace", exact: true }).click();
-    await completeTurn(app, "Synthetic Kimi first send");
-    await completeTurn(app, "Synthetic Kimi second send");
-    await expect.poll(() => durableCounts(app, conversationId)).toEqual({ completed: 2, owners: 0 });
-    await app.restart();
-    await expect(app.page.getByText("Synthetic Kimi first send", { exact: true })).toBeVisible();
-    await expect(app.page.getByText("Synthetic Kimi second send", { exact: true })).toBeVisible();
-    await completeTurn(app, "Synthetic Kimi send after restart");
-    await expect.poll(() => durableCounts(app, conversationId)).toEqual({ completed: 3, owners: 0 });
-    const events = await wireEvents(wirePath);
-    const initialized = events.filter(event => event.kind === "rpc" && event.method === "initialize");
-    expect(initialized.filter(event => event.signedIn === true)).toHaveLength(3);
-    expect(new Set(initialized.map(event => event.pid)).size).toBe(initialized.length);
-    expect(events.filter(event => event.method === "authenticate")).toEqual([]);
-    expect(events.filter(event => event.method === "session/prompt")).toHaveLength(3);
-    expect(events.filter(event => event.kind === "login")).toHaveLength(1);
-    await expect.poll(() => [...initialized, ...login].every(event => !executableProcessExists(event.pid))).toBe(true);
-    expect(app.rendererErrors).toEqual([]);
-  } finally { await app.close(); }
+  activeFixture = { app, wirePath };
+  await app.page.getByRole("button", { name: "Settings", exact: true }).click();
+  await app.page.getByRole("button", { name: "Providers", exact: true }).click();
+  const kimi = app.page.getByRole("button", { name: "Configure Kimi Code" });
+  await expect(kimi).toContainText("Sign in required", { timeout: 20_000 });
+  await kimi.click();
+  await app.page.locator(".provider-settings-editor").getByRole("button", { name: "Connect", exact: true }).click();
+  const dialog = app.page.getByRole("dialog", { name: "Connect Kimi Code" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Connection flow complete", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(kimi).toContainText("Configured");
+  const loginEvents = await wireEvents(wirePath);
+  const login = loginEvents.filter(event => event.kind === "login");
+  expect(login).toEqual([expect.objectContaining({ args: ["acp", "--login"], tty: true })]);
+  const priorInitialize = loginEvents.find(event => event.kind === "rpc" && event.method === "initialize");
+  expect(priorInitialize).toMatchObject({ terminalAuth: true, signedIn: false });
+  expect(priorInitialize?.pid).not.toBe(login[0]?.pid);
+  await app.page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await completeTurn(app, "Synthetic Kimi first send");
+  await completeTurn(app, "Synthetic Kimi second send");
+  await expect.poll(() => durableCounts(app, conversationId)).toEqual({ completed: 2, owners: 0 });
+  await app.restart();
+  await expect(app.page.getByText("Synthetic Kimi first send", { exact: true })).toBeVisible();
+  await expect(app.page.getByText("Synthetic Kimi second send", { exact: true })).toBeVisible();
+  await completeTurn(app, "Synthetic Kimi send after restart");
+  await expect.poll(() => durableCounts(app, conversationId)).toEqual({ completed: 3, owners: 0 });
+  const events = await wireEvents(wirePath);
+  const initialized = events.filter(event => event.kind === "rpc" && event.method === "initialize");
+  expect(initialized.filter(event => event.signedIn === true)).toHaveLength(3);
+  expect(new Set(initialized.map(event => event.pid)).size).toBe(initialized.length);
+  expect(events.filter(event => event.method === "authenticate")).toEqual([]);
+  expect(events.filter(event => event.method === "session/prompt")).toHaveLength(3);
+  expect(events.filter(event => event.kind === "login")).toHaveLength(1);
+  await expect.poll(() => [...initialized, ...login].every(event => !executableProcessExists(event.pid))).toBe(true);
+  expect(app.rendererErrors).toEqual([]);
 });

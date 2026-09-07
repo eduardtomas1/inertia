@@ -1,7 +1,12 @@
-name: Windows action stop diagnostic
+name: Native lifecycle diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        type: choice
+        options: [windows, macos-intel]
+        default: windows
 
 permissions:
   contents: read
@@ -9,6 +14,7 @@ permissions:
 jobs:
   windows-action-stop:
     name: Repeat immediate managed action stop
+    if: inputs.target != 'macos-intel'
     runs-on: windows-2025
     timeout-minutes: 25
     env:
@@ -57,5 +63,34 @@ jobs:
         with:
           name: windows-action-stop-diagnostic
           path: diagnostic-results
+          retention-days: 3
+          if-no-files-found: warn
+
+  macos-kimi:
+    name: Repeat Intel Mac Kimi authentication
+    if: inputs.target == 'macos-intel'
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+    env:
+      CI: "true"
+    steps:
+      - name: Check out diagnostic source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+      - name: Build the native application bundle
+        run: npm run build:packaged
+      - name: Prepare Electron binary
+        run: node -e "console.log(require('electron'))"
+      - name: Repeat Kimi with its neighboring isolated fixture
+        run: npm exec -- playwright test tests/e2e/kimi-terminal-auth.spec.ts tests/e2e/core-bridge-smoke.spec.ts --project=isolated --repeat-each=6 --max-failures=1 --output=test-results/macos-kimi
+      - name: Upload synthetic fixture diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-kimi-diagnostic
+          path: test-results/macos-kimi
           retention-days: 3
           if-no-files-found: warn

@@ -748,7 +748,7 @@ export default function App(): React.JSX.Element {
     dismissActivity,
   } = activityActions;
   const createConversation = (
-    targetProject: Project | null = project,
+    targetProject: Project | null = composerProject,
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
     if (!targetProject) return;

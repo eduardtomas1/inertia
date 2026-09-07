@@ -81,8 +81,11 @@ test("reopens project filters and changes the new-chat project without leaving t
     await expect.poll(() => commands.find(({ type }) => type === "conversation.create")).toBeTruthy();
     const create = commands.find((command) => command.type === "conversation.create")!;
     const store = new RuntimeStore(join(app.testDirectory, "data", "inertia.sqlite"), app.workspaceDirectory, { recoverInterruptedRuns: false });
+    let inertiaProjectId = "";
     try {
-      const target = store.shellSnapshot().projects.find(({ name }) => name === "Companion")!;
+      const projects = store.shellSnapshot().projects;
+      const target = projects.find(({ name }) => name === "Companion")!;
+      inertiaProjectId = projects.find(({ name }) => name === "Inertia")!.id;
       expect(create.payload.projectId).toBe(target.id);
     } finally { store.close(); }
     await expect(heading).toBeHidden();
@@ -90,6 +93,12 @@ test("reopens project filters and changes the new-chat project without leaving t
     await expect(heading).toBeVisible();
     await refreshCapturedRuntimeSnapshot(page);
     await expect(heading).toBeVisible();
+    await project.click();
+    await page.getByRole("dialog", { name: "Choose project", exact: true }).getByRole("option", { name: "Inertia", exact: true }).click();
+    commands.length = 0;
+    await page.keyboard.press("ControlOrMeta+n");
+    await expect.poll(() => commands.find((command) => command.type === "conversation.create")?.payload.projectId).toBe(inertiaProjectId);
+    await expect(heading).toBeHidden();
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

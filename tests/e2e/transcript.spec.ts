@@ -17,7 +17,7 @@ let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "transcript", initialState: "conversation" });
+  app = await createAppFixture({ name: "transcript", initialState: "conversation", windowDisplay: "primary" });
   page = app.page;
   testDirectory = app.testDirectory;
   workspaceDirectory = app.workspaceDirectory;
@@ -260,10 +260,13 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       "Go to turn 1: Virtualized request 0",
     );
     await expect(firstMinimapMarker).not.toHaveAttribute("title");
-    const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
+    // Settle the native target, then restore its idle state before measuring.
+    await firstMinimapMarker.hover();
+    await transcript.hover({ position: { x: 160, y: 160 } });
     await expect.poll(() => firstMinimapMarker.evaluate((element) =>
       Number.parseFloat(getComputedStyle(element, "::before").width)))
       .toBeCloseTo(6, 1);
+    const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
     await firstMinimapMarker.hover();
     await expect(firstMinimapMarker).toHaveAttribute(
       "data-emphasized",

@@ -1,4 +1,6 @@
+import type { RuntimeShutdownUnconfirmedReason } from "../node/runtime-process-protocol.js";
 import type { RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
+import { runtimeRestartFailureMessage, runtimeShutdownFailureMessage } from "../node/runtime-failure-diagnostic.js";
 import type {
   RuntimeProcessRecord,
   RuntimeSupervisorOptions,
@@ -146,7 +148,17 @@ export function recordRuntimeRestartRequested(
     record.restartDiagnosticReported = true;
     try { report?.(event, record.generation); } catch { /* Diagnostics cannot affect cleanup. */ }
   }
-  record.reportedFailure ??= event.reason === "owned-process-tainted"
-    ? "The runtime restarted because owned process containment could not be confirmed."
-    : "The runtime restarted because owned process cleanup could not be confirmed.";
+  record.initiatingFailure ??= runtimeRestartFailureMessage(event);
+  record.reportedFailure ??= record.initiatingFailure;
+}
+
+export function recordRuntimeShutdownFailure(
+  record: RuntimeProcessRecord,
+  reason?: RuntimeShutdownUnconfirmedReason,
+): string {
+  const shutdown = runtimeShutdownFailureMessage(reason);
+  // Compose from the first validated cause, not the previous composite. Repeated
+  // shutdown observations remain bounded and cannot discard the initiating cause.
+  return record.reportedFailure = record.initiatingFailure
+    ? `${record.initiatingFailure} ${shutdown}` : shutdown;
 }

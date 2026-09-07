@@ -31,7 +31,7 @@ import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
   claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
-  drainRuntimeRecordRequests, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
+  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from "../node/runtime-shutdown-deadline.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js"; import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
@@ -67,6 +67,7 @@ export class RuntimeSupervisor {
   private readonly recoveryAdmission: RuntimeSupervisorRecoveryAdmission;
   private readonly attachmentRequests:
     RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
+  private readonly onRestartRequested?: RuntimeSupervisorOptions["onRestartRequested"];
   private readonly onMascotStatus?: RuntimeSupervisorOptions["onMascotStatus"]; private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
@@ -228,6 +229,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
       forceTerminate: (record) => this.forceTerminate(record.child),
     });
+    this.onRestartRequested = options.onRestartRequested;
     this.onMascotStatus = options.onMascotStatus; this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
@@ -706,9 +708,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.restart-requested") {
-      record.reportedFailure ??= event.reason === "owned-process-tainted"
-        ? "The runtime restarted because owned process containment could not be confirmed."
-        : "The runtime restarted because owned process cleanup could not be confirmed.";
+      recordRuntimeRestartRequested(record, event, this.onRestartRequested);
       return;
     }
     if (event.type === "runtime.startup-failed") {

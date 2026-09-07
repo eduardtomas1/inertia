@@ -1127,6 +1127,7 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onMascotStatus: (status) => mascotMain?.observe(status),
+    onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {
       mascotMain?.runtimePhase(snapshot.phase);
       appUpdateRuntimeReadiness.observe(snapshot);

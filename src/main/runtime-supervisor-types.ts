@@ -8,6 +8,7 @@ import type {
   RuntimeDatabaseStartupRecoveryReport,
   RuntimeCredentialOperation,
   RuntimeWorkerOptions,
+  RuntimeWorkerEvent,
 } from "../node/runtime-process-protocol.js";
 import type {
   RuntimeOwnedProcessContainment,
@@ -54,6 +55,7 @@ export interface RuntimeProcessRecord {
   processTreeTerminationSettled: boolean;
   shutdownDeadlineAt: number | null;
   reportedFailure: string | null;
+  restartDiagnosticReported?: boolean;
   credentialRequestIds: Set<string>;
   secureFileRequestIds: Set<string>;
   agentBrowserRequestIds: Set<string>;
@@ -195,5 +197,6 @@ export interface RuntimeSupervisorOptions {
     recorded: boolean,
   ) => void;
   onMascotStatus?: (status: import("../shared/mascot.js").MascotStatus) => void;
+  onRestartRequested?: (event: Extract<RuntimeWorkerEvent, { type: "runtime.restart-requested" }>, generation: number) => void;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }

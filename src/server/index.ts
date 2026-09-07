@@ -14,6 +14,7 @@ import {
   type RuntimeSyncCursor,
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
+import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
@@ -149,6 +150,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runtimeSafetyError("Runtime startup is blocked."),
     );
   }
+  await prepareGitExecutable();
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {

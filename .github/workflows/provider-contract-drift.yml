@@ -44,18 +44,18 @@ jobs:
         run: npm ci
       - name: Build native runtime helpers
         run: npm run pretest
-      - name: Repeat the unchanged immediate stop regression
+      - name: Repeat the unchanged runtime integration suite
         shell: pwsh
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           New-Item -ItemType Directory -Force -Path diagnostic-results | Out-Null
           $failures = 0
-          for ($attempt = 1; $attempt -le 10; $attempt++) {
-            Write-Output "Attempt $attempt of 10"
-            npm exec -- vitest run tests/server/runtime.test.ts --maxWorkers=1 --testNamePattern="controls only the exact managed project action and persists a safe rerun identity" --reporter=default --reporter=json --outputFile.json="diagnostic-results/attempt-$attempt.json" 2>&1 | Tee-Object -FilePath "diagnostic-results/attempt-$attempt.log"
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            Write-Output "Attempt $attempt of 5"
+            npm exec -- vitest run tests/server/runtime.test.ts --maxWorkers=1 --reporter=default --reporter=json --outputFile.json="diagnostic-results/attempt-$attempt.json" 2>&1 | Tee-Object -FilePath "diagnostic-results/attempt-$attempt.log"
             if ($LASTEXITCODE -ne 0) { $failures++ }
           }
-          Write-Output "$failures of 10 attempts failed"
+          Write-Output "$failures of 5 attempts failed"
           if ($failures -gt 0) { exit 1 }
       - name: Upload synthetic fixture diagnostics
         if: always()

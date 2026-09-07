@@ -88,6 +88,9 @@ export function useWorkspaceGit({
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
   const [workspaceGitStatus, setWorkspaceGitStatus] =
     useState<WorkspaceGitSnapshot | null>(null);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const branchRequestRef = useRef(0);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -272,6 +275,9 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
     setWorkspaceGitStatus(null);
     setBranches([]);
+    branchRequestRef.current += 1;
+    setBranchesLoading(false);
+    setBranchesError(null);
     setLoading(false);
     setLoadError(null);
     setChangesRequest(null);
@@ -412,6 +418,9 @@ export function useWorkspaceGit({
   const loadBranches = useCallback((passive = false) => {
     if (!project || !gitStatus?.isRepository) return;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const sequence = ++branchRequestRef.current;
+    setBranchesLoading(true);
+    setBranchesError(null);
     void request({
       type: "git.branches",
       payload: {
@@ -421,17 +430,23 @@ export function useWorkspaceGit({
     }).then(resultEvent).then((event) => {
       if (
         authorityRef.current === owner
+        && sequence === branchRequestRef.current
         && event.result.kind === "git.branches"
       ) {
         setBranches(event.result.branches);
       }
     }).catch((error) => {
+      if (authorityRef.current !== owner || sequence !== branchRequestRef.current) return;
+      setBranches([]);
+      setBranchesError(gitErrorMessage(error, "Branches could not be loaded."));
       const fallback = "Branches could not be loaded.";
       if (passive) {
         reportPassiveGitError(error, fallback, setActionError);
       } else {
         setActionError(gitErrorMessage(error, fallback));
       }
+    }).finally(() => {
+      if (authorityRef.current === owner && sequence === branchRequestRef.current) setBranchesLoading(false);
     });
   }, [
     conversation?.id,
@@ -497,6 +512,7 @@ export function useWorkspaceGit({
   const mutateBranch = useCallback((
     type: "git.branch.create" | "git.branch.switch",
     name: string,
+    remote?: boolean,
   ) => {
     if (!project) return;
     const repository = rootGitMutationScope(gitStatus);
@@ -511,6 +527,7 @@ export function useWorkspaceGit({
         conversationId: conversation?.id,
         ...repository,
         name,
+        ...(type === "git.branch.switch" && remote ? { remote } : {}),
       },
     } as CommandWithoutId).catch(() => undefined);
   }, [conversation?.id, gitStatus, project, run, setActionError]);
@@ -588,6 +605,8 @@ export function useWorkspaceGit({
     setGitDiff,
     workspaceGitStatus,
     branches,
+    branchesLoading,
+    branchesError,
     loading,
     loadError,
     loadGit,

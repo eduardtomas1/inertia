@@ -275,6 +275,8 @@ describe("WorkspaceHeader Git pull request availability", () => {
     await waitFor(() => expect(commit).toHaveFocus());
 
     fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: /^Fetch/u })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(pull).toHaveFocus();
     fireEvent.keyDown(menu, { key: "Home" });
     expect(commit).toHaveFocus();

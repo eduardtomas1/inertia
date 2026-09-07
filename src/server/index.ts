@@ -402,7 +402,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   server.maxHeadersCount = 32;
   const canStopWorkspaceRun = (run: AppSnapshot["runs"][number]): boolean => {
     if (run.status !== "running" && run.status !== "waiting") return false;
-    if (run.kind === "check" || run.kind === "service") {
+    if (run.kind === "check" || run.kind === "service" || run.kind === "source-control") {
       return workspaceRuns?.canStopManagedAction(run) ?? false;
     }
     if (run.kind !== "agent" || !run.conversationId) return false;

@@ -148,6 +148,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "git.pr.open": gitMutation,
   "git.pr.confidence": gitRead,
   "git.pr.create": gitMutation,
+  "git.fetch": gitMutation,
   "git.pull": gitMutation,
   "git.push": gitMutation,
   "git.refresh": {
@@ -242,6 +243,7 @@ const WORKSPACE_GIT_COMPLETION_PUBLICATIONS = new Set<ClientCommand["type"]>([
   "git.commit",
   "git.pr.open",
   "git.pr.create",
+  "git.fetch",
   "git.pull",
   "git.push",
   "git.selection.revert",

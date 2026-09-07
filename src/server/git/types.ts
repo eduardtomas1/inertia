@@ -117,6 +117,7 @@ export interface GitBranch {
   current: boolean;
   commit: string;
   upstream: string | null;
+  checkedOut?: boolean;
 }
 
 export interface GitBranches {

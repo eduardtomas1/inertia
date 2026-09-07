@@ -102,6 +102,7 @@ interface AppLayoutActions {
   mutateBranch: (
     type: "git.branch.create" | "git.branch.switch",
     name: string,
+    remote?: boolean,
   ) => void;
   loadGit: () => Promise<void>;
   loadCommitReview: () => Promise<GitDiffSnapshot | null>;
@@ -155,6 +156,8 @@ interface AppLayoutProps {
   workspaceToolsUnavailableReason: string | null;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
+  branchesLoading?: boolean;
+  branchesError?: string | null;
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
   multiSpawn: MultiSpawnController;
@@ -246,6 +249,8 @@ export function AppLayout({
   workspaceToolsUnavailableReason,
   gitStatus,
   branches,
+  branchesLoading,
+  branchesError,
   projectActions,
   reviewStates,
   multiSpawn,
@@ -544,6 +549,8 @@ export function AppLayout({
             theme={settings.theme}
             gitStatus={gitStatus}
             branches={branches}
+            branchesLoading={branchesLoading}
+            branchesError={branchesError}
             actions={projectActions}
             busy={Boolean(busyAction)}
             conversationDetached={Boolean(
@@ -574,8 +581,8 @@ export function AppLayout({
               }
             }}
             onRefreshBranches={actions.loadBranches}
-            onSwitchBranch={(name) =>
-              actions.mutateBranch("git.branch.switch", name)}
+            onSwitchBranch={(name, remote) =>
+              actions.mutateBranch("git.branch.switch", name, remote)}
             onCreateBranch={(name) =>
               actions.mutateBranch("git.branch.create", name)}
             onCommit={() => setCommitDialogOpen(true)}
@@ -604,6 +611,13 @@ export function AppLayout({
                 return;
               }
               setPullRequestDialogOpen(true);
+            }}
+            onFetch={() => {
+              if (!project || !rootRepository) return;
+              void actions.run("git.fetch", {
+                type: "git.fetch",
+                payload: { projectId: project.id, conversationId: conversation?.id, ...rootRepository },
+              }).catch(() => undefined);
             }}
             onPull={() => {
               if (!project) return;

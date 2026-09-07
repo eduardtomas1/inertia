@@ -139,6 +139,7 @@ export function gitStatusSnapshot(
 ): GitStatusSnapshot {
   return {
     isRepository: true,
+    truncated: status.truncated,
     authorityRef: authorityRef ?? null,
     root: status.root,
     branch: status.branch,

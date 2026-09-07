@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import {
   Download,
+  RefreshCw,
+  GitBranch,
+  ArrowDown,
+  ArrowUp,
   GitCommitHorizontal,
   GitPullRequest,
   Upload,
@@ -9,9 +13,11 @@ import {
 import type { GitStatusSnapshot } from "@shared/contracts";
 import {
   headerGitActions,
+  gitSyncSummary,
   type HeaderGitActionId,
 } from "../utils/headerGitActions";
 import { loadCommitDialog } from "./lazySurfaceLoaders";
+import "./workspace-git-menus.css";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 
 type WorkspaceGitActionMenuProps = {
@@ -21,6 +27,7 @@ type WorkspaceGitActionMenuProps = {
 };
 
 function actionIcon(action: HeaderGitActionId): React.JSX.Element {
+  if (action === "fetch") return <RefreshCw size={14} />;
   if (action === "commit") return <GitCommitHorizontal size={14} />;
   if (action === "pull") return <Download size={14} />;
   if (action === "push") return <Upload size={14} />;
@@ -51,15 +58,16 @@ export default function WorkspaceGitActionMenu({
       aria-label="Git actions"
       onKeyDown={navigateMenuItems}
     >
-      <div className="git-action-popover-status">
-        <strong>{status.branch ?? "Detached HEAD"}</strong>
-        <span>
-          {status.ahead > 0 ? `${status.ahead} ahead` : ""}
-          {status.ahead > 0 && status.behind > 0 ? " · " : ""}
-          {status.behind > 0 ? `${status.behind} behind` : ""}
-          {status.ahead === 0 && status.behind === 0 ? "Up to date" : ""}
-        </span>
+      <div className="git-overview">
+        <div className="git-overview-heading"><GitBranch size={15} /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
+        <span className="git-overview-upstream" title={status.upstream ?? undefined}>{status.upstream ? `Tracking ${status.upstream}` : status.hasRemote ? "Publish this branch to set an upstream" : "Local repository · no remote"}</span>
+        <div className="git-overview-counts">
+          <span><ArrowUp size={12} />{status.upstream ? status.ahead : "—"} outgoing</span>
+          <span><ArrowDown size={12} />{status.upstream ? status.behind : "—"} incoming</span>
+        </div>
+        <div className="git-overview-summary" role="status">{busy ? "Git operation in progress…" : gitSyncSummary(status)}</div>
       </div>
+      <div className="git-menu-section-label">Changes <span>{status.files.length} {status.files.length === 1 ? "file" : "files"} <b>+{status.insertions}</b> <i>−{status.deletions}</i></span></div>
       {actions.map((action) => (
         <button
           type="button"

@@ -157,6 +157,7 @@ function inspectionArguments(args: readonly string[]): string[] {
     : [command, ...rest];
   return [
     "--no-pager",
+    "--no-optional-locks",
     "-c",
     "core.fsmonitor=false",
     ...commandArguments,
@@ -211,6 +212,21 @@ function classifyFailure(stderr: string, fallback: string): GitError {
       "authentication",
       "Git authentication failed. Check the repository credentials and try again.",
     );
+  }
+  if (detail.includes("non-fast-forward") || detail.includes("fetch first")) {
+    return new GitError("conflict", "The remote has commits that are not in this branch. Fetch, then reconcile the branches before pushing again.");
+  }
+  if (detail.includes("could not resolve host") || detail.includes("could not resolve hostname") || detail.includes("failed to connect") || detail.includes("network is unreachable")) {
+    return new GitError("operation-failed", "The Git remote could not be reached. Check your network connection and remote configuration, then retry.");
+  }
+  if (detail.includes("index.lock") && detail.includes("file exists")) {
+    return new GitError("conflict", "Another Git operation holds the index lock. Wait for it to finish. If it has stopped, inspect the lock in the terminal before retrying.");
+  }
+  if (detail.includes("already checked out at") || detail.includes("already used by worktree")) {
+    return new GitError("conflict", "This branch is checked out in another worktree. Open that worktree to use it.");
+  }
+  if (detail.includes("unable to auto-detect email address") || detail.includes("author identity unknown")) {
+    return new GitError("invalid-input", "Git needs your author identity. Configure user.name and user.email for this repository, then retry.");
   }
   if (
     detail.includes("would be overwritten")

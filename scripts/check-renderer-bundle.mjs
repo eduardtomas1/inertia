@@ -47,6 +47,8 @@ const budgets = {
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
+  // Branch search/tracking and the Git overview load only when opened.
+  deferredGitMenusJavaScript: 8.5 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -448,6 +450,17 @@ const mascotJavaScriptBytes = await closureBytes(mascotClosure, entryJavaScriptC
 const mascotSettingsJavaScriptBytes = await closureBytes(mascotSettingsClosure, new Set([
   ...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...mascotClosure,
 ]));
+const gitMenuEntries = ["WorkspaceBranchMenu", "WorkspaceGitActionMenu"].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred Git menu: ${prefix}`);
+  if (mainWorkbenchJavaScriptClosure.has(entry)) throw new Error(`Git menu is eagerly loaded: ${prefix}`);
+  return entry;
+});
+const gitMenuClosures = await Promise.all(gitMenuEntries.map(javaScriptClosure));
+const deferredGitMenusJavaScriptBytes = await closureBytes(
+  new Set(gitMenuClosures.flatMap((closure) => [...closure])),
+  new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]),
+);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - mascotJavaScriptBytes
@@ -466,6 +479,7 @@ const coreJavaScriptBytes =
   - deferredProviderMaintenanceJavaScriptBytes
   - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
+  - deferredGitMenusJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
@@ -502,6 +516,7 @@ const measurements = {
   deferredProviderMaintenanceJavaScript: deferredProviderMaintenanceJavaScriptBytes,
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
+  deferredGitMenusJavaScript: deferredGitMenusJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,

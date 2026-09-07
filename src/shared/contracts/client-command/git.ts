@@ -270,7 +270,17 @@ export const gitCommandSchemas = [
         .object({
           ...projectWithOptionalConversationAndRepository,
           name: z.string().trim().min(1).max(255),
+          remote: z.boolean().optional(),
         })
+        .strict()
+        .superRefine(requireRepositoryAuthority),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      type: z.literal("git.fetch"),
+      payload: z.object(projectWithOptionalConversationAndRepository)
         .strict()
         .superRefine(requireRepositoryAuthority),
     })

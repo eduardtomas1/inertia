@@ -937,7 +937,7 @@ export function createTurnInteractionCommandHandler(
             "That activity has already finished.",
           );
         }
-        if (activity.kind === "check" || activity.kind === "service") {
+        if (activity.kind === "check" || activity.kind === "service" || activity.kind === "source-control") {
           if (!await dependencies.workspaceRuns.stopManagedAction(activity.id)) {
             throw new RuntimeRequestError(
               "That process is no longer owned by the local runtime.",

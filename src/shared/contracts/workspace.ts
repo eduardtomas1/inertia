@@ -3,6 +3,8 @@ export interface GitBranchInfo {
   current: boolean;
   remote: boolean;
   worktreePath: string | null;
+  /** Occupancy only; another checkout's filesystem path stays privileged. */
+  checkedOut?: boolean;
 }
 
 export interface WorkspaceEntry {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GitStatusSnapshot } from "../../src/shared/contracts";
 import {
   headerGitActions,
+  gitSyncSummary,
 } from "../../src/renderer/src/utils/headerGitActions";
 import { primaryHeaderGitAction } from "../../src/renderer/src/utils/primaryHeaderGitAction";
 
@@ -151,5 +152,26 @@ describe("header Git action hierarchy", () => {
       disabled: true,
       detail: "Add a Git remote first.",
     });
+  });
+});
+
+describe("Git overview states", () => {
+  it("distinguishes local, unpublished, detached and fetched states", () => {
+    expect(gitSyncSummary(status({ hasRemote: false, upstream: null }))).toBe("Local repository");
+    expect(gitSyncSummary(status({ upstream: null }))).toBe("No upstream");
+    expect(gitSyncSummary(status({ branch: null }))).toBe("Detached HEAD");
+    expect(gitSyncSummary(status())).toBe("Up to date with last fetch");
+  });
+  it("allows fetch while diverged or dirty but fails incomplete mutation state closed", () => {
+    const actions = headerGitActions(status({ ahead: 2, behind: 3, truncated: true }));
+    expect(actions.find(({ id }) => id === "fetch")?.disabled).toBe(false);
+    expect(actions.find(({ id }) => id === "pull")?.disabled).toBe(true);
+    expect(actions.find(({ id }) => id === "commit")?.disabled).toBe(true);
+    expect(primaryHeaderGitAction(status({ truncated: true, ahead: 2 }))).toBeNull();
+  });
+  it("allows pushing existing commits with uncommitted work, but never when behind", () => {
+    const dirty = [{ path: "file", status: "modified", insertions: 1, deletions: 0, untracked: false, staged: false, unstaged: true, indexStatus: ".", worktreeStatus: "M" }];
+    expect(headerGitActions(status({ ahead: 1, files: dirty })).find(({ id }) => id === "push")?.disabled).toBe(false);
+    expect(headerGitActions(status({ behind: 1 })).find(({ id }) => id === "push")?.disabled).toBe(true);
   });
 });

@@ -69,6 +69,7 @@ describe("workspace Git command contracts", () => {
   it("accepts paired root authority for every root Git mutation", () => {
     const scoped = { projectId, conversationId, repositoryPath: ".", authorityRef };
     for (const command of [
+      { type: "git.fetch", requestId, payload: scoped },
       { type: "git.pull", requestId, payload: scoped },
       { type: "git.push", requestId, payload: scoped },
       { type: "git.pr.confidence", requestId, payload: scoped },
@@ -87,6 +88,7 @@ describe("workspace Git command contracts", () => {
     for (const type of [
       "git.branch.create",
       "git.branch.switch",
+      "git.fetch",
       "git.pull",
       "git.push",
       "git.pr.confidence",

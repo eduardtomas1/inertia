@@ -481,7 +481,7 @@ describe("environment summary projection", () => {
       authorityRef: "root-authority",
       branch: "codex/environment",
       commitAction: { label: "Commit", disabled: false },
-      pushAction: { label: "Push 1", disabled: true },
+      pushAction: { label: "Push 1", disabled: false },
     }, {
       repositoryPath: "packages/docs",
       authorityRef: "docs-authority",

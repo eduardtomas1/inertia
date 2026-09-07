@@ -76,6 +76,7 @@ export {
 } from "./git/commit-review";
 export {
   getPullRequestCreateUrl,
+  fetchRepository,
   pullRepository,
   pushCurrentBranch,
 } from "./git/remotes";

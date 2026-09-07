@@ -144,6 +144,8 @@ export interface GitPreMergeConfidence {
 
 export interface GitStatusSnapshot {
   isRepository: boolean;
+  /** A partial status must never be presented as a complete, clean checkout. */
+  truncated?: boolean;
   /** Ephemeral runtime-owned reference for diffs from this status snapshot. */
   authorityRef?: string | null;
   /** Canonical Git toplevel actually inspected for this status snapshot. */

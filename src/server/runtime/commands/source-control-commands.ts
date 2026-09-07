@@ -1,5 +1,4 @@
 import { realpath } from "node:fs/promises";
-
 import WebSocket from "ws";
 
 import type { GitStatusSnapshot, ServerEvent } from "../../../shared/contracts";
@@ -12,6 +11,7 @@ import {
   commitReviewedChanges,
   createBranch,
   createGitHubPullRequest,
+  fetchRepository,
   getPullRequestCreateUrl,
   getUnifiedDiff,
   gitCommitReviewFingerprintsEqual,
@@ -19,7 +19,6 @@ import {
   prepareGitCommitReview,
   renderGitCommitReviewDiff,
   GitError,
-  listBranches,
   pullRepository,
   pushCurrentBranch,
   switchBranch,
@@ -43,6 +42,7 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 import { reconcileReviews } from "./review-support";
+import { handleBranchListCommand } from "./source-control-branch-list";
 import { handlePreMergeConfidenceCommand } from "./pre-merge-confidence-command";
 import {
   mapWithinSourceControlDeadline,
@@ -278,6 +278,7 @@ export function createSourceControlCommandHandler(
     "git.branches",
     "git.branch.create",
     "git.branch.switch",
+    "git.fetch",
     "git.pull",
     "git.commit",
     "git.push",
@@ -855,32 +856,8 @@ export function createSourceControlCommandHandler(
         }
         return "handled";
       }
-      case "git.branches": {
-        const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS;
-        const branches = await listBranches(
-          dependencies.workspacePath(
-            command.payload.projectId,
-            command.payload.conversationId,
-          ),
-          { deadlineAt },
-        );
-        dependencies.send(socket, {
-          type: "request.result",
-          requestId: command.requestId,
-          result: {
-            kind: "git.branches",
-            branches: [...branches.local, ...branches.remote].map(
-              (branch) => ({
-                name: branch.name,
-                current: branch.current,
-                remote: branch.kind === "remote",
-                worktreePath: null,
-              }),
-            ),
-          },
-        });
-        return "handled";
-      }
+      case "git.branches":
+        return await handleBranchListCommand(socket, command, dependencies);
       case "git.branch.create": {
         const repository = await resolveCommandRepository(
           socket,
@@ -924,7 +901,10 @@ export function createSourceControlCommandHandler(
           command.requestId,
           async () => await runVerifiedRepositoryOperation(
             repository,
-            async (root) => await switchBranch(root, command.payload.name),
+            async (root) => await switchBranch(root, command.payload.name, {
+              remote: command.payload.remote,
+              deadlineAt: Date.now() + GIT_READ_OPERATION_TIMEOUT_MS,
+            }),
           ),
           trackedRepositoryOptions(repository),
         );
@@ -938,6 +918,40 @@ export function createSourceControlCommandHandler(
           },
         });
         return "handled";
+      }
+      case "git.fetch": {
+        const deadlineAt = Date.now() + GIT_READ_OPERATION_TIMEOUT_MS + 60_000;
+        const deadline = new SourceControlDeadline(deadlineAt, "read");
+        const cancellation = new AbortController();
+        const cancel = (): void => cancellation.abort();
+        socket.once("close", cancel);
+        try {
+          const repository = await deadline.runToSettlement(async (signal) =>
+            await resolveCommandRepository(socket, command.payload, {
+              requireAuthority: true, deadlineAt, signal: AbortSignal.any([signal, cancellation.signal]),
+            }));
+          await dependencies.workspaceRuns.trackSourceControl(
+            "Fetch remote branches",
+            command.payload.projectId,
+            command.payload.conversationId,
+            repository.workspaceRoot,
+            command.requestId,
+            async () => await deadline.runToSettlement(async (signal) =>
+              await runVerifiedRepositoryOperation(repository,
+                async (root) => await fetchRepository(root, { deadlineAt, signal: AbortSignal.any([signal, cancellation.signal]) }),
+                { deadlineAt, signal })),
+            { ...trackedRepositoryOptions(repository, false), cancellation },
+          );
+          dependencies.send(socket, {
+            type: "request.result",
+            requestId: command.requestId,
+            result: { kind: "git.action", message: "Fetched remote branches. Your local changes are preserved." },
+          });
+          return "handled";
+        } finally {
+          socket.off("close", cancel);
+          deadline.dispose();
+        }
       }
       case "git.pull": {
         const repository = await resolveCommandRepository(
@@ -953,7 +967,9 @@ export function createSourceControlCommandHandler(
           command.requestId,
           async () => await runVerifiedRepositoryOperation(
             repository,
-            pullRepository,
+            async (root) => await pullRepository(root, {
+              deadlineAt: Date.now() + GIT_READ_OPERATION_TIMEOUT_MS + 60_000,
+            }),
           ),
           trackedRepositoryOptions(repository),
         );

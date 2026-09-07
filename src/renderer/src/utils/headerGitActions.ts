@@ -3,7 +3,7 @@ import type {
   GitStatusSnapshot,
 } from "@shared/contracts";
 
-export type HeaderGitActionId = "commit" | "pull" | "push" | "pull-request";
+export type HeaderGitActionId = "commit" | "fetch" | "pull" | "push" | "pull-request";
 
 export type HeaderGitAction = {
   id: HeaderGitActionId;
@@ -32,17 +32,20 @@ export function headerGitActions(
   if (!status?.isRepository) return [];
   const changedFiles = status.files.length;
   const dirty = changedFiles > 0;
+  const incomplete = status.truncated === true;
+  const conflicts = status.files.some((file) => file.status === "unmerged");
   const diverged = status.ahead > 0 && status.behind > 0;
   const canPull = Boolean(status.upstream)
     && status.behind > 0
     && !dirty
+    && !incomplete
     && !diverged;
   const canPush = Boolean(status.branch)
     && status.hasRemote
     && Boolean(status.pullRequest?.remoteName)
     && status.pullRequest?.unavailableReason !== "missing-remote"
-    && !dirty
-    && !diverged
+    && !incomplete
+    && status.behind === 0
     && (status.ahead > 0 || !status.upstream);
   const canOpenPullRequest = status.pullRequest?.available === true
     && Boolean(status.upstream)
@@ -53,15 +56,26 @@ export function headerGitActions(
     {
       id: "commit",
       label: "Commit",
-      detail: dirty
+      detail: incomplete ? "Repository status is incomplete. Refresh before committing."
+        : conflicts ? "Resolve merge conflicts before committing."
+        : dirty
         ? `Review and commit ${changedFiles} changed ${changedFiles === 1 ? "file" : "files"}.`
         : "There are no local changes to commit.",
-      disabled: busy || !dirty,
+      disabled: busy || !dirty || incomplete || conflicts,
+    },
+    {
+      id: "fetch",
+      label: "Fetch",
+      detail: status.hasRemote
+        ? "Refresh remote branches and incoming commits. Keep local changes."
+        : "Add a Git remote before fetching.",
+      disabled: busy || !status.hasRemote,
     },
     {
       id: "pull",
       label: status.behind > 0 ? `Pull ${status.behind}` : "Pull",
-      detail: !status.upstream
+      detail: incomplete ? "Repository status is incomplete. Refresh before pulling."
+        : !status.upstream
         ? "This branch has no upstream."
         : diverged
           ? "This branch has diverged; reconcile it in the terminal."
@@ -69,7 +83,7 @@ export function headerGitActions(
             ? "Commit or discard local changes before pulling."
           : status.behind > 0
             ? `Receive ${status.behind} upstream ${status.behind === 1 ? "commit" : "commits"}.`
-            : "The branch is already up to date.",
+            : "No incoming commits in the last local check. Fetch to check the remote.",
       disabled: busy || !canPull,
     },
     {
@@ -87,8 +101,10 @@ export function headerGitActions(
               ? "The configured push remote is missing."
               : diverged
                 ? "This branch has diverged; reconcile it in the terminal."
-                : dirty
-                  ? "Commit or discard local changes before pushing."
+                : incomplete
+                  ? "Repository status is incomplete. Refresh before pushing."
+                  : status.behind > 0
+                    ? "Pull incoming commits before pushing."
                   : status.upstream && status.ahead === 0
                     ? "There are no local commits to push."
                     : status.upstream
@@ -111,4 +127,15 @@ export function headerGitActions(
       disabled: busy || !canOpenPullRequest,
     },
   ];
+}
+
+export function gitSyncSummary(status: GitStatusSnapshot): string {
+  if (status.truncated) return "Incomplete status";
+  if (!status.branch) return "Detached HEAD";
+  if (!status.hasRemote) return "Local repository";
+  if (!status.upstream) return "No upstream";
+  if (status.ahead > 0 && status.behind > 0) return "Branches have diverged";
+  if (status.behind > 0) return `${status.behind} incoming ${status.behind === 1 ? "commit" : "commits"}`;
+  if (status.ahead > 0) return `${status.ahead} outgoing ${status.ahead === 1 ? "commit" : "commits"}`;
+  return "Up to date with last fetch";
 }

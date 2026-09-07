@@ -440,6 +440,7 @@ if (message.method === "turn/start") {
     return;
   }
   send({ method: "turn/completed", params: { threadId, turn: { id: "orphan-turn", status: "completed", items: [], error: null } } });
+  if (process.env.INERTIA_APP_SERVER_SCENARIO?.startsWith("steer-receipt-")) return;
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "steer-and-collab") {
     send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-1", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-1"], prompt: "Inspect the tests", model: null, reasoningEffort: null, agentsStates: { "child-1": { status: "pendingInit", message: null } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-1", parentThreadId: threadId, agentNickname: "Scout", agentRole: "researcher", preview: "Inspect the tests" } } });
@@ -592,8 +593,16 @@ if (message.id === "input-rpc") {
   return complete();
 }
 if (message.method === "turn/steer") {
-  send({ id: message.id, result: {} });
-  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+  const scenario = process.env.INERTIA_APP_SERVER_SCENARIO;
+  const receipt = scenario === "steer-receipt-missing" ? {}
+    : scenario === "steer-receipt-foreign" ? { turnId: "foreign-turn" }
+    : scenario === "steer-receipt-wrong-type" ? { turnId: 1 }
+    : scenario === "steer-receipt-whitespace" ? { turnId: " " + turnId + " " }
+    : { turnId };
+  sendBatch([
+    { id: message.id, result: receipt },
+    { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+  ]);
   return;
 }
 if (message.method === "turn/interrupt") {

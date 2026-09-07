@@ -33,6 +33,7 @@ test("reviews sync state, fetches safely, searches branches and checks out a rem
   const testInfo = test.info();
   const { page, workspaceDirectory } = app;
   await app.resizeWindow(1440, 920);
+  await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; document.documentElement.style.colorScheme = "dark"; });
   const openGit = async (): Promise<void> => {
     await page.getByRole("button", { name: "More Git actions" }).click();
     await expect(page.getByRole("menu", { name: "Git actions" })).toBeVisible();

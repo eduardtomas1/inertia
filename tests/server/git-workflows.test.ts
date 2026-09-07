@@ -120,6 +120,33 @@ describe("Git workflows", () => {
     await expect(pullRepository(local)).rejects.toThrow("no upstream");
   });
 
+  it("supports remote names containing slashes and rejects overlapping tracking namespaces", async () => {
+    const { local, remote } = fixture();
+    git(local, "remote", "rename", "origin", "team/upstream");
+    git(remote, "branch", "topic/remote", "main");
+    await fetchRepository(local);
+    const result = await switchBranch(local, "team/upstream/topic/remote", { remote: true });
+    expect(result.status.branch).toBe("topic/remote");
+    expect(result.status.upstream).toBe("team/upstream/topic/remote");
+    git(local, "switch", "main");
+    git(local, "remote", "add", "team", join(remote, "missing"));
+    git(remote, "branch", "topic/ambiguous", "main");
+    await fetchRepository(local);
+    await expect(switchBranch(local, "team/upstream/topic/ambiguous", { remote: true }))
+      .rejects.toThrow("fetch mappings");
+    expect(git(local, "branch", "--list", "topic/ambiguous")).toBe("");
+  });
+
+  it("bounds a large branch listing instead of silently showing partial results", async () => {
+    const { local } = fixture();
+    const head = git(local, "rev-parse", "HEAD");
+    execFileSync("git", ["update-ref", "--stdin"], {
+      cwd: local, timeout: 10_000, maxBuffer: 1024 * 1024,
+      input: Array.from({ length: 1000 }, (_, index) => `create refs/heads/topic-${index} ${head}\n`).join(""),
+    });
+    await expect(listBranches(local)).rejects.toMatchObject({ code: "output-limit" });
+  });
+
   it("honors cancellation and the shared deadline before Git execution", async () => {
     const { local } = fixture();
     const signal = AbortSignal.abort();

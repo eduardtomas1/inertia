@@ -6,6 +6,7 @@ import {
 } from "./paths";
 import { runGit, runGitInspection } from "./runner";
 import { getRepositoryStatus } from "./status";
+import { requireUnambiguousBranchTracking } from "./branch-tracking";
 import {
   GitError,
   type GitBranch,
@@ -101,6 +102,7 @@ export async function switchBranch(
     if (branches.local.some((candidate) => candidate.name === localName)) {
       throw new GitError("conflict", "A local branch with this name already exists. Select it in Local branches.");
     }
+    await requireUnambiguousBranchTracking(root, remote, name, localName, options);
     args = ["switch", "--track", "-c", localName, `refs/remotes/${name}`];
   }
   await runGit(root, args, {

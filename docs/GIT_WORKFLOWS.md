@@ -59,6 +59,9 @@ text conversion. Branch listing uses one inspection for local/remote refs and
 occupancy, bounded to 1,000 branches and 1 MiB; larger lists fail with explicit
 terminal guidance. Occupancy is projected as a boolean, not another worktree's
 filesystem path. Remote names containing slashes are matched by longest prefix.
+Overlapping/custom fetch mappings must identify exactly one expected source
+branch before tracking checkout; Git itself can create a branch before
+reporting this ambiguity, so this check runs before mutation.
 
 Fetch has a shared 180-second workflow deadline and a 120-second network limit;
 the output limit is 64 KiB. Its explicit refspec updates only that remote's

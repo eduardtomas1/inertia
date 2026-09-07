@@ -154,5 +154,24 @@ describe("runtime root Git authority", () => {
     );
     expect(git(worktree, "branch", "--show-current"))
       .toBe(conversation.branch);
+
+    const remote = join(root, "remote.git");
+    git(root, "init", "--bare", remote);
+    git(workspace, "remote", "add", "origin", remote);
+    git(workspace, "push", "origin", `${projectBranch}:main`);
+    git(remote, "branch", "topic/remote", "main");
+    await expect(requestRuntimeGit(
+      client.socket, client.events, "git.fetch", identity,
+      "git.action", Date.now() + 10_000,
+    )).rejects.toThrow("Refresh repository status");
+    await requestRuntimeGit(
+      client.socket, client.events, "git.fetch",
+      await refreshRuntimeRootGitAuthority(client.socket, client.events, identity, Date.now() + 10_000),
+      "git.action", Date.now() + 10_000,
+    );
+    expect(git(worktree, "rev-parse", "refs/remotes/origin/topic/remote"))
+      .toBe(git(remote, "rev-parse", "topic/remote"));
+    expect(git(workspace, "branch", "--show-current")).toBe(projectBranch);
+
   });
 });

@@ -30,11 +30,7 @@ import {
   activateAfterRuntimeWorkerStartupPreflight,
   RuntimeWorkerStartupPreflightError,
 } from "./runtime-worker-startup-preflight.js";
-import {
-  runtimeStartupBlockerCode,
-  runtimeStartupFailureMessage,
-} from
-  "../shared/runtime-startup-diagnostics.js";
+import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -638,7 +634,7 @@ parentPort.on("message", (messageEvent) => {
     void shutdown(1);
     return;
   }
-  void startRuntime({
+  void observeRuntimeStartup(startRuntime({
     onMascotStatus: (status) => post({ type: "runtime.mascot-status", status }),
     ...command.options,
     onCleanupReceiptConsumed: (
@@ -674,7 +670,7 @@ parentPort.on("message", (messageEvent) => {
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
     secureFiles,
     agentBrowser,
-  }).then(async (startedRuntime) => {
+  }), async (startedRuntime) => {
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
@@ -711,14 +707,9 @@ parentPort.on("message", (messageEvent) => {
         packageSmokeImageOperation = null;
       });
     }
-  }).catch(async (error: unknown) => {
+  }, async (failure) => {
     starting = false;
-    const blockerCode = runtimeStartupBlockerCode(error);
-    post({
-      type: "runtime.startup-failed",
-      message: runtimeStartupFailureMessage(blockerCode),
-      ...(blockerCode ? { blockerCode } : {}),
-    });
+    post(failure);
     if (stopping) {
       await finishShutdown(null, 1);
       return;

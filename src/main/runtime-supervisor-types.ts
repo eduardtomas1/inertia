@@ -55,6 +55,7 @@ export interface RuntimeProcessRecord {
   processTreeTerminationSettled: boolean;
   shutdownDeadlineAt: number | null;
   reportedFailure: string | null;
+  initiatingFailure?: string;
   restartDiagnosticReported?: boolean;
   credentialRequestIds: Set<string>;
   secureFileRequestIds: Set<string>;

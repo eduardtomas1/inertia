@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches:
       - main
@@ -15,54 +16,54 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'merge_group' }}
 
 jobs:
   classify:
     name: Classify change evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
-      all_evidence: ${{ steps.changes.outputs.all_evidence }}
+      base_sha: ${{ steps.changes.outputs.base_sha }}
+      plan_json: ${{ steps.changes.outputs.plan_json }}
+      matrix_json: ${{ steps.changes.outputs.matrix_json }}
+      node_22_minimum: ${{ steps.changes.outputs.node_22_minimum }}
+      pr_linux_core: ${{ steps.changes.outputs.pr_linux_core }}
+      pr_linux_lifecycle: ${{ steps.changes.outputs.pr_linux_lifecycle }}
+      pr_windows_lifecycle: ${{ steps.changes.outputs.pr_windows_lifecycle }}
+      pr_macos_lifecycle: ${{ steps.changes.outputs.pr_macos_lifecycle }}
+      test: ${{ steps.changes.outputs.test }}
+      windows_unit: ${{ steps.changes.outputs.windows_unit }}
+      renderer: ${{ steps.changes.outputs.renderer }}
+      benchmarks: ${{ steps.changes.outputs.benchmarks }}
       full_certification: ${{ steps.changes.outputs.full_certification }}
-      documentation_only: ${{ steps.changes.outputs.documentation_only }}
-      quality_shared: ${{ steps.changes.outputs.quality_shared }}
-      runtime_supervisor: ${{ steps.changes.outputs.runtime_supervisor }}
-      process_containment: ${{ steps.changes.outputs.process_containment }}
-      startup_recovery: ${{ steps.changes.outputs.startup_recovery }}
-      provider_common: ${{ steps.changes.outputs.provider_common }}
-      provider_codex: ${{ steps.changes.outputs.provider_codex }}
-      provider_claude: ${{ steps.changes.outputs.provider_claude }}
-      provider_cursor: ${{ steps.changes.outputs.provider_cursor }}
-      provider_gemini: ${{ steps.changes.outputs.provider_gemini }}
-      provider_kimi: ${{ steps.changes.outputs.provider_kimi }}
-      provider_opencode: ${{ steps.changes.outputs.provider_opencode }}
-      turn_session: ${{ steps.changes.outputs.turn_session }}
-      agent_management: ${{ steps.changes.outputs.agent_management }}
-      database_migrations: ${{ steps.changes.outputs.database_migrations }}
-      terminal_native: ${{ steps.changes.outputs.terminal_native }}
-      updater: ${{ steps.changes.outputs.updater }}
-      windows_packaging: ${{ steps.changes.outputs.windows_packaging }}
-      linux_appimage: ${{ steps.changes.outputs.linux_appimage }}
-      macos_packaging: ${{ steps.changes.outputs.macos_packaging }}
-      renderer_ui: ${{ steps.changes.outputs.renderer_ui }}
-      performance: ${{ steps.changes.outputs.performance }}
-      ci_test_infrastructure: ${{ steps.changes.outputs.ci_test_infrastructure }}
-      domains_json: ${{ steps.changes.outputs.domains_json }}
 
     steps:
       - name: Check out complete comparison history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Classify changed evidence domains
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: node scripts/ci/change-classifier.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/plan-workflow.mjs
+
+  lineage:
+    name: Migration lineage
+    needs: classify
+    uses: ./.github/workflows/database-migration-lineage.yml
+    with:
+      comparison-base: ${{ needs.classify.outputs.base_sha }}
 
   # Migrations, architecture, lint, and types are platform independent, so they
   # are proven once here instead of six times across the matrix. Every
@@ -79,6 +80,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -110,7 +112,8 @@ jobs:
   node-22-minimum:
     name: Node 22.13 minimum runtime
     runs-on: ubuntu-24.04
-    needs: gate
+    needs: [classify, gate]
+    if: needs.classify.outputs.node_22_minimum == 'true'
     timeout-minutes: 20
     env:
       CI: "true"
@@ -119,6 +122,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -139,8 +143,8 @@ jobs:
         run: npm run check:node-runtime
 
   pr-linux-core:
-    name: PR Linux core and portable conformance
-    if: github.event_name == 'pull_request'
+    name: Linux core and portable conformance
+    if: needs.classify.outputs.pr_linux_core == 'true'
     runs-on: ubuntu-24.04
     needs: [classify, gate]
     timeout-minutes: 25
@@ -151,6 +155,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -184,8 +189,8 @@ jobs:
           retention-days: 7
 
   pr-linux-lifecycle:
-    name: PR Linux x64 AppImage and lifecycle sentinel
-    if: github.event_name == 'pull_request'
+    name: Linux interaction and lifecycle
+    if: needs.classify.outputs.pr_linux_lifecycle == 'true'
     runs-on: ubuntu-24.04
     needs: [classify, gate]
     timeout-minutes: 25
@@ -196,6 +201,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -215,20 +221,6 @@ jobs:
       - name: Build native runtime helpers
         run: npm run pretest
 
-      - name: Run Linux lifecycle and AppImage update sentinels
-        run: >-
-          npm exec -- vitest run --maxWorkers=1
-          tests/main/app-update-bootstrap.test.ts
-          tests/main/app-update-handoff.test.ts
-          tests/main/app-update-install.test.ts
-          tests/main/app-update.test.ts
-          tests/main/appimage-installed-identity.test.ts
-          tests/main/runtime-owned-process-update-recovery.test.ts
-          tests/main/runtime-process-containment-admission.test.ts
-          tests/main/runtime-recovery-integration.test.ts
-          tests/main/runtime-supervisor-lifecycle.test.ts
-          tests/server/runtime-shutdown-authority.test.ts
-
       - name: Build the application bundle
         id: application_bundle
         run: npm run build:packaged
@@ -238,54 +230,23 @@ jobs:
         run: node -e "console.log(require('electron'))"
 
       - name: Run compact Electron/core bridge smoke under Xvfb
+        if: needs.classify.outputs.renderer != 'true'
         run: >-
           xvfb-run --auto-servernum npm exec -- playwright test
           tests/e2e/core-bridge-smoke.spec.ts
           --project=isolated --workers=1
           --output=test-results/core-bridge-smoke
 
+      - name: Run renderer display-sensitive interaction under Xvfb
+        if: needs.classify.outputs.renderer == 'true'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run renderer isolated interaction under Xvfb
+        if: needs.classify.outputs.renderer == 'true'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
-      - name: Package Linux x64 AppImage and unpacked app
-        run: npm run package:linux
-
-      - name: Validate Linux AppImage identity, icons, and runtime resource
-        run: npm run validate:linux-package
-
-      - name: Verify the packaged Linux guardian is static
-        shell: bash
-        run: |
-          set -euo pipefail
-          guardian="release/linux-unpacked/resources/runtime/runtime-process-guardian"
-          test -x "$guardian"
-          if readelf --program-headers "$guardian" | grep -Fq 'INTERP'; then
-            echo "The packaged Linux guardian unexpectedly has a program interpreter." >&2
-            exit 1
-          fi
-          if readelf --dynamic "$guardian" 2>/dev/null | grep -Fq '(NEEDED)'; then
-            echo "The packaged Linux guardian unexpectedly has a dynamic dependency." >&2
-            exit 1
-          fi
-
-      - name: Verify packaged Electron fuses
-        run: npm run verify:fuses -- release/linux-unpacked/inertia
-
-      - name: Configure Linux sandbox helper for smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          sandbox="release/linux-unpacked/chrome-sandbox"
-          sudo chown root:root "$sandbox"
-          sudo chmod 4755 "$sandbox"
-          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
-
-      - name: Smoke packaged Linux app and final AppImage under Xvfb
-        env:
-          INERTIA_RELEASE_CHANNEL: stable
-        run: |
-          xvfb-run --auto-servernum npm run test:package-smoke
-          xvfb-run --auto-servernum npm run test:release-container-smoke
 
       - name: Keep Linux sentinel failure diagnostics
         if: failure()
@@ -297,8 +258,8 @@ jobs:
           retention-days: 7
 
   pr-windows-lifecycle:
-    name: PR Windows x64 lifecycle sentinel
-    if: github.event_name == 'pull_request'
+    name: Windows x64 lifecycle sentinel
+    if: needs.classify.outputs.pr_windows_lifecycle == 'true'
     runs-on: windows-2025
     needs: [classify, gate]
     timeout-minutes: 25
@@ -309,6 +270,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -348,6 +310,12 @@ jobs:
           tests/main/windows-update-terminal-receipt.test.ts
           tests/server/runtime-shutdown-authority.test.ts
 
+      - name: Run portable provider contracts on Windows
+        run: npm run test:portable
+
+      - name: Verify Windows provider discovery and shim transport
+        run: npm run test:windows-codex
+
       - name: Build the application bundle
         id: application_bundle
         run: npm run build:packaged
@@ -369,8 +337,8 @@ jobs:
           retention-days: 7
 
   pr-macos-lifecycle:
-    name: PR macOS arm64 lifecycle sentinel
-    if: github.event_name == 'pull_request'
+    name: macOS arm64 lifecycle sentinel
+    if: needs.classify.outputs.pr_macos_lifecycle == 'true'
     runs-on: macos-15
     needs: [classify, gate]
     timeout-minutes: 25
@@ -381,6 +349,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -407,6 +376,9 @@ jobs:
           tests/main/terminal-darwin-shutdown.test.ts
           tests/server/runtime-shutdown-authority.test.ts
 
+      - name: Run portable provider contracts on macOS
+        run: npm run test:portable
+
       - name: Build the application bundle
         id: application_bundle
         run: npm run build:packaged
@@ -429,64 +401,15 @@ jobs:
 
   test:
     name: ${{ matrix.label }}
-    if: github.event_name != 'pull_request' || needs.classify.outputs.full_certification == 'true'
+    if: needs.classify.outputs.test == 'true'
     runs-on: ${{ matrix.runner }}
     needs: [classify, gate]
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: Linux x64
-            runner: ubuntu-24.04
-            artifact: linux-x64
-            arch: x64
-            timeout_minutes: 40
-            package_script: package:linux
-            app_path: release/linux-unpacked/inertia
-            unpacked_dir: release/linux-unpacked
-            docker_platform: linux/amd64
-          - label: Linux ARM64
-            runner: ubuntu-24.04-arm
-            artifact: linux-arm64
-            arch: arm64
-            timeout_minutes: 55
-            package_script: package:linux:arm64
-            app_path: release/linux-arm64-unpacked/inertia
-            unpacked_dir: release/linux-arm64-unpacked
-            docker_platform: linux/arm64
-          - label: Windows x64
-            runner: windows-2025
-            artifact: windows-x64
-            arch: x64
-            timeout_minutes: 55
-            release_platform: windows-x64
-            release_package_script: package:release:win
-            app_path: release/win-unpacked/Inertia.exe
-          - label: Windows ARM64
-            runner: windows-11-arm
-            artifact: windows-arm64
-            arch: arm64
-            timeout_minutes: 70
-            release_platform: windows-arm64
-            release_package_script: package:release:win:arm64
-            app_path: release/win-arm64-unpacked/Inertia.exe
-          - label: macOS arm64
-            runner: macos-15
-            artifact: macos-arm64
-            arch: arm64
-            timeout_minutes: 40
-            release_platform: macos-arm64
-            release_package_script: package:release:mac
-            app_path: release/mac-arm64/Inertia.app
-          - label: macOS x64
-            runner: macos-15-intel
-            artifact: macos-x64
-            arch: x64
-            timeout_minutes: 55
-            release_platform: macos-x64
-            release_package_script: package:release:mac:x64
-            app_path: release/mac/Inertia.app
+      matrix: ${{ fromJSON(needs.classify.outputs.matrix_json) }}
+      # Bound background certification without expanding native worker counts.
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
     env:
       CI: "true"
       INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.artifact }}.json
@@ -497,6 +420,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -530,7 +454,7 @@ jobs:
         run: npm run test:native-architecture
 
       - name: Run cross-platform performance smoke
-        if: github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true'
+        if: needs.classify.outputs.benchmarks == 'true'
         run: npm run benchmark:platform:smoke
 
       # Migrations, architecture, lint, and types are already proven by the
@@ -544,8 +468,12 @@ jobs:
       # Coverage runs the same suite as npm test, so Linux runs it once here
       # instead of running the suite twice.
       - name: Run the unit suite and enforce all-source coverage baselines
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
         run: npm run test:coverage
+
+      - name: Run the complete Linux ARM64 unit suite without duplicate coverage
+        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+        run: npm test
 
       # Linux coverage, macOS units, and the sharded Windows x64 job already
       # execute every marked portable test. Windows ARM64 has no complete unit
@@ -566,7 +494,7 @@ jobs:
           --output-directory test-results/nightly-lifecycle
 
       - name: Run opt-in Kimi through Claude integration
-        if: runner.os == 'Linux'
+        if: github.event_name == 'schedule' && runner.os == 'Linux' && matrix.arch == 'x64'
         shell: bash
         env:
           INERTIA_KIMI_CODE_API_KEY: ${{ secrets.INERTIA_KIMI_CODE_API_KEY }}
@@ -607,60 +535,6 @@ jobs:
       - name: Build the application bundle
         id: application_bundle
         run: npm run build:packaged
-
-      # The shared dependency cache deliberately excludes Electron's platform
-      # payload. Download it outside Playwright's hook deadline so a cold cache
-      # cannot consume the first display-sensitive suite's startup budget.
-      - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
-        run: node -e "console.log(require('electron'))"
-
-      - name: Run display-sensitive Electron end-to-end tests
-        if: runner.os != 'Linux'
-        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      # Keep this as a separate step with an explicit status condition: an
-      # assertion in the display-sensitive phase must fail the job without
-      # preventing the independent coverage from running.
-      - name: Run isolated Electron end-to-end tests
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
-        env:
-          # Bound Windows load after hosted socket-buffer exhaustion.
-          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
-        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
-      - name: Run display-sensitive Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      - name: Run isolated Electron end-to-end tests under Xvfb
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially under Xvfb
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
-      - name: Keep provider settings visual evidence
-        if: runner.os == 'Linux' && matrix.arch == 'x64'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: provider-settings-screenshots
-          path: test-results/**/provider-settings-*.png
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Measure desktop workloads
-        if: (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true') && runner.os != 'Linux'
-        run: npm run benchmark:desktop:built
-
-      - name: Measure desktop workloads under Xvfb
-        if: (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true') && runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Package native Windows installer and unpacked app
         if: runner.os == 'Windows'
@@ -803,6 +677,59 @@ jobs:
           mac_app="${{ matrix.app_path }}"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
 
+      # The shared dependency cache deliberately excludes Electron's platform
+      # payload. Download it outside Playwright's hook deadline so a cold cache
+      # cannot consume the first display-sensitive suite's startup budget.
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
+      - name: Run display-sensitive Electron end-to-end tests
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      # Package evidence is already complete. Do not continue native work
+      # after a failed phase whose fixture cleanup may be unconfirmed.
+      - name: Run isolated Electron end-to-end tests
+        if: runner.os != 'Linux'
+        env:
+          # Bound Windows load after hosted socket-buffer exhaustion.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
+        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Run display-sensitive Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run isolated Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Keep provider settings visual evidence
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provider-settings-screenshots
+          path: test-results/**/provider-settings-*.png
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Measure desktop workloads
+        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux'
+        run: npm run benchmark:desktop:built
+
+      - name: Measure desktop workloads under Xvfb
+        if: (needs.classify.outputs.benchmarks == 'true') && runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+
       - name: Keep failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -815,7 +742,7 @@ jobs:
           retention-days: 7
 
       - name: Keep cross-platform performance evidence
-        if: always() && (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true')
+        if: always() && (needs.classify.outputs.benchmarks == 'true')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-${{ matrix.artifact }}
@@ -841,7 +768,7 @@ jobs:
 
   windows-unit:
     name: Windows unit tests (${{ matrix.shard }}/4)
-    if: github.event_name != 'pull_request' || needs.classify.outputs.full_certification == 'true'
+    if: needs.classify.outputs.windows_unit == 'true'
     runs-on: windows-2025
     needs: [classify, gate]
     timeout-minutes: 30
@@ -860,6 +787,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -887,16 +815,37 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  merge-ready:
+    name: merge-ready
+    if: always()
+    needs: [classify, gate, lineage, node-22-minimum, pr-linux-core, pr-linux-lifecycle, pr-windows-lifecycle, pr-macos-lifecycle, test, windows-unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact candidate verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Require complete exact-candidate evidence
+        env:
+          PLAN_JSON: ${{ needs.classify.outputs.plan_json }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/merge-ready.mjs
+
   report-nightly-failure:
     name: Report nightly lifecycle certification failure
     if: >-
       always() && github.event_name == 'schedule' &&
-      (needs.classify.result != 'success' ||
-      needs.gate.result != 'success' ||
-      needs.node-22-minimum.result != 'success' ||
-      needs.test.result != 'success' ||
-      needs.windows-unit.result != 'success')
-    needs: [classify, gate, node-22-minimum, test, windows-unit]
+      needs.merge-ready.result != 'success'
+    needs: merge-ready
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

@@ -1,131 +1,164 @@
-# CI evidence tiers and timing record
+# CI evidence lanes and timing record
 
-This document distinguishes observed timings from projections. A projection is
-not promoted to an actual result until the corresponding workflow has completed
-successfully on GitHub-hosted runners.
+This describes the implementation relative to current MAIN
+`c9740a517da9636df343902cb4e08d851d9e33c9`, not just the older audit snapshot.
+The current-source baseline retained the audited overlapping PR/full tiers,
+six copies of release quality and duplicate Linux coverage instrumentation.
+Implemented scheduling is not a hosted timing result or repository protection.
 
-## Evidence tiers
+## One explainable plan, one merge result
 
-Every pull request runs the classifier and quality gate in parallel, the Node
-22.13 compatibility check, and the independent migration-lineage workflow. It
-then runs four explicit critical jobs in parallel:
+`scripts/ci/change-classifier.mjs` retains domain ownership.
+`evidence-plan.mjs` turns it into a machine-readable plan containing the
+comparison baseline, tested candidate and source head, lane, paths, domains,
+reasons, required suites/jobs/checks/platforms and explicit job/platform omissions.
+The plan is printed and attached to the classify job summary.
+It does not select only tests whose filenames changed.
 
-- Linux x64: the complete all-source coverage suite, including every generated
-  portable provider/runtime test, and production dependency audit;
-- Linux x64 lifecycle: focused updater, containment, recovery, and shutdown unit
-  tests; a compact synthetic-turn Electron/core bridge; one packaged build;
-  destructive runtime-recovery Electron tests; and an AppImage package,
-  identity, fuse, native-guardian, and launch smoke;
-- Windows x64: focused Job Object, containment, updater-handoff, recovery, and
-  shutdown tests followed by one build and destructive Electron recovery;
-- macOS arm64: focused guardian, containment, terminal shutdown, updater-handoff,
-  recovery, and shutdown tests followed by one build and destructive Electron
-  recovery.
+| Lane | Required evidence | Boundary |
+| --- | --- | --- |
+| Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
+| Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
+| Main validation | Same policy over the accumulated unproven diff from a trusted compatible successful ancestor | Missing/uncertain baseline requires the complete matrix. |
+| Nightly certification | All six native targets, full units/portable contracts, Electron, packages, performance and retained three-attempt lifecycle checks | Native matrix limited to two simultaneous target jobs; every failed attempt still fails certification. |
+| Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
-The complete six-target package/E2E matrix and the four full Windows x64 unit
-shards additionally run for every push to `main`, merge-queue group, scheduled
-certification, and release-relevant affected pull request. A pull request is
-promoted to that full tier for an all-evidence result or a runtime-supervisor,
-process-containment, startup-recovery, terminal-native, updater, platform-package,
-renderer, or performance change. Shared test infrastructure, workflows,
-dependency manifests, shared contracts, and unclassified paths are all-evidence,
-so this CI-changing pull
-request itself runs both the critical and complete tiers. Isolated provider,
-turn/session, agent-management, database, and documentation changes retain the
-critical tier without paying for all six native packages.
+Docs-only changes require quality and immutable migration lineage, but no
+installer or Electron matrix. Renderer-owned changes require full Linux
+coverage and Linux display-sensitive, isolated and recovery Electron projects,
+without native installers. Provider adapters require Linux coverage plus
+three-OS lifecycle/transport proof; Windows/macOS also run the generated
+portable contracts, and Windows retains native Codex shim/discovery proof.
+OS-specific package paths select both architectures of that OS plus canonical
+coverage. Shared lifecycle, startup, containment, migrations, toolchain,
+workflow/test infrastructure, shared contracts and unknown changes expand to
+all six targets. Mixed changes take the union; a full native target replaces
+the equivalent same-platform sentinel.
 
-Windows Electron scenarios use one worker in CI and release certification;
-Linux and macOS isolated scenarios retain two. Hosted x64 and ARM64 runs each
-reported Winsock buffer exhaustion while two Electron instances were running.
-The Windows scheduling bound reduces concurrent resource demand. Every
-scenario, renderer-error assertion, and native recovery/package gate remains
-required; a passing run does not establish that the underlying resource issue
-has been eliminated.
+No assertions are removed from full certification. The complete Linux x64
+suite enforces unchanged all-source/per-area coverage thresholds once. Linux
+ARM64 runs the same complete unit suite without duplicate instrumentation;
+macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
+remain single-worker; Windows ARM64 retains its portable/native obligations.
+Windows Electron remains one worker, other isolated desktop projects two.
+The isolated browser-evidence CPU budget remains in CI quality and on each
+release target, separate from instrumented coverage.
 
-Full benchmarks run for performance/all-evidence pull requests and for every
-`main`, merge-queue, and scheduled run. Other full-tier affected pull requests
-retain all correctness evidence but skip benchmark-only steps. Concurrency groups
-are separate by event and ref, and only superseded pull-request runs are cancelled.
+The stable `merge-ready` job uses `always()` and explicitly requires classifier,
+quality, migration lineage and every planned result. It validates the canonical
+plan and enumerates actual REST job records, including every selected matrix
+member and all four required Windows shards. Failure, cancellation, timeout,
+unexpected skip, missing/duplicate check, unplanned execution or wrong run/head
+cannot count as success. Jobs intentionally omitted by the plan are distinct
+from required jobs which did not execute.
 
-Scheduled certification attempts a focused common and platform-specific
-lifecycle set up to three times in fresh Vitest processes on all six targets,
-stopping early only when cleanup is unconfirmed. Every attempted run and a
-structured pass/failure/flake summary are retained for 30 days; one failed
-attempt fails the target after artifact publication. A failed scheduled
-certification opens or updates one tracked issue with the exact SHA, failed job
-and step names, platform, locked provider-version link, run/artifact link, and an
-occurrence count derived only from marked automation reports. Failure of that
-issue reporter is itself visible rather than being converted to success.
+GitHub PR checkouts test the synthetic merge SHA (`github.sha`); Actions REST
+jobs identify the PR source head. The plan records both and every checkout is
+explicitly pinned to the tested SHA. The gate checks its own checkout, both
+plan identities, same-run job identity and source head. Merge groups use the
+actual queue candidate. The PR event list explicitly includes
+`ready_for_review`, `synchronize` and `converted_to_draft`; GitHub's defaults
+do not include the ready transition. See
+[GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
+and [needs/status conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds).
 
-The hostile browser-evidence batch keeps its 1.5-second thread-CPU ceiling in
-`npm run test:browser-evidence-cpu-budget`, which starts one fresh,
-uninstrumented
-Vitest worker. The ordinary and coverage suites still execute every exact
-sanitization, publication, redaction, ordering, and bound assertion, but do not
-charge concurrent V8 coverage bookkeeping to the production CPU budget. Every
-CI event runs the isolated guard in the Linux quality gate, and the release
-matrix repeats it on each target platform.
+## Cancellation without dropping unproven changes
 
-Release tags continue through the independent full six-target release workflow.
-Each target checks out and validates the exact tag, builds and smokes its native
-package, stages checksummed assets, and uploads those exact bytes. The publish job
-downloads and verifies the staged set before provenance attestation and upload.
-It also re-reads the direct and peeled remote tag under a bounded noninteractive
-Git operation immediately before draft creation, every missing-asset upload,
-the final publish transition, and every `canary-feed` ref push, so a remotely
-moved tag cannot inherit frozen
-artifacts from the earlier validation window.
-The CI tiering change does not weaken or reuse unverified release bytes.
+Superseded PR, main-push and merge-group validations cancel their predecessors.
+Release ownership remains separate and non-cancellable. Concurrency is not a
+global priority scheduler; queue delay and runner contention must be measured
+separately from execution time.
 
-Stable Windows x64 full and release certification also select the greatest
-published version below the candidate, require its architecture-specific installer
-and `SHA256SUMS.txt`, stream both under byte ceilings, and verify the exact digest.
-The released N-1 installer is installed and smoked first; the N installer then
-replaces it in the same directory and reopens the same bounded profile, workspace,
-and database state. The installed N files are compared byte-for-byte with the
-candidate unpacked tree before another smoke and uninstall. This is real packaged
-NSIS replacement and existing-profile evidence; it does not claim to drive the
-old app's `electron-updater` UI/handoff or fault-inject the privileged installer.
-The PR Windows x64 lifecycle sentinel nevertheless compiles the native helper
-and runs the deterministic updater startup, authenticated terminal-receipt, and
-supervisor namespace-pinning suites. On Windows that supervisor suite retargets
-a parent junction after request serialization and proves that the launch request
-continues to name the previously canonicalized paths. Its Windows-only native
-case also runs a delayed installer, observes an authenticated quarantine receipt
-at the deadline before that installer completes, and then observes the installer
-finish without having been killed. That configured Windows-only case also
-exercises the integrity-locked broker path and rejects a second launch while the
-first exact operation claim is live; portable contract tests prove that no
-direct staged-exe update entry remains and that every native wait shares one
-monotonic budget. This describes the enforced flow, not a hosted result for the
-current change before CI has run.
-Concurrent replacement of an
-already-canonical native ancestor still requires packaged Windows evidence; a
-Linux source/contract run is not counted as proof of that platform boundary.
+Main never classifies only `github.event.before`. A bounded read-only Actions
+lookup considers up to 50 successful runs of this exact workflow on repository
+`main` pushes. A candidate must belong to this repository, be older than the
+current run, have a successful exact-head `merge-ready`, be a Git ancestor,
+and have the same verification-contract digest. Failed/cancelled runs,
+PR/fork runs, another workflow, non-ancestors and changed contracts cannot
+nominate a baseline. API permission/rate failures, missing history or no
+compatible run expand to full evidence.
 
-For an ordinary pull request, the expected critical-path shape is the classifier
-and quality gate followed by the slowest of the four parallel critical jobs; it
-no longer includes Linux ARM64, Windows ARM64, macOS x64, six native package
-builds, or four complete Windows unit shards. Existing logs measured the Linux
-coverage step at 5m 48s and the formerly duplicated portable step at 1m 34s,
-but those step samples do not establish a complete new job duration. The
-portable tests remain inside the complete coverage suite. No 6–10 minute target or other
-numeric after value is claimed before the new jobs run successfully.
+Compatibility hashes the Git mode/blob/path identities of complete
+`.github/`, `scripts/`, `tests/`, `benchmarks/` trees and root non-document
+configuration files. This includes the lockfile, dependency action and verifier.
+The dependency action uses existing release Node 22.23.2 instead of floating
+Node 22, while the deliberate uncached Node 22.13 install remains separate.
+No runner artifact supplies authority. The lineage reusable job consumes this
+same baseline; unavailable main proof checks full history rather than forgetting
+migration edits in a cancelled predecessor.
 
-## Conservative change classification
+Git comparisons are NUL-delimited and use `--no-renames`, representing moves as
+deletion plus addition so neither old nor new ownership disappears. Unsafe,
+unknown or unavailable comparisons expand evidence. See the
+[official workflow-run API](https://docs.github.com/en/rest/actions/workflow-runs)
+and [job evidence API](https://docs.github.com/en/rest/actions/workflow-jobs).
 
-`scripts/ci/change-classifier.mjs` emits explicit Boolean outputs for the shared
-quality layer and lifecycle, including distinct Codex, Claude, Cursor, Gemini,
-Kimi, and OpenCode provider domains, plus database, native-terminal, updater,
-packaging, renderer, performance, and CI/test domains. Documentation is narrow:
-every changed path must be a recognized documentation path. Empty diffs, malformed
-paths, new unclassified paths, workflow/test infrastructure, dependency manifests,
-and shared contracts fail open to every evidence domain.
+## Package evidence and preserved trust
 
-The classifier is tested as a pure function. Its workflow invocation uses a
-NUL-delimited Git diff and also fails open if either commit cannot be resolved or
-Git cannot produce the comparison. The quality gate validates every workflow with
-checksum-pinned actionlint 1.7.7 before installing project dependencies.
+Each native target still builds once for its exact source/target/configuration.
+Package construction, identity/fuse/static-guardian checks, packaged launch,
+final-container smoke, Windows N-1 installed upgrade and applicable signature
+checks now precede desktop E2E. Thus the observed failure mode where a later
+display assertion suppressed package evidence is removed.
+
+Native phases remain sequential and stop after failure: no assumption that a
+failed fixture left a safe runner. A unit/build/package failure can still
+prevent later evidence. Fully independent downstream diagnostics would require
+isolated runners plus a measured, complete artifact identity and transfer
+protocol; that is deliberately not introduced here. Package-first ordering
+does not make a failed run release-ready or replace exact final signed-byte
+proof. Publisher/download/checksum/provenance/tag-revalidation logic is unchanged.
+
+Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,
+never under PR/merge-group source. Missing secret is explicitly not exercised.
+The separate latest-provider drift workflow remains secret-free and unchanged.
+
+## Verification retirement map
+
+| Removed duplicate execution | Retained authority | Distinct native proof retained |
+| --- | --- | --- |
+| Critical PR tier alongside complete same-platform certification | Complete selected/full target units, Electron and package gates | Windows x64 four complete shards; Windows ARM64 portable/native; both macOS architectures |
+| Linux sentinel's repeated focused unit list | Same tests in canonical Linux full coverage | Linux core bridge/recovery for narrow contracts; full Electron and exact package smoke for broad/package contracts |
+| Narrow provider/renderer Linux AppImage construction | Selected Linux package target on packaging/lifecycle risk; full nightly/release matrix | No installed-boundary claim from an unpackaged renderer/provider-only run |
+| Linux ARM64 coverage instrumentation | Complete ARM64 unit suite plus unchanged Linux x64 coverage thresholds | ARM64 ABI, static guardian, Electron and AppImage proof |
+| Six repeated release lint/type/architecture checks | One frozen-source release quality prerequisite | Per-target full unit/ABI/CPU/native/package/signature checks |
+| Independent migration workflow dispatch duplicated outside aggregate | Same reusable lineage job inside CI and required by merge-ready | Released migration comparison and semantic migration tests preserved |
+
+The planner, gate and baseline tests exercise docs/renderer/provider/OS/mixed/
+shared/unknown changes; deletion/rename; unavailable comparison; failed or
+cancelled predecessor; incompatible/foreign/non-ancestor baseline; missing,
+duplicate, skipped, failed and wrong-identity shards; draft non-approval; and
+the exact workflow output/selection contract. Existing packaged, minimum-Node,
+release-trust and native-worker assertions remain, with topology expectations
+updated to their retained owners.
+
+## Dependabot review
+
+Version updates now keep native ABI/extraction/update dependencies out of the
+generic production group, and Electron/build/browser/DOM test infrastructure
+out of the generic development group. Vitest and its coverage adapter form one
+coordinated verifier group, including majors, instead of incompatible separate
+major PRs. Provider SDKs retain their existing individual review exclusions.
+Existing compatibility ignores, action SHA pins, schedules and open-PR limits
+are preserved. No automerge, disabled rebasing, new security-update suppression,
+credentialed PR execution or automatic upstream approval is introduced.
+[Dependabot grouping semantics](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#groups)
+distinguish default version groups from security updates.
+
+## Administrative merge protection (not applied)
+
+The 2026-09-07 read-only API check reports main protection disabled and no
+repository/inherited rulesets. This implementation does not modify settings.
+
+An administrator must create an active main ruleset/branch protection requiring
+pull requests and the exact `merge-ready` status check from GitHub Actions.
+Require current-base evidence (strict checks or a configured merge queue);
+if queueing is enabled retain the wired `merge_group: checks_requested` event.
+Remove superseded individual matrix/sentinel required-check names only after
+the aggregate is installed and observed on a final candidate. Keep normal
+review requirements, restrict verifier/workflow changes to trusted review,
+and do not grant an urgent-label/admin bypass for missing evidence.
+A changed YAML file cannot itself activate those protections.
 
 ## Generated portable conformance suite
 
@@ -177,32 +210,28 @@ projects four shard weights of 533.393s, 533.393s, 533.392s, and 533.392s across
 projection, not a hosted-run result; install time, runner variance, and queue
 time are excluded.
 
-## After measurement status
+## Current verification and measurement limits
 
-There is no actual after result yet. The ordinary PR critical path has no numeric
-claim until all four new jobs succeed on hosted runners; their 25-minute timeouts
-are safety bounds, not estimates. This CI-changing pull request intentionally
-fails open to both critical and complete evidence, and its first successful hosted
-run will be reported without relabeling either projection as actual. A subsequent
-ordinary provider/documentation pull request is required to measure the reduced
-tier itself. Failed or cancelled runs must not refresh
-`.github/test-durations/windows-x64.json`.
+Local planner/gate/lineage/topology and preserved package-contract checks are
+recorded in the stabilization evidence ledger. Actionlint uses the existing
+1.7.7 checksum-pinned binary. Hosted final-head and native-platform certification
+remain required; no local unit pass is described as a hosted or installed pass.
 
-## Remaining CI work
+The current-source baseline full check took 169.34 seconds, stopped before
+build with four pre-existing SBOM checkout-basename assertions, and reported
+7,137 passing/77 skipped tests. It is a failed baseline, not a successful timing
+comparison. The historical successful timings above remain historical, and
+their Windows sharding projections are not current-run measurements.
 
-The full CI tier builds once inside each native target job, and the release tier
-now packages and smokes the one bundle built by that target rather than invoking
-a rebuilding `dist:*` path. Cross-job fan-out still needs a portable artifact
-identity containing the commit, lockfile, Node, Electron ABI, native-helper,
-OS/architecture, and build-configuration inputs. Release finalization publishes
-a checksummed CycloneDX dependency SBOM from the complete production lockfile
-union, including platform-optional packages, and binds it to the frozen source
-SHA, release tag, lockfile digest, and every exact staged asset digest. Each
-target also runs and retains release-candidate
-platform, desktop, and package-smoke performance evidence. Packaged stable Windows
-x64 now covers a successful N-1-to-N same-profile NSIS transition, but native
-`electron-updater` initiation and deterministic interrupted-installer rollback
-remain unproved with packaged artifacts. Cross-night trend aggregation and an
-owner-visible quarantine policy also remain future work; a pass after any failed
-nightly attempt is already classified and failed as a flake. No blind retry was
-introduced to conceal those boundaries.
+No numeric CI speedup is claimed yet. Before/after reporting must include
+exact source/toolchain, cold/warm dependency state, queue delay, critical-path
+wall time, summed runner time and first useful failure time for comparable
+successful lanes. This CI/test/dependency-changing stabilization PR requires
+the final six-target matrix and all Windows shards on its combined ready head.
+An earlier draft or older-head pass is not that evidence.
+
+Cross-job native artifact reuse, global runner priority, hosted speedup and
+new live-provider/installed upgrade claims are not implemented by this change.
+Existing checksum-first published Windows N-1 same-profile installation proof,
+Linux supported manual transition limitations, static guardian, Electron
+fuses, signatures, SBOM and provenance obligations remain intact.

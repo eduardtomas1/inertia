@@ -46,10 +46,7 @@ const FULL_CERTIFICATION_DOMAINS = new Set([
   "startup_recovery",
   "terminal_native",
   "updater",
-  "windows_packaging",
-  "linux_appimage",
-  "macos_packaging",
-  "renderer_ui",
+  "database_migrations",
   "performance",
 ]);
 
@@ -179,7 +176,7 @@ function domainsForTestPath(path) {
     || path.startsWith("tests/server/runtime")
     || path.startsWith("tests/server/conversation-")
     || path.startsWith("tests/server/duo-")
-  ) return { domains: new Set(PROVIDER_DOMAINS) };
+  ) return { domains: new Set(PROVIDER_DOMAINS), full: true };
 
   // An unmodeled test remains broad rather than silently losing evidence.
   return null;
@@ -207,28 +204,43 @@ function domainsForKnownPath(path) {
     return { domains: new Set(ALL_DOMAIN_SET), broad: true };
   }
 
+  // Provider adapters retain all portable contracts and native transport
+  // sentinels; a shared lifecycle owner is classified separately below.
   if (path.startsWith("src/server/provider/")) {
     return { domains: providerDomains(path) };
   }
 
-  // Server-side turn/session and child-agent orchestration are portable
-  // lifecycle domains. They require every provider contract and the compact
-  // desktop sentinels, but do not by themselves justify six native package
-  // builds. Keep these rules before the broader server-runtime rule below.
+  if (path.startsWith("native/runtime-process-guardian/")
+    || path.startsWith("src/node/runtime-owned-process")) {
+    return { domains: new Set(["process_containment", "startup_recovery"]) };
+  }
+  if (path.startsWith("build/linux/") || path.startsWith("scripts/linux-")
+    || path.startsWith("src/main/linux-singleton")) {
+    return { domains: new Set(["linux_appimage"]) };
+  }
+  if (path.startsWith("build/windows/") || path.startsWith("scripts/windows-")) {
+    return { domains: new Set(["windows_packaging"]) };
+  }
+  if (path.startsWith("build/macos/")) {
+    return { domains: new Set(["macos_packaging"]) };
+  }
+
+  // Shared turn/session and child-agent orchestration owns the complete
+  // lifecycle contract, including installed restart and shutdown behavior.
   if (
     path.startsWith("src/server/runtime/turns/")
     || path === "src/server/runtime/run-state-engine.ts"
     || path.startsWith("src/server/runtime/commands/conversation")
     || path.startsWith("src/server/runtime/commands/turn-")
   ) {
-    return { domains: new Set(PROVIDER_DOMAINS) };
+    return { domains: new Set(PROVIDER_DOMAINS), full: true };
   }
 
   if (
     path.startsWith("src/server/runtime/agent-")
     || path.startsWith("src/server/runtime/commands/agent-")
   ) {
-    return { domains: new Set(PROVIDER_DOMAINS) };
+    return { domains: new Set(PROVIDER_DOMAINS), full: true };
   }
 
   if (
@@ -236,7 +248,7 @@ function domainsForKnownPath(path) {
     || path.startsWith("src/server/agent")
     || path.startsWith("src/server/turn")
   ) {
-    return { domains: new Set(["turn_session", "agent_management", ...PROVIDER_DOMAINS]) };
+    return { domains: new Set(["turn_session", "agent_management", ...PROVIDER_DOMAINS]), full: true };
   }
 
   if (
@@ -324,6 +336,7 @@ export function classifyChangedPaths(inputPaths) {
   const domains = new Set();
   const reasons = new Set();
   let broad = false;
+  let full = false;
   let documentationOnly = true;
 
   for (const input of inputPaths) {
@@ -346,6 +359,7 @@ export function classifyChangedPaths(inputPaths) {
       domains.add("quality_shared");
     }
     if (result.broad) broad = true;
+    if (result.full) full = true;
     for (const domain of result.domains) domains.add(domain);
   }
 
@@ -356,7 +370,7 @@ export function classifyChangedPaths(inputPaths) {
 
   return {
     allEvidence: broad,
-    fullCertification: broad || [...domains].some(
+    fullCertification: broad || full || [...domains].some(
       (domain) => FULL_CERTIFICATION_DOMAINS.has(domain),
     ),
     documentationOnly,

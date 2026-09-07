@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { PLATFORMS } from "../../scripts/ci/evidence-plan.mjs";
 
 const repositoryRoot = process.cwd();
 
@@ -17,20 +18,6 @@ function workflowStep(workflow: string, name: string): string {
   const start = workflow.indexOf(marker);
   const end = workflow.indexOf("\n      - name:", start + marker.length);
   return workflow.slice(start, end < 0 ? undefined : end);
-}
-
-function workflowMatrixEntry(workflow: string, label: string): string {
-  const marker = `          - label: ${label}`;
-  const start = workflow.indexOf(marker);
-  if (start < 0) throw new Error(`Missing CI matrix entry for ${label}.`);
-  const boundaries = [
-    workflow.indexOf("\n          - label:", start + marker.length),
-    workflow.indexOf("\n    env:", start + marker.length),
-  ].filter((boundary) => boundary >= 0);
-  if (boundaries.length === 0) {
-    throw new Error(`Unbounded CI matrix entry for ${label}.`);
-  }
-  return workflow.slice(start, Math.min(...boundaries));
 }
 
 function workflowJob(workflow: string, id: string): string {
@@ -164,13 +151,10 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("keeps build, Electron E2E, fuse verification, and native smoke on all six CI targets", async () => {
     const workflow = await source(".github/workflows/ci.yml");
+    expect(PLATFORMS.map(({ runner }: { runner: string }) => runner)).toEqual([
+      "ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025", "windows-11-arm", "macos-15", "macos-15-intel",
+    ]);
     for (const expected of [
-      "runner: ubuntu-24.04",
-      "runner: ubuntu-24.04-arm",
-      "runner: windows-2025",
-      "runner: windows-11-arm",
-      "runner: macos-15",
-      "runner: macos-15-intel",
       "run: npm run check:quality",
       "run: npm run build:packaged",
       "run: npm run test:native-architecture",
@@ -193,7 +177,7 @@ describe("cross-platform packaged behavior contract", () => {
   it.each([
     ["ci.yml", "test"],
     ["release-platforms.yml", "build"],
-  ])("keeps native desktop phases independent and sequential in %s", async (filename, job) => {
+  ])("keeps package proof before safely sequential native desktop phases in %s", async (filename, job) => {
     const workflow = parse(await source(`.github/workflows/${filename}`)) as {
       jobs: Record<string, { steps: Array<{
         run?: string;
@@ -216,12 +200,11 @@ describe("cross-platform packaged behavior contract", () => {
         expect(phase.if).toContain(`runner.os ${linux ? "==" : "!="} 'Linux'`);
         const project = ["display-sensitive", "isolated", "runtime-recovery"][index];
         expect(phase.run).toContain(`--output=test-results/${project}`);
-        if (index === 0) continue;
-        // A foreground assertion must fail certification without suppressing
-        // the other phases. Neither may run before a valid app and binary exist.
-        expect(phase.if).toContain("!cancelled()");
-        expect(phase.if).toContain("steps.application_bundle.outcome == 'success'");
-        expect(phase.if).toContain("steps.electron_test_binary.outcome == 'success'");
+        // No unconditional continuation on a runner whose prior fixture may
+        // have failed cleanup. Package evidence has already run independently.
+        expect(phase.if).not.toContain("!cancelled()");
+        expect(phase.if).not.toContain("always()");
+        expect(phase.if).not.toContain("failure()");
       }
     }
   });
@@ -256,8 +239,10 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("retains the full release suite with the same macOS worker bound as PR CI", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
-    const units = workflowStep(workflow, "Verify quality and run the complete unit suite");
-    expect(units).toContain("npm run check:quality");
+    const units = workflowStep(workflow, "Run the complete release unit suite");
+    expect(units).not.toContain("npm run check:quality");
+    expect(workflowJob(workflow, "quality")).toContain("npm run check:quality");
+    expect(workflowJob(workflow, "build")).toContain("needs: [release_identity, quality]");
     expect(units).toContain('if [[ "$RUNNER_OS" == "macOS" ]]; then');
     expect(units).toContain("npm test -- --maxWorkers=2");
     expect(units).toMatch(/else\s+npm test\s+fi/u);
@@ -276,37 +261,35 @@ describe("cross-platform packaged behavior contract", () => {
       ["macOS arm64", "macos-15", "macos-arm64", "arm64", 40],
       ["macOS x64", "macos-15-intel", "macos-x64", "x64", 55],
     ] as const) {
-      const entry = workflowMatrixEntry(workflow, label);
-      expect(entry).toContain(`runner: ${runner}`);
-      expect(entry).toContain(`artifact: ${artifact}`);
-      expect(entry).toContain(`arch: ${architecture}`);
-      expect(entry).toContain(`timeout_minutes: ${timeout}`);
+      const entry = PLATFORMS.find((target: { label: string }) => target.label === label);
+      expect(entry).toMatchObject({ runner, artifact, arch: architecture, timeout_minutes: timeout });
     }
   });
 
-  it("keeps a compact every-PR tier and fail-open full certification", async () => {
+  it("keeps selected compact contracts mutually exclusive with full certification", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     expect(workflow).toContain("merge_group:");
     expect(workflow).toContain('cron: "17 3 * * *"');
-    expect(workflow).toContain("node scripts/ci/change-classifier.mjs");
+    expect(workflow).toContain("node scripts/ci/plan-workflow.mjs");
 
     const linuxCore = workflowJob(workflow, "pr-linux-core");
-    expect(linuxCore).toContain("if: github.event_name == 'pull_request'");
+    expect(linuxCore).toContain("if: needs.classify.outputs.pr_linux_core == 'true'");
     expect(linuxCore).toContain("run: npm run test:coverage");
     expect(linuxCore).not.toContain("run: npm run test:portable");
 
     const linuxLifecycle = workflowJob(workflow, "pr-linux-lifecycle");
     expect(linuxLifecycle).toContain("runs-on: ubuntu-24.04");
-    expect(linuxLifecycle).toContain("tests/main/app-update-handoff.test.ts");
-    expect(linuxLifecycle).toContain("tests/main/appimage-installed-identity.test.ts");
+    // These unit assertions remain in complete Linux coverage, while native
+    // package assertions remain in the selected/full target job.
+    expect(linuxLifecycle).not.toContain("npm exec -- vitest");
     expect(linuxLifecycle).toContain(
       "Run compact Electron/core bridge smoke under Xvfb",
     );
     expect(linuxLifecycle).toContain("tests/e2e/core-bridge-smoke.spec.ts");
     expect(linuxLifecycle).toContain("--output=test-results/core-bridge-smoke");
     expect(linuxLifecycle).toContain("--project=runtime-recovery");
-    expect(linuxLifecycle).toContain("run: npm run package:linux");
-    expect(linuxLifecycle).toContain("run: npm run validate:linux-package");
+    expect(linuxLifecycle).not.toContain("run: npm run package:linux");
+    expect(workflowJob(workflow, "test")).toContain("run: npm run validate:linux-package");
     const coreBridgeSmoke = workflowStep(
       workflow,
       "Run compact Electron/core bridge smoke under Xvfb",
@@ -344,10 +327,7 @@ describe("cross-platform packaged behavior contract", () => {
 
     for (const jobId of ["test", "windows-unit"]) {
       const certification = workflowJob(workflow, jobId);
-      expect(certification).toContain("github.event_name != 'pull_request'");
-      expect(certification).toContain(
-        "needs.classify.outputs.full_certification == 'true'",
-      );
+      expect(certification).toContain(`needs.classify.outputs.${jobId.replaceAll("-", "_")} == 'true'`);
     }
   });
 
@@ -361,8 +341,7 @@ describe("cross-platform packaged behavior contract", () => {
       "Verify migrations, architecture, lint, and types",
     );
     expect(qualityGate).toContain("run: npm run check:quality");
-    expect(workflow.match(/^ {4}needs: gate$/gmu)).toHaveLength(1);
-    expect(workflow.match(/needs: \[classify, gate\]/gu)).toHaveLength(6);
+    expect(workflow.match(/needs: \[classify, gate\]/gu)).toHaveLength(7);
 
     // macOS is the only platform whose unit signal is a plain suite run: Linux
     // gets the same suite through coverage, and Windows gets it sharded.
@@ -374,7 +353,9 @@ describe("cross-platform packaged behavior contract", () => {
       workflow,
       "Run the unit suite and enforce all-source coverage baselines",
     );
-    expect(linuxUnits).toContain("if: runner.os == 'Linux'");
+    expect(linuxUnits).toContain("if: runner.os == 'Linux' && matrix.arch == 'x64'");
+    expect(workflowStep(workflow, "Run the complete Linux ARM64 unit suite without duplicate coverage"))
+      .toContain("run: npm test");
     expect(linuxUnits).toContain("run: npm run test:coverage");
 
     // Linux coverage, macOS units, and the sharded Windows x64 job already run
@@ -439,13 +420,13 @@ describe("cross-platform packaged behavior contract", () => {
       scripts: Record<string, string>;
     };
     expect(packageJson.scripts["check:platform"]).toBe(
-      "npm run check:quality && npm run check:private-connect && npm run build:bundle",
+      "npm run check:quality && npm run build:bundle",
     );
     expect(packageJson.scripts["prebuild:bundle"]).toBe(
       "node scripts/build-runtime-process-guardian.mjs",
     );
     expect(packageJson.scripts.check).toBe(
-      "npm run check:quality && npm run test && npm run check:private-connect && npm run build:bundle",
+      "npm run check:quality && npm run test && npm run build:bundle",
     );
     expect(packageJson.build.files).toContain(
       "resources/generated/windows-runtime-job-integrity.json",
@@ -549,11 +530,11 @@ describe("cross-platform packaged behavior contract", () => {
     expect(vitest).toContain("fileParallelism: false");
     expect(vitest).toContain("groupOrder: 1");
 
-    // Specs that pin a window to the primary display share one machine
-    // resource, so they are discovered rather than listed. Separate workflow
+    // Resource ownership is declared per scenario and checked recursively.
+    // Separate workflow
     // steps ensure a display assertion cannot suppress the isolated coverage.
     const playwright = await source("playwright.config.ts");
-    expect(playwright).toContain('windowDisplay: "primary"');
+    expect(playwright).toContain("discoverE2eResources(testDir)");
     expect(playwright).toContain('name: "display-sensitive"');
     expect(playwright).toContain('name: "runtime-recovery"');
     expect(playwright.match(/workers: 1,/gu)).toHaveLength(2);
@@ -583,13 +564,8 @@ describe("cross-platform packaged behavior contract", () => {
       "Run isolated Electron end-to-end tests under Xvfb",
     ]) {
       const isolatedPhase = workflowStep(workflow, name);
-      expect(isolatedPhase).toContain("if: ${{ !cancelled()");
-      expect(isolatedPhase).toContain(
-        "steps.application_bundle.outcome == 'success'",
-      );
-      expect(isolatedPhase).toContain(
-        "steps.electron_test_binary.outcome == 'success'",
-      );
+      expect(isolatedPhase).toContain("if: runner.os");
+      expect(isolatedPhase).not.toContain("!cancelled()");
       expect(isolatedPhase).toContain("--project=isolated");
       expect(isolatedPhase).toContain("--output=test-results/isolated");
     }
@@ -599,13 +575,8 @@ describe("cross-platform packaged behavior contract", () => {
       "Run destructive runtime-recovery tests sequentially under Xvfb",
     ]) {
       const recoveryPhase = workflowStep(workflow, name);
-      expect(recoveryPhase).toContain("if: ${{ !cancelled()");
-      expect(recoveryPhase).toContain(
-        "steps.application_bundle.outcome == 'success'",
-      );
-      expect(recoveryPhase).toContain(
-        "steps.electron_test_binary.outcome == 'success'",
-      );
+      expect(recoveryPhase).toContain("if: runner.os");
+      expect(recoveryPhase).not.toContain("!cancelled()");
       expect(recoveryPhase).toContain("--project=runtime-recovery");
       expect(recoveryPhase).toContain("--output=test-results/runtime-recovery");
     }
@@ -971,7 +942,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseIdentity).toContain('printf \'release_sha=%s\\n\' "$release_sha" >> "$GITHUB_OUTPUT"');
 
     for (const [jobId, prerequisite] of [
-      ["build", "needs: release_identity"],
+      ["build", "needs: [release_identity, quality]"],
       ["upload", "needs: [release_identity, build]"],
       ["publish-canary-feed", "needs: [release_identity, upload]"],
     ] as const) {
@@ -1027,11 +998,10 @@ describe("cross-platform packaged behavior contract", () => {
       ["Linux x64", "ubuntu-24.04", "linux-x64", "x64", "package:release:linux"],
       ["Linux ARM64", "ubuntu-24.04-arm", "linux-arm64", "arm64", "package:release:linux:arm64"],
     ] as const) {
-      const entry = workflowMatrixEntry(workflow, label);
-      expect(entry).toContain(`runner: ${runner}`);
-      expect(entry).toContain(`platform: ${platform}`);
-      expect(entry).toContain(`arch: ${architecture}`);
-      expect(entry).toContain(`package_script: ${packageScript}`);
+      const targets = parse(workflow).jobs.build.strategy.matrix.include as Array<{ label: string }>;
+      expect(targets.find((target) => target.label === label)).toMatchObject({
+        runner, platform, arch: architecture, package_script: packageScript,
+      });
     }
 
     const releaseBundle = workflowStep(

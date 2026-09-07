@@ -84,19 +84,19 @@ describe("CI change classifier", () => {
     for (const path of [
       "src/main/runtime-supervisor.ts",
       "src/main/terminal-manager.ts",
-      "src/renderer/src/App.tsx",
+      "src/server/database.ts",
+      "src/server/runtime/run-state-engine.ts",
+      "src/server/persistence/migrations/runtime-catalog.ts",
+      "src/server/runtime/turns/turn-controller.ts",
+      "src/server/runtime/agent-thread-manager.ts",
+      "src/server/runtime/commands/conversation-commands.ts",
       "benchmarks/data-throughput.test.ts",
     ]) {
       expect(classifyChangedPaths([path]).fullCertification, path).toBe(true);
     }
     for (const path of [
       "src/server/provider/claude-agent-sdk-harness.ts",
-      "src/server/database.ts",
-      "src/server/persistence/migrations/runtime-catalog.ts",
-      "src/server/runtime/run-state-engine.ts",
-      "src/server/runtime/turns/turn-controller.ts",
-      "src/server/runtime/agent-thread-manager.ts",
-      "src/server/runtime/commands/conversation-commands.ts",
+      "src/renderer/src/App.tsx",
       "docs/CI_EVIDENCE.md",
     ]) {
       expect(classifyChangedPaths([path]).fullCertification, path).toBe(false);
@@ -111,7 +111,7 @@ describe("CI change classifier", () => {
     ]) {
       const result = classifyChangedPaths([path]);
       expect(result.allEvidence, path).toBe(false);
-      expect(result.fullCertification, path).toBe(false);
+      expect(result.fullCertification, path).toBe(true);
       expect(result.domains, path).toEqual(expect.arrayContaining([
         "provider_common",
         "provider_codex",

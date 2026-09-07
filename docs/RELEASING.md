@@ -220,7 +220,8 @@ new architecture-specific AppImage against its release's `SHA256SUMS.txt`, apply
 delete the profile or recreate projects to update.
 
 The stable Linux final-container gate now drives the production installed update
-coordinator and candidate bootstrap, checks atomic replacement and owner shutdown,
+coordinator and candidate bootstrap through extract-and-run, checks atomic
+replacement and owner shutdown,
 resumes the saved conversation's provider session, refreshes its Git workspace,
 and reopens the durable AppImage filename. The fixture substitutes the release
 download with the locally built package and advertises a synthetic older source

@@ -436,6 +436,13 @@ terminal-login scenario. Its trace identifies the first failure as the missing
 fixture-close error replaced that assertion in the console summary. The saved
 trace does not expose enough ownership data to establish its exact native
 interleaving; it must not be presented as conclusive root-cause evidence.
+The completed Intel macOS lane reproduced that Kimi failure and also rejected
+cleanup after `window-health-recovery`. Its trace proves all four health
+assertions, screenshot and restoration of the injected methods succeeded;
+the failure occurred only in the shared fixture's teardown. The same health
+test passed on ARM64. Neither retained artifact identifies the responsible
+detached process claim. This second failure is not attributed to the terminal
+sign-in race or declared fixed without evidence.
 
 Investigation did independently reproduce a real product race: normal PTY exit
 can precede asynchronous retirement of its exact durable guardian claim. The
@@ -478,10 +485,53 @@ Local validation of the new product code:
   platform skips (2.8 minutes). These used synthetic providers, private profiles
   and a private virtual display; the user's live app and profile were untouched.
 
-The earlier packaged artifact is evidence for its recorded source revision,
-not a package containing this later terminal change. Fresh hosted macOS results
-are still required; local Linux execution and the composed Darwin regression
-do not substitute for native macOS proof.
+The complete `npm run check` was also repeated after all focused assertions
+were frozen: the same 7,471 tests and every gate passed, with a 108.15-second
+test phase.
+
+A fresh local AppImage containing the terminal change was then produced from
+`085ef553a09f01302a9b9de1890206b7b69e6016`: 359,692,635 bytes, SHA-256
+`8230c17be1e1d9822392aaeec35d9e52155d2590e8c63419441391ab91d28d0a`.
+All 207 frozen build files exactly matched its archive; all 11 native binaries
+had the expected architecture; static Linux package checks and both nine-fuse
+checks passed. Existing package-smoke tests passed on their first attempts for
+normal FUSE/AppRun, guardian-sealed descriptor handoff and retained-wrapper
+extraction. Each proved runtime readiness, PDF extraction, image retention and
+complete cleanup; all six recorded main/runtime PIDs were absent afterward.
+
+This used the reviewed installed dependencies and frozen output, not a new
+cold installation. The packaging command's tool response did not retain its
+numeric exit receipt; completed artifacts, the build log and independent
+successful static/native checks are recorded instead. One incorrectly rooted
+validator invocation never started the validator; its correctly rooted run
+passed. The inherited AppRun fallback and explicit extraction-fixture bypass
+mean these results are not sandbox-enabled proof on this host. No installed
+application, user profile, public release or tag was changed. The earlier
+installed-update result remains tied to its earlier recorded source revision;
+this package smoke does not certify authenticated Kimi or native macOS.
+
+Fresh hosted macOS results are still required; local Linux execution and the
+composed Darwin regression do not substitute for native macOS proof.
+
+To preserve evidence if the separate Intel cleanup failure recurs, shared
+Electron fixture teardown now captures the existing allowlisted, digest-checked
+runtime record projection before deleting its private profile, only after a
+cleanup failure. Reads/reporting are bounded and abortable. No raw log, prompt,
+credential, authenticated endpoint or filesystem error is published. Reporting
+failure cannot replace the original cleanup error or prevent directory removal.
+Nine regressions cover failure-only ordering, reporting throw/rejection/hang,
+late rejection, removal failure, sanitized real records and cancelled capture;
+the focused support suite passed 69 tests with three existing platform skips.
+This adds diagnostic evidence, not a claimed fix for the unidentified detached
+claim in that Intel run.
+
+The combined final `npm run check` passed 7,480 tests, 77 existing skips and
+705 active test files, followed by all build and bundle gates. Its test phase
+took 100.39 seconds. Product bytes are unchanged from the freshly verified
+`085ef553` AppImage; the additional nine tests exercise failure reporting only.
+The final real Linux Electron pass also succeeded for all three Kimi-login/
+restart and window-health scenarios with the updated fixture support
+(20.6 seconds), including clean teardown.
 
 ## Final evidence
 

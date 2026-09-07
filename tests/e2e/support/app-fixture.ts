@@ -16,7 +16,7 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
-import { attachElectronFixtureCloseFailure } from "./electron-failure-evidence";
+import { attachElectronFixtureCloseFailure, attachElectronFixtureRuntimeRecords } from "./electron-failure-evidence";
 import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
   readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
 import {
@@ -977,6 +977,8 @@ export async function createAppFixture(
         requestRuntimeQuit: async () => await finishElectronPreparedQuit(activeApp),
         waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
+        onCleanupFailure: async (signal) =>
+          attachElectronFixtureRuntimeRecords(() => test.info(), testDirectory, signal),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),
       }).catch(async (error: unknown) => {
         await attachElectronFixtureCloseFailure(() => test.info(), error);

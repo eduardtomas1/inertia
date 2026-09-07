@@ -16,6 +16,7 @@ import {
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
 import { GitExecutableSelection } from "./executable";
+import { rememberRejectedLookupScratch, startupFailureScratch } from "../runtime-startup-postfailure-scratch";
 import { withGitScanProcessSlot } from "./scan-coordinator";
 import {
   GIT_PROCESS_TREE_TERMINATION_FAILURE,
@@ -32,12 +33,14 @@ const gitExecutable = new GitExecutableSelection();
 export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
   try {
     await gitExecutable.prepare(environment, async () => {
+      startupFailureScratch.lookupStartedAt = Date.now();
       const result = await runGitProcess("/usr/bin/xcrun", process.cwd(), ["--find", "git"], {
         timeoutMs: 3_000,
         maxOutputBytes: 4_096,
         environment,
         failureMessage: "Git executable discovery failed.",
       });
+      startupFailureScratch.lookupElapsedMs = Date.now() - startupFailureScratch.lookupStartedAt;
       return result.stdout.toString("utf8");
     });
   } catch (error) {
@@ -338,7 +341,13 @@ function runGitProcess(
         clearTimeout(cancelledProcessDrainTimer);
       }
       options.signal?.removeEventListener("abort", onAbort);
-      if (error) rejectProcess(error);
+      if (error) {
+        rejectProcess(error);
+        if (command === "/usr/bin/xcrun") rememberRejectedLookupScratch({
+          error, stderr, stdoutBytes, terminalCode: terminalError?.code ?? null,
+          signal: child.signalCode, exitCode: child.exitCode,
+        });
+      }
       else if (result) resolveProcess(result);
     };
 

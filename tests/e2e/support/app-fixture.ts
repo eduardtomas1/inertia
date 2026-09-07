@@ -1,7 +1,7 @@
 import { _electron as electron, test, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -831,6 +831,13 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
+    const captureDirectory = process.env.INERTIA_STARTUP_CAPTURE_DIRECTORY;
+    if (captureDirectory) {
+      const capture = await readFile(join(testDirectory, "provider-home", ".inertia-startup-postfailure.jsonl"))
+        .catch(() => Buffer.from(""));
+      if (capture.length > 0) await writeFile(join(captureDirectory, "startup-rejected.jsonl"), capture.subarray(0, 16_384))
+        .catch(() => undefined);
+    }
     try {
       if (electronApp) {
         await closeElectronAppBounded(electronApp).catch(() => undefined);

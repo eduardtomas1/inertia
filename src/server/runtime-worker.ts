@@ -5,6 +5,7 @@ import {
   type RuntimeWorkerEvent,
 } from "../node/runtime-process-protocol.js";
 import { startRuntime, type RunningRuntime } from "./index.js";
+import { startupFailureScratch, writeRejectedStartupScratch } from "./runtime-startup-postfailure-scratch.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
 import {
@@ -143,6 +144,7 @@ async function shutdown(exitCode = 0): Promise<void> {
 }
 
 function requestRuntimeRestart(reason: RuntimeRestartReason, diagnostic?: RuntimeOwnedProcessDiagnostic): void {
+  startupFailureScratch.taint ??= diagnostic ?? null;
   try {
     if (!restartReason) {
       restartReason = reason;
@@ -675,6 +677,9 @@ parentPort.on("message", (messageEvent) => {
     secureFiles,
     agentBrowser,
   }).then(async (startedRuntime) => {
+    startupFailureScratch.startRuntimeResolved = true;
+    startupFailureScratch.stoppingOnResolution = stopping;
+    startupFailureScratch.restartReasonOnResolution = restartReason;
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
@@ -712,6 +717,7 @@ parentPort.on("message", (messageEvent) => {
       });
     }
   }).catch(async (error: unknown) => {
+    writeRejectedStartupScratch(error, stopping, restartReason);
     starting = false;
     const blockerCode = runtimeStartupBlockerCode(error);
     post({

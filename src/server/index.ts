@@ -118,6 +118,7 @@ import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
 import { gitScanCoordinator } from "./git/scan-coordinator";
 import { gitInspectionLifecycle } from "./git/inspection-lifecycle";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
+import { startupFailureScratch } from "./runtime-startup-postfailure-scratch";
 import {
   initializeRuntimePersistence,
   prepareRuntimeStartupRecovery,
@@ -135,6 +136,8 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
+  startupFailureScratch.startedAt = Date.now();
+  startupFailureScratch.stage = "startup-recovery";
   const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id));
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
@@ -150,7 +153,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runtimeSafetyError("Runtime startup is blocked."),
     );
   }
+  startupFailureScratch.stage = "git-prewarm";
   await prepareGitExecutable();
+  startupFailureScratch.stage = "generated-attachments";
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -159,6 +164,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         || authorizedModernGenerationIds.size > 0,
     },
   );
+  startupFailureScratch.stage = "persistence";
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
@@ -225,6 +231,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     conversationAttachments: initializedConversationAttachments,
     recovery,
   } = await initializeRuntimePersistence(options, startupRecovery, store);
+  startupFailureScratch.stage = "backend-setup";
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -584,7 +591,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   });
   backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
+  startupFailureScratch.stage = "backend-initialize";
   if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
+  startupFailureScratch.stage = "services-and-listen";
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);

@@ -22,6 +22,10 @@ import {
 } from "../../src/main/runtime-diagnostics";
 
 const roots: string[] = [];
+const OWNED_PROCESS_RESTART_FAILURES = [
+  "The runtime restarted because owned process containment could not be confirmed.",
+  "The runtime restarted because owned process cleanup could not be confirmed.",
+] as const;
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), "inertia-runtime-diagnostics-"));
@@ -119,6 +123,60 @@ describe("runtime diagnostics", () => {
       "The runtime process tree could not be confirmed stopped.",
     );
     expect(content).toContain("Runtime lifecycle failure detail omitted.");
+  });
+
+  it.each(OWNED_PROCESS_RESTART_FAILURES)("preserves the fixed supervisor restart cause: %s", (message) => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.recordState({
+      phase: "restarting", generation: 2, pid: null, websocketUrl: null,
+      runtimeGenerationHash: null, lastError: message, startupBlockerCode: null,
+      restartAttempt: 1, restartScheduled: true,
+    });
+
+    expect(JSON.parse(readFileSync(join(directory, "runtime.log"), "utf8")))
+      .toMatchObject({ event: "runtime.failure", message });
+    const report = diagnostics.supportReport({
+      version: "0.0.52", platform: "linux", architecture: "x64", runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain(message);
+    expect(report.text).not.toContain("Runtime lifecycle failure detail omitted.");
+  });
+
+  it.each(OWNED_PROCESS_RESTART_FAILURES)("does not allow arbitrary suffixes on a fixed restart cause: %s", (message) => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    const unsafeMessages = [
+      `${message} arbitrary provider detail`,
+      `${message} prompt='private draft' source=/mnt/customer/private.txt token=ghp_1234567890`,
+    ];
+    for (const unsafeMessage of unsafeMessages) {
+      diagnostics.record("runtime.failure", { phase: "restarting", message: unsafeMessage });
+    }
+    const logPath = join(directory, "runtime.log");
+    const records = readFileSync(logPath, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { message: string });
+    expect(records.map((record) => record.message)).toEqual(
+      unsafeMessages.map(() => "Runtime lifecycle failure detail omitted."),
+    );
+    const reportInput = {
+      version: "0.0.52", platform: "linux", architecture: "x64", runtime: null,
+    };
+    expect(diagnostics.supportReport(reportInput)).toMatchObject({ eventCount: 2 });
+
+    // A valid digest must not make an appended raw message safe to import.
+    writeFileSync(logPath, unsafeMessages.map((unsafeMessage) => signedRecord({
+      schemaVersion: 1, at: new Date().toISOString(), event: "runtime.failure",
+      phase: "restarting", message: unsafeMessage,
+    })).join("\n"), { mode: 0o600 });
+    const report = diagnostics.supportReport(reportInput);
+    expect(report.eventCount).toBe(0);
+    expect(report.text).not.toContain(message);
+    expect(report.text).not.toContain("arbitrary provider detail");
+    expect(report.text).not.toContain("private draft");
+    expect(report.text).not.toContain("customer");
+    expect(report.text).not.toContain("ghp_1234567890");
   });
 
   it("exposes only classified detached-draft recovery diagnostics", () => {

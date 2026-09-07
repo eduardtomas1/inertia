@@ -78,9 +78,12 @@ function runLinuxGuardianHelper(
       abortSignal?.removeEventListener("abort", abort);
       resolve({ stdout, stderr, status, signal, failed });
     };
+    const kill = (): void => {
+      try { child.kill("SIGKILL"); } catch { failed = true; }
+    };
     const stop = (): void => {
       failed = true;
-      try { child.kill("SIGKILL"); } catch { /* The bounded helper already exited. */ }
+      kill();
     };
     const abort = (): void => stop();
     const collect = (target: "stdout" | "stderr", data: Buffer): void => {
@@ -102,8 +105,12 @@ function runLinuxGuardianHelper(
       resolve({ stdout: "", stderr: "", status: null, signal: null, failed: true });
       return;
     }
+    // Under event-loop contention, a successful helper may already be a zombie
+    // when this timer runs before its queued close event. Still kill live helpers
+    // at the deadline, but let their actual exit status distinguish that case.
+    // Explicit aborts, excess output, and spawn errors remain failed regardless.
     const timer = setTimeout(
-      stop,
+      kill,
       LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
     );
     timer.unref();

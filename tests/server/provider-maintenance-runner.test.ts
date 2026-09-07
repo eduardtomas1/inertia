@@ -350,7 +350,7 @@ describe("provider maintenance runner", () => {
       {
         shell: false,
         windowsHide: true,
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
     expect(child.kill).not.toHaveBeenCalled();

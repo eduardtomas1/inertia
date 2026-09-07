@@ -159,6 +159,43 @@ describe("runtime diagnostics", () => {
     expect(report.text).not.toContain("Runtime lifecycle failure detail omitted.");
   });
 
+  it.each([
+    "Runtime initialization failed (git-timeout). Runtime shutdown could not confirm cleanup after incomplete startup.",
+    "Runtime startup completion failed (filesystem-permission). Runtime shutdown failed while closing local resources.",
+    "The runtime restarted because owned process containment could not be confirmed. (stage=darwin-readiness, signal=SIGKILL, exit-code=1) Runtime shutdown could not confirm cleanup after incomplete startup.",
+  ])("retains the validated initiating failure in persisted support evidence: %s", (message) => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.record("runtime.failure", { phase: "restarting", message });
+    expect(JSON.parse(readFileSync(join(directory, "runtime.log"), "utf8")))
+      .toMatchObject({ event: "runtime.failure", message });
+    expect(diagnostics.supportReport({
+      version: "0.0.53", platform: "linux", architecture: "x64", runtime: null,
+    }).text).toContain(message);
+  });
+
+  it("omits unknown categories, stages, signals and arbitrary composed suffixes", () => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    const taint = "The runtime restarted because owned process containment could not be confirmed.";
+    for (const message of [
+      "Runtime initialization failed (private-value).",
+      "Runtime initialization failed (git-timeout). private-value",
+      `${taint} (stage=private-value, signal=SIGKILL)`,
+      `${taint} (stage=darwin-readiness, signal=private-value)`,
+      `${taint} (stage=darwin-readiness, exit-code=999)`,
+      `${taint} (stage=darwin-readiness, signal=SIGKILL) private-value`,
+      "Runtime initialization failed (git-timeout). Runtime shutdown could not confirm cleanup after incomplete startup. private-value",
+    ]) diagnostics.record("runtime.failure", { phase: "restarting", message });
+    const records = readFileSync(join(directory, "runtime.log"), "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { message: string });
+    expect(records).toHaveLength(7);
+    expect(records.every((record) => record.message === "Runtime lifecycle failure detail omitted.")).toBe(true);
+    expect(diagnostics.supportReport({
+      version: "0.0.53", platform: "linux", architecture: "x64", runtime: null,
+    }).text).not.toContain("private-value");
+  });
+
   it.each(OWNED_PROCESS_RESTART_FAILURES)("does not allow arbitrary suffixes on a fixed restart cause: %s", (message) => {
     const directory = runtimeDiagnosticsDirectory(fixture());
     const diagnostics = new RuntimeDiagnostics(directory);

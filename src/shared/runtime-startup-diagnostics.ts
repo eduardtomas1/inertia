@@ -6,6 +6,20 @@ export const RUNTIME_STARTUP_BLOCKER_CODES = [
 export type RuntimeStartupBlockerCode =
   (typeof RUNTIME_STARTUP_BLOCKER_CODES)[number];
 
+export const RUNTIME_STARTUP_FAILURE_CATEGORIES = [
+  "git-timeout", "git-cleanup-unconfirmed", "git-unavailable", "git-operation-failed",
+  "filesystem-permission", "filesystem-missing", "filesystem-io",
+  "type-error", "range-error", "unknown",
+] as const;
+export type RuntimeStartupFailureCategory = (typeof RUNTIME_STARTUP_FAILURE_CATEGORIES)[number];
+export type RuntimeStartupFailurePhase = "initialization" | "startup completion";
+export function categorizedRuntimeStartupFailureMessage(
+  phase: RuntimeStartupFailurePhase,
+  category: RuntimeStartupFailureCategory,
+): `Runtime ${RuntimeStartupFailurePhase} failed (${RuntimeStartupFailureCategory}).` {
+  return `Runtime ${phase} failed (${category}).`;
+}
+
 export const RUNTIME_STARTUP_FAILURE_MESSAGES = [
   "The runtime received an invalid lifecycle command.",
   "The runtime was asked to start more than once.",
@@ -13,6 +27,10 @@ export const RUNTIME_STARTUP_FAILURE_MESSAGES = [
   "The local runtime could not start.",
   "Runtime startup is blocked because prior process cleanup remains unconfirmed.",
   "Provider installation recovery requires manual attention.",
+  ...RUNTIME_STARTUP_FAILURE_CATEGORIES.flatMap((category) => [
+    categorizedRuntimeStartupFailureMessage("initialization", category),
+    categorizedRuntimeStartupFailureMessage("startup completion", category),
+  ]),
 ] as const;
 
 export type RuntimeStartupFailureMessage =

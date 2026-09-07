@@ -45,7 +45,7 @@ const ENVIRONMENT_KEYS = [
   "ZDOTDIR",
 ] as const;
 
-describe.sequential("provider environment discovery", () => {
+describe("provider environment discovery", { concurrent: false }, () => {
   const multiMegabyteValue = " ".repeat(2 * 1_024 * 1_024);
   const roots: string[] = [];
   const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));

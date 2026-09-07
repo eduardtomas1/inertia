@@ -107,7 +107,7 @@ describe("bounded Kimi ACP framing", () => {
   });
 });
 
-describe.sequential("Kimi ACP harness", () => {
+describe("Kimi ACP harness", { concurrent: false }, () => {
   const roots: string[] = [];
   const registryDeactivators: Array<() => void> = [];
 

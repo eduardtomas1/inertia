@@ -159,7 +159,7 @@ describe("final release container smoke", () => {
       devDependencies: { "electron-builder"?: string };
       scripts: Record<string, string>;
     };
-    expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
+    expect(manifest.devDependencies["electron-builder"]).toBe("26.16.0");
     expect(manifest.build.toolsets?.appimage).toBe("1.0.3");
     expect(manifest.build.mac?.minimumSystemVersion).toBe("13.0");
     expect(manifest.scripts["test:release-container-smoke"]).toBe(

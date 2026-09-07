@@ -171,7 +171,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
-describe.sequential("Cursor ACP harness", () => {
+describe("Cursor ACP harness", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 

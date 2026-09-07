@@ -23,7 +23,7 @@ import { CappedProviderBuffer } from "../../src/server/provider/io";
 
 const fixtureRoots: string[] = [];
 
-describe.sequential("Gemini dotenv credential inventory", () => {
+describe("Gemini dotenv credential inventory", { concurrent: false }, () => {
   afterEach(() => {
     for (const root of fixtureRoots.splice(0)) {
       rmSync(root, { recursive: true, force: true });

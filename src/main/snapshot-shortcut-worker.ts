@@ -2,13 +2,14 @@ import ffi from "ffi-rs";
 const { DataType, load, open } = ffi;
 
 // These are the only keys sampled. No key events or typed text are collected.
-function shiftPair(): () => boolean {
+export function shiftPair(platform: NodeJS.Platform = process.platform): () => boolean {
   const library = "inertia-snapshot-shift";
-  if (process.platform === "darwin") {
+  if (platform === "darwin") {
     open({ library, path: "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" });
-    return () => (Number(load({ library, funcName: "CGEventSourceFlagsState", retType: DataType.U64, paramsType: [DataType.I32], paramsValue: [0] })) & 6) === 6;
+    const down = (key: number): boolean => load({ library, funcName: "CGEventSourceKeyState", retType: DataType.Boolean, paramsType: [DataType.I32, DataType.I16], paramsValue: [1, key] });
+    return () => down(0x38) && down(0x3c);
   }
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     open({ library, path: "user32.dll" });
     const down = (key: number): boolean => (load({ library, funcName: "GetAsyncKeyState", retType: DataType.I16, paramsType: [DataType.I32], paramsValue: [key] }) & 0x8000) !== 0;
     return () => down(0xa0) && down(0xa1);

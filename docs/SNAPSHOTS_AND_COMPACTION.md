@@ -41,6 +41,9 @@ providers, and unconfirmed provider cleanup produce no success receipt. The
 existing provider compaction operation and ownership rules are preserved; the
 receipt is a system message, not a fabricated agent turn. Schema migration 70
 adds its bounded metadata without changing any released migration.
+If the provider completes compaction but local receipt storage or timeline refresh
+fails, the success notice explains that reporting failure without inviting a
+second compaction.
 
 ## T3 Code reference and adaptation
 

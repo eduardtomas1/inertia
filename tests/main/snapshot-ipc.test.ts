@@ -10,9 +10,12 @@ vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotError: class extends Error {},
   SnapshotService: class {
     enabled = false;
+    disposalStarted = false;
     shortcut: SnapshotState["shortcut"] = "both-shift";
     constructor(trigger: () => Promise<void>) { native.trigger = trigger; }
     state() { return { enabled: this.enabled, shortcut: this.shortcut, available: true, permission: "granted", message: null }; }
+    isDisposing() { return this.disposalStarted; }
+    async dispose() { this.disposalStarted = true; }
     async configure(enabled: boolean, shortcut: SnapshotState["shortcut"]) { native.configure(enabled); this.enabled = enabled; this.shortcut = shortcut; return this.state(); }
     capture = native.capture;
   },
@@ -38,9 +41,9 @@ function fixture() {
     try { return await run(controller.signal); } catch (error) { controller.abort(); throw error; }
   }), cancel: vi.fn(async () => { controller.abort(); }) };
   const owner = vi.fn((event: { window?: typeof window }) => event.window ?? window);
-  registerSnapshotIpc({ owner: owner as never, registry: (() => registry) as never, imports: imports as never });
+  const service = registerSnapshotIpc({ owner: owner as never, registry: (() => registry) as never, imports: imports as never });
   const handler = native.handle.mock.calls[0]![1] as (event: unknown, input: unknown) => Promise<SnapshotState>;
-  return { handler, send, imports, importImage, owner, window, controller };
+  return { handler, send, imports, importImage, owner, window, controller, service };
 }
 describe("snapshot destination and preference boundaries", () => {
   it("disables capture if saving the enabled preference fails", async () => {
@@ -97,6 +100,31 @@ describe("snapshot destination and preference boundaries", () => {
     await native.trigger!();
     expect(window.show).not.toHaveBeenCalled(); expect(window.focus).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
     expect(imports.cancel).toHaveBeenCalledOnce();
+  });
+  it.each(["rejects", "resolves"])("does not refocus a deferred capture that %s after service disposal starts", async (outcome) => {
+    const { handler, send, window, controller, service } = fixture();
+    let finishCapture!: (value: unknown) => void;
+    native.capture.mockImplementationOnce(async () => await new Promise((resolve, reject) => { finishCapture = outcome === "rejects" ? reject : resolve; }));
+    await handler({}, { type: "bind", conversationId: "11111111-1111-4111-8111-111111111111" });
+    const pending = native.trigger!();
+    await service.dispose();
+    expect(controller.signal.aborted).toBe(false);
+    finishCapture(outcome === "rejects" ? new SnapshotError("Snapshot capture stopped before completing.") : { png: Buffer.alloc(10), source: snapshotFixture() });
+    await pending;
+    expect(window.show).not.toHaveBeenCalled(); expect(window.focus).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+    expect(window.webContents.eventNames()).toEqual([]);
+  });
+  it("does not refocus a failed capture when service disposal starts during rollback", async () => {
+    const { handler, send, imports, window, service } = fixture();
+    let finishRollback!: () => void;
+    imports.cancel.mockImplementationOnce(async () => await new Promise<void>((resolve) => { finishRollback = resolve; }));
+    native.capture.mockRejectedValueOnce(new SnapshotError("The foreground window changed."));
+    await handler({}, { type: "bind", conversationId: "11111111-1111-4111-8111-111111111111" });
+    const pending = native.trigger!();
+    await vi.waitFor(() => expect(imports.cancel).toHaveBeenCalledOnce());
+    await service.dispose(); finishRollback(); await pending;
+    expect(window.show).not.toHaveBeenCalled(); expect(window.focus).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+    expect(window.webContents.eventNames()).toEqual([]);
   });
   it.each(["cancelled", "destroyed-window", "destroyed-document", "navigation", "renderer-gone", "replaced-frame"])("keeps a %s capture failure silent", async (cause) => {
     const { handler, send, imports, window, controller } = fixture();

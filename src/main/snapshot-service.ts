@@ -29,8 +29,12 @@ export class SnapshotService {
   private message: string | null = null;
   private busy = false;
   private disposed = false;
+  private disposalStarted = false;
   private readonly exited = new WeakSet<UtilityProcess>();
   constructor(private readonly onCapture: () => Promise<void>) {}
+
+  // Capture failures can disable the service without ending its reporting lifetime.
+  isDisposing(): boolean { return this.disposalStarted; }
 
   state(): SnapshotState {
     const available = snapshotPlatformAvailable(process.platform, process.env);
@@ -196,6 +200,7 @@ export class SnapshotService {
   }
 
   async dispose(): Promise<void> {
+    this.disposalStarted = true;
     this.disposed = true; this.enabled = false;
     const results = await Promise.allSettled([
       this.stopShortcut(),

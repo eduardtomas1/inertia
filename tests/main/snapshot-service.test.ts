@@ -63,6 +63,29 @@ describe("snapshot native worker ownership", () => {
     expect(native.accessibility.mock.calls.every((args) => args[0] !== true)).toBe(true);
   });
 
+  it("invalidates capture ownership synchronously before disposal waits for worker exit", async () => {
+    const { service, child } = await fixture(); const controller = new AbortController();
+    child.kill.mockImplementation(() => true);
+    const capture = service.capture(controller.signal); const failure = expect(capture).rejects.toThrow("stopped");
+    expect(service.isDisposing()).toBe(false);
+    const stopping = service.dispose();
+    expect(service.isDisposing()).toBe(true);
+    expect(controller.signal.aborted).toBe(false);
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1); await stopping; await failure;
+    expect(service.isDisposing()).toBe(true);
+  });
+
+  it("keeps failure reporting valid when an unconfirmed capture only disables future work", async () => {
+    vi.useFakeTimers();
+    const { service, child } = await fixture(); child.kill.mockImplementation(() => true);
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow("Restart Inertia");
+    await vi.advanceTimersByTimeAsync(13_000); await failure;
+    expect(service.state().enabled).toBe(false);
+    expect(service.isDisposing()).toBe(false);
+    child.emit("exit", 1);
+  });
+
   it("does not deliver bytes until the exact worker exits", async () => {
     const { service, child } = await fixture();
     const capture = service.capture(); const delivered = vi.fn(); void capture.then(delivered);

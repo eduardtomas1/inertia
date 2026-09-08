@@ -30,7 +30,7 @@ export function registerSnapshotIpc(options: {
       if (details.isMainFrame && !details.isSameDocument) invalidate();
     };
     const current = (): boolean => {
-      if (invalidated || target !== owner || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
+      if (service.isDisposing() || invalidated || target !== owner || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
       const frame = owner.window.webContents.mainFrame;
       return owner.document.owner === owner.window.webContents && frame.processId === owner.document.processId
         && frame.routingId === owner.document.frameId && frame.frameToken === owner.document.frameToken;
@@ -60,7 +60,7 @@ export function registerSnapshotIpc(options: {
           throw error;
         }
       });
-      if (owner.window.isDestroyed()) throw new Error("Snapshot destination closed.");
+      if (service.isDisposing() || owner.window.isDestroyed()) throw new Error("Snapshot destination closed.");
       owner.window.show(); owner.window.focus();
       owner.window.webContents.send("inertia:snapshot-ready", { conversationId: owner.conversationId, selection: { batchId, attachments } });
     } catch (error) {

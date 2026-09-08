@@ -22,13 +22,17 @@ describe("branch picker", () => {
     expect(onSwitch).toHaveBeenCalledWith("origin/feature/remote", true);
   });
 
-  it("keeps stale branch choices disabled during refresh and exposes retry after failure", () => {
+  it("keeps branch choices focusable during refresh and exposes retry after failure", () => {
     const onRefresh = vi.fn();
     const props = { branches, busy: false, onSwitch: vi.fn(), onCreate: vi.fn(), onRefresh };
     const { rerender } = render(<WorkspaceBranchList {...props} loading />);
     expect(screen.getByText("Refreshing branches…")).toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: "feature/local" })).toBeDisabled();
+    const choice = screen.getByRole("menuitemradio", { name: "feature/local" });
+    expect(choice).toBeEnabled();
+    fireEvent.click(choice);
+    expect(props.onSwitch).not.toHaveBeenCalled();
     rerender(<WorkspaceBranchList {...props} error="Git is unavailable." />);
+    expect(props.onSwitch).not.toHaveBeenCalled();
     expect(screen.getByRole("menuitemradio", { name: "feature/local" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Refresh branches" }));
     expect(onRefresh).toHaveBeenCalledOnce();

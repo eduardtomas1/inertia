@@ -28,6 +28,12 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
   }, [branches, busy, error, loading, onClose, onSwitch]);
   const needle = query.trim().toLocaleLowerCase();
   const visible = branches.filter((branch) => branch.name.toLocaleLowerCase().includes(needle));
+  const select = (branch: GitBranchInfo) => {
+    if (busy || error || (!branch.current && branch.checkedOut)) return;
+    if (loading) queued.current = branch;
+    else if (branch.current) onClose?.();
+    else onSwitch(branch.name, branch.remote);
+  };
   return <>
     <label className="git-branch-search"><Search size={14} /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
       if (event.key === "Enter") {
@@ -35,10 +41,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
         if (event.nativeEvent.isComposing) { queued.current = null; return; }
         event.preventDefault();
         const branch = visible.find((choice) => choice.current || !choice.checkedOut);
-        if (!branch || busy || error) return;
-        if (loading) queued.current = branch;
-        else if (branch.current) onClose?.();
-        else onSwitch(branch.name, branch.remote);
+        if (branch) select(branch);
         return;
       }
       queued.current = null;
@@ -48,13 +51,13 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
       <span role="status">{loading ? "Refreshing branches…" : error ?? `${branches.length} branches`}</span>
       {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={onRefresh}><RefreshCw size={13} /></button>}
     </div>
-    <div className="git-branch-results" aria-busy={loading}>
+    <div className="git-branch-results" aria-busy={loading} onBlur={() => { queued.current = null; }}>
       {[false, true].map((remote) => {
         const group = visible.filter((branch) => branch.remote === remote);
         if (group.length === 0) return null;
         return <div role="group" aria-label={remote ? "Remote branches" : "Local branches"} key={String(remote)}>
           <div className="git-menu-section-label">{remote ? "Remote branches" : "Local branches"}<span>{group.length}</span></div>
-          {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || loading || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={`${branch.name}${branch.checkedOut && !branch.current ? " · Checked out in another worktree" : branch.remote ? " · Create a local tracking branch" : ""}`} onClick={() => { if (branch.current) onClose?.(); else onSwitch(branch.name, branch.remote); }}>
+          {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={`${branch.name}${branch.checkedOut && !branch.current ? " · Checked out in another worktree" : branch.remote ? " · Create a local tracking branch" : ""}`} onClick={() => select(branch)}>
             <GitBranch size={13} /><span className="git-branch-name">{branch.name}</span>
             {branch.current ? <Check size={13} aria-label="Current" /> : branch.checkedOut ? <small>In worktree</small> : remote ? <small>Track</small> : null}
           </button>)}

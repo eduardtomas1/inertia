@@ -35,6 +35,35 @@ describe("branch menu interaction", () => {
     expect(scroll).toHaveBeenLastCalledWith({ block: "nearest" });
   });
 
+  it("keeps keyboard focus in branch choices during refresh without starting stale work", async () => {
+    const callbacks = props();
+    const view = render(<WorkspaceBranchMenu {...callbacks} />);
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "ArrowDown" });
+    expect(screen.getByRole("menuitemradio", { name: "main Current" })).toHaveFocus();
+    view.rerender(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    const target = screen.getByRole("menuitemradio", { name: "origin/topic Track" });
+    expect(target).toHaveFocus();
+    fireEvent.click(target);
+    expect(callbacks.onSwitchBranch).not.toHaveBeenCalled();
+    view.rerender(<WorkspaceBranchMenu {...callbacks} />);
+    await waitFor(() => expect(callbacks.onSwitchBranch).toHaveBeenCalledWith("origin/topic", true));
+  });
+
+  it("cancels a waiting row selection when keyboard focus moves to another row", async () => {
+    const callbacks = props();
+    const view = render(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+    const target = screen.getByRole("menuitemradio", { name: "origin/topic Track" });
+    target.focus();
+    fireEvent.click(target);
+    fireEvent.keyDown(target, { key: "ArrowUp" });
+    expect(screen.getByRole("menuitemradio", { name: "main Current" })).toHaveFocus();
+    view.rerender(<WorkspaceBranchMenu {...callbacks} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(callbacks.onSwitchBranch).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
   it("preserves text-editing keys in search and branch creation", () => {
     render(<WorkspaceBranchMenu {...props()} />);
     for (const input of [screen.getByRole("searchbox"), screen.getByRole("textbox", { name: "New branch name" })]) {

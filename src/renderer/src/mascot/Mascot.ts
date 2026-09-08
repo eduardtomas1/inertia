@@ -1,6 +1,6 @@
 import {
   emptyMascotStatus, MASCOT_LABELS,
-  type MascotAction, type MascotBridge, type MascotSnapshot,
+  type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot,
 } from "../../../shared/mascot";
 import { mascotArtwork, readMascotAssets } from "./assets";
 import { mascotActionLabel, mascotFallback } from "./copy";
@@ -10,16 +10,17 @@ declare global { interface Window { mascot: MascotBridge } }
 /** An event-driven image and label: no framework, frame loop, or status polling. */
 export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void {
   const mascotAssets = readMascotAssets(root);
-  const main = root.querySelector("main")!;
-  const image = root.querySelector("img")!;
-  const pickupImage = root.querySelector<HTMLImageElement>(".mascot-pickup")!;
-  const handle = root.querySelector<HTMLElement>(".mascot-drag")!;
-  const button = root.querySelector("button")!;
-  const label = root.querySelector(".mascot-label")!;
-  const detail = root.querySelector(".mascot-detail")!;
-  const chat = root.querySelector(".mascot-chat")!;
-  const message = root.querySelector(".mascot-message")!;
-  const actionLabel = root.querySelector(".mascot-action")!;
+  const select = <T extends HTMLElement = HTMLElement>(selector: string): T => root.querySelector<T>(selector)!;
+  const main = select("main");
+  const image = select<HTMLImageElement>("img");
+  const pickupImage = select<HTMLImageElement>(".mascot-pickup");
+  const handle = select(".mascot-drag");
+  const button = select<HTMLButtonElement>("button");
+  const label = select(".mascot-label");
+  const detail = select(".mascot-detail");
+  const chat = select(".mascot-chat");
+  const message = select(".mascot-message");
+  const actionLabel = select(".mascot-action");
   const media = matchMedia("(prefers-reduced-motion: reduce)");
   const listeners = new AbortController();
   const eventOptions = { signal: listeners.signal };
@@ -31,6 +32,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pointer: number | null = null;
+  let gesture: MascotGesture = [0, 0];
 
   const render = (): void => {
     const { status, preferences } = snapshot;
@@ -59,7 +61,10 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   };
   const update = (value: MascotSnapshot): void => {
     if (!active) return;
-    if (snapshot.dragging && !value.dragging) releasePointer();
+    if (value.gesture) {
+      if (value.gesture[0] !== gesture[0] || value.gesture[1] > gesture[1]) gesture = value.gesture;
+      if (!value.dragging && value.gesture[0] === gesture[0] && value.gesture[1] === gesture[1]) releasePointer();
+    }
     if (snapshot.status.phase !== value.status.phase || snapshot.status.turnId !== value.status.turnId) {
       clearTimeout(timer);
       settled = false;
@@ -70,7 +75,8 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     render();
   };
   const perform = (action: MascotAction): void => {
-    const operation = action === "open-chat" ? bridge.action(action, snapshot.status) : bridge.action(action);
+    const expected = action === "open-chat" ? snapshot.status : action === "drop" ? gesture : undefined;
+    const operation = expected ? bridge.action(action, expected) : bridge.action(action);
     void operation.catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
   };
   const open = (): void => perform("open-chat");
@@ -86,11 +92,14 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     perform("drop");
   };
   const pickup = (event: PointerEvent): void => {
-    if (snapshot.placement === "system" || event.button !== 0 || !event.isPrimary || event.pointerType !== "mouse" || pointer !== null) return;
+    if (!snapshot.preferences.enabled || snapshot.placement === "system" || event.button !== 0 || !event.isPrimary || event.pointerType !== "mouse" || pointer !== null) return;
     event.preventDefault();
     try { handle.setPointerCapture(event.pointerId); } catch { return; }
     pointer = event.pointerId;
-    void bridge.action("pickup").catch(() => { releasePointer(); if (active) label.textContent = "Use Settings to move with keyboard"; });
+    const current = gesture = [gesture[0], gesture[1] + 1];
+    void bridge.action("pickup", current).catch(() => {
+      if (gesture === current) { releasePointer(); if (active) label.textContent = "Use Settings to move with keyboard"; }
+    });
   };
   const pointerEnd = (event: PointerEvent): void => { if (event.pointerId === pointer) drop(); };
   const pointerMove = (event: PointerEvent): void => { if (event.pointerId === pointer && !(event.buttons & 1)) drop(); };

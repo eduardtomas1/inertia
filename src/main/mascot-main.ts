@@ -29,9 +29,11 @@ export class MascotMain {
   private status = emptyMascotStatus("unavailable");
   private window: BrowserWindow | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private drag: { offset: { x: number; y: number }; started: number } | null = null;
+  private drag: { offset: { x: number; y: number }; started: number; gesture: number } | null = null;
   private dragTimer: ReturnType<typeof setInterval> | null = null;
   private pickupOffset: { x: number; y: number } | null = null;
+  private epoch = 0;
+  private lastGesture = 0;
   private ignoringMouse = false;
   private suspended = false;
   private registered = false;
@@ -43,7 +45,7 @@ export class MascotMain {
     this.rendererUrl = new URL("mascot.html", options.rendererUrl).href;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status }, dragging: Boolean(this.drag), ...(!this.canPosition ? { placement: "system" as const } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status }, dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}) }; }
 
   observe(status: MascotStatus): void {
     this.status = status;
@@ -73,18 +75,31 @@ export class MascotMain {
         return this.snapshot();
       });
       ipcMain.handle(MASCOT_IPC.action, async (event, ...args) => {
-        this.assertSender(event, args.length, args[0] === "open-chat" ? 2 : 1);
+        const dragAction = args[0] === "pickup" || args[0] === "drop";
+        this.assertSender(event, args.length, args[0] === "open-chat" || dragAction ? 2 : 1);
         if (!MASCOT_ACTIONS.includes(args[0] as MascotAction)) throw new Error("Invalid mascot action");
-        if ((args[0] === "pickup" || args[0] === "drop") && event.sender !== this.window?.webContents) {
-          throw new Error("Rejected untrusted mascot drag");
+        if (dragAction) {
+          if (event.sender !== this.window?.webContents) throw new Error("Rejected untrusted mascot drag");
+          const gesture = args[1];
+          if (!Array.isArray(gesture) || gesture.length !== 2 || Object.keys(gesture).join(",") !== "0,1"
+            || !gesture.every((part) => Number.isSafeInteger(part) && part > 0)) {
+            throw new Error("Invalid mascot gesture");
+          }
+          if (gesture[0] !== this.epoch) return;
+          if (args[0] === "pickup") this.beginDrag(gesture[1] as number);
+          else {
+            this.lastGesture = Math.max(this.lastGesture, gesture[1] as number);
+            this.endDrag(gesture[1] as number);
+          }
+          return;
         }
         const expected = args[0] === "open-chat" ? parseMascotStatus(args[1]) : null;
         if (args[0] === "open-chat" && !expected) throw new Error("Invalid mascot chat identity");
         await this.action(args[0] as MascotAction, expected ?? undefined);
       });
-      screen.on("display-added", this.reposition);
-      screen.on("display-removed", this.reposition);
-      screen.on("display-metrics-changed", this.reposition);
+      screen.on("display-added", this.displayChanged);
+      screen.on("display-removed", this.displayChanged);
+      screen.on("display-metrics-changed", this.displayChanged);
     }
     void this.reconcile().catch(() => undefined);
   }
@@ -122,6 +137,8 @@ export class MascotMain {
       },
     });
     this.window = window;
+    this.epoch += 1;
+    this.lastGesture = 0;
     this.ignoringMouse = false;
     const unregister = this.options.registerHealthRenderer(window.webContents);
     this.options.registerProtocol(window.webContents.session);
@@ -144,7 +161,9 @@ export class MascotMain {
       if (mouse.type === "mouseUp" && mouse.button === "left") this.endDrag();
     });
     window.webContents.on("render-process-gone", () => this.failed());
-    window.webContents.on("did-start-loading", () => this.endDrag());
+    window.webContents.on("did-start-loading", () => {
+      this.endDrag(); this.epoch += 1; this.lastGesture = 0;
+    });
     window.on("move", this.scheduleSave);
     window.on("blur", () => { this.endDrag(); window.setFocusable(false); });
     window.on("hide", () => this.endDrag());
@@ -192,13 +211,14 @@ export class MascotMain {
     this.window = null;
   }
 
+  private readonly displayChanged = (): void => { this.pickupOffset = null; this.reposition(); };
+
   private readonly reposition = (): void => {
     const window = this.window;
     if (!this.canPosition || !window || window.isDestroyed()) return;
     // A display was unplugged or its scale changed. End the gesture before
     // restoring reachability; an old cursor offset must not move it back out.
     if (this.drag) { this.endDrag(); return; }
-    this.pickupOffset = null;
     const bounds = mascotBounds(window.getBounds(), screen.getAllDisplays());
     const current = window.getBounds();
     if (current.x !== bounds.x || current.y !== bounds.y || current.width !== bounds.width || current.height !== bounds.height) window.setBounds(bounds);
@@ -241,16 +261,18 @@ export class MascotMain {
     catch { /* A read-only profile must not break the workbench or mascot. */ }
   }
 
-  private beginDrag(): void {
+  private beginDrag(gesture: number): void {
+    if (gesture <= this.lastGesture) return;
+    this.lastGesture = gesture;
     const window = this.window;
-    if (!this.canPosition || this.drag || !window || window.isDestroyed()) return;
+    if (!this.canPosition || !window || window.isDestroyed()) return;
     // Only the character's input region can start a drag. No renderer-supplied
     // coordinates, global hooks, or persistent polling are needed.
     const offset = this.pickupOffset;
-    this.pickupOffset = null;
-    if (!offset) return;
+    if (!offset) { this.broadcast(); return; }
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
-    this.drag = { offset, started: Date.now() };
+    this.clearDrag(false);
+    this.drag = { offset, started: Date.now(), gesture };
     this.updateHitTesting();
     this.dragTimer = setInterval(() => {
       // Bound a lost pointer-up even if a renderer stalls without exiting.
@@ -275,22 +297,25 @@ export class MascotMain {
     }
   }
 
-  private clearDrag(): void {
-    this.pickupOffset = null;
+  private clearDrag(clearPress = true): void {
+    if (clearPress) this.pickupOffset = null;
     if (this.dragTimer) clearInterval(this.dragTimer);
     this.dragTimer = null;
     this.drag = null;
   }
 
-  private endDrag(): void {
+  private endDrag(gesture?: number): void {
+    if (gesture !== undefined && gesture !== this.drag?.gesture) return;
     const pending = this.pickupOffset !== null;
-    this.pickupOffset = null;
+    // Only native release/lifecycle events own the physical press. A delayed
+    // renderer drop must not consume the offset captured by a newer press.
+    if (gesture === undefined) this.pickupOffset = null;
     if (!this.drag) {
       if (pending) this.updateHitTesting();
       return;
     }
     this.moveDrag(true);
-    this.clearDrag();
+    this.clearDrag(gesture === undefined);
     this.reposition();
     this.broadcast();
   }
@@ -303,8 +328,6 @@ export class MascotMain {
   }
 
   private async action(action: MascotAction, expectedStatus?: MascotStatus): Promise<void> {
-    if (action === "pickup") { this.beginDrag(); return; }
-    if (action === "drop") { this.endDrag(); return; }
     if (action === "open-chat") {
       if (!expectedStatus || ["projectId", "conversationId", "runId", "turnId"].some(
         (key) => expectedStatus[key as keyof MascotStatus] !== this.status[key as keyof MascotStatus],

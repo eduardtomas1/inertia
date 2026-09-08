@@ -19,7 +19,7 @@ function renderMascot() {
 }
 
 function fixture() {
-  let snapshot: MascotSnapshot = { preferences: { enabled: true, motion: true }, status: emptyMascotStatus() };
+  let snapshot: MascotSnapshot = { preferences: { enabled: true, motion: true }, status: emptyMascotStatus(), gesture: [1, 0] };
   let receive = (_value: MascotSnapshot): void => undefined;
   const unsubscribe = vi.fn();
   const action = vi.fn<MascotBridge["action"]>(async () => undefined);
@@ -32,8 +32,8 @@ function fixture() {
   };
   return {
     action, unsubscribe, media,
-    interaction(dragging: boolean, placement?: "system"): void {
-      snapshot = { ...snapshot, dragging, placement };
+    interaction(dragging: boolean, placement?: "system", gesture = 1): void {
+      snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
     },
     update(phase: MascotSnapshot["status"]["phase"], motion = true, context: Partial<MascotSnapshot["status"]> = {}): void {
@@ -168,7 +168,7 @@ describe("mascot rendering", () => {
     handle.hasPointerCapture = () => true;
     handle.releasePointerCapture = vi.fn();
     fireEvent.pointerDown(handle, { button: 0, pointerId: 7, pointerType: "mouse", isPrimary: true });
-    expect(app.action).toHaveBeenCalledWith("pickup");
+    expect(app.action).toHaveBeenCalledWith("pickup", [1, 1]);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(7);
     app.interaction(true);
     if (ending === "unmount") view.unmount();
@@ -195,5 +195,37 @@ describe("mascot rendering", () => {
     fireEvent.pointerDown(handle, { button: 0, pointerType: "mouse", isPrimary: true });
     expect(app.action).not.toHaveBeenCalled();
     expect(handle.setPointerCapture).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new mouse capture when an old drop snapshot or pickup failure arrives", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const handle = view.container.querySelector<HTMLElement>(".mascot-drag")!;
+    handle.setPointerCapture = vi.fn();
+    handle.hasPointerCapture = () => true;
+    handle.releasePointerCapture = vi.fn();
+    let rejectFirst!: (error: Error) => void;
+    app.action.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }));
+    const press = (): void => { fireEvent.pointerDown(handle, { button: 0, pointerId: 7, pointerType: "mouse", isPrimary: true }); };
+    press();
+    fireEvent.pointerUp(window, { pointerId: 7 });
+    press();
+    app.interaction(true, undefined, 1);
+    app.interaction(false, undefined, 1);
+    await act(async () => { rejectFirst(new Error("Previous gesture failed")); });
+    expect(handle.releasePointerCapture).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Use Settings to move with keyboard");
+    app.interaction(true, undefined, 2);
+    fireEvent.pointerUp(window, { pointerId: 7 });
+    expect(app.action.mock.calls).toEqual([
+      ["pickup", [1, 1]], ["drop", [1, 1]], ["pickup", [1, 2]], ["drop", [1, 2]],
+    ]);
+    expect(handle.releasePointerCapture).toHaveBeenCalledTimes(2);
+    // An older idle notification cannot make the next press reuse an identity.
+    app.interaction(false, undefined, 1);
+    press();
+    expect(app.action).toHaveBeenLastCalledWith("pickup", [1, 3]);
+    fireEvent.pointerUp(window, { pointerId: 7 });
   });
 });

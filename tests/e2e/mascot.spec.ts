@@ -203,6 +203,29 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
         Number.parseFloat(getComputedStyle(element).backgroundPositionX))).toBeGreaterThanOrEqual(partial);
       await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "0px");
       await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      const previousGesture = await overlay.evaluate(async () =>
+        (await (window as unknown as { mascot: MascotBridge }).mascot.snapshot()).gesture!);
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      // This capture listener sends the old drop after main receives the new
+      // native press, but before the normal renderer pickup handler runs.
+      await overlay.evaluate((previous) => {
+        const bridge = (window as unknown as { mascot: MascotBridge }).mascot;
+        document.querySelector(".mascot-drag")!.addEventListener("pointerdown", () => {
+          void bridge.action("drop", previous);
+        }, { capture: true, once: true });
+      }, previousGesture);
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      // The same stale cancellation is harmless after the new pickup too.
+      await overlay.evaluate((previous) =>
+        (window as unknown as { mascot: MascotBridge }).mascot.action("drop", previous), previousGesture);
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
     } finally { await cursor.evaluate((value) => value.restore()); await cursor.dispose(); }
     await overlay.emulateMedia({ reducedMotion: "reduce" });
     await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");

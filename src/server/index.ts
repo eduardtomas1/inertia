@@ -198,11 +198,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
     updatePreparation.track(operation);
   const streamingTrace = createTestStreamingTrace(dataDirectory);
-  const send = (
-    socket: WebSocket,
-    event: Parameters<typeof sendRuntimeEvent>[1],
-    onSent?: (sent: boolean) => void,
-  ): void => {
+  const send: typeof sendRuntimeEvent = (socket, event, onSent) => {
     const isStreamingEvent = event.type === "runtime.event"
       && event.event.type === "agent.text";
     if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");

@@ -1,0 +1,103 @@
+--- a/tests/e2e/sent-attachments.spec.ts
++++ b/tests/e2e/sent-attachments.spec.ts
+@@ -212,10 +212,96 @@
+   await page.getByRole("textbox", { name: "Message" }).fill("Inspect the selected image.");
+   await page.getByRole("button", { name: "Send message" }).click();
+   await expect(attachments).toHaveCount(0);
+-  await expect(page.getByRole("button", {
+-    name: "Attach images, documents, or spreadsheets",
+-  }))
+-    .toBeEnabled({ timeout: 5_000 });
++  try {
++    await expect(page.getByRole("button", {
++      name: "Attach images, documents, or spreadsheets",
++    }))
++      .toBeEnabled({ timeout: 5_000 });
++  } catch (error) {
++    // Observe only after the original assertion fails; never alter its budget.
++    let timer: ReturnType<typeof setTimeout> | undefined;
++    const deadline = new Promise<{ outcome: "timeout" }>((resolve) => {
++      timer = setTimeout(() => resolve({ outcome: "timeout" }), 1_000);
++    });
++    const capture = <T,>(read: Promise<T>) => Promise.race([
++      read.then((value) => ({ outcome: "captured" as const, value }),
++        () => ({ outcome: "unavailable" as const })),
++      deadline,
++    ]);
++    try {
++      const [ui, runtime] = await Promise.all([
++        capture(page.evaluate(() => {
++          const fixed = (value: string | null | undefined, allowed: string[]) =>
++            value && allowed.includes(value) ? value : "unknown";
++          const count = (selector: string) =>
++            Math.min(100, document.querySelectorAll(selector).length);
++          const composer = document.querySelector(".composer");
++          const attach = composer?.querySelector<HTMLButtonElement>(
++            'button[aria-label="Attach images, documents, or spreadsheets"]',
++          );
++          const primary = composer?.querySelector<HTMLButtonElement>(
++            "button[data-composer-action-state]",
++          );
++          const textarea = composer?.querySelector("textarea");
++          return {
++            connection: fixed(document.querySelector(".app-shell")
++              ?.getAttribute("data-connection-status"), ["connecting", "online", "offline"]),
++            composerPresent: Boolean(composer),
++            attachPresent: Boolean(attach),
++            attachDisabled: attach?.disabled ?? null,
++            inputDisabled: textarea?.disabled ?? null,
++            primaryAction: fixed(primary?.getAttribute("data-composer-action-state"),
++              ["send-disabled", "send-ready", "submitting", "stop-ready", "stop-pending"]),
++            primaryBusy: primary?.getAttribute("aria-busy") === "true",
++            primaryDisabled: primary?.disabled ?? null,
++            primaryHasMotionPresentation: primary?.hasAttribute("data-motion-state") ?? null,
++            importPending: composer?.querySelector('.composer-toolbar .provider-status[role="status"]')
++              ?.textContent?.trim() === "Adding attachments…",
++            attachmentCount: count('.composer [aria-label="Attachments"] > li'),
++            pendingAttachmentCount: count('.composer [data-attachment-pending="true"]'),
++            sentAttachmentCount: count(".sent-attachments img"),
++            alertCount: count('[role="alert"]'),
++            turnStatuses: Object.fromEntries([
++              "queued", "starting", "running", "waiting-for-approval", "waiting-for-input",
++              "completed", "failed", "cancelled", "interrupted",
++            ].map((status) => [status, count(`[data-turn-status="${status}"]`)])),
++          };
++        })),
++        capture(app.runtimeSnapshot().then(async (snapshot) => {
++          const { parseRuntimeFailureDiagnosticMessage } = await import(
++            "../../src/node/runtime-failure-diagnostic"
++          );
++          const failure = parseRuntimeFailureDiagnosticMessage(snapshot.lastError);
++          const bounded = (value: number) => Number.isSafeInteger(value)
++            && value >= 0 ? Math.min(value, 100) : null;
++          return {
++            phase: ["idle", "starting", "ready", "restarting", "stopping", "stopped"]
++              .includes(snapshot.phase) ? snapshot.phase : "unknown",
++            generation: bounded(snapshot.generation),
++            restartAttempt: bounded(snapshot.restartAttempt),
++            restartScheduled: snapshot.restartScheduled === true,
++            hasProcess: snapshot.pid !== null,
++            hasError: snapshot.lastError !== null,
++            failureCode: failure?.initiatingCode
++              ?? (snapshot.lastError === null ? "none" : "unclassified"),
++            shutdownUnconfirmed: Boolean(failure?.shutdownMessage),
++          };
++        })),
++      ]);
++      const body = JSON.stringify({ schema: 1, event: "attach-enable-failed", ui, runtime });
++      process.stderr.write(`INERTIA_ATTACH_FAILURE ${body}\n`);
++      await testInfo.attach("attach-enable-failure", {
++        body,
++        contentType: "application/json",
++      }).catch(() => undefined);
++    } catch {
++      // Diagnostic transport failure must not replace the original assertion.
++      process.stderr.write('INERTIA_ATTACH_FAILURE {"schema":1,"capture":"unavailable"}\n');
++    } finally {
++      clearTimeout(timer);
++    }
++    throw error;
++  }
+   await expect.poll(async () =>
+     stat(selectedTempPath).then(() => true, () => false)).toBe(false);
+   const sentAttachments = page.locator(".sent-attachments").filter({

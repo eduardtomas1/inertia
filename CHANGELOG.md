@@ -50,6 +50,9 @@ The useful changes in each Inertia release, in plain language.
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication
   check settle its process cleanup while keeping cancellation final.
+- Cancelling a read-only Git inspection on Windows gives it a bounded chance
+  to close normally, avoiding a termination race that could block new chats.
+  Hung inspections still require confirmed process-tree cleanup.
 - Lifecycle certification rejects missing test suites, and cross-platform test
   fixtures publish their ownership receipts atomically.
 - Update Lucide React to 1.41.0, Claude Agent SDK to 0.3.261, OpenCode SDK to

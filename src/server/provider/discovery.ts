@@ -41,6 +41,7 @@ import {
 } from "./opencode-pure-isolation";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
+const CANCELLED_PROBE_COMPLETION_DRAIN_MS = 250;
 export const GEMINI_MINIMUM_STABLE_ACP_VERSION = "0.58.0";
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
   "CODEX_HOME",
@@ -153,6 +154,8 @@ async function probeProcess(
     let started = false;
     let timedOut = false;
     let deadline: ProviderProbeDeadline | undefined;
+    let cancellation: { aborted: boolean } | undefined;
+    let completionDrainTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (
       exitCode: number | null,
       cleanupConfirmed = true,
@@ -160,16 +163,32 @@ async function probeProcess(
       if (settled) return;
       settled = true;
       deadline?.cancel();
+      if (completionDrainTimer) clearTimeout(completionDrainTimer);
       signal?.removeEventListener("abort", abortProbe);
       resolveProbe({
-        exitCode,
+        exitCode: cancellation ? null : exitCode,
         output: output.toString(),
         started,
         timedOut,
         cleanupConfirmed,
+        ...(cancellation ? { aborted: cancellation.aborted } : {}),
       });
     };
-    const abortProbe = (): void => terminateAndFinish(true);
+    const drainBeforeTermination = (aborted: boolean): void => {
+      if (settled || cancellation) return;
+      cancellation = { aborted };
+      deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
+      // Cancellation stays final. A completed payload may still be draining
+      // inside its guardian; let that close prove cleanup before signalling
+      // and revoking its normal-completion authority. A nonclosing process
+      // still receives the existing exact tree termination and proof checks.
+      completionDrainTimer = setTimeout(
+        () => terminateAndFinish(aborted), CANCELLED_PROBE_COMPLETION_DRAIN_MS,
+      );
+      completionDrainTimer.unref();
+    };
+    const abortProbe = (): void => drainBeforeTermination(true);
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -200,6 +219,7 @@ async function probeProcess(
       if (settled) return;
       settled = true;
       deadline?.cancel();
+      if (completionDrainTimer) clearTimeout(completionDrainTimer);
       signal?.removeEventListener("abort", abortProbe);
       void requireProcessTreeTermination(
         terminateProcessTree,
@@ -226,10 +246,11 @@ async function probeProcess(
       );
     };
     child.once("error", () => {
-      if (started) terminateAndFinish();
+      if (started) terminateAndFinish(cancellation?.aborted ?? false);
       else finish(null);
     });
     child.once("close", (code) => {
+      if (completionDrainTimer) clearTimeout(completionDrainTimer);
       void awaitRuntimeOwnedProcessStopped(child).then(
         (confirmed) => finish(code, confirmed),
         () => finish(code, false),
@@ -246,7 +267,7 @@ async function probeProcess(
     deadline = scheduleDeadline(() => {
       if (settled) return;
       timedOut = true;
-      terminateAndFinish();
+      drainBeforeTermination(false);
     }, timeoutMs);
   });
 }

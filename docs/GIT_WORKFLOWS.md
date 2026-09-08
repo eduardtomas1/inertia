@@ -113,8 +113,11 @@ remotes:
 4. Create the exact local tracking branch, fetch incoming commits, and pull a
    fast-forward in a compact light-theme window without viewport overflow.
 
-The four scenarios pass on macOS arm64 using Node 22 and Electron 44. Screenshots
-below are actual desktop captures, not rendered mockups. Before images use
+The four scenarios pass on macOS arm64 using Node 22 and Electron 44, including
+a run with Git’s initial branch forced to `master`; they also pass in the Linux
+interaction lane. The latest macOS pass includes the Browser restart/cleanup
+regression scenario. Screenshots below are actual desktop captures, not rendered
+mockups. Before images use
 released main commit `3121f209`; after images use this PR on the same release
 baseline. Dark captures use a 1440×920 content-size request (the primary display
 may constrain height), and compact light captures use 1100×760.

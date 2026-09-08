@@ -47,10 +47,10 @@ async function installerSmokeModule() {
     }>>;
     waitForInstallRootProcessDrain: (
       installDirectory: string,
-      options: {
-        snapshot: (root: string, timeoutMs: number) => Promise<Array<{ name: string; processId: number }>>;
-        now: () => number;
-        wait: (milliseconds: number) => Promise<void>;
+      options?: {
+        snapshot?: (root: string, timeoutMs: number) => Promise<Array<{ name: string; processId: number }>>;
+        now?: () => number;
+        wait?: (milliseconds: number) => Promise<void>;
       },
     ) => Promise<void>;
     nsisApplicationArchiveName: (
@@ -243,17 +243,15 @@ test.runIf(process.platform === "win32")(
       await vi.waitFor(() => {
         expect(blockers.every((child) => child.pid !== undefined)).toBe(true);
       });
-      const { windowsInstallRootProcesses } = await installerSmokeModule();
-      await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([
+      const { windowsInstallRootProcesses, waitForInstallRootProcessDrain } = await installerSmokeModule();
+      await expect(windowsInstallRootProcesses(installDirectory, 30_000)).resolves.toEqual([
         expect.objectContaining({
           name: "installed-blocker.exe",
           processId: blockers[0].pid,
         }),
       ]);
       blockers[0].stdin?.end();
-      await vi.waitFor(async () => {
-        await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([]);
-      }, { timeout: 10_000 });
+      await waitForInstallRootProcessDrain(installDirectory);
       expect(executableProcessExists(blockers[1].pid!)).toBe(true);
     } finally {
       for (const blocker of blockers) {
@@ -273,6 +271,9 @@ test.runIf(process.platform === "win32")(
       });
     }
   },
+  // The initial snapshot and real installer drain each retain their bounded
+  // 30-second process query budget, followed by strict fixture cleanup.
+  90_000,
 );
 
 test("the installer smoke refuses an existing per-user installation", async () => {

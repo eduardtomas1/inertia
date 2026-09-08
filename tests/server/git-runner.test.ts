@@ -1062,3 +1062,33 @@ setInterval(() => {}, 1000);
     },
   );
 });
+
+describe("Git workflow failure guidance", () => {
+  it.each([
+    ["[rejected] main -> main (non-fast-forward)", "Fetch, then reconcile"],
+    ["Could not resolve host: private.invalid", "network connection"],
+    ["Unable to create index.lock: File exists", "index lock"],
+    ["fatal: branch is already used by worktree at private-path", "another worktree"],
+    ["Author identity unknown", "user.name and user.email"],
+  ])("classifies %s without returning raw stderr", async (stderr, expected) => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-error-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(directory, "emit-error", `
+process.stderr.write(${JSON.stringify(stderr)} + " credential-must-stay-private");
+process.exitCode = 1;
+`);
+    try {
+      await runGit(directory, ["emit-error"], {
+        environment: { PATH: directory },
+        failureMessage: "Git failed.",
+      });
+      expect.fail("The failing Git command must reject.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GitError);
+      expect((error as Error).message).toContain(expected);
+      expect((error as Error).message).not.toContain("credential-must-stay-private");
+      expect((error as Error).message).not.toContain("private-path");
+    }
+  });
+});

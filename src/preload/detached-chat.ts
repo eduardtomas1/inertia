@@ -84,6 +84,12 @@ const bridge = Object.freeze({
       IPC.copyText,
       typeof text === "string" ? text : "",
     ) as ReturnType<DesktopBridge["copyText"]>,
+  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke("inertia:snapshot", request),
+  onSnapshot: (listener: (delivery: import("../shared/snapshots").SnapshotDelivery) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, delivery: import("../shared/snapshots").SnapshotDelivery): void => listener(delivery);
+    ipcRenderer.on("inertia:snapshot-ready", handler);
+    return () => { ipcRenderer.removeListener("inertia:snapshot-ready", handler); };
+  },
   selectAttachments: (
     mode: Parameters<DesktopBridge["selectAttachments"]>[0],
   ) => ipcRenderer.invoke(

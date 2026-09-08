@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { GitError } from "../../src/server/git/types";
 import { RuntimeStore } from "../../src/server/database";
 import {
   WorkspaceRunController,
@@ -900,4 +901,46 @@ describe("workspace run controller", () => {
       }
     },
   );
+});
+
+
+describe("cancellable Git activity", () => {
+  it.each([false, true])("waits for fetch cleanup before stopping (cleanup failure: %s)", async (cleanupFails) => {
+    const runtime = await fixture();
+    const cancellation = new AbortController();
+    let release!: () => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const cleanup = new Promise<void>((resolve) => { release = resolve; });
+    const failure = cleanupFails
+      ? new GitError("operation-failed", "Git stopped responding, and its process tree could not be confirmed stopped.")
+      : new GitError("timeout", "Git inspection was cancelled.");
+    try {
+      const operation = runtime.controller.trackSourceControl(
+        "Fetch remote branches", runtime.project.id, runtime.conversation.id,
+        runtime.workspace, "fetch-request", async () => {
+          started();
+          await new Promise<void>((resolve) => cancellation.signal.addEventListener("abort", () => resolve(), { once: true }));
+          await cleanup;
+          throw failure;
+        }, { cancellation },
+      ).catch((error: unknown) => error);
+      await startedPromise;
+      const run = runtime.store.shellSnapshot().runs.find((candidate) => candidate.label === "Fetch remote branches")!;
+      expect(runtime.controller.canStopManagedAction(run)).toBe(true);
+      let stopSettled = false;
+      const stopped = runtime.controller.stopManagedAction(run.id).then(
+        (result) => { stopSettled = true; return result; },
+        (error: unknown) => { stopSettled = true; return error; },
+      );
+      expect(cancellation.signal.aborted).toBe(true);
+      await Promise.resolve();
+      expect(stopSettled).toBe(false);
+      release();
+      await expect(operation).resolves.toBe(failure);
+      await expect(stopped).resolves.toBe(cleanupFails ? failure : true);
+      expect(runtime.store.workspaceRun(run.id).status).toBe(cleanupFails ? "failed" : "cancelled");
+      expect(runtime.controller.canStopManagedAction(runtime.store.workspaceRun(run.id))).toBe(false);
+    } finally { release?.(); runtime.store.close(); }
+  });
 });

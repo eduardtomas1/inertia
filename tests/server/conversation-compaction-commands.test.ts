@@ -192,6 +192,10 @@ function fixture(options: {
       })),
       usageForConversation: vi.fn(() => existingUsage),
       upsertUsage,
+      createMessage: vi.fn((id, content, role, attachments, turnId, createdAt, options) => ({
+        id: "44444444-4444-4444-8444-444444444444", conversationId: id, content, role, attachments, turnId,
+        createdAt: createdAt ?? "2026-08-12T10:01:00.000Z", compaction: options.compaction,
+      })),
     },
     providers: {
       resolveModelRoute: vi.fn(() => route),
@@ -242,6 +246,84 @@ function fixture(options: {
 }
 
 describe("conversation compaction command", () => {
+  it.each(["SQLITE_FULL", "SQLITE_READONLY"])("preserves completed compaction when receipt storage fails with %s", async (code) => {
+    const { dependencies, compact, send, broadcast, release } = fixture();
+    vi.mocked(dependencies.store.createMessage).mockImplementation(() => { throw new Error(`${code} /private/fixture.db`); });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(compact).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith(conversationId);
+    expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: "request.result", result: expect.objectContaining({
+      kind: "conversation.compacted", message: "Context compacted with the focus instruction. The compaction receipt could not be saved.",
+    }) }));
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.message.persisted" }));
+    expect(JSON.stringify(send.mock.calls)).not.toMatch(/SQLITE|private/);
+  });
+
+  it("preserves the saved receipt and completion when timeline publication throws", async () => {
+    const { dependencies, compact, send, broadcast } = fixture();
+    broadcast.mockImplementation((event) => { if (event.type === "conversation.message.persisted") throw new Error("publication failed"); });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(compact).toHaveBeenCalledOnce(); expect(dependencies.store.createMessage).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ result: expect.objectContaining({
+      kind: "conversation.compacted", message: expect.stringContaining("The receipt was saved, but the timeline could not refresh"),
+    }) }));
+  });
+
+  it("still records the receipt when post-completion usage invalidation fails", async () => {
+    const { dependencies, compact, send, upsertUsage } = fixture();
+    upsertUsage.mockImplementation(() => { throw new Error("usage storage failed"); });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(compact).toHaveBeenCalledOnce(); expect(dependencies.store.createMessage).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ result: expect.objectContaining({
+      kind: "conversation.compacted", message: "Context compacted with the focus instruction. Usage could not be refreshed.",
+    }) }));
+  });
+
+  it("keeps usage projection errors out of the provider operation while retaining observed counts", async () => {
+    const { dependencies, compact, send, upsertUsage } = fixture();
+    const result = await compact();
+    const provider = vi.fn<ProviderManager["compact"]>(async (input, _instruction, hooks) => {
+      const current = dependencies.store.usageForConversation(conversationId)!;
+      hooks?.onUsage?.({ type: "usage", providerId: input.providerId, conversationId, runId: input.runId, turnId: input.turnId, usage: { ...current, usedTokens: 5690 } });
+      return { ...result, runId: input.runId, turnId: input.turnId, terminalReason: { outcome: "completed", reason: "provider-completed" } };
+    });
+    dependencies.providers.compact = provider;
+    upsertUsage.mockImplementation(() => { throw new Error("usage storage failed"); });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).resolves.toBe("handled");
+    expect(provider).toHaveBeenCalledOnce();
+    expect(dependencies.store.createMessage).toHaveBeenCalledWith(conversationId, "/compact", "system", [], null, undefined, {
+      compaction: { providerId: "claude", beforeTokens: 12000, afterTokens: 5690, instructionForwarded: true },
+    });
+    expect(send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ result: expect.objectContaining({
+      kind: "conversation.compacted", message: expect.stringContaining("Usage could not be refreshed"),
+    }) }));
+  });
+
+  it("persists provider-confirmed before and after counts in a system receipt", async () => {
+    const { dependencies, compact, broadcast } = fixture();
+    const result = await compact(); compact.mockClear();
+    dependencies.providers.compact = vi.fn<ProviderManager["compact"]>(async (input, _instruction, hooks) => {
+      const current = dependencies.store.usageForConversation(conversationId)!;
+      hooks?.onUsage?.({ type: "usage", providerId: input.providerId, conversationId, runId: input.runId, turnId: input.turnId, usage: { ...current, usedTokens: 5690 } });
+      return { ...result, runId: input.runId, turnId: input.turnId, terminalReason: { outcome: "completed", reason: "provider-completed" } };
+    });
+    await createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId, instruction: "keep the tests" },
+    });
+    expect(dependencies.store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
+      compaction: { providerId: "claude", beforeTokens: 12000, afterTokens: 5690, instructionForwarded: true },
+    });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.message.persisted", message: expect.objectContaining({ turnId: null }) }));
+  });
+
   const roots: string[] = [];
   afterEach(async () => await Promise.all(
     roots.splice(0).map(removePortableFixture),
@@ -442,6 +524,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.isRunning(conversationId)).toBe(false);
     expect(release).toHaveBeenCalledWith(conversationId);
     expect(send).not.toHaveBeenCalled();
+    expect(dependencies.store.createMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a provider that compacts a different resumed session", async () => {

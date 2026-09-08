@@ -85,7 +85,7 @@ import {
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
 import { createTurnInteractionCommandHandler } from "./runtime/commands/turn-interaction-commands";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
-import { createUsageCommandHandler } from "./runtime/commands/usage-commands";
+import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -198,15 +198,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
     updatePreparation.track(operation);
   const streamingTrace = createTestStreamingTrace(dataDirectory);
-  const send = (
-    socket: WebSocket,
-    event: Parameters<typeof sendRuntimeEvent>[1],
-  ): void => {
+  const send: typeof sendRuntimeEvent = (socket, event, onSent) => {
     const isStreamingEvent = event.type === "runtime.event"
       && event.event.type === "agent.text";
     if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");
     if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-started");
-    sendRuntimeEvent(socket, event);
+    sendRuntimeEvent(socket, event, onSent);
     if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-accepted");
   };
   let onDatabaseBackupCreated = (): void => undefined;
@@ -407,7 +404,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   server.maxHeadersCount = 32;
   const canStopWorkspaceRun = (run: AppSnapshot["runs"][number]): boolean => {
     if (run.status !== "running" && run.status !== "waiting") return false;
-    if (run.kind === "check" || run.kind === "service") {
+    if (run.kind === "check" || run.kind === "service" || run.kind === "source-control") {
       return workspaceRuns?.canStopManagedAction(run) ?? false;
     }
     if (run.kind !== "agent" || !run.conversationId) return false;
@@ -706,7 +703,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         refreshProviderInfo,
         send,
       }),
-      createUsageCommandHandler({ store, send }),
+      ...createReadCommandHandlers({ store, send, databasePath, lifetimeSignal: runtimeLifetimeAbort.signal, reveal: (target) => runtimeSync.focusDetachedMessage(target) }),
       createConversationCommandHandler({
         store, conversationAttachments: initializedConversationAttachments,
         providers,

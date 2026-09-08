@@ -91,7 +91,11 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
+          "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),
+          "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
+          "message-search-worker": resolve("src/server/persistence/message-search-worker.ts"),
           "app-update-candidate-viability-worker": resolve(
             "src/server/app-update-candidate-viability-worker.ts",
           ),
@@ -163,7 +167,18 @@ export default defineConfig({
               "archive-restore": "restore",
               workspaceFileReference: "file-ref",
             };
-            return `assets/${compactNames[name] ?? name}-[hash].js`;
+            // Preserve feature names consumed by the bundle gates. Short utility
+            // names reduce repeated import/preload metadata without changing code.
+            const budgetedChunks = new Set([
+              "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
+              "MascotSettings", "IssueReportSettings", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
+              "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
+              "DiscordSettings", "DocumentAttachmentPreview", "AppUpdateNotice", "CanaryRollbackSetting",
+              "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
+              "WorkspaceBranchMenu", "WorkspaceGitActionMenu",
+            ]);
+            const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
+            return `assets/${label ? `${label}-` : ""}[hash].js`;
           },
           manualChunks(id) {
             const normalizedId = id.replaceAll("\\", "/");

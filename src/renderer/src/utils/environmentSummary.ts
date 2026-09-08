@@ -269,6 +269,7 @@ function repositorySummaries(
     return workspaceGitStatus.repositories.map((repository) => {
       const actions = headerGitActions(repository.state === "ready" ? {
         isRepository: true,
+        truncated: repository.truncated,
         authorityRef: repository.authorityRef,
         root: null,
         branch: repository.branch,
@@ -317,8 +318,8 @@ function repositorySummaries(
     files: gitStatus.files.length,
     insertions: gitStatus.insertions,
     deletions: gitStatus.deletions,
-    clean: gitStatus.files.length === 0,
-    truncated: false,
+    clean: gitStatus.files.length === 0 && !gitStatus.truncated,
+    truncated: gitStatus.truncated ?? false,
     authorityRef: gitStatus.authorityRef ?? null,
     commitAction: mutationAction(actions, "commit", gitStatus.authorityRef),
     pushAction: mutationAction(actions, "push", gitStatus.authorityRef),

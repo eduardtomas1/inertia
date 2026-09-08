@@ -1,3 +1,5 @@
+import { snapshotSourceSchema } from "../snapshots";
+import { isContextCompaction } from "../context-compaction";
 import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
 import type { ChatMessage } from "./agent";
 
@@ -20,6 +22,7 @@ function attachment(value: unknown): boolean {
     && CHAT_ATTACHMENT_MIME_TYPES.includes(
       value.mimeType as (typeof CHAT_ATTACHMENT_MIME_TYPES)[number],
     )
+    && (value.snapshot === undefined || snapshotSourceSchema.safeParse(value.snapshot).success)
     && typeof value.size === "number"
     && Number.isFinite(value.size)
     && value.size >= 0;
@@ -35,7 +38,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
     "createdAt",
   )) return false;
 
-  return (value.turnId === null || stringField(value, "turnId"))
+  return (value.compaction === undefined || (value.role === "system" && value.turnId === null && isContextCompaction(value.compaction)))
+    && (value.turnId === null || stringField(value, "turnId"))
     && ["user", "assistant", "system"].includes(value.role as string)
     && Array.isArray(value.attachments)
     && value.attachments.every(attachment)

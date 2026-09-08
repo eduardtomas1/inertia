@@ -6,6 +6,7 @@ import {
   chatAttachmentKind,
 } from "@shared/attachments";
 import type { ChatAttachment } from "@shared/contracts";
+import { snapshotSourceSchema } from "@shared/snapshots";
 
 import type { ComposerQueuedPrompt } from "./types";
 import {
@@ -65,6 +66,7 @@ function queuedAttachment(value: unknown): ChatAttachment | null {
     || !Number.isSafeInteger(candidate.size)
     || candidate.size <= 0
     || candidate.size > MAX_CHAT_ATTACHMENT_BYTES
+    || (candidate.snapshot !== undefined && !snapshotSourceSchema.safeParse(candidate.snapshot).success)
   ) return null;
   const attachment = candidate as unknown as ChatAttachment;
   return chatAttachmentKind(attachment.mimeType) === "image"

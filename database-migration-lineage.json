@@ -602,6 +602,16 @@
       "version": 69,
       "name": "PersistGuidedIssueReport",
       "digest": "61338f4b256d505c8e982f8474f03a8095195c9b232d5e75df8b298e3e1303a9"
+    },
+    {
+      "version": 70,
+      "name": "IndexMessageSearchChronology",
+      "digest": "6cc99991439beccebb1be5953b79c801fe70e7217fb09819c3de8e4f659de102"
+    },
+    {
+      "version": 71,
+      "name": "PersistContextCompactionReceipts",
+      "digest": "e29e884b3d2b738fe0ebc211dbdcd45ac3ac6524fdeb7f4b7139a483faaf2831"
     }
   ]
 }

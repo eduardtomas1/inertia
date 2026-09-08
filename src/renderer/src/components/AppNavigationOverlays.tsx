@@ -7,6 +7,8 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { loadCommandPalette } from "./lazySurfaceLoaders";
 import { LoadingMark } from "./ui";
+import type { MessageSearchHit } from "@shared/message-search";
+import type { MessageSearchCommand } from "../hooks/useMessageSearch";
 
 function PaletteLoadingShell(): React.JSX.Element {
   return (
@@ -26,6 +28,8 @@ interface AppNavigationOverlaysProps {
   setWorkspaceView: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
+  selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
+  sendCommand: MessageSearchCommand;
   createConversation: () => void;
   importProject: () => Promise<void>;
   openSettings: () => void;
@@ -39,6 +43,8 @@ export function AppNavigationOverlays({
   setWorkspaceView,
   selectProject,
   selectConversation,
+  selectMessage,
+  sendCommand,
   createConversation,
   importProject,
   openSettings,
@@ -60,6 +66,8 @@ export function AppNavigationOverlays({
             conversations={conversations}
             newThreadShortcut={newThreadShortcut}
             onClose={() => setPaletteOpen(false)}
+            sendCommand={sendCommand}
+            onSelectMessage={selectMessage}
             onSelectProject={(project) => {
               selectProject(project);
               setWorkspaceView();

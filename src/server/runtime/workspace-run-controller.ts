@@ -8,6 +8,7 @@ import type {
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import { recoverReviewedCommitTransaction } from "../git";
+import { GitError, isGitProcessTreeTerminationFailure } from "../git/types";
 import {
   projectActionCommand,
 } from "../runtime-commands";
@@ -159,6 +160,10 @@ export class WorkspaceRunController<Owner> {
   private readonly managedActions = new Map<string, { terminalId: string }>();
   private readonly sourceControlInFlight = new Map<string, number>();
   private readonly sourceControlTails = new Map<string, Promise<void>>();
+  private readonly cancellableSourceControl = new Map<string, {
+    controller: AbortController;
+    settled: Promise<unknown>;
+  }>();
 
   constructor(
     private readonly store: WorkspaceRunStore,
@@ -323,12 +328,19 @@ export class WorkspaceRunController<Owner> {
   canStopManagedAction(run: WorkspaceRun): boolean {
     return (
       (run.status === "running" || run.status === "waiting")
-      && (run.kind === "check" || run.kind === "service")
-      && this.managedActions.has(run.id)
+      && ((run.kind === "source-control" && this.cancellableSourceControl.has(run.id))
+        || ((run.kind === "check" || run.kind === "service") && this.managedActions.has(run.id)))
     );
   }
 
   async stopManagedAction(runId: string): Promise<boolean> {
+    const sourceControl = this.cancellableSourceControl.get(runId);
+    if (sourceControl) {
+      sourceControl.controller.abort();
+      const failure = await sourceControl.settled;
+      if (isGitProcessTreeTerminationFailure(failure)) throw failure;
+      return true;
+    }
     const managed = this.managedActions.get(runId);
     return managed !== undefined
       && await this.terminals.closeManaged(managed.terminalId);
@@ -347,6 +359,8 @@ export class WorkspaceRunController<Owner> {
       verifyRepositoryIdentity?: () => void | Promise<void>;
       onMutationStarting?: () => void;
       onMutationSettled?: () => void;
+      /** Only operations with independently bounded cancellation may opt in. */
+      cancellation?: AbortController;
     } = {},
   ): Promise<T> {
     // Multiple projects may point at different folders in one Git checkout.
@@ -391,6 +405,13 @@ export class WorkspaceRunController<Owner> {
           status: "running",
           port: null,
         });
+        let settleCancellation: ((failure: unknown) => void) | undefined;
+        if (options.cancellation) {
+          this.cancellableSourceControl.set(activity.id, {
+            controller: options.cancellation,
+            settled: new Promise((resolve) => { settleCancellation = resolve; }),
+          });
+        }
         this.sourceControlInFlight.set(
           invalidationScope,
           (this.sourceControlInFlight.get(invalidationScope) ?? 0) + 1,
@@ -418,12 +439,15 @@ export class WorkspaceRunController<Owner> {
           this.store.updateWorkspaceRun(activity.id, outcome.ok
             ? { status: "succeeded" }
             : {
-                status: "failed",
+                status: options.cancellation?.signal.aborted && outcome.error instanceof GitError && outcome.error.code === "timeout"
+                  ? "cancelled" : "failed",
                 detail: publicRuntimeError(outcome.error),
               });
         } catch {
           // The Git result is authoritative even if activity persistence is unavailable.
         }
+        this.cancellableSourceControl.delete(activity.id);
+        settleCancellation?.(outcome.ok ? null : outcome.error);
         try {
           this.broadcastSnapshot();
         } catch {

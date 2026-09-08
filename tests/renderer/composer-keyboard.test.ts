@@ -49,16 +49,22 @@ describe("composer prompt history keyboard navigation", () => {
     ...overrides,
   });
 
-  it("uses plain arrows for single-line prompt history", () => {
+  it("preserves native movement inside text that can wrap without newlines", () => {
     const selection = { value: "draft", selectionStart: 2, selectionEnd: 2 };
     expect(composerPromptHistoryDirection(
       historyEvent("ArrowUp"),
       selection,
-    )).toBe("previous");
+    )).toBeNull();
     expect(composerPromptHistoryDirection(
       historyEvent("ArrowDown"),
       selection,
-    )).toBe("next");
+    )).toBeNull();
+    expect(composerPromptHistoryDirection(historyEvent("ArrowUp"), {
+      ...selection, selectionStart: 0, selectionEnd: 0,
+    })).toBe("previous");
+    expect(composerPromptHistoryDirection(historyEvent("ArrowDown"), {
+      ...selection, selectionStart: 5, selectionEnd: 5,
+    })).toBe("next");
   });
 
   it("preserves native multiline navigation away from text boundaries", () => {

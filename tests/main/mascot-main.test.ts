@@ -6,12 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
 import { emptyMascotStatus, MASCOT_IPC } from "../../src/shared/mascot";
+import { readMascotWindowState } from "../../src/main/mascot-placement";
 
 const harness = vi.hoisted(() => ({
   options: [] as BrowserWindowConstructorOptions[],
   windows: [] as unknown[],
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>(),
   displays: [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }],
+  cursor: { x: 1296, y: 820 },
+  displayListeners: new Map<string, () => void>(),
 }));
 vi.mock("../../src/main/preview-broker", () => ({ hardenDesktopSession: vi.fn() }));
 vi.mock("electron", async () => {
@@ -24,6 +27,7 @@ vi.mock("electron", async () => {
     focus = vi.fn();
     setFocusable = vi.fn();
     setShape = vi.fn();
+    setIgnoreMouseEvents = vi.fn();
     setMenu = vi.fn();
     setBounds = vi.fn((value: Rectangle) => {
       if (JSON.stringify(this.bounds) !== JSON.stringify(value)) { this.bounds = value; this.emit("move"); }
@@ -46,7 +50,8 @@ vi.mock("electron", async () => {
     app: { commandLine: { getSwitchValue: () => "" } },
     BrowserWindow: Window,
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
-    screen: { getAllDisplays: () => harness.displays, on: vi.fn() },
+    screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
+      on: (event: string, listener: () => void) => harness.displayListeners.set(event, listener) },
     Menu: { buildFromTemplate: () => ({ popup: vi.fn() }) },
   };
 });
@@ -60,6 +65,7 @@ interface WindowDouble {
   showInactive: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   setFocusable: ReturnType<typeof vi.fn>;
+  setIgnoreMouseEvents: ReturnType<typeof vi.fn>;
   setBounds: ReturnType<typeof vi.fn<(bounds: Rectangle) => void>>;
   getBounds(): Rectangle;
   isDestroyed(): boolean;
@@ -69,6 +75,8 @@ const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
+  harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
+  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
 });
 
 async function fixture() {
@@ -88,7 +96,8 @@ async function fixture() {
     } as unknown as IpcMainInvokeEvent, ...value);
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
-  return { mascot, main, invoke, openChat, unregister };
+  const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
+  return { mascot, main, invoke, openChat, unregister, directory, gesture };
 }
 
 describe("mascot window ownership", () => {
@@ -118,6 +127,142 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: false, motion: true }]);
     expect(overlay.isDestroyed()).toBe(true);
     expect(app.unregister).toHaveBeenCalledOnce();
+  });
+
+  it.each(["native release", "renderer capture loss"])("passes empty macOS corners through after %s without losing captured drags or polling at idle", async (ending) => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const hover = (x: number, y: number, button: "none" | "left" = "none"): void => {
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y, button });
+    };
+    hover(20, 220);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    hover(120, 40);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    hover(4, 0); // Transparent rounded corner of the status bubble.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    hover(120, 184);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    hover(-100, -100, "left"); // Pointer capture must continue outside the window.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    hover(20, 220, "left"); // Losing capture does not prove a physical release.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    if (ending === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    hover(20, 220);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    const calls = overlay.setIgnoreMouseEvents.mock.calls.length;
+    hover(20, 220);
+    vi.advanceTimersByTime(500);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenCalledTimes(calls);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retains macOS input when hover leaves the grab region before pickup IPC arrives", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    const bounds = overlay.getBounds();
+    harness.cursor = { x: bounds.x + 20, y: bounds.y + 220 };
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    // No further movement arrives to repair input before the native release.
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["native release", "released hover", "blur", "hide", "reload", "display"])("releases pending macOS input on %s before pickup IPC and rejects the late pickup", async (reason) => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    const bounds = overlay.getBounds();
+    harness.cursor = { x: bounds.x + 20, y: bounds.y + 220 };
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    else if (reason === "released hover") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220, button: "none" });
+    else if (reason === "reload") overlay.webContents.emit("did-start-loading");
+    else if (reason === "display") harness.displayListeners.get("display-metrics-changed")!();
+    else overlay.emit(reason);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["pending", "active", "all messages late"])("isolates an earlier gesture's delayed messages from the %s next press", async (ordering) => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const press = (x: number): void => {
+      const bounds = overlay.getBounds();
+      harness.cursor = { x: bounds.x + x, y: bounds.y + 184 };
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x, y: 184 });
+    };
+    press(120);
+    if (ordering !== "all messages late") await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    press(110);
+    if (ordering === "active") await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(2)], overlay);
+    if (ordering === "all messages late") await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    if (ordering !== "active") await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(2)], overlay);
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay); // A replay cannot replace the new owner.
+    expect(app.mascot.snapshot()).toMatchObject({ dragging: true, gesture: app.gesture(2) });
+    harness.cursor = { x: 900, y: 500 };
+    vi.advanceTimersByTime(16);
+    expect(overlay.getBounds()).toMatchObject({ x: 790, y: 316 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a cancelled or previous-renderer gesture without consuming the current native press", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const stale = app.gesture();
+    overlay.webContents.emit("did-start-loading");
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", stale], overlay);
+    await app.invoke(MASCOT_IPC.action, ["drop", stale], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(2)], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    await app.invoke(MASCOT_IPC.action, ["drop", stale], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([undefined, null, 1, [], [1], [1, 1, 1], [1, 0], [1, -1], [1, NaN], [1, Infinity], [1, "1"], [1, Number.MAX_SAFE_INTEGER + 1], Object.assign([1, 1], { extra: true })].map((gesture) => ({ gesture })))("rejects a malformed gesture identity: %j", async ({ gesture }) => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", gesture], overlay)).rejects.toThrow("Invalid mascot gesture");
+    expect(app.mascot.snapshot().dragging).toBe(false);
   });
 
   it("rejects foreign windows, subframes, navigation, malformed arguments and overlay configuration", async () => {
@@ -156,5 +301,109 @@ describe("mascot window ownership", () => {
     app.mascot.attach();
     await Promise.resolve();
     expect(harness.windows).toHaveLength(3);
+  });
+
+  it("moves from the grabbed offset, crosses negative displays, and saves only the final position", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const saved = (): ReturnType<typeof readMascotWindowState> => readMascotWindowState(join(app.directory, "mascot-window-state.json"));
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    // A quick mouse movement can precede the renderer's asynchronous request.
+    harness.cursor = { x: 1100, y: 700 };
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    const sends = overlay.webContents.send.mock.calls.length;
+    vi.advanceTimersByTime(16);
+    expect(overlay.getBounds()).toEqual({ x: 980, y: 516, width: 240, height: 240 });
+    vi.advanceTimersByTime(1000); // Holding still must not drop, save, or broadcast.
+    expect(saved().position).toBeNull();
+    expect(overlay.webContents.send).toHaveBeenCalledTimes(sends);
+    expect(overlay.focus).not.toHaveBeenCalled();
+    app.mascot.observe({ ...emptyMascotStatus(), phase: "running", activeCount: 1 });
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    harness.displays.push({ workArea: { x: -1920, y: -200, width: 1920, height: 1080 } });
+    harness.cursor = { x: -1, y: 20 };
+    vi.advanceTimersByTime(16);
+    expect(overlay.getBounds()).toEqual({ x: -121, y: -164, width: 240, height: 240 });
+    harness.cursor = { x: -1900, y: -190 };
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay); // Flush the last cursor sample.
+    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 240 });
+    expect(saved().position).toEqual({ x: -1920, y: -200 });
+    expect(app.mascot.snapshot()).toMatchObject({ dragging: false, status: { phase: "running" } });
+    expect(vi.getTimerCount()).toBe(0);
+    app.mascot.suspend(); app.mascot.attach(); await Promise.resolve();
+    expect((harness.windows[2] as WindowDouble).getBounds()).toEqual(overlay.getBounds());
+  });
+
+  it("keeps each DIP of movement continuous across mixed-scale monitor seams, then bounds the drop", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const displays = [
+      { workArea: { x: 0, y: 24, width: 1440, height: 876 }, scaleFactor: 2 },
+      { workArea: { x: 1440, y: 100, width: 1920, height: 1080 }, scaleFactor: 1.25 },
+    ];
+    harness.displays = displays;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    for (const x of [1438, 1439, 1440, 1441, 1440, 1439, 1441]) {
+      harness.cursor = { x, y: 420 };
+      vi.advanceTimersByTime(16);
+      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 236, width: 240, height: 240 });
+    }
+    await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
+    expect(overlay.getBounds()).toEqual({ x: 1440, y: 236, width: 240, height: 240 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["blur", "hide", "reload", "display", "timeout", "suspend", "native release"])("ends a lost drag on %s with no background tracking", async (reason) => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    if (reason === "reload") overlay.webContents.emit("did-start-loading");
+    else if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    else if (reason === "display") harness.displayListeners.get("display-metrics-changed")!();
+    else if (reason === "timeout") vi.advanceTimersByTime(120_000);
+    else if (reason === "suspend") app.mascot.suspend();
+    else overlay.emit(reason);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects drag requests from settings, extra coordinates, and outside the mascot handle", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup"], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["drop"], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(), { x: 0, y: 0 }], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", { x: 0, y: 0 }], overlay)).rejects.toThrow("Invalid");
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 40 });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("leaves Wayland movement to the compositor without starting cursor tracking", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "linux", env: { ...process.env, WAYLAND_DISPLAY: "wayland-0" } });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], harness.windows[1] as WindowDouble);
+    expect(app.mascot.snapshot()).toMatchObject({ placement: "system", dragging: false });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

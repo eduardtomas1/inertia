@@ -197,7 +197,7 @@ describe("WorkspaceHeader Git pull request availability", () => {
     fireEvent.click(more);
     expect(await screen.findByRole("menu", { name: "Git actions" })).toBeInTheDocument();
     const pullReason = screen.getByText(
-      "Commit or discard local changes before pulling.",
+      "Commit or stash local changes before pulling.",
     );
     expect(pullReason.closest("button")).toHaveAttribute("aria-disabled", "true");
 
@@ -274,6 +274,8 @@ describe("WorkspaceHeader Git pull request availability", () => {
     const pullRequest = screen.getByRole("menuitem", { name: /^Pull request/u });
     await waitFor(() => expect(commit).toHaveFocus());
 
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: /^Fetch/u })).toHaveFocus();
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(pull).toHaveFocus();
     fireEvent.keyDown(menu, { key: "Home" });

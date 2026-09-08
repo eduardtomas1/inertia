@@ -450,6 +450,7 @@ describe("append-oriented stream text persistence", () => {
       DROP TABLE recovery_import_receipts;
       DROP TABLE message_content_chunks;
       DROP TABLE reasoning_content_chunks;
+      DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 42;
     `);
     old.close();
@@ -526,6 +527,7 @@ describe("append-oriented stream text persistence", () => {
       DROP TABLE reasoning_content_chunks_v44_source;
       CREATE INDEX reasoning_content_chunks_reasoning_sequence_idx
         ON reasoning_content_chunks(reasoning_id, sequence ASC);
+      DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 44;
     `);
     old.close();

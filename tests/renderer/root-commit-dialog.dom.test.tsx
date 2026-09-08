@@ -91,13 +91,15 @@ describe("RootCommitDialog", () => {
       "Preparing the complete diff",
     );
     expect(screen.getByText(/0 files/iu)).toHaveTextContent("+0");
+    expect(screen.getByText("Preparing review…")).toBeInTheDocument();
+    expect(screen.queryByText("Detached HEAD")).not.toBeInTheDocument();
     expect(screen.queryByText("ambient.ts")).not.toBeInTheDocument();
 
     await act(async () => pending.resolve(review()));
 
     expect(await screen.findByText("exact.ts")).toBeInTheDocument();
     expect(screen.queryByText("ambient.ts")).not.toBeInTheDocument();
-    expect(screen.getByText(/1 files/iu)).toHaveTextContent("+2");
+    expect(screen.getByText(/1 file/iu)).toHaveTextContent("main · 1 file · +2 −1");
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveFocus();
   });
 

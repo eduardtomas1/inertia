@@ -14,6 +14,7 @@ type ConversationCreatePayload = Extract<
 export interface PersistedDraftConversation {
   conversation: Conversation;
   payload: ConversationCreatePayload;
+  resumeAfterSearch?: boolean;
 }
 
 export interface PersistedMaterializedDraftConversation {
@@ -48,6 +49,7 @@ function readPersistedDraftRecord(): PersistedDraftConversation | null {
     conversationId?: unknown;
     createdAt?: unknown;
     payload?: unknown;
+    resumeAfterSearch?: unknown;
   };
   if (
     (candidate.version !== 1 && candidate.version !== 2)
@@ -73,6 +75,7 @@ function readPersistedDraftRecord(): PersistedDraftConversation | null {
     return null;
   }
   return {
+    resumeAfterSearch: candidate.resumeAfterSearch === true,
     payload: parsed.data.payload,
     conversation: buildDraftConversation(parsed.data.payload, {
       id: candidate.conversationId,
@@ -187,6 +190,7 @@ export function writePersistedDraftConversation(
         conversationId: draft.conversation.id,
         createdAt: draft.conversation.createdAt,
         payload: draft.payload,
+        resumeAfterSearch: draft.resumeAfterSearch,
       }),
     );
   } catch {

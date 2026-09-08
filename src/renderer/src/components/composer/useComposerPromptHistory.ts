@@ -1,6 +1,7 @@
 import {
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useRef,
   type RefObject,
 } from "react";
@@ -99,6 +100,7 @@ export function useComposerPromptHistory({
     newSession(conversationId, signature, message),
   );
   const pendingStopRestoreRef = useRef<PendingStopRestore | null>(null);
+  const pendingCaretRef = useRef<(() => void) | null>(null);
   const settlementInputsRef = useRef({
     conversationId,
     signature,
@@ -153,13 +155,30 @@ export function useComposerPromptHistory({
     onApplyMessage(next);
   };
 
-  const focusAt = (position: number): void => {
-    window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.focus();
+  // Commit the caret with the recalled value before another key can arrive.
+  useLayoutEffect(() => {
+    const placeCaret = pendingCaretRef.current;
+    pendingCaretRef.current = null;
+    placeCaret?.();
+  });
+
+  const recallMessage = (next: string, position: number): void => {
+    onApplyMessage(next);
+    pendingCaretRef.current = null;
+    // Identical saved prompts already have the requested boundary and need no
+    // value commit. Never leave their placement for an unrelated render.
+    if (next === message) return;
+    const textarea = textareaRef.current;
+    const editorRevision = readEditorRevision();
+    pendingCaretRef.current = () => {
+      const current = settlementInputsRef.current;
+      if (!textarea || !textarea.isConnected
+        || current.textareaRef.current !== textarea
+        || document.activeElement !== textarea
+        || current.conversationId !== conversationId
+        || current.readEditorRevision() !== editorRevision) return;
       textarea.setSelectionRange(position, position);
-    });
+    };
   };
 
   const navigate = (direction: ComposerPromptHistoryDirection): boolean => {
@@ -180,8 +199,7 @@ export function useComposerPromptHistory({
       const entry = entries[nextIndex]!;
       session.cursorId = entry.id;
       const next = session.edits.get(entry.id) ?? entry.content;
-      onApplyMessage(next);
-      focusAt(next.length);
+      recallMessage(next, 0);
       return true;
     }
 
@@ -190,15 +208,13 @@ export function useComposerPromptHistory({
     if (currentEntry) session.edits.set(currentEntry.id, message);
     if (cursorIndex === entries.length - 1) {
       session.cursorId = null;
-      onApplyMessage(session.scratch);
-      focusAt(session.scratch.length);
+      recallMessage(session.scratch, session.scratch.length);
       return true;
     }
     const entry = entries[cursorIndex + 1]!;
     session.cursorId = entry.id;
     const next = session.edits.get(entry.id) ?? entry.content;
-    onApplyMessage(next);
-    focusAt(next.length);
+    recallMessage(next, next.length);
     return true;
   };
 

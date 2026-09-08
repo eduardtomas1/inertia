@@ -7166,6 +7166,7 @@ button.environment-row:focus-visible,
   }
 
   .workspace-repository-scope-actions {
+    flex-wrap: wrap;
     justify-content: flex-end;
     padding: 3px 0 0 21px;
     border-left: 0;
@@ -8543,9 +8544,13 @@ button.environment-row:focus-visible,
 .palette-group button > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; overflow: hidden; }
 .palette-group button strong,
 .palette-group button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.palette-group button strong { font-size: 9.5px; font-weight: 610; }
-.palette-group button small { color: var(--text-muted); font-size: 7.5px; }
+.palette-group button strong { font-size: var(--ui-font-secondary); font-weight: 610; }
+.palette-group button small { color: var(--text-muted); font-size: var(--ui-font-micro); }
 .palette-group button kbd { color: var(--text-muted); font-family: inherit; font-size: 7.5px; }
+.palette-message-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 3px; color: var(--text-soft); font-size: var(--ui-font-secondary); line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
+.palette-group mark { color: var(--text); background: var(--accent-soft); font-weight: 650; border-radius: 2px; }
+.palette-search-status { padding: 10px 12px; color: var(--text-muted); font-size: var(--ui-font-secondary); line-height: 1.5; }
+.palette-search-status button { margin-left: 4px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .palette-empty { display: flex; min-height: 180px; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 45px; color: var(--text-muted); font-size: 9px; text-align: center; }
 .palette-empty strong { color: var(--text-soft); font-size: 10px; }
 .palette-footer { display: flex; min-height: 34px; align-items: center; gap: 14px; padding: 0 13px; border-top: 1px solid var(--panel-border); color: var(--text-muted); background: var(--surface); font-size: 7.5px; }
@@ -11919,6 +11924,11 @@ button.sent-attachment-open:focus-visible {
   font-size: var(--metadata-font-size);
   font-weight: 620;
   line-height: 1.25;
+}
+
+.turn-follow-up-row:focus-visible,
+.orphan-run-flow [data-message-search-id]:focus-visible {
+  outline-offset: -2px;
 }
 
 .turn-follow-up-row > p {

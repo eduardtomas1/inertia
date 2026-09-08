@@ -1,3 +1,4 @@
+import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
 import { parseMascotStatus, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
@@ -1104,7 +1105,8 @@ function parseRuntimeAttachmentResult(
   ) return null;
   const attachment = value.attachment;
   if (
-    Object.keys(attachment).length !== 6
+    Object.keys(attachment).length !== (attachment.snapshot === undefined ? 6 : 7)
+    || (attachment.snapshot !== undefined && !snapshotSourceSchema.safeParse(attachment.snapshot).success)
     || typeof attachment.id !== "string"
     || !UUID_PATTERN.test(attachment.id)
     || typeof attachment.name !== "string"
@@ -1133,6 +1135,7 @@ function parseRuntimeAttachmentResult(
       mimeType: attachment.mimeType as TrustedRuntimeAttachment["mimeType"],
       size: attachment.size,
       digest: attachment.digest,
+      ...(attachment.snapshot ? { snapshot: snapshotSourceSchema.parse(attachment.snapshot) } : {}),
     },
   };
 }

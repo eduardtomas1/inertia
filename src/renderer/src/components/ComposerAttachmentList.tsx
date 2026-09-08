@@ -13,6 +13,7 @@ import {
   attachmentPreviewUrl,
   formatAttachmentSize,
 } from "../utils/composerAttachments";
+import "./SnapshotAttachment.css";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 type ComposerAttachmentListProps = {
@@ -66,11 +67,9 @@ export function ComposerAttachmentList({
                     : <FileText size={19} />}
               </span>
               <span className="composer-attachment-copy">
-                <strong>{attachment.name}</strong>
+                <strong>{attachment.snapshot?.appName ?? attachment.name}</strong>
                 <small>
-                  {chatAttachmentTypeLabel(attachment.mimeType)}
-                  {" · "}
-                  {formatAttachmentSize(attachment.size)}
+                  {attachment.snapshot ? attachment.snapshot.windowTitle : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
                 </small>
               </span>
             </>
@@ -79,6 +78,7 @@ export function ComposerAttachmentList({
             <li
               className="composer-attachment"
               data-attachment-kind={kind}
+              data-snapshot={Boolean(attachment.snapshot) || undefined}
               data-attachment-pending={pending || undefined}
               key={attachment.id}
             >

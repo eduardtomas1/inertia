@@ -1,3 +1,4 @@
+import type { MessageSearchTarget } from "../shared/message-search";
 import Database from "better-sqlite3";
 import {
   type AgentActivity,
@@ -906,9 +907,8 @@ export class RuntimeStore {
   }
 
   attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
-  message(messageId: string): ChatMessage {
-    return this.transcriptRepository.message(messageId);
-  }
+  messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
+  message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);

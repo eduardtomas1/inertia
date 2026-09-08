@@ -142,7 +142,7 @@ describe("CommandPalette behavior", () => {
     );
 
     expect(screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     })).toHaveFocus();
   });
 
@@ -150,7 +150,7 @@ describe("CommandPalette behavior", () => {
     const user = userEvent.setup();
     render(palette(true));
     const search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
     const settings = screen.getByRole("option", { name: /Open settings/u });
 
@@ -169,7 +169,7 @@ describe("CommandPalette behavior", () => {
     const onOpenSettings = vi.fn();
     render(<ResetHarness onOpenSettings={onOpenSettings} />);
     let search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
 
     await user.type(search, "settings");
@@ -179,7 +179,7 @@ describe("CommandPalette behavior", () => {
 
     await user.click(screen.getByRole("button", { name: "Open palette" }));
     search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
     expect(search).toHaveValue("");
     expect(screen.getAllByRole("option")[0])
@@ -193,7 +193,7 @@ describe("CommandPalette behavior", () => {
 
     await user.click(screen.getByRole("button", { name: "Open palette" }));
     expect(screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     })).toHaveValue("");
   });
 
@@ -204,7 +204,7 @@ describe("CommandPalette behavior", () => {
 
     await user.click(trigger);
     const search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
     const lastOption = screen.getAllByRole("option").at(-1)!;
     expect(search).toHaveFocus();

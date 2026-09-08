@@ -55,6 +55,9 @@ describe("shared contracts boundary", () => {
     });
 
     expect(commandTypes).toEqual([
+      "conversation.messages.search",
+      "conversation.messages.search.cancel",
+      "conversation.message.reveal",
       "app.refresh",
       "daily.work.get",
       "usage.dashboard.get",
@@ -149,6 +152,7 @@ describe("shared contracts boundary", () => {
       "git.branches",
       "git.branch.create",
       "git.branch.switch",
+      "git.fetch",
       "git.pull",
       "git.commit",
       "git.push",

@@ -42,6 +42,18 @@ describe("mascot placement and contracts", () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
+  it("uses the cursor's destination display in DIP across seams, gaps, and vertical arrangements", () => {
+    const right = { workArea: { x: 1440, y: 100, width: 1280, height: 720 } };
+    expect(mascotBounds({ x: 1321, y: 0 }, [primary, right], { x: 1441, y: 184 }))
+      .toEqual({ x: 1440, y: 100, width: 240, height: 240 });
+    const above = { workArea: { x: 0, y: -1080, width: 1920, height: 1040 } };
+    expect(mascotBounds({ x: 0, y: -194 }, [primary, above], { x: 120, y: -10 }))
+      .toEqual({ x: 0, y: -280, width: 240, height: 240 });
+    expect(mascotBounds({ x: 0, y: 0 }, [{ workArea: { x: -500, y: 40, width: 160, height: 200 } }]))
+      .toEqual({ x: -500, y: 40, width: 160, height: 200 });
+    expect(mascotBounds(null, [])).toEqual({ x: 760, y: 504, width: 240, height: 240 });
+  });
+
   it("rejects malformed preferences, unknown phases, extra payload, and broken identity", () => {
     expect(parseMascotPreferences({ enabled: "yes", motion: true })).toBeNull();
     expect(parseMascotPreferences({ enabled: true, motion: true, path: "/tmp" })).toBeNull();

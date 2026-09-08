@@ -18,6 +18,7 @@ import {
   type RuntimeAttachmentBroker,
 } from "../../src/server/runtime/attachments/trusted-attachment-resolver";
 import { publicRuntimeError } from "../../src/server/runtime-errors";
+import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 const directories: string[] = [];
 const id = "11111111-1111-4111-8111-111111111111";
@@ -66,6 +67,16 @@ afterEach(async () => {
 });
 
 describe("trusted runtime attachment resolution", () => {
+  it("ignores renderer snapshot substitutions and restores only broker-authorized context", async () => {
+    const { root, trusted } = await fixture();
+    const source = snapshotFixture();
+    const renderer = { ...trusted, snapshot: { ...source, appName: "Forged application" } };
+    const authorized = new TrustedAttachmentResolver(root, broker({ ...trusted, snapshot: source }));
+    expect((await authorized.resolveAll([renderer], handoffId))[0]?.snapshot).toEqual(source);
+    const ordinary = new TrustedAttachmentResolver(root, broker(trusted));
+    expect((await ordinary.resolveAll([renderer], handoffId))[0]?.snapshot).toBeUndefined();
+  });
+
   it("uses only the main-authorized descriptor and ignores renderer path and metadata", async () => {
     const { root, trusted } = await fixture();
     const resolver = new TrustedAttachmentResolver(root, broker(trusted));

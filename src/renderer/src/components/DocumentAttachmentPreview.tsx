@@ -331,6 +331,7 @@ export function AttachmentPreviewDialog({
   const titleId = useId();
   const descriptionId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [snapshotData, setSnapshotData] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [opening, setOpening] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
@@ -401,8 +402,9 @@ export function AttachmentPreviewDialog({
             <X size={16} aria-hidden="true" />
           </button>
         </header>
+        {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
         <div className="attachment-preview-stage" data-load-failed={loadFailed}>
-          {loadFailed
+          {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
             ? (
                 <div className="attachment-preview-unavailable" role="alert">
                   <FileText size={28} aria-hidden="true" />

@@ -79,6 +79,7 @@ function dropUnreleasedAgentThreadManagement(
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
+    DROP INDEX IF EXISTS messages_created_id_idx;
     DELETE FROM schema_migrations WHERE version >= 60;
   `);
 }
@@ -1455,6 +1456,39 @@ describe("transactional database migrations", () => {
 });
 
 describe("runtime migration catalog", () => {
+  it("upgrades released schema 69 with a chronology index without changing messages or migration history", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    await copyFile(join(fixtureDirectory, "v0.0.6.sqlite"), databasePath);
+    const database = new Database(databasePath);
+    try {
+      migrateRuntimeDatabase(database, 69);
+      const messages = database.prepare("SELECT * FROM messages ORDER BY id").all() as Array<Record<string, unknown>>;
+      expect(messages.length).toBeGreaterThan(0);
+      const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
+      expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
+      migrateRuntimeDatabase(database);
+      expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null })));
+      expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
+      expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
+        expect.objectContaining({ name: "id", desc: 1, key: 1 }),
+      ]));
+      const schemaVersion = database.pragma("schema_version", { simple: true });
+      const migratedHistory = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
+      migrateRuntimeDatabase(database);
+      expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);
+      expect(database.prepare("SELECT * FROM schema_migrations ORDER BY version").all()).toEqual(migratedHistory);
+    } finally { database.close(); }
+    const reopened = new Database(databasePath);
+    try {
+      const schemaVersion = reopened.pragma("schema_version", { simple: true });
+      migrateRuntimeDatabase(reopened);
+      expect(reopened.pragma("schema_version", { simple: true })).toBe(schemaVersion);
+    } finally { reopened.close(); }
+  });
+
   it("pins released numbering in one immutable, contiguous catalog", () => {
     const definition = (name: string): DatabaseMigrationDefinition => ({
       name,
@@ -1530,6 +1564,7 @@ describe("runtime migration catalog", () => {
 
     const schema63 = new Database(databasePath);
     schema63.exec(`
+      DROP INDEX messages_created_id_idx;
       DROP INDEX agent_turns_run_state_requested_idx;
       ALTER TABLE agent_turns DROP COLUMN run_state;
       ALTER TABLE agent_turns DROP COLUMN provider_state;
@@ -1687,6 +1722,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema64 = new Database(databasePath);
+    schema64.exec("DROP INDEX messages_created_id_idx");
     schema64.prepare("DELETE FROM schema_migrations WHERE version >= 65").run();
     expect((schema64.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
@@ -2004,6 +2040,7 @@ describe("runtime migration catalog", () => {
 
     const schema65 = new Database(databasePath);
     schema65.exec(`
+      DROP INDEX messages_created_id_idx;
       DROP INDEX system_suspend_intervals_range_idx;
       DROP TABLE system_suspend_intervals;
       ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms;
@@ -2077,6 +2114,8 @@ describe("runtime migration catalog", () => {
       { version: 67 },
       { version: 68 },
       { version: 69 },
+      { version: 70 },
+      { version: 71 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

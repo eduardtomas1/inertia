@@ -99,8 +99,18 @@ export function startTimelineItemFocus(input: {
     const target = resolveTarget(root);
     if (target?.row.isConnected && target.destination.isConnected) {
       const destination = target.destination;
+      const retainedFocus = focusDocument.activeElement === destination;
+      const retainedDestination = retainedFocus && lastDestination === destination;
+      const activeElement = focusDocument.activeElement;
+      // Only the launching control, our previous destination or a neutral
+      // document may be superseded. New focus intent wins before any scrolling.
+      if (!retainedFocus && activeElement && activeElement !== focusDocument.body
+        && activeElement !== focusDocument.documentElement && activeElement !== ownedDestination) {
+        finish(false);
+        return;
+      }
       if (!virtualized) {
-        target.row.scrollIntoView({ block: align, inline: "nearest" });
+        destination.scrollIntoView({ block: align, inline: "nearest" });
       } else if (
         scrollElement
         && !intersectsScrollViewport(target.row, scrollElement)
@@ -113,24 +123,14 @@ export function startTimelineItemFocus(input: {
         schedule();
         return;
       }
-      const retainedFocus = focusDocument.activeElement === destination;
-      const retainedDestination = retainedFocus
-        && lastDestination === destination;
+      if (scrollElement && !intersectsScrollViewport(destination, scrollElement)) {
+        destination.scrollIntoView({ block: align, inline: "nearest" });
+        consecutiveStableSamples = 0;
+        lastDestination = null;
+        schedule();
+        return;
+      }
       if (!retainedFocus) {
-        const activeElement = focusDocument.activeElement;
-        // The control that launched navigation may retain focus until the row
-        // mounts. After we have acquired focus, only our own prior destination
-        // or a neutral document can be superseded; any other owner is newer
-        // focus intent and must win.
-        if (
-          activeElement
-          && activeElement !== focusDocument.body
-          && activeElement !== focusDocument.documentElement
-          && activeElement !== ownedDestination
-        ) {
-          finish(false);
-          return;
-        }
         destination.focus({ preventScroll: true });
       }
       if (focusDocument.activeElement === destination) {

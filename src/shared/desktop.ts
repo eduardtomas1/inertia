@@ -141,6 +141,7 @@ export interface CanaryRollbackStatus {
 }
 
 export interface DesktopAttachment {
+  snapshot?: import("./snapshots").SnapshotSource;
   id: string;
   name: string;
   path: string;
@@ -629,6 +630,8 @@ export interface DesktopBridge {
   sendDiscordReleaseInfo: (
     request: SendDiscordReleaseInfoRequest,
   ) => Promise<{ sent: true }>;
+  snapshot: (request: import("./snapshots").SnapshotRequest) => Promise<import("./snapshots").SnapshotState>;
+  onSnapshot: (listener: (event: import("./snapshots").SnapshotDelivery) => void) => () => void;
   selectAttachments: (
     mode?: AttachmentPickerMode,
   ) => Promise<DesktopAttachmentImportSelection | null>;

@@ -30,12 +30,17 @@ export interface MascotSnapshot {
   preferences: MascotPreferences;
   /** Native Wayland delegates global placement to the compositor. */
   placement?: "system";
+  /** Transient window interaction, independent of the current agent activity. */
+  dragging?: boolean;
+  /** Renderer lifetime and monotonically increasing pointer gesture. */
+  gesture?: MascotGesture;
 }
+export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
-  | "left" | "right" | "up" | "down" | "reset-position";
+  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop";
 
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
-  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position",
+  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop",
 ];
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
   idle: "Ready when you are",
@@ -92,7 +97,7 @@ export function parseMascotPreferences(value: unknown): MascotPreferences | null
 export interface MascotBridge {
   snapshot(): Promise<MascotSnapshot>;
   onChanged(listener: (snapshot: MascotSnapshot) => void): () => void;
-  action(action: MascotAction, expectedStatus?: MascotStatus): Promise<void>;
+  action(action: MascotAction, expected?: MascotStatus | MascotGesture): Promise<void>;
 }
 
 export interface MascotSettingsBridge extends MascotBridge {

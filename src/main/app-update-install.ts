@@ -5,6 +5,7 @@ import type {
   AppUpdaterInstallResult,
 } from "./electron-app-updater.js";
 import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
+import { SnapshotCleanupUnconfirmedError } from "./snapshot-shutdown.js";
 
 interface UpdateService {
   current(): AppUpdateStatus;
@@ -139,6 +140,7 @@ export class AppUpdateInstallCoordinator {
     this.normalShutdownIsRetry = retryAttempt;
     this.normalShutdownPending = true;
     const pendingInstall = this.installPromise;
+    let snapshotCleanupUnconfirmed = false;
     const stopping = Promise.resolve()
       .then(async () => await this.options.service.abortInstall?.())
       .then(async () => await pendingInstall?.catch(() => undefined))
@@ -154,6 +156,7 @@ export class AppUpdateInstallCoordinator {
         return finished;
       })
       .catch((error: unknown) => {
+        snapshotCleanupUnconfirmed = error instanceof SnapshotCleanupUnconfirmedError;
         this.options.reportError(error);
         this.normalShutdownUnconfirmed = true;
         this.reportUnconfirmedShutdown();
@@ -165,7 +168,7 @@ export class AppUpdateInstallCoordinator {
         this.normalShutdownRetryRequested = false;
       } else if (
         !confirmed
-        && (this.options.platform ?? process.platform) === "linux"
+        && ((this.options.platform ?? process.platform) === "linux" || snapshotCleanupUnconfirmed)
         && this.normalShutdown === tracked
       ) {
         const retryRequested = this.normalShutdownRetryRequested

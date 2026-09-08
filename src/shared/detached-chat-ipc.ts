@@ -30,6 +30,8 @@ export type DetachedChatBridge = Pick<
   | "getRuntimeConnection"
   | "onRuntimeReady"
   | "copyText"
+  | "snapshot"
+  | "onSnapshot"
   | "selectAttachments"
   | "beginAttachmentImport"
   | "importAttachments"

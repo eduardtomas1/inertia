@@ -80,6 +80,7 @@ export interface ResponseTimelineCompatibility {
 }
 
 export type ResponseTimelineItem =
+  | { kind: "compaction"; id: string; message: ChatMessage }
   | { kind: "turn"; id: string; turn: ResponseTurn }
   | {
       kind: "compatibility";
@@ -307,7 +308,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     inferredTurns,
     malformedTurns,
     messages: input.messages
-      .filter(({ id }) => !claimedMessageIds.has(id))
+      .filter(({ id, compaction }) => !claimedMessageIds.has(id) && !compaction)
       .sort(compareTimestamped),
     activities: input.activities
       .filter(({ turnId }) => turnId === null || !claimedTurnIds.has(turnId))
@@ -330,6 +331,12 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     || compatibility.plans.length > 0
     || compatibility.checkpoints.length > 0;
 
+  const ordered: ResponseTimelineItem[] = [
+    ...authoritativeTurns.map((turn) => ({ kind: "turn" as const, id: turn.id, turn })),
+    ...input.messages.filter((message) => message.role === "system" && message.turnId === null && message.compaction).map((message) => ({ kind: "compaction" as const, id: message.id, message })),
+  ];
+  const time = (item: ResponseTimelineItem): string => item.kind === "turn" ? item.turn.requestedAt : item.kind === "compaction" ? item.message.createdAt : "";
+  ordered.sort((left, right) => timestamp(time(left)) - timestamp(time(right)) || left.id.localeCompare(right.id));
   return [
     ...(hasCompatibility
       ? [{
@@ -338,7 +345,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
           compatibility,
         }]
       : []),
-    ...authoritativeTurns.map((turn) => ({ kind: "turn" as const, id: turn.id, turn })),
+    ...ordered,
   ];
 }
 
@@ -500,6 +507,11 @@ export function stabilizeResponseTimeline(
       return stable;
     }
 
+    if (item.kind === "compaction") {
+      const stable = prior?.kind === "compaction" && prior.message === item.message ? prior : item;
+      if (stable !== previous[index]) changed = true;
+      return stable;
+    }
     if (prior?.kind !== "compatibility") {
       changed = true;
       return item;

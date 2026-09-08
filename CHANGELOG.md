@@ -2,6 +2,52 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.55 — 2026-09-08
+
+### Find and share context
+
+- Search saved messages and final answers from Cmd/Ctrl+K and open the matching
+  passage across long histories, split panes and detached chats. New-chat drafts
+  survive navigation and restart. Large histories can return labeled partial
+  results; reasoning, tool logs and unfinished output stay outside search.
+- Enable Snapshots to capture another app's foreground window and review its
+  screenshot and accessibility context before sending. Capture is optional and
+  permission-gated. Linux requires X11; Wayland capture is unavailable.
+- Successful context compaction leaves a saved timeline receipt, with token
+  counts when the provider reports them. Codex compaction tolerates a brief delay
+  before its completed turn appears in durable history.
+- Up and Down move through wrapped and multiline drafts normally. At the text
+  boundaries, repeated presses recall older or newer prompts while preserving
+  the unsent draft and edits.
+
+### Git and the desktop mascot
+
+- See branch tracking and incoming/outgoing commits, search local and remote
+  branches, and create tracking branches. Fetch preserves local work; Pull
+  requires a clean checkout and fast-forwards only. Existing commits can be
+  pushed while unrelated edits remain.
+- Git actions keep errors and retry controls near the operation. Branches used
+  by other worktrees are identified, and ambiguous remote destinations are
+  rejected before a fetch can overwrite another remote's tracking refs.
+- The mascot has pickup, suspended and landing poses, preserves the grab point,
+  and supports repeated dragging and cancellation. Reduced motion remains
+  supported; Wayland placement is controlled by the compositor.
+
+### Reliability and maintenance
+
+- Linux startup retires completed discovery probes correctly. Repeated runtime
+  recovery failures stop instead of restarting indefinitely.
+- Each provider's completed model catalog appears independently. Settings
+  Refresh can recover an unavailable catalog without restarting the app.
+- Lifecycle certification rejects missing test suites, and cross-platform test
+  fixtures publish their ownership receipts atomically.
+- Update Lucide React to 1.41.0, Claude Agent SDK to 0.3.261, OpenCode SDK to
+  1.18.29, Anthropic SDK to 0.124.0, and Playwright to 1.63.0.
+
+Windows and macOS retain manual installation while release signing is
+unavailable. Linux installations still on 0.0.52 need one manual upgrade,
+preserving the existing profile.
+
 ## 0.0.54 — 2026-09-08
 
 ### Reliable turns and provider interactions

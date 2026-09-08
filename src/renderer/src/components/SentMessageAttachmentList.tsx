@@ -99,11 +99,9 @@ export function SentMessageAttachmentList({
                     </span>
                   )}
               <span className="sent-attachment-copy">
-                <strong title={attachment.name}>{attachment.name}</strong>
+                <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
                 <small id={metadataId}>
-                  {typeLabel}
-                  {" · "}
-                  {formatAttachmentSize(attachment.size)}
+                  {attachment.snapshot?.windowTitle ?? `${typeLabel} · ${formatAttachmentSize(attachment.size)}`}
                 </small>
               </span>
             </>

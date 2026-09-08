@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 import {
   AttachmentRegistry,
@@ -97,6 +98,18 @@ afterEach(async () => {
 });
 
 describe("main-owned attachment registry", () => {
+  it("preserves only validated main-owned snapshot context with its image capability", async () => {
+    const { registry: attachments } = await registry();
+    const [image] = await attachments.import([{ name: "snapshot.png", mimeType: "image/png", data: png }]);
+    const source = snapshotFixture();
+    const descriptor = attachments.setSnapshotSource(image!.id, source);
+    expect(descriptor.path).toBe(image!.id);
+    expect((await attachments.resolve(image!.id))?.snapshot).toEqual(source);
+    expect(() => attachments.setSnapshotSource(image!.id, { ...source, width: 9000 })).toThrow();
+    await attachments.dispose();
+    await expect(attachments.resolve(image!.id)).resolves.toBeNull();
+  });
+
   it("uses an unpredictable private session directory and removes it cleanly", async () => {
     const parent = await mkdtemp(join(tmpdir(), "inertia-attachment-storage-"));
     directories.push(parent);

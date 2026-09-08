@@ -20,17 +20,18 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
 3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-Use **Ctrl/Cmd+K** to find commands, projects, and chats. Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
+Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly. Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
 ## One workspace for the coding loop
 
 - **Chat with context.** Attach images, documents, and spreadsheets; mention files; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
+- **Capture a window.** Enable [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in the composer to attach a foreground screenshot with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Work side by side.** Open two chats in a split workspace, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
-- **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Click the bubble to open the relevant chat; right-click to pause or hide. Reduced motion uses still artwork. Wayland manages placement through the window manager.
+- **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two conversations with independent composers in a split workspace](docs/screenshots/inertia-split-workspace.png)
 

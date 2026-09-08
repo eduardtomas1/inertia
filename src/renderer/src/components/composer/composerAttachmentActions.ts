@@ -6,7 +6,7 @@ import {
   chatAttachmentKind,
   chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
-import { mergeComposerAttachments } from "../../utils/composerAttachments";
+import { mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
@@ -34,6 +34,7 @@ interface ComposerAttachmentActionOptions {
 }
 
 export interface ComposerAttachmentActions {
+  adoptAttachments(lease: ComposerAttachmentImportLease): Promise<ComposerAttachmentAdoptionResult>;
   chooseAttachments(): Promise<void>;
   importAttachments(files: File[]): Promise<void>;
   removeAttachment(attachment: ChatAttachment): void;
@@ -137,15 +138,15 @@ export function composerAttachmentActions({
   const adoptPrivilegedLease = async (
     lease: NonNullable<Awaited<ReturnType<ComposerProps["onImportAttachments"]>>>,
     authority: string,
-  ): Promise<void> => {
+  ): Promise<ComposerAttachmentAdoptionResult> => {
     if (!selectionRemainsAuthorized(authority)) {
       await cancelPrivilegedLease(lease);
-      return;
+      return "cancelled";
     }
     const adoptedIds = addAttachments(lease.attachments, false, true);
     if (adoptedIds.length === 0) {
       await cancelPrivilegedLease(lease);
-      return;
+      return selectionRemainsAuthorized(authority) ? "rejected" : "cancelled";
     }
     try {
       await lease.commit(adoptedIds);
@@ -159,7 +160,9 @@ export function composerAttachmentActions({
           setAttachments(() => next);
         }
         for (const id of adoptedIds) void releaseAttachmentRef.current(id);
+        return "cancelled";
       }
+      return "adopted";
     } catch {
       const adopted = new Set(adoptedIds);
       const next = attachmentsRef.current.filter(({ id }) => !adopted.has(id));
@@ -169,10 +172,16 @@ export function composerAttachmentActions({
         setAttachments(() => next);
       }
       await cancelPrivilegedLease(lease);
+      return selectionRemainsAuthorized(authority) ? "rejected" : "cancelled";
     }
   };
 
   return {
+    async adoptAttachments(lease) {
+      if (actionBlocked()) { await cancelPrivilegedLease(lease); return selectionRemainsAuthorized(attachmentAuthorityKey) ? "rejected" : "cancelled"; }
+      const sequence = beginImport();
+      try { return await adoptPrivilegedLease(lease, attachmentAuthorityKey); } finally { finishImport(sequence); }
+    },
     async chooseAttachments() {
       if (actionBlocked()) return;
       const importSequence = beginImport();

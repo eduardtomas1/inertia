@@ -1,0 +1,6 @@
+.context-compaction-row { display: grid; gap: 24px; padding-block: 12px; }
+.context-compaction-row > .turn-user-request { justify-self: end; width: fit-content; max-width: var(--user-request-max-width); padding: 11px 13px 10px; border-radius: var(--radius-medium); background: var(--user-request-tint); }
+.context-compaction-separator { display: flex; align-items: center; gap: 12px; color: var(--text-muted); padding-block: 4px; }
+.context-compaction-separator > span { height: 1px; flex: 1; background: var(--border); }
+.context-compaction-separator small { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; text-align: center; }
+.context-compaction-separator svg { flex: none; }

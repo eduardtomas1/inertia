@@ -111,15 +111,11 @@ else {
     return child;
   });
   const signal = linuxGuardian.signalLinuxGuardianExactAsync;
-  let stalled = false;
   let delayedCallbacks = 0;
   vi.spyOn(linuxGuardian, "signalLinuxGuardianExactAsync").mockImplementation(async (...args) => {
     const result = await signal(...args);
     if (args[2] === "exec") {
-      if (!stalled) {
-        stalled = true;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_700);
-      }
+      // Withhold native acknowledgment until the real child-close boundary.
       await closes.get(args[0].pid);
       delayedCallbacks += 1;
     }

@@ -44,6 +44,7 @@ import {
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 import { startTestRuntime as startRuntime } from "../support/test-runtime";
 import { RuntimeTestCleanup } from "../support/runtime-test-cleanup";
+import { prepareWindowsRuntimeCleanupDiagnostic, markWindowsRuntimeCleanupDiagnostic, restoreWindowsRuntimeCleanupDiagnostic } from "../support/windows-runtime-cleanup-diagnostic";
 
 const runtimeIdentity = {
   runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
@@ -98,6 +99,7 @@ describe("local runtime", () => {
     try {
       await cleanup.close();
     } finally {
+      restoreWindowsRuntimeCleanupDiagnostic();
       vi.restoreAllMocks();
     }
   });
@@ -865,12 +867,13 @@ process.exit(child.status ?? 1);
   });
 
   it("controls only the exact managed project action and persists a safe rerun identity", async () => {
-    const { data, workspace } = temporaryWorkspace();
+    const { root, data, workspace } = temporaryWorkspace();
+    prepareWindowsRuntimeCleanupDiagnostic(root);
     writeFileSync(join(workspace, "package.json"), JSON.stringify({
       name: "activity-control-fixture",
       private: true,
       scripts: {
-        preview: "node -e \"console.log('http://localhost:45678'); setInterval(() => {}, 1000)\"",
+        preview: "node -e \"console.log('http://localhost:45678'); if(process.env.INERTIA_DIAGNOSTIC_PREVIEW_FILE) require('node:fs').appendFileSync(process.env.INERTIA_DIAGNOSTIC_PREVIEW_FILE,JSON.stringify({pid:process.pid,ppid:process.ppid,at:Date.now(),uptimeMs:Math.floor(process.uptime()*1000)})+'\\n'); setInterval(() => {}, 1000)\"",
       },
     }));
     const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: false, ...runtimeIdentity });
@@ -934,6 +937,7 @@ process.exit(child.status ?? 1);
     );
     expect(unrelated.message).toBe("Workspace activity not found.");
 
+    markWindowsRuntimeCleanupDiagnostic("before-first-stop");
     const stopRequestId = randomUUID();
     send(client.socket, {
       type: "activity.stop",
@@ -975,6 +979,7 @@ process.exit(child.status ?? 1);
           && run.canStop),
     );
     const rerun = rerunning.snapshot.runs.find((run) => run.id !== activity.id && run.actionId === activity.actionId)!;
+    markWindowsRuntimeCleanupDiagnostic("before-rerun-stop");
     const stopRerunRequestId = randomUUID();
     send(client.socket, {
       type: "activity.stop",

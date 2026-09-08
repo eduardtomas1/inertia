@@ -139,6 +139,7 @@ export class MascotMain {
       if (mouse.type === "mouseDown" && mouse.button === "left") {
         this.pickupOffset = mouse.x >= 72 && mouse.x < 168 && mouse.y >= 136 && mouse.y < 234
           ? { x: mouse.x, y: mouse.y } : null;
+        this.updateHitTesting(mouse);
       }
       if (mouse.type === "mouseUp" && mouse.button === "left") this.endDrag();
     });
@@ -197,6 +198,7 @@ export class MascotMain {
     // A display was unplugged or its scale changed. End the gesture before
     // restoring reachability; an old cursor offset must not move it back out.
     if (this.drag) { this.endDrag(); return; }
+    this.pickupOffset = null;
     const bounds = mascotBounds(window.getBounds(), screen.getAllDisplays());
     const current = window.getBounds();
     if (current.x !== bounds.x || current.y !== bounds.y || current.width !== bounds.width || current.height !== bounds.height) window.setBounds(bounds);
@@ -219,7 +221,9 @@ export class MascotMain {
     const character = x >= 72 && x < 168 && y >= 136 && y < 234;
     const bubble = (x - Math.max(18, Math.min(x, 222))) ** 2
       + (y - Math.max(14, Math.min(y, 102))) ** 2 <= 14 ** 2;
-    const ignore = !this.drag && !character && !bubble;
+    // A native press owns input while its asynchronous pickup is still pending,
+    // so a quick move/release cannot pass through before the renderer responds.
+    const ignore = !this.drag && !this.pickupOffset && !character && !bubble;
     if (ignore !== this.ignoringMouse) {
       window.setIgnoreMouseEvents(ignore, { forward: true });
       this.ignoringMouse = ignore;
@@ -247,6 +251,7 @@ export class MascotMain {
     if (!offset) return;
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.drag = { offset, started: Date.now() };
+    this.updateHitTesting();
     this.dragTimer = setInterval(() => {
       // Bound a lost pointer-up even if a renderer stalls without exiting.
       if (this.drag && Date.now() - this.drag.started >= 120_000) this.endDrag();
@@ -278,8 +283,12 @@ export class MascotMain {
   }
 
   private endDrag(): void {
+    const pending = this.pickupOffset !== null;
     this.pickupOffset = null;
-    if (!this.drag) return;
+    if (!this.drag) {
+      if (pending) this.updateHitTesting();
+      return;
+    }
     this.moveDrag(true);
     this.clearDrag();
     this.reposition();

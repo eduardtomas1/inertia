@@ -65,6 +65,43 @@ function event(
 }
 
 describe("model shortcut resolution", () => {
+  it("keeps access and interaction variants independently selectable by shortcut", () => {
+    const profiles = [
+      reference("agent", { configuration: { accessMode: "full", interactionMode: "plan" } }),
+      reference("agent", { configuration: { accessMode: "supervised", interactionMode: "build" } }),
+    ];
+    const favorites = resolveModelFavorites(profiles, [route("agent")]);
+    const visible = favorites.flatMap(({ route: match }) => match ? [match] : []);
+    expect(resolveModelShortcutBindings(favorites, visible, { platform: "linux" })
+      .map(({ key, route: match }) => [key, match.configuration]))
+      .toEqual([["1", profiles[0]!.configuration], ["2", profiles[1]!.configuration]]);
+  });
+
+  it("selects the saved full profile from its ordinary provider row with one visible shortcut", () => {
+    const profiles = [
+      reference("agent", { reasoningEffort: "high", configuration: {
+        accessMode: "full", interactionMode: "plan", fastMode: false,
+      } }),
+      reference("agent", { reasoningEffort: "high", configuration: {
+        accessMode: "supervised", interactionMode: "build", fastMode: false,
+      } }),
+    ];
+    const visible = route("agent", {
+      key: "provider-row", reasoningEffort: "high", reasoningOptions: ["high"],
+    });
+    const favorites = resolveModelFavorites(profiles, [visible]);
+    const bindings = resolveModelShortcutBindings(favorites, [visible], { platform: "darwin" });
+
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]).toMatchObject({
+      routeKey: "provider-row", label: "⌘1", favoriteKey: modelFavoriteKey(profiles[0]!),
+      route: { configuration: profiles[0]!.configuration, reasoningEffort: "high" },
+    });
+    expect(bindings[0]!.route).toBe(favorites[0]!.route);
+    expect(resolveModelShortcutBindings(favorites, [{ ...visible, selectable: false }],
+      { platform: "darwin" })).toEqual([]);
+  });
+
   it("assigns distinct shortcuts to high and xhigh favorites on one model", () => {
     const high = reference("gpt-5.6-sol", { reasoningEffort: "high" });
     const xhigh = reference("gpt-5.6-sol", { reasoningEffort: "xhigh" });

@@ -597,6 +597,11 @@
           "digest": "63dea00e64daee5e9f8c2baa150ad20b239fe095cccb41e19fc6e1c62cc6d48a"
         }
       ]
+    },
+    {
+      "version": 69,
+      "name": "PersistGuidedIssueReport",
+      "digest": "61338f4b256d505c8e982f8474f03a8095195c9b232d5e75df8b298e3e1303a9"
     }
   ]
 }

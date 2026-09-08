@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import type { MascotBridge } from "../../src/shared/mascot";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";

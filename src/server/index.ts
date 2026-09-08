@@ -1,3 +1,5 @@
+import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
+import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
@@ -14,7 +16,9 @@ import {
   type RuntimeSyncCursor,
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
+import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
+import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
@@ -148,6 +152,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runtimeSafetyError("Runtime startup is blocked."),
     );
   }
+  await prepareGitExecutable();
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -624,7 +629,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
-        if (status !== "completed") return;
+        if (!enableProviders || status !== "completed") return;
         const turn = store.agentTurn(turnId);
         if (backendProfileController.isExternalSelection(turn.modelSelection)) return;
         const current = providers.cachedMetadata(providerId);
@@ -649,16 +654,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
         applyProviderMetadata(providerId, metadata);
       },
-      onTurnSettled: async (turn) => {
-        // The durable turn is already terminal. Backup work stays off the
-        // settlement path and the manager deduplicates it with quiet/hourly
-        // triggers. Failed and cancelled turns restart the same quiet window:
-        // their cleanup writes are just as real as a successful completion.
-        void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
-        await agentThreads?.manager.onSourceTurnSettled(turn);
-        await duoLaunches?.onTurnSettled(turn);
-        await testOnlyOnTurnSettled?.(turn);
-      },
+      onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
+        (settled) => duoLaunches?.onTurnSettled(settled),
+        (settled) => testOnlyOnTurnSettled?.(settled),
+      ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
     },
     {
@@ -685,6 +685,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,
@@ -872,7 +873,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     }
   };
-
   const webSocketBoundary = attachRuntimeWebSocketBoundary({
     server,
     websocketPath,

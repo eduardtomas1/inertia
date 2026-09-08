@@ -4,6 +4,7 @@ import type {
   ProviderGoalSnapshot,
 } from "../../provider/contracts";
 import type { RuntimeStore } from "../../database";
+import { broadcastTurnSnapshot } from "./turn-controller-support";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -103,7 +104,7 @@ export class TurnNativeGoalCoordinator {
       type: "conversation.detail.invalidated",
       conversationId: input.conversationId,
     });
-    this.options.hooks.broadcastSnapshot();
+    broadcastTurnSnapshot(this.options.hooks);
     if (!this.options.start(queued.turn.id)) {
       const owned = this.options.activeForTurn(queued.turn.id);
       const acknowledgement = owned?.nativeGoalStartAcknowledgement;

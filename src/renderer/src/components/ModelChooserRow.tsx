@@ -34,6 +34,7 @@ interface ModelChooserRowBase {
   reasoningEffort: string | null;
   responseSpeed?: "Standard" | "Fast";
   speedChangeNote?: "Fast turns off";
+  configuration?: ModelSearchRoute["configuration"];
   harnessLabel: string;
   backendProfileName: string;
   source: "built-in" | "custom";
@@ -96,6 +97,7 @@ export function modelChooserRowFromRoute(
     reasoningEffort: route.reasoningEffort ?? null,
     ...(route.responseSpeed ? { responseSpeed: route.responseSpeed } : {}),
     ...(route.speedChangeNote ? { speedChangeNote: route.speedChangeNote } : {}),
+    ...(route.configuration ? { configuration: route.configuration } : {}),
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
     source: route.source,
@@ -117,6 +119,7 @@ export function modelChooserSecondaryIdentity(
     | "reasoningEffort"
     | "responseSpeed"
     | "speedChangeNote"
+    | "configuration"
   >,
 ): string {
   return [
@@ -126,6 +129,10 @@ export function modelChooserSecondaryIdentity(
       ? `${row.reasoningEffort} reasoning`
       : "Provider default reasoning",
     ...(row.responseSpeed ? [`${row.responseSpeed} speed`] : []),
+    ...(row.configuration ? [
+      row.configuration.interactionMode === "plan" ? "Plan" : "Build",
+      { supervised: "Supervised", "auto-edit": "Auto-edit", full: "Full access" }[row.configuration.accessMode],
+    ] : []),
     ...(row.speedChangeNote ? [row.speedChangeNote] : []),
   ].join(" · ");
 }

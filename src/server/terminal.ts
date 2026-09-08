@@ -24,7 +24,11 @@ import {
   terminalCloseTimeoutMs,
   terminalShutdownTimeoutMs,
 } from "./terminal-shutdown-deadline";
-import { beforeTerminalDeadline } from "./terminal-deadline";
+import {
+  waitForBooleanWithinTerminalDeadline,
+  waitForGuardianStopWithinDeadline,
+  waitForOwnedProcessStoppedWithinDeadline,
+} from "./terminal-ownership-deadline";
 import {
   runtimeOwnedPtyInvocationForBoundary,
   type TerminalOwnershipBoundary,
@@ -53,6 +57,7 @@ interface TerminalSession {
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
+  readonly outputObserved: boolean;
   exitObserved: boolean;
   exitCode: number | null;
   exitSignal: number | null;
@@ -60,6 +65,7 @@ interface TerminalSession {
   terminationRequested: boolean;
   supportsGracefulReplacement: boolean;
   closing: Promise<void> | null;
+  naturalExitCode: number | null;
   shutdownDeadlineAt: number | null;
   waitForShutdownDeadline: Promise<number>;
   setShutdownDeadline(deadlineAt: number): void;
@@ -124,72 +130,6 @@ export interface TerminalProviderResumeAttachment {
   conversationId: string;
 }
 
-async function waitForBooleanWithinTerminalDeadline(
-  operation: Promise<boolean>,
-  session: TerminalSession,
-  localDeadlineAt: number | null,
-): Promise<boolean> {
-  if (session.shutdownDeadlineAt !== null) {
-    return await beforeTerminalDeadline(
-      operation,
-      localDeadlineAt === null
-        ? session.shutdownDeadlineAt
-        : Math.min(localDeadlineAt, session.shutdownDeadlineAt),
-    );
-  }
-  const boundedOperation = localDeadlineAt === null
-    ? operation.catch(() => false)
-    : beforeTerminalDeadline(operation, localDeadlineAt);
-  const first = await Promise.race([
-    boundedOperation.then((value) => ({ kind: "operation" as const, value })),
-    session.waitForShutdownDeadline.then((deadlineAt) => ({
-      kind: "deadline" as const,
-      deadlineAt,
-    })),
-  ]);
-  return first.kind === "operation"
-    ? first.value
-    : await beforeTerminalDeadline(
-        operation,
-        localDeadlineAt === null
-          ? first.deadlineAt
-          : Math.min(localDeadlineAt, first.deadlineAt),
-      );
-}
-
-async function waitForGuardianStopWithinDeadline(
-  session: TerminalSession,
-  localDeadlineAt: number | null,
-): Promise<boolean> {
-  return await waitForBooleanWithinTerminalDeadline(
-    session.waitForOwnedGuardianStop(),
-    session,
-    localDeadlineAt,
-  );
-}
-
-async function waitForOwnedProcessStoppedWithinDeadline(
-  session: TerminalSession,
-  fallbackWaitMs: number,
-  localDeadlineAt: number | null = null,
-): Promise<boolean> {
-  const initialDeadlineAt = localDeadlineAt
-    ?? session.shutdownDeadlineAt
-    ?? Date.now() + fallbackWaitMs;
-  while (!session.confirmOwnedProcessStopped()) {
-    const deadlineAt = session.shutdownDeadlineAt === null
-      ? initialDeadlineAt
-      : Math.min(initialDeadlineAt, session.shutdownDeadlineAt);
-    const remainingMs = Math.trunc(deadlineAt - Date.now());
-    if (remainingMs <= 0) return false;
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, Math.min(10, remainingMs));
-      timer.unref();
-    });
-  }
-  return true;
-}
-
 function ownershipRetirementFailure(session: TerminalSession): TerminalError {
   const outcome = session.exitObserved
     ? ` Guardian exit code: ${session.exitCode ?? "unknown"}; signal: ${session.exitSignal ?? "unknown"}.`
@@ -197,6 +137,15 @@ function ownershipRetirementFailure(session: TerminalSession): TerminalError {
   return new TerminalError(
     `A terminal process ownership claim could not be retired during runtime shutdown.${outcome}`,
   );
+}
+
+function terminalStopObservation(session: TerminalSession) {
+  return {
+    outputObserved: session.outputObserved,
+    exitObserved: session.exitObserved,
+    exitCode: session.exitCode,
+    naturalExitCode: session.naturalExitCode,
+  };
 }
 
 export class TerminalManager {
@@ -741,30 +690,44 @@ export class TerminalManager {
         else void this.trackFinalDisposal(session);
       },
     });
+    let outputObserved = false;
     const dataListener = pseudoterminal.onData((data) => {
+      outputObserved = true;
       onOutput?.(data);
       output.queue(data);
     });
     const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
+      if (session.exitObserved) return;
       output.flush();
       session.exitObserved = true;
       session.exitCode = exitCode;
       session.exitSignal = signal ?? null;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
-      releaseOwnedProcessIfExited(signal);
+      // A Windows PTY exit proves only that the root exited. During a stop,
+      // retain its claim until the full-tree termination path confirms cleanup.
+      if (this.platform !== "win32" || !session.terminationRequested) {
+        releaseOwnedProcessIfExited(signal);
+      }
+      if (session.terminationRequested) return;
       const ownsProviderInstallation = session.installationUse !== null;
       const ownedProcessStopped = session.confirmOwnedProcessStopped();
+      // A normal PTY exit may precede asynchronous retirement of the exact
+      // durable claim. Keep the transferred installation and track that proof
+      // within the ordinary close envelope; never signal this exited PID.
+      if (ownsProviderInstallation && !ownedProcessStopped
+        && (signal === 0 || signal === undefined)) {
+        session.naturalExitCode = exitCode;
+        void this.trackDisposal(session, false);
+        return;
+      }
       if (
-        !session.terminationRequested
-        && (
-          (signal !== 0 && !ownedProcessStopped)
-          || (
-            ownsProviderInstallation
-            && (
-              !ownedProcessStopped
-              || !this.releaseInstallationUse(session)
-            )
+        (signal !== 0 && !ownedProcessStopped)
+        || (
+          ownsProviderInstallation
+          && (
+            !ownedProcessStopped
+            || !this.releaseInstallationUse(session)
           )
         )
       ) {
@@ -776,13 +739,12 @@ export class TerminalManager {
         this.recordCleanupFailure(session, ownershipRetirementFailure(session));
         return;
       }
-      if (session.terminationRequested) return;
-      const exitOwner = session.owner;
-      this.dispose(id, false);
-      if (exitOwner) {
-        send(exitOwner, { type: "terminal.exit", terminalId: id, exitCode });
-      }
-      onExit?.(exitCode);
+      // node-pty can report exitCode=0 for a signalled process. Preserve the
+      // numeric contract without letting an interrupted sign-in look successful.
+      const completedExitCode = exitCode === 0 && signal !== undefined && signal > 0
+        ? 128 + signal
+        : exitCode;
+      this.completeNaturalExit(session, completedExitCode);
     });
     session = {
       id,
@@ -794,6 +756,7 @@ export class TerminalManager {
       pty: pseudoterminal,
       dataListener,
       exitListener,
+      get outputObserved() { return outputObserved; },
       exitObserved: false,
       exitCode: null,
       exitSignal: null,
@@ -801,6 +764,7 @@ export class TerminalManager {
       terminationRequested: false,
       supportsGracefulReplacement,
       closing: null,
+      naturalExitCode: null,
       shutdownDeadlineAt: null,
       waitForShutdownDeadline,
       setShutdownDeadline: (deadlineAt) => {
@@ -1036,9 +1000,39 @@ export class TerminalManager {
     session: TerminalSession,
     attemptGracefulReplacement: boolean,
   ): Promise<void> {
+    const windowsTerminalAtStop = this.platform === "win32"
+      ? terminalStopObservation(session)
+      : null;
+    const windowsFailureOptions = (): ErrorOptions | undefined => windowsTerminalAtStop
+      ? { cause: {
+          windowsCleanupFailures: windowsCleanupFailures(),
+          windowsTerminalCleanup: {
+            atStop: windowsTerminalAtStop,
+            atFailure: terminalStopObservation(session),
+          },
+        } }
+      : undefined;
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();
+    if (session.naturalExitCode !== null) {
+      if (
+        this.closingFailures.has(session.id)
+        || !await waitForOwnedProcessStoppedWithinDeadline(
+          session,
+          this.closeTimeoutMs,
+        ).catch(() => false)
+        || !this.releaseInstallationUse(session)
+      ) {
+        this.quarantineInstallationUse(
+          session,
+          "terminal-provider-natural-exit-cleanup-unconfirmed",
+        );
+        throw ownershipRetirementFailure(session);
+      }
+      this.completeNaturalExit(session, session.naturalExitCode);
+      return;
+    }
     if (
       attemptGracefulReplacement
       && await this.gracefullyRetireReplacementShell(session)
@@ -1124,9 +1118,7 @@ export class TerminalManager {
             );
             finish(new TerminalError(
               "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-              process.platform === "win32"
-                ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
-                : undefined,
+              windowsFailureOptions(),
             ));
             return;
           }
@@ -1166,9 +1158,7 @@ export class TerminalManager {
           );
           finish(new TerminalError(
             "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-            process.platform === "win32"
-              ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
-              : undefined,
+            windowsFailureOptions(),
           ));
         },
       );
@@ -1176,11 +1166,24 @@ export class TerminalManager {
   }
 
   private trackFinalDisposal(session: TerminalSession): Promise<void> {
+    if (session.naturalExitCode !== null) session.naturalExitCode = 130;
     return this.trackDisposal(session, false);
   }
 
   private trackReplacementDisposal(session: TerminalSession): Promise<void> {
+    if (session.naturalExitCode !== null) session.naturalExitCode = 130;
     return this.trackDisposal(session, session.supportsGracefulReplacement);
+  }
+
+  private completeNaturalExit(session: TerminalSession, exitCode: number): void {
+    const owner = session.owner;
+    this.dispose(session.id, false);
+    if (owner) {
+      send(owner, { type: "terminal.exit", terminalId: session.id, exitCode });
+    }
+    try { session.onExit?.(exitCode); } catch {
+      // The exact durable claim and installation authority are already retired.
+    }
   }
 
   private trackDisposal(

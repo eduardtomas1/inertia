@@ -1,0 +1,8 @@
+[
+  { "label": "Linux x64", "runner": "ubuntu-24.04", "artifact": "linux-x64", "arch": "x64", "timeout_minutes": 40, "package_script": "package:linux", "app_path": "release/linux-unpacked/inertia", "unpacked_dir": "release/linux-unpacked", "docker_platform": "linux/amd64" },
+  { "label": "Linux ARM64", "runner": "ubuntu-24.04-arm", "artifact": "linux-arm64", "arch": "arm64", "timeout_minutes": 55, "package_script": "package:linux:arm64", "app_path": "release/linux-arm64-unpacked/inertia", "unpacked_dir": "release/linux-arm64-unpacked", "docker_platform": "linux/arm64" },
+  { "label": "Windows x64", "runner": "windows-2025", "artifact": "windows-x64", "arch": "x64", "timeout_minutes": 55, "release_platform": "windows-x64", "release_package_script": "package:release:win", "app_path": "release/win-unpacked/Inertia.exe" },
+  { "label": "Windows ARM64", "runner": "windows-11-arm", "artifact": "windows-arm64", "arch": "arm64", "timeout_minutes": 70, "release_platform": "windows-arm64", "release_package_script": "package:release:win:arm64", "app_path": "release/win-arm64-unpacked/Inertia.exe" },
+  { "label": "macOS arm64", "runner": "macos-15", "artifact": "macos-arm64", "arch": "arm64", "timeout_minutes": 40, "release_platform": "macos-arm64", "release_package_script": "package:release:mac", "app_path": "release/mac-arm64/Inertia.app" },
+  { "label": "macOS x64", "runner": "macos-15-intel", "artifact": "macos-x64", "arch": "x64", "timeout_minutes": 70, "release_platform": "macos-x64", "release_package_script": "package:release:mac:x64", "app_path": "release/mac/Inertia.app" }
+]

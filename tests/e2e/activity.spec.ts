@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -7,10 +8,7 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import {
-  ensureWorkspaceTools,
-  selectWorkspaceTool,
-} from "./support/workspace-tools";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];

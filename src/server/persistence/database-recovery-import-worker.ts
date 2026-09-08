@@ -3,18 +3,15 @@ import { parentPort, workerData } from "node:worker_threads";
 
 import { RuntimeStore } from "../database";
 import { readDatabaseRecoveryExportFile } from "./database-export-file";
-import type { RecoveryImportWorkerFault } from "./database-recovery-import-worker-client";
+import {
+  parseRecoveryImportWorkerRequest,
+  type RecoveryImportWorkerEvent,
+  type RecoveryImportWorkerFault,
+} from "./database-recovery-import-worker-protocol";
 
-interface RecoveryImportWorkerData {
-  databasePath: string;
-  defaultWorkspacePath: string;
-  recoveryPath: string;
-  targetDirectory: string;
-  operationId: string;
-  fault?: RecoveryImportWorkerFault;
-}
-
-const input = workerData as RecoveryImportWorkerData;
+const parsedInput = parseRecoveryImportWorkerRequest(workerData);
+if (!parsedInput) throw new Error("The recovery import worker request is invalid.");
+const input = parsedInput;
 
 let faultStarted = false;
 function applyFault(phase: RecoveryImportWorkerFault["phase"]): void {
@@ -75,14 +72,18 @@ async function run(): Promise<void> {
     );
     store.close();
     store = null;
-    parentPort.postMessage({ type: "result", ok: true, result });
-  } catch (error) {
+    parentPort.postMessage({
+      type: "recovery-import.result", version: 1, operationId: input.operationId, ok: true, result,
+    } satisfies RecoveryImportWorkerEvent);
+  } catch {
     store?.close();
     parentPort.postMessage({
-      type: "result",
+      type: "recovery-import.result",
+      version: 1,
+      operationId: input.operationId,
       ok: false,
-      message: error instanceof Error ? error.message : "Recovery import failed.",
-    });
+      code: "import-failed",
+    } satisfies RecoveryImportWorkerEvent);
   }
 }
 

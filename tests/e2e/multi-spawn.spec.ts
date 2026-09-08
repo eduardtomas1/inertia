@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";

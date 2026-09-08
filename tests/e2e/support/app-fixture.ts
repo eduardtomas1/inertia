@@ -10,12 +10,13 @@ import { positionWorkbenchOnPrimary, waitForWorkbenchPage } from "./electron-wor
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
+import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
-import { attachElectronFixtureCloseFailure } from "./electron-failure-evidence";
+import { attachElectronFixtureCloseFailure, attachElectronFixtureRuntimeRecords } from "./electron-failure-evidence";
 import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
   readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
 import {
@@ -660,6 +661,7 @@ async function createSecondWorkspace(
 export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
+  assertE2eWindowResource(test.info().project.name, options.windowDisplay);
   const preview = await createPreviewServer();
   const { processTemporaryDirectory, testDirectory } =
     await createFixtureTemporaryDirectories();
@@ -975,6 +977,8 @@ export async function createAppFixture(
         requestRuntimeQuit: async () => await finishElectronPreparedQuit(activeApp),
         waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
+        onCleanupFailure: async (signal) =>
+          attachElectronFixtureRuntimeRecords(() => test.info(), testDirectory, signal),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),
       }).catch(async (error: unknown) => {
         await attachElectronFixtureCloseFailure(() => test.info(), error);

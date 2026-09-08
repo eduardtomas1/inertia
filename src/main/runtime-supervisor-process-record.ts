@@ -1,3 +1,6 @@
+import type { RuntimeShutdownUnconfirmedReason } from "../node/runtime-process-protocol.js";
+import type { RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
+import { runtimeRestartFailureMessage, runtimeShutdownFailureMessage } from "../node/runtime-failure-diagnostic.js";
 import type {
   RuntimeProcessRecord,
   RuntimeSupervisorOptions,
@@ -134,4 +137,28 @@ export function createRuntimeProcessRecord(options: {
     deletingAttachmentIds: new Set(),
     attachmentOperationTails: new Map(),
   };
+}
+
+export function recordRuntimeRestartRequested(
+  record: RuntimeProcessRecord,
+  event: RuntimeRestartRequestedEvent,
+  report: RuntimeSupervisorOptions["onRestartRequested"],
+): void {
+  if (!record.restartDiagnosticReported) {
+    record.restartDiagnosticReported = true;
+    try { report?.(event, record.generation); } catch { /* Diagnostics cannot affect cleanup. */ }
+  }
+  record.initiatingFailure ??= runtimeRestartFailureMessage(event);
+  record.reportedFailure ??= record.initiatingFailure;
+}
+
+export function recordRuntimeShutdownFailure(
+  record: RuntimeProcessRecord,
+  reason?: RuntimeShutdownUnconfirmedReason,
+): string {
+  const shutdown = runtimeShutdownFailureMessage(reason);
+  // Compose from the first validated cause, not the previous composite. Repeated
+  // shutdown observations remain bounded and cannot discard the initiating cause.
+  return record.reportedFailure = record.initiatingFailure
+    ? `${record.initiatingFailure} ${shutdown}` : shutdown;
 }

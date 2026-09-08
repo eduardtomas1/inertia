@@ -160,7 +160,10 @@ export interface WorkspaceSceneActions {
     targetProject?: Project | null,
     location?: NewConversationLocation,
   ) => void;
-  createConversationForSelection: (selection: ModelSelection) => Promise<void>;
+  createConversationForSelection: (
+    selection: ModelSelection,
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
+  ) => Promise<void>;
   sendMessage: (
     content: string,
     attachments: ChatAttachment[],
@@ -527,6 +530,7 @@ export function createWorkspaceSceneModel({
       onChooseCodexBinary: () => {
         void actions.chooseCodexBinary().catch(() => undefined);
       },
+      onReportCommand: (command) => actions.run(command.type, command),
       onRevealRuntimeLogs: () => window.inertia.revealRuntimeLogs(),
       onCopyRuntimeDiagnosticReport: () => window.inertia.copyRuntimeDiagnosticReport(
         connection.status === "online"

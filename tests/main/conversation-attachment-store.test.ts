@@ -1129,7 +1129,40 @@ describe("durable conversation attachment storage", () => {
 
   it("preserves private referenced bytes when metadata cannot be read", async () => {
     const dataDirectory = await root();
-    const store = await ConversationAttachmentStore.open(dataDirectory);
+    let foregroundReadStarted = false;
+    let foregroundReadStopped = false;
+    const nativeReadFailures: unknown[] = [];
+    let settleNativeRead!: () => void;
+    const nativeReadCompleted = new Promise<void>((resolveNativeRead) => {
+      settleNativeRead = resolveNativeRead;
+    });
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      readOperationRunner(operation, signal) {
+        if (!foregroundReadStarted) {
+          // Force the first batch to yield at its existing deadline. The
+          // background retry below still performs the real native read.
+          foregroundReadStarted = true;
+          if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
+          const result = new Promise<never>((_resolve, reject) => {
+            const onAbort = (): void => reject(signal.reason);
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) onAbort();
+          });
+          return {
+            result,
+            stopped: result.then(undefined, () => { foregroundReadStopped = true; }),
+          };
+        }
+        const reading = runConversationAttachmentStoreChild(operation, signal);
+        return {
+          ...reading,
+          result: reading.result.catch((error: unknown) => {
+            nativeReadFailures.push(error);
+            throw error;
+          }).finally(settleNativeRead),
+        };
+      },
+    });
     const payload = image("56565656-5656-4656-8656-565656565656");
     const record = join(store.directory, payload.attachment.id);
     const content = join(record, `${payload.attachment.id}.png`);
@@ -1139,10 +1172,21 @@ describe("durable conversation attachment storage", () => {
 
       // Missing metadata is an unsuccessful helper read, not its explicit
       // missing/invalid receipt. Keep those outcomes distinct in maintenance.
-      await expect(store.reconcile([payload.attachment])).rejects.toThrow(/read failed/u);
+      await expect(store.reconcile([payload.attachment])).resolves.toBeUndefined();
+      expect(foregroundReadStopped).toBe(true);
+      await nativeReadCompleted;
+      expect(nativeReadFailures).toEqual([
+        expect.objectContaining({ message: expect.stringMatching(/read failed/u) }),
+      ]);
+      await vi.waitFor(async () => {
+        await expect(store.retain([payload])).rejects.toThrow(/reconciliation failed/u);
+      });
       await expect(readFile(content)).resolves.toEqual(png);
       await expect(readdir(record)).resolves.toEqual([`${payload.attachment.id}.png`]);
-      await expect(store.retain([payload])).rejects.toThrow(/reconciliation failed/u);
+      await expect(store.usage()).resolves.toEqual({
+        bytes: 512 * 1024 * 1024,
+        records: 256,
+      });
     } finally {
       await store.close();
     }
@@ -1204,14 +1248,58 @@ describe("durable conversation attachment storage", () => {
     "retains referenced records that cannot be read with private permissions",
     async () => {
       const dataDirectory = await root();
-      const store = await openTestStore(dataDirectory);
-      const [retained] = await store.retain([image()]);
-      await chmod(retained!.path, 0o644);
+      let holdFirstMaintenanceRead = false;
+      let observingMaintenance = false;
+      let foregroundReadStopped = false;
+      let nativeReadFailure: unknown;
+      let settleNativeRead!: () => void;
+      const nativeReadCompleted = new Promise<void>((resolve) => { settleNativeRead = resolve; });
+      const store = await openTestStore(dataDirectory, {
+        readOperationRunner(operation, signal) {
+          if (holdFirstMaintenanceRead) {
+            holdFirstMaintenanceRead = false;
+            if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
+            const result = new Promise<never>((_resolve, reject) => {
+              const onAbort = (): void => reject(signal.reason);
+              signal.addEventListener("abort", onAbort, { once: true });
+              if (signal.aborted) onAbort();
+            });
+            return {
+              result,
+              stopped: result.then(undefined, () => { foregroundReadStopped = true; }),
+            };
+          }
+          const reading = runConversationAttachmentStoreChild(operation, signal);
+          if (!observingMaintenance) return reading;
+          return {
+            ...reading,
+            result: reading.result.catch((error: unknown) => {
+              nativeReadFailure = error;
+              throw error;
+            }).finally(settleNativeRead),
+          };
+        },
+      });
+      try {
+        const [retained] = await store.retain([image()]);
+        await chmod(retained!.path, 0o644);
 
-      await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
-      await expect(store.reconcile([retained!])).rejects.toThrow(/unsafe/u);
-      await expect(readFile(retained!.path)).resolves.toEqual(png);
-      await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
+        await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
+        holdFirstMaintenanceRead = true;
+        observingMaintenance = true;
+        // A yielded foreground batch is not a completed reconciliation. The
+        // background retry must report unsafe storage and keep writes blocked.
+        await expect(store.reconcile([retained!])).resolves.toBeUndefined();
+        expect(foregroundReadStopped).toBe(true);
+        await nativeReadCompleted;
+        expect(nativeReadFailure).toMatchObject({ message: expect.stringMatching(/unsafe/u) });
+        await vi.waitFor(async () => {
+          await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
+        });
+        await expect(readFile(retained!.path)).resolves.toEqual(png);
+      } finally {
+        await store.close();
+      }
     },
   );
 

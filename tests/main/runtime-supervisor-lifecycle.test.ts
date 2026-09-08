@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import { RuntimeSupervisor, type RuntimeSupervisorOptions } from "../../src/main/runtime-supervisor";
 import { RuntimeConnectionUnavailableError } from
   "../../src/main/runtime-supervisor-connection";
 import { runtimeSupervisorDefaults } from
@@ -48,6 +48,7 @@ class FakeUtilityProcess extends EventEmitter {
 }
 
 function createHarness(options: {
+  onRestartRequested?: RuntimeSupervisorOptions["onRestartRequested"];
   platform?: NodeJS.Platform;
   startupTimeoutMs?: number;
   recoverOwnedProcesses?: (
@@ -70,6 +71,7 @@ function createHarness(options: {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn((_pid: number, _deadlineAt: number) => true);
   const supervisor = new RuntimeSupervisor({
+    onRestartRequested: options.onRestartRequested,
     platform: options.platform,
     systemBootId: "test:00000000-0000-4000-8000-000000000001",
     workerOptions: {
@@ -518,6 +520,65 @@ describe("RuntimeSupervisor lifecycle", () => {
       phase: "restarting",
       lastError: message,
     });
+  });
+
+  it.each([false, true])("reports the first restart cause once even when diagnostics throws=%s", (throws) => {
+    const onRestartRequested = vi.fn(() => { if (throws) throw new Error("diagnostic failure"); });
+    const { children, supervisor } = createHarness({ onRestartRequested });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    const first = { type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "darwin-guardian-close", signal: "SIGUSR2" } };
+    children[0].message(first);
+    children[0].message({ type: "runtime.restart-requested", reason: "owned-process-cleanup-unconfirmed" });
+    children[0].message({ type: "runtime.shutdown-unconfirmed", reason: "owned-process-cleanup" });
+    children[0].exit(1);
+    expect(onRestartRequested).toHaveBeenCalledExactlyOnceWith(first, 1);
+    expect(supervisor.snapshot().lastError).toBe(
+      "The runtime restarted because owned process containment could not be confirmed."
+      + " (stage=darwin-guardian-close, signal=SIGUSR2)"
+      + " Runtime shutdown could not confirm owned-process cleanup.",
+    );
+  });
+
+  it("preserves the first startup failure and fatal cleanup outcome across repeated events", () => {
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start(); children[0].spawn();
+    children[0].message({ type: "runtime.startup-failed", message: "Runtime initialization failed (git-timeout)." });
+    const shutdown = { type: "runtime.shutdown-unconfirmed", reason: "incomplete-startup" };
+    children[0].message(shutdown);
+    const expected = "Runtime initialization failed (git-timeout)."
+      + " Runtime shutdown could not confirm cleanup after incomplete startup.";
+    expect(supervisor.snapshot()).toMatchObject({ phase: "restarting", lastError: expected });
+    expect(forceKill).toHaveBeenCalled();
+    expect(() => supervisor.connection()).toThrow(RuntimeConnectionUnavailableError);
+    for (let index = 0; index < 20; index += 1) children[0].message(shutdown);
+    children[0].message({ type: "runtime.startup-failed", message: "The local runtime could not start." });
+    expect(supervisor.snapshot().lastError).toBe(expected);
+    children[0].exit(1);
+    expect(supervisor.snapshot().lastError).toBe(expected);
+  });
+
+  it("keeps the validated first admission stage when startup rejects after a taint restart", () => {
+    const onRestartRequested = vi.fn();
+    const { children, forceKill, supervisor } = createHarness({ onRestartRequested });
+    supervisor.start(); children[0].spawn();
+    const first = { type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "darwin-readiness", signal: "SIGKILL", exitCode: 1 } };
+    children[0].message(first);
+    children[0].message({ type: "runtime.startup-failed", message: "Runtime initialization failed (git-cleanup-unconfirmed)." });
+    children[0].message({ type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "darwin-guardian-close", signal: "SIGUSR2" } });
+    children[0].message({ type: "runtime.shutdown-unconfirmed", reason: "incomplete-startup" });
+    children[0].exit(1);
+    expect(onRestartRequested).toHaveBeenCalledExactlyOnceWith(first, 1);
+    expect(forceKill).toHaveBeenCalled();
+    expect(supervisor.snapshot().lastError).toBe(
+      "The runtime restarted because owned process containment could not be confirmed."
+      + " (stage=darwin-readiness, signal=SIGKILL, exit-code=1)"
+      + " Runtime shutdown could not confirm cleanup after incomplete startup.",
+    );
   });
 
   it("does not start after shutdown closes an unused supervisor", async () => {

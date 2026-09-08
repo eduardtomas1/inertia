@@ -1092,9 +1092,12 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return false;
   }
 }
+import { issueReportSchema } from "../issue-report";
+
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),

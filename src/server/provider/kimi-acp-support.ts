@@ -164,7 +164,8 @@ export function kimiRuntimeFailure(
     .test(detail);
   const unsupportedTerminalAuth = /advertised terminal authentication without client terminal support/iu
     .test(detail);
-  const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth
+  const invalidTerminalAuth = /unsupported or invalid terminal authentication descriptor/iu.test(detail);
+  const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth || invalidTerminalAuth
     ? "provider-error"
     : isAuth
     ? "provider-error"
@@ -183,8 +184,10 @@ export function kimiRuntimeFailure(
                 : "provider-error";
   const message = unsupportedTerminalAuth
     ? "Kimi ACP advertised unsupported terminal authentication."
+    : invalidTerminalAuth
+    ? "Kimi ACP returned an unsupported or invalid terminal authentication descriptor."
     : isAuth
-    ? "Kimi Code is not authenticated. Run 'kimi login' and try again."
+    ? "Kimi Code is not authenticated. Connect Kimi Code in provider settings, then try again."
     : reason === "protocol-overflow"
       ? "Kimi ACP exceeded Inertia's bounded protocol limits."
       : reason === "malformed-protocol"
@@ -206,7 +209,7 @@ export function kimiRuntimeFailure(
   }) ?? undefined;
   const phase = isAuth ? "auth" : context.phase;
   const terminalEvent = isAuth
-    ? "authenticate"
+    ? context.terminalEvent
     : reason === "protocol-overflow" || reason === "malformed-protocol"
       ? "transport/frame"
       : reason === "transport-closed"

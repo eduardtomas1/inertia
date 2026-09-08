@@ -358,11 +358,14 @@ export function useDraftConversation({
     draft?.materialized?.acceptedTurnId,
   ]);
 
-  const chooseModel = (selection: ModelSelection): boolean => {
+  const chooseModel = (
+    selection: ModelSelection,
+    configuration?: Pick<Conversation, "accessMode" | "interactionMode">,
+  ): boolean => {
     if (!draft || draft.materialized) return false;
     explicitModelRef.current = true;
     const payload = withNewConversationModelSelection(
-      draft.payload,
+      { ...draft.payload, ...configuration },
       selection,
     );
     replaceDraft({

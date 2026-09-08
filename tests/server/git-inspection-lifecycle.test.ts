@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { gitInspectionLifecycle } from "../../src/server/git/inspection-lifecycle";
+import { GitInspectionLifecycle, gitInspectionLifecycle } from "../../src/server/git/inspection-lifecycle";
 import { withGitScanProcessSlot } from "../../src/server/git/scan-coordinator";
 import {
   GIT_PROCESS_TREE_TERMINATION_FAILURE,
@@ -8,6 +8,38 @@ import {
 } from "../../src/server/git/types";
 
 describe("Git inspection lifecycle", () => {
+  it("retains handled cleanup failures for later shutdown without an unhandled rejection", async () => {
+    const lifecycle = new GitInspectionLifecycle();
+    const failure = new GitError(
+      "operation-failed",
+      GIT_PROCESS_TREE_TERMINATION_FAILURE,
+    );
+    const unhandled = vi.fn();
+    const observeUnhandled = (reason: unknown): void => {
+      if (reason === failure) unhandled();
+    };
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      await expect(lifecycle.run({}, async () => {
+        throw failure;
+      })).rejects.toBe(failure);
+      // The command caller has handled its result before shutdown starts.
+      // Any independently rejected internal promise is still a runtime crash.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+
+      const cleanup = vi.fn(async () => undefined);
+      await expect(lifecycle.cancelAndDrainWhile(cleanup)).rejects.toBe(failure);
+      expect(cleanup).toHaveBeenCalledOnce();
+      const nextInspection = vi.fn(async () => "unreachable");
+      await expect(lifecycle.run({}, nextInspection)).rejects.toBe(failure);
+      expect(nextInspection).not.toHaveBeenCalled();
+      await expect(lifecycle.cancelAndDrainWhile(cleanup)).rejects.toBe(failure);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("cancels raw inspections and holds admission through shutdown drains", async () => {
     let releaseCleanup!: () => void;
     const cleanupStarted = vi.fn();

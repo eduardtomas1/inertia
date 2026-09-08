@@ -7,7 +7,9 @@ message, including in an existing split pane or detached window. Follow-up and
 inferred legacy messages open their collapsed history sections; long requests
 expand their full text. Composer drafts stay in their owning conversation.
 Search also preserves an unsent new-chat draft across later chat and project
-navigation until returning to New chat.
+navigation and a full application restart until returning to New chat. The draft
+keeps its original project and identity; ordinary draft dismissal still clears
+only its own saved state.
 
 ## Implementation
 
@@ -37,8 +39,8 @@ updates so hydration cannot clear a pending navigation before the timeline mount
 
 ## Verification
 
-- Focused unit, DOM and contract checks passed, including 54 cases for the final
-  navigation, hydration and legacy-history corrections. Coverage includes literal punctuation and Unicode; readable Markdown previews;
+- Focused unit, DOM and contract checks passed, including 74 cases for the final
+  navigation, hydration, legacy-history and durable-draft corrections. Coverage includes literal punctuation and Unicode; readable Markdown previews;
   canonical/chunked answers; archived and settled chats; legacy IDs; scan and
   result bounds; cancellation and shutdown; stale responses and result ownership;
   visible keyboard order; composition input; retry and focus; split/detached
@@ -50,9 +52,9 @@ updates so hydration cannot clear a pending navigation before the timeline mount
   TypeScript projects).
 - `npm run build:bundle`: passed with every existing budget unchanged. Unused
   schema construction is omitted, utility assets use compact hashed names, and
-  search navigation loads on demand. The measured main route is 735.6 KiB and
-  core JavaScript is 1,974.2 KiB; the limits remain 736 and 1,977 KiB.
-- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 11.4 s.
+  search navigation loads on demand. The measured main route is 735.9 KiB and
+  core JavaScript is 1,974.5 KiB; the limits remain 736 and 1,977 KiB.
+- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 12.8 s.
   They cover unloaded historical turns, saved and unsent-draft retention across
   projects, split/detached focus, compact layout, a full application restart,
   a follow-up buried inside a collapsed long historical turn, inferred legacy
@@ -60,11 +62,18 @@ updates so hydration cannot clear a pending navigation before the timeline mount
   delivered after the owning detached window reconnects. The reconnect test
   holds the socket until the server acknowledges the focus intent and then
   checks both delivery and actual native focus. It reproduced the hydration
-  cleanup defect before the subscription fix and passes afterward.
+  cleanup defect before the subscription fix and passes afterward. The unsent
+  new-chat draft scenario restarts the complete application and navigates to
+  another chat before reopening New chat. Against the preserved `3c346e24` build
+  (147 emitted JavaScript files checked by SHA-256), it failed at the composer
+  assertion with an empty value. After the durable ownership fix and integration
+  of main `7cf8cf91`, the identical test passed in 4.6 s. Three real-hook remount
+  cases also verify direct restoration, later navigation, a restart with no
+  selected chat, original project/model/identity, and unrelated draft retention.
 - Full `npm run check`: passed on Node 22.23.2. All 722 active test files passed
-  (7,704 tests passed; 12 files / 122 tests skipped by existing platform and
+  (7,727 tests passed; 14 files / 127 tests skipped by existing platform and
   environment conditions), followed by the production build and bundle gates.
-  The test phase took 107.05 s with two workers.
+  The test phase took 334.57 s with two workers.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 
@@ -100,3 +109,7 @@ using synthetic conversations and isolated temporary projects.
 ### Reconnected detached window
 
 ![Matching answer focused after its detached runtime client reconnects](reconnected-match.png)
+
+### Restored new-chat draft after restart
+
+![Unsent draft restored after a full restart and later chat navigation](restored-draft.png)

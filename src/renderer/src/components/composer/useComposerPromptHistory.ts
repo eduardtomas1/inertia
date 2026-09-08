@@ -100,12 +100,7 @@ export function useComposerPromptHistory({
     newSession(conversationId, signature, message),
   );
   const pendingStopRestoreRef = useRef<PendingStopRestore | null>(null);
-  const pendingCaretRef = useRef<{
-    textarea: HTMLTextAreaElement | null;
-    conversationId: string;
-    editorRevision: number;
-    position: number;
-  } | null>(null);
+  const pendingCaretRef = useRef<(() => void) | null>(null);
   const settlementInputsRef = useRef({
     conversationId,
     signature,
@@ -160,31 +155,29 @@ export function useComposerPromptHistory({
     onApplyMessage(next);
   };
 
-  // Apply the caret with the recalled value, before another key can arrive.
-  // A later interaction must never inherit placement from an older editor.
+  // Commit the caret with the recalled value before another key can arrive.
   useLayoutEffect(() => {
-    const pending = pendingCaretRef.current;
+    const placeCaret = pendingCaretRef.current;
     pendingCaretRef.current = null;
-    if (!pending) return;
-    const { textarea, position } = pending;
-    if (!textarea || !textarea.isConnected
-      || textareaRef.current !== textarea
-      || document.activeElement !== textarea
-      || conversationId !== pending.conversationId
-      || readEditorRevision() !== pending.editorRevision) return;
-    textarea.setSelectionRange(position, position);
+    placeCaret?.();
   });
 
-  const focusAt = (position: number, next: string): void => {
-    // Identical saved prompts need no value commit; their caret is already at
-    // the requested boundary, so do not leave work for an unrelated render.
-    if (next === message) {
-      pendingCaretRef.current = null;
-      return;
-    }
-    pendingCaretRef.current = {
-      textarea: textareaRef.current, conversationId,
-      editorRevision: readEditorRevision(), position,
+  const recallMessage = (next: string, position: number): void => {
+    onApplyMessage(next);
+    pendingCaretRef.current = null;
+    // Identical saved prompts already have the requested boundary and need no
+    // value commit. Never leave their placement for an unrelated render.
+    if (next === message) return;
+    const textarea = textareaRef.current;
+    const editorRevision = readEditorRevision();
+    pendingCaretRef.current = () => {
+      const current = settlementInputsRef.current;
+      if (!textarea || !textarea.isConnected
+        || current.textareaRef.current !== textarea
+        || document.activeElement !== textarea
+        || current.conversationId !== conversationId
+        || current.readEditorRevision() !== editorRevision) return;
+      textarea.setSelectionRange(position, position);
     };
   };
 
@@ -206,8 +199,7 @@ export function useComposerPromptHistory({
       const entry = entries[nextIndex]!;
       session.cursorId = entry.id;
       const next = session.edits.get(entry.id) ?? entry.content;
-      onApplyMessage(next);
-      focusAt(0, next);
+      recallMessage(next, 0);
       return true;
     }
 
@@ -216,15 +208,13 @@ export function useComposerPromptHistory({
     if (currentEntry) session.edits.set(currentEntry.id, message);
     if (cursorIndex === entries.length - 1) {
       session.cursorId = null;
-      onApplyMessage(session.scratch);
-      focusAt(session.scratch.length, session.scratch);
+      recallMessage(session.scratch, session.scratch.length);
       return true;
     }
     const entry = entries[cursorIndex + 1]!;
     session.cursorId = entry.id;
     const next = session.edits.get(entry.id) ?? entry.content;
-    onApplyMessage(next);
-    focusAt(next.length, next);
+    recallMessage(next, next.length);
     return true;
   };
 

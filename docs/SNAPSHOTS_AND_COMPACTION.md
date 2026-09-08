@@ -103,3 +103,10 @@ The measured macOS ARM64 renderer footprint is 738.3 KiB for the workbench,
 565.1 KiB for detached chat, and 1,985.9 KiB for shared core. The snapshot setup
 and attachment preview remain deferred; their measured additions have explicit
 budgets with less than 2 KiB of headroom. Other bundle limits are unchanged.
+
+Snapshot settings after disable revocation and masking-copy corrections:
+[dark](screenshots/inertia-snapshot-settings-privacy-dark.png) ·
+[light](screenshots/inertia-snapshot-settings-privacy-light.png).
+These Electron captures use the controlled desktop fixture at source
+`6ddedecdf0b62d79322aff70503ef90b0dda0c07`; both native UI scenarios passed.
+They show the point-of-use wording, not permission-protected screen-redaction proof.

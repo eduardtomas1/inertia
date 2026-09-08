@@ -70,12 +70,12 @@ export async function fetchRepository(
     : names.includes("origin") ? "origin" : names.length === 1 ? names[0]! : null;
   if (!remote) throw new GitError("invalid-input", "Several remotes are configured. Set an upstream for this branch or fetch a remote in the terminal.");
   if (!names.includes(remote)) throw new GitError("not-found", "The upstream remote is missing. Update branch tracking before fetching.");
-  // Reject names that can alias on case-insensitive filesystems, even when
-  // this checkout currently lives on a case-sensitive volume.
-  const namespace = remote.toLowerCase();
+  // Reject names that can alias on case- or normalization-insensitive
+  // filesystems, without changing the names passed to Git.
+  const namespace = remote.normalize("NFC").toLowerCase();
   if (names.some((name) => {
     if (name === remote) return false;
-    const other = name.toLowerCase();
+    const other = name.normalize("NFC").toLowerCase();
     return other === namespace || other.startsWith(`${namespace}/`) || namespace.startsWith(`${other}/`);
   })) {
     throw new GitError("invalid-input", "Remote tracking namespaces overlap. Rename the conflicting remotes in the terminal before fetching.");
@@ -118,7 +118,7 @@ async function assertExclusiveFetchDestinations(
     if (keys.stdout.toString("utf8").split("\0").some((key) => /^remote\..*\.fetch$/u.test(key))) throw error;
     return;
   }
-  const namespace = `refs/remotes/${remote.toLowerCase()}`;
+  const namespace = `refs/remotes/${remote.normalize("NFC").toLowerCase()}`;
   for (const record of records) {
     const separator = record.indexOf("\n");
     const key = record.slice(0, separator);
@@ -130,7 +130,7 @@ async function assertExclusiveFetchDestinations(
     if (value.startsWith("^")) continue; // Exclusions never own a destination.
     const colon = value.indexOf(":");
     if (colon < 0) continue; // Source-only fetches update no local ref.
-    const destination = value.slice(colon + 1).toLowerCase();
+    const destination = value.slice(colon + 1).normalize("NFC").toLowerCase();
     if (!destination) continue;
     const wildcard = destination.indexOf("*");
     const prefix = wildcard < 0 ? destination : destination.slice(0, wildcard);

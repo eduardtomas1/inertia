@@ -117,8 +117,13 @@ describe("Git workflows", () => {
     ["origin", "Origin"],
     ["origin", "Origin/team"],
     ["team/upstream", "TEAM"],
-  ])("refuses case-folded remote namespaces %s and %s before fetching", async (selected, other) => {
+    ["café", "cafe\u0301"],
+    ["cafe\u0301", "CAFÉ/team"],
+    ["café/team", "cafe\u0301"],
+  ])("refuses aliased remote namespaces %s and %s before fetching", async (selected, other) => {
     const { local, remote } = fixture();
+    // Preserve the actual config spelling instead of Git precomposing argv.
+    git(local, "config", "core.precomposeUnicode", "false");
     if (selected !== "origin") git(local, "remote", "rename", "origin", selected);
     git(remote, "branch", "should-not-fetch", "main");
     git(local, "config", `remote.${other}.url`, remote);
@@ -127,7 +132,7 @@ describe("Git workflows", () => {
     const config = readFileSync(join(local, ".git", "config"));
     writeFileSync(join(local, "tracked.txt"), "retained work\n");
 
-    await expect(fetchRepository(local)).rejects.toThrow("tracking namespaces overlap");
+    await expect.soft(fetchRepository(local)).rejects.toThrow("tracking namespaces overlap");
 
     expect(git(local, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
     expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
@@ -135,16 +140,20 @@ describe("Git workflows", () => {
   });
 
   it.each([
-    "+refs/heads/*:refs/remotes/origin/*",
-    "+refs/heads/private:refs/remotes/origin/private",
-    "+refs/heads/*:refs/remotes/Origin/*",
-    "+refs/*:refs/*",
-    "+refs/heads/*:refs/remotes/ori*/private",
-  ])("refuses another remote's overlapping fetch destination before mutation: %s", async (mapping) => {
+    ["origin", "+refs/heads/*:refs/remotes/origin/*"],
+    ["origin", "+refs/heads/private:refs/remotes/origin/private"],
+    ["origin", "+refs/heads/*:refs/remotes/Origin/*"],
+    ["origin", "+refs/*:refs/*"],
+    ["origin", "+refs/heads/*:refs/remotes/ori*/private"],
+    ["café", "+refs/heads/*:refs/remotes/cafe\u0301/*"],
+    ["cafe\u0301", "+refs/heads/private:refs/remotes/café/private"],
+  ])("refuses another remote's overlapping fetch destination for %s before mutation: %s", async (selected, mapping) => {
     const { local, remote } = fixture();
+    git(local, "config", "core.precomposeUnicode", "false");
+    if (selected !== "origin") git(local, "remote", "rename", "origin", selected);
     git(remote, "branch", "private", "main");
     git(local, "commit", "--allow-empty", "-m", "Other remote's retained tip");
-    git(local, "update-ref", "refs/remotes/origin/private", "HEAD");
+    git(local, "update-ref", `refs/remotes/${selected}/private`, "HEAD");
     git(local, "config", "remote.other.url", remote);
     git(local, "config", "remote.other.fetch", mapping);
     writeFileSync(join(local, "tracked.txt"), "retained work\n");
@@ -162,11 +171,13 @@ describe("Git workflows", () => {
     expect(readFileSync(join(local, "tracked.txt"), "utf8")).toBe("retained work\n");
   });
 
-  it("keeps disjoint remote destinations and selected negative fetch exclusions intact", async () => {
+  it.each(["origin", "cafe\u0301"])("keeps disjoint remote destinations and selected negative fetch exclusions intact for %s", async (selected) => {
     const { local, remote } = fixture();
+    git(local, "config", "core.precomposeUnicode", "false");
+    if (selected !== "origin") git(local, "remote", "rename", "origin", selected);
     git(remote, "branch", "topic", "main");
     git(remote, "branch", "private", "main");
-    git(local, "config", "--add", "remote.origin.fetch", "^refs/heads/private");
+    git(local, "config", "--add", `remote.${selected}.fetch`, "^refs/heads/private");
     git(local, "config", "remote.other.url", remote);
     git(local, "config", "remote.other.fetch", "+refs/heads/*:refs/remotes/other/*");
     git(local, "config", "--add", "remote.other.fetch", "^refs/heads/origin/*");
@@ -175,8 +186,8 @@ describe("Git workflows", () => {
 
     await fetchRepository(local);
 
-    expect(git(local, "rev-parse", "refs/remotes/origin/topic")).toBe(git(remote, "rev-parse", "main"));
-    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/private", "refs/remotes/other")).toBe("");
+    expect(git(local, "rev-parse", `refs/remotes/${selected}/topic`)).toBe(git(remote, "rev-parse", "main"));
+    expect(git(local, "for-each-ref", "--format=%(refname)", `refs/remotes/${selected}/private`, "refs/remotes/other")).toBe("");
     expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
   });
 

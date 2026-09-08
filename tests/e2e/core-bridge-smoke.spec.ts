@@ -38,7 +38,9 @@ const complete = () => {
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.id === "core-bridge-approval" && message.result) {
-    fs.writeFileSync(path.join(process.cwd(), "core-bridge-approval.json"), JSON.stringify(message.result));
+    const receiptPath = path.join(process.cwd(), "core-bridge-approval.json");
+    fs.writeFileSync(receiptPath + ".tmp", JSON.stringify(message.result));
+    fs.renameSync(receiptPath + ".tmp", receiptPath);
     complete();
     return;
   }

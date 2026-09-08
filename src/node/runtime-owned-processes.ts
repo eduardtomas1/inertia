@@ -1,5 +1,5 @@
-import { constants as osConstants } from "node:os";
-import { guardianCloseDiagnostic, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
+import { stopExactLinuxGuardian } from "./runtime-owned-process-linux-stop.js";
+import { guardianCloseDiagnostic, guardianSignalName, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
 import type {
@@ -223,11 +223,7 @@ export function requestRuntimeOwnedGuardianStop(
     claim.stopRequested = true;
     if (claim.admission) return claim.admission;
     if (claim.linuxIdentity && registry.darwinGuardianPath) {
-      return signalLinuxGuardianExactAsync(
-        claim.linuxIdentity,
-        registry.darwinGuardianPath,
-        "stop",
-      );
+      return stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
     }
     // A known Linux guardian always owns this stop attempt. Failure to prove
     // the exact helper signal is reported through the barrier with its durable
@@ -456,13 +452,14 @@ function monitorLinuxGuardian(
     registry.darwinGuardianPath,
     (authorizationObserved) => {
       const retired = registry.journal.retire(claim.ownershipId, registry.sessionCapability);
+      if (retired) claim.linuxTerminalObserved = true;
       if (retired && authorizationObserved) claim.authorizationObserved = true;
       return retired;
     },
     () => {
       registry.activeLinuxMonitors.delete(stopTrackedMonitor);
       claim.stopLinuxMonitor = undefined;
-      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-guardian-monitor" });
+      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-guardian-monitor", ...(claim.probe ? { probe: claim.probe } : {}) });
       settleLinuxMonitorConfirmation(false);
     },
     {
@@ -495,6 +492,7 @@ async function admitLinuxGuardian(
 ): Promise<boolean> {
   const guardianPath = registry.darwinGuardianPath;
   let durableClaim: RuntimeOwnedProcessClaim | null = null;
+  let stage: RuntimeOwnedProcessDiagnostic["stage"] = "linux-readiness";
   try {
     if (!guardianPath || activeRegistry !== registry) {
       throw new Error("The Linux owned process guardian is unavailable.");
@@ -510,6 +508,7 @@ async function admitLinuxGuardian(
       throw new Error("The Linux owned process guardian is not ready.");
     }
     claim.linuxIdentity = identity;
+    stage = "linux-durable-claim";
     durableClaim = registry.journal.claim(
       claim.ownershipId,
       registry.runtimeGenerationId,
@@ -524,6 +523,7 @@ async function admitLinuxGuardian(
       },
     );
     monitorLinuxGuardian(registry, claim, durableClaim);
+    stage = "linux-claim";
     let claimed = await signalLinuxGuardianExactAsync(
       identity,
       guardianPath,
@@ -546,21 +546,19 @@ async function admitLinuxGuardian(
     if (!claimed) {
       throw new Error("The Linux owned process guardian could not be claimed.");
     }
+    stage = "linux-durable-authorization";
     const owned = registry.journal.own(claim.ownershipId, registry.sessionCapability);
     if (!owned) {
       throw new Error("The Linux owned process authorization could not be persisted.");
     }
     if (claim.stopRequested || registry.tainted) {
-      if (!await signalLinuxGuardianExactAsync(
-        identity,
-        guardianPath,
-        "stop",
-        registry.admissionController.signal,
-      )) {
+      stage = "linux-stop";
+      if (!await stopExactLinuxGuardian(registry, claim, identity, () => activeRegistry === registry)) {
         throw new Error("The Linux owned process guardian could not be stopped.");
       }
       return true;
     }
+    stage = "linux-authorization";
     let authorized = await signalLinuxGuardianExactAsync(
       owned.process as LinuxProcessIdentity,
       guardianPath,
@@ -587,19 +585,15 @@ async function admitLinuxGuardian(
       throw new Error("The Linux owned process guardian could not be authorized.");
     }
     if (claim.stopRequested) {
-      if (!await signalLinuxGuardianExactAsync(
-        identity,
-        guardianPath,
-        "stop",
-        registry.admissionController.signal,
-      )) {
+      stage = "linux-stop";
+      if (!await stopExactLinuxGuardian(registry, claim, identity, () => activeRegistry === registry)) {
         throw new Error("The Linux owned process guardian could not be stopped.");
       }
     }
     return true;
   } catch {
     if (activeRegistry !== registry) return false;
-    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-admission" });
+    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage, ...(claim.probe ? { probe: claim.probe } : {}) });
     if (guardianPath) {
       if (claim.linuxIdentity) {
         await signalLinuxGuardianExactAsync(
@@ -817,6 +811,7 @@ async function admitDarwinGuardian(
 
 export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   spawnProcess: () => T,
+  probe?: RuntimeOwnedProcessDiagnostic["probe"],
 ): T {
   const registry = activeRegistry;
   if (!registry) return spawnProcess();
@@ -840,6 +835,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   });
   const claim: ActiveRuntimeOwnedProcessClaim = {
     ownershipId,
+    probe,
     released: false,
     stopRequested: false,
     waitForStopRequest,
@@ -855,7 +851,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     registry.claims.set(child, claim);
     child.once("close", (code, signal) => {
       if (typeof signal === "string") {
-        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("linux-guardian-close", signal, code));
+        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { ...guardianCloseDiagnostic("linux-guardian-close", signal, code), ...(claim.probe ? { probe: claim.probe } : {}) });
         return;
       }
       settleClosedLinuxGuardian(registry, claim, child.pid ?? 0);
@@ -1016,11 +1012,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           if (claim.released) return true;
           claim.stopRequested = true;
           if (!claim.admission && claim.linuxIdentity && registry.darwinGuardianPath) {
-            stopBarrier = signalLinuxGuardianExactAsync(
-              claim.linuxIdentity,
-              registry.darwinGuardianPath,
-              "stop",
-            );
+            stopBarrier = stopExactLinuxGuardian(registry, claim, claim.linuxIdentity, () => activeRegistry === registry);
           }
           return true;
         },
@@ -1203,6 +1195,19 @@ export function runtimeOwnedProcessStopConfirmation(
   return claim ? claim.released : null;
 }
 
+/** Joins the exact claim's existing admission/retirement work after child close. */
+export async function awaitRuntimeOwnedProcessStopped(child: ChildProcess): Promise<boolean> {
+  const registry = activeRegistry;
+  const claim = registry?.claims.get(child);
+  if (!registry || !claim) return true;
+  if (claim.admission) await claim.admission;
+  while (activeRegistry === registry && !claim.released && claim.releaseConfirmation) {
+    const release = claim.releaseConfirmation;
+    if (!await release && claim.releaseConfirmation === release) break;
+  }
+  return activeRegistry === registry && confirmRuntimeOwnedProcessStopped(child);
+}
+
 export function runtimeOwnedProcessCleanupConfirmed(): boolean {
   if (!activeRegistry) {
     return !supportedRuntimeOwnedProcessPlatform(process.platform);
@@ -1238,9 +1243,4 @@ export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolea
   }
   if (activeRegistry !== registry) return false;
   return runtimeOwnedProcessCleanupConfirmed();
-}
-
-function guardianSignalName(signal: unknown): unknown {
-  if (signal === 0) return null;
-  return Object.entries(osConstants.signals).find(([, value]) => value === signal)?.[0];
 }

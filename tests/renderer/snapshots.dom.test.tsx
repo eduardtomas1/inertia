@@ -1,5 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { useRef } from "react";
+import { startTransition, Suspense, useRef, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
@@ -34,6 +34,34 @@ it("shows app and window identity on a removable snapshot attachment", () => {
   expect(screen.getByText("Release checklist")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Remove attachment shot.png" }));
   expect(remove).toHaveBeenCalledWith(attachment);
+});
+
+it("cancels a delivery during an uncommitted conversation transition before invoking another chat's adoption", async () => {
+  let listener!: (value: SnapshotDelivery) => void;
+  const attemptedNextConversation = vi.fn();
+  const pending = new Promise<void>(() => undefined);
+  const cancel = vi.fn(async () => undefined);
+  const first = vi.fn(async () => undefined); const next = vi.fn(async () => undefined);
+  const snapshot = vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null }));
+  window.inertia = { ...original, snapshot, onSnapshot: (fn) => { listener = fn; return () => undefined; }, cancelAttachmentImport: cancel };
+  function Pane({ id }: { id: string }) {
+    const ref = useRef<HTMLTextAreaElement>(null);
+    useComposerSnapshots(id, id === "chat-a" ? first : next, ref);
+    if (id === "chat-b") { attemptedNextConversation(); throw pending; }
+    return <textarea ref={ref} aria-label={id} />;
+  }
+  function Workspace() {
+    const [id, setId] = useState("chat-a");
+    return <><button onClick={() => startTransition(() => setId("chat-b"))}>Next chat</button><Suspense fallback={<span>Loading chat</span>}><Pane id={id} /></Suspense></>;
+  }
+  render(<Workspace />);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Next chat" })); });
+  expect(attemptedNextConversation).toHaveBeenCalled();
+  expect(screen.getByRole("textbox", { name: "chat-a" })).toBeVisible();
+  expect(snapshot).toHaveBeenLastCalledWith({ type: "bind", conversationId: "chat-a" });
+  act(() => listener({ conversationId: "chat-a", selection: { batchId: "during-transition", attachments: [] } }));
+  await waitFor(() => expect(cancel).toHaveBeenCalledWith("during-transition"));
+  expect(first).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled();
 });
 
 it("keeps split composers from cancelling each other's deliveries and binds the focused pane", async () => {

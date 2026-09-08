@@ -60,6 +60,15 @@ describe("foreground snapshot pixels and context", () => {
     await expect(captureForegroundSnapshot()).resolves.toMatchObject({ ok: true });
     expect(native.foreground).toHaveBeenCalledTimes(4);
   });
+  it("uses the fresh verified labels, values and truncation state as provider context", async () => {
+    const label: SnapshotElement = { role: "static_text", name: "stale context ".repeat(100), value: "stale value", raw: {}, bounds: null, children: async () => [] };
+    native.foreground.mockResolvedValueOnce(foreground("Review window", [field(), label])).mockResolvedValueOnce(foreground())
+      .mockResolvedValue(foreground("Review window", [field(), { ...label, name: "Updated label", value: "Updated value" }]));
+    const result = await captureForegroundSnapshot();
+    expect(result.source.accessibility.nodes[2]).toMatchObject({ name: "Updated label", value: "Updated value" });
+    expect(result.source.accessibility.truncated).toBe(false);
+    expect(JSON.stringify(result.source)).not.toContain("stale");
+  });
   it("refuses an incomplete fresh accessibility scan after pixel capture", async () => {
     let nested: SnapshotElement = field();
     for (let depth = 0; depth < 18; depth++) {

@@ -41,6 +41,11 @@ export function useComposerSnapshots(
       receive: (event) => {
         if (!event.selection) { report(event.error, conversationId); return; }
         const selection = event.selection;
+        if (current.current.conversationId !== event.conversationId) {
+          void bridge.cancelAttachmentImport(selection.batchId).catch(() => undefined);
+          report("The selected chat changed. Take the snapshot again in the chat you want to use.");
+          return;
+        }
         void current.current.adopt({
           attachments: selection.attachments,
           commit: async (ids) => await bridge.commitAttachmentImport(selection.batchId, [...ids]),

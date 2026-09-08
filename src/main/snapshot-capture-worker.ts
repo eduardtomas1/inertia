@@ -51,8 +51,8 @@ export async function captureForegroundSnapshot() {
   const source: SnapshotSource = {
     appName: app.name.slice(0, 200), windowTitle: (window.name ?? "Captured window").slice(0, 500),
     capturedAt: new Date().toISOString(), width: output.width, height: output.height,
-    accessibility: { format: "element-tree", coordinateSpace: "captured-image", truncated: context.truncated,
-      nodes: context.nodes.map((node) => ({ ...node, ...(node.bounds ? { bounds: {
+    accessibility: { format: "element-tree", coordinateSpace: "captured-image", truncated: verification.truncated,
+      nodes: verification.nodes.map((node) => ({ ...node, ...(node.bounds ? { bounds: {
         x: (node.bounds.x - bounds.x) * scaleX * scale, y: (node.bounds.y - bounds.y) * scaleY * scale,
         width: node.bounds.width * scaleX * scale, height: node.bounds.height * scaleY * scale,
       } } : {}) })),

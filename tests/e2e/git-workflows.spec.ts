@@ -146,12 +146,23 @@ test("branch search retains failed choices and keeps keyboard focus visible", as
   const count = await menu.locator('.git-branch-results button:not(:disabled)').count();
   for (let index = 0; index < count; index += 1) await page.keyboard.press("ArrowDown");
   const focused = await menu.locator(".git-branch-results").evaluate((element) => {
-    const row = document.activeElement?.getBoundingClientRect();
+    const active = document.activeElement;
+    const row = active?.getBoundingClientRect();
     const bounds = element.getBoundingClientRect();
-    return { scrollTop: element.scrollTop, visible: Boolean(row && row.top >= bounds.top && row.bottom <= bounds.bottom + 1) };
+    const rectangle = (value: DOMRect | undefined): unknown => value && ({
+      top: value.top, bottom: value.bottom, left: value.left, right: value.right, width: value.width, height: value.height,
+    });
+    return {
+      scrollTop: element.scrollTop, visible: Boolean(row && row.top >= bounds.top && row.bottom <= bounds.bottom + 1),
+      activeTag: active?.tagName, activeRole: active?.getAttribute("role"), activeInside: element.contains(active),
+      activeBranch: active?.querySelector(".git-branch-name")?.textContent?.slice(0, 80),
+      row: rectangle(row), bounds: rectangle(bounds), menu: rectangle(element.closest('[role="menu"]')?.getBoundingClientRect()),
+      clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollBehavior: getComputedStyle(element).scrollBehavior,
+      enabledRows: element.querySelectorAll('button:not(:disabled)').length,
+    };
   });
   expect(focused.scrollTop).toBeGreaterThan(0);
-  expect(focused.visible).toBe(true);
+  expect(focused.visible, JSON.stringify({ keyPresses: count, ...focused })).toBe(true);
   await search.fill(initialBranch);
   await search.press("Enter");
   await expect(menu).toBeHidden();
@@ -181,7 +192,8 @@ test("commits reviewed paths and pushes existing commits while preserving unrela
 test("tracks an exact remote branch and fast-forwards incoming commits", async () => {
   const { page, workspaceDirectory } = app;
   await git(workspaceDirectory, "config", "core.autocrlf", "true");
-  await commitFromUi("Prepare clean checkout");
+  await git(workspaceDirectory, "add", "--", "sample.ts");
+  await git(workspaceDirectory, "commit", "-m", "Prepare clean checkout");
   await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
   await fetchFromUi();
   const trigger = page.locator('[data-header-menu="branch"] > button');

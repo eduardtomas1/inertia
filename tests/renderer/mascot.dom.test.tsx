@@ -2,12 +2,14 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
 import { emptyMascotStatus, type MascotBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import documentMarkup from "../../src/renderer/mascot.html?raw";
 
 const disposals: Array<() => void> = [];
 afterEach(() => { for (const dispose of disposals.splice(0)) dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); Reflect.deleteProperty(window, "mascot"); document.body.replaceChildren(); });
 
 function renderMascot() {
   const container = document.createElement("div");
+  container.innerHTML = new DOMParser().parseFromString(documentMarkup, "text/html").querySelector("#root")!.innerHTML;
   document.body.append(container);
   const dispose = mountMascot(container, window.mascot);
   let mounted = true;
@@ -173,6 +175,10 @@ describe("mascot rendering", () => {
     else if (ending === "blur") fireEvent(window, new Event("blur"));
     else fireEvent(ending === "lostpointercapture" ? handle : window, new PointerEvent(ending, { pointerId: 7 }));
     fireEvent.pointerUp(window, { pointerId: 7 });
+    if (ending === "unmount") {
+      fireEvent.keyDown(handle, { key: "ArrowDown" });
+      fireEvent.pointerDown(handle, { button: 0, pointerId: 8, pointerType: "mouse", isPrimary: true });
+    }
     expect(app.action.mock.calls.map(([action]) => action)).toEqual(["pickup", "drop"]);
     expect(handle.releasePointerCapture).toHaveBeenCalledWith(7);
   });

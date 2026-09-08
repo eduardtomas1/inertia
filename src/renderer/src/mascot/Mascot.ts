@@ -2,29 +2,14 @@ import {
   emptyMascotStatus, MASCOT_LABELS,
   type MascotAction, type MascotBridge, type MascotSnapshot,
 } from "../../../shared/mascot";
-import { mascotArtwork, mascotAssets } from "./assets";
+import { mascotArtwork, readMascotAssets } from "./assets";
 import { mascotActionLabel, mascotFallback } from "./copy";
 
 declare global { interface Window { mascot: MascotBridge } }
 
 /** An event-driven image and label: no framework, frame loop, or status polling. */
 export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void {
-  // All interpolated runtime content is assigned through textContent below.
-  root.innerHTML = `<main class="mascot" tabindex="0">
-    <div class="mascot-speech-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-    <div class="mascot-drag" title="Drag to move. Right-click for options.">
-      <img class="mascot-activity" width="96" height="96" alt="" draggable="false" />
-      <img class="mascot-pickup" width="96" height="96" alt="" draggable="false" />
-    </div>
-    <button class="mascot-status" type="button" title="Open chat. Arrow keys move the mascot; Escape hides it.">
-      <span class="mascot-content" role="status" aria-live="polite" aria-atomic="true">
-        <span class="mascot-label"></span>
-        <span class="mascot-chat"></span>
-        <span class="mascot-message"></span>
-      </span>
-      <span class="mascot-footer"><span class="mascot-detail"></span><span class="mascot-action"></span></span>
-    </button>
-  </main>`;
+  const mascotAssets = readMascotAssets(root);
   const main = root.querySelector("main")!;
   const image = root.querySelector("img")!;
   const pickupImage = root.querySelector<HTMLImageElement>(".mascot-pickup")!;
@@ -36,6 +21,8 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const message = root.querySelector(".mascot-message")!;
   const actionLabel = root.querySelector(".mascot-action")!;
   const media = matchMedia("(prefers-reduced-motion: reduce)");
+  const listeners = new AbortController();
+  const eventOptions = { signal: listeners.signal };
   let snapshot: MascotSnapshot = {
     status: emptyMascotStatus("unavailable"), preferences: { enabled: false, motion: false },
   };
@@ -119,35 +106,25 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const unsubscribe = bridge.onChanged((value) => { received = true; update(value); });
   void bridge.snapshot().then((value) => { if (!received) update(value); })
     .catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
-  main.addEventListener("keydown", key);
-  button.addEventListener("click", open);
-  handle.addEventListener("pointerdown", pickup);
-  handle.addEventListener("lostpointercapture", pointerEnd);
-  window.addEventListener("pointerup", pointerEnd);
-  window.addEventListener("pointercancel", pointerEnd);
-  window.addEventListener("pointermove", pointerMove);
-  document.addEventListener("visibilitychange", visibility);
-  media.addEventListener("change", render);
-  window.addEventListener("focus", focus);
-  window.addEventListener("blur", blur);
+  main.addEventListener("keydown", key, eventOptions);
+  button.addEventListener("click", open, eventOptions);
+  handle.addEventListener("pointerdown", pickup, eventOptions);
+  handle.addEventListener("lostpointercapture", pointerEnd, eventOptions);
+  window.addEventListener("pointerup", pointerEnd, eventOptions);
+  window.addEventListener("pointercancel", pointerEnd, eventOptions);
+  window.addEventListener("pointermove", pointerMove, eventOptions);
+  document.addEventListener("visibilitychange", visibility, eventOptions);
+  media.addEventListener("change", render, eventOptions);
+  window.addEventListener("focus", focus, eventOptions);
+  window.addEventListener("blur", blur, eventOptions);
   render();
   // Set the keyboard target without requesting native window activation.
   main.focus({ preventScroll: true });
   return () => {
     active = false;
+    listeners.abort();
     drop();
     clearTimeout(timer);
     unsubscribe();
-    main.removeEventListener("keydown", key);
-    button.removeEventListener("click", open);
-    handle.removeEventListener("pointerdown", pickup);
-    handle.removeEventListener("lostpointercapture", pointerEnd);
-    window.removeEventListener("pointerup", pointerEnd);
-    window.removeEventListener("pointercancel", pointerEnd);
-    window.removeEventListener("pointermove", pointerMove);
-    document.removeEventListener("visibilitychange", visibility);
-    media.removeEventListener("change", render);
-    window.removeEventListener("focus", focus);
-    window.removeEventListener("blur", blur);
   };
 }

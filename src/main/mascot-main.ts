@@ -32,6 +32,7 @@ export class MascotMain {
   private drag: { offset: { x: number; y: number }; started: number } | null = null;
   private dragTimer: ReturnType<typeof setInterval> | null = null;
   private pickupOffset: { x: number; y: number } | null = null;
+  private ignoringMouse = false;
   private suspended = false;
   private registered = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
@@ -121,6 +122,7 @@ export class MascotMain {
       },
     });
     this.window = window;
+    this.ignoringMouse = false;
     const unregister = this.options.registerHealthRenderer(window.webContents);
     this.options.registerProtocol(window.webContents.session);
     hardenDesktopSession(window.webContents.session);
@@ -131,6 +133,7 @@ export class MascotMain {
     window.webContents.on("will-attach-webview", (event) => event.preventDefault());
     window.webContents.on("context-menu", () => this.menu(window));
     window.webContents.on("before-mouse-event", (_event, mouse) => {
+      if (mouse.type === "mouseMove") this.updateHitTesting(mouse);
       // Capture the grab point before dispatching to the renderer. The OS
       // cursor may already have moved when its asynchronous pickup arrives.
       if (mouse.type === "mouseDown" && mouse.button === "left") {
@@ -160,7 +163,10 @@ export class MascotMain {
       if (this.window === window) this.failed();
       throw new Error("The mascot window could not be loaded.");
     }
-    if (this.window === window && !window.isDestroyed()) window.showInactive();
+    if (this.window === window && !window.isDestroyed()) {
+      this.updateHitTesting();
+      window.showInactive();
+    }
   }
 
   private failed(): void {
@@ -196,7 +202,29 @@ export class MascotMain {
     if (current.x !== bounds.x || current.y !== bounds.y || current.width !== bounds.width || current.height !== bounds.height) window.setBounds(bounds);
     this.state.position = { x: bounds.x, y: bounds.y };
     this.save();
+    this.updateHitTesting();
   };
+
+  private updateHitTesting(point?: { x: number; y: number }): void {
+    // macOS has no setShape input region. Transparency alone still intercepts
+    // clicks, so forward hover events over the empty area and restore input as
+    // soon as the pointer reaches the bubble or character. No polling or IPC.
+    const window = this.window;
+    if (process.platform !== "darwin" || !window || window.isDestroyed()) return;
+    if (!point) {
+      const cursor = screen.getCursorScreenPoint(); const bounds = window.getBounds();
+      point = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
+    }
+    const { x, y } = point;
+    const character = x >= 72 && x < 168 && y >= 136 && y < 234;
+    const bubble = (x - Math.max(18, Math.min(x, 222))) ** 2
+      + (y - Math.max(14, Math.min(y, 102))) ** 2 <= 14 ** 2;
+    const ignore = !this.drag && !character && !bubble;
+    if (ignore !== this.ignoringMouse) {
+      window.setIgnoreMouseEvents(ignore, { forward: true });
+      this.ignoringMouse = ignore;
+    }
+  }
 
   private readonly scheduleSave = (): void => {
     if (!this.canPosition || this.drag) return;
@@ -227,11 +255,15 @@ export class MascotMain {
     this.broadcast();
   }
 
-  private moveDrag(): void {
+  private moveDrag(dropped = false): void {
     const window = this.window; const drag = this.drag;
     if (!drag || !window || window.isDestroyed()) return;
     const cursor = screen.getCursorScreenPoint();
-    const bounds = mascotBounds({ x: cursor.x - drag.offset.x, y: cursor.y - drag.offset.y }, screen.getAllDisplays(), cursor);
+    const point = { x: Math.round(cursor.x - drag.offset.x), y: Math.round(cursor.y - drag.offset.y) };
+    // Keep the grab point attached to the cursor across monitor seams. Clamping
+    // to one display while held causes a whole-window jump at a shared edge.
+    // Electron already supplies DIP here, including on mixed-scale desktops.
+    const bounds = dropped ? mascotBounds(point, screen.getAllDisplays(), cursor) : { ...point, ...MASCOT_SIZE };
     const previous = window.getBounds();
     if (bounds.x !== previous.x || bounds.y !== previous.y || bounds.width !== previous.width || bounds.height !== previous.height) {
       window.setBounds(bounds, false);
@@ -248,7 +280,7 @@ export class MascotMain {
   private endDrag(): void {
     this.pickupOffset = null;
     if (!this.drag) return;
-    this.moveDrag();
+    this.moveDrag(true);
     this.clearDrag();
     this.reposition();
     this.broadcast();

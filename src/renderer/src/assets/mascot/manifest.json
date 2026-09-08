@@ -46,7 +46,13 @@
       "animation": "pickup.webp",
       "poster": "pickup.png",
       "durationMs": 2000,
-      "frameCount": 24
+      "frameCount": 48,
+      "framesPerSecond": 24,
+      "lift": {
+        "strip": "pickup-lift.webp",
+        "frameCount": 13,
+        "durationMs": 400
+      }
     }
   }
 }

@@ -27,6 +27,7 @@ vi.mock("electron", async () => {
     focus = vi.fn();
     setFocusable = vi.fn();
     setShape = vi.fn();
+    setIgnoreMouseEvents = vi.fn();
     setMenu = vi.fn();
     setBounds = vi.fn((value: Rectangle) => {
       if (JSON.stringify(this.bounds) !== JSON.stringify(value)) { this.bounds = value; this.emit("move"); }
@@ -64,6 +65,7 @@ interface WindowDouble {
   showInactive: ReturnType<typeof vi.fn>;
   focus: ReturnType<typeof vi.fn>;
   setFocusable: ReturnType<typeof vi.fn>;
+  setIgnoreMouseEvents: ReturnType<typeof vi.fn>;
   setBounds: ReturnType<typeof vi.fn<(bounds: Rectangle) => void>>;
   getBounds(): Rectangle;
   isDestroyed(): boolean;
@@ -124,6 +126,36 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: false, motion: true }]);
     expect(overlay.isDestroyed()).toBe(true);
     expect(app.unregister).toHaveBeenCalledOnce();
+  });
+
+  it("passes empty macOS corners through without losing captured drags or polling at idle", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const hover = (x: number, y: number): void => {
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y });
+    };
+    hover(20, 220);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    hover(120, 40);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    hover(4, 0); // Transparent rounded corner of the status bubble.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    hover(120, 184);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    hover(-100, -100); // Pointer capture must continue outside the window.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    await app.invoke(MASCOT_IPC.action, ["drop"], overlay);
+    hover(20, 220);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
+    const calls = overlay.setIgnoreMouseEvents.mock.calls.length;
+    hover(20, 220);
+    vi.advanceTimersByTime(500);
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenCalledTimes(calls);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("rejects foreign windows, subframes, navigation, malformed arguments and overlay configuration", async () => {
@@ -187,7 +219,7 @@ describe("mascot window ownership", () => {
     harness.displays.push({ workArea: { x: -1920, y: -200, width: 1920, height: 1080 } });
     harness.cursor = { x: -1, y: 20 };
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toEqual({ x: -240, y: -164, width: 240, height: 240 });
+    expect(overlay.getBounds()).toEqual({ x: -121, y: -164, width: 240, height: 240 });
     harness.cursor = { x: -1900, y: -190 };
     await app.invoke(MASCOT_IPC.action, ["drop"], overlay); // Flush the last cursor sample.
     expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 240 });
@@ -196,6 +228,28 @@ describe("mascot window ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
     app.mascot.suspend(); app.mascot.attach(); await Promise.resolve();
     expect((harness.windows[2] as WindowDouble).getBounds()).toEqual(overlay.getBounds());
+  });
+
+  it("keeps each DIP of movement continuous across mixed-scale monitor seams, then bounds the drop", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const displays = [
+      { workArea: { x: 0, y: 24, width: 1440, height: 876 }, scaleFactor: 2 },
+      { workArea: { x: 1440, y: 100, width: 1920, height: 1080 }, scaleFactor: 1.25 },
+    ];
+    harness.displays = displays;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    for (const x of [1438, 1439, 1440, 1441, 1440, 1439, 1441]) {
+      harness.cursor = { x, y: 420 };
+      vi.advanceTimersByTime(16);
+      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 236, width: 240, height: 240 });
+    }
+    await app.invoke(MASCOT_IPC.action, ["drop"], overlay);
+    expect(overlay.getBounds()).toEqual({ x: 1440, y: 236, width: 240, height: 240 });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each(["blur", "hide", "reload", "display", "timeout", "suspend", "native release"])("ends a lost drag on %s with no background tracking", async (reason) => {

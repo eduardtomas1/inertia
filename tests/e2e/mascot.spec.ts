@@ -33,10 +33,32 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     let overlay = await opened;
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "idle");
     await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
+    await expect.poll(() => overlay.locator(".mascot-activity").evaluate((element) =>
+      element instanceof HTMLImageElement && element.complete && element.naturalWidth === 96)).toBe(true);
     const bubble = await overlay.locator(".mascot-status").boundingBox();
     const character = await overlay.locator(".mascot-activity").boundingBox();
     expect(bubble!.y + bubble!.height).toBeLessThan(character!.y);
     await expect(overlay.locator(".mascot-speech-dots i")).toHaveCount(3);
+    if (process.platform === "darwin") {
+      const input = await app.electronApp.evaluateHandle(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+        const original = window.setIgnoreMouseEvents.bind(window);
+        let last: boolean | undefined;
+        window.setIgnoreMouseEvents = (ignore, options) => { last = ignore; original(ignore, options); };
+        return { last: () => last, restore: () => { window.setIgnoreMouseEvents = original; } };
+      });
+      try {
+        await overlay.mouse.move(120, 184);
+        await overlay.mouse.move(20, 220);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
+        await overlay.mouse.move(120, 40);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);
+        await overlay.mouse.move(4, 0);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
+        await overlay.mouse.move(120, 184);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);
+      } finally { await input.evaluate((value) => value.restore()); await input.dispose(); }
+    }
     await capture(overlay, "idle", info);
     await main.locator(".mascot-settings").evaluate((element) => element.scrollIntoView({ block: "center" }));
     await main.screenshot({ path: info.outputPath("mascot-setting.png") });
@@ -122,6 +144,9 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       const target = await cursor.evaluate((value) => [value.bounds.x - 100, value.bounds.y - 80]);
       await expect.poll(() => app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === "Inertia mascot")!.getPosition())).toEqual(target);
       await expect(overlay.locator(".mascot-pickup")).toHaveCSS("opacity", "1");
+      await expect.poll(() => overlay.locator(".mascot-pickup").evaluate((element) =>
+        element instanceof HTMLImageElement && element.complete && element.naturalWidth === 96)).toBe(true);
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "-1152px");
       await capture(overlay, "pickup", info);
       await overlay.emulateMedia({ reducedMotion: "reduce" });
       await expect(overlay.locator(".mascot-pickup")).toHaveAttribute("data-animated", "false");
@@ -137,6 +162,35 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
         const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
         return { focused: window.isFocused(), focusable: window.isFocusable() };
       })).toEqual(focusBeforeDrag);
+      // Control the CSS transition clock, so early-release coverage does not
+      // depend on whether a loaded native CI host responds within 400ms.
+      await overlay.locator(".mascot-lift").evaluate((element) => {
+        const main = element.closest("main")!;
+        const observer = new MutationObserver(() => {
+          if (main.dataset.dragging !== "true") return;
+          observer.disconnect();
+          for (const animation of element.getAnimations()) {
+            if (animation instanceof CSSTransition && animation.transitionProperty === "background-position-x") animation.pause();
+          }
+        });
+        observer.observe(main, { attributes: true, attributeFilter: ["data-dragging"] });
+      });
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      const partial = await overlay.locator(".mascot-lift").evaluate((element) => {
+        const transition = element.getAnimations().find((animation) =>
+          animation instanceof CSSTransition && animation.transitionProperty === "background-position-x");
+        if (!transition) throw new Error("The rig lift transition did not start");
+        transition.currentTime = 160;
+        return Number.parseFloat(getComputedStyle(element).backgroundPositionX);
+      });
+      expect(partial).toBeLessThan(0);
+      expect(partial).toBeGreaterThan(-1152);
+      await overlay.mouse.up();
+      expect(await overlay.locator(".mascot-lift").evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).backgroundPositionX))).toBeGreaterThanOrEqual(partial);
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "0px");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
     } finally { await cursor.evaluate((value) => value.restore()); await cursor.dispose(); }
     await overlay.emulateMedia({ reducedMotion: "reduce" });
     await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");

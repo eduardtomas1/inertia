@@ -9,10 +9,8 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
-  // Pointer capture, drag cancellation and the pickup crossfade measure 7.4 KiB.
-  // Keep the optional overlay isolated with less than 0.2 KiB of headroom.
-  mascotFirstLoadJavaScript: 7.5 * kibibyte,
-  mascotJavaScript: 7.5 * kibibyte,
+  mascotFirstLoadJavaScript: 6 * kibibyte,
+  mascotJavaScript: 6 * kibibyte,
   mascotSettingsJavaScript: 4 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and

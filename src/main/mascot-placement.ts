@@ -52,8 +52,8 @@ export function mascotBounds(
     x: fallback.x + fallback.width - MASCOT_SIZE.width - 24,
     y: fallback.y + fallback.height - MASCOT_SIZE.height - 24,
   };
-  // While dragging, the cursor chooses the display. Using the overlay's top-left
-  // would trap the mascot on the previous monitor until its whole offset crosses.
+  // On drop the cursor chooses the display, even when the overlay still spans
+  // a seam. Restoration and keyboard placement use the saved top-left point.
   const target = anchor ?? point;
   const distance = (area: Rectangle): number => (
     Math.max(area.x - target.x, 0, target.x - area.x - area.width + 1) ** 2

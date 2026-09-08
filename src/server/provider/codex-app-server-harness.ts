@@ -334,6 +334,9 @@ function startCodexCompaction(
 
   const result = (async (): Promise<ProviderRunResult> => {
     let completionTimer: NodeJS.Timeout | undefined;
+    let candidateFailure: Error | undefined;
+    const failureAbort = new AbortController();
+    const persistenceSignal = AbortSignal.any([abortController.signal, failureAbort.signal]);
     try {
       if (
         options.harnessConfiguration
@@ -351,14 +354,14 @@ function startCodexCompaction(
       const observedCompactionTurnIds = new Set<string>();
       const candidates: CodexCompactionCandidate[] = [];
       let observedCandidateCount = 0;
-      let candidateFailure: Error | undefined;
       let candidateWaiter: {
         reject: (error: Error) => void;
         resolve: (candidate: CodexCompactionCandidate) => void;
       } | undefined;
       const failCandidates = (error: Error): void => {
-        if (candidateFailure) return;
+        if (candidateFailure || abortController.signal.aborted) return;
         candidateFailure = error;
+        failureAbort.abort();
         candidateWaiter?.reject(error);
         candidateWaiter = undefined;
       };
@@ -577,7 +580,7 @@ function startCodexCompaction(
               // cannot starve the real completion; the existing deadline,
               // candidate cap, and exact baseline check still apply.
               await delay(CODEX_COMPACTION_PERSISTENCE_RETRY_MS, undefined, {
-                signal: abortController.signal,
+                signal: persistenceSignal,
               });
               if (candidateFailure) throw candidateFailure;
               candidates.push(candidate);
@@ -604,11 +607,14 @@ function startCodexCompaction(
       };
     } catch (error) {
       const cleanupConfirmed = !isProcessTreeTerminationUnconfirmed(error);
-      const status = cancelRequested || abortController.signal.aborted
+      // The coordinator may cancel while owned cleanup is still draining. It
+      // must not replace a failure already observed by this operation.
+      const status = !candidateFailure && (cancelRequested || abortController.signal.aborted)
         ? "cancelled" as const
         : "failed" as const;
-      const message = error instanceof Error
-        ? error.message
+      const failure = cleanupConfirmed ? candidateFailure ?? error : error;
+      const message = failure instanceof Error
+        ? failure.message
         : "Codex could not compact the context.";
       emitter.status(status, status === "failed" ? message : undefined);
       return {

@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   SDKMessage,
@@ -39,6 +39,7 @@ import {
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 
 const COMPACTION_PHASE_TRACE_LIMIT = 32;
 const COMPACTION_PHASE_DEADLINE_MS = 20_000;
@@ -624,6 +625,78 @@ describe("provider compaction adapters", { concurrent: false }, () => {
     }))).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
     expect(turnListRequests).toBe(3);
     expect(manager.isRunning("codex-compact-delayed-page")).toBe(false);
+  });
+
+  it.each(["deadline", "user cancellation"])("preserves the first %s through default-deadline persistence cleanup", async (first) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let releaseCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+    let reachedPersistence!: () => void;
+    const persistence = new Promise<void>((resolve) => { reachedPersistence = resolve; });
+    let cleanupStartedAfterCancellation: boolean | undefined;
+    let settled = false;
+    const conversationId = `codex-compact-first-${first}`;
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => {
+      try {
+        return await runWithClient({
+          request: async (method, params = {}) => {
+            if (method === "thread/resume") {
+              return {
+                thread: { id: params.threadId },
+                initialTurnsPage: { data: [{ id: "previous-turn" }] },
+              };
+            }
+            if (method === "thread/compact/start") {
+              emitCodexCompactionLifecycle(options.onNotification!, {
+                itemId: "compact-delayed-persistence",
+                threadId: "thread-existing",
+                turnId: "compact-delayed-turn",
+              });
+              return {};
+            }
+            if (method === "thread/turns/list") {
+              reachedPersistence();
+              return { data: [{ id: "previous-turn" }] };
+            }
+            throw new Error(`Unexpected control request: ${method}`);
+          },
+        });
+      } finally {
+        cleanupStartedAfterCancellation = options.signal?.aborted;
+        await cleanup;
+      }
+    };
+    const manager = trackManager(ProviderManager.createForTests(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([createCodexAppServerHarness({ withControlClient })]),
+    ));
+    try {
+      const result = manager.compact(nativeProviderRunInput({
+        providerId: "codex", conversationId, cwd: process.cwd(), prompt: "/compact",
+        interactionMode: "build", access: "supervised", sessionId: "thread-existing",
+      })).then((value) => { settled = true; return value; });
+      await persistence;
+      await vi.advanceTimersByTimeAsync(0);
+      if (first === "user cancellation") expect(manager.cancel(conversationId)).toBe(true);
+      // Exercise the equal, real default harness/coordinator deadlines, keeping
+      // owned cleanup pending across both callbacks rather than shortening one.
+      await vi.advanceTimersByTimeAsync(PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
+      expect.soft(cleanupStartedAfterCancellation).toBe(first === "user cancellation");
+      expect(settled).toBe(false);
+      expect(manager.isRunning(conversationId)).toBe(true);
+      releaseCleanup();
+      await expect(result).resolves.toMatchObject({
+        status: first === "deadline" ? "failed" : "cancelled",
+        cleanupConfirmed: true,
+        ...(first === "deadline" ? { message: "Codex context compaction timed out." } : {}),
+      });
+      expect(manager.isRunning(conversationId)).toBe(false);
+    } finally {
+      releaseCleanup();
+      vi.useRealTimers();
+    }
   });
 
   it("does not authorize compaction from item completion alone", async () => {

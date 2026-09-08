@@ -1,0 +1,15 @@
+# Frozen Snapshot prepared-quit diagnostic proposal
+
+Application source is fixed at `3ca1ba81dc241e51de7e368327e420bd03482cb9`, including its reviewed lock graph, Playwright1.62.1 and existing shutdown contracts. This branch changes only this document, one manual-only workflow, and a test-only observation in `tests/e2e/activity.spec.ts`. No production source, fixture cleanup implementation, assertion, deadline, worker count, retry, tag, or release is changed.
+
+The workflow checks out driver and frozen application separately. It rejects any driver diff outside the three explicit paths, checks exact source/driver/tree/lock identities, builds frozen application bytes before copying the single test overlay, and hashes the complete built output before/after execution. The driver and source paths must be used explicitly by every Git invocation.
+
+The existing activity beforeAll installs wrappers on the actual main BrowserWindow handle obtained from its page and the actual main process.exit. Each wrapper preserves receiver, original arguments, original call, return behavior, and thrown exception; it writes only a fixed stage string through synchronous stderr before or after the original call. The wrapper is test-only and disappears when the isolated Electron process exits. No global BrowserWindow prototype or production file is modified.
+
+The four allowed markers are window-destroy-entry, window-destroy-return, window-destroy-throw, and process-exit-entry. The Node test listener retains at most eight records with a fixed stage and wall timestamp; partial-line retention is bounded to128 characters. It never retains arbitrary stderr, provider output, raw profiles, environment values, credentials, paths, or PID arguments. Markers are attached only after the original app.close rejects, and the original error is rethrown. Existing runtime/launcher/native-sample evidence remains active.
+
+The entire original isolated project runs once with its normal two workers, unchanged test ordering, unchanged90-second isolated outer clocks and30-second assertion clocks. The original5-second retained Electron child-exit check and strict rejection of forced close remain intact. No activity-only filter or retry is used. Setup and builds are not product-test success, and a green diagnostic would only mean non-reproduction in this run.
+
+This bounded diagnostic omits the preceding full platform unit, packaging and display-sensitive phases from the historical native lane. Its two trusted setup evaluation calls and up to four synchronous tiny marker writes can perturb timing; it cannot establish byte-identical execution timing. It aims only to distinguish whether native mainWindow.destroy returns and whether process.exit is entered after confirmed privileged cleanup. A missing marker without supporting original evidence remains ambiguous.
+
+The proposal has not been dispatched. Root must review the precise diff, source guards, and test-only semantics before authorizing one commit/push/manual dispatch. No repeated run is authorized by this document.

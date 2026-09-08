@@ -19,6 +19,44 @@ let attachmentImagePath!: AppFixture["attachmentImagePath"];
 let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
+const quitStages: Array<{ stage: string; at: string }> = [];
+let stopQuitStageCapture = (): void => undefined;
+
+async function observePreparedQuit(): Promise<void> {
+  const stderr = electronApp.process().stderr;
+  if (!stderr) throw new Error("The diagnostic requires the owned Electron stderr pipe.");
+  let partial = "";
+  const capture = (chunk: Buffer): void => {
+    const text = partial + chunk.toString("utf8");
+    const lines = text.split("\n");
+    partial = (lines.pop() ?? "").slice(-128);
+    for (const line of lines) {
+      const match = /^INERTIA_QUIT_STAGE:(window-destroy-entry|window-destroy-return|window-destroy-throw|process-exit-entry)$/u.exec(line);
+      if (match && quitStages.length < 8) quitStages.push({ stage: match[1]!, at: new Date().toISOString() });
+    }
+  };
+  stderr.on("data", capture);
+  stopQuitStageCapture = () => { stderr.off("data", capture); partial = ""; };
+  const window = await electronApp.browserWindow(page);
+  await window.evaluate((ownedWindow) => {
+    const writeSync = process.getBuiltinModule("node:fs").writeSync;
+    const marker = (stage: string): void => {
+      try { writeSync(2, `INERTIA_QUIT_STAGE:${stage}\n`); } catch { /* Observation cannot replace the original call. */ }
+    };
+    const destroy = ownedWindow.destroy;
+    ownedWindow.destroy = function (this: typeof ownedWindow, ...args: Parameters<typeof destroy>): void {
+      marker("window-destroy-entry");
+      try { Reflect.apply(destroy, this, args); marker("window-destroy-return"); }
+      catch (error) { marker("window-destroy-throw"); throw error; }
+    };
+    const exit = process.exit;
+    process.exit = function (this: NodeJS.Process, ...args: Parameters<typeof exit>): never {
+      marker("process-exit-entry");
+      return Reflect.apply(exit, this, args) as never;
+    };
+  });
+  await window.dispose();
+}
 
 const measureComposerRail = async (composer: Locator): Promise<{
   dockWidth: number;
@@ -73,10 +111,18 @@ test.beforeAll(async () => {
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;
   expectNoViewportOverflow = app.expectNoViewportOverflow;
+  await observePreparedQuit();
 });
 
 test.afterAll(async () => {
-  await app.close();
+  try { await app.close(); }
+  catch (error) {
+    await test.info().attach("prepared-quit-fixed-stages", {
+      body: Buffer.from(JSON.stringify({ sourceSha: "3ca1ba81dc241e51de7e368327e420bd03482cb9", stages: quitStages })),
+      contentType: "application/json",
+    }).catch(() => undefined);
+    throw error;
+  } finally { stopQuitStageCapture(); }
 });
 
 test("omits Runs and preserves adjacent toolbar navigation responsively", async () => {

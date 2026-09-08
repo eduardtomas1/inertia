@@ -169,7 +169,7 @@ test("searches persisted history after a full application restart", async () => 
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("returns to an unsent new-chat draft after following a search result", async () => {
+test("returns to a search-preserved new-chat draft after restart and later navigation", async ({ browserName: _browserName }, info) => {
   await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
   await expect(page.getByRole("heading", { name: /message-search fixture/u, level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
@@ -178,9 +178,12 @@ test("returns to an unsent new-chat draft after following a search result", asyn
   const input = await search();
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
+  ({ page } = await app.restart());
+  await expect(page.getByRole("heading", { name: targetTitle, level: 1 })).toBeVisible();
   await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
   await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(unsent);
+  await evidence(page, info, "restored-draft");
   expect(app.rendererErrors).toEqual([]);
 });
 

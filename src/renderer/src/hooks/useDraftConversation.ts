@@ -104,6 +104,7 @@ export function useDraftConversation({
     const stored = readPersistedDraftConversation();
     return (
       stored
+      && !stored.resumeAfterSearch
       &&
       !persistedConversationId
       && stored.conversation.projectId === snapshot?.activeProjectId
@@ -130,7 +131,8 @@ export function useDraftConversation({
     if (stored && snapshot?.projects.some(({ id }) => id === stored.conversation.projectId)) {
       independentDraftRef.current = independent;
       selectionWhenDraftOpenedRef.current = persistedConversationId;
-      replaceDraft({ ...stored, materialized: null }, false);
+      writePersistedDraftConversation({ ...stored, resumeAfterSearch: false });
+      replaceDraft({ conversation: stored.conversation, payload: stored.payload, materialized: null }, false);
       return;
     }
     discard();
@@ -354,7 +356,7 @@ export function useDraftConversation({
       forgetPersistedDraftConversation(stored.conversation.id);
       return;
     }
-    if (snapshot.activeProjectId === stored.conversation.projectId) {
+    if (!stored.resumeAfterSearch && snapshot.activeProjectId === stored.conversation.projectId) {
       replaceDraft({ ...stored, materialized: null }, false);
     }
   }, [

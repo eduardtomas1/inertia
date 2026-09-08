@@ -18,6 +18,7 @@ import type { AppView } from "../appView";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigation";
 import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
+import { readPersistedDraftConversation, writePersistedDraftConversation } from "../utils/draftConversationPersistence";
 
 type DraftConversationNavigation = {
   changeProject: (projectId: string) => void;
@@ -75,8 +76,10 @@ export function useProjectChatNavigation({
     deactivateGlobalChat();
     if (preserveDraft) {
       resumeSearchDraftRef.current = true;
+      const stored = readPersistedDraftConversation();
+      if (stored) writePersistedDraftConversation({ ...stored, resumeAfterSearch: true });
       draftConversation.clear();
-    } else if (globalChatActive || !resumeSearchDraftRef.current) {
+    } else if (globalChatActive || !(resumeSearchDraftRef.current || readPersistedDraftConversation()?.resumeAfterSearch)) {
       resumeSearchDraftRef.current = false;
       draftConversation.discard();
     }
@@ -123,7 +126,7 @@ export function useProjectChatNavigation({
       setGlobalChatActive(false);
       return;
     }
-    if (resumeSearchDraftRef.current) draftConversation.start(targetProject.id, true, true);
+    if (resumeSearchDraftRef.current || readPersistedDraftConversation()?.resumeAfterSearch) draftConversation.start(targetProject.id, true, true);
     else draftConversation.start(targetProject.id, true);
     resumeSearchDraftRef.current = false;
     setGlobalChatActive(true);

@@ -113,6 +113,9 @@ Transport write completion is not renderer acknowledgment.
   (7,748 tests passed; 14 files / 127 tests skipped by existing platform and
   environment conditions), followed by the production build and bundle gates.
   The test phase took 346.41 s with two workers.
+- These local full and desktop results were recorded at `5b654fc8`, before
+  merging main’s Playwright 1.63 update (`3e2cc181`). That clean merge changes no
+  application source; its updated dependency graph still requires CI verification.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 

@@ -146,10 +146,17 @@ export function createProviderInfoRefresh(
       if (replaceOwned(owner, detected) && !dependencies.isClosed()) {
         dependencies.broadcastSnapshot();
       }
-      const enriched = await Promise.all(detections.map(enrichedSnapshot));
-      if (replaceOwned(owner, enriched) && !dependencies.isClosed()) {
-        dependencies.broadcastSnapshot();
-      }
+      await Promise.all(detections.map(async (detection) => {
+        if (!detection.canRun) return;
+        const enriched = await enrichedSnapshot(detection);
+        // Each provider owns its catalog. A different provider's pending
+        // metadata must not hide this completed read from Settings/composers.
+        // Keep joining every read so refresh activity and shutdown retain
+        // their original lifetime, and recheck ownership before publication.
+        if (replaceOwned(owner, [enriched]) && !dependencies.isClosed()) {
+          dependencies.broadcastSnapshot();
+        }
+      }));
     }
   };
 

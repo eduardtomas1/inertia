@@ -113,6 +113,27 @@ describe("Git workflows", () => {
     expect(git(local, "rev-parse", "refs/remotes/origin/team/private")).toBe(protectedTip);
   });
 
+  it.each([
+    ["origin", "Origin"],
+    ["origin", "Origin/team"],
+    ["team/upstream", "TEAM"],
+  ])("refuses case-folded remote namespaces %s and %s before fetching", async (selected, other) => {
+    const { local, remote } = fixture();
+    if (selected !== "origin") git(local, "remote", "rename", "origin", selected);
+    git(remote, "branch", "should-not-fetch", "main");
+    git(local, "config", `remote.${other}.url`, remote);
+    git(local, "config", `remote.${other}.fetch`, `+refs/heads/*:refs/remotes/${other}/*`);
+    const refs = git(local, "for-each-ref", "--format=%(refname) %(objectname)");
+    const config = readFileSync(join(local, ".git", "config"));
+    writeFileSync(join(local, "tracked.txt"), "retained work\n");
+
+    await expect(fetchRepository(local)).rejects.toThrow("tracking namespaces overlap");
+
+    expect(git(local, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+    expect(readFileSync(join(local, "tracked.txt"), "utf8")).toBe("retained work\n");
+  });
+
   it("lists local, remote, symbolic and occupied branches without exposing worktree paths", async () => {
     const { root, local } = fixture();
     git(local, "worktree", "add", "-b", "occupied", join(root, "other"));

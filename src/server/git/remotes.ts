@@ -69,7 +69,14 @@ export async function fetchRepository(
     : names.includes("origin") ? "origin" : names.length === 1 ? names[0]! : null;
   if (!remote) throw new GitError("invalid-input", "Several remotes are configured. Set an upstream for this branch or fetch a remote in the terminal.");
   if (!names.includes(remote)) throw new GitError("not-found", "The upstream remote is missing. Update branch tracking before fetching.");
-  if (names.some((name) => name !== remote && (name.startsWith(`${remote}/`) || remote.startsWith(`${name}/`)))) {
+  // Reject names that can alias on case-insensitive filesystems, even when
+  // this checkout currently lives on a case-sensitive volume.
+  const namespace = remote.toLowerCase();
+  if (names.some((name) => {
+    if (name === remote) return false;
+    const other = name.toLowerCase();
+    return other === namespace || other.startsWith(`${namespace}/`) || namespace.startsWith(`${other}/`);
+  })) {
     throw new GitError("invalid-input", "Remote tracking namespaces overlap. Rename the conflicting remotes in the terminal before fetching.");
   }
   validateName(remote, "The remote name");

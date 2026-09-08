@@ -80,9 +80,26 @@ process cleanup authority, admission policy or cache freshness rule changes.
   the model to appear with the same runtime PID/generation and exactly two
   catalog reads. This tests the ordinary confirmed-cleanup recovery path;
   quarantined installations do not become retryable by inference.
+- [Draft feedback run 34217964274](https://github.com/eduardtomas1/inertia/actions/runs/34217964274)
+  tested `a1b04cbbc87f8a2f25c8cf453d047dfd06cf00d5`. All executed lanes passed,
+  including Linux coverage, Windows/macOS lifecycle sentinels and Linux Electron
+  (35 display-sensitive, 61 isolated with four existing skips, four recovery).
+  The Linux log explicitly records the new Settings recovery scenario and both
+  existing provider Settings scenarios. The merge-ready gate correctly rejected
+  draft feedback as merge authorization; this was not full merge certification.
 - Native Settings screenshots, full local verification, portable contracts and
-  exact-head hosted CI are recorded in the PR after execution. Until then the
-  new native scenario is authored coverage, not a claimed pass.
+  final exact-head hosted CI/review results are recorded in the PR after execution.
+
+The native macOS ARM64 run (Node 22.23.2, `CI=true`, one Playwright worker)
+passed all three selected Settings tests in 12.9 seconds without retries. These
+unaltered screenshots were captured and visually inspected from that run. The
+displayed Node version and model are synthetic fixture data, not live-provider
+certification. The two images show ordinary recovery in one runtime; they do not
+purport to reconstruct the earlier nightly failure.
+
+| Completed unavailable attempt | After Settings Refresh |
+| --- | --- |
+| ![Empty catalog and visible Refresh instruction](pr-evidence/provider-catalog-unavailable.png) | ![Recovered catalog in the same runtime](pr-evidence/provider-catalog-recovered.png) |
 
 The separate early-close Browser teardown failure observed by PR 312 has a
 stopped utility runtime but a pending privileged-cleanup receipt. Its retained

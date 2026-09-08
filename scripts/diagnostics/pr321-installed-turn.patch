@@ -1,0 +1,48 @@
+--- a/scripts/package-smoke-history-runtime.mjs
++++ b/scripts/package-smoke-history-runtime.mjs
+@@ -1,6 +1,7 @@
+ import { deepStrictEqual, ok } from "node:assert/strict";
+ import { randomUUID } from "node:crypto";
+ import WebSocket from "ws";
++import { createTurnObserver } from "./diagnostics/pr321-turn-observer.mjs";
+ 
+ const projectKeys = ["id", "name", "path", "normalizedPath", "repositoryIdentity", "repositoryRoot", "repositoryRelativePath", "createdAt"];
+ const conversationKeys = ["id", "projectId", "title", "providerId", "modelSelection", "worktreePath", "branch", "createdAt"];
+@@ -13,6 +14,7 @@
+   const socket = new WebSocket(url, {
+     headers: { Origin: "http://127.0.0.1" }, maxPayload: 1024 * 1024,
+   });
++  const observer = createTurnObserver();
+   const pending = new Map();
+   let snapshot = null;
+   let failure = null;
+@@ -42,6 +44,7 @@
+         snapshot = event.snapshot;
+         welcomeResolve();
+       }
++      observer.observe(event);
+       const entry = pending.get(event.requestId);
+       if (!entry) return;
+       if (event.type === "request.error") {
+@@ -55,6 +58,7 @@
+   });
+   return {
+     welcome,
++    observeFailure: (value, acceptance, phase) => observer.failed(value, acceptance, snapshot, phase),
+     snapshot: () => {
+       if (failure) throw failure;
+       return snapshot;
+@@ -238,7 +242,12 @@
+       let proof;
+       do {
+         value = await detail(client, conversationId);
+-        proof = completedTurnProof(value, acceptance, challenge);
++        try {
++          proof = completedTurnProof(value, acceptance, challenge);
++        } catch (error) {
++          client.observeFailure(value, acceptance, phase);
++          throw error;
++        }
+         if (!proof) await new Promise((resolve) => setTimeout(resolve, 25));
+       } while (!proof);
+       const turn = proof.agentTurns[0];

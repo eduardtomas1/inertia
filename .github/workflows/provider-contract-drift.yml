@@ -1,259 +1,110 @@
-name: Provider contract drift
+name: PR321 installed Windows turn-start diagnostic
 
 on:
-  schedule:
-    - cron: "17 5 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: provider-contract-drift
-  cancel-in-progress: true
-
 jobs:
-  provider-drift:
-    name: Latest provider compatibility canary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    continue-on-error: true
-    permissions:
-      contents: read
-    outputs:
-      failed: ${{ steps.collect.outputs.failed }}
-      guardian_toolchain: ${{ steps.guardian_toolchain.outcome }}
-      locked_install: ${{ steps.locked_install.outcome }}
-      locked_tests: ${{ steps.locked_tests.outcome }}
-      cursor_install: ${{ steps.cursor_install.outcome }}
-      latest_probe: ${{ steps.latest_probe.outcome }}
-      latest_versions: ${{ steps.collect.outputs.latest_versions }}
+  installed-turn:
+    name: Observe exact installed upgrade once
+    runs-on: windows-2025
+    # Keep the failing lane's outer budget and all per-scenario bounds intact.
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
     env:
       CI: "true"
-
+      INERTIA_BENCHMARK_REPORT: performance-results/platform-windows-x64.json
+      INERTIA_DESKTOP_BENCHMARK_REPORT: performance-results/desktop-windows-x64.json
+      INERTIA_PACKAGE_BENCHMARK_REPORT: performance-results/package-windows-x64.json
     steps:
-      - name: Check out source
+      - name: Check out exact failed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          ref: 3be5a9ce64f776969ebc23f87a44ad52c70a4641
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Check out reviewed diagnostic driver separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install Linux guardian toolchain
-        id: guardian_toolchain
+          ref: ${{ github.sha }}
+          path: diagnostic-driver
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Match native CI temporary fixture location
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+      - name: Match disposable native CI Defender exclusions
         continue-on-error: true
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
-
-      - name: Install the product's locked dependency graph
-        id: locked_install
-        continue-on-error: true
-        run: npm ci
-
-      - name: Exercise locked provider types and protocol fixtures
-        id: locked_tests
-        if: >-
-          steps.guardian_toolchain.outcome == 'success'
-          && steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        run: |
-          npm run pretest
-          npm run typecheck
-          npm run test:portable
-
-      - name: Resolve and download the latest official Cursor CLI in isolation
-        id: cursor_install
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/provider-drift"
-          installer="${RUNNER_TEMP}/provider-drift/cursor-install.sh"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            https://cursor.com/install \
-            --output "$installer"
-          sha256sum "$installer"
-          download_url="$(
-            sed -n 's/^DOWNLOAD_URL="\(https:\/\/[^"]*\)"/\1/p' "$installer"
-          )"
-          download_url="${download_url/\$\{OS\}/linux}"
-          download_url="${download_url/\$\{ARCH\}/x64}"
-          case "$download_url" in
-            https://downloads.cursor.com/*/linux/x64/agent-cli-package.tar.gz) ;;
-            *) echo "Unexpected Cursor download URL: $download_url" >&2; exit 1 ;;
-          esac
-          archive="${RUNNER_TEMP}/provider-drift/cursor-agent.tar.gz"
-          cursor_root="${RUNNER_TEMP}/provider-drift/cursor"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            "$download_url" \
-            --output "$archive"
-          sha256sum "$archive"
-          mkdir -p "$cursor_root"
-          tar --extract --gzip --file "$archive" --strip-components=1 --directory "$cursor_root"
-          cursor_agent="$cursor_root/cursor-agent"
-          test -x "$cursor_agent"
-          printf 'cursor_agent=%s\n' "$cursor_agent" >> "$GITHUB_OUTPUT"
-
-      - name: Probe latest SDK types, runtime surfaces, and official CLI help
-        id: latest_probe
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+      - name: Install the exact source dependency graph
+        uses: ./.github/actions/install-dependencies
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: x64
+        run: npm run test:native-architecture
+      - name: Preserve original platform benchmark prefix
+        run: npm run benchmark:platform:smoke
+      - name: Preserve native Codex discovery prefix
+        run: npm run test:windows-codex
+      - name: Build native helper
+        run: npm run pretest
+      - name: Build exact unchanged application
+        run: npm run build:packaged
+      - name: Package exact unchanged candidate
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_RELEASE_PLATFORM: windows-x64
+        run: npm run package:release:win
+      - name: Download original checksummed public predecessor
         shell: bash
         env:
-          CURSOR_AGENT: ${{ steps.cursor_install.outputs.cursor_agent }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          probe_args=(
-            --workspace "${RUNNER_TEMP}/provider-drift/npm"
-            --report "${RUNNER_TEMP}/provider-drift/report.json"
-          )
-          if [[ -n "$CURSOR_AGENT" ]]; then
-            probe_args+=(--cursor-agent "$CURSOR_AGENT")
-          fi
-          node scripts/provider-drift-probe.mjs "${probe_args[@]}"
-
-      - name: Collect privacy-limited canary result
-        id: collect
+          node scripts/ci/download-windows-n-minus-one.mjs --current-version 0.0.54 --channel stable --architecture x64 --output-directory release/n-minus-one
+      - name: Verify packaged Electron fuses
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:fuses -- release/win-unpacked/Inertia.exe
+      - name: Smoke unchanged unpacked candidate
+        run: npm run test:package-smoke
+      - name: Verify source and inject failure-only smoke observer after packaging
+        run: node diagnostic-driver/scripts/diagnostics/prepare-pr321-installed-turn.mjs
+      - name: Run original installed predecessor and candidate sequence once
+        id: installed
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
+        run: npm run test:windows-installer-smoke
+      - name: Preserve outcome independently of profile cleanup
         if: always()
-        shell: bash
         env:
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ steps.guardian_toolchain.outcome }}
-          LOCKED_INSTALL_OUTCOME: ${{ steps.locked_install.outcome }}
-          LOCKED_TESTS_OUTCOME: ${{ steps.locked_tests.outcome }}
-          CURSOR_INSTALL_OUTCOME: ${{ steps.cursor_install.outcome }}
-          LATEST_PROBE_OUTCOME: ${{ steps.latest_probe.outcome }}
+          INSTALLED_OUTCOME: ${{ steps.installed.outcome }}
         run: |
-          set -euo pipefail
-          failed=false
-          for outcome in \
-            "$GUARDIAN_TOOLCHAIN_OUTCOME" \
-            "$LOCKED_INSTALL_OUTCOME" \
-            "$LOCKED_TESTS_OUTCOME" \
-            "$CURSOR_INSTALL_OUTCOME" \
-            "$LATEST_PROBE_OUTCOME"
-          do
-            if [[ "$outcome" == "failure" ]]; then
-              failed=true
-            fi
-          done
-          report="${RUNNER_TEMP}/provider-drift/report.json"
-          versions="$(
-            node -e '
-              const fs = require("node:fs");
-              const allowed = new Set([
-                "@agentclientprotocol/sdk",
-                "@anthropic-ai/claude-agent-sdk",
-                "@anthropic-ai/sdk",
-                "@modelcontextprotocol/sdk",
-                "@opencode-ai/sdk",
-                "@openai/codex",
-                "@anthropic-ai/claude-code",
-                "@google/gemini-cli",
-                "@moonshot-ai/kimi-code",
-                "opencode-ai",
-              ]);
-              let report = {};
-              try { report = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
-              const values = Object.entries(report.latestPackages ?? {})
-                .filter(([name, version]) =>
-                  allowed.has(name) &&
-                  typeof version === "string" &&
-                  /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)
-                )
-                .map(([name, version]) => name + "@" + version);
-              process.stdout.write(values.join(", "));
-            ' "$report"
-          )"
-          printf 'failed=%s\n' "$failed" >> "$GITHUB_OUTPUT"
-          printf 'latest_versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
-
-  report-failure:
-    name: Report provider compatibility failure
-    needs: provider-drift
-    if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    continue-on-error: true
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Open or update the provider drift issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          PROVIDER_DRIFT_RESULT: ${{ needs.provider-drift.result }}
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ needs.provider-drift.outputs.guardian_toolchain }}
-          LOCKED_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.locked_install }}
-          LOCKED_TESTS_OUTCOME: ${{ needs.provider-drift.outputs.locked_tests }}
-          CURSOR_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.cursor_install }}
-          LATEST_PROBE_OUTCOME: ${{ needs.provider-drift.outputs.latest_probe }}
-          LATEST_VERSIONS: ${{ needs.provider-drift.outputs.latest_versions }}
+          New-Item -ItemType Directory -Force diagnostic-results | Out-Null
+          [ordered]@{
+            schema = 1
+            source = '3be5a9ce64f776969ebc23f87a44ad52c70a4641'
+            driver = $env:GITHUB_SHA
+            runId = $env:GITHUB_RUN_ID
+            attempt = $env:GITHUB_RUN_ATTEMPT
+            installedOutcome = $env:INSTALLED_OUTCOME
+          } | ConvertTo-Json | Set-Content -Path diagnostic-results/outcome.json
+      - name: Preserve bounded synthetic fixture evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          script: |
-            const title = "Weekly provider compatibility canary failed";
-            const marker = "<!-- inertia-provider-contract-drift -->";
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const outcomes = [
-              ["Canary job", process.env.PROVIDER_DRIFT_RESULT],
-              ["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME],
-              ["Locked dependency install", process.env.LOCKED_INSTALL_OUTCOME],
-              ["Locked type and protocol suite", process.env.LOCKED_TESTS_OUTCOME],
-              ["Isolated Cursor CLI install", process.env.CURSOR_INSTALL_OUTCOME],
-              ["Latest SDK and CLI probe", process.env.LATEST_PROBE_OUTCOME],
-            ];
-            const versions = (process.env.LATEST_VERSIONS || "")
-              .split(", ")
-              .filter(Boolean)
-              .map((value) => `- \`${value}\``)
-              .join("\n");
-            const body = [
-              marker,
-              "The secret-free weekly provider compatibility canary failed.",
-              "",
-              `[Inspect the workflow run](${runUrl})`,
-              "",
-              "### Step outcomes",
-              ...outcomes.map(([name, outcome]) => `- ${name}: **${outcome || "unavailable"}**`),
-              "",
-              "### Resolved latest packages",
-              versions || "- Unavailable because installation did not complete.",
-              "",
-              "The issue intentionally contains no raw CLI output, environment values, prompts,",
-              "workspace content, paths, credentials, or diagnostics. Use the linked secret-free",
-              "runner log for bounded command output.",
-            ].join("\n");
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo,
-              state: "all",
-              per_page: 100,
-            });
-            const existing = issues.find((issue) =>
-              !issue.pull_request &&
-              (issue.title === title || issue.body?.includes(marker))
-            );
-            if (!existing) {
-              await github.rest.issues.create({ ...context.repo, title, body });
-              return;
-            }
-            if (existing.state !== "open") {
-              await github.rest.issues.update({
-                ...context.repo,
-                issue_number: existing.number,
-                state: "open",
-              });
-            }
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: existing.number,
-              body,
-            });
+          name: pr321-installed-turn-windows-x64
+          path: |
+            diagnostic-results
+            performance-results
+          if-no-files-found: warn
+          retention-days: 5

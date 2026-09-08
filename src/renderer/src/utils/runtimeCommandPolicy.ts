@@ -210,6 +210,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "support.report.edit": shortMutation,
   "support.report.submit": reviewOperation,
   "support.report.reconcile": reviewOperation,
+  "support.report.retire": shortMutation,
   "review.summary.cancel": shortMutation,
   "review.summary.generate": reviewOperation,
   "settings.update": {

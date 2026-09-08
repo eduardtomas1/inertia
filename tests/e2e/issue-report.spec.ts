@@ -10,6 +10,22 @@ test("preserves the private report chat and requires a reviewed preview before p
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("radio", { name: "Light", exact: true }).click();
     await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+    // Settings menus must stay in Chromium's top layer on Linux too.
+    for (const name of ["Report agent and model", "Report reasoning", "Diagnostic scope"]) {
+      const control = page.getByRole("combobox", { name, exact: true });
+      await expect(control).toHaveCSS("appearance", "base-select");
+      if (await control.isDisabled()) continue;
+      await control.click();
+      await expect.poll(() => control.evaluate((element) => element.matches(":open"))).toBe(true);
+      await expect(control.getByRole("option").last()).toBeVisible();
+      if (name === "Diagnostic scope") {
+        const picker = testInfo.outputPath("issue-report-scope-picker.png");
+        await page.screenshot({ path: picker, animations: "disabled" });
+        await testInfo.attach("In-page issue-report picker", { path: picker, contentType: "image/png" });
+      }
+      await page.keyboard.press("Escape");
+      await expect(control).toBeFocused();
+    }
     await page.getByLabel("What happened?").fill("After cancelling a running chat, sending the next message leaves it waiting. I expected the next message to start normally. Steps: start a turn, cancel it, then send another message.");
     const form = testInfo.outputPath("issue-report-describe.png");
     await page.screenshot({ path: form, animations: "disabled" });

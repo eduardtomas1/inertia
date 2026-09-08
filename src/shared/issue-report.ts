@@ -13,7 +13,7 @@ export const issueReportInputSchema = z.object({
 export const issueReportSchema = z.object({
   id: z.string().uuid(),
   revision: z.number().int().nonnegative(),
-  status: z.enum(["draft", "validating", "preview", "cancelled", "failed", "submitting", "uncertain", "submitted"]),
+  status: z.enum(["draft", "validating", "preview", "cancelled", "failed", "submitting", "uncertain", "submitted", "retired"]),
   description: z.string().max(REPORT_TEXT_LIMIT),
   projectId: z.string().uuid().nullable(),
   selection: modelSelectionSchema,

@@ -5,12 +5,14 @@ import type { RuntimeStore } from "../../database";
 import type { IssuePublisher } from "../../git/github-issue-report";
 import { editReport, newIssueReport, parseReportAnswer, reportBody, reportPrompt } from "../../issue-report";
 import { RuntimeRequestError } from "../../runtime-errors";
+import type { BackendProfileController } from "../backends/backend-profile-controller";
 import { IsolatedRunError, type IsolatedRunController } from "../reviews/isolated-run-controller";
 import { defineRuntimeCommandHandler, type RuntimeCommandHandler } from "./command-router";
 
 interface Dependencies {
   store: Pick<RuntimeStore, "readIssueReport" | "saveIssueReport">;
   isolatedRuns: IsolatedRunController<WebSocket>;
+  backendProfileController: Pick<BackendProfileController, "validateSelection" | "readiness">;
   snapshot(): AppSnapshot;
   providerInfo(): readonly ProviderInfo[];
   publisher: IssuePublisher;
@@ -34,11 +36,11 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
     return report;
   };
   const editable = (value: IssueReport): void => {
-    if (["validating", "submitting", "uncertain", "submitted"].includes(value.status)) throw new RuntimeRequestError("This report cannot be changed while validation or publication is pending, or after publication.");
+    if (["validating", "submitting", "uncertain", "submitted", "retired"].includes(value.status)) throw new RuntimeRequestError("This report cannot be changed while validation or publication is pending, or after publication or retirement.");
   };
   let publicationBusy = false;
   return defineRuntimeCommandHandler([
-    "support.report.get", "support.report.prepare", "support.report.validate", "support.report.cancel", "support.report.edit", "support.report.submit", "support.report.reconcile",
+    "support.report.get", "support.report.prepare", "support.report.validate", "support.report.cancel", "support.report.edit", "support.report.submit", "support.report.reconcile", "support.report.retire",
   ], async (socket, command) => {
     switch (command.type) {
       case "support.report.get": break;
@@ -56,26 +58,31 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
           break;
         }
         const provider = deps.providerInfo().find(({ id }) => id === "claude");
-        if (!provider?.canRun) {
-          save({ ...value, status: "failed", revision: value.revision + 1, notice: "Connect Claude in Settings → Providers to validate with this model, or continue with the manual preview." });
-          break;
-        }
         save({ ...value, status: "validating", revision: value.revision + 1, notice: "Checking your observations against the safe local evidence. Tools are disabled; this run stops after 90 seconds." });
+        const validationRevision = value.revision + 1;
+        const active = (): boolean => report?.id === value.id && report.revision === validationRevision && report.status === "validating";
         try {
+          const selection = deps.backendProfileController.validateSelection(value.selection);
+          const readiness = await deps.backendProfileController.readiness(selection, provider);
+          // Cancellation can replace the singleton while vault readiness is pending.
+          if (!active()) break;
+          if (readiness ? !readiness.ready : !provider?.canRun) {
+            save({ ...current(value.id, validationRevision), status: "failed", revision: validationRevision + 1, notice: "The selected model is not ready. Check its backend in Settings → Providers, or continue with the manual preview." });
+            break;
+          }
           const completed = await deps.isolatedRuns.run({
             kind: "issue-report", projectId: value.projectId ?? value.id, conversationId: value.id, owner: socket,
-            selection: { modelSelection: value.selection }, request: { visibleContent: null, executionPrompt: reportPrompt(value) },
+            selection: { modelSelection: selection }, request: { visibleContent: null, executionPrompt: reportPrompt(value) },
             label: "Issue report", detail: "Bounded local validation", toolPolicy: "none", interactionPolicy: "fail-closed", timeoutMs: 90_000, outputLimitChars: 8_000,
             onResult: (output, context) => { context.assertActive(); return parseReportAnswer(output.text); },
           });
-          const latest = current(value.id);
-          if (latest.status === "validating") {
+          if (active()) {
+            const latest = current(value.id, validationRevision);
             const next = { ...latest, answer: completed.value, status: "preview" as const, revision: latest.revision + 1, notice: "Validation complete. The assessment is advisory; review and edit the issue before publishing." };
             save({ ...next, body: reportBody(next) });
           }
         } catch (error) {
-          const latest = current(value.id);
-          if (latest.status === "validating") save({ ...latest, status: "failed", revision: latest.revision + 1, notice: error instanceof IsolatedRunError && error.reason === "timeout" ? "Validation reached its 90-second limit. Retry or continue with the manual preview." : "Validation could not complete safely. Your draft is preserved. Check provider setup, retry, or continue with the manual preview." });
+          if (active()) save({ ...current(value.id, validationRevision), status: "failed", revision: validationRevision + 1, notice: error instanceof IsolatedRunError && error.reason === "timeout" ? "Validation reached its 90-second limit. Retry or continue with the manual preview." : "Validation could not complete safely. Your draft is preserved. Check provider setup, retry, or continue with the manual preview." });
         }
         break;
       }
@@ -117,6 +124,7 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
       }
       case "support.report.reconcile": {
         const value = current(command.payload.id, command.payload.revision);
+        if (value.status === "retired") throw new RuntimeRequestError("This report was retired and cannot be checked or submitted again.");
         if (value.status !== "uncertain" || publicationBusy) break;
         publicationBusy = true;
         try {
@@ -125,6 +133,12 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
         } catch {
           save({ ...value, revision: value.revision + 1, notice: "Could not check GitHub. Reconnect GitHub CLI or inspect the repository's issues before proceeding." });
         } finally { publicationBusy = false; }
+        break;
+      }
+      case "support.report.retire": {
+        const value = current(command.payload.id, command.payload.revision);
+        if (value.status !== "uncertain" || publicationBusy || deps.isolatedRuns.has(value.id)) throw new RuntimeRequestError("Wait for pending publication or checks to finish before retiring an uncertain report.");
+        save({ ...value, status: "retired", revision: value.revision + 1, notice: "Publication tracking retired. The original issue may already exist on GitHub. This report cannot be checked or submitted again. Its preview remains saved until you create another draft." });
         break;
       }
       default: return "not-handled";

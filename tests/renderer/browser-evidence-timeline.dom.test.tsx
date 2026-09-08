@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewPanel } from "../../src/renderer/src/components/PreviewPanel";
@@ -183,6 +183,45 @@ describe("Browser evidence timeline", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByText("Local evidence")).not.toBeInTheDocument());
+  });
+
+  it("does not steal newer split-pane focus when closing evidence before the next frame", async () => {
+    render(<>
+      <section aria-label="Primary Browser">
+        <PreviewPanel owner="primary" contextId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" url="http://127.0.0.1:4173/" evidence={evidence} onNavigate={vi.fn()} onOpenExternal={vi.fn()} />
+      </section>
+      <section aria-label="Secondary Browser">
+        <PreviewPanel owner="secondary" contextId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" url="http://127.0.0.1:4174/" evidence={evidence} onNavigate={vi.fn()} onOpenExternal={vi.fn()} />
+      </section>
+    </>);
+    const primary = within(screen.getByRole("region", { name: "Primary Browser" }));
+    const secondary = within(screen.getByRole("region", { name: "Secondary Browser" }));
+    const primaryToggle = primary.getByRole("button", { name: "Evidence 3" });
+    primaryToggle.focus();
+    fireEvent.click(primaryToggle);
+    const primaryClose = await primary.findByRole("button", { name: "Close Browser evidence" });
+    const secondaryToggle = secondary.getByRole("button", { name: "Evidence 3" });
+    secondaryToggle.focus();
+    fireEvent.click(secondaryToggle);
+    const secondaryClose = await secondary.findByRole("button", { name: "Close Browser evidence" });
+
+    // A keyboard action may focus the other pane before the next paint.
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    secondaryClose.focus();
+    fireEvent.click(secondaryClose);
+    expect(secondary.queryByRole("button", { name: "Close Browser evidence" })).toBeNull();
+    primaryClose.focus();
+    for (const frame of frames.splice(0)) frame(performance.now());
+    expect(primaryClose).toHaveFocus();
+
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    for (const frame of frames.splice(0)) frame(performance.now());
+    expect(primary.queryByRole("button", { name: "Close Browser evidence" })).toBeNull();
+    expect(primaryToggle).toHaveFocus();
+    expect(secondaryToggle).not.toHaveFocus();
+    expect(primary.getByRole("tabpanel")).toBeInTheDocument();
+    expect(secondary.getByRole("tabpanel")).toBeInTheDocument();
   });
 
   it("drops evicted thumbnails and ignores late inspection responses", async () => {

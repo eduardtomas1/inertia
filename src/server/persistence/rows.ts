@@ -194,6 +194,7 @@ export interface TurnGitArtifactRow {
 }
 
 export interface MessageRow {
+  compaction_json?: string | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;

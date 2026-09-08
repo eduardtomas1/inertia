@@ -163,9 +163,8 @@ describe("runtime recovery safety command boundary", () => {
       expect(unchanged.prepare(
         "SELECT MAX(version) FROM schema_migrations",
       ).pluck().get()).toBe(priorVersion);
-      expect(unchanged.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issue_report_draft'",
-      ).get()).toBeUndefined();
+      expect((unchanged.prepare("PRAGMA table_info(messages)").all() as { name: string }[])
+        .some(({ name }) => name === "compaction_json")).toBe(false);
       expect((unchanged.prepare(`
         SELECT sql FROM sqlite_master
         WHERE type = 'table' AND name = 'model_backend_profiles'

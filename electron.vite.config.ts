@@ -91,6 +91,9 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
+          "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),
+          "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
           "app-update-candidate-viability-worker": resolve(
             "src/server/app-update-candidate-viability-worker.ts",

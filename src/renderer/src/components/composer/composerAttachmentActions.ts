@@ -34,6 +34,7 @@ interface ComposerAttachmentActionOptions {
 }
 
 export interface ComposerAttachmentActions {
+  adoptAttachments(lease: import("../../utils/composerAttachments").ComposerAttachmentImportLease): Promise<void>;
   chooseAttachments(): Promise<void>;
   importAttachments(files: File[]): Promise<void>;
   removeAttachment(attachment: ChatAttachment): void;
@@ -173,6 +174,11 @@ export function composerAttachmentActions({
   };
 
   return {
+    async adoptAttachments(lease) {
+      if (actionBlocked()) { await cancelPrivilegedLease(lease); return; }
+      const sequence = beginImport();
+      try { await adoptPrivilegedLease(lease, attachmentAuthorityKey); } finally { finishImport(sequence); }
+    },
     async chooseAttachments() {
       if (actionBlocked()) return;
       const importSequence = beginImport();

@@ -141,6 +141,7 @@ export const MESSAGE_PROJECTION_COLUMNS = `
     ) AS ordered_chunks
   ), '') AS content,
   messages.attachments_json,
+  messages.compaction_json,
   messages.created_at
 `;
 

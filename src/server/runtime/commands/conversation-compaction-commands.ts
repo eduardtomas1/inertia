@@ -253,6 +253,8 @@ export function createConversationCompactionCommandHandler(
           "The chat configuration changed while compaction was starting. Try again with the current provider settings.",
         );
       }
+      const beforeTokens = dependencies.store.usageForConversation(conversation.id)?.usedTokens ?? null;
+      let afterTokens: number | null = null;
       let usageObserved = false;
       let result: Awaited<ReturnType<ProviderManager["compact"]>>;
       try {
@@ -278,6 +280,7 @@ export function createConversationCompactionCommandHandler(
           ...(supportedFastMode ? { supportedFastMode } : {}),
         }, command.payload.instruction, {
           onUsage: (event) => {
+            afterTokens = event.usage.usedTokens;
             projectUsage(dependencies, conversation.id, event.usage);
             usageObserved = true;
           },
@@ -314,6 +317,13 @@ export function createConversationCompactionCommandHandler(
       if (!usageObserved) {
         invalidateStaleContextUsage(dependencies, conversation.id);
       }
+      const message = dependencies.store.createMessage(
+        conversation.id,
+        command.payload.instruction ? `/compact ${command.payload.instruction}` : "/compact",
+        "system", [], null, undefined,
+        { compaction: { providerId: result.providerId, beforeTokens, afterTokens, instructionForwarded: result.instructionForwarded } },
+      );
+      dependencies.broadcast({ type: "conversation.message.persisted", message });
       dependencies.send(socket, {
         type: "request.result",
         requestId: command.requestId,

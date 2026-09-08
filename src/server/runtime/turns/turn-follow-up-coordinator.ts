@@ -1,3 +1,5 @@
+import { snapshotPromptContext } from "../../../shared/snapshots";
+import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
 import type { ChatAttachment, ChatMessage } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import type { ProviderSteerInput } from "../../provider/contracts";
@@ -87,9 +89,13 @@ export class TurnFollowUpCoordinator {
       || !this.options.providers.steer
       || signal?.aborted
     ) return null;
+    const snapshotContext = snapshotPromptContext(attachments);
+    if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
+      throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
+    }
     const accepted = await this.options.providers.steer(
       lease.conversationId,
-      { content: followUp, imagePaths: input.imagePaths },
+      { content: [followUp, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
       { runId: active.turn.runId, turnId: active.turn.id },
     );
     const ownerAfterSteer = this.options.activeForConversation(

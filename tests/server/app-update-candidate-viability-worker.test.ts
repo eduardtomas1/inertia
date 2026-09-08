@@ -118,9 +118,8 @@ describe("app update candidate viability worker", () => {
     expect(database.prepare(
       "SELECT value FROM app_update_clone_marker",
     ).pluck().get()).toBe("live-n-minus-one");
-    expect(database.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issue_report_draft'",
-    ).get()).toBeUndefined();
+    expect((database.prepare("PRAGMA table_info(messages)").all() as { name: string }[])
+      .some(({ name }) => name === "compaction_json")).toBe(false);
     expect(tableSql(database, "model_backend_profiles"))
       .toContain("'gemini-acp'");
     database.close();
@@ -133,7 +132,7 @@ describe("app update candidate viability worker", () => {
     const previousVersion = runtimeMigrationCatalog().length - 1;
     migrateRuntimeDatabase(database, previousVersion);
     database.exec(`
-      CREATE INDEX issue_report_draft ON agent_turns(id);
+      ALTER TABLE messages ADD COLUMN compaction_json BLOB;
       CREATE TABLE app_update_clone_marker (marker TEXT NOT NULL);
       INSERT INTO app_update_clone_marker (marker) VALUES ('live-only');
     `);

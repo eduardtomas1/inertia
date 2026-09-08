@@ -1,3 +1,4 @@
+import { isContextCompaction } from "../../shared/context-compaction";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -7,7 +8,7 @@ import type {
 import {
   agentTurnFromRow,
   messageFromRow,
-  parseAttachments,
+  parseSnapshotAttachments as parseAttachments,
   rendererSafeAttachments,
   requireTimestamp,
 } from "./codecs";
@@ -94,10 +95,11 @@ export class TranscriptRepository {
     const now = createdAt === undefined
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Message creation time");
-    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now };
+    if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}) };
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments) });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,

@@ -39,6 +39,9 @@ import {
   type BuildResponseTimelineInput,
   type ResponseTimelineItem,
 } from "../../utils/responseTimeline";
+import { ContextCompactionRow } from "./ContextCompactionRow";
+import { responseTimelineArticleLabel } from "./row-label";
+export { responseTimelineArticleLabel } from "./row-label";
 import { CompatibilityTimeline } from "./compatibility";
 import { startFinalAnswerAnchor } from "./final-answer-anchor";
 import {
@@ -56,24 +59,6 @@ import type { ResponseTimelineProps } from "./types";
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
 type TimelineJumpTarget = "turn" | "request" | "final" | "artifact";
-const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
-
-export function responseTimelineArticleLabel(
-  item: ResponseTimelineItem,
-): string {
-  if (item.kind === "compatibility") {
-    return "Recovered legacy and orphaned history";
-  }
-  const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
-  const requestLabel = request
-    ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS
-      ? `${request.slice(0, TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS - 1)}…`
-      : request
-    : item.turn.userMessage.attachments.length > 0
-      ? "Request with attachments"
-      : "Request";
-  return `Turn ${item.turn.index}: ${requestLabel}`;
-}
 
 function findTurnElement(
   root: HTMLElement | null | undefined,
@@ -1094,7 +1079,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         const row = item.kind === "turn"
           ? findTurnElement(root, item.turn.id)
           : root.querySelector<HTMLElement>(
-              '[data-response-row-id="legacy-orphan-history"]',
+              `[data-response-row-id="${CSS.escape(item.id)}"]`,
             );
         if (!row) return null;
         const destination = target === "turn"
@@ -1191,7 +1176,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         onAfterToggle={restoreExpansionAnchor}
       />
     )
-    : (
+    : item.kind === "compaction" ? <ContextCompactionRow message={item.message} /> : (
       <CompatibilityTimeline
         key={props.conversationId}
         compatibility={item.compatibility}

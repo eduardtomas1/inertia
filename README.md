@@ -27,6 +27,7 @@ Use **Ctrl/Cmd+K** to find commands, projects, and chats. Choose **All projects*
 ## One workspace for the coding loop
 
 - **Chat with context.** Attach images, documents, and spreadsheets; mention files; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
+- **Capture a window.** Enable [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in the composer to attach a foreground screenshot with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Work side by side.** Open two chats in a split workspace, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.

@@ -17,10 +17,11 @@ const budgets = {
   // detachment ownership live here while their larger UI stays deferred.
   // Complete favorite profiles add validation and restore access, mode and
   // response speed across draft, split and detached chats. The workbench
-  // measures 734.9 KiB and detached route 561.8 KiB on macOS ARM64.
+  // Snapshot lease routing and compaction receipt projection bring the
+  // workbench to 738.3 KiB and detached route to 565.1 KiB on macOS ARM64.
   // Keep less than 2 KiB of headroom on each.
-  mainWorkbenchFirstLoadJavaScript: 736 * kibibyte,
-  detachedChatFirstLoadJavaScript: 563 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 739 * kibibyte,
+  detachedChatFirstLoadJavaScript: 566 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -34,7 +35,8 @@ const budgets = {
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
-  deferredAttachmentPreviewJavaScript: 12 * kibibyte,
+  // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
+  deferredAttachmentPreviewJavaScript: 13 * kibibyte,
   deferredPreviewJavaScript: 8 * kibibyte,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
@@ -53,9 +55,9 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // Guided report command/result validation adds 2.7 KiB to shared core.
-  // Measured 1,976.1 KiB on macOS ARM64; the report UI is separately deferred.
-  coreJavaScript: 1_977 * kibibyte,
+  // Snapshot validation, optional setup, arrival UI and persisted compaction
+  // receipts bring shared core to 1,985.9 KiB on macOS ARM64; keep <2 KiB headroom.
+  coreJavaScript: 1_987 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

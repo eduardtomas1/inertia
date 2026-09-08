@@ -37,6 +37,7 @@ import type { ComposerProps, PendingModelRoute } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
+import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
@@ -612,7 +613,7 @@ export const Composer = memo(function Composer({
     }
   };
 
-  const { chooseAttachments, importAttachments, removeAttachment } =
+  const { adoptAttachments, chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
       attachmentAuthorityKey,
@@ -656,6 +657,7 @@ export const Composer = memo(function Composer({
     : selectedProvider
       ? `${providerIdentityLabels?.[selectedProvider.id] ?? selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
       : conversation.modelSelection.backendProfileDisplayName;
+  useComposerSnapshots(conversation.id, adoptAttachments, textareaRef);
   const attachmentFallback = running
     ? "Please inspect the attached image."
     : "Please inspect the attached file.";

@@ -1,3 +1,4 @@
+import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
@@ -600,6 +601,14 @@ export class AttachmentRegistry {
     }
   }
 
+  setSnapshotSource(id: string, source: SnapshotSource): ChatAttachment {
+    const snapshot = snapshotSourceSchema.parse(source);
+    const record = this.records.get(id);
+    if (!record || record.mimeType !== "image/png") throw new Error("Snapshot attachment is unavailable.");
+    record.snapshot = snapshot;
+    return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, snapshot };
+  }
+
   async import(
     values: readonly unknown[],
     signal?: AbortSignal,
@@ -889,6 +898,7 @@ export class AttachmentRegistry {
           mimeType: record.mimeType,
           size: record.size,
           digest: record.digest,
+          ...(record.snapshot ? { snapshot: record.snapshot } : {}),
         },
         bytes,
       };

@@ -113,7 +113,10 @@
     "asarUnpack": [
       "node_modules/@napi-rs/canvas*/**/*",
       "node_modules/node-pty/**/*",
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/@crowecawcaw/xa11y*/**/*",
+      "node_modules/ffi-rs/**/*",
+      "node_modules/@yuuang/ffi-rs*/**/*"
     ],
     "electronFuses": {
       "runAsNode": false,
@@ -198,6 +201,7 @@
     "@agentclientprotocol/sdk": "1.4.0",
     "@anthropic-ai/claude-agent-sdk": "0.3.260",
     "@anthropic-ai/sdk": "0.123.0",
+    "@crowecawcaw/xa11y": "0.13.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -209,6 +213,7 @@
     "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",
     "electron-updater": "6.8.9",
+    "ffi-rs": "1.3.2",
     "highlight.js": "^11.12.0",
     "lucide-react": "1.40.0",
     "morphicons": "1.7.1",

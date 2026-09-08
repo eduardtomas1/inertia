@@ -119,7 +119,7 @@ export function useAppRuntimeActions(options: {
       payload: {
         conversationId: targetConversationId,
         content,
-        attachments,
+        attachments: attachments.map(({ id, name, path, mimeType, size }) => ({ id, name, path, mimeType, size })),
         activate,
         ...(context ? { context } : {}),
       },

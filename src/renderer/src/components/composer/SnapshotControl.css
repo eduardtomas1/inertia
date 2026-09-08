@@ -1,0 +1,10 @@
+.snapshot-backdrop { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; padding: 20px; background: #0006; }
+.snapshot-dialog { width: min(440px, 100%); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); padding: 20px; box-shadow: 0 18px 60px #0003; font-size: 13px; line-height: 1.5; }
+.snapshot-dialog header { display: flex; align-items: center; justify-content: space-between; }
+.snapshot-dialog h2 { margin: 0; font-size: 16px; }
+.snapshot-dialog header button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; padding: 5px; }
+.snapshot-setting { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-block: 16px; }
+.snapshot-setting select { max-width: 58%; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px; }
+.snapshot-note { color: var(--text-muted); font-size: 12px; }
+.snapshot-permissions button { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; margin-right: 6px; }
+.snapshot-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

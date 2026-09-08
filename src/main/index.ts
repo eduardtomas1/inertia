@@ -1,3 +1,4 @@
+import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { MascotMain } from "./mascot-main.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
@@ -27,23 +28,20 @@ import {
 } from "../shared/claude-backend-profiles.js";
 import {
   type AppHealthSnapshot,
-  parseAttachmentPickerMode, parseDesktopNotificationRequest,
+  parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
-import {
-  attachmentPickerConfiguration,
-} from "./attachment-import.js";
+import { registerSnapshotIpc } from "./snapshot-ipc.js";
+import type { SnapshotService } from "./snapshot-service.js";
 import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
 import {
-  attachmentImportDocumentFromEvent,
   registerRendererAttachmentImportIpc,
   RendererAttachmentImportCoordinator,
 } from "./attachment-import-ipc.js";
 import {
-  importSelectedAttachmentPaths,
   privacySafeAttachmentImportError,
 } from "./attachment-selection-import.js";
 import {
@@ -539,50 +537,18 @@ function registerIpcHandlers(): void {
     assertTrustedIpc,
   });
 
-  ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
-    if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
-    const ownerWindow = detachedChatMain.windowForTrustedChatIpc(event, args.length, 1);
-    const mode = parseAttachmentPickerMode(args[0]);
-    if (!mode) throw new Error("Invalid attachment picker mode.");
-    const picker = attachmentPickerConfiguration(mode);
-    const document = attachmentImportDocumentFromEvent(event);
-    const batchId = rendererAttachmentImports.begin(document);
-    try {
-      const result = await dialog.showOpenDialog(ownerWindow, {
-        title: picker.title,
-        buttonLabel: "Attach",
-        filters: [{
-          name: picker.filterName,
-          extensions: picker.extensions,
-        }],
-        properties: ["openFile", "multiSelections"],
-      });
-      if (result.canceled) {
-        await rendererAttachmentImports.cancel(document, batchId);
-        return null;
-      }
-      const attachments = await rendererAttachmentImports.importSelection(
-        document,
-        batchId,
-        async (signal) => await importSelectedAttachmentPaths(
-          attachmentRegistry(),
-          result.filePaths,
-          mode,
-          signal,
-        ),
-      );
-      return { batchId, attachments };
-    } catch (error) {
-      try {
-        await rendererAttachmentImports.cancel(document, batchId);
-      } catch (cleanupError) {
-        throw privacySafeAttachmentImportError(new AggregateError([
-          error,
-          cleanupError,
-        ]));
-      }
-      throw privacySafeAttachmentImportError(error);
-    }
+  snapshotService = registerSnapshotIpc({
+    owner: (event, count) => {
+      if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+      return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
+    }, registry: attachmentRegistry, imports: rendererAttachmentImports,
+  });
+
+  registerAttachmentSelectionIpc({
+    owner: (event, count) => {
+      if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
+      return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
+    }, registry: attachmentRegistry, imports: rendererAttachmentImports,
   });
 
   registerRendererAttachmentImportIpc({
@@ -897,6 +863,7 @@ function finishQuitAfterCleanup(): void { finishPrivilegedExit({
     takeWindow: () => { const window = mainWindow; mainWindow = null; return window; },
     recordExit: () => recordPackageSmokeStage("app-exit"), exit: () => process.exit(0),
   }); }
+let snapshotService: SnapshotService | null = null;
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
   if (!privilegedCleanupOwners) {
@@ -921,6 +888,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
     });
   }
   const owners = privilegedCleanupOwners; const cleanup = (async () => { try {
+    await snapshotService?.dispose();
     await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
     previewBroker.close(); runtimeDiagnostics?.record("app.stop"); return await owners.cleanup();
   } finally { await disposeWindowsRuntimeJobExecutableLock(); } })();
@@ -1149,8 +1117,8 @@ async function bootstrap(): Promise<void> {
       if (snapshot.phase === "ready" && appUpdateInstallCoordinator) installedUpdateFixture?.ready(snapshot, appUpdateInstallCoordinator);
       if (!installedUpdateFixture && snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && packageSmokeOwnerToken && !packageSmokeScheduled) {
         packageSmokeScheduled = true;
-        void writeFile(
-          packageSmokeFilePath,
+        void snapshotService!.verifyBindings().then(() => writeFile(
+          packageSmokeFilePath!,
           JSON.stringify({
             mainPid: process.pid,
             runtimePid: snapshot.pid,
@@ -1161,7 +1129,7 @@ async function bootstrap(): Promise<void> {
             appImageFileDescriptorIdentity: packageSmoke.appImageFileDescriptorIdentity,
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
-        ).then(async () => {
+        )).then(async () => {
           await Promise.all([
             new Promise<void>((resolveWait) => setTimeout(
               resolveWait,

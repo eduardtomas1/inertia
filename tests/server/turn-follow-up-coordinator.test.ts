@@ -6,6 +6,7 @@ import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-co
 import type { ActiveTurn } from "../../src/server/runtime/turns/turn-controller-types";
 import { TurnFollowUpCoordinator } from "../../src/server/runtime/turns/turn-follow-up-coordinator";
 import { AuthoritativeRunStateEngine } from "../../src/server/runtime/run-state-engine";
+import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 const flushPromises = async (): Promise<void> => {
   await Promise.resolve();
@@ -33,6 +34,24 @@ function activeTurn(): ActiveTurn {
 }
 
 describe("TurnFollowUpCoordinator", () => {
+  it("includes trusted snapshot context only in the provider follow-up", async () => {
+    const active = activeTurn();
+    const steer = vi.fn(async () => true);
+    const persist = vi.fn(() => ({ content: "Inspect this window" }) as ChatMessage);
+    const coordinator = new TurnFollowUpCoordinator({
+      providers: { steer } as unknown as TurnProviderRuntime,
+      store: { createAcknowledgedFollowUpMessage: persist } as unknown as RuntimeStore,
+      now: () => "2026-09-08T09:00:00.000Z", activeForConversation: () => active,
+    });
+    const lease = coordinator.acquire(active)!;
+    const attachments = [{ id: "11111111-1111-4111-8111-111111111111", name: "snapshot.png", path: "/trusted/snapshot.png", mimeType: "image/png" as const, size: 4, snapshot: snapshotFixture() }];
+    try {
+      await coordinator.steer(lease, { content: "Inspect this window", imagePaths: [attachments[0]!.path] }, attachments);
+      expect(steer).toHaveBeenCalledWith("conversation-1", expect.objectContaining({ content: expect.stringContaining("untrusted captured application content") }), { runId: "run-1", turnId: "turn-1" });
+      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Inspect this window", lease.submittedAt, "2026-09-08T09:00:00.000Z", attachments);
+    } finally { lease.release(); }
+  });
+
   it("serializes acknowledged parent follow-ups FIFO for the exact active turn", async () => {
     const active = activeTurn();
     const acknowledgements: Array<(accepted: boolean) => void> = [];

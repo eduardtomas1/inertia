@@ -192,6 +192,10 @@ function fixture(options: {
       })),
       usageForConversation: vi.fn(() => existingUsage),
       upsertUsage,
+      createMessage: vi.fn((id, content, role, attachments, turnId, createdAt, options) => ({
+        id: "44444444-4444-4444-8444-444444444444", conversationId: id, content, role, attachments, turnId,
+        createdAt: createdAt ?? "2026-08-12T10:01:00.000Z", compaction: options.compaction,
+      })),
     },
     providers: {
       resolveModelRoute: vi.fn(() => route),
@@ -242,6 +246,23 @@ function fixture(options: {
 }
 
 describe("conversation compaction command", () => {
+  it("persists provider-confirmed before and after counts in a system receipt", async () => {
+    const { dependencies, compact, broadcast } = fixture();
+    const result = await compact(); compact.mockClear();
+    dependencies.providers.compact = vi.fn<ProviderManager["compact"]>(async (input, _instruction, hooks) => {
+      const current = dependencies.store.usageForConversation(conversationId)!;
+      hooks?.onUsage?.({ type: "usage", providerId: input.providerId, conversationId, runId: input.runId, turnId: input.turnId, usage: { ...current, usedTokens: 5690 } });
+      return { ...result, runId: input.runId, turnId: input.turnId, terminalReason: { outcome: "completed", reason: "provider-completed" } };
+    });
+    await createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId, instruction: "keep the tests" },
+    });
+    expect(dependencies.store.createMessage).toHaveBeenCalledWith(conversationId, "/compact keep the tests", "system", [], null, undefined, {
+      compaction: { providerId: "claude", beforeTokens: 12000, afterTokens: 5690, instructionForwarded: true },
+    });
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.message.persisted", message: expect.objectContaining({ turnId: null }) }));
+  });
+
   const roots: string[] = [];
   afterEach(async () => await Promise.all(
     roots.splice(0).map(removePortableFixture),
@@ -442,6 +463,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.isRunning(conversationId)).toBe(false);
     expect(release).toHaveBeenCalledWith(conversationId);
     expect(send).not.toHaveBeenCalled();
+    expect(dependencies.store.createMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a provider that compacts a different resumed session", async () => {

@@ -27,13 +27,29 @@ interface FixtureRun {
 }
 
 const roots: string[] = [];
-const children = new Set<ChildProcessWithoutNullStreams>();
+const children = new Map<ChildProcessWithoutNullStreams, Promise<Error | undefined>>();
 
 afterEach(async () => {
-  for (const child of children) {
-    child.stdin.end();
-    child.kill();
-  }
+  await Promise.all([...children].map(async ([child, closed]) => {
+    let terminationRequested = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(terminationRequested
+        ? "Streaming fixture child did not close before workspace cleanup."
+        : "Streaming fixture termination was refused and child closure is unconfirmed.")), 5_000);
+    });
+    try {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.stdin.end();
+        terminationRequested = child.kill();
+      }
+      // A signal or root exit alone does not release the Windows cwd/stdio handles.
+      const error = await Promise.race([closed, timeout]);
+      if (error) throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }));
   children.clear();
   await Promise.all(roots.splice(0).map((root) => rm(root, {
     force: true,
@@ -53,7 +69,11 @@ async function startFixture(
     env: { ...process.env, ...environment },
     stdio: "pipe",
   });
-  children.add(child);
+  children.set(child, new Promise((resolveClose) => {
+    let error: Error | undefined;
+    child.once("error", (failure) => { error = failure; });
+    child.once("close", () => resolveClose(error));
+  }));
   const run: FixtureRun = { child, messages: [], stderr: [] };
   let stdout = "";
   child.stdout.setEncoding("utf8");
@@ -199,7 +219,6 @@ describe("desktop benchmark streaming completion gate", () => {
     // observes it. The retained deltas prove the stream reached the final gate.
     await waitFor(() => providerDeltaMessages(run).length === 128);
     expect(await exitCode(run.child)).toBe(2);
-    children.delete(run.child);
     await waitForStreamingCompletionCleanup(workspace, 9);
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     expect(run.stderr.join("")).toContain("Benchmark completion gate timed out.");
@@ -214,7 +233,6 @@ describe("desktop benchmark streaming completion gate", () => {
 
     await waitFor(() => providerDeltaMessages(run).length >= 1);
     expect(await exitCode(run.child)).toBe(2);
-    children.delete(run.child);
     await waitForStreamingCompletionCleanup(workspace, 11);
     expect(providerDeltaMessages(run)).toHaveLength(1);
     expect(run.messages.some(isTerminalMessage)).toBe(false);

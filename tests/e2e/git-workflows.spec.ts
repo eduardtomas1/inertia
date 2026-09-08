@@ -17,7 +17,11 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 let app: AppFixture;
 let remote: string;
 let initialBranch: string;
+const pushScenario = "pushes existing commits while preserving unrelated edits";
+const trackingScenario = "tracks an exact remote branch with missing fetch mappings";
+const pullScenario = "fast-forwards incoming commits using checkout filters";
 test.beforeEach(async () => {
+  const scenario = test.info().title;
   app = await createAppFixture({
     name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
@@ -32,6 +36,28 @@ test.beforeEach(async () => {
       await git(workspaceDirectory, "fetch", "origin");
       await git(workspaceDirectory, "branch", "feature/local-review");
       await git(workspaceDirectory, "worktree", "add", "-b", "feature/occupied", join(testDirectory, "occupied"));
+      // Seed independent mutation scenarios before the renderer's first Git
+      // scan so setup does not require another live refresh or UI operation.
+      if (scenario === pushScenario || scenario === trackingScenario || scenario === pullScenario) {
+        if (scenario !== pushScenario) await git(workspaceDirectory, "config", "core.autocrlf", "true");
+        await git(workspaceDirectory, "add", "--", "sample.ts");
+        await git(workspaceDirectory, "commit", "-m", "Prepare clean checkout");
+      }
+      if (scenario === pushScenario) {
+        await writeFile(join(workspaceDirectory, "notes.txt"), "unfinished local work\n");
+      } else if (scenario === trackingScenario) {
+        await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
+      } else if (scenario === pullScenario) {
+        await git(workspaceDirectory, "switch", "--track", "-c", "feature/remote-review", "refs/remotes/origin/feature/remote-review");
+        const peer = join(testDirectory, "peer");
+        await git(testDirectory, "clone", "--branch", "feature/remote-review", remote, peer);
+        await git(peer, "config", "user.name", "Inertia Peer");
+        await git(peer, "config", "user.email", "peer@example.invalid");
+        await writeFile(join(peer, "incoming.txt"), "reviewed incoming change\n");
+        await git(peer, "add", "incoming.txt");
+        await git(peer, "commit", "-m", "Incoming change");
+        await git(peer, "push");
+      }
     },
   });
   await app.electronApp.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -246,12 +272,19 @@ test("branch search retains failed choices and keeps keyboard focus visible", as
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("commits reviewed paths and pushes existing commits while preserving unrelated edits", async () => {
+// Keep each guarded mutation within its own unchanged scenario budget. On
+// Intel CI, review alone took 26 seconds and tracking plus two fetches left
+// only three seconds for Pull in the former combined scenarios.
+test("commits reviewed paths", async () => {
   const { workspaceDirectory } = app;
   await commitFromUi("Reviewed fixture change", true);
   expect(await git(workspaceDirectory, "status", "--porcelain")).toBe("");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test(pushScenario, async () => {
+  const { workspaceDirectory } = app;
   const localHead = await git(workspaceDirectory, "rev-parse", "HEAD");
-  await writeFile(join(workspaceDirectory, "notes.txt"), "unfinished local work\n");
   await fetchFromUi();
   const menu = await openGit();
   await expect(menu.getByText("1 outgoing", { exact: true })).toBeVisible();
@@ -264,12 +297,8 @@ test("commits reviewed paths and pushes existing commits while preserving unrela
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("tracks an exact remote branch and fast-forwards incoming commits", async () => {
+test(trackingScenario, async () => {
   const { page, workspaceDirectory } = app;
-  await git(workspaceDirectory, "config", "core.autocrlf", "true");
-  await git(workspaceDirectory, "add", "--", "sample.ts");
-  await git(workspaceDirectory, "commit", "-m", "Prepare clean checkout");
-  await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
   await fetchFromUi();
   const trigger = page.locator('[data-header-menu="branch"] > button');
   await trigger.click();
@@ -281,14 +310,12 @@ test("tracks an exact remote branch and fast-forwards incoming commits", async (
   await expect(trigger).toContainText("feature/remote-review");
   expect(await git(workspaceDirectory, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/feature/remote-review");
   expect(await git(workspaceDirectory, "config", "--get-all", "remote.origin.fetch")).toBe("+refs/heads/*:refs/remotes/origin/*");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test(pullScenario, async () => {
+  const { page, workspaceDirectory } = app;
   const peer = join(app.testDirectory, "peer");
-  await git(app.testDirectory, "clone", "--branch", "feature/remote-review", remote, peer);
-  await git(peer, "config", "user.name", "Inertia Peer");
-  await git(peer, "config", "user.email", "peer@example.invalid");
-  await writeFile(join(peer, "incoming.txt"), "reviewed incoming change\n");
-  await git(peer, "add", "incoming.txt");
-  await git(peer, "commit", "-m", "Incoming change");
-  await git(peer, "push");
   await fetchFromUi();
   await app.resizeWindow(1100, 760);
   await page.evaluate(() => { document.documentElement.dataset.theme = "light"; document.documentElement.style.colorScheme = "light"; });

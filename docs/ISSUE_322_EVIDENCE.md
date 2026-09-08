@@ -81,8 +81,33 @@ x86_64 evidence.
   failure, retained claims, and no raw PID fallback.
 - Focused supervisor, process lifecycle, and diagnostic tests pass. Persistent
   short-lived failures are bounded even with cleanup longer than stable uptime.
-- Complete quality gate passed during iteration. Final full check, portable,
-  packaged/native platform certification, and reviewed UI evidence are pending.
+- `npm run check` passes on Node 22/macOS ARM64: quality, migrations,
+  architecture, 7,673 passing tests (127 platform skips), and bundle budgets.
+  `npm run test:portable` passes: 1,246 tests, nine platform skips.
+- The reviewed diagnostic-projector fix has a demonstrated failing regression
+  before the change and eleven passing focused tests afterward. Failure
+  attachments retain the first bounded cause with or without a probe class.
+- Linux ARM64 build, AppImage content validation, all nine Electron fuse
+  settings, and both unpacked and AppImage extract-and-run package smokes pass.
+  The actual packaged utility runtime reaches generation one, extracts a PDF,
+  retains an image, and shuts down cleanly. Readiness/shutdown measured
+  1,062/50 ms unpacked and 2,281/34 ms through the AppImage wrapper.
+  Packaged and regression-tested static guardians have the same SHA-256:
+  `bc27440323dab30c729d71db01a2c0bbb105b3a8cf2e755d12d26343ec7d97dc`.
+- A real Linux Electron UI check passes in a fresh synthetic profile: runtime
+  generation one, zero restarts, no last error, zero active turns/interactions,
+  and no renderer errors. The runtime diagnostics card below was visually
+  inspected. This change adds no renderer UI.
+
+![Linux runtime diagnostics showing Safe and ready](pr-evidence/issue-322-runtime-ready.png)
+
+Local package/UI checks use Xvfb and the existing container no-sandbox option;
+native guardian/seccomp checks remain enforced. AppImage extraction initially
+hit the shared Docker disk limit. A workspace-backed temporary directory was
+correctly rejected by private-storage ownership checks; a task-owned executable
+tmpfs supplied sufficient private storage for the passing smoke. No check was
+relaxed. Default FUSE mounting and native x86_64/macOS/Windows certification are
+delegated to the existing required PR CI; consult the final PR head's checks.
 
 No user profile was deleted, recreated, imported, or uploaded. No authenticated
 provider traffic or real user turn was exercised. No release, version, tag,

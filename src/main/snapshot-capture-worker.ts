@@ -1,7 +1,7 @@
 import xa11y from "@crowecawcaw/xa11y";
 import { createCanvas, ImageData } from "@napi-rs/canvas";
 import { readSnapshotAccessibility } from "./snapshot-accessibility.js";
-import { SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
+import { SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema, type SnapshotRect, type SnapshotSource } from "../shared/snapshots.js";
 const { App, screenshot } = xa11y;
 
 async function foreground() {
@@ -11,6 +11,10 @@ async function foreground() {
   const window = active.length === 1 ? active[0] : undefined;
   if (!window?.bounds || !app.pid) throw new Error("unavailable");
   return { app, window, identity: JSON.stringify([app.pid, window.stableId, window.name, window.bounds]) };
+}
+
+function protectedGeometry(rectangles: readonly SnapshotRect[]): string {
+  return JSON.stringify(rectangles.map(({ x, y, width, height }) => JSON.stringify([x, y, width, height])).sort());
 }
 
 export async function captureForegroundSnapshot() {
@@ -24,7 +28,14 @@ export async function captureForegroundSnapshot() {
   if ((await foreground()).identity !== identity) throw new Error("changed");
   const shot = await screenshot({ element: window });
   if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new Error("unavailable");
-  if ((await foreground()).identity !== identity) throw new Error("changed");
+  const after = await foreground();
+  if (after.identity !== identity) throw new Error("changed");
+  // A fresh native tree must agree with the masks sampled before pixel capture.
+  const verificationDeadline = Date.now() + 3000;
+  const verification = await readSnapshotAccessibility(after.window, () => Date.now() < verificationDeadline);
+  if (!verification.complete) throw new Error("incomplete");
+  if (protectedGeometry(context.redactions) !== protectedGeometry(verification.redactions)
+    || (await foreground()).identity !== identity) throw new Error("changed");
   const canvas = createCanvas(shot.width, shot.height);
   const ctx = canvas.getContext("2d");
   ctx.putImageData(new ImageData(new Uint8ClampedArray(shot.pixels), shot.width, shot.height), 0, 0);

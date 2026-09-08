@@ -1,15 +1,19 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SnapshotElement } from "../../src/main/snapshot-accessibility";
 const native = vi.hoisted(() => ({ foreground: vi.fn(), screenshot: vi.fn() }));
 vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground }, screenshot: native.screenshot } }));
 import { captureForegroundSnapshot } from "../../src/main/snapshot-capture-worker";
 
-function foreground(name = "Review window") {
+function field(bounds = { x: 60, y: 60, width: 20, height: 20 }): SnapshotElement {
+  return { role: "text_field", name: "Editable note", value: "fixture-masked-text", raw: {}, bounds, children: async () => [] };
+}
+function foreground(name = "Review window", fields: SnapshotElement[] = [field()]) {
   const window = {
     active: true, stableId: "fixture-window", name, role: "window", value: null, raw: {},
     bounds: { x: 50, y: 50, width: 100, height: 100 },
-    children: async () => [{ role: "text_field", name: "Editable note", value: "fixture-masked-text", raw: {}, bounds: { x: 60, y: 60, width: 20, height: 20 }, children: async () => [] }],
+    children: async () => fields,
   };
   return { pid: 123, name: "Fixture", asElement: () => window, children: async () => [window] };
 }
@@ -37,6 +41,40 @@ describe("foreground snapshot pixels and context", () => {
     native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground()).mockResolvedValue(foreground("Other window"));
     await expect(captureForegroundSnapshot()).rejects.toThrow("changed");
     expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ["moves", [field({ x: 80, y: 60, width: 20, height: 20 })]],
+    ["resizes", [field({ x: 60, y: 60, width: 30, height: 20 })]],
+    ["appears", [field(), field({ x: 80, y: 80, width: 10, height: 10 })]],
+    ["disappears", []],
+  ] as const)("discards pixels when a protected field %s while the screenshot is taken", async (_change, fields) => {
+    native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground())
+      .mockResolvedValue(foreground("Review window", [...fields]));
+    await expect(captureForegroundSnapshot()).rejects.toThrow("changed");
+    expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it("accepts unchanged masks even when a fresh tree enumerates them in a different order", async () => {
+    const fields = [field(), field({ x: 80, y: 80, width: 10, height: 10 })];
+    native.foreground.mockResolvedValueOnce(foreground("Review window", fields)).mockResolvedValueOnce(foreground("Review window", fields))
+      .mockResolvedValue(foreground("Review window", fields.toReversed()));
+    await expect(captureForegroundSnapshot()).resolves.toMatchObject({ ok: true });
+    expect(native.foreground).toHaveBeenCalledTimes(4);
+  });
+  it("refuses an incomplete fresh accessibility scan after pixel capture", async () => {
+    let nested: SnapshotElement = field();
+    for (let depth = 0; depth < 18; depth++) {
+      const child = nested;
+      nested = { role: "group", name: null, value: null, raw: {}, bounds: null, children: async () => [child] };
+    }
+    native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground())
+      .mockResolvedValue(foreground("Review window", [nested]));
+    await expect(captureForegroundSnapshot()).rejects.toThrow("incomplete");
+    expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it("rejects a foreground change during the verification scan", async () => {
+    native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground())
+      .mockResolvedValueOnce(foreground()).mockResolvedValue(foreground("Other window"));
+    await expect(captureForegroundSnapshot()).rejects.toThrow("changed");
   });
   it("exits an orphaned utility worker without waiting indefinitely for its parent", async () => {
     const prior = Object.getOwnPropertyDescriptor(process, "parentPort");

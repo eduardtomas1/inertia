@@ -18,7 +18,8 @@ The capture worker reads the current window once. It masks editable controls and
 protected fields in the image and omits their text and descendants from context.
 Static content elsewhere in a window may still contain sensitive information:
 review the attachment before sending it. A changed foreground identity, an
-incomplete protected-field scan, timeout, or oversized image fails the capture.
+incomplete protected-field scan, changed protected-field geometry across the
+screenshot, timeout, or oversized image fails the capture.
 Only the two Shift modifiers are sampled for the default shortcut; no typed text
 or general keyboard events are recorded. There is no continuous screen capture.
 

@@ -154,10 +154,15 @@ export function useComposerPromptHistory({
   };
 
   const focusAt = (position: number): void => {
+    const textarea = textareaRef.current;
+    const editorRevision = readEditorRevision();
     window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.focus();
+      const current = settlementInputsRef.current;
+      if (!textarea || !textarea.isConnected
+        || current.textareaRef.current !== textarea
+        || document.activeElement !== textarea
+        || current.conversationId !== conversationId
+        || current.readEditorRevision() !== editorRevision) return;
       textarea.setSelectionRange(position, position);
     });
   };
@@ -181,7 +186,7 @@ export function useComposerPromptHistory({
       session.cursorId = entry.id;
       const next = session.edits.get(entry.id) ?? entry.content;
       onApplyMessage(next);
-      focusAt(next.length);
+      focusAt(0);
       return true;
     }
 

@@ -170,6 +170,7 @@ function props(
 }
 
 function press(input: HTMLElement, key: "ArrowUp" | "ArrowDown"): void {
+  input.focus();
   fireEvent.keyDown(input, {
     key,
     code: key,
@@ -179,38 +180,112 @@ function press(input: HTMLElement, key: "ArrowUp" | "ArrowDown"): void {
 
 afterEach(() => {
   window.localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe("composer prompt history", () => {
-  it("walks older and newer prompts without losing the scratch draft", () => {
+  it.each(["focus", "conversation", "edit"])("does not apply a queued history caret after a newer %s", (change) => {
+    const frames: FrameRequestCallback[] = [];
+    const rendered = render(<Composer {...props({ conversation: conversation("queued-history-a") })} />);
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+    input.focus();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Latest prompt");
+    let other: HTMLButtonElement | undefined;
+    if (change === "focus") {
+      other = document.createElement("button");
+      document.body.append(other);
+      other.focus();
+    } else if (change === "conversation") {
+      rendered.rerender(<Composer {...props({ conversation: conversation("queued-history-b") })} />);
+      fireEvent.change(input, { target: { value: "New conversation draft" } });
+      input.focus();
+      input.setSelectionRange(5, 5);
+    } else {
+      fireEvent.change(input, { target: { value: "Newer local edit" } });
+      input.setSelectionRange(5, 5);
+    }
+    act(() => { frames.forEach((callback) => callback(0)); });
+    if (other) {
+      expect(other).toHaveFocus();
+      other.remove();
+    } else {
+      expect(input.selectionStart).toBe(5);
+    }
+  });
+
+  it.each(["ArrowUp", "ArrowDown"])("keeps %s native inside a long wrapping draft", (key) => {
+    render(<Composer {...props({ conversation: conversation(`wrapped-${key}`) })} />);
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Latest prompt");
+    const draft = "Keep this unfinished paragraph while moving between its wrapped lines. ".repeat(8);
+    fireEvent.change(input, { target: { value: draft } });
+    input.setSelectionRange(180, 180);
+
+    expect(fireEvent.keyDown(input, { key, code: key })).toBe(true);
+    expect(input).toHaveValue(draft);
+  });
+
+  it("keeps repeated Up history navigation at the beginning of recalled multiline prompts", async () => {
+    render(<Composer {...props({ conversation: conversation("history-boundary-repeat"), promptHistory: [
+      { id: "older", content: "Older\nmultiline prompt" },
+      { id: "newer", content: "Newer\nmultiline prompt" },
+    ] })} />);
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Newer\nmultiline prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Older\nmultiline prompt");
+  });
+
+  it("walks older and newer prompts without losing the scratch draft", async () => {
     render(<Composer {...props({ conversation: conversation("history-walk") })} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Unsent scratch" } });
+    input.setSelectionRange(0, 0);
 
     press(input, "ArrowUp");
     expect(input).toHaveValue("Latest prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
     press(input, "ArrowUp");
     expect(input).toHaveValue("Middle prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
     press(input, "ArrowUp");
     expect(input).toHaveValue("Oldest prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
     press(input, "ArrowUp");
     expect(input).toHaveValue("Oldest prompt");
+    // Happy DOM does not implement native caret movement. Reach the opposite
+    // text edge as the user would before asking for newer history.
+    input.setSelectionRange(input.value.length, input.value.length);
     press(input, "ArrowDown");
     expect(input).toHaveValue("Middle prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(input.value.length));
     press(input, "ArrowDown");
     expect(input).toHaveValue("Latest prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(input.value.length));
     press(input, "ArrowDown");
     expect(input).toHaveValue("Unsent scratch");
   });
 
-  it("keeps edits to recalled prompts while browsing the same history", () => {
+  it("keeps edits to recalled prompts while browsing the same history", async () => {
     render(<Composer {...props({ conversation: conversation("history-edits") })} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
 
     press(input, "ArrowUp");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
     fireEvent.change(input, { target: { value: "Edited latest prompt" } });
+    input.setSelectionRange(0, 0);
     press(input, "ArrowUp");
     expect(input).toHaveValue("Middle prompt");
+    await waitFor(() => expect(input.selectionStart).toBe(0));
+    input.setSelectionRange(input.value.length, input.value.length);
     press(input, "ArrowDown");
     expect(input).toHaveValue("Edited latest prompt");
   });

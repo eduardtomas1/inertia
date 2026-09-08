@@ -164,15 +164,16 @@ async function commitFromUi(message: string, screenshot = false): Promise<void> 
   const dialog = app.page.getByRole("dialog", { name: "Commit changes" });
   await dialog.getByRole("textbox", { name: "Commit message" }).fill(message);
   const submit = dialog.getByRole("button", { name: "Commit", exact: true });
-  // Complete review owns many guarded Git inspections on macOS. Use normal
-  // action readiness within the unchanged test deadline before checking the
-  // completed review's branch context; typing does not require review readiness.
-  await submit.click({ trial: true });
+  // Hosted Macs spend 16–30 seconds preparing the complete review. Wait for
+  // readiness before checking its branch context; typing can happen sooner.
+  await submit.click({ trial: true, timeout: 60_000 });
   await expect(dialog.getByText(initialBranch, { exact: true })).toBeVisible();
   await expect(submit).toBeEnabled();
   if (screenshot) await capture("git-commit-review-dark.png");
   await submit.click();
-  await expect(dialog).toBeHidden();
+  // Commit independently revalidates the reviewed state before its transaction.
+  // A 15-second UI assertion can expire while those checks are still completing.
+  await expect(dialog).toBeHidden({ timeout: 60_000 });
   expect(await git(app.workspaceDirectory, "log", "-1", "--format=%s")).toBe(message);
 }
 
@@ -272,10 +273,11 @@ test("branch search retains failed choices and keeps keyboard focus visible", as
   expect(app.rendererErrors).toEqual([]);
 });
 
-// Keep each guarded mutation within its own unchanged scenario budget. On
-// Intel CI, review alone took 26 seconds and tracking plus two fetches left
-// only three seconds for Pull in the former combined scenarios.
+// Keep each mutation independent. Native timing found 83 guarded Git commands
+// in review alone, followed by commit revalidation and the transaction. Allow
+// this complete flow its own bound without changing other scenarios or retries.
 test("commits reviewed paths", async () => {
+  test.setTimeout(120_000);
   const { workspaceDirectory } = app;
   await commitFromUi("Reviewed fixture change", true);
   expect(await git(workspaceDirectory, "status", "--porcelain")).toBe("");

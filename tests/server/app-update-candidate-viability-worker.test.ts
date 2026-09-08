@@ -119,7 +119,7 @@ describe("app update candidate viability worker", () => {
       "SELECT value FROM app_update_clone_marker",
     ).pluck().get()).toBe("live-n-minus-one");
     expect(database.prepare(
-      "SELECT 1 FROM pragma_table_info('agent_turns') WHERE name = 'continuation_reason_code'",
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issue_report_draft'",
     ).get()).toBeUndefined();
     expect(tableSql(database, "model_backend_profiles"))
       .toContain("'gemini-acp'");
@@ -133,8 +133,7 @@ describe("app update candidate viability worker", () => {
     const previousVersion = runtimeMigrationCatalog().length - 1;
     migrateRuntimeDatabase(database, previousVersion);
     database.exec(`
-      ALTER TABLE agent_turns RENAME TO agent_turns_live;
-      CREATE VIEW agent_turns AS SELECT * FROM agent_turns_live;
+      CREATE INDEX issue_report_draft ON agent_turns(id);
       CREATE TABLE app_update_clone_marker (marker TEXT NOT NULL);
       INSERT INTO app_update_clone_marker (marker) VALUES ('live-only');
     `);
@@ -160,7 +159,7 @@ describe("app update candidate viability worker", () => {
       "PRAGMA table_info(agent_turns)",
     ).all() as Array<{ name: string }>).some(
       ({ name }) => name === "continuation_reason_code",
-    )).toBe(false);
+    )).toBe(true);
     expect(tableSql(unchanged, "model_backend_profiles"))
       .toContain("'gemini-acp'");
     unchanged.close();

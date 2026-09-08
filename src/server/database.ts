@@ -99,7 +99,6 @@ import type {
   UpsertSubagentTraceResult,
 } from "./persistence/types";
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
-
 export { RecordNotFoundError } from "./persistence/errors";
 export type * from "./database-public-types";
 
@@ -128,7 +127,6 @@ export class RuntimeStore {
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
-
   constructor(
     databasePath: string,
     _defaultWorkspacePath: string,
@@ -1112,6 +1110,11 @@ export class RuntimeStore {
     );
   }
 
+  readIssueReport(): unknown {
+    const row = this.database.prepare("SELECT report_json FROM issue_report_draft WHERE singleton = 1").get() as { report_json: string } | undefined;
+    return row ? JSON.parse(row.report_json) : null;
+  }
+  saveIssueReport(report: import("../shared/issue-report").IssueReport): void { this.database.prepare("INSERT INTO issue_report_draft (singleton, report_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET report_json = excluded.report_json").run(JSON.stringify(report)); }
   createWorkspaceRun(
     input: Omit<WorkspaceRun, "id" | "actionId" | "attentionState" | "canStop" | "startedAt" | "finishedAt"> & {
       id?: string;

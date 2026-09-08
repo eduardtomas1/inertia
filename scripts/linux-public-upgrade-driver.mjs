@@ -5,18 +5,17 @@ import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "@playwright/test";
 import WebSocket from "ws";
-import { readPublicTarget, verifyPrivateDownloadedTarget, verifyTargetFile } from "./linux-public-update-evidence.mjs";
+import { readPublicTarget, validatePublicUpgrade, verifyPrivateDownloadedTarget, verifyTargetFile } from "./linux-public-update-evidence.mjs";
 import { exactOwner, ownedWindow, processIdentity, profileDirectory, readyRuntime } from "./linux-public-upgrade-ownership.mjs";
 import { runPackagedHistorySmoke, resumePackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { assertHistoryAfterShutdown } from "./package-smoke-history-storage.mjs";
 
 assert.equal(process.platform, "linux");
 assert.equal(process.arch, "x64");
-assert.equal(process.argv.length, 6);
-assert.equal(process.argv[4], "0.0.54");
-assert.match(process.argv[5], /^[a-f0-9]{64}$/u);
+assert([6, 9].includes(process.argv.length));
+const identity = validatePublicUpgrade(...process.argv.slice(4));
+const predecessorVersion = identity.predecessor.version, targetVersion = identity.target.version;
 const predecessor = resolve(process.argv[2]), root = resolve(process.argv[3]);
-const predecessorDigest = "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2";
 const report = { schemaVersion: 1, proof: "normal-public-upgrade", passed: false,
   fixtureAdvertisementAndDownload: false, fixtureVersionOverride: false, phase: "public-target" };
 const started = Date.now(), deadline = started + 150_000;
@@ -164,12 +163,12 @@ async function configureProvider(url, path) {
 }
 
 try {
-  const target = await readPublicTarget(process.argv[5]); // Fails until immutable public54 exists.
+  const target = await readPublicTarget(identity.target.sha256, targetVersion); // Requires the exact public release.
   report.publicTarget = target;
-  await verifyTargetFile(predecessor, { size: 360582286, sha256: predecessorDigest });
-  report.predecessor = { version: "0.0.53", size: 360582286, sha256: predecessorDigest };
+  await verifyTargetFile(predecessor, identity.predecessor);
+  report.predecessor = identity.predecessor;
   for (const name of ["home", "config", "cache", "data", "workspace", "temp", "bin"]) await mkdir(join(root, name), { mode: 0o700 });
-  const installed = join(root, "Inertia-0.0.53.AppImage"), stable = join(root, "Inertia.AppImage");
+  const installed = join(root, identity.predecessor.name), stable = join(root, "Inertia.AppImage");
   const workspace = join(root, "workspace"), codex = join(root, "bin", "codex");
   await copyFile(predecessor, installed); await chmod(installed, 0o755);
   await copyFile(process.execPath, codex); await chmod(codex, 0o755);
@@ -185,7 +184,7 @@ try {
   const namespaces = spawnSync("/usr/bin/unshare", ["-Ur", "/usr/bin/true"], { env, shell: false, timeout: 2000, stdio: "ignore" });
   report.host = { userNamespacesAvailable: !namespaces.error && namespaces.status === 0 && namespaces.signal === null,
     explicitSandboxOverride: false, extractionLaunch: true };
-  report.phase = "normal-v53-launch";
+  report.phase = "normal-predecessor-launch";
   const old = await launch(installed, env, "predecessor");
   report.phase = "predecessor-profile-identity";
   const profile = await profileDirectory(root);
@@ -199,17 +198,17 @@ try {
   const oldUrl = await connection(old.page);
   report.phase = "predecessor-provider-configuration";
   await configureProvider(oldUrl, codex);
-  report.phase = "seed-real-v53-history";
+  report.phase = "seed-real-predecessor-history";
   const history = await runPackagedHistorySmoke({ websocketUrl: oldUrl, workspaceDirectory: workspace, deadlineAt: Math.min(deadline, Date.now() + 30_000) });
   const sentinel = randomUUID();
   await writeFile(join(root, "data", "user-owned-file"), sentinel, { mode: 0o600 });
   report.phase = "normal-public-check";
   const available = await bounded(old.page.evaluate(() => window.inertia.checkAppUpdate(true)), 30_000);
-  for (const [key, value] of Object.entries({ currentVersion: "0.0.53", latestVersion: "0.0.54", channel: "stable", delivery: "in-app", state: "available", freshness: "fresh", installBlocker: null })) assert.equal(available[key], value);
+  for (const [key, value] of Object.entries({ currentVersion: predecessorVersion, latestVersion: targetVersion, channel: "stable", delivery: "in-app", state: "available", freshness: "fresh", installBlocker: null })) assert.equal(available[key], value);
   report.phase = "normal-public-download";
   const downloaded = await bounded(old.page.evaluate(() => window.inertia.downloadAppUpdate()));
   assert.equal(downloaded.state, "downloaded"); assert.equal(downloaded.installBlocker, null);
-  assert.equal(downloaded.currentVersion, "0.0.53"); assert.equal(downloaded.latestVersion, "0.0.54");
+  assert.equal(downloaded.currentVersion, predecessorVersion); assert.equal(downloaded.latestVersion, targetVersion);
   report.download = await verifyPrivateDownloadedTarget(root, target);
   report.phase = "normal-install-once";
   const installAt = Date.now();
@@ -245,9 +244,9 @@ try {
   const status = await bounded(reopened.page.evaluate(() => window.inertia.checkAppUpdate(true)), 30_000);
   report.freshUpdateStatus = updateObservation(status);
   report.phase = "fresh-current-version";
-  assert.equal(status.currentVersion, "0.0.54");
+  assert.equal(status.currentVersion, targetVersion);
   report.phase = "fresh-latest-version";
-  assert.equal(status.latestVersion, "0.0.54");
+  assert.equal(status.latestVersion, targetVersion);
   report.phase = "fresh-update-state";
   assert.equal(status.state, "current");
   report.phase = "fresh-update-blocker";

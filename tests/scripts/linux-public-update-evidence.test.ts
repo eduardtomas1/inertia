@@ -8,8 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const moduleUrl = pathToFileURL(join(import.meta.dirname, "../../scripts/linux-public-update-evidence.mjs")).href;
 type Target = { version: string; name: string; size: number; sha256: string };
 const evidence = await import(moduleUrl) as {
-  validatePublicTarget: (release: unknown, checksums: string, digest: string) => Target;
-  downloadPublicTarget: (directory: string, digest: string) => Promise<Target>;
+  validatePublicTarget: (release: unknown, checksums: string, digest: string, version?: string) => Target;
+  downloadPublicTarget: (directory: string, digest: string, version?: string) => Promise<Target>;
+  validatePublicUpgrade: (version: string, digest: string, predecessorVersion?: string, predecessorSize?: string, predecessorDigest?: string) => {
+    predecessor: Target;
+    target: Omit<Target, "size">;
+  };
   verifyPrivateDownloadedTarget: (root: string, target: Target) => Promise<unknown>;
 };
 const name = "Inertia-0.0.54.AppImage";
@@ -17,8 +21,8 @@ const bytes = Buffer.from("synthetic immutable AppImage bytes");
 const digest = createHash("sha256").update(bytes).digest("hex");
 const target = { version: "0.0.54", name, size: bytes.length, sha256: digest };
 const checksums = `${digest}  ${name}\n`;
-const release = () => ({ tag_name: "v0.0.54", draft: false, prerelease: false, assets: [{
-  name, size: bytes.length, browser_download_url: `https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/${name}`,
+const release = (version = "0.0.54") => ({ tag_name: `v${version}`, draft: false, prerelease: false, assets: [{
+  name: `Inertia-${version}.AppImage`, size: bytes.length, browser_download_url: `https://github.com/eduardtomas1/inertia/releases/download/v${version}/Inertia-${version}.AppImage`,
   digest: `sha256:${digest}`,
 }] });
 const roots: string[] = [];
@@ -36,12 +40,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-function mockPublicFetch(download = bytes) {
+function mockPublicFetch(download = bytes, version = "0.0.54") {
+  const expectedName = `Inertia-${version}.AppImage`;
   const fetch = vi.fn(async (url: string, options: RequestInit) => {
     expect(new Headers(options.headers).get("authorization")).toBeNull();
-    if (url === "https://api.github.com/repos/eduardtomas1/inertia/releases/tags/v0.0.54") return new Response(JSON.stringify(release()));
-    if (url === "https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/SHA256SUMS.txt") return new Response(checksums);
-    expect(url).toBe(`https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/${name}`);
+    if (url === `https://api.github.com/repos/eduardtomas1/inertia/releases/tags/v${version}`) return new Response(JSON.stringify(release(version)));
+    if (url === `https://github.com/eduardtomas1/inertia/releases/download/v${version}/SHA256SUMS.txt`) return new Response(`${digest}  ${expectedName}\n`);
+    expect(url).toBe(`https://github.com/eduardtomas1/inertia/releases/download/v${version}/${expectedName}`);
     return new Response(new Uint8Array(download), { headers: { "content-length": String(download.length) } });
   });
   vi.stubGlobal("fetch", fetch);
@@ -49,6 +54,47 @@ function mockPublicFetch(download = bytes) {
 }
 
 describe("scratch public Linux update identity", () => {
+  it("requires explicit identities for a consecutive new patch pair", () => {
+    const value = evidence.validatePublicUpgrade("0.0.55", digest, "0.0.54", "123", "a".repeat(64));
+    expect(value).toEqual({ predecessor: { version: "0.0.54", name: "Inertia-0.0.54.AppImage", size: 123, sha256: "a".repeat(64) },
+      target: { version: "0.0.55", name: "Inertia-0.0.55.AppImage", sha256: digest } });
+    expect(() => evidence.validatePublicUpgrade("0.0.55", digest)).toThrow();
+    expect(evidence.validatePublicUpgrade("0.0.54", digest).predecessor.version).toBe("0.0.53");
+  });
+
+  it.each(["0.0.54", "0.0.56", "0.1.0", "1.0.55", "0.0.55-canary", "00.0.55", "../0.0.55", "0.0.1000000"])("rejects a nonconsecutive or unsafe target %s", version => {
+    expect(() => evidence.validatePublicUpgrade(version, digest, "0.0.54", "123", "a".repeat(64))).toThrow();
+  });
+
+  it.each(["0", "-1", "1e2", "123.5", "536870913", "123/private"])("rejects unbounded predecessor size %s", size => {
+    expect(() => evidence.validatePublicUpgrade("0.0.55", digest, "0.0.54", size, "a".repeat(64))).toThrow();
+  });
+
+  it("rejects absent, malformed or identical old and new digests", () => {
+    expect(() => evidence.validatePublicUpgrade("0.0.55", "", "0.0.54", "123", "a".repeat(64))).toThrow();
+    expect(() => evidence.validatePublicUpgrade("0.0.55", digest, "0.0.54", "123", "A".repeat(64))).toThrow();
+    expect(() => evidence.validatePublicUpgrade("0.0.55", digest, "0.0.54", "123", digest)).toThrow();
+  });
+
+  it("binds the new version to its exact public URLs, metadata, manifest and cache file", async () => {
+    const version = "0.0.55", nextName = `Inertia-${version}.AppImage`;
+    const nextTarget = { ...target, version, name: nextName };
+    const fetch = mockPublicFetch(bytes, version);
+    const { root, pending } = await fixture();
+    expect(() => evidence.validatePublicTarget(release(), checksums, digest, version)).toThrow();
+    expect(() => evidence.validatePublicTarget(release(version), checksums, digest, version)).toThrow();
+    await expect(evidence.downloadPublicTarget(join(root, "new-public-target"), digest, version)).resolves.toEqual({
+      ...nextTarget, checksumVerified: true, publicArtifact: true,
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await expect(evidence.verifyPrivateDownloadedTarget(root, nextTarget)).rejects.toThrow();
+    await rm(join(pending, name));
+    await writeFile(join(pending, nextName), bytes);
+    await expect(evidence.verifyPrivateDownloadedTarget(root, nextTarget)).resolves.toEqual({
+      name: nextName, size: bytes.length, sha256: digest, checksumVerified: true,
+    });
+  });
+
   it("downloads only the fixed public target anonymously and rehashes before making it executable", async () => {
     const fetch = mockPublicFetch();
     const { root } = await fixture();

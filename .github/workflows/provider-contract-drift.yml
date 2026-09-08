@@ -1,4 +1,4 @@
-name: Linux v53 to v54 release validation
+name: Linux public release upgrade validation
 
 on:
   workflow_dispatch:
@@ -10,11 +10,31 @@ on:
         options: [pretag-handoff, public-handoff, public-download, public-upgrade]
         default: pretag-handoff
       source_sha:
-        description: Exact 40-hex frozen v54 main commit
+        description: Exact 40-hex frozen target main commit
         required: true
         type: string
+      target_version:
+        description: Exact stable target version; public-upgrade supports consecutive patches
+        required: true
+        default: 0.0.54
+        type: string
+      predecessor_version:
+        description: Exact independently verified public predecessor version
+        required: true
+        default: 0.0.53
+        type: string
+      predecessor_size:
+        description: Independently verified public predecessor AppImage byte count
+        required: true
+        default: "360582286"
+        type: string
+      predecessor_sha256:
+        description: Independently verified public predecessor AppImage SHA256
+        required: true
+        default: 81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2
+        type: string
       expected_public_sha256:
-        description: Required for public modes; exact published v54 x64 digest
+        description: Required for public modes; exact independently verified target x64 digest
         required: false
         type: string
 
@@ -23,7 +43,7 @@ permissions:
 
 jobs:
   linux-v53-transition:
-    name: Published v53 / ${{ inputs.mode }}
+    name: Published ${{ inputs.predecessor_version }} to ${{ inputs.target_version }} / ${{ inputs.mode }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -31,6 +51,10 @@ jobs:
       RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
       VALIDATION_MODE: ${{ inputs.mode }}
       EXPECTED_PUBLIC_SHA256: ${{ inputs.expected_public_sha256 }}
+      TARGET_VERSION: ${{ inputs.target_version }}
+      PREDECESSOR_VERSION: ${{ inputs.predecessor_version }}
+      PREDECESSOR_SIZE: ${{ inputs.predecessor_size }}
+      PREDECESSOR_SHA256: ${{ inputs.predecessor_sha256 }}
       INERTIA_RELEASE_CHANNEL: stable
       INERTIA_RELEASE_PLATFORM: linux-x64
     steps:
@@ -48,12 +72,27 @@ jobs:
             public-handoff|public-download|public-upgrade) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
             *) exit 1 ;;
           esac
+          node --input-type=module <<'JS'
+          import { strict as assert } from "node:assert";
+          import { validatePublicUpgrade } from "./scripts/linux-public-update-evidence.mjs";
+          const env = process.env;
+          if (env.VALIDATION_MODE === "public-upgrade") {
+            validatePublicUpgrade(env.TARGET_VERSION, env.EXPECTED_PUBLIC_SHA256,
+              env.PREDECESSOR_VERSION, env.PREDECESSOR_SIZE, env.PREDECESSOR_SHA256);
+          } else {
+            // The original fixture/download modes retain their reviewed 53 → 54 identities.
+            assert.equal(env.TARGET_VERSION, "0.0.54");
+            assert.equal(env.PREDECESSOR_VERSION, "0.0.53");
+            assert.equal(env.PREDECESSOR_SIZE, "360582286");
+            assert.equal(env.PREDECESSOR_SHA256, "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2");
+          }
+          JS
           mkdir -p "$RUNNER_TEMP/validation-harness/ci" "$RUNNER_TEMP/validation-evidence"
           cp scripts/linux-guarded-smoke.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-installed-update-{smoke,driver}.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-public-update-{probe,probe-driver,evidence}.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-public-upgrade-{driver,ownership}.mjs scripts/linux-public-upgrade-window.py "$RUNNER_TEMP/validation-harness/"
-          cp scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/validation-harness/ci/"
+          cp scripts/ci/download-public-linux-predecessor.mjs "$RUNNER_TEMP/validation-harness/ci/"
       - name: Check out exact frozen candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,11 +112,15 @@ jobs:
           import { join } from "node:path";
           const pkg = JSON.parse(readFileSync("package.json", "utf8"));
           const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
-          for (const version of [pkg.version, lock.version, lock.packages[""].version]) assert.equal(version, "0.0.54");
+          for (const version of [pkg.version, lock.version, lock.packages[""].version]) assert.equal(version, process.env.TARGET_VERSION);
           assert.equal(pkg.inertiaReleaseChannel, "stable");
           writeFileSync(join(process.env.RUNNER_TEMP, "validation-evidence/source.json"), JSON.stringify({
             sourceSha: process.env.SOURCE_SHA, driverSha: process.env.DRIVER_SHA,
             mode: process.env.VALIDATION_MODE, version: pkg.version,
+            predecessorVersion: process.env.PREDECESSOR_VERSION,
+            predecessorSize: Number(process.env.PREDECESSOR_SIZE),
+            predecessorSha256: process.env.PREDECESSOR_SHA256,
+            expectedPublicSha256: process.env.EXPECTED_PUBLIC_SHA256,
           }) + "\n");
           JS
       - name: Install locked dependencies
@@ -115,10 +158,10 @@ jobs:
           set -euo pipefail
           cp "$RUNNER_TEMP/validation-harness/"*.mjs scripts/
           cp "$RUNNER_TEMP/validation-harness/linux-public-upgrade-window.py" scripts/
-          cp "$RUNNER_TEMP/validation-harness/ci/download-public-linux-v53.mjs" scripts/ci/
+          cp "$RUNNER_TEMP/validation-harness/ci/download-public-linux-predecessor.mjs" scripts/ci/
           git diff --exit-code -- src package.json package-lock.json
       - name: Download and verify the exact published predecessor
-        run: node scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/v53-predecessor"
+        run: node scripts/ci/download-public-linux-predecessor.mjs "$RUNNER_TEMP/public-predecessor" "$PREDECESSOR_VERSION" "$PREDECESSOR_SIZE" "$PREDECESSOR_SHA256"
       - name: Download verified public v54 without rebuilding the candidate
         if: inputs.mode == 'public-handoff'
         run: |
@@ -139,26 +182,27 @@ jobs:
           if [[ "$VALIDATION_MODE" == public-handoff ]]; then candidate="$RUNNER_TEMP/v54-public/Inertia-0.0.54.AppImage"; fi
           xvfb-run --auto-servernum node scripts/linux-installed-update-smoke.mjs \
             "$candidate" \
-            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" 0.0.53
+            "$RUNNER_TEMP/public-predecessor/Inertia-0.0.53.AppImage" 0.0.53
       - name: Check real public feed and download via untouched v53 updater
         if: inputs.mode == 'public-download'
         run: |
           xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs \
-            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" \
+            "$RUNNER_TEMP/public-predecessor/Inertia-0.0.53.AppImage" \
             "$RUNNER_TEMP/validation-evidence" 0.0.54 "$EXPECTED_PUBLIC_SHA256"
-      - name: Prove one normal public53 to public54 upgrade and fresh relaunch
+      - name: Prove one normal public upgrade and fresh relaunch
         if: inputs.mode == 'public-upgrade'
         run: |
           xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs \
-            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" \
-            "$RUNNER_TEMP/validation-evidence" 0.0.54 "$EXPECTED_PUBLIC_SHA256" public-upgrade
+            "$RUNNER_TEMP/public-predecessor/Inertia-$PREDECESSOR_VERSION.AppImage" \
+            "$RUNNER_TEMP/validation-evidence" "$TARGET_VERSION" "$EXPECTED_PUBLIC_SHA256" public-upgrade \
+            "$PREDECESSOR_VERSION" "$PREDECESSOR_SIZE" "$PREDECESSOR_SHA256"
       - name: Retain only compact identities and bounded outcomes
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linux-v53-${{ inputs.mode }}-${{ inputs.source_sha }}
+          name: linux-${{ inputs.predecessor_version }}-to-${{ inputs.target_version }}-${{ inputs.mode }}-${{ inputs.source_sha }}
           path: |
-            ${{ runner.temp }}/v53-predecessor/predecessor.json
+            ${{ runner.temp }}/public-predecessor/predecessor.json
             ${{ runner.temp }}/validation-evidence/*.json
           retention-days: 7
           if-no-files-found: warn

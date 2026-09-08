@@ -5,13 +5,32 @@ import { chmod, lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { downloadBoundedFile, fetchBoundedText, releaseAssetChecksum } from "./ci/download-windows-n-minus-one.mjs";
 
-const name = "Inertia-0.0.54.AppImage";
-const url = `https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/${name}`;
 const maxBytes = 512 * 1024 * 1024;
+export function publicAssetName(version) {
+  assert(typeof version === "string" && version.length <= 20);
+  assert.match(version, /^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/u);
+  return `Inertia-${version}.AppImage`;
+}
+const publicAssetUrl = version => `https://github.com/eduardtomas1/inertia/releases/download/v${version}/${publicAssetName(version)}`;
 
-export function validatePublicTarget(release, checksums, expectedDigest) {
+export function validatePublicUpgrade(targetVersion, targetDigest, predecessorVersion = "0.0.53",
+  predecessorSize = "360582286", predecessorDigest = "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2") {
+  const targetName = publicAssetName(targetVersion), predecessorName = publicAssetName(predecessorVersion);
+  const before = predecessorVersion.split(".").map(Number), after = targetVersion.split(".").map(Number);
+  assert(after[0] === before[0] && after[1] === before[1] && after[2] === before[2] + 1);
+  assert.match(predecessorSize, /^[1-9][0-9]{0,8}$/u);
+  const size = Number(predecessorSize);
+  assert(Number.isSafeInteger(size) && size <= maxBytes);
+  for (const digest of [targetDigest, predecessorDigest]) assert.match(digest, /^[a-f0-9]{64}$/u);
+  assert.notEqual(targetDigest, predecessorDigest);
+  return { predecessor: { version: predecessorVersion, name: predecessorName, size, sha256: predecessorDigest },
+    target: { version: targetVersion, name: targetName, sha256: targetDigest } };
+}
+
+export function validatePublicTarget(release, checksums, expectedDigest, version = "0.0.54") {
+  const name = publicAssetName(version), url = publicAssetUrl(version);
   assert.match(expectedDigest, /^[a-f0-9]{64}$/u);
-  assert.equal(release.tag_name, "v0.0.54");
+  assert.equal(release.tag_name, `v${version}`);
   assert.equal(release.draft, false);
   assert.equal(release.prerelease, false);
   assert(Array.isArray(release.assets) && release.assets.length <= 64);
@@ -22,39 +41,42 @@ export function validatePublicTarget(release, checksums, expectedDigest) {
   assert.equal(asset.browser_download_url, url);
   assert.equal(asset.digest, `sha256:${expectedDigest}`);
   assert.equal(releaseAssetChecksum(checksums, name), expectedDigest);
-  return { version: "0.0.54", name, size: asset.size, sha256: expectedDigest };
+  return { version, name, size: asset.size, sha256: expectedDigest };
 }
 
-export async function readPublicTarget(expectedDigest) {
+export async function readPublicTarget(expectedDigest, version = "0.0.54") {
+  publicAssetName(version);
+  assert.match(expectedDigest, /^[a-f0-9]{64}$/u);
   const timeouts = { connectTimeoutMs: 10_000, bodyTimeoutMs: 10_000 };
   const release = JSON.parse(await fetchBoundedText(
-    "https://api.github.com/repos/eduardtomas1/inertia/releases/tags/v0.0.54",
+    `https://api.github.com/repos/eduardtomas1/inertia/releases/tags/v${version}`,
     2 * 1024 * 1024, "", "application/vnd.github+json", timeouts,
   ));
   const checksums = await fetchBoundedText(
-    "https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/SHA256SUMS.txt",
+    `https://github.com/eduardtomas1/inertia/releases/download/v${version}/SHA256SUMS.txt`,
     65_536, "", "application/octet-stream", timeouts,
   );
-  return validatePublicTarget(release, checksums, expectedDigest);
+  return validatePublicTarget(release, checksums, expectedDigest, version);
 }
 
-export async function downloadPublicTarget(directory, expectedDigest) {
+export async function downloadPublicTarget(directory, expectedDigest, version = "0.0.54") {
   assert(isAbsolute(directory));
-  const target = await readPublicTarget(expectedDigest);
+  const target = await readPublicTarget(expectedDigest, version);
   // This one-use directory must be fresh; never replace an existing candidate.
   await mkdir(directory, { mode: 0o700 });
   const path = join(directory, target.name);
-  await downloadBoundedFile(url, path, target.size, "");
+  await downloadBoundedFile(publicAssetUrl(version), path, target.size, "");
   await verifyTargetFile(path, target);
   await chmod(path, 0o755);
   return { ...target, checksumVerified: true, publicArtifact: true };
 }
 
 export async function verifyPrivateDownloadedTarget(root, target) {
+  const name = publicAssetName(target.version);
   assert.equal(target.name, name);
   assert.match(target.sha256, /^[a-f0-9]{64}$/u);
   assert(Number.isSafeInteger(target.size) && target.size > 0 && target.size <= maxBytes);
-  // The pinned public v53 package is named inertia; its shipped builder uses
+  // The public predecessor package is named inertia; its shipped builder uses
   // sanitizedName.toLowerCase() + '-updater', under the private XDG_CACHE_HOME.
   let directory = await realpath(root);
   for (const part of ["cache", "inertia-updater", "pending"]) {
@@ -78,6 +100,8 @@ export async function verifyPrivateDownloadedTarget(root, target) {
 }
 
 export async function verifyTargetFile(path, target) {
+  const name = publicAssetName(target.version);
+  assert.equal(target.name, name);
   const before = await lstat(path);
   assert(before.isFile() && !before.isSymbolicLink() && before.size === target.size);
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

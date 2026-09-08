@@ -2,13 +2,20 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { strict as assert } from "node:assert";
 import { downloadBoundedFile, fetchBoundedText, releaseAssetChecksum } from "./download-windows-n-minus-one.mjs";
+import { publicAssetName } from "../linux-public-update-evidence.mjs";
 
 const repository = "eduardtomas1/inertia";
-const tag = "v0.0.53";
-const name = "Inertia-0.0.53.AppImage";
-const size = 360582286;
-const sha256 = "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2";
+assert([3, 6].includes(process.argv.length));
+const version = process.argv[3] ?? "0.0.53";
+const name = publicAssetName(version), tag = `v${version}`;
+const expectedSize = process.argv[4] ?? "360582286";
+assert.match(expectedSize, /^[1-9][0-9]{0,8}$/u);
+const size = Number(expectedSize);
+assert(Number.isSafeInteger(size) && size <= 512 * 1024 * 1024);
+const sha256 = process.argv[5] ?? "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2";
+assert.match(sha256, /^[a-f0-9]{64}$/u);
 const url = `https://github.com/${repository}/releases/download/${tag}/${name}`;
 const root = resolve(process.argv[2]);
 const release = JSON.parse(await fetchBoundedText(`https://api.github.com/repos/${repository}/releases/tags/${tag}`,

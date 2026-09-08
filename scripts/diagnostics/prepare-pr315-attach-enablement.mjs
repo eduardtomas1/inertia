@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +25,20 @@ const changed = git(driver, "diff", "--name-only", source, "HEAD").split("\n");
 if (changed.length !== allowed.length || changed.some((path) => !allowed.includes(path))) {
   throw new Error("Driver changes exceed diagnostic-only scope");
 }
-git(process.cwd(), "diff", "--exit-code", "HEAD");
+const generatedManifest = "resources/generated/windows-runtime-job-integrity.json";
+const generatedJob = "resources/generated/runtime-process-guardian/windows-runtime-job.exe";
+const manifest = JSON.parse(normalized(generatedManifest));
+const jobStat = statSync(generatedJob);
+if (!manifest || Object.keys(manifest).length !== 1
+  || typeof manifest.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(manifest.sha256)
+  || !jobStat.isFile() || jobStat.size <= 0 || jobStat.size > 16 * 1024 * 1024) {
+  throw new Error("Invalid generated Windows Job Object evidence");
+}
+const generatedJobHash = hash(readFileSync(generatedJob));
+if (manifest.sha256 !== generatedJobHash
+  || git(process.cwd(), "diff", "--name-only", "HEAD") !== generatedManifest) {
+  throw new Error("Build changed source or generated Windows Job Object identity");
+}
 const patch = resolve(driver, patchPath);
 const patchHash = hash(normalized(patch));
 if (patchHash !== "da10eb743a3eab3a4a9734a0c0ab02fac11b2dae996aa417b476e15d0cdc1aec") {
@@ -42,7 +55,8 @@ git(process.cwd(), "apply", "--check", appliedPatch);
 git(process.cwd(), "apply", appliedPatch);
 const observedHash = hash(normalized(target));
 if (observedHash !== "db45588882d1e326c8181dcfe564386851b1ef5307c91e8f2ec38b1ca1719e63"
-  || git(process.cwd(), "diff", "--name-only", "HEAD") !== target) {
+  || git(process.cwd(), "diff", "--name-only", "HEAD")
+    !== [generatedManifest, target].join("\n")) {
   throw new Error("Unexpected applied instrumentation");
 }
 writeFileSync("diagnostic-results/provenance.json", JSON.stringify({
@@ -53,6 +67,7 @@ writeFileSync("diagnostic-results/provenance.json", JSON.stringify({
   workflowSha256: hash(normalized(resolve(driver, ".github/workflows/provider-contract-drift.yml"))),
   lockSha256: hash(normalized("package-lock.json")),
   patchSha256: patchHash, originalTestSha256: originalHash, observedTestSha256: observedHash,
+  generatedWindowsJobSha256: generatedJobHash, generatedWindowsJobBytes: jobStat.size,
   productionBuiltBeforeInstrumentation: true,
   command: "npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery",
   expectedScenarios: ["app-shell", "goal-reliability", "runtime-stranded-profile", "sent-attachments"],

@@ -42,6 +42,32 @@ async function gone(identity) {
 const errorKinds = new Set(["Error", "AssertionError", "TimeoutError", "TypeError"]);
 const errorCodes = new Set(["ERR_ASSERTION", "ENOENT", "ESRCH", "EACCES", "EPERM", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT"]);
 const signalKinds = new Set(["SIGABRT", "SIGBUS", "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL", "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGTERM", "SIGTRAP", "SIGUSR1", "SIGUSR2", "SIGSYS"]);
+const updateStates = new Set(["idle", "checking", "available", "downloading", "cancelled", "downloaded", "installing", "current", "unavailable", "failed"]);
+const updateFreshness = new Set(["fresh", "cached", "unavailable"]);
+const updateBlockers = new Set(["active-work", "terminal", "maintenance", "database-recovery", "local-operation", "runtime-transition", "private-connect", "shutdown"]);
+function updateObservation(status) {
+  const version = value => value === null ? null : typeof value === "string" && value.length <= 20
+    && /^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/u.test(value) ? value : "other";
+  return { currentVersion: version(status?.currentVersion), latestVersion: version(status?.latestVersion),
+    state: updateStates.has(status?.state) ? status.state : "other",
+    freshness: updateFreshness.has(status?.freshness) ? status.freshness : "other",
+    installBlocker: status?.installBlocker === null ? null : updateBlockers.has(status?.installBlocker) ? status.installBlocker : "other" };
+}
+const diagnosticSources = ["linux-public-upgrade-driver.mjs", "package-smoke-history-runtime.mjs", "package-smoke-history-storage.mjs"];
+function failureFrames(error) {
+  const frames = [];
+  for (const line of (typeof error?.stack === "string" ? error.stack.slice(0, 16_384) : "").split("\n").slice(0, 32)) {
+    if (!line.trimStart().startsWith("at ")) continue;
+    for (const source of diagnosticSources) {
+      const url = new URL(`./${source}`, import.meta.url).href, index = line.indexOf(url);
+      if (index < 0) continue;
+      const match = /^:([1-9][0-9]{0,4}):([1-9][0-9]{0,4})\)?$/u.exec(line.slice(index + url.length));
+      if (match) frames.push({ source, line: Number(match[1]), column: Number(match[2]) });
+      if (frames.length === 3) return frames;
+    }
+  }
+  return frames;
+}
 const launches = [];
 report.launches = launches;
 async function launch(path, env, role) {
@@ -211,12 +237,25 @@ try {
   assert.equal(await readFile(join(root, "data", "user-owned-file"), "utf8"), sentinel);
   report.phase = "fresh-stable-relaunch";
   const reopened = await launch(stable, env, "reopened");
-  report.phase = "fresh-stable-relaunch-verification";
-  assert.equal(await profileDirectory(root), profile);
+  report.phase = "fresh-profile-identity";
+  const reopenedProfile = await profileDirectory(root);
+  report.sameProfileAfterFreshRelaunch = reopenedProfile === profile;
+  assert.equal(reopenedProfile, profile);
+  report.phase = "fresh-public-update-check";
   const status = await bounded(reopened.page.evaluate(() => window.inertia.checkAppUpdate(true)), 30_000);
-  assert.equal(status.currentVersion, "0.0.54"); assert.equal(status.latestVersion, "0.0.54");
-  assert.equal(status.state, "current"); assert.equal(status.installBlocker, null);
-  const finalHistory = await resumePackagedHistorySmoke(await connection(reopened.page), history);
+  report.freshUpdateStatus = updateObservation(status);
+  report.phase = "fresh-current-version";
+  assert.equal(status.currentVersion, "0.0.54");
+  report.phase = "fresh-latest-version";
+  assert.equal(status.latestVersion, "0.0.54");
+  report.phase = "fresh-update-state";
+  assert.equal(status.state, "current");
+  report.phase = "fresh-update-blocker";
+  assert.equal(status.installBlocker, null);
+  report.phase = "fresh-runtime-connection";
+  const reopenedUrl = await connection(reopened.page);
+  report.phase = "fresh-retained-history-and-session";
+  const finalHistory = await resumePackagedHistorySmoke(reopenedUrl, history);
   report.phase = "final-normal-close";
   await reopened.page.close({ runBeforeUnload: true });
   await wait("reopened launcher exit", () => reopened.exit(), 15_000);
@@ -228,7 +267,7 @@ try {
   report.phase = "complete"; report.passed = true;
 } catch (error) {
   report.failure = { phase: report.phase, kind: errorKinds.has(error?.name) ? error.name : "other",
-    code: errorCodes.has(error?.code) ? error.code : null };
+    code: errorCodes.has(error?.code) ? error.code : null, frames: failureFrames(error) };
   process.exitCode = 1;
 } finally {
   // Never signal or destroy a candidate window as a substitute for normal close.

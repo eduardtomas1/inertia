@@ -22,7 +22,8 @@ The Windows job checks out the original source by its full SHA into
 `application`, installs its original locked graph, and builds it before copying
 exactly two instrumented test files from the diagnostic checkout. It checks the
 original source identity, records every `out` file hash before instrumentation,
-and compares hashes afterward, including on benchmark failure. It rejects
+and compares hashes afterward, including on benchmark failure. The sole allowed
+prebuild source difference is `resources/generated/windows-runtime-job-integrity.json`: Windows replaces its null hash with the compiled helper SHA. The verifier requires a regular, contained manifest (at most 4 KiB), a strict one-key lowercase SHA-256 schema, and a regular, contained compiled helper (1 byte through 16 MiB) whose hash matches. After test instrumentation, only that manifest and the one benchmark test may be tracked differences, with exactly the expected helper test addition. The compiled helper hash and byte count must remain unchanged afterward. It rejects
 unexpected tracked changes, extra test files, or source/config/lock changes.
 
 The command remains `npm run benchmark:desktop:built`. The complete benchmark

@@ -48,7 +48,8 @@ jobs:
       - name: Record source and production bundle identity
         run: |
           if ((git rev-parse HEAD) -ne '0fc4f60e1dc4a538d05c3af3773e7e67a3e02bbb') { throw 'Wrong source' }
-          if (git status --porcelain --untracked-files=no) { throw 'Source changed during build' }
+          node ../diagnostic/scripts/diagnostics/verify-323-streaming-source.mjs before
+          if ($LASTEXITCODE -ne 0) { throw "Invalid post-build source evidence" }
           New-Item -ItemType Directory -Force diagnostic-evidence | Out-Null
           git rev-parse HEAD | Set-Content diagnostic-evidence/source.txt
           Get-ChildItem out -File -Recurse | Sort-Object FullName | ForEach-Object {
@@ -58,10 +59,8 @@ jobs:
         run: |
           Copy-Item ../diagnostic/tests/performance/desktop.benchmark.spec.ts tests/performance/desktop.benchmark.spec.ts
           Copy-Item ../diagnostic/tests/helpers/streaming-timeline-diagnostic.ts tests/helpers/streaming-timeline-diagnostic.ts
-          $changed = @(git diff --name-only)
-          if ($changed.Count -ne 1 -or $changed[0] -ne 'tests/performance/desktop.benchmark.spec.ts') { throw 'Unexpected tracked changes' }
-          $untracked = @(git ls-files --others --exclude-standard tests)
-          if ($untracked.Count -ne 1 -or $untracked[0] -ne 'tests/helpers/streaming-timeline-diagnostic.ts') { throw 'Unexpected test additions' }
+          node ../diagnostic/scripts/diagnostics/verify-323-streaming-source.mjs after
+          if ($LASTEXITCODE -ne 0) { throw "Invalid post-instrumentation source evidence" }
           git diff -- tests/performance/desktop.benchmark.spec.ts | Set-Content diagnostic-evidence/instrumentation.diff
           Get-FileHash tests/helpers/streaming-timeline-diagnostic.ts | Format-List | Out-String | Set-Content diagnostic-evidence/helper-hash.txt
       - name: Run unchanged complete desktop benchmark command
@@ -73,6 +72,8 @@ jobs:
             "$($_.FullName.Substring((Get-Location).Path.Length + 1)) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
           } | Set-Content diagnostic-evidence/build-after.txt
           if (Compare-Object (Get-Content diagnostic-evidence/build-before.txt) (Get-Content diagnostic-evidence/build-after.txt)) { throw 'Production build changed' }
+          node ../diagnostic/scripts/diagnostics/verify-323-streaming-source.mjs after
+          if ($LASTEXITCODE -ne 0) { throw "Invalid final source evidence" }
           if (git diff --name-only -- src package.json package-lock.json scripts playwright.benchmark.config.ts) { throw 'Production or benchmark contract changed' }
       - name: Retain diagnostic evidence including failures
         if: always()

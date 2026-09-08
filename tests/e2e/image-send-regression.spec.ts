@@ -9,18 +9,25 @@ import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
+import { observeImagePreviewFailure } from "./support/image-preview-failure-evidence";
 
 let activeApp: Awaited<ReturnType<typeof createAppFixture>> | undefined;
 let bodyFailure: { error: unknown } | undefined;
+let previewEvidence: ReturnType<typeof observeImagePreviewFailure> | undefined;
 
 test.afterEach(async () => {
   const app = activeApp;
   const failure = bodyFailure;
+  const evidence = previewEvidence;
+  previewEvidence = undefined;
   activeApp = undefined;
   bodyFailure = undefined;
   // Playwright gives teardown its own budget; the 45-second body must not
   // truncate the existing privileged cleanup receipt and process proof.
-  if (app) await closeElectronAfterTest(() => app.close(), () => test.info(), failure);
+  if (app) {
+    try { await evidence?.finish(test.info(), Boolean(failure)); }
+    finally { await closeElectronAfterTest(() => app.close(), () => test.info(), failure); }
+  }
 });
 
 const imageAwareCodexAppServer = `
@@ -124,6 +131,11 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,
   });
+  // Retain the post-restart click boundary when the full Windows x64 lane
+  // reproduces a preview failure; other scenarios and platforms do not trace.
+  if (process.platform === "win32" && process.arch === "x64" && process.env.CI) {
+    previewEvidence = observeImagePreviewFailure(app);
+  }
   try {
     const canvas = createCanvas(1_920, 1_080);
     const context = canvas.getContext("2d");
@@ -220,6 +232,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     }
 
     await app.restart();
+    await previewEvidence?.afterRestart();
     for (const attachment of retained) {
       const path = join(app.testDirectory, "data", "conversation-attachments",
         attachment.id, `${attachment.id}.png`);

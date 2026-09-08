@@ -5,7 +5,9 @@ import { runLinuxGuardedSmoke } from "./linux-guarded-smoke.mjs";
 import { strict as assert } from "node:assert";
 
 if (process.platform !== "linux" || process.arch !== "x64") throw new Error("This public probe requires native Linux x64.");
-assert.equal(process.argv.length, 6);
+assert([6, 7].includes(process.argv.length));
+const completeUpgrade = process.argv[6] === "public-upgrade";
+if (process.argv.length === 7) assert(completeUpgrade);
 assert.equal(process.argv[4], "0.0.54");
 assert.match(process.argv[5], /^[a-f0-9]{64}$/u);
 const root = await mkdtemp(join(tmpdir(), "inertia-public-update-"));
@@ -16,7 +18,7 @@ try {
   const output = await runLinuxGuardedSmoke({
     guardian: resolve("resources/generated/runtime-process-guardian/runtime-process-guardian"),
     command: process.execPath,
-    args: [resolve(import.meta.dirname, "linux-public-update-probe-driver.mjs"), resolve(process.argv[2]), root, process.argv[4], process.argv[5]],
+    args: [resolve(import.meta.dirname, completeUpgrade ? "linux-public-upgrade-driver.mjs" : "linux-public-update-probe-driver.mjs"), resolve(process.argv[2]), root, process.argv[4], process.argv[5]],
   });
   console.log(output.trim());
   succeeded = true;
@@ -28,6 +30,6 @@ try {
   const report = source ? JSON.parse(source) : { phase: "driver-report-unavailable", passed: false };
   report.nativeCleanupConfirmed = succeeded;
   report.passed = report.passed === true && succeeded;
-  await writeFile(join(reportDirectory, "public-update-probe.json"), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(join(reportDirectory, completeUpgrade ? "public-upgrade.json" : "public-update-probe.json"), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   if (succeeded) await rm(root, { recursive: true, force: true });
 }

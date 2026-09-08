@@ -77,7 +77,7 @@ export async function verifyPrivateDownloadedTarget(root, target) {
   return await verifyTargetFile(join(directory, name), target);
 }
 
-async function verifyTargetFile(path, target) {
+export async function verifyTargetFile(path, target) {
   const before = await lstat(path);
   assert(before.isFile() && !before.isSymbolicLink() && before.size === target.size);
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

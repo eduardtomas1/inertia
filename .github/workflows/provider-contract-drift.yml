@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Pre-tag handoff, public-artifact handoff, or normal public download
+        description: Pre-tag handoff, public-artifact handoff, normal public download or complete upgrade
         required: true
         type: choice
-        options: [pretag-handoff, public-handoff, public-download]
+        options: [pretag-handoff, public-handoff, public-download, public-upgrade]
         default: pretag-handoff
       source_sha:
         description: Exact 40-hex frozen v54 main commit
         required: true
         type: string
       expected_public_sha256:
-        description: Required for both public modes; exact published v54 x64 digest
+        description: Required for public modes; exact published v54 x64 digest
         required: false
         type: string
 
@@ -45,12 +45,13 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           case "$VALIDATION_MODE" in
             pretag-handoff) test -z "$EXPECTED_PUBLIC_SHA256" ;;
-            public-handoff|public-download) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
+            public-handoff|public-download|public-upgrade) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
             *) exit 1 ;;
           esac
           mkdir -p "$RUNNER_TEMP/validation-harness/ci" "$RUNNER_TEMP/validation-evidence"
           cp scripts/linux-installed-update-{smoke,driver}.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-public-update-{probe,probe-driver,evidence}.mjs "$RUNNER_TEMP/validation-harness/"
+          cp scripts/linux-public-upgrade-{driver,ownership}.mjs scripts/linux-public-upgrade-window.py "$RUNNER_TEMP/validation-harness/"
           cp scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/validation-harness/ci/"
       - name: Check out exact frozen candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,6 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           cp "$RUNNER_TEMP/validation-harness/"*.mjs scripts/
+          cp "$RUNNER_TEMP/validation-harness/linux-public-upgrade-window.py" scripts/
           cp "$RUNNER_TEMP/validation-harness/ci/download-public-linux-v53.mjs" scripts/ci/
           git diff --exit-code -- src package.json package-lock.json
       - name: Download and verify the exact published predecessor
@@ -127,7 +129,7 @@ jobs:
           await writeFile(join(process.env.RUNNER_TEMP, "validation-evidence/public-target.json"), JSON.stringify(target) + "\n", { mode: 0o600 });
           JS
       - name: Certify actual v53 handoff, retained history, new turns and relaunch
-        if: inputs.mode != 'public-download'
+        if: inputs.mode == 'pretag-handoff' || inputs.mode == 'public-handoff'
         env:
           INERTIA_VALIDATION_REPORT: ${{ runner.temp }}/validation-evidence/installed-handoff.json
         run: |
@@ -143,6 +145,12 @@ jobs:
           xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs \
             "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" \
             "$RUNNER_TEMP/validation-evidence" 0.0.54 "$EXPECTED_PUBLIC_SHA256"
+      - name: Prove one normal public53 to public54 upgrade and fresh relaunch
+        if: inputs.mode == 'public-upgrade'
+        run: |
+          xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs \
+            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" \
+            "$RUNNER_TEMP/validation-evidence" 0.0.54 "$EXPECTED_PUBLIC_SHA256" public-upgrade
       - name: Retain only compact identities and bounded outcomes
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

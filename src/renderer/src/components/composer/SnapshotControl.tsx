@@ -48,13 +48,13 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
         else trapModalFocus(event, event.currentTarget);
       }}>
         <header><h2 id="snapshot-title">Snapshots</h2><button ref={close} aria-label="Close Snapshots" onClick={() => setOpen(false)}><X size={18} /></button></header>
-        <p>Capture the foreground window and its accessibility context, then review the attachment before sending.</p>
+        <p>Experimental capture of the foreground window and its accessibility context. Review the attachment before sending.</p>
         {state && <>
           <label className="snapshot-setting"><span>Enable Snapshots</span><input type="checkbox" checked={state.enabled} disabled={pending || !state.available} onChange={(event) => void request({ type: "configure", enabled: event.target.checked, shortcut: state.shortcut })} /></label>
           <label className="snapshot-setting"><span>Capture shortcut</span><select aria-label="Capture shortcut" value={state.shortcut} disabled={pending || !state.available} onChange={(event) => void request({ type: "configure", enabled: state.enabled, shortcut: event.target.value as SnapshotState["shortcut"] })}>
             {!navigator.platform.toLowerCase().includes("linux") && <option value="both-shift">Both Shift keys</option>}<option value="accelerator">{navigator.platform.includes("Mac") ? "⌘⌥S" : "Ctrl+Alt+S"}</option>
           </select></label>
-          <p className="snapshot-note">Editable fields are masked. Capture is available on macOS, Windows and Linux X11.</p>
+          <p className="snapshot-note">Detected editable fields are masked. Screenshots and accessibility context may still contain sensitive information, including overlapping windows. Review before sending.</p>
           {state.permission === "required" && <div className="snapshot-permissions"><p>Allow Inertia in macOS Accessibility and Screen Recording.</p><button disabled={pending} onClick={() => void request({ type: "permission", permission: "accessibility" })}>Accessibility settings</button><button disabled={pending} onClick={() => void request({ type: "permission", permission: "screen" })}>Screen Recording settings</button></div>}
           {state.message && <p role="status">{state.message}</p>}
           {state.enabled && <p>Switch to the window you want to share and press {state.shortcut === "both-shift" ? "both Shift keys together" : navigator.platform.includes("Mac") ? "⌘⌥S" : "Ctrl+Alt+S"}. Inertia will bring you back to this chat.</p>}

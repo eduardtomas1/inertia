@@ -10,9 +10,13 @@ The useful changes in each Inertia release, in plain language.
   passage across long histories, split panes and detached chats. New-chat drafts
   survive navigation and restart. Large histories can return labeled partial
   results; reasoning, tool logs and unfinished output stay outside search.
-- Enable Snapshots to capture another app's foreground window and review its
-  screenshot and accessibility context before sending. Capture is optional and
-  permission-gated. Linux requires X11; Wayland capture is unavailable.
+- Enable experimental Snapshots to capture another app's foreground window
+  and review its screenshot and accessibility context before sending. Detected
+  editable fields are masked, but sensitive content may remain, including in
+  overlapping windows. Capture is optional and permission-gated. Linux requires
+  X11; Wayland capture is unavailable.
+- Disabling Snapshots cancels pending capture and attachment import. A revoked
+  capture cannot attach or bring a window forward after re-enabling.
 - Successful context compaction leaves a saved timeline receipt, with token
   counts when the provider reports them. Codex compaction tolerates a brief delay
   before its completed turn appears in durable history.
@@ -32,6 +36,8 @@ The useful changes in each Inertia release, in plain language.
 - Git actions keep errors and retry controls near the operation. Branches used
   by other worktrees are identified, and ambiguous remote destinations are
   rejected before a fetch can overwrite another remote's tracking refs.
+- Fetch respects configured branch exclusions, including patterns that span
+  reference namespaces.
 - The mascot has pickup, suspended and landing poses, preserves the grab point,
   and supports repeated dragging and cancellation. Reduced motion remains
   supported; Wayland placement is controlled by the compositor.

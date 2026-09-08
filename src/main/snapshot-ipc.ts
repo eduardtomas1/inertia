@@ -21,25 +21,30 @@ export function registerSnapshotIpc(options: {
 }): SnapshotService {
   let target: { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string } | null = null;
   let operation = false;
-  let cancelCapture: ((document: AttachmentImportDocument) => Promise<void>) | null = null;
+  let generation = 0;
+  let captureEnabled = false;
+  let cancelCapture: ((document?: AttachmentImportDocument) => Promise<void>) | null = null;
   const sameDocument = (left: AttachmentImportDocument, right: AttachmentImportDocument): boolean =>
     left.owner === right.owner && left.processId === right.processId
       && left.frameId === right.frameId && left.frameToken === right.frameToken;
   let configuration = Promise.resolve();
   const service = new SnapshotService(async () => {
     const owner = target;
-    if (!owner || owner.window.isDestroyed() || operation) return;
+    const captureGeneration = generation;
+    if (!captureEnabled || !owner || owner.window.isDestroyed() || operation) return;
     let invalidated = false;
     const invalidate = (): void => { invalidated = true; };
     const navigation = (details: { isMainFrame: boolean; isSameDocument: boolean }): void => {
       if (details.isMainFrame && !details.isSameDocument) invalidate();
     };
-    const current = (): boolean => {
-      if (service.isDisposing() || invalidated || target !== owner || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
+    const live = (): boolean => {
+      if (!captureEnabled || captureGeneration !== generation || service.isDisposing()
+        || invalidated || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
       const frame = owner.window.webContents.mainFrame;
       return owner.document.owner === owner.window.webContents && frame.processId === owner.document.processId
         && frame.routingId === owner.document.frameId && frame.frameToken === owner.document.frameToken;
     };
+    const current = (): boolean => target === owner && live();
     if (!current()) return;
     owner.document.owner.on("destroyed", invalidate);
     owner.document.owner.on("render-process-gone", invalidate);
@@ -49,7 +54,7 @@ export function registerSnapshotIpc(options: {
     let captureSignal: AbortSignal | null = null;
     let importerCancelled: boolean | null = null;
     cancelCapture = async (document) => {
-      if (!sameDocument(owner.document, document)) return;
+      if (document && !sameDocument(owner.document, document)) return;
       invalidate();
       if (batchId) await options.imports.cancel(owner.document, batchId);
     };
@@ -70,7 +75,7 @@ export function registerSnapshotIpc(options: {
           throw error;
         }
       });
-      if (invalidated || service.isDisposing() || owner.window.isDestroyed()) throw new Error("Snapshot destination closed.");
+      if (!live() || !service.state().enabled) throw new Error("Snapshot destination closed.");
       owner.window.show(); owner.window.focus();
       owner.window.webContents.send("inertia:snapshot-ready", { conversationId: owner.conversationId, selection: { batchId, attachments } });
     } catch (error) {
@@ -94,8 +99,20 @@ export function registerSnapshotIpc(options: {
       cancelCapture = null;
     }
   });
+  const revoke = (): Promise<PromiseSettledResult<void>[]> => {
+    generation += 1;
+    captureEnabled = false;
+    // Abort the captured owner's lease, not the requesting window or the latest target.
+    return Promise.allSettled([service.revokeCapture(), cancelCapture?.() ?? Promise.resolve()]);
+  };
+  const requireRevoked = (results: PromiseSettledResult<void>[]): void => {
+    if (results.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot cleanup is unconfirmed.");
+  };
   configuration = readSnapshotPreferences(app.getPath("userData")).then(async (saved) => {
-    if (saved) await service.configure(saved.enabled, saved.shortcut);
+    if (saved && generation === 0) {
+      const state = await service.configure(saved.enabled, saved.shortcut);
+      if (generation === 0) captureEnabled = state.enabled;
+    }
   }).catch(() => undefined);
   ipcMain.handle("inertia:snapshot", async (event, ...args) => {
     const window = options.owner(event, args.length);
@@ -103,11 +120,26 @@ export function registerSnapshotIpc(options: {
     switch (request.type) {
       case "state": await configuration; return service.state();
       case "configure": {
+        const revoked = request.enabled ? Promise.resolve([]) : revoke();
+        const requestGeneration = generation;
         const next = configuration.then(async () => {
-          const state = await service.configure(request.enabled, request.shortcut);
+          const [configured, cancellation] = await Promise.all([
+            service.configure(request.enabled, request.shortcut).then(
+              (state) => ({ state, error: null }), (error: unknown) => ({ state: null, error })),
+            revoked,
+          ]);
+          if (configured.state === null) throw configured.error;
+          requireRevoked(cancellation);
+          const state = configured.state;
+          if (generation === requestGeneration) captureEnabled = state.enabled;
           try { await writeSnapshotPreferences(app.getPath("userData"), { enabled: state.enabled, shortcut: state.shortcut }); }
           catch {
-            await service.configure(false, request.shortcut);
+            const revoked = revoke();
+            const [stopped, cancellation] = await Promise.all([
+              service.configure(false, request.shortcut).then(() => null, (error: unknown) => error), revoked,
+            ]);
+            if (stopped) throw stopped;
+            requireRevoked(cancellation);
             throw new Error("Snapshot settings could not be saved. Snapshots has been disabled.");
           }
           return state;

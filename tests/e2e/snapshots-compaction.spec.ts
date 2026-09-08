@@ -86,6 +86,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     const settings = page.getByRole("button", { name: "Snapshots", exact: true }); await settings.click();
     const setup = page.getByRole("dialog", { name: "Snapshots", exact: true }); await expect(setup).toBeVisible();
     await expect(setup.getByRole("checkbox", { name: "Enable Snapshots" })).not.toBeChecked();
+    await save(`snapshot-settings-privacy-${theme}`);
     await page.keyboard.press("Escape"); await expect(settings).toBeFocused();
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }

@@ -1,6 +1,6 @@
 # Snapshots and compaction receipts
 
-Open **Snapshots** in the composer toolbar and enable capture. On macOS and
+Snapshots is experimental. Open **Snapshots** in the composer toolbar and enable capture. On macOS and
 Windows, press both physical Shift keys together while another application is
 foreground. You can instead select Cmd+Option+S on macOS or Ctrl+Alt+S on Windows.
 Linux X11 uses Ctrl+Alt+S. The selected chat receives a removable screenshot tile
@@ -14,10 +14,12 @@ working AT-SPI accessibility. Wayland is reported as unavailable because reliabl
 foreground-window cropping is not available through the selected native backend.
 Applications that omit accessibility information can provide incomplete context.
 
-The capture worker reads the current window once. It masks editable controls and
-protected fields in the image and omits their text and descendants from context.
-Static content elsewhere in a window may still contain sensitive information:
-review the attachment before sending it. A changed foreground identity, an
+The capture worker reads the current window once. It masks detected editable
+controls and protected fields in the image and omits their text and descendants
+from context. Screenshots and accessibility context may still contain sensitive
+information. The [backend captures pixels under the window bounds](https://xa11y.dev/guides/screenshots/),
+which can include overlapping windows outside that accessibility tree. Review the
+attachment before sending it. A changed foreground identity, an
 incomplete protected-field scan, changed protected-field geometry across the
 screenshot, timeout, or oversized image fails the capture.
 Only the two Shift modifiers are sampled for the default shortcut; no typed text
@@ -28,7 +30,9 @@ on either edge and 8 MiB. Existing message and attachment budgets still apply.
 Main owns capture, native workers, permissions, attachment capabilities and
 cleanup. The renderer receives a validated attachment and source metadata, with
 no filesystem or arbitrary native API. Native bytes are delivered only after the
-capture worker exits. Sending resolves the attachment again through the trusted
+capture worker exits. Disabling immediately revokes an active capture and its
+import lease; acknowledgment waits for worker exit and import rollback. Revoked
+work cannot attach or focus a window, even after re-enabling. Sending resolves the attachment again through the trusted
 main/runtime broker; renderer-supplied snapshot substitutions are ignored. The
 provider receives the accessibility tree as quoted, untrusted attachment context.
 Visible user text and diagnostic execution manifests exclude that content.
@@ -85,7 +89,9 @@ synthetic Notes content; they do not claim to capture a permission-protected OS
 desktop. Package smoke also loads the shipped bindings without desktop access.
 Interactive permission grants and real foreground capture were not exercised on
 the locked macOS host. Windows/Linux capture also requires manual platform
-validation; deterministic tests do not substitute for it.
+validation, including overlapping windows, mixed-DPI monitors and partially
+off-screen targets. Deterministic tests do not substitute for this physical
+validation or prove complete screen redaction.
 
 Reviewed Electron captures from synthetic Notes content:
 [dark](screenshots/inertia-snapshots-compaction-dark.png),

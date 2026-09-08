@@ -17,6 +17,8 @@ it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only sup
   render(<SnapshotControl conversationId="shortcut-chat" />);
   fireEvent.click(screen.getByRole("button", { name: "Snapshots" }));
   await screen.findByRole("combobox", { name: "Capture shortcut" });
+  expect(screen.getByText(/Experimental capture of the foreground window/u)).toBeVisible();
+  expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information.*Review before sending/u)).toBeVisible();
   expect(screen.getByRole("checkbox", { name: "Enable Snapshots" })).toBeChecked();
   expect(screen.queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
 });

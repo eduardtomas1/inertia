@@ -76,6 +76,65 @@ describe("snapshot native worker ownership", () => {
     expect(service.isDisposing()).toBe(true);
   });
 
+  it.each(["before-disable", "after-disable"])("revokes a held worker with a successful result %s and waits for its exit", async (resultTime) => {
+    const { service, child } = await fixture(); child.kill.mockImplementation(() => true);
+    const result = { ok: true, png: Buffer.alloc(10), source: snapshotFixture() };
+    const capture = service.capture();
+    const outcome = capture.then(() => "delivered", (error: Error) => error.message);
+    if (resultTime === "before-disable") child.emit("message", result);
+    let acknowledged = false;
+    const disabling = service.configure(false, "accelerator").then((state) => { acknowledged = true; return state; });
+    const enabledAfterRequest = service.state().enabled;
+    const killedBeforeExit = child.kill.mock.calls.length;
+    await Promise.resolve(); await Promise.resolve();
+    const acknowledgedBeforeExit = acknowledged;
+    if (resultTime === "after-disable") child.emit("message", result);
+    child.emit("exit", 0);
+    await disabling;
+    expect(await outcome).toContain("cancelled");
+    expect(enabledAfterRequest).toBe(false);
+    expect(killedBeforeExit).toBe(1);
+    expect(acknowledgedBeforeExit).toBe(false);
+    expect(service.isDisposing()).toBe(false);
+    expect((await service.configure(true, "accelerator")).enabled).toBe(true);
+    const nextChild = new Child(); native.fork.mockReturnValueOnce(nextChild);
+    const next = service.capture(); nextChild.emit("message", result); nextChild.emit("exit", 0);
+    expect((await next).source).toEqual(snapshotFixture());
+  });
+
+  it("revokes a successful exit before its capture continuation can deliver bytes", async () => {
+    const { service, child } = await fixture();
+    const capture = service.capture();
+    const outcome = capture.then(() => "delivered", (error: Error) => error.message);
+    child.emit("message", { ok: true, png: Buffer.alloc(10), source: snapshotFixture() });
+    child.emit("exit", 0);
+    await service.configure(false, "accelerator");
+    expect(await outcome).toContain("cancelled");
+  });
+
+  it("does not start capture if the revoked worker spawns after the stop request", async () => {
+    const { service, child } = await fixture(); child.kill.mockImplementation(() => true);
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow("cancelled");
+    const disabling = service.configure(false, "accelerator");
+    child.emit("spawn");
+    expect(child.postMessage).not.toHaveBeenCalledWith("capture");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    child.emit("exit", 0); await failure; await disabling;
+  });
+
+  it("rejects disable acknowledgment when its held worker exit remains unconfirmed", async () => {
+    vi.useFakeTimers();
+    const { service, child } = await fixture(); child.kill.mockImplementation(() => true);
+    const capture = service.capture(); const captureFailure = expect(capture).rejects.toThrow("cleanup is unconfirmed");
+    const disabling = service.configure(false, "accelerator"); const disableFailure = expect(disabling).rejects.toThrow("cleanup is unconfirmed");
+    await vi.advanceTimersByTimeAsync(3000); await captureFailure; await disableFailure;
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(service.isDisposing()).toBe(false);
+    expect(native.unregister).toHaveBeenCalled();
+    expect((await service.configure(true, "accelerator")).enabled).toBe(false);
+    child.emit("exit", 0);
+  });
+
   it("keeps failure reporting valid when an unconfirmed capture only disables future work", async () => {
     vi.useFakeTimers();
     const { service, child } = await fixture(); child.kill.mockImplementation(() => true);

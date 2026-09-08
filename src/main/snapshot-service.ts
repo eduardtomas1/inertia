@@ -25,6 +25,8 @@ export class SnapshotService {
   private shortcut: SnapshotState["shortcut"] = process.platform === "linux" ? "accelerator" : "both-shift";
   private poller: UtilityProcess | null = null;
   private captureChild: UtilityProcess | null = null;
+  private captureGeneration = 0;
+  private cancelCapture: (() => Promise<void>) | null = null;
   private heartbeat: NodeJS.Timeout | null = null;
   private message: string | null = null;
   private busy = false;
@@ -43,12 +45,22 @@ export class SnapshotService {
       message: !available ? "Snapshots requires macOS, Windows, or a Linux X11 desktop with accessibility support." : this.message };
   }
 
+  // Revoke synchronously, including when IPC configuration is waiting behind a prior request.
+  revokeCapture(): Promise<void> {
+    this.enabled = false;
+    this.captureGeneration += 1;
+    return this.cancelCapture?.() ?? Promise.resolve();
+  }
+
   async configure(enabled: boolean, shortcut: SnapshotState["shortcut"]): Promise<SnapshotState> {
     this.enabled = false;
-    await this.stopShortcut();
+    const captureStopped = enabled ? Promise.resolve() : this.revokeCapture();
+    const generation = this.captureGeneration;
+    const stopped = await Promise.allSettled([this.stopShortcut(), captureStopped]);
+    if (stopped.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot worker cleanup is unconfirmed.");
     this.shortcut = process.platform === "linux" ? "accelerator" : shortcut;
     this.message = null;
-    if (!enabled || this.disposed) return this.state();
+    if (!enabled || this.disposed || generation !== this.captureGeneration) return this.state();
     const state = this.state();
     if (!state.available) return state;
     if (state.permission !== "granted") {
@@ -71,7 +83,7 @@ export class SnapshotService {
         else if (value === "trigger" && this.poller === child) trigger();
       });
     });
-    if (ready && this.poller === child && !this.disposed && !this.exited.has(child)) {
+    if (ready && this.poller === child && !this.disposed && generation === this.captureGeneration && !this.exited.has(child)) {
       this.enabled = true;
       this.heartbeat = setInterval(() => {
         try { child.postMessage("alive"); } catch { child.kill(); }
@@ -93,23 +105,32 @@ export class SnapshotService {
   async capture(signal?: AbortSignal): Promise<SnapshotWorkerResult> {
     if (!this.enabled || this.busy || this.disposed || signal?.aborted) throw new SnapshotError("Snapshots is unavailable or already capturing.");
     this.busy = true;
+    const generation = this.captureGeneration;
     try {
-      return await new Promise<SnapshotWorkerResult>((resolve, reject) => {
+      const captured = await new Promise<SnapshotWorkerResult>((resolve, reject) => {
         const child = this.spawn("snapshot-capture-worker");
         this.captureChild = child;
         let result: SnapshotWorkerResult | null = null;
         let error: Error | null = null;
         let killTimer: NodeJS.Timeout | null = null;
+        let confirmExit!: () => void;
+        let failExit!: (error: Error) => void;
+        const exited = new Promise<void>((resolve, reject) => { confirmExit = resolve; failExit = reject; });
+        // The capture owns failures even when no disable caller requests the exit receipt.
+        void exited.catch(() => undefined);
         const stop = (reason: string): void => {
           error ??= new SnapshotError(reason);
-          killTimer ??= setTimeout(() => {
+          if (killTimer) return;
+          killTimer = setTimeout(() => {
             this.disposed = true;
             this.enabled = false;
-            reject(new SnapshotError("Snapshot worker cleanup is unconfirmed. Restart Inertia before capturing again."));
+            const failure = new SnapshotError("Snapshot worker cleanup is unconfirmed. Restart Inertia before capturing again.");
+            failExit(failure); reject(failure);
           }, 3000);
           child.kill();
         };
         const abort = (): void => stop("Snapshot cancelled.");
+        this.cancelCapture = () => { abort(); return exited; };
         const timer = setTimeout(() => stop("Snapshot capture timed out."), 10_000);
         signal?.addEventListener("abort", abort, { once: true });
         child.on("message", (value: unknown) => {
@@ -126,14 +147,18 @@ export class SnapshotService {
         child.once("exit", (code) => {
           clearTimeout(timer); if (killTimer) clearTimeout(killTimer);
           signal?.removeEventListener("abort", abort);
-          if (this.captureChild === child) this.captureChild = null;
+          if (this.captureChild === child) { this.captureChild = null; this.cancelCapture = null; }
+          confirmExit();
           if (code === 0 && result && !error) resolve(result);
           else reject(error ?? new SnapshotError("Snapshot capture stopped before completing."));
         });
         child.once("spawn", () => {
+          if (error) { child.kill(); return; }
           try { child.postMessage("capture"); } catch { stop("Snapshot capture could not start."); }
         });
       });
+      if (generation !== this.captureGeneration) throw new SnapshotError("Snapshot cancelled.");
+      return captured;
     } finally { this.busy = false; }
   }
 

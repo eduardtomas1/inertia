@@ -49,10 +49,25 @@ function signedRecord(record: Record<string, unknown>): string {
 }
 
 describe("runtime diagnostics", () => {
+  it("retains a fixed first-cause probe through journal reload and support export", () => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.recordRestartRequested({ type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "linux-stop", probe: "codex-control" } }, 1);
+    const report = new RuntimeDiagnostics(directory).supportReport({
+      version: "0.0.54", platform: "linux", architecture: "x64", runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain("stage=linux-stop");
+    expect(report.text).toContain("probe=codex-control");
+  });
+
   it("logs only allowlisted lifecycle fields and redacts unsafe failure values", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);
-    const diagnostics = new RuntimeDiagnostics(directory);
+    // This timestamp gives the sanitized record a digest containing "1234".
+    const at = "2026-09-08T00:00:01.094Z";
+    const diagnostics = new RuntimeDiagnostics(directory, { now: () => Date.parse(at) });
     diagnostics.record("runtime.failure", {
       phase: "restarting",
       generation: 2,
@@ -65,25 +80,24 @@ describe("runtime diagnostics", () => {
     });
 
     const content = readFileSync(join(directory, "runtime.log"), "utf8");
-    expect(content).toContain('"event":"runtime.failure"');
-    expect(content).toContain('"phase":"restarting"');
-    expect(content).not.toContain("rewrite secret");
-    expect(content).not.toContain("private.ts");
-    expect(content).not.toContain("ghp_1234567890");
-    expect(content).not.toContain("hunter2");
-    expect(content).not.toContain("dev@example.com");
-    expect(content).not.toContain("must never be serialized");
-    expect(content).not.toContain("export const secret");
-    expect(content).not.toContain("1234");
-    expect(content).not.toContain("sensitive-capability");
-    expect(content).not.toMatch(/prompt|source|tokens?|credential/iu);
+    const { recordDigest, ...payload } = JSON.parse(content) as Record<string, unknown>;
+    expect(payload).toEqual({
+      schemaVersion: 1,
+      at,
+      event: "runtime.failure",
+      phase: "restarting",
+      generation: 2,
+      message: "Runtime lifecycle failure detail omitted.",
+    });
+    expect(recordDigest).toBe(JSON.parse(signedRecord(payload)).recordDigest);
+    expect(recordDigest).toContain("1234");
   });
 
   it("drops invalid restart detail and unrelated fields from persisted evidence", () => {
     const directory = runtimeDiagnosticsDirectory(fixture());
     const diagnostics = new RuntimeDiagnostics(directory);
     diagnostics.record("runtime.restart-requested", { generation: 1, reason: "owned-process-tainted",
-      stage: "PRIVATE", signal: "PRIVATE", exitCode: 256, argv: ["PRIVATE"] });
+      stage: "PRIVATE", signal: "PRIVATE", exitCode: 256, probe: "/PRIVATE/provider", argv: ["PRIVATE"] });
     diagnostics.record("runtime.restart-requested", { generation: 2, reason: "owned-process-cleanup-unconfirmed",
       stage: "darwin-guardian-close", signal: "SIGKILL", stderr: "PRIVATE" });
     diagnostics.record("runtime.restart-requested", { generation: -1, reason: "owned-process-tainted" });
@@ -161,6 +175,7 @@ describe("runtime diagnostics", () => {
 
   it.each([
     "Runtime initialization failed (git-timeout). Runtime shutdown could not confirm cleanup after incomplete startup.",
+    "The runtime restarted because owned process containment could not be confirmed. (stage=linux-stop, probe=codex-control)",
     "Runtime startup completion failed (filesystem-permission). Runtime shutdown failed while closing local resources.",
     "The runtime restarted because owned process containment could not be confirmed. (stage=darwin-readiness, signal=SIGKILL, exit-code=1) Runtime shutdown could not confirm cleanup after incomplete startup.",
   ])("retains the validated initiating failure in persisted support evidence: %s", (message) => {

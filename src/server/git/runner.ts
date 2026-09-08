@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import {
+  awaitRuntimeOwnedProcessStopped,
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
@@ -314,7 +315,7 @@ function runGitProcess(
       windowsHide: true,
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
       env: gitProcessEnvironment(process.env, options.environment),
-    }));
+    }), "git");
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;
@@ -457,27 +458,33 @@ function runGitProcess(
       }
     });
     child.on("close", (code) => {
-      if (termination) return;
-      const result = bufferedResult();
-      if (terminalError) {
-        finish(terminalError);
-      } else if (truncated && !options.truncateOutput) {
-        finish(
-          new GitError(
-            "output-limit",
-            "Git returned more data than this application can safely process.",
-          ),
-        );
-      } else if (code === 0) {
-        finish(undefined, result);
-      } else {
-        finish(
-          classifyFailure(
-            result.stderr.toString("utf8"),
-            options.failureMessage,
-          ),
-        );
-      }
+      void awaitRuntimeOwnedProcessStopped(child).then((confirmed) => {
+        if (termination) return;
+        if (!confirmed) {
+          finish(new GitError("operation-failed", GIT_PROCESS_TREE_TERMINATION_FAILURE));
+          return;
+        }
+        const result = bufferedResult();
+        if (terminalError) {
+          finish(terminalError);
+        } else if (truncated && !options.truncateOutput) {
+          finish(
+            new GitError(
+              "output-limit",
+              "Git returned more data than this application can safely process.",
+            ),
+          );
+        } else if (code === 0) {
+          finish(undefined, result);
+        } else {
+          finish(
+            classifyFailure(
+              result.stderr.toString("utf8"),
+              options.failureMessage,
+            ),
+          );
+        }
+      }, () => finish(new GitError("operation-failed", GIT_PROCESS_TREE_TERMINATION_FAILURE)));
     });
   });
 }

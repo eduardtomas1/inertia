@@ -108,7 +108,7 @@ export async function withCodexControlClient<T>(
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       },
-    ));
+    ), "codex-control");
   } catch (error) {
     installationUse?.quarantine("codex-control-spawn-outcome-uncertain");
     throw error;

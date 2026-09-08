@@ -16,6 +16,7 @@ import {
   linuxProcessGroupCanExecute,
 } from "../node/runtime-owned-process-posix";
 import {
+  awaitRuntimeOwnedProcessStopped,
   confirmRuntimeOwnedProcessStopped,
   requestRuntimeOwnedGuardianStop,
   runtimeOwnedProcessStopConfirmation,
@@ -706,7 +707,7 @@ export async function terminateProcessTreeAndWait(
       // A released runtime-owned claim is an exact, durable cleanup receipt.
       // Conversely, map presence without release must stay fail-closed; never
       // reinterpret the now-reapable numeric PGID as ownership evidence.
-      return ownedStopConfirmation;
+      return ownedStopConfirmation || await awaitRuntimeOwnedProcessStopped(child);
     }
     // A no-signal existence probe can still prove that the owned group is
     // already gone for an untracked child. Never signal a group after this

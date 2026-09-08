@@ -23,6 +23,7 @@ export const runtimeSupervisorDefaults = {
   databaseRecoveryCancelTimeoutMs: 5_000,
   credentialRequestTimeoutMs: 10_000,
   maxUnconfirmedRestarts: 2,
+  maxConsecutiveRestarts: 3,
 } as const;
 
 export function runtimeRestartDelayMs(attempt: number): number {

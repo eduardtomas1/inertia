@@ -49,6 +49,7 @@ jobs:
             *) exit 1 ;;
           esac
           mkdir -p "$RUNNER_TEMP/validation-harness/ci" "$RUNNER_TEMP/validation-evidence"
+          cp scripts/linux-guarded-smoke.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-installed-update-{smoke,driver}.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-public-update-{probe,probe-driver,evidence}.mjs "$RUNNER_TEMP/validation-harness/"
           cp scripts/linux-public-upgrade-{driver,ownership}.mjs scripts/linux-public-upgrade-window.py "$RUNNER_TEMP/validation-harness/"

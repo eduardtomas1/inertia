@@ -39,29 +39,61 @@ async function gone(identity) {
   const value = await processIdentity(identity.pid);
   return !value || value.start !== identity.start;
 }
-async function launch(path, env) {
+const errorKinds = new Set(["Error", "AssertionError", "TimeoutError", "TypeError"]);
+const errorCodes = new Set(["ERR_ASSERTION", "ENOENT", "ESRCH", "EACCES", "EPERM", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT"]);
+const signalKinds = new Set(["SIGABRT", "SIGBUS", "SIGFPE", "SIGHUP", "SIGILL", "SIGINT", "SIGKILL", "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGTERM", "SIGTRAP", "SIGUSR1", "SIGUSR2", "SIGSYS"]);
+const launches = [];
+report.launches = launches;
+async function launch(path, env, role) {
   let endpoint, tail = "", exit;
+  const observation = { role, spawned: false, endpointObserved: false, rendererSelected: false,
+    shellReady: false, exited: false, exitCode: null, signal: null, exitPhase: null, afterFailure: false, spawnErrorCode: null,
+    stderrHints: { sandboxNamespaceDenied: false, sandboxHelperRejected: false, rootSandboxRejected: false } };
+  launches.push(observation);
+  report.phase = `${role}-spawn`;
   // No harness --no-sandbox argument or ELECTRON_DISABLE_SANDBOX override.
   // The untouched AppRun chooses its ordinary namespace/sandbox behavior.
   const child = spawn(path, ["--remote-debugging-port=0"], { shell: false, detached: true,
     env, stdio: ["ignore", "pipe", "pipe"] });
-  child.once("exit", (code, signal) => { exit = { code, signal }; });
-  child.once("error", () => { exit = { spawnError: true }; });
+  child.once("spawn", () => { observation.spawned = true; });
+  child.once("exit", (code, signal) => {
+    exit = { code, signal };
+    observation.exited = true;
+    observation.exitPhase = report.phase;
+    observation.afterFailure = Boolean(report.failure);
+    observation.exitCode = Number.isSafeInteger(code) ? code : null;
+    observation.signal = signalKinds.has(signal) ? signal : signal === null ? null : "other";
+  });
+  child.once("error", error => {
+    exit = { spawnError: true };
+    observation.spawnErrorCode = errorCodes.has(error.code) ? error.code : "other";
+  });
   launchers.push(child);
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => {
     tail = (tail + chunk.toString("utf8")).slice(-4096);
+    // Untrusted stderr contributes fixed diagnostic hints only, never authority.
+    observation.stderrHints.sandboxNamespaceDenied ||= tail.includes("Failed to move to new namespace") || tail.includes("No usable sandbox!");
+    observation.stderrHints.sandboxHelperRejected ||= tail.includes("SUID sandbox helper binary was found, but is not configured correctly");
+    observation.stderrHints.rootSandboxRejected ||= tail.includes("Running as root without --no-sandbox");
     endpoint = /DevTools listening on (ws:\/\/127\.0\.0\.1:[1-9][0-9]*\/devtools\/browser\/[a-zA-Z0-9-]+)/u.exec(tail)?.[1] ?? endpoint;
   });
+  report.phase = `${role}-renderer-endpoint`;
   await wait("renderer endpoint", () => { assert(!exit, "Owned application exited before readiness."); return endpoint; });
+  observation.endpointObserved = true;
+  report.phase = `${role}-cdp-connect`;
   const browser = await chromium.connectOverCDP(endpoint, { timeout: Math.min(30_000, remaining()) });
   connections.push(browser);
+  report.phase = `${role}-trusted-renderer`;
   const page = await wait("trusted renderer", async () => {
     for (const context of browser.contexts()) for (const candidate of context.pages()) {
       if (await candidate.evaluate(() => typeof window.inertia?.installAppUpdate === "function").catch(() => false)) return candidate;
     }
     return null;
   });
+  observation.rendererSelected = true;
+  report.phase = `${role}-renderer-shell`;
   await page.locator(".app-shell:not(.offline)").waitFor({ state: "visible", timeout: Math.min(30_000, remaining()) });
+  observation.shellReady = true;
   return { page, browser, exit: () => exit };
 }
 async function connection(page) {
@@ -72,18 +104,30 @@ async function connection(page) {
   return value.websocketUrl; // Capability stays only in process memory.
 }
 async function configureProvider(url, path) {
+  const observation = { opened: false, requestSent: false, closed: false, socketError: false,
+    matchingReply: null, events: { welcome: 0, snapshot: 0, ok: 0, result: 0, error: 0, other: 0 } };
+  report.providerConfiguration = observation;
+  const eventKinds = new Map([["server.welcome", "welcome"], ["snapshot.updated", "snapshot"],
+    ["request.ok", "ok"], ["request.result", "result"], ["request.error", "error"]]);
   const socket = new WebSocket(url, { headers: { Origin: "http://127.0.0.1" }, maxPayload: 1024 * 1024 });
   const requestId = randomUUID();
   try {
     await bounded(new Promise((yes, no) => {
-      socket.once("error", no);
-      socket.once("close", () => no(new Error("Provider configuration connection closed.")));
-      socket.once("open", () => socket.send(JSON.stringify({ type: "settings.update", requestId, payload: { codexBinaryPath: path } })));
+      socket.once("error", error => { observation.socketError = true; no(error); });
+      socket.once("close", () => { observation.closed = true; no(new Error("Provider configuration connection closed.")); });
+      socket.once("open", () => {
+        observation.opened = true;
+        socket.send(JSON.stringify({ type: "settings.update", requestId, payload: { codexBinaryPath: path } }));
+        observation.requestSent = true;
+      });
       socket.on("message", bytes => {
         try {
           const frame = JSON.parse(bytes.toString("utf8"));
           const event = frame.type === "runtime.event" ? frame.event : frame;
+          const kind = eventKinds.get(event.type) ?? "other";
+          observation.events[kind] = Math.min(1000, observation.events[kind] + 1);
           if (event.requestId === requestId) {
+            observation.matchingReply = ["ok", "result", "error"].includes(kind) ? kind : "other";
             if (event.type === "request.error") no(new Error("Normal provider configuration rejected."));
             if (event.type === "request.ok") yes();
           }
@@ -116,12 +160,18 @@ try {
   report.host = { userNamespacesAvailable: !namespaces.error && namespaces.status === 0 && namespaces.signal === null,
     explicitSandboxOverride: false, extractionLaunch: true };
   report.phase = "normal-v53-launch";
-  const old = await launch(installed, env);
+  const old = await launch(installed, env, "predecessor");
+  report.phase = "predecessor-profile-identity";
   const profile = await profileDirectory(root);
+  report.phase = "predecessor-runtime-identity";
   const oldOwner = await wait("old runtime identity", () => readyRuntime(profile, new Set(), started));
+  report.phase = "predecessor-owner-ancestry";
   await exactOwner(oldOwner.main, guardian); await exactOwner(oldOwner.runtime, guardian);
+  report.phase = "predecessor-mapped-window";
   await wait("old mapped window", () => ownedWindow("find", oldOwner.main, guardian, env), 5000);
+  report.phase = "predecessor-runtime-connection";
   const oldUrl = await connection(old.page);
+  report.phase = "predecessor-provider-configuration";
   await configureProvider(oldUrl, codex);
   report.phase = "seed-real-v53-history";
   const history = await runPackagedHistorySmoke({ websocketUrl: oldUrl, workspaceDirectory: workspace, deadlineAt: Math.min(deadline, Date.now() + 30_000) });
@@ -160,7 +210,8 @@ try {
   await assertHistoryAfterShutdown(root, history);
   assert.equal(await readFile(join(root, "data", "user-owned-file"), "utf8"), sentinel);
   report.phase = "fresh-stable-relaunch";
-  const reopened = await launch(stable, env);
+  const reopened = await launch(stable, env, "reopened");
+  report.phase = "fresh-stable-relaunch-verification";
   assert.equal(await profileDirectory(root), profile);
   const status = await bounded(reopened.page.evaluate(() => window.inertia.checkAppUpdate(true)), 30_000);
   assert.equal(status.currentVersion, "0.0.54"); assert.equal(status.latestVersion, "0.0.54");
@@ -175,7 +226,9 @@ try {
   report.retainedHistoryAndSettings = true;
   report.newTurnAfterFreshRelaunch = true;
   report.phase = "complete"; report.passed = true;
-} catch {
+} catch (error) {
+  report.failure = { phase: report.phase, kind: errorKinds.has(error?.name) ? error.name : "other",
+    code: errorCodes.has(error?.code) ? error.code : null };
   process.exitCode = 1;
 } finally {
   // Never signal or destroy a candidate window as a substitute for normal close.

@@ -14,8 +14,10 @@ const root = await mkdtemp(join(tmpdir(), "inertia-public-update-"));
 const reportDirectory = resolve(process.argv[3]);
 await mkdir(reportDirectory, { recursive: true, mode: 0o700 });
 let succeeded = false;
+let cleanupEvidence = null;
 try {
   const output = await runLinuxGuardedSmoke({
+    onCleanupEvidence: confirmed => { cleanupEvidence = confirmed; },
     guardian: resolve("resources/generated/runtime-process-guardian/runtime-process-guardian"),
     command: process.execPath,
     args: [resolve(import.meta.dirname, completeUpgrade ? "linux-public-upgrade-driver.mjs" : "linux-public-update-probe-driver.mjs"), resolve(process.argv[2]), root, process.argv[4], process.argv[5]],
@@ -28,8 +30,9 @@ try {
 } finally {
   const source = await readFile(join(root, "report.json"), "utf8").catch(() => null);
   const report = source ? JSON.parse(source) : { phase: "driver-report-unavailable", passed: false };
-  report.nativeCleanupConfirmed = succeeded;
-  report.passed = report.passed === true && succeeded;
+  report.nativeCleanupConfirmed = cleanupEvidence === true;
+  report.cleanupOutcome = cleanupEvidence === true ? "confirmed" : cleanupEvidence === false ? "unconfirmed" : "not-observed";
+  report.passed = report.passed === true && succeeded && cleanupEvidence === true;
   await writeFile(join(reportDirectory, completeUpgrade ? "public-upgrade.json" : "public-update-probe.json"), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
   if (succeeded) await rm(root, { recursive: true, force: true });
 }

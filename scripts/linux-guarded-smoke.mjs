@@ -4,7 +4,7 @@ import { linuxProcessGroupCanExecute } from "./linux-process-group.mjs";
 
 // The native subreaper owns the whole smoke, including AppImage wrappers and
 // update candidates that create new sessions/process groups before readiness.
-export async function runLinuxGuardedSmoke({ guardian, command, args, env = process.env, timeoutMs = 180_000 }) {
+export async function runLinuxGuardedSmoke({ guardian, command, args, env = process.env, timeoutMs = 180_000, onCleanupEvidence }) {
   const executable = statSync(guardian, { bigint: true });
   const device = String(executable.dev);
   const inode = String(executable.ino);
@@ -101,6 +101,9 @@ export async function runLinuxGuardedSmoke({ guardian, command, args, env = proc
       cleanupFailure = error;
     }
   }
+  // Optional external diagnostic observer receives proof already established
+  // above; it cannot change cleanup, admission, deadlines or the payload result.
+  try { onCleanupEvidence?.(cleanupFailure === undefined); } catch {}
   if (cleanupFailure) throw cleanupFailure;
   if (failure) throw new Error(`${failure.message}\n${output}`, { cause: failure });
   if (outcome.code !== 0) throw new Error(`Installed smoke exited with status ${outcome.code}.\n${output}`);

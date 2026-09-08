@@ -57,6 +57,8 @@ The useful changes in each Inertia release, in plain language.
   fixtures publish their ownership receipts atomically.
 - Update Lucide React to 1.41.0, Claude Agent SDK to 0.3.261, OpenCode SDK to
   1.18.29, Anthropic SDK to 0.124.0, and Playwright to 1.63.0.
+- Patch the transitive Hono and js-yaml dependencies to 4.13.5 and 4.3.2,
+  addressing newly reported security advisories.
 
 Windows and macOS retain manual installation while release signing is
 unavailable. Linux installations still on 0.0.52 need one manual upgrade,

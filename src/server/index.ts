@@ -201,12 +201,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const send = (
     socket: WebSocket,
     event: Parameters<typeof sendRuntimeEvent>[1],
+    onSent?: (sent: boolean) => void,
   ): void => {
     const isStreamingEvent = event.type === "runtime.event"
       && event.event.type === "agent.text";
     if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");
     if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-started");
-    sendRuntimeEvent(socket, event);
+    sendRuntimeEvent(socket, event, onSent);
     if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-accepted");
   };
   let onDatabaseBackupCreated = (): void => undefined;

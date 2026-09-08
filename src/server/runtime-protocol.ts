@@ -102,13 +102,21 @@ function requestIdFrom(value: unknown): string {
     : randomUUID();
 }
 
-export function sendRuntimeEvent(socket: WebSocket, event: ServerEvent): void {
-  if (socket.readyState !== WebSocket.OPEN) return;
+export function sendRuntimeEvent(
+  socket: WebSocket,
+  event: ServerEvent,
+  onSent?: (sent: boolean) => void,
+): void {
+  if (socket.readyState !== WebSocket.OPEN) {
+    onSent?.(false);
+    return;
+  }
   let serialized: string;
   try {
     serialized = JSON.stringify(event);
   } catch {
     terminateSocket(socket);
+    onSent?.(false);
     return;
   }
   const eventBytes = Buffer.byteLength(serialized, "utf8");
@@ -118,12 +126,14 @@ export function sendRuntimeEvent(socket: WebSocket, event: ServerEvent): void {
       > MAX_QUEUED_RUNTIME_EVENT_BYTES - eventBytes
   ) {
     terminateSocket(socket);
+    onSent?.(false);
     return;
   }
   try {
     socket.send(serialized, (error) => {
       if (error) {
         terminateSocket(socket);
+        onSent?.(false);
         return;
       }
       const state = runtimeEventBackpressure.get(socket);
@@ -132,10 +142,12 @@ export function sendRuntimeEvent(socket: WebSocket, event: ServerEvent): void {
         state.lastProgressAt = Date.now();
       }
       observeRuntimeEventBackpressure(socket);
+      onSent?.(true);
     });
     observeRuntimeEventBackpressure(socket);
   } catch {
     terminateSocket(socket);
+    onSent?.(false);
   }
 }
 

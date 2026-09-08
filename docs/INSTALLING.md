@@ -1,6 +1,6 @@
 # Install Inertia
 
-Download [Inertia v0.0.53](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.53):
+Download [Inertia v0.0.54](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.54):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |
@@ -30,12 +30,12 @@ chmod 0755 ./Inertia-VERSION-arm64.AppImage
 
 Do not apply executable permissions to a wildcard or to an unverified download.
 
-Linux v0.0.52 requires one manual installation of v0.0.53 because its installed
-updater cannot repair itself. Quit the old app cleanly, verify and open the new
-AppImage as described above, and keep your existing profile. Do not delete saved
-data or recreate projects. The repaired installed-update handoff is covered by
-native packaging tests; this does not establish that an unmodified v0.0.52 can
-update itself.
+Linux v0.0.52 requires one manual installation of this release because its
+installed updater cannot repair itself. That repair first shipped in v0.0.53.
+Quit the old app cleanly, verify and open the new AppImage as described above,
+and keep your existing profile. Do not delete saved data or recreate projects.
+The repaired installed-update handoff is covered by native packaging tests;
+this does not establish that an unmodified v0.0.52 can update itself.
 
 Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
 

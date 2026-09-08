@@ -36,8 +36,8 @@ describe("Git workflows", () => {
     git(local, "tag", "local-only");
     git(local, "config", "fetch.prune", "true");
     git(local, "config", "fetch.pruneTags", "true");
-    git(local, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*");
-    git(local, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/unrelated/*");
+    git(local, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*");
+    git(remote, "tag", "remote-only");
     writeFileSync(join(local, "tracked.txt"), "staged\n");
     git(local, "add", "tracked.txt");
     writeFileSync(join(local, "tracked.txt"), "unstaged\n");
@@ -133,6 +133,67 @@ describe("Git workflows", () => {
     expect(result.status.upstream).toBe("origin/feature/remote");
   });
 
+  it.each(["missing", "unrelated"])("tracks a fetched branch with %s head mappings and supports a later pull", async (mapping) => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "topic", "main");
+    if (mapping === "missing") git(local, "config", "--unset-all", "remote.origin.fetch");
+    else git(local, "config", "remote.origin.fetch", "+refs/tags/*:refs/tags/*");
+    await fetchRepository(local);
+    const result = await switchBranch(local, "origin/topic", { remote: true });
+    expect(result.status.branch).toBe("topic");
+    expect(result.status.upstream).toBe("origin/topic");
+    expect(git(local, "config", "branch.topic.remote")).toBe("origin");
+    expect(git(local, "config", "branch.topic.merge")).toBe("refs/heads/topic");
+    const mappings = git(local, "config", "--get-all", "remote.origin.fetch").split("\n");
+    expect(mappings).toContain("+refs/heads/*:refs/remotes/origin/*");
+    if (mapping === "unrelated") expect(mappings).toContain("+refs/tags/*:refs/tags/*");
+    const tip = git(remote, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+      "commit-tree", "refs/heads/topic^{tree}", "-p", "refs/heads/topic", "-m", "Advance topic");
+    git(remote, "update-ref", "refs/heads/topic", tip);
+    await fetchRepository(local);
+    expect((await pullRepository(local)).status.behind).toBe(0);
+    expect(git(local, "rev-parse", "HEAD")).toBe(tip);
+  });
+
+  it.each([
+    "+refs/heads/*:refs/heads/*",
+    "+refs/heads/*:refs/remotes/unrelated/*",
+    "+refs/tags/*:refs/remotes/origin/*",
+  ])("preserves an incompatible mapping without exposing untrackable refs: %s", async (mapping) => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "topic", "main");
+    git(local, "config", "remote.origin.fetch", mapping);
+    const config = readFileSync(join(local, ".git", "config"));
+    await expect(fetchRepository(local)).rejects.toThrow("remote-tracking mapping");
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/topic")).toBe("");
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+    expect(git(local, "branch", "--show-current")).toBe("main");
+  });
+
+  it("fails a fallback tracking config lock before creating or switching a branch", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "topic", "main");
+    git(local, "config", "--unset-all", "remote.origin.fetch");
+    await fetchRepository(local);
+    const config = readFileSync(join(local, ".git", "config"));
+    writeFileSync(join(local, ".git", "config.lock"), "owned by another config writer\n");
+    await expect(switchBranch(local, "origin/topic", { remote: true })).rejects.toThrow();
+    expect(git(local, "branch", "--list", "topic")).toBe("");
+    expect(git(local, "branch", "--show-current")).toBe("main");
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+  });
+
+  it("rejects an excluded fallback branch before adding tracking configuration", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "topic", "main");
+    await fetchRepository(local);
+    git(local, "config", "remote.origin.fetch", "^refs/heads/topic");
+    const config = readFileSync(join(local, ".git", "config"));
+    await expect(switchBranch(local, "origin/topic", { remote: true })).rejects.toThrow("fetch mappings");
+    expect(git(local, "branch", "--list", "topic")).toBe("");
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+  });
+
   it("refuses to overwrite an existing local branch or carry dirty files into another branch", async () => {
     const { local } = fixture();
     git(local, "branch", "other");
@@ -153,6 +214,17 @@ describe("Git workflows", () => {
     expect(result.status.upstream).toBe("origin/client");
     expect(git(local, "config", "branch.client.merge")).toBe("refs/heads/server");
     expect(git(local, "rev-parse", "HEAD")).toBe(git(remote, "rev-parse", "server"));
+  });
+
+  it("rejects multiple upstream destinations before creating a tracking branch", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "server", "main");
+    git(local, "config", "remote.origin.fetch", "+refs/heads/server:refs/remotes/origin/first");
+    git(local, "config", "--add", "remote.origin.fetch", "+refs/heads/server:refs/remotes/origin/second");
+    await fetchRepository(local);
+    await expect(switchBranch(local, "origin/second", { remote: true })).rejects.toThrow("fetch mappings");
+    expect(git(local, "branch", "--list", "second")).toBe("");
+    expect(git(local, "branch", "--show-current")).toBe("main");
   });
 
   it("refreshes a safely renamed tracking destination when its remote source advances", async () => {

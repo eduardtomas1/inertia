@@ -91,6 +91,8 @@ describe("RootCommitDialog", () => {
       "Preparing the complete diff",
     );
     expect(screen.getByText(/0 files/iu)).toHaveTextContent("+0");
+    expect(screen.getByText("Preparing review…")).toBeInTheDocument();
+    expect(screen.queryByText("Detached HEAD")).not.toBeInTheDocument();
     expect(screen.queryByText("ambient.ts")).not.toBeInTheDocument();
 
     await act(async () => pending.resolve(review()));

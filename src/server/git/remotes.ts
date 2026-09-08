@@ -13,10 +13,10 @@ import {
 } from "./remote-routing";
 import { runGit, runGitInspection } from "./runner";
 import { requireCleanCheckout } from "./branches";
+import { readConfiguredFetchRefspecs, scopedTrackingFetchRefspecs } from "./fetch-refspecs";
 import { getRepositoryStatus } from "./status";
 import {
   GitError,
-  isGitProcessTreeTerminationFailure,
   type GitMutationResult,
 } from "./types";
 
@@ -39,37 +39,6 @@ export async function pullRepository(
     failureMessage: "Unable to pull changes from the remote repository.",
   });
   return { status: await getRepositoryStatus(root, options) };
-}
-
-async function trackingFetchRefspecs(
-  root: string,
-  remote: string,
-  options: GitPathInspectionOptions,
-): Promise<string[]> {
-  const key = `remote.${remote}.fetch`;
-  const inspection = { ...options, maxOutputBytes: 16 * 1024,
-    failureMessage: "Unable to inspect the remote fetch mappings." };
-  let configured: string[];
-  try {
-    configured = (await runGitInspection(root, ["config", "--null", "--get-all", key], inspection))
-      .stdout.toString("utf8").split("\0").filter(Boolean);
-  } catch (error) {
-    if (!(error instanceof GitError) || error.code !== "operation-failed" || isGitProcessTreeTerminationFailure(error)) throw error;
-    // --get-all exits unsuccessfully for an absent key. Confirm its absence
-    // using --get's default; malformed config and cleanup failures still fail.
-    const absent = await runGitInspection(root, ["config", "--null", "--default", "", "--get", key], inspection);
-    if (absent.stdout.toString("utf8").split("\0")[0]) throw error;
-    configured = [];
-  }
-  const namespace = `refs/remotes/${remote}/`;
-  const safe = configured.filter((value) => {
-    const [source, destination, extra] = value.replace(/^\+/u, "").split(":");
-    return extra === undefined && source?.startsWith("refs/heads/") && destination?.startsWith(namespace);
-  });
-  return [
-    ...(safe.length ? safe : [`+refs/heads/*:${namespace}*`]),
-    ...configured.filter((value) => value.startsWith("^refs/heads/")),
-  ];
 }
 
 /** Refresh one tracking remote without touching the index, checkout, tags or FETCH_HEAD. */
@@ -105,7 +74,8 @@ export async function fetchRepository(
   }
   validateName(remote, "The remote name");
   await validateBranch(root, `${remote}/inertia-fetch-probe`, options);
-  const refspecs = await trackingFetchRefspecs(root, remote, options);
+  const configured = await readConfiguredFetchRefspecs(root, remote, options);
+  const { refspecs } = scopedTrackingFetchRefspecs(remote, configured);
   await runGit(root, [
     "fetch", "--no-recurse-submodules", "--no-auto-maintenance", "--no-tags",
     "--no-prune", "--no-prune-tags", "--no-write-fetch-head", "--refmap=", "--", remote,

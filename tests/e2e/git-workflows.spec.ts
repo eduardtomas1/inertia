@@ -7,8 +7,11 @@ import { expect, test, type Locator } from "@playwright/test";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 const execFileAsync = promisify(execFile);
+async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
+  return (await execFileAsync("git", args, { cwd, timeout: 10_000, maxBuffer: 1024 * 1024 })).stdout;
+}
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  return (await execFileAsync("git", args, { cwd, timeout: 10_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+  return (await gitOutput(cwd, ...args)).trim();
 }
 let app: AppFixture;
 let remote: string;
@@ -172,7 +175,10 @@ test("commits reviewed paths and pushes existing commits while preserving unrela
 
 test("tracks an exact remote branch and fast-forwards incoming commits", async () => {
   const { page, workspaceDirectory } = app;
+  await git(workspaceDirectory, "config", "core.autocrlf", "true");
   await commitFromUi("Prepare clean checkout");
+  await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
+  await fetchFromUi();
   const trigger = page.locator('[data-header-menu="branch"] > button');
   await trigger.click();
   const branches = page.getByRole("menu", { name: "Branches" });
@@ -182,6 +188,7 @@ test("tracks an exact remote branch and fast-forwards incoming commits", async (
   await expect(branches).toBeHidden();
   await expect(trigger).toContainText("feature/remote-review");
   expect(await git(workspaceDirectory, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/feature/remote-review");
+  expect(await git(workspaceDirectory, "config", "--get-all", "remote.origin.fetch")).toBe("+refs/heads/*:refs/remotes/origin/*");
   const peer = join(app.testDirectory, "peer");
   await git(app.testDirectory, "clone", "--branch", "feature/remote-review", remote, peer);
   await git(peer, "config", "user.name", "Inertia Peer");
@@ -201,7 +208,9 @@ test("tracks an exact remote branch and fast-forwards incoming commits", async (
   await capture("git-incoming-light.png");
   await pull.click();
   await expect.poll(async () => await git(workspaceDirectory, "rev-parse", "HEAD")).toBe(await git(peer, "rev-parse", "HEAD"));
-  expect(await readFile(join(workspaceDirectory, "incoming.txt"), "utf8")).toBe("reviewed incoming change\n");
+  expect(await git(workspaceDirectory, "show", "HEAD:incoming.txt")).toBe("reviewed incoming change");
+  expect(await readFile(join(workspaceDirectory, "incoming.txt"), "utf8"))
+    .toBe(await gitOutput(workspaceDirectory, "cat-file", "--filters", "HEAD:incoming.txt"));
   await openGit();
   await expect(menu.getByText("0 incoming", { exact: true })).toBeVisible();
   await capture("git-overview-light.png");

@@ -68,8 +68,8 @@ and verifies its filesystem identity and Git metadata before and after inspectio
 Occupancy is projected as a boolean, not another worktree's filesystem path. Remote names containing slashes are matched by longest prefix.
 Custom fetch mappings must identify exactly one source branch on the selected
 remote before tracking checkout, including a uniquely renamed mapping such as
-`refs/heads/server` to `refs/remotes/origin/client`. Excluded or ambiguous sources
-are rejected; Git itself can create a branch before
+`refs/heads/server` to `refs/remotes/origin/client`. Excluded or ambiguous sources,
+and sources that map to multiple upstream destinations, are rejected; Git itself can create a branch before
 reporting this ambiguity, so this check runs before mutation.
 
 Fetch has a shared 180-second workflow deadline and a 120-second network limit;
@@ -77,9 +77,15 @@ the output limit is 64 KiB. Its explicit refspec updates only that remote's
 tracking branches, with tags, pruning, `FETCH_HEAD`, submodule recursion and
 automatic maintenance disabled. Configured head mappings within that remote's
 tracking namespace, including renamed destinations and source exclusions, are
-honored. Mappings to local branches, tags or another remote are ignored; when no
-safe positive mapping exists, Fetch uses the normal remote-tracking namespace. Overlapping remote names such as `origin` and
-`origin/team` are rejected before fetch can overwrite another remote's tracking
+honored. Head mappings to local branches or another remote, and non-head mappings
+into this remote's tracking namespace, are rejected with terminal guidance. This
+preserves existing configuration and prevents Git from tracking the wrong ref.
+Unrelated non-head mappings (for example tags into `refs/tags/`) are ignored.
+When no head mapping exists, Fetch uses the normal remote-tracking namespace;
+selecting one of those branches adds that normal mapping to the local repository
+configuration before creating the tracking branch. Existing unrelated mappings
+and exclusions are retained, and a config-lock failure cannot create a branch.
+Overlapping remote names such as `origin` and `origin/team` are rejected before fetch can overwrite another remote's tracking
 refs; this guard is covered by a reproducing regression test. It uses the same scoped mutation serialization
 and invalidation as other Git actions. Cancellation and disconnect retain
 ownership until cleanup finishes. Branch validation no longer disguises
@@ -110,14 +116,15 @@ remotes:
    focus after dismissal/current-branch selection.
 3. Commit through Inertia's existing selected-path review transaction, then push
    the existing commit while preserving unrelated uncommitted content.
-4. Create the exact local tracking branch, fetch incoming commits, and pull a
-   fast-forward in a compact light-theme window without viewport overflow.
+4. Fetch with no configured head mapping, establish the exact local tracking
+   branch, fetch incoming commits, and pull a fast-forward in a compact light-theme
+   window without viewport overflow. Verify checkout bytes with Git’s configured
+   filters, including CRLF checkout behavior.
 
 The four scenarios pass on macOS arm64 using Node 22 and Electron 44, including
-a run with Git’s initial branch forced to `master`; they also pass in the Linux
-interaction lane. The latest macOS pass includes the Browser restart/cleanup
-regression scenario. Screenshots below are actual desktop captures, not rendered
-mockups. Before images use
+a run under `CI=true` with Git’s initial branch forced to `master`. A separate
+five-run Browser restart/cleanup repetition also passes on the same build.
+Screenshots below are actual desktop captures. Before images use
 released main commit `3121f209`; after images use this PR on the same release
 baseline. Dark captures use a 1440×920 content-size request (the primary display
 may constrain height), and compact light captures use 1100×760.

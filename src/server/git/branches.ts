@@ -102,7 +102,13 @@ export async function switchBranch(
     if (branches.local.some((candidate) => candidate.name === localName)) {
       throw new GitError("conflict", "A local branch with this name already exists. Select it in Local branches.");
     }
-    await requireUnambiguousBranchTracking(root, remote, name, options);
+    const fallback = await requireUnambiguousBranchTracking(root, remote, name, options);
+    if (fallback) {
+      await runGit(root, ["config", "--local", "--add", `remote.${remote}.fetch`, fallback], {
+        ...options, failureMessage: "Unable to configure remote branch tracking. Check the repository config lock, then retry.",
+      });
+      await requireUnambiguousBranchTracking(root, remote, name, options);
+    }
     args = ["switch", "--track", "-c", localName, `refs/remotes/${name}`];
   }
   await runGit(root, args, {

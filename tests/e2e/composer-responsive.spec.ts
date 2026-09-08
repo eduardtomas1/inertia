@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test, type Locator } from "@playwright/test";
 import { stat } from "node:fs/promises";

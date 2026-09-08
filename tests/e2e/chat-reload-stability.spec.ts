@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test, type Frame, type Locator } from "@playwright/test";
 import { join } from "node:path";
 

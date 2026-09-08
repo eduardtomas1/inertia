@@ -498,7 +498,7 @@ describe("provider metadata cache", () => {
   });
 });
 
-describe.sequential("provider metadata discovery invalidation", () => {
+describe("provider metadata discovery invalidation", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 

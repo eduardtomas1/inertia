@@ -42,6 +42,9 @@ export const windowsCleanupFailureSchema = z.object({
   force: z.boolean(),
   elapsedMs: z.number().int().min(0).max(300_000),
   exitCode: z.number().int().min(-2_147_483_648).max(4_294_967_295).nullable(),
+  outputClassification: z.enum([
+    "not-found", "access-denied", "other", "unavailable",
+  ]).optional(),
 }).strict();
 export type WindowsCleanupFailure = z.infer<typeof windowsCleanupFailureSchema>;
 const safeVersion = z

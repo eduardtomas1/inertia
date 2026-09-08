@@ -44,11 +44,31 @@ updates:
           - "@anthropic-ai/sdk"
           - "@modelcontextprotocol/sdk"
           - "@opencode-ai/sdk"
+          # Native ABI, extraction and update trust need reviewable own PRs.
+          - "@napi-rs/canvas"
+          - "better-sqlite3"
+          - "node-pty"
+          - "electron-updater"
+      vitest-contract:
+        # Runner and coverage adapter are one verifier contract, including
+        # coordinated majors. No automatic merge or security-update delay.
+        patterns:
+          - vitest
+          - "@vitest/*"
+        update-types: [patch, minor, major]
       development-patch-and-minor:
         dependency-type: development
         update-types:
           - patch
           - minor
+        exclude-patterns:
+          - vitest
+          - "@vitest/*"
+          - electron
+          - electron-builder
+          - electron-vite
+          - "@playwright/test"
+          - happy-dom
 
   - package-ecosystem: github-actions
     directory: /

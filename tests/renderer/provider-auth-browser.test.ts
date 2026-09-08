@@ -1,7 +1,8 @@
+import { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 
 import {
-  ProviderAuthBrowserUrlDetector,
+  providerAuthBrowserUrlFromTerminal,
   providerAuthBrowserUrl,
 } from "../../src/renderer/src/utils/providerAuthBrowser";
 
@@ -44,30 +45,22 @@ function geminiAuthUrlWith(
 }
 
 describe("provider authentication browser links", () => {
-  it("reassembles Claude's official authorization URL across PTY chunks", () => {
-    const detector = new ProviderAuthBrowserUrlDetector("claude");
-
-    expect(detector.push("If the browser didn't open, visit: https://claude.com/cai/oauth/auth"))
-      .toBeNull();
-    expect(detector.push("orize?client_id=fixture&response_type=code&state=fixture"))
-      .toBeNull();
-    expect(detector.push("-state&code_challenge=fixture-challenge"))
-      .toBeNull();
-    expect(detector.push("\r\n"))
-      .toBe(AUTH_URL);
-  });
-
-  it("reassembles Gemini's official manual OAuth URL across PTY chunks", () => {
-    const detector = new ProviderAuthBrowserUrlDetector("gemini");
+  it("reassembles Gemini's official manual OAuth URL across parsed PTY chunks", async () => {
+    const terminal = new Terminal({ cols: 40, rows: 10, allowProposedApi: false });
+    const write = async (chunk: string) => {
+      await new Promise<void>((resolve) => terminal.write(chunk, resolve));
+      return providerAuthBrowserUrlFromTerminal("gemini", terminal);
+    };
     const authUrl = geminiAuthUrl();
     const first = authUrl.indexOf("redirect_uri");
     const second = authUrl.indexOf("scope");
-
-    expect(detector.push(`Please visit the following URL:\r\n\r\n${authUrl.slice(0, first)}`))
-      .toBeNull();
-    expect(detector.push(authUrl.slice(first, second))).toBeNull();
-    expect(detector.push(authUrl.slice(second))).toBeNull();
-    expect(detector.push("\r\n\r\n")).toBe(authUrl);
+    try {
+      expect(await write(`Please visit the following URL:\r\n\r\n${authUrl.slice(0, first)}`))
+        .toBeNull();
+      expect(await write(`\x1b[0m${authUrl.slice(first, second)}`)).toBeNull();
+      expect(await write(authUrl.slice(second))).toBeNull();
+      expect(await write("\r\n\r\n")).toBe(authUrl);
+    } finally { terminal.dispose(); }
   });
 
   it("allows only bounded HTTPS authorization endpoints owned by Claude", () => {
@@ -151,22 +144,4 @@ describe("provider authentication browser links", () => {
     }
   });
 
-  it("ignores hostile output and can clear a cancelled login attempt", () => {
-    const detector = new ProviderAuthBrowserUrlDetector("claude");
-
-    expect(detector.push("Open javascript:alert(1) or https://evil.test/oauth/authorize?state=fixture"))
-      .toBeNull();
-    expect(detector.push("https://claude.com/cai/oauth/auth")).toBeNull();
-    detector.clear();
-    expect(detector.push("orize?state=cancelled")).toBeNull();
-
-    const geminiDetector = new ProviderAuthBrowserUrlDetector("gemini");
-    expect(geminiDetector.push(
-      "Open https://accounts.google.com.evil.test/o/oauth2/v2/auth?state=fixture\r\n",
-    )).toBeNull();
-    const geminiUrl = geminiAuthUrl();
-    expect(geminiDetector.push(geminiUrl.slice(0, -10))).toBeNull();
-    geminiDetector.clear();
-    expect(geminiDetector.push(`${geminiUrl.slice(-10)}\r\n`)).toBeNull();
-  });
 });

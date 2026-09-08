@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";

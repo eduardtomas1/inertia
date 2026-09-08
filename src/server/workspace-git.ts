@@ -1,4 +1,4 @@
-import { lstat, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type {
@@ -26,10 +26,16 @@ import type {
   SecureFileRootCapability,
 } from "./secure-files";
 
+import {
+  isBroadWorkspaceDirectory,
+  readDiscoveryEntries,
+  WORKSPACE_GIT_DISCOVERY_BOUNDS,
+} from "./workspace-git-discovery-policy";
+
 export const WORKSPACE_GIT_DEFAULT_LIMITS = Object.freeze({
-  maxDepth: 8,
-  maxDirectories: 5_000,
-  maxRepositories: 128,
+  maxDepth: 4,
+  maxDirectories: 256,
+  maxRepositories: 16,
   statusConcurrency: 4,
   maxIssues: 20,
 });
@@ -234,12 +240,16 @@ async function beforeDiscoveryDeadline<T>(
 }
 
 function normalizedLimits(input: Partial<WorkspaceGitDiscoveryLimits>): WorkspaceGitDiscoveryLimits {
+  const bounded = (key: keyof WorkspaceGitDiscoveryLimits): number => Math.min(
+    positiveLimit(input[key], WORKSPACE_GIT_DEFAULT_LIMITS[key]),
+    WORKSPACE_GIT_DISCOVERY_BOUNDS[key],
+  );
   return {
-    maxDepth: positiveLimit(input.maxDepth, WORKSPACE_GIT_DEFAULT_LIMITS.maxDepth),
-    maxDirectories: positiveLimit(input.maxDirectories, WORKSPACE_GIT_DEFAULT_LIMITS.maxDirectories),
-    maxRepositories: positiveLimit(input.maxRepositories, WORKSPACE_GIT_DEFAULT_LIMITS.maxRepositories),
-    statusConcurrency: positiveLimit(input.statusConcurrency, WORKSPACE_GIT_DEFAULT_LIMITS.statusConcurrency),
-    maxIssues: positiveLimit(input.maxIssues, WORKSPACE_GIT_DEFAULT_LIMITS.maxIssues),
+    maxDepth: bounded("maxDepth"),
+    maxDirectories: bounded("maxDirectories"),
+    maxRepositories: bounded("maxRepositories"),
+    statusConcurrency: bounded("statusConcurrency"),
+    maxIssues: bounded("maxIssues"),
   };
 }
 
@@ -284,21 +294,9 @@ async function markerState(
   directory: string,
   signal?: AbortSignal,
 ): Promise<"present" | "absent" | "unsafe"> {
-  let entries;
-  try {
-    entries = await beforeRepositoryResolutionAbort(
-      () => readdir(directory, { withFileTypes: true }),
-      signal,
-    );
-  } catch (error) {
-    if (error instanceof GitError) throw error;
-    return "absent";
-  }
-  const marker = entries.find((entry) => entry.name.toLocaleLowerCase("en-US") === ".git");
-  if (!marker) return "absent";
   try {
     const info = await beforeRepositoryResolutionAbort(
-      () => lstat(resolve(directory, marker.name)),
+      () => lstat(resolve(directory, ".git")),
       signal,
     );
     if (info.isSymbolicLink()) return "unsafe";
@@ -325,33 +323,47 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const output = Array<R>(values.length);
   let cursor = 0;
+  const failures: unknown[] = [];
   const workers = Array.from(
     { length: Math.min(concurrency, values.length) },
     async () => {
-      while (cursor < values.length) {
+      while (cursor < values.length && failures.length === 0) {
         const index = cursor;
         cursor += 1;
-        output[index] = await operation(values[index]);
+        try {
+          output[index] = await operation(values[index]);
+        } catch (error) {
+          failures.push(error);
+        }
       }
     },
   );
   await Promise.all(workers);
+  if (failures.length > 0) {
+    throw failures.find(isGitProcessTreeTerminationFailure) ?? failures[0];
+  }
   return output;
 }
 
 /**
  * Discovers Git roots without invoking Git for every traversed directory.
- * Directory traversal is breadth-first, bounded, deterministic and never
+ * Directory traversal is breadth-first, bounded, sorted within each batch and never
  * follows symbolic links.
  */
 export async function discoverWorkspaceGitRepositories(
   workspacePath: string,
   inputLimits: WorkspaceGitDiscoveryOptions = {},
 ): Promise<WorkspaceGitSnapshot> {
+  const startedAt = Date.now();
   const limits = normalizedLimits(inputLimits);
+  const traversalDeadlineAt = Math.min(
+    inputLimits.deadlineAt ?? Infinity,
+    startedAt + WORKSPACE_GIT_DISCOVERY_BOUNDS.traversalMs,
+  );
+  const statusAdmissionDeadlineAt = startedAt + WORKSPACE_GIT_DISCOVERY_BOUNDS.statusAdmissionMs;
   const workspaceRoot = await requireWorkspaceDirectory(
     workspacePath,
-    inputLimits.deadlineAt,
+    traversalDeadlineAt,
   );
   const queue: QueuedDirectory[] = [{ absolutePath: workspaceRoot, repositoryPath: ".", depth: 0 }];
   const candidates: DiscoveryCandidate[] = [];
@@ -362,142 +374,151 @@ export async function discoverWorkspaceGitRepositories(
   let partial = false;
   let truncated = false;
 
-  while (queue.length > 0) {
-    requireDiscoveryTime(inputLimits.deadlineAt);
-    if (scannedDirectories >= limits.maxDirectories) {
-      skippedDirectories += queue.length;
+  let remainingEntries = WORKSPACE_GIT_DISCOVERY_BOUNDS.maxEntries;
+  try {
+    if (await beforeDiscoveryDeadline(() => isBroadWorkspaceDirectory(workspaceRoot), traversalDeadlineAt)) {
+      queue.length = 0;
       truncated = true;
-      break;
+      safeIssue(issues, limits, ".", "Choose a project folder to inspect Git changes. Automatic discovery does not scan filesystem or home roots.");
     }
-    const current = queue.shift()!;
-    scannedDirectories += 1;
+    while (queue.length > 0) {
+      requireDiscoveryTime(traversalDeadlineAt);
+      if (scannedDirectories >= limits.maxDirectories || remainingEntries <= 0) {
+        skippedDirectories += queue.length;
+        truncated = true;
+        break;
+      }
+      const current = queue.shift()!;
+      scannedDirectories += 1;
 
-    let entries;
-    try {
-      entries = await beforeDiscoveryDeadline(
-        () => readdir(current.absolutePath, { withFileTypes: true }),
-        inputLimits.deadlineAt,
+      const marker = await beforeDiscoveryDeadline(
+        (signal) => markerState(current.absolutePath, signal),
+        traversalDeadlineAt,
       );
-      requireDiscoveryTime(inputLimits.deadlineAt);
-    } catch (error) {
-      if (error instanceof GitError && error.code === "timeout") throw error;
-      partial = true;
-      safeIssue(issues, limits, current.repositoryPath, "This folder could not be inspected.");
-      continue;
-    }
-    entries.sort((left, right) => comparePaths(left.name, right.name));
+      if (current.depth === 0 && marker !== "present") {
+        limits.maxDepth = Math.min(limits.maxDepth, WORKSPACE_GIT_DISCOVERY_BOUNDS.containerDepth);
+      }
+      if (marker === "unsafe") {
+        partial = true;
+        safeIssue(issues, limits, current.repositoryPath, "An unsafe symbolic-link Git marker was ignored.");
+      } else if (marker === "present") {
+        discoveredRepositories += 1;
+        if (candidates.length >= limits.maxRepositories) truncated = true;
+        else candidates.push({ absolutePath: current.absolutePath, repositoryPath: current.repositoryPath });
+      }
 
-    const marker = entries.find((entry) => entry.name.toLocaleLowerCase("en-US") === ".git");
-    if (marker) {
+      let entries;
       try {
-        const markerInfo = await beforeDiscoveryDeadline(
-          () => lstat(resolve(current.absolutePath, marker.name)),
-          inputLimits.deadlineAt,
+        const batch = await beforeDiscoveryDeadline(
+          (signal) => readDiscoveryEntries(current.absolutePath, remainingEntries, signal),
+          traversalDeadlineAt,
         );
-        if (markerInfo.isSymbolicLink()) {
-          partial = true;
-          safeIssue(issues, limits, current.repositoryPath, "An unsafe symbolic-link Git marker was ignored.");
-        } else if (markerInfo.isDirectory() || markerInfo.isFile()) {
-          discoveredRepositories += 1;
-          if (candidates.length >= limits.maxRepositories) {
-            truncated = true;
-          } else {
-            candidates.push({
-              absolutePath: current.absolutePath,
-              repositoryPath: current.repositoryPath,
-            });
-          }
+        entries = batch.entries;
+        remainingEntries -= entries.length;
+        if (batch.truncated) truncated = true;
+        requireDiscoveryTime(traversalDeadlineAt);
+      } catch (error) {
+        if (error instanceof GitError && error.code === "timeout") throw error;
+        partial = true;
+        safeIssue(issues, limits, current.repositoryPath, "This folder could not be inspected.");
+        continue;
+      }
+      entries.sort((left, right) => comparePaths(left.name, right.name));
+
+      for (const entry of entries) {
+        requireDiscoveryTime(traversalDeadlineAt);
+        const foldedName = entry.name.toLocaleLowerCase("en-US");
+        if (IGNORED_DIRECTORY_NAMES.has(foldedName)) {
+          if (entry.isDirectory() || entry.isSymbolicLink()) skippedDirectories += 1;
+          continue;
         }
-      } catch (error) {
-        if (error instanceof GitError && error.code === "timeout") throw error;
-        partial = true;
-        safeIssue(issues, limits, current.repositoryPath, "The Git marker could not be inspected.");
+        if (entry.isSymbolicLink()) {
+          skippedDirectories += 1;
+          continue;
+        }
+        // Directory enumeration already identifies ordinary files, which cannot contain a
+        // repository. Only probe directories again: their type may have changed
+        // since enumeration, so lstat and realpath must still guard traversal.
+        if (!entry.isDirectory()) continue;
+        // Reserve the remaining traversal slots before issuing metadata I/O.
+        // A wide directory otherwise probes every child (including slow mounts)
+        // before the queue's limit is checked on the next loop iteration.
+        if (current.depth >= limits.maxDepth || scannedDirectories + queue.length >= limits.maxDirectories) {
+          skippedDirectories += 1;
+          truncated = true;
+          continue;
+        }
+        const childAbsolute = resolve(current.absolutePath, entry.name);
+        let childInfo;
+        try {
+          childInfo = await beforeDiscoveryDeadline(
+            () => lstat(childAbsolute),
+            traversalDeadlineAt,
+          );
+        } catch (error) {
+          if (error instanceof GitError && error.code === "timeout") throw error;
+          partial = true;
+          safeIssue(
+            issues,
+            limits,
+            current.repositoryPath === "." ? entry.name : `${current.repositoryPath}/${entry.name}`,
+            "This folder entry could not be inspected.",
+          );
+          continue;
+        }
+        if (childInfo.isSymbolicLink()) {
+          skippedDirectories += 1;
+          continue;
+        }
+        if (!childInfo.isDirectory()) continue;
+        let canonicalChild;
+        try {
+          canonicalChild = await beforeDiscoveryDeadline(
+            () => realpath(childAbsolute),
+            traversalDeadlineAt,
+          );
+        } catch (error) {
+          if (error instanceof GitError && error.code === "timeout") throw error;
+          partial = true;
+          skippedDirectories += 1;
+          continue;
+        }
+        if (!isContained(workspaceRoot, canonicalChild)) {
+          partial = true;
+          skippedDirectories += 1;
+          continue;
+        }
+        queue.push({
+          absolutePath: canonicalChild,
+          repositoryPath: current.repositoryPath === "." ? entry.name : `${current.repositoryPath}/${entry.name}`,
+          depth: current.depth + 1,
+        });
       }
     }
 
-    for (const entry of entries) {
-      requireDiscoveryTime(inputLimits.deadlineAt);
-      const foldedName = entry.name.toLocaleLowerCase("en-US");
-      if (IGNORED_DIRECTORY_NAMES.has(foldedName)) {
-        if (entry.isDirectory() || entry.isSymbolicLink()) skippedDirectories += 1;
-        continue;
-      }
-      if (entry.isSymbolicLink()) {
-        skippedDirectories += 1;
-        continue;
-      }
-      // readdir already identifies ordinary files, which cannot contain a
-      // repository. Only probe directories again: their type may have changed
-      // since enumeration, so lstat and realpath must still guard traversal.
-      if (!entry.isDirectory()) continue;
-      // Reserve the remaining traversal slots before issuing metadata I/O.
-      // A wide directory otherwise probes every child (including slow mounts)
-      // before the queue's limit is checked on the next loop iteration.
-      if (scannedDirectories + queue.length >= limits.maxDirectories) {
-        skippedDirectories += 1;
-        truncated = true;
-        continue;
-      }
-      const childAbsolute = resolve(current.absolutePath, entry.name);
-      let childInfo;
-      try {
-        childInfo = await beforeDiscoveryDeadline(
-          () => lstat(childAbsolute),
-          inputLimits.deadlineAt,
-        );
-      } catch (error) {
-        if (error instanceof GitError && error.code === "timeout") throw error;
-        partial = true;
-        safeIssue(
-          issues,
-          limits,
-          current.repositoryPath === "." ? entry.name : `${current.repositoryPath}/${entry.name}`,
-          "This folder entry could not be inspected.",
-        );
-        continue;
-      }
-      if (childInfo.isSymbolicLink()) {
-        skippedDirectories += 1;
-        continue;
-      }
-      if (!childInfo.isDirectory()) continue;
-      if (current.depth >= limits.maxDepth) {
-        skippedDirectories += 1;
-        truncated = true;
-        continue;
-      }
-      let canonicalChild;
-      try {
-        canonicalChild = await beforeDiscoveryDeadline(
-          () => realpath(childAbsolute),
-          inputLimits.deadlineAt,
-        );
-      } catch (error) {
-        if (error instanceof GitError && error.code === "timeout") throw error;
-        partial = true;
-        skippedDirectories += 1;
-        continue;
-      }
-      if (!isContained(workspaceRoot, canonicalChild)) {
-        partial = true;
-        skippedDirectories += 1;
-        continue;
-      }
-      queue.push({
-        absolutePath: canonicalChild,
-        repositoryPath: current.repositoryPath === "." ? entry.name : `${current.repositoryPath}/${entry.name}`,
-        depth: current.depth + 1,
-      });
-    }
+  } catch (error) {
+    requireDiscoveryTime(inputLimits.deadlineAt);
+    if (!(error instanceof GitError) || error.code !== "timeout") throw error;
+    truncated = true;
+    safeIssue(issues, limits, ".", "Automatic repository discovery reached its time limit. Choose a narrower project folder to inspect more repositories.");
   }
 
   requireDiscoveryTime(inputLimits.deadlineAt);
   const inspected = await mapWithConcurrency(candidates, limits.statusConcurrency, async (candidate) => {
+    requireDiscoveryTime(inputLimits.deadlineAt);
+    if (Date.now() >= statusAdmissionDeadlineAt) {
+      truncated = true;
+      return null;
+    }
+    const deadlineAt = Math.min(
+      inputLimits.deadlineAt ?? Infinity,
+      Date.now() + WORKSPACE_GIT_DISCOVERY_BOUNDS.repositoryStatusMs,
+    );
     try {
-      requireDiscoveryTime(inputLimits.deadlineAt);
+      requireDiscoveryTime(deadlineAt);
       const candidateInfo = await beforeDiscoveryDeadline(
         () => lstat(candidate.absolutePath, { bigint: true }),
-        inputLimits.deadlineAt,
+        deadlineAt,
       );
       const secureRoot = inputLimits.secureFiles
         ? await beforeDiscoveryDeadline(
@@ -505,10 +526,10 @@ export async function discoverWorkspaceGitRepositories(
               candidate.absolutePath,
               signal,
             ),
-            inputLimits.deadlineAt,
+            deadlineAt,
           )
         : null;
-      requireDiscoveryTime(inputLimits.deadlineAt);
+      requireDiscoveryTime(deadlineAt);
       if (
         secureRoot
         && (
@@ -522,17 +543,14 @@ export async function discoverWorkspaceGitRepositories(
           "The repository folder changed while it was being inspected.",
         );
       }
-      const metadataMarkerIdentity = await beforeDiscoveryDeadline(
-        () => repositoryMetadataMarkerIdentity(
-          secureRoot?.root ?? candidate.absolutePath,
-          { deadlineAt: inputLimits.deadlineAt },
-        ),
-        inputLimits.deadlineAt,
+      const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+        secureRoot?.root ?? candidate.absolutePath,
+        { deadlineAt },
       );
       const status = await getRepositoryStatus(
         secureRoot?.root ?? candidate.absolutePath,
         {
-          deadlineAt: inputLimits.deadlineAt,
+          deadlineAt,
           ...(inputLimits.scanAuthorityGeneration
             ? (() => {
                 const identity = validatedGitScanIdentity(
@@ -553,12 +571,9 @@ export async function discoverWorkspaceGitRepositories(
             : {}),
         },
       );
-      const verifiedMetadataMarkerIdentity = await beforeDiscoveryDeadline(
-        () => repositoryMetadataMarkerIdentity(
-          secureRoot?.root ?? candidate.absolutePath,
-          { deadlineAt: inputLimits.deadlineAt },
-        ),
-        inputLimits.deadlineAt,
+      const verifiedMetadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
+        secureRoot?.root ?? candidate.absolutePath,
+        { deadlineAt },
       );
       if (metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
         throw new GitError(
@@ -569,7 +584,7 @@ export async function discoverWorkspaceGitRepositories(
       if (secureRoot) {
         await beforeDiscoveryDeadline(
           (signal) => inputLimits.secureFiles!.verifyRoot(secureRoot, signal),
-          inputLimits.deadlineAt,
+          deadlineAt,
         );
       }
       const candidateIdentity = canonicalIdentity(candidate.absolutePath);
@@ -602,6 +617,7 @@ export async function discoverWorkspaceGitRepositories(
   const repositories: WorkspaceGitRepositorySnapshot[] = [];
   for (const result of inspected) {
     requireDiscoveryTime(inputLimits.deadlineAt);
+    if (!result) continue;
     if (result.rootIdentity && seenRoots.has(result.rootIdentity)) continue;
     if (result.rootIdentity) seenRoots.add(result.rootIdentity);
     repositories.push(result.repository);

@@ -1,3 +1,4 @@
+import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveRestore,
@@ -58,6 +59,7 @@ import {
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
+  loadIssueReportSettings,
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
   loadMascotSettings,
@@ -68,6 +70,7 @@ import { ThemeLibrary } from "./ThemeLibrary";
 import "./SettingsView.css";
 
 export type SettingsViewProps = {
+  onReportCommand?: IssueReportSettingsProps["request"];
   target?: {
     section: "providers" | "backends" | "connections";
     profileId?: string;
@@ -124,6 +127,7 @@ export type SettingsViewProps = {
 };
 
 type SettingsSection =
+  | "support"
   | "general"
   | "providers"
   | "backends"
@@ -141,6 +145,7 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
   { id: "discord", label: "Discord", icon: Bot },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
+  { id: "support", label: "Report an issue", icon: Bot },
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
 ];
 
@@ -220,6 +225,7 @@ export function SettingsView({
   onChooseCodexBinary,
   onRevealRuntimeLogs,
   onCopyRuntimeDiagnosticReport,
+  onReportCommand,
   appUpdateStatus,
   checkingAppUpdate,
   onCheckAppUpdate,
@@ -249,6 +255,7 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
+  const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, section === "support");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -1077,6 +1084,8 @@ export function SettingsView({
             <p className="settings-card-note">Cmd/Ctrl stays fixed; available keys avoid system shortcuts.</p>
           </section>
         )}
+
+        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (
           <>

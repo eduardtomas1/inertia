@@ -47,10 +47,10 @@ async function installerSmokeModule() {
     }>>;
     waitForInstallRootProcessDrain: (
       installDirectory: string,
-      options: {
-        snapshot: (root: string, timeoutMs: number) => Promise<Array<{ name: string; processId: number }>>;
-        now: () => number;
-        wait: (milliseconds: number) => Promise<void>;
+      options?: {
+        snapshot?: (root: string, timeoutMs: number) => Promise<Array<{ name: string; processId: number }>>;
+        now?: () => number;
+        wait?: (milliseconds: number) => Promise<void>;
       },
     ) => Promise<void>;
     nsisApplicationArchiveName: (
@@ -243,17 +243,15 @@ test.runIf(process.platform === "win32")(
       await vi.waitFor(() => {
         expect(blockers.every((child) => child.pid !== undefined)).toBe(true);
       });
-      const { windowsInstallRootProcesses } = await installerSmokeModule();
-      await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([
+      const { windowsInstallRootProcesses, waitForInstallRootProcessDrain } = await installerSmokeModule();
+      await expect(windowsInstallRootProcesses(installDirectory, 30_000)).resolves.toEqual([
         expect.objectContaining({
           name: "installed-blocker.exe",
           processId: blockers[0].pid,
         }),
       ]);
       blockers[0].stdin?.end();
-      await vi.waitFor(async () => {
-        await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([]);
-      }, { timeout: 10_000 });
+      await waitForInstallRootProcessDrain(installDirectory);
       expect(executableProcessExists(blockers[1].pid!)).toBe(true);
     } finally {
       for (const blocker of blockers) {
@@ -273,6 +271,9 @@ test.runIf(process.platform === "win32")(
       });
     }
   },
+  // The initial snapshot and real installer drain each retain their bounded
+  // 30-second process query budget, followed by strict fixture cleanup.
+  90_000,
 );
 
 test("the installer smoke refuses an existing per-user installation", async () => {
@@ -834,7 +835,7 @@ test("keeps stderr diagnostics out of strict archive listing stdout", async () =
   expect(result).toBe(listing);
 });
 
-test("pins the minimal fixed builder and gates installed Windows binaries", async () => {
+test("pins the reviewed builder and gates installed Windows binaries", async () => {
   const manifest = JSON.parse(await readFile(
     join(repositoryRoot, "package.json"),
     "utf8",
@@ -866,9 +867,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     "utf8",
   );
 
-  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
-  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.7");
-  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.7");
+  expect(manifest.devDependencies["electron-builder"]).toBe("26.16.0");
+  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.16.0");
+  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.16.0");
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");
@@ -937,10 +938,11 @@ test("runs packaged N-1 to N on both native Windows architectures", async () => 
     "utf8",
   );
 
-  expect(ci).toContain("release_platform: windows-x64");
-  expect(ci).toContain("release_platform: windows-arm64");
-  expect(ci).toContain("release_package_script: package:release:win");
-  expect(ci).toContain("release_package_script: package:release:win:arm64");
+  const targets = JSON.parse(await readFile(join(repositoryRoot, "scripts/ci/platforms.json"), "utf8"));
+  expect(targets).toEqual(expect.arrayContaining([
+    expect.objectContaining({ release_platform: "windows-x64", release_package_script: "package:release:win" }),
+    expect.objectContaining({ release_platform: "windows-arm64", release_package_script: "package:release:win:arm64" }),
+  ]));
   expect(ci).toContain("Package native Windows installer and unpacked app");
   expect(ci).toContain("Download checksummed packaged Windows N-1 installer");
   expect(ci).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows package");

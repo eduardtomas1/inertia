@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, win32 } from "node:path";
 import { runGitInspection } from "./git/runner";
+import { isBroadWorkspaceDirectory } from "./workspace-git-discovery-policy";
 
 const IDENTITY_TIMEOUT_MS = 3_000;
 const MAX_IDENTITY_OUTPUT = 16 * 1024;
@@ -66,10 +67,18 @@ export async function inspectProjectIdentityWithDeadline(
 export async function inspectProjectIdentity(projectPath: string): Promise<ProjectIdentity> {
   const canonicalPath = await canonicalDirectory(projectPath);
   const normalizedPath = normalizeIdentityPath(canonicalPath);
+  const nonRepository: ProjectIdentity = {
+    normalizedPath,
+    repositoryIdentity: null,
+    repositoryRoot: null,
+    repositoryRelativePath: ".",
+  };
+  if (await isBroadWorkspaceDirectory(canonicalPath)) return nonRepository;
   try {
     const repositoryRootValue = await gitValue(canonicalPath, ["rev-parse", "--show-toplevel"]);
     if (!isAbsolute(repositoryRootValue)) throw new Error("Git returned a relative repository root.");
     const repositoryRoot = await canonicalDirectory(repositoryRootValue);
+    if (await isBroadWorkspaceDirectory(repositoryRoot)) return nonRepository;
     let commonDirectoryValue: string;
     try {
       commonDirectoryValue = await gitValue(canonicalPath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
@@ -88,11 +97,6 @@ export async function inspectProjectIdentity(projectPath: string): Promise<Proje
       repositoryRelativePath,
     };
   } catch {
-    return {
-      normalizedPath,
-      repositoryIdentity: null,
-      repositoryRoot: null,
-      repositoryRelativePath: ".",
-    };
+    return nonRepository;
   }
 }

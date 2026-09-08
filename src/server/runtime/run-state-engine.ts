@@ -2,6 +2,7 @@ import type {
   AgentRunState,
   AgentRunStateSnapshot,
   AgentRunTerminalState,
+  AgentTurn,
   ProviderId,
 } from "../../shared/contracts";
 
@@ -172,6 +173,28 @@ export class AuthoritativeRunStateEngine {
     this.terminal = "failed";
     this.requestedTerminal = "failed";
     return this.refresh(providerState);
+  }
+
+  /** Only the controller's confirmed durable terminal row may restore this state. */
+  acknowledgeTerminalCommit(
+    turn: AgentTurn,
+  ): void {
+    const outcome = turn.status;
+    if (
+      turn.id !== this.identity.turnId
+      || turn.runId !== this.identity.runId
+      || turn.conversationId !== this.identity.conversationId
+      || turn.providerId !== this.identity.providerId
+      || !(outcome === "completed" || outcome === "cancelled" || outcome === "failed" || outcome === "interrupted")
+    ) throw new Error("The committed terminal row does not own this run state.");
+    const snapshot = turn.runState;
+    if (snapshot && snapshot.state !== outcome) {
+      throw new Error("The committed terminal state does not match its outcome.");
+    }
+    this.terminal = outcome;
+    this.requestedTerminal = outcome;
+    if (snapshot) this.current = { ...snapshot };
+    else this.refresh();
   }
 
   private derivedState(): AgentRunState {

@@ -155,6 +155,10 @@ export const Composer = memo(function Composer({
   const [fileReferences, setFileReferences] = useState<string[]>([]);
   const [previewContextSelected, setPreviewContextSelected] = useState(false);
   const selectedPreviewUrlRef = useRef<string | null>(null);
+  const [dismissedPreviews, setDismissedPreviews] = useState<ReadonlySet<string>>(() => new Set());
+  const previewContextKey = JSON.stringify([conversation.id, previewContextUrl]);
+  const visiblePreviewContextUrl = previewContextUrl && !dismissedPreviews.has(previewContextKey)
+    ? previewContextUrl : null;
   const [pendingRoute, setPendingRoute] = useState<PendingModelRoute | null>(null);
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
@@ -292,7 +296,7 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     if (!previewContextSelected) return;
-    const next = previewContextUrl ?? null;
+    const next = visiblePreviewContextUrl;
     if (selectedPreviewUrlRef.current === next) return;
     selectedPreviewUrlRef.current = next;
     editorRevisionSequenceRef.current += 1;
@@ -301,7 +305,7 @@ export const Composer = memo(function Composer({
       editorRevisionSequenceRef.current,
     );
     if (!next) setPreviewContextSelected(false);
-  }, [conversation.id, previewContextSelected, previewContextUrl]);
+  }, [conversation.id, previewContextSelected, visiblePreviewContextUrl]);
 
   useEffect(() => {
     flushDraftPersistence();
@@ -477,9 +481,20 @@ export const Composer = memo(function Composer({
 
   const togglePreviewContext = (): void => {
     markEditorChanged();
-    const next = selectedPreviewUrlRef.current ? null : previewContextUrl ?? null;
+    const next = selectedPreviewUrlRef.current ? null : visiblePreviewContextUrl;
     selectedPreviewUrlRef.current = next;
     setPreviewContextSelected(Boolean(next));
+  };
+
+  const dismissPreviewContext = (): void => {
+    if (!visiblePreviewContextUrl) return;
+    setDismissedPreviews((previous) => new Set(previous).add(previewContextKey));
+    if (selectedPreviewUrlRef.current) {
+      markEditorChanged();
+      selectedPreviewUrlRef.current = null;
+      setPreviewContextSelected(false);
+    }
+    textareaRef.current?.focus();
   };
 
   const submit = async () => {
@@ -831,6 +846,10 @@ export const Composer = memo(function Composer({
       setRouteCreationError(null);
       setPendingRoute({
         selection: transition.selection,
+        ...(route.configuration ? { configuration: {
+          accessMode: route.configuration.accessMode,
+          interactionMode: route.configuration.interactionMode,
+        } } : {}),
         label: `${route.backendProfileName} · ${route.displayName}`,
         reason: transition.reason,
         sourceConversationId: conversation.id,
@@ -855,6 +874,10 @@ export const Composer = memo(function Composer({
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
+      ...(route.configuration ? {
+        accessMode: route.configuration.accessMode,
+        interactionMode: route.configuration.interactionMode,
+      } : {}),
     });
   };
   const updatePromptStash = (
@@ -1015,9 +1038,10 @@ export const Composer = memo(function Composer({
           onRunRouteRepair={runRouteRepair}
           promptContext={promptContext}
           onClearPromptContext={clearPromptContext}
-          previewContextUrl={previewContextUrl}
+          previewContextUrl={visiblePreviewContextUrl}
           previewContextSelected={previewContextSelected}
           onTogglePreviewContext={togglePreviewContext}
+          onDismissPreviewContext={dismissPreviewContext}
           attachments={attachments} attachmentsDisabled={attachmentImporting} pendingAttachmentIds={pendingAttachmentIds}
           onRemoveAttachment={removeAttachment}
           pendingRoute={pendingRoute}
@@ -1041,7 +1065,10 @@ export const Composer = memo(function Composer({
             const prefillText = message.trim() ? message : undefined;
             void onCreateConversationForSelection(
               pendingRoute.selection,
-              prefillText ? { prefillText } : undefined,
+              prefillText || pendingRoute.configuration ? {
+                ...(prefillText ? { prefillText } : {}),
+                ...(pendingRoute.configuration ? { configuration: pendingRoute.configuration } : {}),
+              } : undefined,
             ).then(
               () => {
                 setPendingRoute(null);

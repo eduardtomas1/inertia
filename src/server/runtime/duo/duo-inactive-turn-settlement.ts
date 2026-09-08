@@ -5,6 +5,7 @@ import {
 } from "../../../shared/contracts";
 import { RecordNotFoundError, type RuntimeStore } from "../../database";
 import type { TurnControllerHooks } from "../turns/turn-controller-types";
+import { broadcastTurnSnapshot } from "../turns/turn-controller-support";
 import { resolvePersistedDuoInteractions } from "./duo-active-turn-quarantine";
 
 export function settleInactiveDuoTurn(
@@ -146,7 +147,7 @@ export function settleInactiveDuoTurn(
       type: "conversation.detail.invalidated",
       conversationId: input.conversationId,
     });
-    input.hooks.broadcastSnapshot();
+    broadcastTurnSnapshot(input.hooks);
     return true;
   } catch {
     return false;

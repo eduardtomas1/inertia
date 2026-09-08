@@ -792,9 +792,9 @@ export default function App(): React.JSX.Element {
   });
   const createConversationForSelection = async (
     selection: ModelSelection,
-    options?: { prefillText?: string },
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
   ): Promise<void> => {
-    if (draftConversation.chooseModel(selection)) return;
+    if (draftConversation.chooseModel(selection, options?.configuration)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
     const selectionGeneration =
       conversationSelectionGenerationRef.current + 1;
@@ -806,6 +806,7 @@ export default function App(): React.JSX.Element {
           buildNewConversationPayload(project.id, settings),
           selection,
         ),
+        ...options?.configuration,
         activate: false,
       },
     });

@@ -233,7 +233,7 @@ server.listen(port,"127.0.0.1",()=>{port=server.address().port;save();console.lo
   return command;
 }
 
-describe.sequential("provider host-tool injection", () => {
+describe("provider host-tool injection", { concurrent: false }, () => {
   it.each([false, true])("injects Claude's exact in-process bridge without a second SDK approval (resume=%s)", async (resume) => {
     const root = portableFixtureRoot(`Claude host tools ${resume ? "resume" : "new"}`);
     roots.push(root);

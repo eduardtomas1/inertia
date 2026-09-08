@@ -7,6 +7,7 @@ import { performance } from "node:perf_hooks";
 
 import { parseDocument, stringify } from "yaml";
 import { releaseSbomFailureMessage } from "./release-sbom-diagnostic.mjs";
+import { canonicalReleaseSbomRoot } from "./release-sbom-root.mjs";
 
 const MAX_UPDATE_METADATA_BYTES = 256 * 1024;
 const MAX_MANIFEST_BYTES = 512 * 1024;
@@ -188,8 +189,6 @@ async function generateReleaseSbom(releaseAssets) {
     || document.version !== 1
     || !isPlainRecord(document.metadata)
     || !isPlainRecord(document.metadata.component)
-    || document.metadata.component.name !== packageJson.name
-    || document.metadata.component.version !== version
     || !Array.isArray(document.components)
     || document.components.length === 0
     || document.components.length > MAX_SBOM_COMPONENTS
@@ -198,8 +197,15 @@ async function generateReleaseSbom(releaseAssets) {
     || (document.metadata.properties !== undefined
       && !Array.isArray(document.metadata.properties))
   ) throw new Error("The release dependency SBOM has an invalid identity or shape.");
+  const lockfileBytes = await readFile("package-lock.json");
+  document.metadata.component = canonicalReleaseSbomRoot(
+    document.metadata.component,
+    packageJson,
+    JSON.parse(lockfileBytes.toString("utf8")),
+    basename(process.cwd()),
+  );
   const lockfileDigest = createHash("sha256")
-    .update(await readFile("package-lock.json"))
+    .update(lockfileBytes)
     .digest("hex");
   const electronManifest = JSON.parse(
     await readFile("node_modules/electron/package.json", "utf8"),

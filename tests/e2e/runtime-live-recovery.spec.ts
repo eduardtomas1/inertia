@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { _electron as electron, expect, test, type ElectronApplication } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { isBuiltin } from "node:module";

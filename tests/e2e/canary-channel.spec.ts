@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { copyFile, mkdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 

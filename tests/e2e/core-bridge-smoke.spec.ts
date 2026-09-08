@@ -1,10 +1,13 @@
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import WebSocket from "ws";
 
 import { RuntimeStore } from "../../src/server/database";
-import { createAppFixture } from "./support/app-fixture";
+import type { ServerEvent } from "../../src/shared/contracts";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 
 const providerOutput = "Electron/core bridge provider output is live.";
@@ -24,8 +27,21 @@ let threadId = "core-bridge-thread";
 let activeTurnId = null;
 let turnSequence = 0;
 let settled = false;
+const complete = () => {
+  if (settled || !activeTurnId) return;
+  settled = true;
+  send({ method: "turn/completed", params: {
+    threadId,
+    turn: { id: activeTurnId, status: "completed", items: [], error: null },
+  } });
+};
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
+  if (message.id === "core-bridge-approval" && message.result) {
+    fs.writeFileSync(path.join(process.cwd(), "core-bridge-approval.json"), JSON.stringify(message.result));
+    complete();
+    return;
+  }
   if (message.method === "initialize") {
     send({ id: message.id, result: { userAgent: "core-bridge-fixture" } });
     return;
@@ -84,6 +100,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     itemId: "core-bridge-answer",
     delta: ${JSON.stringify(providerOutput)},
   } });
+  const prompt = (message.params.input || []).filter((item) => item.type === "text")
+    .map((item) => item.text).join("\\n");
+  if (prompt.includes("core:approval")) {
+    send({ id: "core-bridge-approval", method: "item/commandExecution/requestApproval", params: {
+      threadId, turnId: activeTurnId, itemId: "core-bridge-command",
+      startedAtMs: Date.now(), command: "fixture-read-only-check", cwd: process.cwd(),
+      reason: "Verify the exact Electron approval route", availableDecisions: ["accept", "decline", "cancel"],
+    } });
+  } else if (prompt.includes("core:complete")) complete();
 });
 `;
 
@@ -129,6 +154,92 @@ function durableTurnState(
   } finally {
     database.close();
   }
+}
+
+async function sendCompletedTurn(app: AppFixture, conversationId: string, request: string): Promise<string> {
+  const composer = app.page.getByRole("region", { name: "Message composer" });
+  await composer.getByRole("textbox", { name: "Message" }).fill(request);
+  await composer.getByRole("button", { name: "Send message" }).click();
+  const turn = app.page.locator("[data-turn-id]").filter({
+    has: app.page.getByText(request, { exact: true }),
+  });
+  await expect(turn).toBeVisible();
+  const turnId = await turn.getAttribute("data-turn-id");
+  expect(turnId).toMatch(/^[0-9a-f-]{36}$/iu);
+  await expect(turn.locator('[data-turn-status="completed"]')).toBeVisible();
+  await expect(turn.getByText(providerOutput, { exact: true })).toBeVisible();
+  await expect.poll(() => durableTurnState(
+    join(app.testDirectory, "data", "inertia.sqlite"), conversationId, turnId!,
+  )).toEqual({
+    conversationPresent: true, status: "completed", terminalReason: "provider-completed", providerOwnerCount: 0,
+  });
+  return turnId!;
+}
+
+for (const workspaceGit of [true, false]) {
+  test(`completes first and second sends and preserves history after restart in an existing ${workspaceGit ? "Git" : "non-Git"} workspace`, async () => {
+    let conversationId = "";
+    const app = await createAppFixture({
+      name: `core-complete-${workspaceGit ? "git" : "folder"}`,
+      initialState: "conversation",
+      workspaceGit,
+      codexAppServerSource: coreBridgeAppServer,
+      beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+        const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory,
+          { recoverInterruptedRuns: false });
+        try {
+          conversationId = store.shellSnapshot().activeConversationId!;
+          store.createMessage(conversationId, "Existing synthetic history survives.", "assistant", []);
+        } finally { store.close(); }
+      },
+    });
+    try {
+      const first = await sendCompletedTurn(app, conversationId, "core:complete first message");
+      const second = await sendCompletedTurn(app, conversationId, "core:complete second message");
+      expect(second).not.toBe(first);
+      await app.restart();
+      for (const turnId of [first, second]) {
+        await expect(app.page.locator(`[data-turn-id="${turnId}"] [data-turn-status="completed"]`)).toBeVisible();
+        expect(durableTurnState(join(app.testDirectory, "data", "inertia.sqlite"), conversationId, turnId))
+          .toMatchObject({ status: "completed", providerOwnerCount: 0 });
+      }
+      const database = new Database(join(app.testDirectory, "data", "inertia.sqlite"), { readonly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND content = ?")
+          .get(conversationId, "Existing synthetic history survives.")).toEqual({ count: 1 });
+      } finally { database.close(); }
+      await sendCompletedTurn(app, conversationId, "core:complete after restart");
+      expect(app.rendererErrors).toEqual([]);
+    } finally { await app.close(); }
+  });
+}
+
+for (const decision of ["approve", "deny"] as const) {
+  test(`routes ${decision} through the real provider transport and admits the next send`, async () => {
+    let conversationId = "";
+    const app = await createAppFixture({
+      name: `core-approval-${decision}`, initialState: "conversation", codexAppServerSource: coreBridgeAppServer,
+      beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+        const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory,
+          { recoverInterruptedRuns: false });
+        try {
+          conversationId = store.shellSnapshot().activeConversationId!;
+          store.updateConversation(conversationId, { accessMode: "supervised" });
+        } finally { store.close(); }
+      },
+    });
+    try {
+      const composer = app.page.getByRole("region", { name: "Message composer" });
+      await composer.getByRole("textbox", { name: "Message" }).fill("core:approval synthetic check");
+      await composer.getByRole("button", { name: "Send message" }).click();
+      await app.page.getByRole("button", { name: decision === "approve" ? "Approve once" : "Deny", exact: true }).click();
+      await expect.poll(async () => JSON.parse(await readFile(join(app.workspaceDirectory, "core-bridge-approval.json"), "utf8")
+        .catch(() => "null"))).toEqual({ decision: decision === "approve" ? "accept" : "decline" });
+      await expect(app.page.locator('[data-turn-status="completed"]')).toBeVisible();
+      await sendCompletedTurn(app, conversationId, `core:complete after ${decision}`);
+      expect(app.rendererErrors).toEqual([]);
+    } finally { await app.close(); }
+  });
 }
 
 test("keeps one cancelled provider turn authoritative across the Electron/core bridge", async () => {
@@ -213,6 +324,34 @@ test("keeps one cancelled provider turn authoritative across the Electron/core b
       terminalReason: "user-cancelled",
       providerOwnerCount: 0,
     });
+    try {
+      await sendCompletedTurn(app, conversationId, "core:complete after cancellation and runtime recycle");
+    } catch (error) {
+      const { websocketUrl } = await app.runtimeSnapshot();
+      if (websocketUrl) {
+        const readiness = await new Promise<unknown>((resolve) => {
+          const socket = new WebSocket(websocketUrl, { origin: "inertia://bundle", maxPayload: 2 * 1024 * 1024 });
+          const finish = (value: unknown): void => { clearTimeout(timer); socket.terminate(); resolve(value); };
+          const timer = setTimeout(() => finish(null), 2_000);
+          socket.on("error", () => finish(null));
+          socket.on("message", (data) => {
+            try {
+              const message = JSON.parse(data.toString()) as ServerEvent;
+              const event = message.type === "runtime.event" ? message.event : message;
+              if (event.type !== "server.welcome") return;
+              finish(event.snapshot.providers.map((provider) => ({
+                id: provider.id, available: provider.available, installState: provider.installState,
+                authState: provider.authState, canRun: provider.canRun, capabilityContract: provider.capabilityContract,
+              })));
+            } catch { finish(null); }
+          });
+        });
+        await test.info().attach("post-recycle-provider-readiness", {
+          body: JSON.stringify(readiness, null, 2), contentType: "application/json",
+        });
+      }
+      throw error;
+    }
     expect(app.rendererErrors).toEqual([]);
   } finally {
     // The fixture rejects unless Electron, the runtime, provider ownership,

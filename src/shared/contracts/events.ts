@@ -174,6 +174,7 @@ export type ServerEvent =
       type: "request.result";
       requestId: string;
       result:
+        | { kind: "support.report"; report: import("../issue-report").IssueReport | null }
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
         | { kind: "git.workspace.status"; status: WorkspaceGitSnapshot }

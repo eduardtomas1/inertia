@@ -347,7 +347,7 @@ describe("Gemini ACP data negotiation", () => {
   );
 });
 
-describe.sequential("Gemini ACP harness", () => {
+describe("Gemini ACP harness", { concurrent: false }, () => {
   const roots: string[] = [];
 
   afterEach(async () => {

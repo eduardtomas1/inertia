@@ -46,7 +46,7 @@ const MUTATED_ENVIRONMENT_KEYS = [
   "ZDOTDIR",
 ] as const;
 
-describe.sequential("provider runtime", () => {
+describe("provider runtime", { concurrent: false }, () => {
   const roots: string[] = [];
   const descendantPids: number[] = [];
   const ownershipDeactivators: Array<() => void> = [];

@@ -264,9 +264,10 @@ describe("useDraftConversation", () => {
     act(() => hook.result.current.start(projectId, true));
     act(() => hook.result.current.changeProject(otherId));
     expect(hook.result.current.conversation?.modelSelection).toEqual(secondModel);
-    act(() => { hook.result.current.chooseModel(explicitModel); });
+    act(() => { hook.result.current.chooseModel(explicitModel, { accessMode: "full", interactionMode: "plan" }); });
     act(() => hook.result.current.changeProject(projectId));
     expect(hook.result.current.conversation?.modelSelection).toEqual(explicitModel);
+    expect(hook.result.current.conversation).toMatchObject({ accessMode: "full", interactionMode: "plan" });
     expect(hook.result.current.conversation).toMatchObject({ providerSessionId: null, branch: null, worktreePath: null });
   });
 

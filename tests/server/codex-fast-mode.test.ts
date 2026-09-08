@@ -16,7 +16,7 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-describe.sequential("Codex provider-native Fast mode", () => {
+describe("Codex provider-native Fast mode", { concurrent: false }, () => {
   const roots: string[] = [];
   const managers: ProviderManager[] = [];
 

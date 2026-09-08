@@ -2,6 +2,41 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.54 — 2026-09-08
+
+### Reliable turns and provider interactions
+
+- Completed turns and conversation state are saved together. Recovery preserves
+  committed results, and shutdown retains ownership until process cleanup is
+  confirmed.
+- Correct Codex steering and exit handling, Cursor questions and approvals, and
+  Kimi terminal sign-in. Cold Git discovery on macOS gets a separate bounded
+  startup allowance; ordinary repository deadlines stay unchanged.
+- Startup diagnostics preserve the first safe failure category when shutdown
+  also fails, without exposing raw errors or provider output.
+
+### Saved agents, discovery and reporting
+
+- Starred agents and their keyboard shortcuts restore reasoning, access level,
+  Build/Plan mode and supported Fast settings. Unstar and star older favorites
+  once to record their full configuration; legacy entries do not grant extra
+  access.
+- Provider defaults in Settings use an in-page picker that supports Linux,
+  pointer and keyboard selection, narrow windows and saved values after restart.
+- Automatic Git discovery avoids broad system/home roots, caps traversal and
+  status work, and returns useful partial results. Explicit deeper repositories
+  remain accessible.
+- Settings adds issue-report drafts with limited diagnostic metadata, optional
+  Claude assessment, editable previews and explicit publication to GitHub.
+  Automatic assessment cannot inspect files or reproduce the issue; other
+  provider routes retain the manual reporting path.
+
+Release checks retain native packaging and installed-upgrade coverage; Windows
+x64 certification now has the same 75-minute job budget as ARM64. Windows and
+macOS continue to use manual installation while release signing is unavailable.
+The Linux updater repair first shipped in 0.0.53; installations still on 0.0.52
+need one manual installation of this or a later release, preserving their profile.
+
 ## 0.0.53 — 2026-09-07
 
 ### Linux startup, updates, and turns

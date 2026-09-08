@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 
 import * as acp from "@agentclientprotocol/sdk";
@@ -9,8 +8,9 @@ import type {
   SessionModeState,
 } from "@agentclientprotocol/sdk";
 
+import { readBoundedProviderImage } from "./provider-image-read";
+
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_COMPACTION_INSTRUCTION_CHARS = 4_000;
 
 export type KimiControlRequest = <T>(
@@ -177,6 +177,7 @@ export async function kimiPrompt(
   prompt: string,
   paths: readonly string[],
   initialized: InitializeResponse,
+  signal?: AbortSignal,
 ): Promise<ContentBlock[]> {
   if (
     paths.length > 0
@@ -195,11 +196,8 @@ export async function kimiPrompt(
         `Kimi Code does not support the attached image type: ${extname(path) || "unknown"}.`,
       );
     }
-    const data = await readFile(path);
+    const data = await readBoundedProviderImage("Kimi Code", path, total, signal);
     total += data.byteLength;
-    if (total > MAX_IMAGE_BYTES) {
-      throw new Error("Kimi Code image attachments exceed the 20 MB safety limit.");
-    }
     blocks.push({ type: "image", mimeType, data: data.toString("base64") });
   }
   blocks.push({ type: "text", text: prompt });

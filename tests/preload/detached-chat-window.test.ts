@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DesktopBridge } from "../../src/shared/desktop";
 import {
@@ -27,7 +27,9 @@ vi.mock("electron", () => ({
 describe("detached chat preload", () => {
   let bridge: DetachedChatBridge;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.resetModules();
     await import("../../src/preload/detached-chat");
     bridge = electron.exposeInMainWorld.mock.calls[0]![1] as DetachedChatBridge;
   });

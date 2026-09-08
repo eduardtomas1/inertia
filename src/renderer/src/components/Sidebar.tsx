@@ -551,12 +551,12 @@ function SidebarView({
         </button>
       ))}
       <span className="project-menu-heading"><FolderOpen size={12} />Repository display limit</span>
-      {([64, 128, 256, 512, 1024] as const).map((limit) => (
+      {([16, 32] as const).map((limit) => (
         <button
           type="button"
           role="menuitemradio"
           tabIndex={-1}
-          aria-checked={project.gitRepositoryLimit === limit}
+          aria-checked={Math.min(project.gitRepositoryLimit, 32) === limit}
           onClick={() => {
             dismissMenu("selection");
             onSetProjectGitRepositoryLimit(project, limit);
@@ -564,7 +564,7 @@ function SidebarView({
           key={limit}
         >
           <span className="menu-check">
-            {project.gitRepositoryLimit === limit ? "✓" : ""}
+            {Math.min(project.gitRepositoryLimit, 32) === limit ? "✓" : ""}
           </span>
           Show up to {limit} repositories
         </button>

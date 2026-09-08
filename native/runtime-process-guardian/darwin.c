@@ -537,6 +537,10 @@ static void observe_root_forks(struct owned_tree_tracker *tracker) {
       &immediate
     );
     if (count < 0) {
+      // Signal delivery can interrupt even a zero-timeout observation before
+      // any events are returned. Consume the existing pass budget on retry;
+      // repeated interruption still taints the observer at exhaustion below.
+      if (errno == EINTR) continue;
       tracker->fork_tainted = 1;
       return;
     }

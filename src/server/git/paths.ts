@@ -16,6 +16,7 @@ import {
   runGitInspection,
 } from "./runner";
 import { GitError } from "./types";
+import { isBroadWorkspaceDirectory } from "../workspace-git-discovery-policy";
 
 export function isContained(root: string, target: string): boolean {
   const child = relative(root, target);
@@ -190,6 +191,9 @@ export async function repositoryRoot(
 ): Promise<string> {
   const directory = await requireDirectory(repositoryPath, options);
   requirePathInspectionTime(options);
+  if (await awaitPathInspection(() => isBroadWorkspaceDirectory(directory), options)) {
+    throw new GitError("not-repository", "Choose a project folder instead of a filesystem or home root.");
+  }
   const result = await runGitInspection(
     directory,
     ["rev-parse", "--show-toplevel"],
@@ -214,6 +218,9 @@ export async function repositoryRoot(
       options,
     );
     requirePathInspectionTime(options);
+    if (await awaitPathInspection(() => isBroadWorkspaceDirectory(canonical), options)) {
+      throw new GitError("not-repository", "Choose a project repository instead of a filesystem or home-root repository.");
+    }
     return canonical;
   } catch (error) {
     if (error instanceof GitError) throw error;

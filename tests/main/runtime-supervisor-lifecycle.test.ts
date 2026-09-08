@@ -116,6 +116,35 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it.each([0, 10_000])("bounds repeated containment failures after exact cleanup takes %i ms", async (cleanupDelay) => {
+    const { children, supervisor } = createHarness({ platform: "linux" });
+    supervisor.start();
+    for (let index = 0; index < 10; index += 1) {
+      const child = children[index];
+      if (!child) break;
+      child.spawn();
+      child.message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+      await vi.advanceTimersByTimeAsync(3_000);
+      child.message({ type: "runtime.restart-requested", reason: "owned-process-tainted",
+        diagnostic: { stage: "linux-admission" } });
+      expect(() => supervisor.connection()).toThrow(RuntimeConnectionUnavailableError);
+      child.message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+      expect(supervisor.snapshot().phase).toBe("restarting");
+      await vi.advanceTimersByTimeAsync(cleanupDelay);
+      child.message({ type: "runtime.stopped" });
+      child.exit(1);
+      await vi.advanceTimersByTimeAsync(8_000);
+    }
+    expect(children.length).toBeLessThanOrEqual(4);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", restartScheduled: false });
+    expect(supervisor.snapshot().lastError).toContain("linux-admission");
+    expect(() => supervisor.connection()).toThrow(RuntimeConnectionUnavailableError);
+    const count = children.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    supervisor.start();
+    expect(children).toHaveLength(count);
+  });
+
   it("keeps session proof when a spawn failure cannot retire its lease", () => {
     const consume = vi.spyOn(
       RuntimeGenerationLeaseJournal.prototype,

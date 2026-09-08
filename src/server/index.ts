@@ -627,7 +627,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
-        if (status !== "completed") return;
+        if (!enableProviders || status !== "completed") return;
         const turn = store.agentTurn(turnId);
         if (backendProfileController.isExternalSelection(turn.modelSelection)) return;
         const current = providers.cachedMetadata(providerId);

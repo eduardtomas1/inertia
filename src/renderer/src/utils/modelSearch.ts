@@ -1,4 +1,13 @@
+import type { AccessMode, InteractionMode } from "@shared/contracts";
+
 const MAX_MODEL_SEARCH_QUERY_LENGTH = 300;
+
+export interface ModelFavoriteConfiguration {
+  accessMode: AccessMode;
+  interactionMode: InteractionMode;
+  /** Absent on routes that do not expose a response-speed control. */
+  fastMode?: boolean;
+}
 
 export interface ModelSearchRoute {
   /** Stable route key; callers should include harness, backend profile, and model identity. */
@@ -25,6 +34,7 @@ export interface ModelSearchRoute {
   responseSpeed?: "Standard" | "Fast";
   /** Explicit disclosure when choosing this route clears a current Fast option. */
   speedChangeNote?: "Fast turns off";
+  configuration?: ModelFavoriteConfiguration;
   selectable: boolean;
   unavailableReason: string | null;
 }

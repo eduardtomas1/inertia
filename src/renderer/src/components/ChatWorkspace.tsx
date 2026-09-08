@@ -187,7 +187,7 @@ type ChatWorkspaceProps = {
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
   onCreateConversationForSelection?: (
     selection: ModelSelection,
-    options?: { prefillText?: string },
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
   ) => Promise<void>;
   onChooseAttachments: (
     mode?: import("@shared/desktop").AttachmentPickerMode,

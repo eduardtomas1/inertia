@@ -317,7 +317,7 @@ export function useSplitWorkspaceScene({
     ...actions,
     createConversationForSelection: async (
       selection: ModelSelection,
-      options?: { prefillText?: string },
+      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
     ) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
@@ -329,6 +329,7 @@ export function useSplitWorkspaceScene({
             buildNewConversationPayload(splitProject.id, settings),
             selection,
           ),
+          ...options?.configuration,
           activate: false,
         },
       }));

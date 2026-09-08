@@ -349,6 +349,21 @@ describe("Git workflows", () => {
     expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/private")).toBe("");
   });
 
+  it.each(["configured", "fallback"])("honors broad negative refspecs with %s tracking mappings", async (mapping) => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "public", "main");
+    git(remote, "branch", "private", "main");
+    if (mapping === "fallback") git(local, "config", "--unset-all", "remote.origin.fetch");
+    git(local, "config", "--add", "remote.origin.fetch", "^refs/*private");
+    const config = readFileSync(join(local, ".git", "config"));
+
+    await fetchRepository(local);
+
+    expect(git(local, "rev-parse", "refs/remotes/origin/public")).toBe(git(remote, "rev-parse", "main"));
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/private")).toBe("");
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+  });
+
   it("rejects an excluded renamed source before creating the local tracking branch", async () => {
     const { local, remote } = fixture();
     git(remote, "branch", "server", "main");

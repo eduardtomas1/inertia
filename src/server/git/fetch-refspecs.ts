@@ -46,7 +46,9 @@ export function scopedTrackingFetchRefspecs(remote: string, configured: readonly
   }
   const fallback = safe.length ? null : `+refs/heads/*:${namespace}*`;
   return {
-    refspecs: [...(fallback ? [fallback] : safe), ...configured.filter((value) => value.startsWith("^refs/heads/"))],
+    // Negative patterns can match heads without a refs/heads/ prefix. They
+    // only exclude sources; preserve them for Git's own refspec validation.
+    refspecs: [...(fallback ? [fallback] : safe), ...configured.filter((value) => value.startsWith("^"))],
     fallback,
   };
 }

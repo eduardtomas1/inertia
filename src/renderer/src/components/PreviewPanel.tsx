@@ -158,7 +158,8 @@ export function PreviewPanel({
 
   const closeEvidence = useCallback(() => {
     setOpenEvidenceContextId(null);
-    requestAnimationFrame(() => evidenceToggleRef.current?.focus());
+    // The toggle stays mounted; deferred focus could override newer pane input.
+    evidenceToggleRef.current?.focus();
   }, []);
 
   const moveTabFocus = (

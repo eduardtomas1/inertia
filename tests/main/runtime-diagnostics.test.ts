@@ -52,7 +52,9 @@ describe("runtime diagnostics", () => {
   it("logs only allowlisted lifecycle fields and redacts unsafe failure values", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);
-    const diagnostics = new RuntimeDiagnostics(directory);
+    // This timestamp gives the sanitized record a digest containing "1234".
+    const at = "2026-09-08T00:00:01.094Z";
+    const diagnostics = new RuntimeDiagnostics(directory, { now: () => Date.parse(at) });
     diagnostics.record("runtime.failure", {
       phase: "restarting",
       generation: 2,
@@ -65,18 +67,17 @@ describe("runtime diagnostics", () => {
     });
 
     const content = readFileSync(join(directory, "runtime.log"), "utf8");
-    expect(content).toContain('"event":"runtime.failure"');
-    expect(content).toContain('"phase":"restarting"');
-    expect(content).not.toContain("rewrite secret");
-    expect(content).not.toContain("private.ts");
-    expect(content).not.toContain("ghp_1234567890");
-    expect(content).not.toContain("hunter2");
-    expect(content).not.toContain("dev@example.com");
-    expect(content).not.toContain("must never be serialized");
-    expect(content).not.toContain("export const secret");
-    expect(content).not.toContain("1234");
-    expect(content).not.toContain("sensitive-capability");
-    expect(content).not.toMatch(/prompt|source|tokens?|credential/iu);
+    const { recordDigest, ...payload } = JSON.parse(content) as Record<string, unknown>;
+    expect(payload).toEqual({
+      schemaVersion: 1,
+      at,
+      event: "runtime.failure",
+      phase: "restarting",
+      generation: 2,
+      message: "Runtime lifecycle failure detail omitted.",
+    });
+    expect(recordDigest).toBe(JSON.parse(signedRecord(payload)).recordDigest);
+    expect(recordDigest).toContain("1234");
   });
 
   it("drops invalid restart detail and unrelated fields from persisted evidence", () => {

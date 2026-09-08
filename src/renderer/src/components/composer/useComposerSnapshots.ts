@@ -39,7 +39,7 @@ export function useComposerSnapshots(
         void bridge.snapshot({ type: "bind", conversationId }).catch(() => undefined);
       },
       receive: (event) => {
-        if (!event.selection) { report(event.error, conversationId); return; }
+        if (!event.selection) { if (current.current.conversationId === event.conversationId) report(event.error, conversationId); return; }
         const selection = event.selection;
         if (current.current.conversationId !== event.conversationId) {
           void bridge.cancelAttachmentImport(selection.batchId).catch(() => undefined);

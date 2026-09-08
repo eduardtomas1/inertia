@@ -24,31 +24,64 @@ export function registerSnapshotIpc(options: {
   const service = new SnapshotService(async () => {
     const owner = target;
     if (!owner || owner.window.isDestroyed() || operation) return;
+    let invalidated = false;
+    const invalidate = (): void => { invalidated = true; };
+    const navigation = (details: { isMainFrame: boolean; isSameDocument: boolean }): void => {
+      if (details.isMainFrame && !details.isSameDocument) invalidate();
+    };
+    const current = (): boolean => {
+      if (invalidated || target !== owner || owner.window.isDestroyed() || owner.window.webContents.isDestroyed()) return false;
+      const frame = owner.window.webContents.mainFrame;
+      return owner.document.owner === owner.window.webContents && frame.processId === owner.document.processId
+        && frame.routingId === owner.document.frameId && frame.frameToken === owner.document.frameToken;
+    };
+    if (!current()) return;
+    owner.document.owner.on("destroyed", invalidate);
+    owner.document.owner.on("render-process-gone", invalidate);
+    owner.document.owner.on("did-start-navigation", navigation);
     operation = true;
     let batchId: string | null = null;
+    let captureSignal: AbortSignal | null = null;
+    let importerCancelled: boolean | null = null;
     try {
       batchId = options.imports.begin(owner.document);
       const attachments = await options.imports.importSelection(owner.document, batchId, async (signal) => {
-        const result = await service.capture(signal);
-        const attachment = await options.registry().import([{
-          name: `snapshot-${result.source.capturedAt.replace(/[:.]/gu, "-")}.png`,
-          mimeType: "image/png", data: result.png,
-        }], signal);
-        return attachment.map((item) => options.registry().setSnapshotSource(item.id, result.source));
+        captureSignal = signal;
+        try {
+          const result = await service.capture(signal);
+          const attachment = await options.registry().import([{
+            name: `snapshot-${result.source.capturedAt.replace(/[:.]/gu, "-")}.png`,
+            mimeType: "image/png", data: result.png,
+          }], signal);
+          return attachment.map((item) => options.registry().setSnapshotSource(item.id, result.source));
+        } catch (error) {
+          // Failed-import rollback also aborts the signal; preserve the cause first.
+          importerCancelled = signal.aborted;
+          throw error;
+        }
       });
       if (owner.window.isDestroyed()) throw new Error("Snapshot destination closed.");
       owner.window.show(); owner.window.focus();
       owner.window.webContents.send("inertia:snapshot-ready", { conversationId: owner.conversationId, selection: { batchId, attachments } });
     } catch (error) {
+      const cancelled = importerCancelled ?? (captureSignal as AbortSignal | null)?.aborted ?? false;
       let failure = error;
       if (batchId) {
         try { await options.imports.cancel(owner.document, batchId); }
         catch (cleanup) { failure = new AggregateError([error, cleanup]); }
       }
-      if (!owner.window.isDestroyed()) owner.window.webContents.send("inertia:snapshot-ready", {
-        conversationId: owner.conversationId, error: failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message,
-      });
-    } finally { operation = false; }
+      if (!cancelled && current()) {
+        owner.window.show(); owner.window.focus();
+        owner.window.webContents.send("inertia:snapshot-ready", {
+          conversationId: owner.conversationId, error: failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message,
+        });
+      }
+    } finally {
+      owner.document.owner.removeListener("destroyed", invalidate);
+      owner.document.owner.removeListener("render-process-gone", invalidate);
+      owner.document.owner.removeListener("did-start-navigation", navigation);
+      operation = false;
+    }
   });
   configuration = readSnapshotPreferences(app.getPath("userData")).then(async (saved) => {
     if (saved) await service.configure(saved.enabled, saved.shortcut);
@@ -72,9 +105,14 @@ export function registerSnapshotIpc(options: {
         return await next;
       }
       case "bind": {
-        if (window.isFocused() || !target || target.window === window || target.window.isDestroyed()) target = {
-          document: attachmentImportDocumentFromEvent(event), window, conversationId: request.conversationId,
-        };
+        if (window.isFocused() || !target || target.window === window || target.window.isDestroyed()) {
+          const document = attachmentImportDocumentFromEvent(event);
+          if (!target || target.window !== window || target.conversationId !== request.conversationId
+            || target.document.owner !== document.owner || target.document.processId !== document.processId
+            || target.document.frameId !== document.frameId || target.document.frameToken !== document.frameToken) {
+            target = { document, window, conversationId: request.conversationId };
+          }
+        }
         return service.state();
       }
       case "permission": {

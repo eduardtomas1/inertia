@@ -66,10 +66,15 @@ it("cancels a delivery during an uncommitted conversation transition before invo
     return <><button onClick={() => startTransition(() => setId("chat-b"))}>Next chat</button><Suspense fallback={<span>Loading chat</span>}><Pane id={id} /></Suspense></>;
   }
   render(<Workspace />);
+  const errors = vi.fn(); window.addEventListener("inertia:snapshot-error", errors);
+  act(() => listener({ conversationId: "chat-a", error: "A current capture failed." }));
+  expect(errors).toHaveBeenCalledOnce(); errors.mockClear();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Next chat" })); });
   expect(attemptedNextConversation).toHaveBeenCalled();
   expect(screen.getByRole("textbox", { name: "chat-a" })).toBeVisible();
   expect(snapshot).toHaveBeenLastCalledWith({ type: "bind", conversationId: "chat-a" });
+  act(() => listener({ conversationId: "chat-a", error: "A stale capture failed." }));
+  expect(errors).not.toHaveBeenCalled(); window.removeEventListener("inertia:snapshot-error", errors);
   act(() => listener({ conversationId: "chat-a", selection: { batchId: "during-transition", attachments: [] } }));
   await waitFor(() => expect(cancel).toHaveBeenCalledWith("during-transition"));
   expect(first).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled();

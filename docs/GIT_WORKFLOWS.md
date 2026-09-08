@@ -64,8 +64,10 @@ occupancy, bounded to 1,000 branches and 1 MiB; larger lists fail with explicit
 terminal guidance. Branch discovery requires the runtime-issued authority for the active checkout
 and verifies its filesystem identity and Git metadata before and after inspection.
 Occupancy is projected as a boolean, not another worktree's filesystem path. Remote names containing slashes are matched by longest prefix.
-Overlapping/custom fetch mappings must identify exactly one expected source
-branch before tracking checkout; Git itself can create a branch before
+Custom fetch mappings must identify exactly one source branch on the selected
+remote before tracking checkout, including a uniquely renamed mapping such as
+`refs/heads/server` to `refs/remotes/origin/client`. Excluded or ambiguous sources
+are rejected; Git itself can create a branch before
 reporting this ambiguity, so this check runs before mutation.
 
 Fetch has a shared 180-second workflow deadline and a 120-second network limit;
@@ -88,7 +90,8 @@ no dependency, provider protocol or database migration changes.
 Focused unit, integration and Happy DOM tests cover real bare remotes, dirty/index
 preservation, fork routing, tracking collisions, occupied worktrees, missing
 tracking, detached HEAD, overlapping remote namespaces, cancellation/deadlines,
-safe errors, command authority, stale checkout ownership, search, keyboard focus,
+safe errors, optional-boolean validation at the IPC boundary, command authority,
+stale checkout ownership, search, keyboard focus,
 and single-surface mutation errors.
 
 Four independent Electron scenarios in `tests/e2e/git-workflows.spec.ts` exercise

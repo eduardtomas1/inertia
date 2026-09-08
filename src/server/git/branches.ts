@@ -102,7 +102,7 @@ export async function switchBranch(
     if (branches.local.some((candidate) => candidate.name === localName)) {
       throw new GitError("conflict", "A local branch with this name already exists. Select it in Local branches.");
     }
-    await requireUnambiguousBranchTracking(root, remote, name, localName, options);
+    await requireUnambiguousBranchTracking(root, remote, name, options);
     args = ["switch", "--track", "-c", localName, `refs/remotes/${name}`];
   }
   await runGit(root, args, {

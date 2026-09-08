@@ -1,4 +1,4 @@
-import type { GitPathInspectionOptions } from "./paths";
+import { validateBranch, type GitPathInspectionOptions } from "./paths";
 import { runGitInspection } from "./runner";
 import { GitError, isGitProcessTreeTerminationFailure } from "./types";
 
@@ -17,7 +17,6 @@ export async function requireUnambiguousBranchTracking(
   root: string,
   remote: string,
   remoteBranch: string,
-  localBranch: string,
   options: GitPathInspectionOptions,
 ): Promise<void> {
   const failure = new GitError("invalid-input", "Remote fetch mappings do not identify one tracking branch. Configure tracking in the terminal, then refresh branches.");
@@ -45,9 +44,10 @@ export async function requireUnambiguousBranchTracking(
     const capture = refspecMatch(destination, `refs/remotes/${remoteBranch}`);
     if (capture !== null) matches.add(`${name}\0${source.replace("*", capture)}`);
   }
-  const expectedSource = `refs/heads/${localBranch}`;
-  if (matches.size !== 1 || !matches.has(`${remote}\0${expectedSource}`)
-    || excluded.some((entry) => entry.remote === remote && refspecMatch(entry.source, expectedSource) !== null)) {
+  const [matchedRemote, source = ""] = [...matches][0]?.split("\0") ?? [];
+  if (matches.size !== 1 || matchedRemote !== remote || !source.startsWith("refs/heads/")
+    || excluded.some((entry) => entry.remote === remote && refspecMatch(entry.source, source) !== null)) {
     throw failure;
   }
+  await validateBranch(root, source.slice("refs/heads/".length), options);
 }

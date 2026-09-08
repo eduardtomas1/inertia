@@ -12,6 +12,7 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 }
 let app: AppFixture;
 let remote: string;
+let initialBranch: string;
 test.beforeEach(async () => {
   app = await createAppFixture({
     name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
@@ -21,9 +22,9 @@ test.beforeEach(async () => {
       await git(workspaceDirectory, "remote", "add", "origin", remote);
       await git(workspaceDirectory, "config", "user.name", "Inertia Test");
       await git(workspaceDirectory, "config", "user.email", "test@example.invalid");
-      const current = await git(workspaceDirectory, "branch", "--show-current");
-      await git(workspaceDirectory, "push", "-u", "origin", current);
-      await git(remote, "branch", "feature/remote-review", current);
+      initialBranch = await git(workspaceDirectory, "branch", "--show-current");
+      await git(workspaceDirectory, "push", "-u", "origin", initialBranch);
+      await git(remote, "branch", "feature/remote-review", initialBranch);
       await git(workspaceDirectory, "fetch", "origin");
       await git(workspaceDirectory, "branch", "feature/local-review");
       await git(workspaceDirectory, "worktree", "add", "-b", "feature/occupied", join(testDirectory, "occupied"));
@@ -56,7 +57,7 @@ async function commitFromUi(message: string, screenshot = false): Promise<void> 
   const menu = await openGit();
   await menu.getByRole("menuitem", { name: /^Commit/u }).click();
   const dialog = app.page.getByRole("dialog", { name: "Commit changes" });
-  await expect(dialog.getByText("main", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(initialBranch, { exact: true })).toBeVisible();
   await dialog.getByRole("textbox", { name: "Commit message" }).fill(message);
   const submit = dialog.getByRole("button", { name: "Commit", exact: true });
   await expect(submit).toBeEnabled();
@@ -72,7 +73,7 @@ test("fetch preserves local work and recovers after a remote failure", async () 
   const menu = await openGit();
   await expect(menu.getByText("Up to date with last fetch")).toBeVisible();
   await capture("git-overview-dark.png");
-  await git(remote, "branch", "feature/fetched", "main");
+  await git(remote, "branch", "feature/fetched", initialBranch);
   await git(workspaceDirectory, "remote", "set-url", "origin", join(app.testDirectory, "missing.git"));
   await menu.getByRole("menuitem", { name: /^Fetch/u }).click();
   await expect(page.locator(".error-toast").getByRole("button", { name: "Dismiss error" })).toBeVisible();
@@ -91,7 +92,7 @@ test("fetch preserves local work and recovers after a remote failure", async () 
   await unlink(refLock);
   await openGit();
   await page.keyboard.press("Escape");
-  expect(await git(workspaceDirectory, "rev-parse", "refs/remotes/origin/feature/fetched")).toBe(await git(remote, "rev-parse", "main"));
+  expect(await git(workspaceDirectory, "rev-parse", "refs/remotes/origin/feature/fetched")).toBe(await git(remote, "rev-parse", initialBranch));
   expect(await readFile(join(workspaceDirectory, "sample.ts"), "utf8")).toBe(before);
   await expect(page.locator(".error-toast")).toHaveCount(0);
   expect(app.rendererErrors).toEqual([]);
@@ -143,11 +144,11 @@ test("branch search retains failed choices and keeps keyboard focus visible", as
   });
   expect(focused.scrollTop).toBeGreaterThan(0);
   expect(focused.visible).toBe(true);
-  await search.fill("main");
+  await search.fill(initialBranch);
   await search.press("Enter");
   await expect(menu).toBeHidden();
   await expect(trigger).toBeFocused();
-  expect(await git(workspaceDirectory, "branch", "--show-current")).toBe("main");
+  expect(await git(workspaceDirectory, "branch", "--show-current")).toBe(initialBranch);
   expect(app.rendererErrors).toEqual([]);
 });
 
@@ -164,7 +165,7 @@ test("commits reviewed paths and pushes existing commits while preserving unrela
   await expect(push).not.toHaveAttribute("aria-disabled", "true");
   await capture("git-outgoing-dark.png");
   await push.click();
-  await expect.poll(async () => await git(remote, "rev-parse", "refs/heads/main")).toBe(localHead);
+  await expect.poll(async () => await git(remote, "rev-parse", `refs/heads/${initialBranch}`)).toBe(localHead);
   expect(await readFile(join(workspaceDirectory, "notes.txt"), "utf8")).toBe("unfinished local work\n");
   expect(app.rendererErrors).toEqual([]);
 });

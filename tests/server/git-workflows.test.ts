@@ -118,6 +118,29 @@ describe("Git workflows", () => {
     expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep\n");
   });
 
+  it("tracks the unique source branch of a renamed fetch mapping", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "server", "main");
+    git(local, "config", "remote.origin.fetch", "+refs/heads/server:refs/remotes/origin/client");
+    git(local, "fetch", "origin");
+    const result = await switchBranch(local, "origin/client", { remote: true });
+    expect(result.status.branch).toBe("client");
+    expect(result.status.upstream).toBe("origin/client");
+    expect(git(local, "config", "branch.client.merge")).toBe("refs/heads/server");
+    expect(git(local, "rev-parse", "HEAD")).toBe(git(remote, "rev-parse", "server"));
+  });
+
+  it("rejects an excluded renamed source before creating the local tracking branch", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "server", "main");
+    git(local, "config", "remote.origin.fetch", "+refs/heads/server:refs/remotes/origin/client");
+    git(local, "fetch", "origin");
+    git(local, "config", "--add", "remote.origin.fetch", "^refs/heads/server");
+    await expect(switchBranch(local, "origin/client", { remote: true })).rejects.toThrow("fetch mappings");
+    expect(git(local, "branch", "--list", "client")).toBe("");
+    expect(git(local, "branch", "--show-current")).toBe("main");
+  });
+
   it("does not implicitly guess a remote branch for a local switch", async () => {
     const { local } = fixture();
     await expect(switchBranch(local, "origin/main")).rejects.toThrow("no longer exists");

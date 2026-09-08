@@ -425,6 +425,21 @@ const preMergeConfidence = {
   releaseReadiness: { state: "not-proven", detail: "Tag workflow required." },
 };
 describe("server event request-result trust boundary", () => {
+  it.each([undefined, false, true])("accepts optional Git safety flags set to %s", (value) => {
+    expect(parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, truncated: value } }))).toBeTruthy();
+    expect(parseServerEvent(event({ kind: "git.branches", branches: [
+      { name: "main", current: true, remote: false, worktreePath: null, checkedOut: value },
+    ] }))).toBeTruthy();
+  });
+
+  it.each(["false", 0, 1, null, {}, []].map((value) => ({ value })))("rejects malformed Git safety flags set to $value", ({ value }) => {
+    expect(() => parseServerEvent(event({ kind: "git.status", status: { ...gitStatus, truncated: value } })))
+      .toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({ kind: "git.branches", branches: [
+      { name: "main", current: true, remote: false, worktreePath: null, checkedOut: value },
+    ] }))).toThrow("Malformed server event");
+  });
+
   it.each([
     { kind: "backend.profile", profile: backendProfile },
     { kind: "backend.profile.probe", profile: backendProfile },

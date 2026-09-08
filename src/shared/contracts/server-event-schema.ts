@@ -588,6 +588,7 @@ function gitBranch(value: unknown): boolean {
   return recordWithStrings(value, "name")
     && booleanField(value, "current")
     && booleanField(value, "remote")
+    && optionalBooleanField(value, "checkedOut")
     && nullableStringField(value, "worktreePath");
 }
 
@@ -719,6 +720,7 @@ function pullRequestCapability(
 function gitStatus(value: unknown): boolean {
   return record(value)
     && booleanField(value, "isRepository")
+    && optionalBooleanField(value, "truncated")
     && optionalNullableStringField(value, "authorityRef")
     && nullableStringField(value, "root")
     && nullableStringField(value, "branch")

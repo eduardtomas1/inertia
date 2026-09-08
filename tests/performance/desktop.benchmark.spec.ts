@@ -60,6 +60,8 @@ import {
   waitForStreamingReaderAwayActivity,
 } from "../helpers/desktop-benchmark-streaming-fixture";
 
+import { startBoundedStreamingTimeline } from "../helpers/streaming-timeline-diagnostic";
+
 const execFileAsync = promisify(execFile);
 const reportPath = resolve(
   process.env.INERTIA_DESKTOP_BENCHMARK_REPORT
@@ -160,6 +162,8 @@ interface StreamingPaintMeasurement {
   visibleUpdatesPerSecond: number;
   longTasks: number;
   longTaskTotalMs: number;
+  diagnosticLongTasks: { startTime: number; duration: number; name: string; attribution: { name: string; containerType: string }[] }[];
+  diagnosticLongTasksDropped: number;
   frames: number;
   droppedOrOverBudgetFrames: number;
   frameBudgetMs: number;
@@ -866,6 +870,8 @@ async function streamingResponsivenessSample(
       const visibleUpdateGaps: number[] = [];
       const frameIntervals: number[] = [];
       const longTaskDurations: number[] = [];
+      const diagnosticLongTasks: StreamingPaintMeasurement["diagnosticLongTasks"] = [];
+      let diagnosticLongTasksDropped = 0;
       let lastVisibleText = "";
       let lastVisibleUpdateAt: number | null = null;
       let firstProviderDeltaToPaintMs: number | null = null;
@@ -936,6 +942,8 @@ async function streamingResponsivenessSample(
           visibleUpdates: visibleUpdates.length,
           longTasks: longTaskDurations.length,
           longTaskTotalMs: longTaskDurations.reduce((sum, value) => sum + value, 0),
+          diagnosticLongTasks,
+          diagnosticLongTasksDropped,
           frames: frameIntervals.length,
           droppedOrOverBudgetFrames: frameIntervals.filter(
             (value) => value > frameBudgetMs,
@@ -1057,6 +1065,19 @@ async function streamingResponsivenessSample(
       try {
         longTaskObserver = new PerformanceObserver((list) => {
           longTaskDurations.push(...list.getEntries().map(({ duration }) => duration));
+          for (const entry of list.getEntries()) {
+            if (diagnosticLongTasks.length >= 64) { diagnosticLongTasksDropped += 1; continue; }
+            const attribution = Reflect.get(entry, "attribution");
+            diagnosticLongTasks.push({
+              startTime: entry.startTime,
+              duration: entry.duration,
+              name: entry.name.slice(0, 80),
+              attribution: Array.isArray(attribution) ? attribution.slice(0, 4).map((item: unknown) => ({
+                name: typeof item === "object" && item !== null && typeof Reflect.get(item, "name") === "string" ? String(Reflect.get(item, "name")).slice(0, 80) : "",
+                containerType: typeof item === "object" && item !== null && typeof Reflect.get(item, "containerType") === "string" ? String(Reflect.get(item, "containerType")).slice(0, 40) : "",
+              })) : [],
+            });
+          }
         });
         longTaskObserver.observe({ entryTypes: ["longtask"] });
       } catch {
@@ -1843,13 +1864,20 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const streamingSampleCount = process.env.CI ? 3 : 5;
     const streamingSamples: StreamingResponsivenessSample[] = [];
     for (let sampleNumber = 1; sampleNumber <= streamingSampleCount; sampleNumber += 1) {
-      streamingSamples.push(await streamingResponsivenessSample(
-        cold.electronApp,
-        cold.page,
-        dataDirectory,
-        workspace,
-        sampleNumber,
-      ));
+      const stopDiagnostic = sampleNumber === 1
+        ? await startBoundedStreamingTimeline(cold.page, dirname(reportPath))
+        : async () => {};
+      try {
+        streamingSamples.push(await streamingResponsivenessSample(
+          cold.electronApp,
+          cold.page,
+          dataDirectory,
+          workspace,
+          sampleNumber,
+        ));
+      } finally {
+        await stopDiagnostic();
+      }
     }
     const streamingResponsiveness = summarizeStreamingResponsiveness(
       streamingSamples,

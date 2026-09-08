@@ -57,11 +57,12 @@ export async function fetchRepository(
   const status = await getRepositoryStatus(root, options);
   let trackedRemote = "";
   if (status.branch) {
+    // The upstream atom becomes empty when its configured remote is missing.
+    // Keep that intent so a broken upstream cannot silently fetch from origin.
     const routing = await runGitInspection(root, [
-      "for-each-ref", "--format=%(refname)%00%(upstream:remotename)", `refs/heads/${status.branch}`,
+      "config", "--null", "--default", "", "--get", `branch.${status.branch}.remote`,
     ], { ...options, maxOutputBytes: 16 * 1024, failureMessage: "Unable to inspect the upstream remote." });
-    trackedRemote = routing.stdout.toString("utf8").split("\n")
-      .find((line) => line.startsWith(`refs/heads/${status.branch}\0`))?.split("\0")[1] ?? "";
+    trackedRemote = routing.stdout.toString("utf8").split("\0")[0] ?? "";
   }
   const remote = trackedRemote && trackedRemote !== "." ? trackedRemote
     : names.includes("origin") ? "origin" : names.length === 1 ? names[0]! : null;

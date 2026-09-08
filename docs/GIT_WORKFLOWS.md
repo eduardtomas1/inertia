@@ -23,6 +23,8 @@ runtime-issued authority. Opening the menus does not start a network scan.
 - **Fetch:** refresh remote branches without changing local files or staged
   content. Fetch uses the tracked remote, then `origin`, then a sole remote.
   Ambiguous selection requires configuring tracking or using the terminal.
+  A missing configured upstream remote is reported instead of falling back to
+  another remote.
   Fork workflows fetch the upstream independently of the push remote. Fetch is
   also available for a dirty checkout and from a nested repository's Changes
   controls. Stop an active fetch from **Environment**; the activity stays live

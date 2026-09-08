@@ -66,12 +66,34 @@ describe("Git workflows", () => {
     expect(git(local, "config", "branch.main.remote")).toBe("upstream");
   });
 
+  it("fetches a sole remote into an unborn checkout without creating a local branch or changing files", async () => {
+    const { root, remote } = fixture();
+    const fresh = join(root, "fresh");
+    mkdirSync(fresh);
+    git(fresh, "init", "-b", "unborn");
+    git(fresh, "remote", "add", "team", remote);
+    writeFileSync(join(fresh, "draft.txt"), "unfinished new project\n");
+    await fetchRepository(fresh);
+    expect(git(fresh, "rev-parse", "refs/remotes/team/main")).toBe(git(remote, "rev-parse", "main"));
+    expect(git(fresh, "for-each-ref", "--format=%(refname)", "refs/heads")).toBe("");
+    expect(git(fresh, "symbolic-ref", "HEAD")).toBe("refs/heads/unborn");
+    expect(readFileSync(join(fresh, "draft.txt"), "utf8")).toBe("unfinished new project\n");
+  });
+
   it("refuses ambiguous remote selection without contacting a remote", async () => {
     const { local, remote } = fixture();
     git(local, "remote", "remove", "origin");
     git(local, "remote", "add", "one", remote);
     git(local, "remote", "add", "two", remote);
     await expect(fetchRepository(local)).rejects.toThrow("Several remotes");
+  });
+
+  it("does not fall back to origin when the branch's configured upstream remote is missing", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "should-not-fetch", "main");
+    git(local, "config", "branch.main.remote", "missing");
+    await expect(fetchRepository(local)).rejects.toThrow("upstream remote is missing");
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/should-not-fetch")).toBe("");
   });
 
   it("refuses overlapping remote namespaces before replacing another remote's tracking refs", async () => {

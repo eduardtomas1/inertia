@@ -150,7 +150,13 @@ export class MascotMain {
     window.webContents.on("will-attach-webview", (event) => event.preventDefault());
     window.webContents.on("context-menu", () => this.menu(window));
     window.webContents.on("before-mouse-event", (_event, mouse) => {
-      if (mouse.type === "mouseMove") this.updateHitTesting(mouse);
+      if (mouse.type === "mouseMove") {
+        // Native macOS hover reports "none" after a lost release, though the
+        // sendInputEvent button type omits it. Delayed renderer drops cannot
+        // prove that a newer physical press has ended.
+        if (process.platform === "darwin" && (mouse.button as string | undefined) === "none") this.endDrag();
+        this.updateHitTesting(mouse);
+      }
       // Capture the grab point before dispatching to the renderer. The OS
       // cursor may already have moved when its asynchronous pickup arrives.
       if (mouse.type === "mouseDown" && mouse.button === "left") {

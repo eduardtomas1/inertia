@@ -159,7 +159,7 @@ describe("mascot rendering", () => {
     hidden.mockRestore();
   });
 
-  it.each(["pointerup", "pointercancel", "lostpointercapture", "blur", "unmount"])("captures a mouse pickup and releases exactly once on %s", async (ending) => {
+  it.each(["pointerup", "pointercancel", "lostpointercapture", "released move", "blur", "unmount"])("captures a mouse pickup and releases exactly once on %s", async (ending) => {
     const app = fixture();
     const view = renderMascot();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
@@ -171,8 +171,11 @@ describe("mascot rendering", () => {
     expect(app.action).toHaveBeenCalledWith("pickup", [1, 1]);
     expect(handle.setPointerCapture).toHaveBeenCalledWith(7);
     app.interaction(true);
+    fireEvent.pointerMove(window, { pointerId: 7, buttons: 1 });
+    expect(app.action.mock.calls.map(([action]) => action)).toEqual(["pickup"]);
     if (ending === "unmount") view.unmount();
     else if (ending === "blur") fireEvent(window, new Event("blur"));
+    else if (ending === "released move") fireEvent.pointerMove(window, { pointerId: 7, buttons: 0 });
     else fireEvent(ending === "lostpointercapture" ? handle : window, new PointerEvent(ending, { pointerId: 7 }));
     fireEvent.pointerUp(window, { pointerId: 7 });
     if (ending === "unmount") {

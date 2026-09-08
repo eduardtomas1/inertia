@@ -129,14 +129,14 @@ describe("mascot window ownership", () => {
     expect(app.unregister).toHaveBeenCalledOnce();
   });
 
-  it("passes empty macOS corners through without losing captured drags or polling at idle", async () => {
+  it.each(["native release", "renderer capture loss"])("passes empty macOS corners through after %s without losing captured drags or polling at idle", async (ending) => {
     vi.useFakeTimers();
     vi.stubGlobal("process", { ...process, platform: "darwin" });
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    const hover = (x: number, y: number): void => {
-      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y });
+    const hover = (x: number, y: number, button: "none" | "left" = "none"): void => {
+      overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x, y, button });
     };
     hover(20, 220);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
@@ -147,10 +147,12 @@ describe("mascot window ownership", () => {
     hover(120, 184);
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
-    hover(-100, -100); // Pointer capture must continue outside the window.
+    hover(-100, -100, "left"); // Pointer capture must continue outside the window.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
-    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    hover(20, 220, "left"); // Losing capture does not prove a physical release.
+    expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
+    if (ending === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
     hover(20, 220);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
     const calls = overlay.setIgnoreMouseEvents.mock.calls.length;
@@ -182,7 +184,7 @@ describe("mascot window ownership", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(["native release", "blur", "hide", "reload", "display"])("releases pending macOS input on %s before pickup IPC and rejects the late pickup", async (reason) => {
+  it.each(["native release", "released hover", "blur", "hide", "reload", "display"])("releases pending macOS input on %s before pickup IPC and rejects the late pickup", async (reason) => {
     vi.useFakeTimers();
     vi.stubGlobal("process", { ...process, platform: "darwin" });
     const app = await fixture();
@@ -196,6 +198,7 @@ describe("mascot window ownership", () => {
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220 });
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
     if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    else if (reason === "released hover") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseMove", x: 20, y: 220, button: "none" });
     else if (reason === "reload") overlay.webContents.emit("did-start-loading");
     else if (reason === "display") harness.displayListeners.get("display-metrics-changed")!();
     else overlay.emit(reason);

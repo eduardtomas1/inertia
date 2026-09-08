@@ -127,7 +127,8 @@ remotes:
 
 The five scenarios pass on macOS arm64 using Node 22 and Electron 44, including
 a run under `CI=true` with Git’s initial branch forced to `master`. A separate
-five-run Browser restart/cleanup repetition also passes on the same build.
+five-run Browser restart/cleanup repetition also passed on the preceding
+`cf4d6d3b` implementation.
 Screenshots below are actual desktop captures. Before images use
 released main commit `3121f209`; after images use this PR on the same release
 baseline. Dark captures use a 1440×920 content-size request (the primary display

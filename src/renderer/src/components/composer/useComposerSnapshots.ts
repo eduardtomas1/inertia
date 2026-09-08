@@ -53,7 +53,7 @@ export function useComposerSnapshots(
           cancel: async () => await bridge.cancelAttachmentImport(selection.batchId),
         }).then((result) => {
           if (!stillCurrent()) return;
-          if (result === "adopted") textarea.current?.focus();
+          if (result === "adopted" && focused === registration) textarea.current?.focus();
           else if (result === "rejected") report("Snapshot could not be attached.", conversationId);
         }).catch(() => { if (stillCurrent()) report("Snapshot could not be attached.", conversationId); });
       },

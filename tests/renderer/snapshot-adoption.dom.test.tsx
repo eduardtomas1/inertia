@@ -12,7 +12,7 @@ const original = window.inertia;
 const removeListeners: Array<() => void> = [];
 afterEach(() => { cleanup(); for (const remove of removeListeners.splice(0)) remove(); window.inertia = original; });
 
-function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full" | "commit-rejected" = "ready") {
+function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full" | "commit-rejected" = "ready", split = false) {
   let listener!: (event: SnapshotDelivery) => void;
   const errors: unknown[] = [];
   const onError = (event: Event): void => { errors.push((event as CustomEvent<unknown>).detail); };
@@ -34,22 +34,27 @@ function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full"
     submittingRef: { current: mode === "submitting" },
   };
   if (mode === "commit-rejected") commit.mockRejectedValueOnce(new Error("commit denied /private/fixture.png"));
-  window.inertia = { ...original,
-    snapshot: vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null })),
+  const snapshot = vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null }));
+  window.inertia = { ...original, snapshot,
     onSnapshot: (callback) => { listener = callback; return () => undefined; }, commitAttachmentImport: commit, cancelAttachmentImport: cancel,
   };
   const actions = composerAttachmentActions(options);
+  const secondaryActions = composerAttachmentActions({ ...options, conversationId: "chat-b", blocked: false,
+    attachmentAuthorityKey: "authority-b", attachmentAuthorityRef: { current: { key: "authority-b", conversationId: "chat-b" } },
+    attachmentImportSequenceRef: { current: 0 }, attachmentImportingRef: { current: false }, attachmentsRef: { current: [] },
+    pendingAttachmentIdsRef: { current: new Set<string>() }, mountedRef: { current: true }, submittingRef: { current: false },
+  });
   let pendingAdoption: ReturnType<typeof actions.adoptAttachments> | null = null;
   const adopt: typeof actions.adoptAttachments = (lease) => { pendingAdoption = actions.adoptAttachments(lease); return pendingAdoption; };
   function Pane({ id }: { id: string }) {
-    const textarea = useRef<HTMLTextAreaElement>(null); useComposerSnapshots(id, adopt, textarea);
-    return <textarea ref={textarea} aria-label="Snapshot destination" />;
+    const textarea = useRef<HTMLTextAreaElement>(null); useComposerSnapshots(id, id === "chat-a" ? adopt : secondaryActions.adoptAttachments, textarea);
+    return <div className="conversation-pane-chat"><textarea ref={textarea} aria-label={`Snapshot destination ${id}`} /></div>;
   }
-  const tree = (id: string | null) => <><button>Keep focus here</button>{id !== null && <Pane id={id} />}</>;
+  const tree = (id: string | null) => <><button>Keep focus here</button>{id !== null && <Pane id={id} />}{split && <Pane id="chat-b" />}</>;
   const view = render(tree("chat-a"));
   const button = screen.getByRole("button", { name: "Keep focus here" }); button.focus();
   const attachment: ChatAttachment = { id: "shot", path: "shot", name: "snapshot.png", mimeType: "image/png", size: 10, snapshot: snapshotFixture() };
-  return { options, existing, errors, commit, cancel, release, button,
+  return { options, existing, errors, commit, cancel, release, button, snapshot,
     deliver: () => { act(() => listener({ conversationId: "chat-a", selection: { batchId: "snapshot-batch", attachments: [attachment] } })); },
     settle: async () => { await act(async () => { await pendingAdoption; }); },
     change: (id: string | null) => {
@@ -77,7 +82,20 @@ it("focuses the snapshot destination only after its privileged commit succeeds",
   value.deliver(); await waitFor(() => expect(value.commit).toHaveBeenCalledExactlyOnceWith("snapshot-batch", ["shot"]));
   expect(value.button).toHaveFocus(); expect(value.options.pendingAttachmentIdsRef.current.has("shot")).toBe(true);
   finish(); await value.settle();
-  expect(screen.getByRole("textbox", { name: "Snapshot destination" })).toHaveFocus();
+  expect(screen.getByRole("textbox", { name: "Snapshot destination chat-a" })).toHaveFocus();
+  expect(value.options.attachmentsRef.current.map(({ id }) => id)).toEqual(["shot"]);
+  expect(value.options.pendingAttachmentIdsRef.current.size).toBe(0);
+  expect(value.errors).toEqual([]); expect(value.cancel).not.toHaveBeenCalled();
+});
+
+it("preserves the newer focused composer when another pane's snapshot commit finishes", async () => {
+  const value = fixture("ready", true); let finish!: () => void;
+  value.commit.mockImplementationOnce(async () => await new Promise<void>((resolve) => { finish = resolve; }));
+  value.deliver(); await waitFor(() => expect(value.commit).toHaveBeenCalledExactlyOnceWith("snapshot-batch", ["shot"]));
+  const other = screen.getByRole("textbox", { name: "Snapshot destination chat-b" }); other.focus();
+  expect(value.snapshot).toHaveBeenLastCalledWith({ type: "bind", conversationId: "chat-b" });
+  finish(); await value.settle();
+  expect(other).toHaveFocus(); expect(value.snapshot).toHaveBeenLastCalledWith({ type: "bind", conversationId: "chat-b" });
   expect(value.options.attachmentsRef.current.map(({ id }) => id)).toEqual(["shot"]);
   expect(value.options.pendingAttachmentIdsRef.current.size).toBe(0);
   expect(value.errors).toEqual([]); expect(value.cancel).not.toHaveBeenCalled();

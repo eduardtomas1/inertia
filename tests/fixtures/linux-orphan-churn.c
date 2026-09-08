@@ -50,10 +50,21 @@ int main(int argc, char **argv) {
   if (short_lived < 0 || short_lived > 1024 || live < 0 || live > 512) return 64;
   for (int index = 0; index < live; index++) if (!orphan(1)) return 68;
   for (int index = 0; index < short_lived; index++) if (!orphan(0)) return 69;
-  const int descriptor = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0600);
-  if (descriptor < 0) return 70;
-  if (dprintf(descriptor, "%d\n", getpid()) < 0) return 71;
-  close(descriptor);
+  char *pending = NULL;
+  if (asprintf(&pending, "%s.tmp", argv[1]) < 0) return 70;
+  const int descriptor = open(pending, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  if (descriptor < 0) { free(pending); return 70; }
+  char pid[32];
+  const int length = snprintf(pid, sizeof(pid), "%d\n", getpid());
+  const ssize_t written = length > 0 && (size_t)length < sizeof(pid)
+    ? write(descriptor, pid, (size_t)length) : -1;
+  const int closed = close(descriptor);
+  // Existence is the reader's readiness signal; publish only a complete PID.
+  const int published = length > 0 && written == length && closed == 0
+    && rename(pending, argv[1]) == 0;
+  if (!published) unlink(pending);
+  free(pending);
+  if (!published) return 71;
   const struct timespec pause_time = { .tv_sec = 0, .tv_nsec = 20000000L };
   while (access(argv[2], F_OK)) nanosleep(&pause_time, NULL);
   if (!strcmp(argv[5], "signal")) { raise(SIGUSR1); return 72; }

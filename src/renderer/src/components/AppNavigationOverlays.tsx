@@ -28,7 +28,7 @@ interface AppNavigationOverlaysProps {
   setWorkspaceView: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
-  selectMessage: (hit: MessageSearchHit) => void;
+  selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   sendCommand: MessageSearchCommand;
   createConversation: () => void;
   importProject: () => Promise<void>;
@@ -67,9 +67,7 @@ export function AppNavigationOverlays({
             newThreadShortcut={newThreadShortcut}
             onClose={() => setPaletteOpen(false)}
             sendCommand={sendCommand}
-            onSelectMessage={(hit) => {
-              selectMessage(hit);
-            }}
+            onSelectMessage={selectMessage}
             onSelectProject={(project) => {
               selectProject(project);
               setWorkspaceView();

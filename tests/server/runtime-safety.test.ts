@@ -145,6 +145,7 @@ describe("runtime recovery safety command boundary", () => {
     const database = new Database(databasePath);
     const priorVersion = runtimeMigrationCatalog().length - 1;
     migrateRuntimeDatabase(database, priorVersion);
+    const schemaBefore = database.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
     database.close();
 
     try {
@@ -164,8 +165,8 @@ describe("runtime recovery safety command boundary", () => {
         "SELECT MAX(version) FROM schema_migrations",
       ).pluck().get()).toBe(priorVersion);
       expect(unchanged.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issue_report_draft'",
-      ).get()).toBeUndefined();
+        "SELECT type, name, sql FROM sqlite_master ORDER BY type, name",
+      ).all()).toEqual(schemaBefore);
       expect((unchanged.prepare(`
         SELECT sql FROM sqlite_master
         WHERE type = 'table' AND name = 'model_backend_profiles'

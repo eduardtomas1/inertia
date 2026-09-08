@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { searchMessages } from "../../src/server/persistence/message-search";
 import { messageSearchResultSchema } from "../../src/shared/message-search-schema";
@@ -38,6 +38,40 @@ function answer(store: RuntimeStore, conversationId: string, content: string, tu
 }
 
 describe("persisted message search", () => {
+  it("streams candidates without a temporary ordering B-tree", async () => {
+    const { store, database, conversation } = await fixture();
+    store.createMessage(conversation.id, "needle");
+    const prepared = vi.spyOn(database, "prepare");
+    let statements: string[];
+    try {
+      searchMessages(database, "needle", { maxScanMs: 0 });
+      statements = prepared.mock.calls.map(([sql]) => sql);
+    } finally { prepared.mockRestore(); }
+    const plans = statements.flatMap((sql) => database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(sql.match(/\?/gu) ?? []).map(() => null))) as Array<{ detail: string }>;
+    expect(plans.map(({ detail }) => detail)).not.toEqual(expect.arrayContaining([
+      expect.stringContaining("USE TEMP B-TREE"),
+    ]));
+  });
+
+  it.each(["archived", "system", "nonterminal"] as const)("checks the scan deadline while traversing newer %s rows", async (kind) => {
+    const { store, database, databasePath, conversation, project } = await fixture();
+    store.createMessage(conversation.id, "old needle", "user", [], null, "2026-01-01T00:00:00.000Z");
+    const excluded = store.createConversation(project.id, "Excluded history");
+    if (kind === "archived") store.archiveConversation(excluded.id, true);
+    const writer = new Database(databasePath);
+    try {
+      const insert = writer.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, ?, '', '[]', '2026-09-08T00:00:00.000Z')");
+      writer.transaction(() => {
+        for (let index = 0; index < 256; index += 1) insert.run(`excluded-${index}`, excluded.id, kind === "nonterminal" ? "assistant" : kind === "archived" ? "user" : "system");
+      })();
+    } finally { writer.close(); }
+    let ticks = 0;
+    expect(searchMessages(database, "needle", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({
+      hits: [], incomplete: true,
+    });
+    expect(ticks).toBeLessThanOrEqual(10);
+  });
+
   it("finds user text and canonical answers across chunks, without exposing work logs or archived chats", async () => {
     const { store, database, conversation, project } = await fixture();
     const user = store.createMessage(conversation.id, "Find literal [x]%_\\ and ÁRBOL");
@@ -63,6 +97,37 @@ describe("persisted message search", () => {
     store.archiveConversation(conversation.id, true);
     expect(searchMessages(database, "needle").hits).toEqual([]);
     expect(store.messageSearchTarget(message.id)).toBeNull();
+  });
+
+  it("checks the deadline between ordered chunks without returning a partial message", async () => {
+    const { store, database, databasePath, conversation } = await fixture();
+    const message = store.createMessage(conversation.id, "needle prefix ");
+    const writer = new Database(databasePath);
+    try {
+      const insert = writer.prepare("INSERT INTO message_content_chunks (message_id, content) VALUES (?, ?)");
+      writer.transaction(() => {
+        for (let index = 0; index < 128; index += 1) insert.run(message.id, `part-${index} `);
+      })();
+    } finally { writer.close(); }
+    let ticks = 0;
+    expect(searchMessages(database, "needle", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({
+      hits: [], incomplete: true,
+    });
+    expect(ticks).toBeLessThanOrEqual(10);
+  });
+
+  it("preserves ordered Unicode and NUL content while bounding chunk bytes", async () => {
+    const { store, database, conversation } = await fixture();
+    const message = store.createMessage(conversation.id, "α\0nee");
+    store.appendMessageContent(message.id, "dle 😀");
+    store.appendMessageContent(message.id, " suffix");
+    const content = store.message(message.id).content;
+    expect(searchMessages(database, "needle 😀 suffix", { maxScanBytes: Buffer.byteLength(content) })).toMatchObject({
+      hits: [expect.objectContaining({ messageId: message.id })], incomplete: false,
+    });
+    expect(searchMessages(database, "needle", { maxScanBytes: Buffer.byteLength(content) - 1 })).toMatchObject({
+      hits: [], incomplete: true,
+    });
   });
 
   it("returns a deterministic bounded newest-first page and reports incomplete scans", async () => {

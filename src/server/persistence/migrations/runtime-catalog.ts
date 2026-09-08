@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
-import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations, type DatabaseMigration } from "../../database-migrations";
+import { backfillLegacyAgentTurns, reportMigrationDiagnostic, runDatabaseMigrations, type DatabaseMigration } from "../../database-migrations";
 import { nativeProviderMetadataScope, providerMetadataScopeKey, type PersistedProviderMetadata } from "../../provider/metadata";
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
@@ -1227,23 +1227,15 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, nativeGeminiProviderMigration,
       persistTurnContinuationEvidence, issueReportsMigration,
+      {
+        name: "IndexMessageSearchChronology",
+        up: "CREATE INDEX messages_created_id_idx ON messages(created_at DESC, id DESC);",
+      },
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }
 export function migrateRuntimeDatabase(database: Database.Database, maximumVersion = CURRENT_DATABASE_SCHEMA_VERSION): void {
     runDatabaseMigrations(database, runtimeMigrationCatalog().slice(0, maximumVersion), {
-      onDiagnostic: (diagnostic) => {
-        if (diagnostic.outcome === "failed") {
-          console.error(formatMigrationDiagnostic(diagnostic));
-        } else if (
-          diagnostic.appliedVersions.length > 0
-          && (
-            diagnostic.sourceReleases.length > 0
-            || (diagnostic.legacyBackfill?.responseGroups ?? 0) > 0
-          )
-        ) {
-          console.info(formatMigrationDiagnostic(diagnostic));
-        }
-      },
+      onDiagnostic: reportMigrationDiagnostic,
     });
   }

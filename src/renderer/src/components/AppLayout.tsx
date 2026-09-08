@@ -84,7 +84,7 @@ interface AppLayoutActions {
   openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
-  selectMessage: (hit: MessageSearchHit) => void;
+  selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: () => void;

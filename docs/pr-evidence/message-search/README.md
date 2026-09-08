@@ -15,8 +15,12 @@ only its own saved state.
 
 The runtime searches the existing database through a dedicated read-only worker.
 It reconstructs ordered content chunks, supports migrated turn IDs, and never
-loads every conversation into the renderer. No database migration, additional
-index, dependency or preload method is introduced.
+loads every conversation into the renderer. Append-only migration 70 adds a
+covering chronology index; migrations 1–69 are unchanged. Search streams raw
+message identities in index order and checks the deadline even for excluded
+rows. Base text and ordered chunks are read individually with byte bounds and
+deadline checks, without SQL sorting or aggregate text materialization. No new
+dependency or preload method is introduced.
 
 Queries are 2–200 UTF-16 code units after trimming. Results are ordered newest
 first and capped at 20, with snippets capped at 240 code units. Searches stop
@@ -27,7 +31,14 @@ Closing the palette, changing the query, disconnecting, or shutting down cancels
 obsolete work. Query text and message content are not logged.
 
 Result navigation validates project, conversation, turn and message ownership
-again before switching chats or windows. The lookup reads identities without
+again before switching chats or windows. The palette closes and the active draft
+and view change only after selection succeeds. Failed selection keeps the query,
+reports a retryable error, and preserves the draft and view; closing the palette,
+changing its query, or a newer navigation invalidates pending frontend completion.
+This does not cancel a conversation-selection command already sent to the runtime.
+After an accepted selection, palette closure preserves the result’s pending focus;
+Escape and cancellation still restore the prior control.
+The lookup reads identities without
 materializing message content. Detached clients cannot request global
 searches, and focus notifications only reach the window owning the chat.
 After the native window confirms ownership, an explicit detached focus request
@@ -59,13 +70,30 @@ Transport write completion is not renderer acknowledgment.
   during live delivery and hydration. All 28 focused transport/core cases then
   passed, including an asynchronous write failure and a late successful write
   that must not consume a newer target. Independent source review was clean.
+- Query-plan and excluded-row regressions failed against the previous scan;
+  a further chunk-history deadline case failed before individual bounded reads.
+  Migration 70 preserves every released lineage entry and message row. Synthetic
+  downgrade fixtures remove the unreleased index; blocked-startup and live-WAL
+  checks compare the complete schema before and after the operation. The updater
+  viability fixture uses public v0.0.54’s schema 69 as the actual predecessor and
+  retains a failing migration control against an index-name conflict.
+- Failed-selection DOM regressions reproduced premature palette closure and lost
+  draft/view preservation. Cancellation, superseded import, retry and frontend
+  ownership checks pass. The first desktop run caught two accepted-result focus
+  failures (five of seven scenarios passed). A regression combining the palette
+  with the real timeline focus controller reproduced prior-focus restoration
+  interrupting a still-mounting result. After preserving accepted focus, all
+  42 focused focus/overlay/controller cases and all seven desktop scenarios pass.
+  The original failure logs and traces remain retained as verification evidence.
 - `npm run check:quality`: passed (migration lineage, architecture, lint and all
   TypeScript projects).
 - `npm run build:bundle`: passed with every existing budget unchanged. Unused
   schema construction is omitted, utility assets use compact hashed names, and
-  search navigation loads on demand. The measured main route is 735.9 KiB and
-  core JavaScript is 1,974.5 KiB; the limits remain 736 and 1,977 KiB.
-- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 12.7 s.
+  search navigation loads on demand. Recovery actions also load on demand while
+  their outcome-specific warning and native-preview suspension remain immediate.
+  The measured main route is 734.1 KiB and
+  core JavaScript is 1,976.0 KiB; the limits remain 736 and 1,977 KiB.
+- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 12.1 s.
   They cover unloaded historical turns, saved and unsent-draft retention across
   projects, split/detached focus, compact layout, a full application restart,
   a follow-up buried inside a collapsed long historical turn, inferred legacy
@@ -82,9 +110,9 @@ Transport write completion is not renderer acknowledgment.
   cases also verify direct restoration, later navigation, a restart with no
   selected chat, original project/model/identity, and unrelated draft retention.
 - Full `npm run check`: passed on Node 22.23.2. All 722 active test files passed
-  (7,731 tests passed; 14 files / 127 tests skipped by existing platform and
+  (7,748 tests passed; 14 files / 127 tests skipped by existing platform and
   environment conditions), followed by the production build and bundle gates.
-  The test phase took 333.34 s with two workers.
+  The test phase took 346.41 s with two workers.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 

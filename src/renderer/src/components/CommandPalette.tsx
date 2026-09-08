@@ -17,7 +17,7 @@ type CommandPaletteProps = {
   onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;
   sendCommand?: MessageSearchCommand;
-  onSelectMessage?: (hit: MessageSearchHit) => void;
+  onSelectMessage?: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   onNewThread: () => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
@@ -31,7 +31,7 @@ type PaletteItem = {
   icon: React.JSX.Element;
   shortcut?: string;
   match?: MessageSearchHit;
-  run: () => void;
+  run?: () => void;
 };
 
 function score(label: string, detail: string | undefined, query: string): number {
@@ -70,15 +70,22 @@ function Highlight({ text, query }: { text: string; query: string }) {
 export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [openError, setOpenError] = useState(false);
+  const opening = useRef<AbortController | null>(null);
+  const restorePriorFocus = useRef(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const search = useMessageSearch(open, query, sendCommand);
   useNativePreviewSuspension(open);
 
   useLayoutEffect(() => {
     if (!open) return;
+    restorePriorFocus.current = true;
     const restoreFocus = captureModalFocus(false);
     searchRef.current?.focus();
-    return restoreFocus;
+    return () => {
+      opening.current?.abort();
+      if (restorePriorFocus.current) restoreFocus();
+    };
   }, [open]);
 
   const allItems = useMemo(() => {
@@ -102,7 +109,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
       if (!conversation || !project) return [];
       return [{ id: `message:${hit.messageId}`, group: "Messages" as const, label: conversation.title,
         detail: `${project.name} · ${hit.role === "user" ? "Your message" : "Agent answer"}`,
-        icon: <MessageSquare size={15} />, match: hit, run: () => onSelectMessage(hit) }];
+        icon: <MessageSquare size={15} />, match: hit }];
     });
   }, [search.result, conversations, projects, onSelectMessage]);
   const items = useMemo(() => [...filterItems(allItems, query), ...messageItems], [allItems, query, messageItems]);
@@ -116,14 +123,36 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
   if (!open) return null;
 
   const closePalette = () => {
+    opening.current?.abort();
+    setOpenError(false);
     setQuery("");
     setActiveId(null);
     onClose();
   };
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
+    if (item.match && onSelectMessage) {
+      opening.current?.abort();
+      const controller = new AbortController();
+      opening.current = controller;
+      setOpenError(false);
+      void onSelectMessage(item.match, controller.signal).catch(() => false).then((selected) => {
+        if (controller.signal.aborted || opening.current !== controller) return;
+        if (selected) {
+          // The accepted result owns focus, including a row still mounting.
+          // Restoring the old control would cancel that pending handoff.
+          restorePriorFocus.current = false;
+          closePalette();
+        }
+        else {
+          setOpenError(true);
+          searchRef.current?.focus();
+        }
+      });
+      return;
+    }
     closePalette();
-    item.run();
+    item.run?.();
   };
   const groups = groupOrder.map((group) => ({ group, items: items.map((item, index) => ({ item, index })).filter(({ item }) => item.group === group) })).filter(({ items: groupItems }) => groupItems.length > 0);
 
@@ -144,7 +173,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
             ref={searchRef}
             value={query}
             maxLength={MESSAGE_SEARCH_QUERY_MAX}
-            onChange={(event) => { setQuery(event.target.value); setActiveId(null); }}
+            onChange={(event) => { opening.current?.abort(); setOpenError(false); setQuery(event.target.value); setActiveId(null); }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
               if (event.key === "Escape") { event.preventDefault(); closePalette(); }
@@ -180,6 +209,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
             </div>
           ))}
           </div>
+          {openError && <div className="palette-search-status" role="alert">Could not open this message. Try again.</div>}
           {search.loading && <div className="palette-search-status" role="status">Searching messages…</div>}
           {search.error && <div className="palette-search-status" role="status">{search.error} <button type="button" onClick={() => { search.retry(); searchRef.current?.focus(); }}>Retry</button></div>}
           {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}

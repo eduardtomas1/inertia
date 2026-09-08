@@ -28,16 +28,20 @@ export function useConversationNavigation({
   const selectConversationInMain = useCallback((
     nextConversation: Conversation,
     { focusComposer = true, preserveDraft = false } = {},
-  ): Promise<boolean> => {
-    exitGlobalChat(preserveDraft);
+  ): Promise<number | false> => {
+    if (!preserveDraft) exitGlobalChat();
     const selectionGeneration = ++conversationSelectionGenerationRef.current;
-    setSuppressedMainConversationIds((current) => {
-      if (!current.has(nextConversation.id)) return current;
-      const next = new Set(current);
-      next.delete(nextConversation.id);
-      return next;
-    });
-    if (nextConversation.id === conversation?.id) return Promise.resolve(true);
+    const commitSelection = (): number => {
+      if (preserveDraft) exitGlobalChat(true);
+      setSuppressedMainConversationIds((current) => {
+        if (!current.has(nextConversation.id)) return current;
+        const next = new Set(current);
+        next.delete(nextConversation.id);
+        return next;
+      });
+      return conversationSelectionGenerationRef.current;
+    };
+    if (nextConversation.id === conversation?.id) return Promise.resolve(commitSelection());
     if (nextConversation.id === splitConversation?.id) {
       // A split-pane promotion is visual only. Retargeting the primary and
       // secondary controllers would tear down conversation-owned terminals,
@@ -48,27 +52,29 @@ export function useConversationNavigation({
           "#secondary-conversation-pane textarea",
         )?.focus({ preventScroll: true });
       }, 0);
-      return Promise.resolve(true);
+      return Promise.resolve(commitSelection());
     }
     const nextSplitConversationId = splitConversationAfterPrimaryChange(
       conversation,
       nextConversation,
       splitConversation,
     );
-    setSecondaryPaneFirst(false);
+    if (!preserveDraft) setSecondaryPaneFirst(false);
     splitSelectionTransitionsRef.current += 1;
     return selectConversationCommand(
       "conversation.select",
       nextConversation.id,
-    ).then(() => {
+    ).then((): number | false => {
       if (
         selectionGeneration === conversationSelectionGenerationRef.current
       ) {
+        const committedGeneration = commitSelection();
+        if (preserveDraft) setSecondaryPaneFirst(false);
         updateSplitConversationId(nextSplitConversationId);
-        return true;
+        return committedGeneration;
       }
       return false;
-    }).catch(() => false).finally(() => {
+    }).catch(() => false as const).finally(() => {
       splitSelectionTransitionsRef.current = Math.max(
         0,
         splitSelectionTransitionsRef.current - 1,
@@ -99,14 +105,14 @@ export function useConversationNavigation({
       if (generation === conversationSelectionGenerationRef.current) void selectConversationInMain(nextConversation);
     });
   }, [conversationSelectionGenerationRef, detachedChats, selectConversationInMain]);
-  const selectMessage = useCallback((hit: MessageSearchHit, onReady?: () => void): void => {
+  const selectMessage = useCallback((hit: MessageSearchHit, onReady?: () => void, signal?: AbortSignal): Promise<boolean> => {
     const intent = ++conversationSelectionGenerationRef.current;
-    void import("../utils/openMessageSearchResult").then(({ openMessageSearchResult }) => {
-      if (intent !== conversationSelectionGenerationRef.current) return;
-      openMessageSearchResult(hit, { snapshot, conversationSelectionGenerationRef, intent,
-        detachedChats, request, selectConversationInMain, setActionError, onReady });
+    return import("../utils/openMessageSearchResult").then(({ openMessageSearchResult }) => {
+      return openMessageSearchResult(hit, { snapshot, conversationSelectionGenerationRef, intent,
+        detachedChats, request, selectConversationInMain, setActionError, onReady, signal });
     }).catch(() => {
-      if (intent === conversationSelectionGenerationRef.current) setActionError("Search navigation is unavailable. Try again.");
+      if (!signal?.aborted && intent === conversationSelectionGenerationRef.current) setActionError("Search navigation is unavailable. Try again.");
+      return false;
     });
   }, [snapshot, conversationSelectionGenerationRef, detachedChats, request, selectConversationInMain, setActionError]);
   return { selectConversation, selectMessage };

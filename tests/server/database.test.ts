@@ -33,6 +33,7 @@ function dropUnreleasedAgentThreadManagement(
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
+    DROP INDEX IF EXISTS messages_created_id_idx;
     DELETE FROM schema_migrations WHERE version >= 60;
   `);
 }

@@ -43,9 +43,13 @@ export async function openMessageSearchResult(hit: MessageSearchHit, {
     if (detachedChats.conversationIds.has(hit.conversationId) && await detachedChats.focus(hit.conversationId)) {
       if (!signal?.aborted && intent === conversationSelectionGenerationRef.current) {
         await request({ type: "conversation.message.reveal", payload: { ...target, focusDetached: true } });
-        return !signal?.aborted && intent === conversationSelectionGenerationRef.current;
-      }
-      return false;
+        if (signal?.aborted || intent !== conversationSelectionGenerationRef.current) return false;
+        // Native focus proved liveness only before the asynchronous reveal.
+        // Recheck without stealing focus again; a docked/closed owner needs main.
+        const windows = await window.inertia.getDetachedChatWindows();
+        if (signal?.aborted || intent !== conversationSelectionGenerationRef.current) return false;
+        if (windows.some(({ conversationId }) => conversationId === hit.conversationId)) return true;
+      } else return false;
     }
     if (signal?.aborted || intent !== conversationSelectionGenerationRef.current) return false;
     const selection = selectConversationInMain(nextConversation, { focusComposer: false, preserveDraft: true });

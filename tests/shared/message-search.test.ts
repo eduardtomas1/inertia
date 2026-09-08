@@ -60,6 +60,30 @@ describe("message search contract", () => {
     expect(exactSource.snippet.slice(exactSource.matchStart, exactSource.matchEnd)).toBe(content);
   });
 
+  it.each([
+    ["foo\nbar", "foo bar", 0],
+    ["foo\nbar", "foo bar", 40],
+    ["Set **retry**", "Set retry", 0],
+    ["Set **retry**", "Set retry", 40],
+  ] as const)("anchors the preview to stored text after an earlier normalized-only %s occurrence (%s, %i blocks)", (earlier, query, blocks) => {
+    const content = `${earlier} ${"unrelated ".repeat(blocks)}verified ${query} ending`;
+    const excerpt = messageSearchExcerpt(content, messageSearchPattern(query))!;
+    expect(excerpt.snippet).toContain(`verified ${query} ending`);
+    expect(excerpt.matchStart).toBe(excerpt.snippet.indexOf("verified ") + "verified ".length);
+    expect(excerpt.snippet.slice(excerpt.matchStart, excerpt.matchEnd)).toBe(query);
+    expect(excerpt.snippet.length).toBeLessThanOrEqual(240);
+  });
+
+  it.each([
+    ["\0", ""], ["", "\0"], ["\0\0", "\0\0"], ["\0\u0001", "\u0001\0"],
+  ])("keeps source controls around the verified literal without moving its anchor (%j, %j)", (prefix, suffix) => {
+    const content = `${prefix}needle${suffix}`;
+    const excerpt = messageSearchExcerpt(content, messageSearchPattern("needle"))!;
+    expect(excerpt.snippet).toBe(content);
+    expect(excerpt.matchStart).toBe(prefix.length);
+    expect(excerpt.matchEnd).toBe(prefix.length + "needle".length);
+  });
+
   it("shows readable Markdown and preserves explicit source searches", () => {
     const content = "### Recovery\n\nSet the **retry budget** to `three` attempts. [Details](https://example.test/retry).";
     const excerpt = messageSearchExcerpt(content, messageSearchPattern("retry budget"))!;

@@ -4,8 +4,10 @@ import { useConversationNavigation } from "../../src/renderer/src/hooks/useConve
 import { clearMessageSearchFocus, pendingMessageSearchFocus } from "../../src/renderer/src/utils/messageSearchFocus";
 import type { AppSnapshot, Conversation, ServerEvent } from "../../src/shared/contracts";
 import type { MessageSearchHit } from "../../src/shared/message-search";
+import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { conversation, deferred } from "./composer-fixtures";
 
+const originalBridge = window.inertia;
 const primary = conversation("primary");
 const other = conversation("other");
 const hit: MessageSearchHit = { projectId: other.projectId, conversationId: other.id, turnId: "turn", messageId: "message", role: "assistant", createdAt: other.createdAt, snippet: "needle", matchStart: 0, matchEnd: 6 };
@@ -15,8 +17,10 @@ function fixture(splitConversation: Conversation | null = null, detached = false
   const selected = deferred<ServerEvent>();
   const revealed = deferred<ServerEvent>();
   const focus = vi.fn(async () => detached);
+  const nativeWindows = vi.fn(async () => detached ? [{ conversationId: other.id, alwaysOnTop: false }] : []);
+  window.inertia = { ...originalBridge, getDetachedChatWindows: nativeWindows };
   const select = vi.fn(() => selected.promise);
-  const request = vi.fn(() => revealed.promise);
+  const request = vi.fn((_command: CommandWithoutId) => revealed.promise);
   const secondaryFirst = vi.fn();
   const error = vi.fn();
   const exitGlobalChat = vi.fn(() => { generation.current += 1; });
@@ -29,9 +33,9 @@ function fixture(splitConversation: Conversation | null = null, detached = false
     setSuppressedMainConversationIds: vi.fn(), setSecondaryPaneFirst: secondaryFirst,
     selectConversationCommand: select, updateSplitConversationId: vi.fn(), request, setActionError: error,
   }));
-  return { hook, generation, selected, revealed, focus, select, request, secondaryFirst, error, exitGlobalChat };
+  return { hook, generation, selected, revealed, focus, nativeWindows, select, request, secondaryFirst, error, exitGlobalChat };
 }
-afterEach(() => { clearMessageSearchFocus(); vi.restoreAllMocks(); });
+afterEach(() => { clearMessageSearchFocus(); window.inertia = originalBridge; vi.restoreAllMocks(); });
 
 describe("message search navigation", () => {
   it.each(["cancelled", "superseded"])("does not admit %s navigation after the lazy helper loads", async (reason) => {
@@ -158,6 +162,75 @@ describe("message search navigation", () => {
     expect(f.request).toHaveBeenCalledOnce();
     expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
     expect(pendingMessageSearchFocus(other.id)?.messageId).toBe(hit.messageId);
+  });
+
+  it.each(["accepted", "rejected"])("waits for %s main selection if the detached owner closes during reveal", async (outcome) => {
+    const f = fixture(null, true);
+    const delivered = deferred<ServerEvent>();
+    const ready = vi.fn();
+    f.request.mockImplementation((command) => command.type === "conversation.message.reveal" && command.payload.focusDetached ? delivered.promise : f.revealed.promise);
+    f.nativeWindows.mockResolvedValue([]);
+    let opened: Promise<boolean>;
+    await act(async () => { opened = f.hook.result.current.selectMessage(hit, ready); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.resolve(ok));
+    expect(f.focus).toHaveBeenCalledOnce();
+    expect(f.request).toHaveBeenCalledTimes(2);
+    expect(f.select).not.toHaveBeenCalled();
+    await act(async () => delivered.resolve(ok));
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(ready).not.toHaveBeenCalled();
+    expect(f.exitGlobalChat).not.toHaveBeenCalled();
+    await act(async () => {
+      if (outcome === "accepted") f.selected.resolve(ok);
+      else f.selected.reject(new Error("Selection rejected"));
+    });
+    expect(await opened!).toBe(outcome === "accepted");
+    if (outcome === "accepted") {
+      expect(ready).toHaveBeenCalledOnce();
+      expect(f.exitGlobalChat).toHaveBeenCalledWith(true);
+      expect(pendingMessageSearchFocus(other.id)?.messageId).toBe(hit.messageId);
+    } else {
+      expect(ready).not.toHaveBeenCalled();
+      expect(f.exitGlobalChat).not.toHaveBeenCalled();
+      expect(f.error).toHaveBeenCalledWith(expect.stringContaining("could not be opened"));
+      expect(pendingMessageSearchFocus(other.id)).toBeNull();
+    }
+    expect(f.focus).toHaveBeenCalledOnce();
+  });
+
+  it.each(["cancelled", "superseded"])("does not fall back after %s navigation during the native ownership recheck", async (reason) => {
+    const f = fixture(null, true);
+    const windows = deferred<Awaited<ReturnType<typeof f.nativeWindows>>>();
+    const controller = new AbortController();
+    const ready = vi.fn();
+    f.nativeWindows.mockReturnValue(windows.promise);
+    let opened: Promise<boolean>;
+    await act(async () => { opened = f.hook.result.current.selectMessage(hit, ready, controller.signal); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.resolve(ok));
+    expect(f.nativeWindows).toHaveBeenCalledOnce();
+    act(() => { if (reason === "cancelled") controller.abort(); else f.generation.current += 1; });
+    await act(async () => windows.resolve([]));
+    expect(await opened!).toBe(false);
+    expect(f.focus).toHaveBeenCalledOnce();
+    expect(f.select).not.toHaveBeenCalled();
+    expect(f.exitGlobalChat).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+    expect(pendingMessageSearchFocus(other.id)).toBeNull();
+  });
+
+  it("keeps the view and draft when the post-reveal native ownership read fails", async () => {
+    const f = fixture(null, true);
+    const ready = vi.fn();
+    f.nativeWindows.mockRejectedValue(new Error("Private native failure details"));
+    let opened: Promise<boolean>;
+    await act(async () => { opened = f.hook.result.current.selectMessage(hit, ready); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.resolve(ok));
+    expect(await opened!).toBe(false);
+    expect(f.focus).toHaveBeenCalledOnce();
+    expect(f.select).not.toHaveBeenCalled();
+    expect(f.exitGlobalChat).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+    expect(f.error).toHaveBeenLastCalledWith("This search result could not be opened. Search again to refresh it.");
   });
 
   it("does not queue detached focus after a newer navigation overtakes the native window request", async () => {

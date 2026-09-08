@@ -97,7 +97,7 @@ describe("RootCommitDialog", () => {
 
     expect(await screen.findByText("exact.ts")).toBeInTheDocument();
     expect(screen.queryByText("ambient.ts")).not.toBeInTheDocument();
-    expect(screen.getByText(/1 files/iu)).toHaveTextContent("+2");
+    expect(screen.getByText(/1 file/iu)).toHaveTextContent("main · 1 file · +2 −1");
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveFocus();
   });
 

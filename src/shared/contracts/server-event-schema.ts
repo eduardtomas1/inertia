@@ -1,4 +1,5 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
+import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
@@ -582,14 +583,6 @@ function agentWorkflow(value: unknown): boolean {
     && workflowSkillsCapability(value.skillsCapability)
     && nullableStringField(value, "goalRefreshWarning")
     && skillDiscovery(value.skillDiscovery);
-}
-
-function gitBranch(value: unknown): boolean {
-  return recordWithStrings(value, "name")
-    && booleanField(value, "current")
-    && booleanField(value, "remote")
-    && optionalBooleanField(value, "checkedOut")
-    && nullableStringField(value, "worktreePath");
 }
 
 function workspaceEntry(value: unknown): boolean {

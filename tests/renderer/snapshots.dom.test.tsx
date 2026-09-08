@@ -25,7 +25,7 @@ it("routes a delivered snapshot only to its captured conversation and cancels st
   let listener!: (value: SnapshotDelivery) => void;
   const cancel = vi.fn(async () => undefined);
   const commit = vi.fn(async () => undefined);
-  const adopt = vi.fn(async () => undefined);
+  const adopt = vi.fn(async () => "adopted" as const);
   window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null })), onSnapshot: (fn) => { listener = fn; return () => undefined; }, cancelAttachmentImport: cancel, commitAttachmentImport: commit };
   const hook = renderHook(({ id }) => useComposerSnapshots(id, adopt, useRef<HTMLTextAreaElement>(null)), { initialProps: { id: "chat-a" } });
   const selection = { batchId: "capture-1", attachments: [{ id: "shot", path: "shot", name: "shot.png", mimeType: "image/png" as const, size: 10, snapshot: snapshotFixture() }] };
@@ -52,7 +52,7 @@ it("cancels a delivery during an uncommitted conversation transition before invo
   const attemptedNextConversation = vi.fn();
   const pending = new Promise<void>(() => undefined);
   const cancel = vi.fn(async () => undefined);
-  const first = vi.fn(async () => undefined); const next = vi.fn(async () => undefined);
+  const first = vi.fn(async () => "adopted" as const); const next = vi.fn(async () => "adopted" as const);
   const snapshot = vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null }));
   window.inertia = { ...original, snapshot, onSnapshot: (fn) => { listener = fn; return () => undefined; }, cancelAttachmentImport: cancel };
   function Pane({ id }: { id: string }) {
@@ -86,7 +86,7 @@ it("keeps split composers from cancelling each other's deliveries and binds the 
   const cancel = vi.fn(async () => undefined);
   const onSnapshot = vi.fn((fn) => { listener = fn; return () => undefined; });
   window.inertia = { ...original, snapshot, onSnapshot, cancelAttachmentImport: cancel };
-  const primary = vi.fn(async () => undefined); const secondary = vi.fn(async () => undefined);
+  const primary = vi.fn(async () => "adopted" as const); const secondary = vi.fn(async () => "adopted" as const);
   function Pane({ id, adopt }: { id: string; adopt: typeof primary }) {
     const ref = useRef<HTMLTextAreaElement>(null); useComposerSnapshots(id, adopt, ref);
     return <div className="conversation-pane-chat"><textarea ref={ref} aria-label={id} /></div>;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { SnapshotDelivery } from "@shared/snapshots";
 import type { DesktopBridge } from "@shared/desktop";
-import type { ComposerAttachmentImportLease } from "../../utils/composerAttachments";
+import type { ComposerAttachmentAdoptionResult, ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 
 type Registration = { conversationId: string; activate(): void; receive(event: SnapshotDelivery): void };
 const composers = new Set<Registration>();
@@ -24,7 +24,7 @@ function receive(bridge: DesktopBridge, event: SnapshotDelivery): void {
 
 export function useComposerSnapshots(
   conversationId: string,
-  adopt: (lease: ComposerAttachmentImportLease) => Promise<void>,
+  adopt: (lease: ComposerAttachmentImportLease) => Promise<ComposerAttachmentAdoptionResult>,
   textarea: RefObject<HTMLTextAreaElement | null>,
 ): void {
   const current = useRef({ adopt, conversationId });
@@ -46,12 +46,16 @@ export function useComposerSnapshots(
           report("The selected chat changed. Take the snapshot again in the chat you want to use.");
           return;
         }
+        const stillCurrent = (): boolean => composers.has(registration) && current.current.conversationId === event.conversationId;
         void current.current.adopt({
           attachments: selection.attachments,
           commit: async (ids) => await bridge.commitAttachmentImport(selection.batchId, [...ids]),
           cancel: async () => await bridge.cancelAttachmentImport(selection.batchId),
-        }).then(() => { if (composers.has(registration) && current.current.conversationId === event.conversationId) textarea.current?.focus(); })
-          .catch(() => report("Snapshot could not be attached.", conversationId));
+        }).then((result) => {
+          if (!stillCurrent()) return;
+          if (result === "adopted") textarea.current?.focus();
+          else if (result === "rejected") report("Snapshot could not be attached.", conversationId);
+        }).catch(() => { if (stillCurrent()) report("Snapshot could not be attached.", conversationId); });
       },
     };
     composers.add(registration);

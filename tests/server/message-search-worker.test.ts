@@ -5,6 +5,7 @@ import { build } from "esbuild";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { runMessageSearchWorker as RunWorker } from "../../src/server/persistence/message-search-worker-client";
+import { RuntimeStore } from "../../src/server/database";
 
 let directory: string;
 let databasePath: string;
@@ -21,23 +22,19 @@ beforeAll(async () => {
   });
   const module = await import(/* @vite-ignore */ pathToFileURL(join(directory, "message-search-worker-client.js")).href) as { runMessageSearchWorker: typeof RunWorker };
   run = module.runMessageSearchWorker;
+  const store = new RuntimeStore(databasePath, directory);
+  let conversationId: string;
+  try {
+    const project = store.createProject("Worker search fixture", directory);
+    conversationId = store.createConversation(project.id, "Search history").id;
+  } finally { store.close(); }
   const db = new Database(databasePath);
   try {
     db.pragma("journal_mode = WAL");
-    db.exec(`
-      CREATE TABLE projects (id TEXT PRIMARY KEY);
-      CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT, archived_at TEXT);
-      CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT, turn_id TEXT, role TEXT, content TEXT, attachments_json TEXT, created_at TEXT);
-      CREATE TABLE agent_turns (id TEXT PRIMARY KEY, conversation_id TEXT, terminal_assistant_message_id TEXT);
-      CREATE TABLE message_content_chunks (message_id TEXT, sequence INTEGER, content TEXT, PRIMARY KEY(message_id, sequence));
-    `);
-    const project = "11111111-1111-4111-8111-111111111111";
-    db.prepare("INSERT INTO projects VALUES (?)").run(project);
-    db.prepare("INSERT INTO conversations VALUES (?, ?, NULL)").run(project, project);
-    const insert = db.prepare("INSERT INTO messages VALUES (?, ?, NULL, 'user', ?, '[]', '2026-09-07T00:00:00.000Z')");
+    const insert = db.prepare("INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (?, ?, NULL, 'user', ?, '[]', '2026-09-07T00:00:00.000Z')");
     db.transaction(() => {
       for (let index = 0; index < 100_000; index += 1) {
-        insert.run(`message-${String(index).padStart(6, "0")}`, project, index === 99_999 ? "The rare needle" : "a".repeat(500));
+        insert.run(`message-${String(index).padStart(6, "0")}`, conversationId, index === 99_999 ? "The rare needle" : "a".repeat(500));
       }
     })();
   } finally { db.close(); }

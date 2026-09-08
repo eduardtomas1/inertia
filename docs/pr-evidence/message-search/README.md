@@ -36,25 +36,36 @@ follows runtime hydration, expires after ten seconds and is bounded to twenty
 pending conversation identities. Ordinary main-window validation queues nothing.
 The detached subscription remains stable across snapshot and connection-status
 updates so hydration cannot clear a pending navigation before the timeline mounts.
+A pending target remains until the WebSocket send callback confirms a successful
+transport write. Closing sockets and failed asynchronous writes retain it for
+reconnect; a late completion for an older target cannot consume a newer one.
+Transport write completion is not renderer acknowledgment.
 
 ## Verification
 
-- Focused unit, DOM and contract checks passed, including 74 cases for the final
-  navigation, hydration, legacy-history and durable-draft corrections. Coverage includes literal punctuation and Unicode; readable Markdown previews;
+- Focused unit, DOM and contract checks passed. Coverage includes literal
+  punctuation and Unicode; readable Markdown previews;
   canonical/chunked answers; archived and settled chats; legacy IDs; scan and
   result bounds; cancellation and shutdown; stale responses and result ownership;
   visible keyboard order; composition input; retry and focus; split/detached
   ownership; and the shared validators affected by bundling.
 - The actual emitted worker searches a synthetic 100,000-message history while
   timers and concurrent database writes remain responsive. A final worker and
-  persistence rerun passed after tightening the scan byte limit.
+  persistence rerun passed after tightening the scan byte limit. The fixture
+  uses actual RuntimeStore initialization and current migrations with explicit
+  insertion columns; the workload and strict assertions remain unchanged.
+- Two deterministic tests using the actual runtime transport and synchronization
+  hub reproduced the dropped focus target with a controlled CLOSING socket, both
+  during live delivery and hydration. All 28 focused transport/core cases then
+  passed, including an asynchronous write failure and a late successful write
+  that must not consume a newer target. Independent source review was clean.
 - `npm run check:quality`: passed (migration lineage, architecture, lint and all
   TypeScript projects).
 - `npm run build:bundle`: passed with every existing budget unchanged. Unused
   schema construction is omitted, utility assets use compact hashed names, and
   search navigation loads on demand. The measured main route is 735.9 KiB and
   core JavaScript is 1,974.5 KiB; the limits remain 736 and 1,977 KiB.
-- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 12.8 s.
+- Fresh Electron Playwright: all seven scenarios passed on macOS ARM64 in 12.7 s.
   They cover unloaded historical turns, saved and unsent-draft retention across
   projects, split/detached focus, compact layout, a full application restart,
   a follow-up buried inside a collapsed long historical turn, inferred legacy
@@ -71,9 +82,9 @@ updates so hydration cannot clear a pending navigation before the timeline mount
   cases also verify direct restoration, later navigation, a restart with no
   selected chat, original project/model/identity, and unrelated draft retention.
 - Full `npm run check`: passed on Node 22.23.2. All 722 active test files passed
-  (7,727 tests passed; 14 files / 127 tests skipped by existing platform and
+  (7,731 tests passed; 14 files / 127 tests skipped by existing platform and
   environment conditions), followed by the production build and bundle gates.
-  The test phase took 334.57 s with two workers.
+  The test phase took 333.34 s with two workers.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 

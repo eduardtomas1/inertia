@@ -1,10 +1,19 @@
+import { constants as osConstants } from "node:os";
+
 /** Fixed lifecycle evidence only; never process output, arguments, or identities. */
 export const OWNED_PROCESS_TAINT_STAGES = [
   "linux-guardian-monitor", "linux-admission", "linux-guardian-close",
   "linux-pid-spawn", "linux-pid-close", "darwin-guardian-close", "darwin-pid-close",
+  "linux-readiness", "linux-durable-claim", "linux-claim", "linux-durable-authorization",
+  "linux-authorization", "linux-stop",
   "darwin-readiness", "darwin-durable-claim", "darwin-preauthorization-identity",
   "darwin-stop", "darwin-authorization",
 ] as const;
+
+export const OWNED_PROCESS_PROBE_CLASSES = [
+  "provider-version", "provider-auth", "provider-capability", "codex-control", "git", "terminal",
+] as const;
+export type RuntimeOwnedProcessProbe = (typeof OWNED_PROCESS_PROBE_CLASSES)[number];
 
 const GUARDIAN_CLOSE_SIGNALS = ["none", "SIGUSR2", "SIGKILL", "SIGTERM", "SIGINT", "other"] as const;
 
@@ -12,20 +21,23 @@ export interface RuntimeOwnedProcessDiagnostic {
   readonly stage: (typeof OWNED_PROCESS_TAINT_STAGES)[number];
   readonly signal?: (typeof GUARDIAN_CLOSE_SIGNALS)[number];
   readonly exitCode?: number;
+  readonly probe?: RuntimeOwnedProcessProbe;
 }
 
 export function parseRuntimeOwnedProcessDiagnostic(value: unknown): RuntimeOwnedProcessDiagnostic | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !["stage", "signal", "exitCode"].includes(key))
+  if (Object.keys(record).some((key) => !["stage", "signal", "exitCode", "probe"].includes(key))
     || !OWNED_PROCESS_TAINT_STAGES.includes(record.stage as RuntimeOwnedProcessDiagnostic["stage"])
     || (record.signal !== undefined && !GUARDIAN_CLOSE_SIGNALS.includes(record.signal as NonNullable<RuntimeOwnedProcessDiagnostic["signal"]>))
+    || (record.probe !== undefined && !OWNED_PROCESS_PROBE_CLASSES.includes(record.probe as RuntimeOwnedProcessProbe))
     || (record.exitCode !== undefined && (typeof record.exitCode !== "number"
       || !Number.isInteger(record.exitCode) || record.exitCode < 0 || record.exitCode > 255))) return null;
   return {
     stage: record.stage as RuntimeOwnedProcessDiagnostic["stage"],
     ...(record.signal !== undefined ? { signal: record.signal as RuntimeOwnedProcessDiagnostic["signal"] } : {}),
     ...(record.exitCode !== undefined ? { exitCode: record.exitCode as number } : {}),
+    ...(record.probe !== undefined ? { probe: record.probe as RuntimeOwnedProcessProbe } : {}),
   };
 }
 
@@ -60,4 +72,9 @@ export function parseRuntimeRestartRequestedEvent(value: Record<string, unknown>
   const diagnostic = parseRuntimeOwnedProcessDiagnostic(value.diagnostic);
   return diagnostic && value.reason === "owned-process-tainted"
     ? { type: "runtime.restart-requested", reason: value.reason, diagnostic } : null;
+}
+
+export function guardianSignalName(signal: unknown): unknown {
+  if (signal === 0) return null;
+  return Object.entries(osConstants.signals).find(([, value]) => value === signal)?.[0];
 }

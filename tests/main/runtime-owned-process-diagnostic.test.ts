@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  guardianCloseDiagnostic, OWNED_PROCESS_TAINT_STAGES, parseRuntimeOwnedProcessDiagnostic,
+  guardianCloseDiagnostic, OWNED_PROCESS_PROBE_CLASSES, OWNED_PROCESS_TAINT_STAGES, parseRuntimeOwnedProcessDiagnostic,
 } from "../../src/node/runtime-owned-process-diagnostic";
 import { taintRuntimeOwnedProcessRegistry } from "../../src/node/runtime-owned-process-taint";
 import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
@@ -19,9 +19,17 @@ describe("owned-process first-cause diagnostics", () => {
     { stage: "darwin-guardian-close", exitCode: 256 },
     { stage: "darwin-guardian-close", exitCode: 1.5 },
     { stage: "darwin-guardian-close", exitCode: Infinity },
+    { stage: "linux-stop", probe: "/private/provider --secret" },
+    { stage: "linux-stop", probe: ["git"] },
   ])("rejects malformed or content-bearing diagnostic %j", (diagnostic) => {
     expect(parseRuntimeOwnedProcessDiagnostic(diagnostic)).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.restart-requested", reason: "owned-process-tainted", diagnostic })).toBeNull();
+  });
+
+  it.each(OWNED_PROCESS_PROBE_CLASSES)("relays only the fixed probe class %s", (probe) => {
+    const event = { type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "linux-stop", probe } };
+    expect(parseRuntimeWorkerEvent(event)).toEqual(event);
   });
 
   it("records only the first taint even if reporting fails", () => {

@@ -101,6 +101,15 @@ Every concurrent cleanup caller joins one owner promise. Graceful cleanup may
 monotonically upgrade to force, but neither a timeout nor escalation erases
 unconfirmed durable ownership.
 
+Short-lived Linux startup probes join their exact claim's admission and
+retirement before publishing completion. A hardened terminal receipt is
+monotonic and can satisfy a stop request delivered after native completion;
+it does not by itself clear the durable claim. Consecutive runtime replacements
+are bounded even when outer cleanup succeeds. A failure request immediately
+revokes runtime connection admission, and cleanup time cannot reset the stable
+uptime retry budget. See `ISSUE_322_EVIDENCE.md` for the reproduced ordering and
+platform evidence boundaries.
+
 Startup recovery is also an admission boundary. An unresolved prior-runtime
 safety lock rejects runtime initialization before attachment initialization or
 `RuntimeStore` construction, so it cannot migrate or reconcile the database.

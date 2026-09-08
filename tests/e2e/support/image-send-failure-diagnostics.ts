@@ -81,7 +81,7 @@ function projectRecord(value: unknown): Record<string, unknown> | null {
     || typeof record.recordDigest !== "string" || !/^[a-f0-9]{64}$/u.test(record.recordDigest)) return null;
   const allowed = new Set(["schemaVersion", "at", "event", "recordDigest", "phase", "generation",
     "processId", "restartAttempt", "restartScheduled", "startupBlockerCode", "message",
-    ...(record.event === "runtime.restart-requested" ? ["reason", "stage", "signal", "exitCode"] : [])]);
+    ...(record.event === "runtime.restart-requested" ? ["reason", "stage", "signal", "exitCode", "probe"] : [])]);
   if (Object.keys(record).some((key) => !allowed.has(key))) return null;
   const payload = JSON.stringify(Object.fromEntries(Object.entries(record)
     .filter(([key]) => key !== "recordDigest")
@@ -94,8 +94,9 @@ function projectRecord(value: unknown): Record<string, unknown> | null {
       stage: record.stage,
       ...(record.signal !== undefined ? { signal: record.signal } : {}),
       ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+      ...(record.probe !== undefined ? { probe: record.probe } : {}),
     });
-    if ((record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined)
+    if ((record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined || record.probe !== undefined)
       && (!diagnostic || record.reason !== "owned-process-tainted")) return null;
     return { at: record.at, event: record.event, generation: record.generation,
       reason: record.reason, ...diagnostic };

@@ -685,7 +685,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
-      createIssueReportCommandHandler({ store, isolatedRuns, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
+      createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,

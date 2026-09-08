@@ -98,6 +98,7 @@ describe("shared contracts boundary", () => {
       "support.report.edit",
       "support.report.submit",
       "support.report.reconcile",
+      "support.report.retire",
       "message.send",
       "conversation.compact",
       "agent.workflow.load",
@@ -189,4 +190,12 @@ describe("shared contracts boundary", () => {
       "55555555-5555-4555-8555-555555555555",
     ])).success).toBe(false);
   });
+});
+
+it("requires an explicit acknowledgment for uncertain report retirement", () => {
+  const payload = { id: "11111111-1111-4111-8111-111111111111", revision: 3 };
+  const command = { type: "support.report.retire", requestId: "22222222-2222-4222-8222-222222222222", payload };
+  expect(clientCommandSchema.safeParse(command).success).toBe(false);
+  expect(clientCommandSchema.safeParse({ ...command, payload: { ...payload, acknowledgeUncertainPublication: false } }).success).toBe(false);
+  expect(clientCommandSchema.safeParse({ ...command, payload: { ...payload, acknowledgeUncertainPublication: true } }).success).toBe(true);
 });

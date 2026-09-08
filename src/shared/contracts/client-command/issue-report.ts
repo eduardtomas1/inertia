@@ -10,4 +10,5 @@ export const issueReportCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("support.report.edit"), payload: z.object({ ...identity, title: z.string().trim().min(3).max(200), body: z.string().trim().min(10).max(REPORT_BODY_LIMIT) }).strict() }),
   z.object({ ...requestBase, type: z.literal("support.report.submit"), payload: z.object(identity).strict() }),
   z.object({ ...requestBase, type: z.literal("support.report.reconcile"), payload: z.object(identity).strict() }),
+  z.object({ ...requestBase, type: z.literal("support.report.retire"), payload: z.object({ ...identity, acknowledgeUncertainPublication: z.literal(true) }).strict() }),
 ] as const;

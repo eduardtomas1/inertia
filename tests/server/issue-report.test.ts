@@ -22,7 +22,8 @@ function setup() {
   const run = vi.fn(async () => ({ value: "The evidence cannot confirm reproduction. Does cancelling and sending again reproduce it?" }));
   const isolatedRuns = { has: vi.fn(() => false), run, stopConversation: vi.fn() } as unknown as IsolatedRunController<WebSocket>;
   const send = vi.fn<(socket: WebSocket, event: ServerEvent) => void>();
-  const deps = { store, snapshot, publisher, isolatedRuns, providerInfo: () => [{ id: "claude", canRun: true }] as ProviderInfo[], send };
+  const backendProfileController = { validateSelection: vi.fn((value: typeof selection) => value), readiness: vi.fn(async (): Promise<{ ready: boolean; message: string | null } | null> => null) };
+  const deps = { store, snapshot, publisher, isolatedRuns, backendProfileController, providerInfo: () => [{ id: "claude", canRun: true }] as ProviderInfo[], send };
   const handler = createIssueReportCommandHandler(deps);
   const dispatch = async (command: import("../../src/renderer/src/lib/runtimeCommands").CommandWithoutId) => {
     await handler({} as WebSocket, { requestId: crypto.randomUUID(), ...command } as ClientCommand);
@@ -30,7 +31,7 @@ function setup() {
     if (last.type !== "request.result" || last.result.kind !== "support.report") throw new Error("Unexpected response");
     return last.result.report!;
   };
-  return { store, deps, handler, dispatch, snapshot, run, isolatedRuns, publisher, send };
+  return { store, deps, handler, dispatch, snapshot, run, isolatedRuns, publisher, send, backendProfileController };
 }
 
 describe("private issue reports", () => {
@@ -67,6 +68,51 @@ describe("private issue reports", () => {
     expect(preview.status).toBe("preview");
     expect(preview.body).toContain("cannot confirm reproduction");
   });
+  it("uses selected backend readiness without requiring native Claude login", async () => {
+    const { dispatch, deps, run, backendProfileController } = setup();
+    deps.providerInfo = () => [{ id: "claude", canRun: false }] as ProviderInfo[];
+    const external = { ...selection, backendProfileId: "custom:report", backendProfileDisplayName: "Report backend", backendConfigurationRevision: 4 };
+    backendProfileController.readiness.mockResolvedValueOnce({ ready: true, message: null });
+    const draft = await dispatch({ type: "support.report.prepare", payload: { ...input, selection: external } });
+    expect((await dispatch({ type: "support.report.validate", payload: { id: draft.id, revision: 0 } })).status).toBe("preview");
+    expect(backendProfileController.validateSelection).toHaveBeenCalledWith(external);
+    expect(backendProfileController.readiness).toHaveBeenCalledWith(external, deps.providerInfo()[0]);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ selection: { modelSelection: external }, toolPolicy: "none" }));
+  });
+  it("rejects invalid backend selections before readiness or provider launch", async () => {
+    const { dispatch, run, backendProfileController } = setup();
+    backendProfileController.validateSelection.mockImplementationOnce(() => { throw new Error("Invalid backend with private diagnostic text"); });
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    const failed = await dispatch({ type: "support.report.validate", payload: { id: draft.id, revision: 0 } });
+    expect(failed.status).toBe("failed");
+    expect(failed.notice).not.toContain("private diagnostic text");
+    expect(backendProfileController.readiness).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each([null, { ready: false, message: "Backend requires a configured credential." }])("keeps an unready selected route on the manual path: %j", async (readiness) => {
+    const { dispatch, deps, run, backendProfileController } = setup();
+    deps.providerInfo = () => [{ id: "claude", canRun: readiness !== null }] as ProviderInfo[];
+    backendProfileController.readiness.mockResolvedValueOnce(readiness);
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    expect((await dispatch({ type: "support.report.validate", payload: { id: draft.id, revision: 0 } })).status).toBe("failed");
+    expect(run).not.toHaveBeenCalled();
+  });
+  it.each(["ready", "rejected"])("ignores %s readiness after cancellation and a new unrelated draft", async (outcome) => {
+    const { dispatch, run, backendProfileController } = setup();
+    let resolve!: (value: { ready: boolean; message: null }) => void;
+    let reject!: (error: Error) => void;
+    backendProfileController.readiness.mockImplementationOnce(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    const pending = dispatch({ type: "support.report.validate", payload: { id: draft.id, revision: 0 } });
+    expect((await dispatch({ type: "support.report.get" })).status).toBe("validating");
+    await expect(dispatch({ type: "support.report.prepare", payload: input })).rejects.toThrow("pending report");
+    await dispatch({ type: "support.report.cancel", payload: { id: draft.id } });
+    const next = await dispatch({ type: "support.report.prepare", payload: { ...input, description: "A different problem with project selection." } });
+    if (outcome === "ready") resolve({ ready: true, message: null }); else reject(new Error("Readiness failed after cancellation"));
+    await pending;
+    expect(await dispatch({ type: "support.report.get" })).toEqual(next);
+    expect(run).not.toHaveBeenCalled();
+  });
   it("keeps an unsupported provider on the manual preview path", async () => {
     const { dispatch, run } = setup();
     const draft = await dispatch({ type: "support.report.prepare", payload: { ...input, selection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId: "codex" })) } });
@@ -93,6 +139,7 @@ describe("private issue reports", () => {
     run.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const draft = await dispatch({ type: "support.report.prepare", payload: input });
     const validating = dispatch({ type: "support.report.validate", payload: { id: draft.id, revision: 0 } });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
     const cancelled = await dispatch({ type: "support.report.cancel", payload: { id: draft.id } });
     expect(cancelled.status).toBe("cancelled");
     expect(isolatedRuns.stopConversation).toHaveBeenCalledWith(draft.id, "issue-report");
@@ -114,6 +161,50 @@ describe("private issue reports", () => {
     const published = await dispatch({ type: "support.report.reconcile", payload: { id: draft.id, revision: uncertain.revision } });
     expect(published.status).toBe("submitted");
     expect(publisher.create).toHaveBeenCalledTimes(1);
+  });
+  it("explicitly retires uncertain publication, preserves its preview across restart, and permits a fresh unrelated report", async () => {
+    const { dispatch, publisher, store, deps, send } = setup();
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    const preview = await dispatch({ type: "support.report.edit", payload: { id: draft.id, revision: 0, title: draft.title, body: draft.body } });
+    publisher.create.mockImplementationOnce(async ({ beforePublish }) => { beforePublish(); throw new Error("Unknown outcome"); });
+    const uncertain = await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: preview.revision } });
+    const checked = await dispatch({ type: "support.report.reconcile", payload: { id: draft.id, revision: uncertain.revision } });
+    expect(checked.status).toBe("uncertain");
+    const retired = await dispatch({ type: "support.report.retire", payload: { id: draft.id, revision: checked.revision, acknowledgeUncertainPublication: true } });
+    expect(retired).toMatchObject({ status: "retired", id: draft.id, title: preview.title, body: preview.body });
+    const reopened = createIssueReportCommandHandler(deps);
+    await reopened({} as WebSocket, { type: "support.report.get", requestId: crypto.randomUUID() });
+    expect(send.mock.calls.at(-1)?.[1]).toMatchObject({ result: { report: retired } });
+    expect(store.readIssueReport()).toEqual(retired);
+    for (const type of ["support.report.validate", "support.report.submit", "support.report.reconcile"] as const) {
+      await expect(dispatch({ type, payload: { id: retired.id, revision: retired.revision } })).rejects.toThrow();
+    }
+    await expect(dispatch({ type: "support.report.edit", payload: { id: retired.id, revision: retired.revision, title: "Repost retired issue", body: preview.body } })).rejects.toThrow();
+    const next = await dispatch({ type: "support.report.prepare", payload: { ...input, description: "A different problem with project selection." } });
+    expect(next.id).not.toBe(retired.id);
+    for (const type of ["support.report.validate", "support.report.submit", "support.report.reconcile"] as const) {
+      await expect(dispatch({ type, payload: { id: retired.id, revision: retired.revision } })).rejects.toThrow("changed");
+    }
+    expect(publisher.create).toHaveBeenCalledTimes(1);
+    expect(publisher.find).toHaveBeenCalledTimes(1);
+  });
+  it("refuses retirement while publication or reconciliation is pending and rejects stale confirmation", async () => {
+    const { dispatch, publisher } = setup();
+    let finishPublish!: () => void;
+    publisher.create.mockImplementationOnce(({ beforePublish }) => { beforePublish(); return new Promise((_resolve, reject) => { finishPublish = () => reject(new Error("Unknown outcome")); }); });
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    const preview = await dispatch({ type: "support.report.edit", payload: { id: draft.id, revision: 0, title: draft.title, body: draft.body } });
+    const publishing = dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: preview.revision } });
+    const submitting = await dispatch({ type: "support.report.get" });
+    await expect(dispatch({ type: "support.report.retire", payload: { id: draft.id, revision: submitting.revision, acknowledgeUncertainPublication: true } })).rejects.toThrow();
+    finishPublish(); const uncertain = await publishing;
+    let finishFind!: (url: string | null) => void;
+    publisher.find.mockImplementationOnce(() => new Promise((resolve) => { finishFind = resolve; }));
+    const checking = dispatch({ type: "support.report.reconcile", payload: { id: draft.id, revision: uncertain.revision } });
+    await expect(dispatch({ type: "support.report.retire", payload: { id: draft.id, revision: uncertain.revision, acknowledgeUncertainPublication: true } })).rejects.toThrow();
+    finishFind(null); const checked = await checking;
+    await expect(dispatch({ type: "support.report.retire", payload: { id: draft.id, revision: uncertain.revision, acknowledgeUncertainPublication: true } })).rejects.toThrow("changed");
+    expect((await dispatch({ type: "support.report.retire", payload: { id: draft.id, revision: checked.revision, acknowledgeUncertainPublication: true } })).status).toBe("retired");
   });
   it("retains a retryable preview when authentication fails before publication", async () => {
     const { dispatch, publisher } = setup();

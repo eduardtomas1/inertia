@@ -60,9 +60,13 @@ async function commitFromUi(message: string, screenshot = false): Promise<void> 
   const menu = await openGit();
   await menu.getByRole("menuitem", { name: /^Commit/u }).click();
   const dialog = app.page.getByRole("dialog", { name: "Commit changes" });
-  await expect(dialog.getByText(initialBranch, { exact: true })).toBeVisible();
   await dialog.getByRole("textbox", { name: "Commit message" }).fill(message);
   const submit = dialog.getByRole("button", { name: "Commit", exact: true });
+  // Complete review owns many guarded Git inspections on macOS. Use normal
+  // action readiness within the unchanged test deadline before checking the
+  // completed review's branch context; typing does not require review readiness.
+  await submit.click({ trial: true });
+  await expect(dialog.getByText(initialBranch, { exact: true })).toBeVisible();
   await expect(submit).toBeEnabled();
   if (screenshot) await capture("git-commit-review-dark.png");
   await submit.click();

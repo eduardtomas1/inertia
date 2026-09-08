@@ -43,11 +43,13 @@ export interface ActiveRuntimeOwnedProcessRegistry {
 
 export interface ActiveRuntimeOwnedProcessClaim {
   readonly ownershipId: string;
+  readonly probe?: RuntimeOwnedProcessDiagnostic["probe"];
   released: boolean;
   stopRequested: boolean;
   readonly waitForStopRequest: Promise<void>;
   readonly settleStopRequest: () => void;
   authorizationObserved: boolean;
+  linuxTerminalObserved?: boolean;
   admissionSucceeded: boolean;
   groupExitReleaseAttempts: number;
   admission: Promise<boolean> | null;

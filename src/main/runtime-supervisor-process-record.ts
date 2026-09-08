@@ -3,8 +3,19 @@ import type { RuntimeRestartRequestedEvent } from "../node/runtime-owned-process
 import { runtimeRestartFailureMessage, runtimeShutdownFailureMessage } from "../node/runtime-failure-diagnostic.js";
 import type {
   RuntimeProcessRecord,
+  RuntimeSupervisorPhase,
   RuntimeSupervisorOptions,
 } from "./runtime-supervisor-types.js";
+
+export function runtimeRecordAcceptsBrokerRequests(
+  record: RuntimeProcessRecord,
+  current: RuntimeProcessRecord | null,
+  desiredRunning: boolean,
+  phase: RuntimeSupervisorPhase,
+): boolean {
+  return current === record && desiredRunning && record.acceptingReady
+    && (phase === "starting" || phase === "restarting" || phase === "ready");
+}
 
 interface PendingRuntimeRecordRequest {
   record: RuntimeProcessRecord;

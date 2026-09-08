@@ -74,6 +74,20 @@ describe("Git workflows", () => {
     await expect(fetchRepository(local)).rejects.toThrow("Several remotes");
   });
 
+  it("refuses overlapping remote namespaces before replacing another remote's tracking refs", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "team/private", "main");
+    git(local, "commit", "--allow-empty", "-m", "Private remote tip");
+    git(local, "update-ref", "refs/remotes/origin/team/private", "HEAD");
+    const protectedTip = git(local, "rev-parse", "refs/remotes/origin/team/private");
+    // Represent an existing configuration, including on Git versions whose
+    // `remote add` prevents creating a new overlapping name.
+    git(local, "config", "remote.origin/team.url", remote);
+    git(local, "config", "remote.origin/team.fetch", "+refs/heads/*:refs/remotes/origin/team/*");
+    await expect(fetchRepository(local)).rejects.toThrow("tracking namespaces overlap");
+    expect(git(local, "rev-parse", "refs/remotes/origin/team/private")).toBe(protectedTip);
+  });
+
   it("lists local, remote, symbolic and occupied branches without exposing worktree paths", async () => {
     const { root, local } = fixture();
     git(local, "worktree", "add", "-b", "occupied", join(root, "other"));
@@ -161,12 +175,12 @@ describe("Git workflows", () => {
     expect(result.status.branch).toBe("topic/remote");
     expect(result.status.upstream).toBe("team/upstream/topic/remote");
     git(local, "switch", "main");
+    git(remote, "branch", "topic/ambiguous", "main");
+    await fetchRepository(local);
     // New Git versions reject this overlap in `remote add`; existing/manual
     // configurations can still contain it and must fail before branch creation.
     git(local, "config", "remote.team.url", join(remote, "missing"));
     git(local, "config", "remote.team.fetch", "+refs/heads/*:refs/remotes/team/*");
-    git(remote, "branch", "topic/ambiguous", "main");
-    await fetchRepository(local);
     await expect(switchBranch(local, "team/upstream/topic/ambiguous", { remote: true }))
       .rejects.toThrow("fetch mappings");
     expect(git(local, "branch", "--list", "topic/ambiguous")).toBe("");

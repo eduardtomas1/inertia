@@ -22,7 +22,7 @@ import { runtimeCommandDelivery } from "../utils/connectionMessages";
 
 export interface AppRuntimeActions {
   sendingConversationIds: ReadonlySet<string>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -71,6 +71,7 @@ export function useAppRuntimeActions(options: {
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
+    runOptions?: { reportError?: boolean },
   ): Promise<ServerEvent> => {
     setBusyAction(key);
     setActionError(null);
@@ -79,7 +80,7 @@ export function useAppRuntimeActions(options: {
       if (commandRefreshesConversationDetail(command, event)) refreshDetail();
       return event;
     } catch (error) {
-      setActionError(
+      if (runOptions?.reportError !== false) setActionError(
         error instanceof Error
           ? error.message
           : "That action could not be completed.",

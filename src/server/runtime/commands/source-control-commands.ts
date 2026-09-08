@@ -1,3 +1,4 @@
+import { repositoryAuthorityBinding, commitReviewAuthorityBinding } from "./source-control-authority";
 import { realpath } from "node:fs/promises";
 import WebSocket from "ws";
 
@@ -19,6 +20,7 @@ import {
   prepareGitCommitReview,
   renderGitCommitReviewDiff,
   GitError,
+  listBranches,
   pullRepository,
   pushCurrentBranch,
   switchBranch,
@@ -64,40 +66,6 @@ export interface SourceControlCommandDependencies {
   workspacePath(projectId: string, conversationId?: string): string;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
-}
-
-function repositoryAuthorityBinding(
-  projectId: string,
-  conversationId: string | undefined,
-  workspaceRoot: string,
-  repositoryPath: string,
-  metadataMarkerIdentity: string,
-): readonly string[] {
-  return [
-    projectId,
-    conversationId ?? "",
-    workspaceRoot,
-    repositoryPath,
-    metadataMarkerIdentity,
-  ];
-}
-
-function commitReviewAuthorityBinding(
-  projectId: string,
-  conversationId: string | undefined,
-  workspaceRoot: string,
-  repositoryPath: string,
-  metadataMarkerIdentity: string,
-  fingerprint: string,
-): readonly string[] {
-  return [
-    projectId,
-    conversationId ?? "",
-    workspaceRoot,
-    repositoryPath,
-    metadataMarkerIdentity,
-    fingerprint,
-  ];
 }
 
 export function createSourceControlCommandHandler(
@@ -857,7 +825,15 @@ export function createSourceControlCommandHandler(
         return "handled";
       }
       case "git.branches":
-        return await handleBranchListCommand(socket, command, dependencies);
+        return await handleBranchListCommand(socket, command, {
+          send: dependencies.send,
+          inspectBranches: async (options) => {
+            const repository = await resolveCommandRepository(socket,
+              { ...command.payload, repositoryPath: "." }, { ...options, requireAuthority: true });
+            return await runVerifiedRepositoryOperation(repository,
+              async (root) => await listBranches(root, options), options);
+          },
+        });
       case "git.branch.create": {
         const repository = await resolveCommandRepository(
           socket,

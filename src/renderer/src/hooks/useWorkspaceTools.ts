@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import type { AppRuntimeActions } from "./useAppRuntimeActions";
 import type {
   Conversation,
   ConversationDetail,
@@ -29,7 +30,7 @@ interface WorkspaceToolsOptions {
   confirmDestructiveActions: boolean;
   refreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: AppRuntimeActions["run"];
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;

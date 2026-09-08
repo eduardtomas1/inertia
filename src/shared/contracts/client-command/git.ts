@@ -246,7 +246,7 @@ export const gitCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("git.branches"),
-      payload: z.object(projectWithOptionalConversation).strict(),
+      payload: z.object({ ...projectWithOptionalConversation, authorityRef: z.string().uuid() }).strict(),
     })
     .strict(),
   z

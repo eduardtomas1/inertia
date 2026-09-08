@@ -67,6 +67,9 @@ export async function fetchRepository(
     : names.includes("origin") ? "origin" : names.length === 1 ? names[0]! : null;
   if (!remote) throw new GitError("invalid-input", "Several remotes are configured. Set an upstream for this branch or fetch a remote in the terminal.");
   if (!names.includes(remote)) throw new GitError("not-found", "The upstream remote is missing. Update branch tracking before fetching.");
+  if (names.some((name) => name !== remote && (name.startsWith(`${remote}/`) || remote.startsWith(`${name}/`)))) {
+    throw new GitError("invalid-input", "Remote tracking namespaces overlap. Rename the conflicting remotes in the terminal before fetching.");
+  }
   validateName(remote, "The remote name");
   await validateBranch(root, `${remote}/inertia-fetch-probe`, options);
   await runGit(root, [

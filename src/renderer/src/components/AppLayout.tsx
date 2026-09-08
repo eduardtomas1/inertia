@@ -103,7 +103,7 @@ interface AppLayoutActions {
     type: "git.branch.create" | "git.branch.switch",
     name: string,
     remote?: boolean,
-  ) => void;
+  ) => void | Promise<void>;
   loadGit: () => Promise<void>;
   loadCommitReview: () => Promise<GitDiffSnapshot | null>;
   discardCommitReview: () => void;

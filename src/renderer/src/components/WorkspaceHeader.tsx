@@ -45,8 +45,8 @@ type WorkspaceHeaderProps = {
   onOpenProject: () => void;
   onOpenConversationInWindow?: (conversation: Conversation) => void;
   onRefreshBranches: () => void;
-  onSwitchBranch: (name: string, remote?: boolean) => void;
-  onCreateBranch: (name: string) => void;
+  onSwitchBranch: (name: string, remote?: boolean) => void | Promise<void>;
+  onCreateBranch: (name: string) => void | Promise<void>;
   onCreateConversationOnBranch: (branch: string) => void;
   onCreateConversationInWorktree: () => void;
   onCreateConversationInIsolatedWorktree: () => void;
@@ -97,6 +97,7 @@ export function WorkspaceHeader({
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
+  useEffect(() => setMenu(null), [project?.id, conversation?.id, gitStatus?.root]);
   const privateConnectLoad = usePrivateConnectState();
   const privateConnect = privateConnectLoad.state;
   const pendingPrivateConnectPairings = privateConnect?.pendingPairings.length ?? 0;

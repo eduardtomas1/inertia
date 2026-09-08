@@ -51,7 +51,7 @@ describe("header Git action hierarchy", () => {
     expect(primaryHeaderGitAction(current)?.id).toBe("commit");
     expect(actions.find((action) => action.id === "pull")).toMatchObject({
       disabled: true,
-      detail: "Commit or discard local changes before pulling.",
+      detail: "Commit or stash local changes before pulling.",
     });
   });
 

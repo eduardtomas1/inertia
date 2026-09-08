@@ -37,7 +37,7 @@ describe("workspace Git command contracts", () => {
       {
         type: "git.branches",
         requestId,
-        payload: { projectId, conversationId },
+        payload: { projectId, conversationId, authorityRef },
       },
       {
         type: "git.branch.create",
@@ -64,6 +64,10 @@ describe("workspace Git command contracts", () => {
     ]) {
       expect(clientCommandSchema.parse(command)).toMatchObject(command);
     }
+  });
+
+  it("requires live repository authority for branch discovery", () => {
+    expect(clientCommandSchema.safeParse({ type: "git.branches", requestId, payload: { projectId, conversationId } }).success).toBe(false);
   });
 
   it("accepts paired root authority for every root Git mutation", () => {

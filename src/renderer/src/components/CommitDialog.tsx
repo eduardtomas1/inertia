@@ -267,7 +267,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
           trapModalFocus(event, event.currentTarget);
         }}
       >
-        <header><span className="dialog-icon"><GitCommitHorizontal size={18} /></span><div><h2 id="commit-dialog-title">Commit changes</h2><p>{status?.files.length ?? 0} files · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>
+        <header><span className="dialog-icon"><GitCommitHorizontal size={18} /></span><div><h2 id="commit-dialog-title">Commit changes</h2><p><strong>{status?.branch ?? "Detached HEAD"}</strong> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>
         <div className="commit-path-heading">
           <span>Paths to stage and commit</span>
           <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>

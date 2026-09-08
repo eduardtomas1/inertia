@@ -1,14 +1,14 @@
 import type WebSocket from "ws";
 import type { ClientCommand, ServerEvent } from "../../../shared/contracts";
 import { GIT_READ_OPERATION_TIMEOUT_MS } from "../../../shared/runtime-command-timeouts";
-import { listBranches } from "../../git";
+import type { GitBranches } from "../../git/types";
 import { SourceControlDeadline } from "./source-control-deadline";
 
 export async function handleBranchListCommand(
   socket: WebSocket,
   command: Extract<ClientCommand, { type: "git.branches" }>,
   dependencies: {
-    workspacePath(projectId: string, conversationId?: string): string;
+    inspectBranches(options: { deadlineAt: number; signal: AbortSignal }): Promise<GitBranches>;
     send(socket: WebSocket, event: ServerEvent): void;
   },
 ): Promise<"handled"> {
@@ -17,10 +17,8 @@ export async function handleBranchListCommand(
   const cancel = (): void => deadline.cancel();
   socket.once("close", cancel);
   try {
-    const branches = await deadline.runToSettlement(async (signal) => await listBranches(
-      dependencies.workspacePath(command.payload.projectId, command.payload.conversationId),
-      { deadlineAt, signal },
-    ));
+    const branches = await deadline.runToSettlement(async (signal) =>
+      await dependencies.inspectBranches({ deadlineAt, signal }));
     dependencies.send(socket, {
       type: "request.result",
       requestId: command.requestId,

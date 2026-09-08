@@ -80,7 +80,7 @@ export function headerGitActions(
         : diverged
           ? "This branch has diverged; reconcile it in the terminal."
           : dirty
-            ? "Commit or discard local changes before pulling."
+            ? "Commit or stash local changes before pulling."
           : status.behind > 0
             ? `Receive ${status.behind} upstream ${status.behind === 1 ? "commit" : "commits"}.`
             : "No incoming commits in the last local check. Fetch to check the remote.",

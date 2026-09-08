@@ -136,6 +136,18 @@ describe("runtime root Git authority", () => {
     expect(git(worktree, "branch", "--show-current")).toBe(chatBranch);
     expect(git(workspace, "branch", "--show-current")).toBe(projectBranch);
 
+    const deadline = Date.now() + 10_000;
+    const rootAuthority = await refreshRuntimeRootGitAuthority(client.socket, client.events, { projectId }, deadline);
+    await expect(requestRuntimeGit(client.socket, client.events, "git.branches",
+      { ...identity, authorityRef: rootAuthority.authorityRef }, "git.branches", deadline))
+      .rejects.toThrow("no longer matches");
+    const checkoutAuthority = await refreshRuntimeRootGitAuthority(client.socket, client.events, identity, deadline);
+    const listed = await requestRuntimeGit(client.socket, client.events, "git.branches",
+      { ...identity, authorityRef: checkoutAuthority.authorityRef }, "git.branches", deadline);
+    expect(listed.result).toMatchObject({ kind: "git.branches", branches: expect.arrayContaining([
+      expect.objectContaining({ name: chatBranch, current: true, remote: false }),
+    ]) });
+
     await requestRuntimeGit(
       client.socket,
       client.events,

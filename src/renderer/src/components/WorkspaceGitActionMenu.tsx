@@ -26,13 +26,7 @@ type WorkspaceGitActionMenuProps = {
   onAction: (action: HeaderGitActionId) => void;
 };
 
-function actionIcon(action: HeaderGitActionId): React.JSX.Element {
-  if (action === "fetch") return <RefreshCw size={14} />;
-  if (action === "commit") return <GitCommitHorizontal size={14} />;
-  if (action === "pull") return <Download size={14} />;
-  if (action === "push") return <Upload size={14} />;
-  return <GitPullRequest size={14} />;
-}
+const actionIcons = { fetch: RefreshCw, commit: GitCommitHorizontal, pull: Download, push: Upload, "pull-request": GitPullRequest };
 
 export default function WorkspaceGitActionMenu({
   status,
@@ -68,7 +62,9 @@ export default function WorkspaceGitActionMenu({
         <div className="git-overview-summary" role="status">{busy ? "Git operation in progress…" : gitSyncSummary(status)}</div>
       </div>
       <div className="git-menu-section-label">Changes <span>{status.files.length} {status.files.length === 1 ? "file" : "files"} <b>+{status.insertions}</b> <i>−{status.deletions}</i></span></div>
-      {actions.map((action) => (
+      {actions.map((action) => {
+        const Icon = actionIcons[action.id];
+        return (
         <button
           type="button"
           role="menuitem"
@@ -81,10 +77,10 @@ export default function WorkspaceGitActionMenu({
             if (!action.disabled) onAction(action.id);
           }}
         >
-          {actionIcon(action.id)}
+          <Icon size={14} />
           <span><strong>{action.label}</strong><small>{action.detail}</small></span>
         </button>
-      ))}
+      ); })}
     </div>
   );
 }

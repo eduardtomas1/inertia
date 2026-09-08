@@ -511,7 +511,6 @@ export default function App(): React.JSX.Element {
   const {
     gitStatus,
     branches,
-    branchesLoading, branchesError,
     reviewStates,
     loadGit,
     loadBranches,
@@ -1201,7 +1200,7 @@ export default function App(): React.JSX.Element {
       sceneOpenBrowser={sceneOpenBrowser}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       gitStatus={gitStatus}
-      branches={branches} branchesLoading={branchesLoading} branchesError={branchesError}
+      branches={branches} branchesLoading={workspaceTools.branchesLoading} branchesError={workspaceTools.branchesError}
       projectActions={projectActions}
       reviewStates={reviewStates}
       multiSpawn={multiSpawn}

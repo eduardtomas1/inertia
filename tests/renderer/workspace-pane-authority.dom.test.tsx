@@ -1309,14 +1309,14 @@ describe("workspace pane authority", () => {
         payload: {
           projectId: alpha.id,
           conversationId: alphaChat.id,
+          authorityRef: "66666666-6666-4666-8666-666666666666",
         },
       });
     });
 
-    act(() => hook.result.current.mutateBranch(
-      "git.branch.switch",
-      "feature/chat-checkout",
-    ));
+    act(() => { void hook.result.current.mutateBranch(
+      "git.branch.switch", "feature/chat-checkout",
+    ); });
     expect(run).toHaveBeenCalledWith("git.branch.switch", {
       type: "git.branch.switch",
       payload: {
@@ -1326,7 +1326,7 @@ describe("workspace pane authority", () => {
         authorityRef: "66666666-6666-4666-8666-666666666666",
         name: "feature/chat-checkout",
       },
-    });
+    }, { reportError: false });
   });
 
   it("pins reviewed root authority and refreshes separately before an optional push", async () => {

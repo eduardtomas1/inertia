@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AppRuntimeActions } from "../useAppRuntimeActions";
 import type {
   Conversation,
   GitBranchInfo,
@@ -32,7 +33,7 @@ interface WorkspaceGitOptions {
   ignoreWhitespace: boolean;
   refreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: AppRuntimeActions["run"];
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
 }
@@ -417,6 +418,10 @@ export function useWorkspaceGit({
 
   const loadBranches = useCallback((passive = false) => {
     if (!project || !gitStatus?.isRepository) return;
+    if (!gitStatus.authorityRef) {
+      setBranchesError("Refresh Git status before loading branches.");
+      return;
+    }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const sequence = ++branchRequestRef.current;
     setBranchesLoading(true);
@@ -426,6 +431,7 @@ export function useWorkspaceGit({
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        authorityRef: gitStatus.authorityRef,
       },
     }).then(resultEvent).then((event) => {
       if (
@@ -451,6 +457,7 @@ export function useWorkspaceGit({
   }, [
     conversation?.id,
     gitStatus?.isRepository,
+    gitStatus?.authorityRef,
     project,
     request,
     setActionError,
@@ -509,18 +516,17 @@ export function useWorkspaceGit({
     subscribe,
   ]);
 
-  const mutateBranch = useCallback((
+  const mutateBranch = useCallback(async (
     type: "git.branch.create" | "git.branch.switch",
     name: string,
     remote?: boolean,
   ) => {
-    if (!project) return;
+    if (!project) throw new Error("Select a project before changing branches.");
     const repository = rootGitMutationScope(gitStatus);
     if (!repository) {
-      setActionError("Refresh repository status before changing branches.");
-      return;
+      throw new Error("Refresh repository status before changing branches.");
     }
-    void run(type, {
+    await run(type, {
       type,
       payload: {
         projectId: project.id,
@@ -529,8 +535,8 @@ export function useWorkspaceGit({
         name,
         ...(type === "git.branch.switch" && remote ? { remote } : {}),
       },
-    } as CommandWithoutId).catch(() => undefined);
-  }, [conversation?.id, gitStatus, project, run, setActionError]);
+    } as CommandWithoutId, { reportError: false });
+  }, [conversation?.id, gitStatus, project, run]);
 
   const commit = useCallback(async (
     message: string,

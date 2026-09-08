@@ -1,4 +1,5 @@
-import { Info, MessageSquarePlus } from "lucide-react";
+import { GitBranch, MessageSquarePlus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project } from "@shared/contracts";
 import { conversationContextMismatch } from "../lib/newConversation";
 import { navigateMenuItems } from "../utils/menuKeyboard";
@@ -19,22 +20,56 @@ export default function WorkspaceBranchMenu({
   busy: boolean;
   onClose: () => void;
   onRefreshBranches: () => void;
-  onSwitchBranch: (name: string, remote?: boolean) => void;
-  onCreateBranch: (name: string) => void;
+  onSwitchBranch: (name: string, remote?: boolean) => void | Promise<void>;
+  onCreateBranch: (name: string) => void | Promise<void>;
   onCreateConversationInWorktree: () => void;
   onCreateConversationOnBranch: (branch: string) => void;
   onCreateConversationInIsolatedWorktree: () => void;
 }): React.JSX.Element {
+  const owner = useRef(0);
+  useEffect(() => () => { owner.current += 1; }, []);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const locked = busy || pending;
+  const change = async (action: () => void | Promise<void>): Promise<void> => {
+    if (locked) return;
+    const generation = owner.current;
+    setPending(true);
+    setFailure(null);
+    try {
+      await action();
+      if (owner.current === generation) onClose();
+    } catch (error) {
+      if (owner.current === generation) {
+        setFailure(error instanceof Error ? error.message : "The branch could not be changed. Refresh and retry.");
+        setPending(false);
+      }
+    }
+  };
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
-  const canCreateInWorktree = Boolean(conversation?.worktreePath);
-  const canCreateOnBranch = !canCreateInWorktree && Boolean(gitStatus.branch);
-  const canCreateIsolatedWorktree = Boolean(gitStatus.branch);
+  const chatActions: Array<[boolean, string, () => void]> = [
+    [Boolean(conversation?.worktreePath), "New chat in this worktree", onCreateConversationInWorktree],
+    [!conversation?.worktreePath && Boolean(gitStatus.branch), `New chat on ${gitStatus.branch}`, () => onCreateConversationOnBranch(gitStatus.branch!)],
+    [Boolean(gitStatus.branch), "New chat in new isolated worktree", onCreateConversationInIsolatedWorktree],
+  ];
+  const availableChatActions = chatActions.filter(([available]) => available);
   return (
-    <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={navigateMenuItems}>
+    <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={(event) => {
+      if (event.target instanceof HTMLInputElement) {
+        if (event.target.type !== "search") return;
+        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          event.currentTarget.querySelector<HTMLButtonElement>('.git-branch-results button:not(:disabled)')?.click();
+        }
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      }
+      navigateMenuItems(event, '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)');
+      if (event.defaultPrevented) document.activeElement?.scrollIntoView({ block: "nearest" });
+    }}>
       <div className="header-popover-title">Branches</div>
       {contextMismatch && (
         <div className="checkout-context-note" role="status">
-          <Info size={14} aria-hidden="true" />
+          <GitBranch size={14} aria-hidden="true" />
           <span>
             <strong>Chat and checkout differ</strong>
             {contextMismatch.branchDiffers && (
@@ -45,31 +80,22 @@ export default function WorkspaceBranchMenu({
             )}
           </span>
           {contextMismatch.branchDiffers && contextMismatch.expectedBranch && !conversation?.worktreePath && (
-            <button type="button" onClick={() => { onClose(); onSwitchBranch(contextMismatch.expectedBranch!); }}>
+            <button type="button" disabled={locked} onClick={() => { void change(() => onSwitchBranch(contextMismatch.expectedBranch!)); }}>
               Switch to {contextMismatch.expectedBranch}
             </button>
           )}
         </div>
       )}
-      <WorkspaceBranchList branches={branches} loading={branchesLoading} error={branchesError} onRefresh={onRefreshBranches} busy={busy} onSwitch={(name, remote) => { onClose(); onSwitchBranch(name, remote); }} onCreate={(name) => { onClose(); onCreateBranch(name); }} />
-      {(canCreateInWorktree || canCreateOnBranch || canCreateIsolatedWorktree) && (
+      {failure && <p className="git-branch-error" role="alert">{failure}</p>}
+      <WorkspaceBranchList branches={branches} loading={branchesLoading} error={branchesError} onRefresh={onRefreshBranches} busy={locked} onClose={onClose} onSwitch={(name, remote) => { void change(() => onSwitchBranch(name, remote)); }} onCreate={(name) => { void change(() => onCreateBranch(name)); }} />
+      {availableChatActions.length > 0 && (
         <div className="new-chat-location-actions">
           <div className="header-popover-title">Start another chat</div>
-          {canCreateInWorktree && (
-            <button type="button" role="menuitem" onClick={() => { onClose(); onCreateConversationInWorktree(); }}>
-              <MessageSquarePlus size={13} /><span>New chat in this worktree</span>
+          {availableChatActions.map(([, label, action]) => (
+            <button type="button" role="menuitem" disabled={locked} key={label} onClick={() => { onClose(); action(); }}>
+              <MessageSquarePlus size={13} /><span>{label}</span>
             </button>
-          )}
-          {canCreateOnBranch && gitStatus.branch && (
-            <button type="button" role="menuitem" onClick={() => { onClose(); onCreateConversationOnBranch(gitStatus.branch!); }}>
-              <MessageSquarePlus size={13} /><span>New chat on {gitStatus.branch}</span>
-            </button>
-          )}
-          {canCreateIsolatedWorktree && (
-            <button type="button" role="menuitem" onClick={() => { onClose(); onCreateConversationInIsolatedWorktree(); }}>
-              <MessageSquarePlus size={13} /><span>New chat in new isolated worktree</span>
-            </button>
-          )}
+          ))}
         </div>
       )}
     </div>

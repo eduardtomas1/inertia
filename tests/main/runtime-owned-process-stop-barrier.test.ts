@@ -88,6 +88,27 @@ afterEach(() => {
 });
 
 describe("runtime-owned guardian stop barrier", () => {
+  it("joins a closed Darwin guardian's pending admission before judging cleanup", async () => {
+    const directory = temporaryDirectory();
+    activate(directory, Promise.resolve(expectedIdentity));
+    const guardian = fakeGuardian(null, true);
+    const child = guardian as unknown as ChildProcess;
+    let termination: Promise<boolean> | undefined;
+    const kill = vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
+      expect(signal).toBe("SIGUSR1");
+      guardian.exitCode = 0;
+      guardian.emit("close", 0, null);
+      termination = terminateProcessTreeAndWait(child, true, { platform: "darwin" });
+      return true;
+    });
+    spawnRuntimeOwnedProcess(() => child);
+    await expect.poll(() => termination !== undefined).toBe(true);
+    await expect(termination).resolves.toBe(true);
+    expect(kill).toHaveBeenCalledExactlyOnceWith(expectedIdentity.pid, "SIGUSR1");
+    expect(guardian.kill).not.toHaveBeenCalled();
+    expect(new RuntimeOwnedProcessJournal(directory).records(runtimeGenerationId)).toEqual([]);
+  });
+
   it("starts the child-close budget only after pending admission settles", async () => {
     const directory = temporaryDirectory();
     let resolveReady!: (identity: typeof expectedIdentity) => void;

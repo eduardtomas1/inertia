@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
 import {
+  awaitRuntimeOwnedProcessStopped,
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
@@ -185,7 +186,8 @@ async function probeProcess(
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
-      }));
+      }), args[0] === "--version" ? "provider-version"
+        : args.includes("--help") ? "provider-capability" : "provider-auth");
     } catch {
       finish(null);
       return;
@@ -227,7 +229,12 @@ async function probeProcess(
       if (started) terminateAndFinish();
       else finish(null);
     });
-    child.once("close", (code) => finish(code));
+    child.once("close", (code) => {
+      void awaitRuntimeOwnedProcessStopped(child).then(
+        (confirmed) => finish(code, confirmed),
+        () => finish(code, false),
+      );
+    });
     child.stdin.end();
 
     signal?.addEventListener("abort", abortProbe, { once: true });

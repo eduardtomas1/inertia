@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useMessageSearchFocus } from "./useMessageSearchFocus";
+import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -52,7 +52,7 @@ import type { ResponseTimelineProps } from "./types";
 
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
-type TimelineJumpTarget = "turn" | "request" | "final" | "artifact";
+type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string };
 const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
 
 export function responseTimelineArticleLabel(
@@ -1094,12 +1094,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
               '[data-response-row-id="legacy-orphan-history"]',
             );
         if (!row) return null;
-        const destination = target === "turn"
+        const destination = typeof target === "object"
+          ? resolveMessageSearchDestination(row, target.messageId)
+          : target === "turn"
           ? row
           : row.querySelector<HTMLElement>(
               `[data-turn-jump-target="${target}"]`,
             ) ?? row;
-        return { row, destination };
+        return destination ? { row, destination } : null;
       },
       scrollToIndex: (targetIndex, targetAlign) =>
         virtualizer.scrollToIndex(targetIndex, {

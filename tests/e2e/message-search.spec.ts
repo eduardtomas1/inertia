@@ -8,6 +8,7 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 let app: AppFixture;
 let page: Page;
 let targetTurnId: string;
+let followUpMessageId: string;
 const targetTitle = "Investigate request failures";
 const phrase = "retry budget";
 const draft = "Keep this unsent draft while I look up an earlier decision.";
@@ -21,7 +22,7 @@ test.beforeAll(async () => {
         const shell = store.shellSnapshot();
         const chat = shell.conversations.find(({ title }) => title.endsWith("companion"))!;
         store.updateConversation(chat.id, { title: targetTitle });
-        store.updateSettings({ theme: "dark", colorTheme: "ocean", showTimestamps: true });
+        store.updateSettings({ theme: "dark", colorTheme: "ocean", showTimestamps: true, autoCollapseWorkLog: true });
         for (let index = 0; index < 80; index += 1) {
           const at = new Date(Date.UTC(2026, 8, 6, 9, index)).toISOString();
           const { turn } = store.beginAgentTurn({
@@ -38,6 +39,8 @@ test.beforeAll(async () => {
           if (index === 5) {
             targetTurnId = turn.id;
             store.appendMessageContent(answer.id, "budget to three attempts. Use exponential backoff and stop when cancellation is requested.\n\nThe caller receives the final error if those attempts fail.");
+            store.createMessage(chat.id, "Investigation observation.\n\n".repeat(120), "assistant", [], turn.id, "2026-09-06T09:05:01.000Z");
+            followUpMessageId = store.createAcknowledgedFollowUpMessage(chat.id, turn.id, "Also bound the maximum recovery delay for this endpoint.", "2026-09-06T09:05:02.000Z").id;
           }
           store.updateAgentTurnLifecycle(turn.id, { status: "completed", terminalAssistantMessageId: answer.id, startedAt: at, completedAt: at, updatedAt: at, terminalReason: "provider-completed" });
           store.createTurnGitArtifact({ id: randomUUID(), turnId: turn.id, branch: "main", createdAt: at });
@@ -59,14 +62,14 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await app?.close(); });
 
-async function search() {
+async function search(query = phrase) {
   await page.bringToFront();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
   const input = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
   await expect(input).toBeFocused();
-  await input.fill(phrase);
+  await input.fill(query);
   await expect(page.getByRole("option", { name: new RegExp(targetTitle) })).toBeVisible();
-  await expect(page.locator(".palette-message-snippet mark").first()).toHaveText(phrase);
+  await expect(page.locator(".palette-message-snippet mark").first()).toHaveText(query);
   return input;
 }
 
@@ -90,6 +93,7 @@ test("finds chunked content in an unloaded chat, jumps to an old virtual row and
   await expect(finalAnswer(page)).toBeFocused();
   await expect(finalAnswer(page)).toBeInViewport();
   await expect(finalAnswer(page)).toContainText("retry budget to three attempts");
+  await expect(page.locator(`[data-turn-id="${targetTurnId}"] .turn-run-details-toggle`)).toHaveAttribute("aria-expanded", "false");
   await app.expectNoViewportOverflow();
   await evidence(page, info, "matching-turn");
 
@@ -154,5 +158,18 @@ test("returns to an unsent new-chat draft after following a search result", asyn
   await expect(finalAnswer(page)).toBeFocused();
   await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(unsent);
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("reveals the exact follow-up inside a collapsed long historical turn", async ({ browserName: _browserName }, info) => {
+  const input = await search("maximum recovery delay");
+  await input.press("Enter");
+  const followUp = page.locator(`[data-follow-up-message-id="${followUpMessageId}"]`);
+  await expect(followUp).toBeFocused();
+  await expect(followUp).toBeInViewport();
+  await expect(followUp).toHaveText(/maximum recovery delay/u);
+  await expect(page.locator(`[data-turn-id="${targetTurnId}"] .turn-run-details-toggle`)).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(`[data-turn-id="${targetTurnId}"] [data-turn-jump-target="request"]`)).not.toBeInViewport();
+  await evidence(page, info, "follow-up-match");
   expect(app.rendererErrors).toEqual([]);
 });

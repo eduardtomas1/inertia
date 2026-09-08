@@ -84,6 +84,33 @@ afterEach(() => {
 });
 
 describe("timeline item focus settlement", () => {
+  it("waits for a nested message and reveals it when its long turn already intersects the viewport", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    root.append(row);
+    const destination = document.createElement("article");
+    destination.tabIndex = -1;
+    let top = 1_200;
+    destination.getBoundingClientRect = () => rectangle({ left: 20, top, width: 700, height: 100 });
+    const scroll = vi.spyOn(destination, "scrollIntoView").mockImplementation(() => { top = 100; });
+    const onSettled = vi.fn();
+    startTimelineItemFocus({ root, scrollElement, index: 9, align: "start", virtualized: true,
+      resolveTarget: () => destination.isConnected ? { row, destination } : null,
+      scrollToIndex: vi.fn(), onSettled });
+    frames.runNext();
+    expect(row).not.toHaveFocus();
+    expect(onSettled).not.toHaveBeenCalled();
+    row.append(destination);
+    frames.runNext();
+    expect(scroll).toHaveBeenCalledWith({ block: "start", inline: "nearest" });
+    expect(onSettled).not.toHaveBeenCalled();
+    for (let attempt = 0; attempt < 8; attempt += 1) frames.runNext();
+    expect(destination).toHaveFocus();
+    expect(onSettled).toHaveBeenCalledWith(true);
+    expect(frames.pending()).toBe(0);
+  });
+
   it("keeps exact virtual navigation alive until a delayed row mounts", () => {
     vi.useFakeTimers();
     const frames = frameHarness();
@@ -125,6 +152,30 @@ describe("timeline item focus settlement", () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
     expect(frames.pending()).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not scroll to a delayed nested message after another control claims focus", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    root.append(row);
+    const destination = document.createElement("article");
+    destination.tabIndex = -1;
+    destination.getBoundingClientRect = () => rectangle({ left: 20, top: 1_200, width: 700, height: 100 });
+    const scroll = vi.spyOn(destination, "scrollIntoView");
+    const onSettled = vi.fn();
+    startTimelineItemFocus({ root, scrollElement, index: 9, align: "start", virtualized: true,
+      resolveTarget: () => destination.isConnected ? { row, destination } : null,
+      scrollToIndex: vi.fn(), onSettled });
+    const other = document.createElement("input");
+    document.body.append(other);
+    other.focus();
+    row.append(destination);
+    frames.runNext();
+    expect(scroll).not.toHaveBeenCalled();
+    expect(other).toHaveFocus();
+    expect(onSettled).toHaveBeenCalledWith(false);
+    expect(frames.pending()).toBe(0);
   });
 
   it("cancels a superseded request before it can steal focus", () => {

@@ -406,6 +406,7 @@ export function FollowUpRow({
       className="turn-follow-up-row"
       aria-label="Your follow-up"
       data-follow-up-message-id={entry.message.id}
+      tabIndex={-1}
     >
       <span>You</span>
       <p>{entry.message.content}</p>

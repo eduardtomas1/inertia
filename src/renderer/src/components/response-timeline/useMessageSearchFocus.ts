@@ -4,11 +4,23 @@ import type { ResponseTimelineProps } from "./types";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { MESSAGE_SEARCH_FOCUS_EVENT, clearMessageSearchFocus, pendingMessageSearchFocus } from "../../utils/messageSearchFocus";
 
+export function resolveMessageSearchDestination(row: HTMLElement, messageId: string): HTMLElement | null {
+  const destination = Array.from(row.querySelectorAll<HTMLElement>("[data-follow-up-message-id], [data-message-search-id]"))
+    .find((element) => (element.dataset.followUpMessageId ?? element.dataset.messageSearchId) === messageId);
+  if (destination) return destination;
+  // Collapsed work/legacy disclosures mount their content only after expansion.
+  // The timeline's bounded focus controller keeps resolving until that commit.
+  const details = row.querySelector<HTMLDetailsElement>(".turn-work-log.is-settled > details, :scope > details");
+  if (details) details.open = true;
+  else row.querySelector<HTMLButtonElement>('.turn-run-details-toggle[aria-expanded="false"]')?.click();
+  return null;
+}
+
 export function useMessageSearchFocus(
   props: Pick<ResponseTimelineProps, "conversationId" | "projectId" | "messages">,
   timeline: ResponseTimelineItem[],
   beginReaderTimelineNavigation: () => void,
-  focusTimelineItem: (index: number, target: "turn" | "final") => void,
+  focusTimelineItem: (index: number, target: "turn" | "request" | "final" | { messageId: string }) => void,
 ): void {
   useEffect(() => {
     const focusSearchResult = (): void => {
@@ -23,7 +35,10 @@ export function useMessageSearchFocus(
       if (index < 0) return;
       clearMessageSearchFocus();
       beginReaderTimelineNavigation();
-      focusTimelineItem(index, message.role === "assistant" ? "final" : "turn");
+      const item = timeline[index]!;
+      focusTimelineItem(index, message.role === "assistant" ? "final"
+        : item.kind === "turn" && item.turn.userMessage.id === message.id ? "request"
+          : { messageId: message.id });
     };
     window.addEventListener(MESSAGE_SEARCH_FOCUS_EVENT, focusSearchResult);
     focusSearchResult();

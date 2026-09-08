@@ -3,7 +3,8 @@
 Ctrl/Cmd+K now finds literal phrases in saved user messages and canonical final
 agent answers across unarchived chats. Results include a highlighted text snippet,
 project, chat title and message role. Opening a result focuses its turn or final
-answer, including in an existing split pane or detached window. Composer drafts
+answer, including in an existing split pane or detached window. Follow-up
+messages open their collapsed history section and receive exact message focus. Composer drafts
 stay in their owning conversation. Search also preserves an unsent new-chat
 draft when returning to the chat view.
 
@@ -42,14 +43,15 @@ searches, and focus notifications only reach the window owning the chat.
 - `npm run build:bundle`: passed with every existing budget unchanged. Unused
   schema construction is omitted, utility assets use compact hashed names, and
   search navigation loads on demand. The measured main route is 735.6 KiB and
-  core JavaScript is 1,973.1 KiB; the limits remain 736 and 1,977 KiB.
-- Fresh Electron Playwright: all four scenarios passed on macOS ARM64 in 7.3 s.
+  core JavaScript is 1,973.7 KiB; the limits remain 736 and 1,977 KiB.
+- Fresh Electron Playwright: all five scenarios passed on macOS ARM64 in 8.4 s.
   They cover unloaded historical turns, saved and unsent-draft retention across
-  projects, split/detached focus, compact layout, and a full application restart.
+  projects, split/detached focus, compact layout, a full application restart,
+  and a follow-up buried inside a collapsed long historical turn.
 - Full `npm run check`: passed on Node 22.23.2. All 722 active test files passed
-  (7,690 tests passed; 12 files / 122 tests skipped by existing platform and
+  (7,696 tests passed; 12 files / 122 tests skipped by existing platform and
   environment conditions), followed by the production build and bundle gates.
-  The test phase took 337.87 s with two workers.
+  The test phase took 339.19 s with two workers.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 
@@ -73,3 +75,7 @@ using synthetic conversations and isolated temporary projects.
 ### Detached window
 
 ![Matching answer focused in its detached window with the draft retained](detached-match.png)
+
+### Follow-up in a long historical turn
+
+![Exact follow-up focused after expanding its collapsed history](follow-up-match.png)

@@ -11925,6 +11925,11 @@ button.sent-attachment-open:focus-visible {
   line-height: 1.25;
 }
 
+.turn-follow-up-row:focus-visible,
+.orphan-run-flow [data-message-search-id]:focus-visible {
+  outline-offset: -2px;
+}
+
 .turn-follow-up-row > p {
   margin: 0;
   font-size: var(--response-font-size);

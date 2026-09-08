@@ -37,7 +37,7 @@ describe("Git workflows", () => {
     git(local, "config", "fetch.prune", "true");
     git(local, "config", "fetch.pruneTags", "true");
     git(local, "config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*");
-    git(remote, "tag", "remote-only");
+    git(remote, "tag", "remote-only", "refs/heads/main");
     writeFileSync(join(local, "tracked.txt"), "staged\n");
     git(local, "add", "tracked.txt");
     writeFileSync(join(local, "tracked.txt"), "unstaged\n");

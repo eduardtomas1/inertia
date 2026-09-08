@@ -379,6 +379,9 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
     await expect(app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup"], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["drop"], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", app.gesture(), { x: 0, y: 0 }], overlay)).rejects.toThrow("untrusted");
     await expect(app.invoke(MASCOT_IPC.action, ["pickup", { x: 0, y: 0 }], overlay)).rejects.toThrow("Invalid");
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 40 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);

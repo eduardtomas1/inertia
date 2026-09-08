@@ -572,11 +572,7 @@ export default function App(): React.JSX.Element {
   ): void => {
     setActionError(null);
     if (detachedChats.conversationIds.has(nextConversation.id)) {
-      void detachedChats.focus(nextConversation.id).catch((error: unknown) => {
-        setActionError(error instanceof Error
-          ? error.message
-          : "The chat window could not be focused.");
-      });
+      selectConversation(nextConversation);
       return;
     }
     const preparation = prepareComposerDetachment(nextConversation.id);
@@ -618,6 +614,7 @@ export default function App(): React.JSX.Element {
     });
   }, [
     detachedChats,
+    selectConversation,
     splitConversationId,
     suppressedMainConversationIds,
     updateSplitConversationId,
@@ -631,7 +628,7 @@ export default function App(): React.JSX.Element {
       return;
     }
     if (detachedChats.conversationIds.has(nextConversation.id)) {
-      void detachedChats.focus(nextConversation.id).catch(() => undefined);
+      selectConversation(nextConversation);
       return;
     }
     exitGlobalChat();

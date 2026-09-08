@@ -5,10 +5,21 @@ import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import { ContextCompactionRow } from "../../src/renderer/src/components/response-timeline/ContextCompactionRow";
+import { SnapshotControl } from "../../src/renderer/src/components/composer/SnapshotControl";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 const original = window.inertia;
-afterEach(() => { window.inertia = original; });
+afterEach(() => { window.inertia = original; vi.restoreAllMocks(); });
+
+it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
+  window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
+  render(<SnapshotControl conversationId="shortcut-chat" />);
+  fireEvent.click(screen.getByRole("button", { name: "Snapshots" }));
+  await screen.findByRole("combobox", { name: "Capture shortcut" });
+  expect(screen.getByRole("checkbox", { name: "Enable Snapshots" })).toBeChecked();
+  expect(screen.queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
+});
 
 it("routes a delivered snapshot only to its captured conversation and cancels stale leases", async () => {
   let listener!: (value: SnapshotDelivery) => void;

@@ -36,6 +36,7 @@ import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
+import { cleanupWithSnapshots, SnapshotCleanupUnconfirmedError } from "./snapshot-shutdown.js";
 import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
 import {
   registerRendererAttachmentImportIpc,
@@ -887,14 +888,13 @@ function runPrivilegedCleanup(): Promise<boolean> {
       onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
     });
   }
-  const owners = privilegedCleanupOwners; const cleanup = (async () => { try {
-    await snapshotService?.dispose();
+  const owners = privilegedCleanupOwners; const cleanup = cleanupWithSnapshots(snapshotService, async () => { try {
     await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
     previewBroker.close(); runtimeDiagnostics?.record("app.stop"); return await owners.cleanup();
-  } finally { await disposeWindowsRuntimeJobExecutableLock(); } })();
+  } finally { await disposeWindowsRuntimeJobExecutableLock(); } });
   const tracked = cleanup.then((confirmed) => { if (!confirmed && process.platform === "linux"
       && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
-  }, (error: unknown) => { if (process.platform === "linux" && privilegedCleanup === tracked) privilegedCleanup = null;
+  }, (error: unknown) => { if ((process.platform === "linux" || error instanceof SnapshotCleanupUnconfirmedError) && privilegedCleanup === tracked) privilegedCleanup = null;
     throw error; });
   privilegedCleanup = tracked; return tracked;
 }

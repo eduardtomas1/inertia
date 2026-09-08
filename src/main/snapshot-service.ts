@@ -42,7 +42,7 @@ export class SnapshotService {
   async configure(enabled: boolean, shortcut: SnapshotState["shortcut"]): Promise<SnapshotState> {
     this.enabled = false;
     await this.stopShortcut();
-    this.shortcut = shortcut;
+    this.shortcut = process.platform === "linux" ? "accelerator" : shortcut;
     this.message = null;
     if (!enabled || this.disposed) return this.state();
     const state = this.state();
@@ -52,13 +52,9 @@ export class SnapshotService {
       return this.state();
     }
     const trigger = (): void => { if (this.enabled && !this.busy) void this.onCapture().catch(() => undefined); };
-    if (shortcut === "accelerator") {
+    if (this.shortcut === "accelerator") {
       this.enabled = globalShortcut.register(ACCELERATOR, trigger);
       if (!this.enabled) this.message = "The snapshot shortcut is already used by another app.";
-      return this.state();
-    }
-    if (process.platform === "linux") {
-      this.message = "Use Ctrl+Alt+S on Linux X11.";
       return this.state();
     }
     const child = this.spawn("snapshot-shortcut-worker");
@@ -201,7 +197,10 @@ export class SnapshotService {
 
   async dispose(): Promise<void> {
     this.disposed = true; this.enabled = false;
-    await this.stopShortcut();
-    if (this.captureChild) await this.stopWorker(this.captureChild);
+    const results = await Promise.allSettled([
+      this.stopShortcut(),
+      ...(this.captureChild ? [this.stopWorker(this.captureChild)] : []),
+    ]);
+    if (results.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot worker cleanup is unconfirmed.");
   }
 }

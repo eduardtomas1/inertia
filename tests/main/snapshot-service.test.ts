@@ -32,6 +32,30 @@ async function fixture() {
 }
 
 describe("snapshot native worker ownership", () => {
+  it.runIf(process.platform === "linux")("normalizes an old both-Shift setting to the working Linux accelerator", async () => {
+    const service = new SnapshotService(async () => undefined); services.push(service);
+    expect(await service.configure(true, "both-shift")).toMatchObject({ enabled: true, shortcut: "accelerator" });
+    expect(native.register).toHaveBeenCalledWith("CommandOrControl+Alt+S", expect.any(Function));
+    expect(native.fork).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform === "linux")("stops an active capture even when shortcut-worker cleanup times out", async () => {
+    vi.useFakeTimers();
+    const service = new SnapshotService(async () => undefined); services.push(service);
+    const poller = new Child(); native.fork.mockReturnValueOnce(poller);
+    const configured = service.configure(true, "both-shift");
+    await vi.waitFor(() => expect(native.fork).toHaveBeenCalledOnce());
+    poller.emit("message", "ready"); await configured;
+    const captureChild = new Child(); native.fork.mockReturnValueOnce(captureChild);
+    const capture = service.capture(); const captureFailure = expect(capture).rejects.toThrow("stopped");
+    poller.kill.mockImplementation(() => true);
+    const stopping = service.dispose(); const failure = expect(stopping).rejects.toThrow("cleanup is unconfirmed");
+    await vi.advanceTimersByTimeAsync(3000); await failure; await captureFailure;
+    expect(captureChild.kill).toHaveBeenCalledOnce();
+    poller.emit("exit", 1);
+    await expect(service.dispose()).resolves.toBeUndefined();
+  });
+
   it("starts disabled and leaves capture permissions untouched", () => {
     const service = new SnapshotService(async () => undefined); services.push(service);
     expect(service.state().enabled).toBe(false);

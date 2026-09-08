@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AppUpdateInstallCoordinator } from "../../src/main/app-update-install";
+import { SnapshotCleanupUnconfirmedError } from "../../src/main/snapshot-shutdown";
 import type { AppUpdaterInstallResult } from
   "../../src/main/electron-app-updater";
 import {
@@ -415,6 +416,23 @@ describe("application update install coordination", () => {
     await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
     expect(cleanup).toHaveBeenCalledOnce();
     expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
+  });
+
+  it.each(["darwin", "win32"] as const)("allows a later explicit quit to retry only an unconfirmed snapshot on %s", async (platform) => {
+    const cleanup = vi.fn().mockRejectedValueOnce(new SnapshotCleanupUnconfirmedError()).mockResolvedValueOnce(true);
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform, service: service([]), runtime: () => null, privateConnect: () => null,
+      cleanup, finishNormalShutdown, onUnconfirmedShutdown, reportError: vi.fn(),
+    });
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(cleanup).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry a failed normal cleanup outside Linux", async () => {

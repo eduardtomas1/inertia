@@ -52,7 +52,7 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
         {state && <>
           <label className="snapshot-setting"><span>Enable Snapshots</span><input type="checkbox" checked={state.enabled} disabled={pending || !state.available} onChange={(event) => void request({ type: "configure", enabled: event.target.checked, shortcut: state.shortcut })} /></label>
           <label className="snapshot-setting"><span>Capture shortcut</span><select aria-label="Capture shortcut" value={state.shortcut} disabled={pending || !state.available} onChange={(event) => void request({ type: "configure", enabled: state.enabled, shortcut: event.target.value as SnapshotState["shortcut"] })}>
-            <option value="both-shift">Both Shift keys</option><option value="accelerator">{navigator.platform.includes("Mac") ? "⌘⌥S" : "Ctrl+Alt+S"}</option>
+            {!navigator.platform.toLowerCase().includes("linux") && <option value="both-shift">Both Shift keys</option>}<option value="accelerator">{navigator.platform.includes("Mac") ? "⌘⌥S" : "Ctrl+Alt+S"}</option>
           </select></label>
           <p className="snapshot-note">Editable fields are masked. Capture is available on macOS, Windows and Linux X11.</p>
           {state.permission === "required" && <div className="snapshot-permissions"><p>Allow Inertia in macOS Accessibility and Screen Recording.</p><button disabled={pending} onClick={() => void request({ type: "permission", permission: "accessibility" })}>Accessibility settings</button><button disabled={pending} onClick={() => void request({ type: "permission", permission: "screen" })}>Screen Recording settings</button></div>}

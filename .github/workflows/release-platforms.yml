@@ -193,6 +193,7 @@ jobs:
         run: npm run test:browser-evidence-cpu-budget
 
       - name: Run the complete release unit suite
+        if: runner.os != 'Windows'
         run: |
           # Keep native fixture contention aligned with PR CI.
           if [[ "$RUNNER_OS" == "macOS" ]]; then
@@ -200,6 +201,14 @@ jobs:
           else
             npm test
           fi
+
+      - name: Run the complete Windows release unit suite
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: npm test
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'

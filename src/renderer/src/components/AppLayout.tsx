@@ -105,6 +105,7 @@ interface AppLayoutActions {
     remote?: boolean,
   ) => void | Promise<void>;
   loadGit: () => Promise<void>;
+  mutateRemote: (type: "git.fetch" | "git.pull" | "git.push") => Promise<void>;
   loadCommitReview: () => Promise<GitDiffSnapshot | null>;
   discardCommitReview: () => void;
   commitReviewRevision: number;
@@ -612,43 +613,9 @@ export function AppLayout({
               }
               setPullRequestDialogOpen(true);
             }}
-            onFetch={() => {
-              if (!project || !rootRepository) return;
-              void actions.run("git.fetch", {
-                type: "git.fetch",
-                payload: { projectId: project.id, conversationId: conversation?.id, ...rootRepository },
-              }).catch(() => undefined);
-            }}
-            onPull={() => {
-              if (!project) return;
-              if (!rootRepository) {
-                setActionError("Refresh repository status before pulling.");
-                return;
-              }
-              void actions.run("git.pull", {
-                type: "git.pull",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                  ...rootRepository,
-                },
-              }).catch(() => undefined);
-            }}
-            onPush={() => {
-              if (!project) return;
-              if (!rootRepository) {
-                setActionError("Refresh repository status before pushing.");
-                return;
-              }
-              void actions.run("git.push", {
-                type: "git.push",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                  ...rootRepository,
-                },
-              }).catch(() => undefined);
-            }}
+            onFetch={() => { void actions.mutateRemote("git.fetch").catch(() => undefined); }}
+            onPull={() => { void actions.mutateRemote("git.pull").catch(() => undefined); }}
+            onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
           />
 
           <div

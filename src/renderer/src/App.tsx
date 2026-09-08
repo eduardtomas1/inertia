@@ -1233,7 +1233,7 @@ export default function App(): React.JSX.Element {
         openProjectPath,
         cycleTheme,
         loadBranches,
-        mutateBranch,
+        mutateBranch, mutateRemote: workspaceTools.mutateRemote,
         loadGit: () => loadGit({ authoritative: true }),
         loadCommitReview: workspaceTools.loadCommitReview,
         discardCommitReview: workspaceTools.discardCommitReview,

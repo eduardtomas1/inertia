@@ -538,6 +538,19 @@ export function useWorkspaceGit({
     } as CommandWithoutId, { reportError: false });
   }, [conversation?.id, gitStatus, project, run]);
 
+  const mutateRemote = useCallback(async (type: "git.fetch" | "git.pull" | "git.push"): Promise<void> => {
+    if (!project) return;
+    const repository = rootGitMutationScope(gitStatus);
+    if (!repository) {
+      setActionError("Refresh repository status before running a remote Git action.");
+      return;
+    }
+    await run(type, {
+      type,
+      payload: { projectId: project.id, conversationId: conversation?.id, ...repository },
+    });
+  }, [conversation?.id, gitStatus, project, run, setActionError]);
+
   const commit = useCallback(async (
     message: string,
     push: boolean,
@@ -622,6 +635,7 @@ export function useWorkspaceGit({
     commitReviewRevision,
     loadBranches,
     mutateBranch,
+    mutateRemote,
     commit,
     changesRequest,
     requestWorkspaceChanges,

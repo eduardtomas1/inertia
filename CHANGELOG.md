@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.55 — 2026-09-08
+## 0.0.55 — 2026-09-09
 
 ### Find and share context
 

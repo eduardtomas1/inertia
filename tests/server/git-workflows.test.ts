@@ -134,6 +134,52 @@ describe("Git workflows", () => {
     expect(readFileSync(join(local, "tracked.txt"), "utf8")).toBe("retained work\n");
   });
 
+  it.each([
+    "+refs/heads/*:refs/remotes/origin/*",
+    "+refs/heads/private:refs/remotes/origin/private",
+    "+refs/heads/*:refs/remotes/Origin/*",
+    "+refs/*:refs/*",
+    "+refs/heads/*:refs/remotes/ori*/private",
+  ])("refuses another remote's overlapping fetch destination before mutation: %s", async (mapping) => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "private", "main");
+    git(local, "commit", "--allow-empty", "-m", "Other remote's retained tip");
+    git(local, "update-ref", "refs/remotes/origin/private", "HEAD");
+    git(local, "config", "remote.other.url", remote);
+    git(local, "config", "remote.other.fetch", mapping);
+    writeFileSync(join(local, "tracked.txt"), "retained work\n");
+    writeFileSync(join(local, ".git", "FETCH_HEAD"), "retained fetch evidence\n");
+    const refs = git(local, "for-each-ref", "--format=%(refname) %(objectname)");
+    const config = readFileSync(join(local, ".git", "config"));
+    const index = readFileSync(join(local, ".git", "index"));
+
+    await expect.soft(fetchRepository(local)).rejects.toThrow("fetch destinations overlap");
+
+    expect(git(local, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+    expect(readFileSync(join(local, ".git", "index"))).toEqual(index);
+    expect(readFileSync(join(local, ".git", "FETCH_HEAD"), "utf8")).toBe("retained fetch evidence\n");
+    expect(readFileSync(join(local, "tracked.txt"), "utf8")).toBe("retained work\n");
+  });
+
+  it("keeps disjoint remote destinations and selected negative fetch exclusions intact", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "topic", "main");
+    git(remote, "branch", "private", "main");
+    git(local, "config", "--add", "remote.origin.fetch", "^refs/heads/private");
+    git(local, "config", "remote.other.url", remote);
+    git(local, "config", "remote.other.fetch", "+refs/heads/*:refs/remotes/other/*");
+    git(local, "config", "--add", "remote.other.fetch", "^refs/heads/origin/*");
+    git(local, "config", "--add", "remote.other.fetch", "+refs/tags/*:refs/tags/*");
+    const config = readFileSync(join(local, ".git", "config"));
+
+    await fetchRepository(local);
+
+    expect(git(local, "rev-parse", "refs/remotes/origin/topic")).toBe(git(remote, "rev-parse", "main"));
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/private", "refs/remotes/other")).toBe("");
+    expect(readFileSync(join(local, ".git", "config"))).toEqual(config);
+  });
+
   it("lists local, remote, symbolic and occupied branches without exposing worktree paths", async () => {
     const { root, local } = fixture();
     git(local, "worktree", "add", "-b", "occupied", join(root, "other"));

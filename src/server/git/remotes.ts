@@ -17,6 +17,7 @@ import { readConfiguredFetchRefspecs, scopedTrackingFetchRefspecs } from "./fetc
 import { getRepositoryStatus } from "./status";
 import {
   GitError,
+  isGitProcessTreeTerminationFailure,
   type GitMutationResult,
 } from "./types";
 
@@ -81,6 +82,7 @@ export async function fetchRepository(
   }
   validateName(remote, "The remote name");
   await validateBranch(root, `${remote}/inertia-fetch-probe`, options);
+  await assertExclusiveFetchDestinations(root, remote, options);
   const configured = await readConfiguredFetchRefspecs(root, remote, options);
   const { refspecs } = scopedTrackingFetchRefspecs(remote, configured);
   await runGit(root, [
@@ -94,6 +96,52 @@ export async function fetchRepository(
     failureMessage: "Unable to fetch remote branches. Check connectivity and Git authentication, then retry.",
   });
   return { status: await getRepositoryStatus(root, options) };
+}
+
+async function assertExclusiveFetchDestinations(
+  root: string,
+  remote: string,
+  options: GitPathInspectionOptions,
+): Promise<void> {
+  const inspection = { ...options, maxOutputBytes: 64 * 1024,
+    failureMessage: "Unable to inspect remote fetch destinations." };
+  let records: string[];
+  try {
+    records = (await runGitInspection(root, [
+      "config", "--null", "--get-regexp", "^remote\\..*\\.fetch$",
+    ], inspection)).stdout.toString("utf8").split("\0").filter(Boolean);
+  } catch (error) {
+    if (!(error instanceof GitError) || error.code !== "operation-failed" || isGitProcessTreeTerminationFailure(error)) throw error;
+    // An absent regexp exits unsuccessfully. Confirm absence with one bounded
+    // key-only read; never swallow malformed config or unconfirmed cleanup.
+    const keys = await runGitInspection(root, ["config", "--null", "--name-only", "--list"], inspection);
+    if (keys.stdout.toString("utf8").split("\0").some((key) => /^remote\..*\.fetch$/u.test(key))) throw error;
+    return;
+  }
+  const namespace = `refs/remotes/${remote.toLowerCase()}`;
+  for (const record of records) {
+    const separator = record.indexOf("\n");
+    const key = record.slice(0, separator);
+    if (separator < 0 || !/^remote\..+\.fetch$/u.test(key)) {
+      throw new GitError("invalid-input", "Unable to identify the configured remote fetch destinations.");
+    }
+    if (key === `remote.${remote}.fetch`) continue;
+    const value = record.slice(separator + 1);
+    if (value.startsWith("^")) continue; // Exclusions never own a destination.
+    const colon = value.indexOf(":");
+    if (colon < 0) continue; // Source-only fetches update no local ref.
+    const destination = value.slice(colon + 1).toLowerCase();
+    if (!destination) continue;
+    const wildcard = destination.indexOf("*");
+    const prefix = wildcard < 0 ? destination : destination.slice(0, wildcard);
+    // A wildcard may consume slashes, so compare its fixed prefix. Refname
+    // abbreviations cannot establish disjoint ownership without DWIM lookup.
+    if (!destination.startsWith("refs/") || (wildcard < 0
+      ? destination === namespace || destination.startsWith(`${namespace}/`) || namespace.startsWith(`${destination}/`)
+      : prefix.startsWith(`${namespace}/`) || namespace.startsWith(prefix))) {
+      throw new GitError("invalid-input", "Remote fetch destinations overlap or cannot be isolated. Configure disjoint, fully qualified fetch destinations in the terminal before fetching.");
+    }
+  }
 }
 
 export async function pushCurrentBranch(

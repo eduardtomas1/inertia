@@ -254,7 +254,7 @@ function parseDiagnosticRecord(
     : record.event === "runtime.failure" || record.event === "runtime.state"
       ? runtimeKeys
       : record.event === "runtime.restart-requested"
-        ? [...baseKeys, "generation", "reason", "stage", "signal", "exitCode"] : baseKeys;
+        ? [...baseKeys, "generation", "reason", "stage", "signal", "exitCode", "probe"] : baseKeys;
   if (Object.keys(record).some((key) => !allowedKeys.includes(key))) {
     return null;
   }
@@ -262,11 +262,12 @@ function parseDiagnosticRecord(
   if (record.event === "runtime.restart-requested") {
     if (boundedInteger(record.generation, 0, Number.MAX_SAFE_INTEGER) === undefined
       || (record.reason !== "owned-process-tainted" && record.reason !== "owned-process-cleanup-unconfirmed")) return null;
-    if (record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined) {
+    if (record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined || record.probe !== undefined) {
       if (record.reason !== "owned-process-tainted" || !parseRuntimeOwnedProcessDiagnostic({
         stage: record.stage,
         ...(record.signal !== undefined ? { signal: record.signal } : {}),
         ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+        ...(record.probe !== undefined ? { probe: record.probe } : {}),
       })) return null;
     }
     return record;
@@ -373,6 +374,7 @@ export class RuntimeDiagnostics {
           stage: fields.stage,
           ...(fields.signal !== undefined ? { signal: fields.signal } : {}),
           ...(fields.exitCode !== undefined ? { exitCode: fields.exitCode } : {}),
+          ...(fields.probe !== undefined ? { probe: fields.probe } : {}),
         });
         if (fields.reason === "owned-process-tainted" && diagnostic) Object.assign(entry, diagnostic);
       }
@@ -626,6 +628,7 @@ export class RuntimeDiagnostics {
             event === "runtime.restart-requested" && value.stage !== undefined ? `stage=${value.stage}` : null,
             event === "runtime.restart-requested" && value.signal !== undefined ? `signal=${value.signal}` : null,
             event === "runtime.restart-requested" && value.exitCode !== undefined ? `exit-code=${value.exitCode}` : null,
+            event === "runtime.restart-requested" && value.probe !== undefined ? `probe=${value.probe}` : null,
             lifecycleEvent && typeof value.phase === "string"
               ? `phase=${value.phase}`
               : null,

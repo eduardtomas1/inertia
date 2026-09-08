@@ -31,6 +31,7 @@ export function runtimeRestartFailureMessage(event: RuntimeRestartRequestedEvent
     `stage=${diagnostic.stage}`,
     ...(diagnostic.signal !== undefined ? [`signal=${diagnostic.signal}`] : []),
     ...(diagnostic.exitCode !== undefined ? [`exit-code=${diagnostic.exitCode}`] : []),
+    ...(diagnostic.probe !== undefined ? [`probe=${diagnostic.probe}`] : []),
   ].join(", ") : "";
   return restartMessages[event.reason] + (details ? ` (${details})` : "");
 }
@@ -49,11 +50,12 @@ function initiatingFailureCode(message: string): string | null {
   }
   if (!message.startsWith(restartMessages["owned-process-tainted"])) return null;
   const details = message.slice(restartMessages["owned-process-tainted"].length)
-    .match(/^ \(stage=([a-z-]+)(?:, signal=([A-Za-z0-9]+))?(?:, exit-code=(\d{1,3}))?\)$/u);
+    .match(/^ \(stage=([a-z-]+)(?:, signal=([A-Za-z0-9]+))?(?:, exit-code=(\d{1,3}))?(?:, probe=([a-z-]+))?\)$/u);
   if (!details) return null;
   const diagnostic = parseRuntimeOwnedProcessDiagnostic({ stage: details[1],
     ...(details[2] !== undefined ? { signal: details[2] } : {}),
     ...(details[3] !== undefined ? { exitCode: Number(details[3]) } : {}),
+    ...(details[4] !== undefined ? { probe: details[4] } : {}),
   });
   if (!diagnostic || runtimeRestartFailureMessage({
     type: "runtime.restart-requested", reason: "owned-process-tainted", diagnostic,

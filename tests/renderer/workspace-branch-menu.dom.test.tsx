@@ -63,6 +63,54 @@ describe("branch menu interaction", () => {
     expect(callbacks.onSwitchBranch).toHaveBeenLastCalledWith("origin/topic", true);
   });
 
+  it("retains Enter during a branch refresh and validates that exact choice when it settles", async () => {
+    const callbacks = props();
+    const view = render(<WorkspaceBranchMenu {...callbacks} />);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "topic" } });
+    view.rerender(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(callbacks.onSwitchBranch).not.toHaveBeenCalled();
+    view.rerender(<WorkspaceBranchMenu {...callbacks} />);
+    await waitFor(() => expect(callbacks.onSwitchBranch).toHaveBeenCalledWith("origin/topic", true));
+    await waitFor(() => expect(callbacks.onClose).toHaveBeenCalledOnce());
+  });
+
+  it.each(["query", "blur", "composition", "removed", "occupied", "failure", "busy"])(
+    "does not replay a waiting branch choice after %s changes",
+    async (change) => {
+      const callbacks = props();
+      const view = render(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+      const search = screen.getByRole("searchbox");
+      fireEvent.change(search, { target: { value: "topic" } });
+      fireEvent.keyDown(search, { key: "Enter" });
+      if (change === "query") fireEvent.change(search, { target: { value: "main" } });
+      if (change === "blur") fireEvent.blur(search);
+      if (change === "composition") fireEvent.compositionStart(search);
+      view.rerender(<WorkspaceBranchMenu {...callbacks}
+        busy={change === "busy"}
+        branchesError={change === "failure" ? "Refresh failed." : null}
+        branches={change === "removed" ? callbacks.branches.slice(0, 2)
+          : change === "occupied" ? callbacks.branches.map((branch) => ({ ...branch, checkedOut: true }))
+          : callbacks.branches} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(callbacks.onSwitchBranch).not.toHaveBeenCalled();
+      expect(callbacks.onClose).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels a waiting choice if another operation starts before refresh completes", async () => {
+    const callbacks = props();
+    const view = render(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "topic" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    view.rerender(<WorkspaceBranchMenu {...callbacks} branchesLoading busy />);
+    view.rerender(<WorkspaceBranchMenu {...callbacks} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(callbacks.onSwitchBranch).not.toHaveBeenCalled();
+  });
+
   it("selects the current branch without a mutation and ignores settlement after dismissal", async () => {
     const callbacks = props();
     let finish!: () => void;

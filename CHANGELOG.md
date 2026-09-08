@@ -26,6 +26,8 @@ The useful changes in each Inertia release, in plain language.
   branches, and create tracking branches. Fetch preserves local work; Pull
   requires a clean checkout and fast-forwards only. Existing commits can be
   pushed while unrelated edits remain.
+- Enter in branch search survives a background refresh; changing the query or
+  leaving the search cancels the waiting selection.
 - Git actions keep errors and retry controls near the operation. Branches used
   by other worktrees are identified, and ambiguous remote destinations are
   rejected before a fetch can overwrite another remote's tracking refs.

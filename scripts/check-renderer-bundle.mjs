@@ -55,7 +55,7 @@ const budgets = {
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
-  deferredGitMenusJavaScript: 8.5 * kibibyte,
+  deferredGitMenusJavaScript: 8.75 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,

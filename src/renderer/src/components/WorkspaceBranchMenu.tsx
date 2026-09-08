@@ -57,10 +57,6 @@ export default function WorkspaceBranchMenu({
     <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={(event) => {
       if (event.target instanceof HTMLInputElement) {
         if (event.target.type !== "search") return;
-        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-          event.preventDefault();
-          event.currentTarget.querySelector<HTMLButtonElement>('.git-branch-results button:not(:disabled)')?.click();
-        }
         if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
       }
       navigateMenuItems(event, '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)');

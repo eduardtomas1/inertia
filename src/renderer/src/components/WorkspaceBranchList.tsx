@@ -16,11 +16,33 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => { searchRef.current?.focus(); }, []);
   const [query, setQuery] = useState("");
+  const queued = useRef<GitBranchInfo | null>(null);
+  useEffect(() => {
+    if (loading && !busy && !error) return;
+    const choice = queued.current;
+    queued.current = null;
+    const branch = choice && branches.find(({ name, remote }) => name === choice.name && remote === choice.remote);
+    if (loading || busy || error || !branch || (!branch.current && branch.checkedOut)) return;
+    if (branch.current) onClose?.();
+    else onSwitch(branch.name, branch.remote);
+  }, [branches, busy, error, loading, onClose, onSwitch]);
   const needle = query.trim().toLocaleLowerCase();
   const visible = branches.filter((branch) => branch.name.toLocaleLowerCase().includes(needle));
   return <>
-    <label className="git-branch-search"><Search size={14} /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
-      if (!["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) event.stopPropagation();
+    <label className="git-branch-search"><Search size={14} /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
+      if (event.key === "Enter") {
+        event.stopPropagation();
+        if (event.nativeEvent.isComposing) { queued.current = null; return; }
+        event.preventDefault();
+        const branch = visible.find((choice) => choice.current || !choice.checkedOut);
+        if (!branch || busy || error) return;
+        if (loading) queued.current = branch;
+        else if (branch.current) onClose?.();
+        else onSwitch(branch.name, branch.remote);
+        return;
+      }
+      queued.current = null;
+      if (!["ArrowDown", "ArrowUp", "Escape"].includes(event.key)) event.stopPropagation();
     }} /></label>
     <div className="git-branch-load-status">
       <span role="status">{loading ? "Refreshing branches…" : error ?? `${branches.length} branches`}</span>

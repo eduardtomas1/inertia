@@ -290,6 +290,21 @@ afterEach(async () => {
 });
 
 describe("IsolatedRunController", () => {
+  it("keeps report chats separate and forwards a native no-tools restriction with exact selection", async () => {
+    const store = new FakeStore();
+    const provider = new FakeProvider();
+    const controller = new IsolatedRunController(store, provider, "/private/inertia-data", vi.fn(), { id: ids(), fileSystem: fakeFileSystem() });
+    const selection = { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-test", reasoningEffort: "high" }) };
+    const running = controller.run(request({}, { kind: "issue-report", selection, toolPolicy: "none" }));
+    await providerStarted(provider);
+    expect(provider.inputs[0]).toMatchObject({ toolRestriction: "none", access: "supervised", interactionMode: "plan", model: "claude-test", reasoningEffort: "high", modelSelection: selection.modelSelection });
+    expect(provider.inputs[0]?.sessionId).toBeUndefined();
+    expect(store.runs.size).toBe(0);
+    provider.pending[0]!.resolve(resultFor(provider.inputs[0]!, "completed", "Assessment"));
+    await expect(running).resolves.toMatchObject({ value: "Assessment" });
+    expect(store.updates).toEqual([]);
+  });
+
   it("carries advertised native speed support into fresh isolated runs", async () => {
     const store = new FakeStore();
     const provider = new FakeProvider();

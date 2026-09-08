@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { DatabaseMigrationError } from "../../src/server/database-migrations";
-import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import type { PersistedModelBackendProfile } from "../../src/shared/backend-profile-settings";
@@ -514,8 +513,8 @@ describe("native Gemini provider migration", { concurrent: false }, () => {
     const beforeTriggers = triggers(database);
     const beforeForeignKeys = foreignKeys(database);
 
-    migrateRuntimeDatabase(database);
-    migrateRuntimeDatabase(database);
+    migrateRuntimeDatabase(database, 68);
+    migrateRuntimeDatabase(database, 68);
 
     expect(rowsByTable(database)).toEqual({
       ...beforeRows,
@@ -533,7 +532,7 @@ describe("native Gemini provider migration", { concurrent: false }, () => {
     expect(database.pragma("foreign_key_check")).toEqual([]);
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    ).get() as { version: number }).version).toBe(68);
     expect(() => database.prepare(`
       UPDATE agent_turns SET continuation_reason_code = 'invalid-reason'
       WHERE id = ?

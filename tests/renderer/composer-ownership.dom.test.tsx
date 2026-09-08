@@ -30,6 +30,7 @@ import {
   registerComposerOwnership,
 } from "../../src/renderer/src/utils/composerOwnership";
 import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
+import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -181,6 +182,39 @@ afterEach(() => {
 });
 
 describe("composer detachment ownership", () => {
+  it.each([true, false])("applies a starred model with explicit profile=%s without elevating legacy favorites", async (explicit) => {
+    const current = conversation("favorite-owner");
+    const favoriteSelection = providerNativeModelSelection({
+      providerId: "codex", modelId: "agent", reasoningEffort: "high",
+    });
+    const configuration = { accessMode: "full", interactionMode: "plan", fastMode: true };
+    window.localStorage.setItem(MODEL_FAVORITES_STORAGE_KEY, JSON.stringify({ version: 2, favorites: [{
+      harnessId: favoriteSelection.harnessId, backendProfileId: favoriteSelection.backendProfileId,
+      modelId: "agent", reasoningEffort: "high", ...(explicit ? { configuration } : {}),
+    }] }));
+    const available: ProviderInfo = { ...provider, models: [{
+      id: "agent", label: "Saved Agent", description: "", isDefault: true,
+      inputModalities: ["text"], reasoningOptions: [{ value: "high", label: "High", description: "" }],
+      defaultReasoningEffort: "high",
+      fastMode: { providerValue: "priority", label: "Fast", description: "", isDefault: false },
+    }], metadataState: { ...provider.metadataState, models: {
+      ...provider.metadataState.models, freshness: "fresh", provenance: "provider",
+    } } };
+    const onUpdateConversation = vi.fn<React.ComponentProps<typeof Composer>["onUpdateConversation"]>(async () => undefined);
+    render(<Composer {...composerProps(current, { providers: [available], onUpdateConversation })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click(screen.getByTitle("Saved Agent").closest("button")!);
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
+    expect(onUpdateConversation.mock.calls[0]![0]).toMatchObject({
+      modelSelection: { reasoningEffort: "high", providerOptions: explicit ? { fastMode: "priority" } : {} },
+    });
+    if (explicit) expect(onUpdateConversation.mock.calls[0]![0]).toMatchObject({ accessMode: "full", interactionMode: "plan" });
+    else {
+      expect(onUpdateConversation.mock.calls[0]![0]).not.toHaveProperty("accessMode");
+      expect(onUpdateConversation.mock.calls[0]![0]).not.toHaveProperty("interactionMode");
+    }
+  });
+
   it("flushes the exact pending text and permits a text-only draft in Strict Mode", () => {
     vi.useFakeTimers();
     const current = conversation("text-draft");

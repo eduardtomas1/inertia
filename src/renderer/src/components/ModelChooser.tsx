@@ -28,6 +28,7 @@ import {
   toggleModelFavorite,
   writeModelFavorites,
   type ModelFavoriteReference,
+  type ModelFavoriteConfiguration,
 } from "../utils/modelFavorites";
 import type { ComposerModelRoute } from "../utils/modelChooserRoutes";
 import { searchModelRoutes } from "../utils/modelSearch";
@@ -58,6 +59,7 @@ export type ModelChooserNavigationKey =
 export interface ModelChooserProps {
   routes: readonly ComposerModelRoute[];
   selectedRoute: SelectedModelChipRoute;
+  configuration?: ModelFavoriteConfiguration;
   disabled?: boolean;
   closeSignal?: string | null;
   onSelect: (route: ComposerModelRoute) => void | Promise<void>;
@@ -100,7 +102,7 @@ function initialFavorites(): ModelFavoriteReference[] {
 function favoriteKeyForRoute(
   route: Pick<
     ComposerModelRoute,
-    "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort"
+    "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort" | "configuration"
   >,
 ): string {
   return modelFavoriteKey(route);
@@ -218,6 +220,7 @@ const ModelChooserResult = memo(function ModelChooserResult({
 export function ModelChooser({
   routes,
   selectedRoute,
+  configuration,
   disabled = false,
   closeSignal = null,
   onSelect,
@@ -248,6 +251,17 @@ export function ModelChooser({
     () => new Set(favorites.map(modelFavoriteKey)),
     [favorites],
   );
+  const favoriteReference = useCallback((route: ComposerModelRoute): ModelFavoriteReference => ({
+    ...route,
+    ...(favoriteKeys.has(route.key) || !configuration ? {} : {
+      configuration: {
+        accessMode: configuration.accessMode,
+        interactionMode: configuration.interactionMode,
+        ...(route.supportsNativeFastModeControl
+          ? { fastMode: route.responseSpeed === "Fast" } : {}),
+      },
+    }),
+  }), [configuration, favoriteKeys]);
   const resolvedFavorites = useMemo(
     () => resolveModelFavorites(favorites, routes),
     [favorites, routes],
@@ -343,6 +357,14 @@ export function ModelChooser({
     [shortcuts],
   );
   const selectedKey = activeKeyForRoute(selectedRoute);
+  const selectedConfigurationKey = JSON.stringify(configuration ?? null);
+  const matchesSelection = useCallback((route: ComposerModelRoute): boolean =>
+    activeKeyForRoute(route) === selectedKey && (!route.configuration || (
+      route.configuration.accessMode === configuration?.accessMode
+      && route.configuration.interactionMode === configuration?.interactionMode
+      && (route.configuration.fastMode === undefined
+        || route.configuration.fastMode === configuration?.fastMode)
+    )), [configuration, selectedKey]);
 
   const restoreTriggerFocus = useCallback((): void => {
     const trigger = triggerRef.current;
@@ -383,6 +405,7 @@ export function ModelChooser({
       query,
       selectedSourceId,
       selectedKey,
+      selectedConfigurationKey,
     ]);
     const preserveNavigation =
       activeSelectionContextRef.current === selectionContext;
@@ -391,7 +414,7 @@ export function ModelChooser({
         route.key === activeRouteKeyRef.current && route.selectable)
       : -1;
     const selectedIndex = results.items.findIndex((route) =>
-      activeKeyForRoute(route) === selectedKey && route.selectable);
+      matchesSelection(route) && route.selectable);
     const nextIndex = preservedIndex >= 0
       ? preservedIndex
       : selectedIndex >= 0
@@ -400,7 +423,7 @@ export function ModelChooser({
     activeSelectionContextRef.current = selectionContext;
     activeRouteKeyRef.current = results.items[nextIndex]?.key ?? null;
     setActiveIndex((current) => current === nextIndex ? current : nextIndex);
-  }, [open, query, results.items, selectedKey, selectedSourceId]);
+  }, [matchesSelection, open, query, results.items, selectedConfigurationKey, selectedKey, selectedSourceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -453,13 +476,13 @@ export function ModelChooser({
 
   const toggleFavorite = useCallback((route: ComposerModelRoute): void => {
     setFavorites((current) => {
-      const next = toggleModelFavorite(current, route);
+      const next = toggleModelFavorite(current, favoriteReference(route));
       if (typeof window !== "undefined") {
         writeModelFavorites(window.localStorage, next);
       }
       return next;
     });
-  }, []);
+  }, [favoriteReference]);
 
   const navigateTo = useCallback((index: number): void => {
     activeRouteKeyRef.current = results.items[index]?.key ?? null;
@@ -512,11 +535,11 @@ export function ModelChooser({
     : undefined;
   const chooserRows = useMemo(() => results.items.map((route) =>
     modelChooserRowFromRoute(route, {
-      active: activeKeyForRoute(route) === selectedKey,
-      favorite: favoriteKeys.has(favoriteKeyForRoute(route)),
+      active: matchesSelection(route),
+      favorite: favoriteKeys.has(modelFavoriteKey(favoriteReference(route))),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
-    })), [favoriteKeys, results.items, selectedKey, shortcutsByRoute]);
+    })), [favoriteKeys, favoriteReference, matchesSelection, results.items, shortcutsByRoute]);
 
   useLayoutEffect(() => {
     if (!open || !virtualized || activeIndex < 0) return;

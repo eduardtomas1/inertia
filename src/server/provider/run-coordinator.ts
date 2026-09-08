@@ -210,6 +210,10 @@ export class ProviderRunCoordinator {
         "The custom backend run does not match the exact probed model identity.",
       );
     }
+    if (input.toolRestriction === "none" && (input.harnessId !== "claude-agent-sdk" || callbacks.hostTools || input.skills?.length || input.sessionId || input.access !== "supervised")) {
+      this.rememberCleanupReceipt(expectedIdentity);
+      throw new ProviderRuntimeError("invalid_input", "This provider cannot enforce a report chat without tools.");
+    }
     const providerId = input.providerId;
     const runId = input.runId;
     const turnId = input.turnId;
@@ -441,7 +445,7 @@ export class ProviderRunCoordinator {
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
           environment: { ...launchOptions.environment },
-          providerNativeToolsAvailable: this.options.capabilityAvailable(
+          providerNativeToolsAvailable: input.toolRestriction !== "none" && this.options.capabilityAvailable(
             input,
             "provider-native-tools",
           ),

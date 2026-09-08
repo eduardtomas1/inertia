@@ -1,3 +1,5 @@
+import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
+import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
@@ -627,7 +629,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
-        if (status !== "completed") return;
+        if (!enableProviders || status !== "completed") return;
         const turn = store.agentTurn(turnId);
         if (backendProfileController.isExternalSelection(turn.modelSelection)) return;
         const current = providers.cachedMetadata(providerId);
@@ -683,6 +685,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createIssueReportCommandHandler({ store, isolatedRuns, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,
@@ -870,7 +873,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     }
   };
-
   const webSocketBoundary = attachRuntimeWebSocketBoundary({
     server,
     websocketPath,

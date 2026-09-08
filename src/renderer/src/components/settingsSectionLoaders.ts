@@ -36,3 +36,7 @@ export function prefetchSettingsSection(section: string): void {
     void loadDiscordSettings();
   }
 }
+
+export const loadIssueReportSettings = createSurfaceLoader(async () => ({
+  default: (await import("./IssueReportSettings")).IssueReportSettings,
+}));

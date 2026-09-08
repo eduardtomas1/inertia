@@ -1,5 +1,12 @@
-import type { ModelSelection } from "../../../shared/model-routing";
-import type { ModelSearchRoute } from "./modelSearch";
+import {
+  fastModeProviderValue,
+  routeSupportsNativeFastModeIdentity,
+  withModelSelectionFastMode,
+  type ContinuationIdentity,
+  type ModelSelection,
+} from "../../../shared/model-routing";
+import type { ModelFavoriteConfiguration, ModelSearchRoute } from "./modelSearch";
+export type { ModelFavoriteConfiguration } from "./modelSearch";
 
 export const MODEL_FAVORITES_STORAGE_KEY = "inertia:model-favorites:v2";
 export const MAX_MODEL_FAVORITES = 24;
@@ -12,7 +19,7 @@ const boundedReasoningEffort = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u;
 export type ModelFavoriteReference = Pick<
   ModelSelection,
   "harnessId" | "backendProfileId" | "modelId" | "reasoningEffort"
->;
+> & { configuration?: ModelFavoriteConfiguration };
 
 export interface ModelFavoriteStorage {
   getItem: (key: string) => string | null;
@@ -51,6 +58,25 @@ function parsedReference(
   ) {
     return null;
   }
+  let configuration: ModelFavoriteConfiguration | undefined;
+  if (!legacy && candidate.configuration !== undefined) {
+    if (!candidate.configuration || typeof candidate.configuration !== "object") return null;
+    const saved = candidate.configuration as Record<string, unknown>;
+    if (
+      !["supervised", "auto-edit", "full"].includes(saved.accessMode as string)
+      || !["build", "plan"].includes(saved.interactionMode as string)
+      || (saved.fastMode !== undefined && typeof saved.fastMode !== "boolean")
+      || (saved.fastMode !== undefined && !routeSupportsNativeFastModeIdentity({
+        harnessId: candidate.harnessId,
+        backendProfileId: candidate.backendProfileId,
+      }))
+    ) return null;
+    configuration = {
+      accessMode: saved.accessMode as ModelFavoriteConfiguration["accessMode"],
+      interactionMode: saved.interactionMode as ModelFavoriteConfiguration["interactionMode"],
+      ...(saved.fastMode !== undefined ? { fastMode: saved.fastMode as boolean } : {}),
+    };
+  }
   return {
     harnessId: candidate.harnessId,
     backendProfileId: candidate.backendProfileId,
@@ -58,6 +84,7 @@ function parsedReference(
     reasoningEffort: legacy
       ? null
       : candidate.reasoningEffort as string | null,
+    ...(configuration ? { configuration } : {}),
   };
 }
 
@@ -93,6 +120,8 @@ export function modelFavoriteKey(reference: ModelFavoriteReference): string {
     reference.backendProfileId,
     reference.modelId,
     reference.reasoningEffort,
+    ...(reference.configuration ? [reference.configuration.accessMode,
+      reference.configuration.interactionMode, reference.configuration.fastMode ?? null] : []),
   ]);
 }
 
@@ -184,19 +213,35 @@ export function resolveModelFavorites<Route extends ModelSearchRoute>(
         Array.isArray(reasoningOptions)
         && reasoningOptions.includes(reference.reasoningEffort)
       );
-    const route = baseRoute && reasoningSupported
+    const fastSupported = reference.configuration?.fastMode !== true
+      || (baseRoute && "supportsNativeFastModeControl" in baseRoute
+        && baseRoute.supportsNativeFastModeControl === true);
+    let selection = baseRoute && "selection" in baseRoute
+      ? { ...(baseRoute.selection as ModelSelection), reasoningEffort: reference.reasoningEffort }
+      : null;
+    if (selection && reference.configuration?.fastMode !== undefined) {
+      selection = withModelSelectionFastMode(selection, reference.configuration.fastMode
+        ? reference.harnessId === "codex-app-server" ? "priority" : "fast"
+        : null);
+    }
+    const route = baseRoute && reasoningSupported && fastSupported
       ? {
           ...baseRoute,
           key,
           reasoningEffort: reference.reasoningEffort,
-          ...("selection" in baseRoute
-            ? {
-                selection: {
-                  ...(baseRoute.selection as ModelSelection),
-                  reasoningEffort: reference.reasoningEffort,
-                },
-              }
-            : {}),
+          configuration: reference.configuration,
+          ...(selection ? { selection } : {}),
+          ...(reference.configuration?.fastMode !== undefined && selection ? {
+            responseSpeed: reference.configuration.fastMode ? "Fast" : "Standard",
+            speedChangeNote: undefined,
+            ...("continuationIdentity" in baseRoute ? {
+              continuationIdentity: {
+                ...(baseRoute.continuationIdentity as ContinuationIdentity),
+                performanceModeIdentity: fastModeProviderValue(selection)
+                  ? `fast:${fastModeProviderValue(selection)}` : null,
+              },
+            } : {}),
+          } : {}),
         } as Route
       : null;
     return {

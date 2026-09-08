@@ -544,6 +544,7 @@ function startClaudeRun(
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
+          ...(options.input.toolRestriction === "none" ? { mcpServers: {}, strictMcpConfig: true } : {}),
           ...(claudeHostTools
             ? {
                 mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },

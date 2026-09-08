@@ -846,6 +846,10 @@ export const Composer = memo(function Composer({
       setRouteCreationError(null);
       setPendingRoute({
         selection: transition.selection,
+        ...(route.configuration ? { configuration: {
+          accessMode: route.configuration.accessMode,
+          interactionMode: route.configuration.interactionMode,
+        } } : {}),
         label: `${route.backendProfileName} · ${route.displayName}`,
         reason: transition.reason,
         sourceConversationId: conversation.id,
@@ -870,6 +874,10 @@ export const Composer = memo(function Composer({
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
+      ...(route.configuration ? {
+        accessMode: route.configuration.accessMode,
+        interactionMode: route.configuration.interactionMode,
+      } : {}),
     });
   };
   const updatePromptStash = (
@@ -1057,7 +1065,10 @@ export const Composer = memo(function Composer({
             const prefillText = message.trim() ? message : undefined;
             void onCreateConversationForSelection(
               pendingRoute.selection,
-              prefillText ? { prefillText } : undefined,
+              prefillText || pendingRoute.configuration ? {
+                ...(prefillText ? { prefillText } : {}),
+                ...(pendingRoute.configuration ? { configuration: pendingRoute.configuration } : {}),
+              } : undefined,
             ).then(
               () => {
                 setPendingRoute(null);

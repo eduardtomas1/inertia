@@ -1,259 +1,295 @@
-name: Provider contract drift
+name: Windows v54 installed-upgrade preflight
 
 on:
-  schedule:
-    - cron: "17 5 * * 1"
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed v0.0.54 preview source commit (40 lowercase hex)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: provider-contract-drift
-  cancel-in-progress: true
-
 jobs:
-  provider-drift:
-    name: Latest provider compatibility canary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    continue-on-error: true
-    permissions:
-      contents: read
-    outputs:
-      failed: ${{ steps.collect.outputs.failed }}
-      guardian_toolchain: ${{ steps.guardian_toolchain.outcome }}
-      locked_install: ${{ steps.locked_install.outcome }}
-      locked_tests: ${{ steps.locked_tests.outcome }}
-      cursor_install: ${{ steps.cursor_install.outcome }}
-      latest_probe: ${{ steps.latest_probe.outcome }}
-      latest_versions: ${{ steps.collect.outputs.latest_versions }}
+  installed-upgrade:
+    name: Published v53 to preview v54 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x64
+            platform: windows-x64
+            package_script: package:release:win
+            app_path: release/win-unpacked/Inertia.exe
+            asset: Inertia.Setup.0.0.54.exe
+          - runner: windows-11-arm
+            arch: arm64
+            platform: windows-arm64
+            package_script: package:release:win:arm64
+            app_path: release/win-arm64-unpacked/Inertia.exe
+            asset: Inertia.Setup.0.0.54.arm64.exe
     env:
       CI: "true"
+      INERTIA_RELEASE_CHANNEL: stable
+      INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
+      RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      EXPECTED_ARCH: ${{ matrix.arch }}
 
     steps:
-      - name: Check out source
+      - name: Require the reviewed source and diagnostic scope
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == eduardtomas1/inertia ]]
+          [[ "$GITHUB_REF" == refs/heads/codex/validation-windows-v54-installed-upgrade ]]
+          [[ "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_SOURCE_SHA" == 6b382ce100472d77d33f6cba547f7aaad04e6353 ]]
+          printf 'PREFLIGHT_EVIDENCE=%s/inertia-v54-windows-preflight\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'INERTIA_RELEASE_STAGE_DIR=%s/inertia-v54-windows-stage\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      # The workflow comes from the diagnostic ref. The package, downloader and
+      # complete installer smoke come from the exact clean preview, unchanged.
+      - name: Check out the exact preview source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Node.js
+      - name: Set up release Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version: 22.23.2
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Linux guardian toolchain
-        id: guardian_toolchain
+      - name: Verify source, native runner and all manifest versions
+        id: source
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SOURCE_SHA" ]]
+          [[ "$(git rev-parse 'HEAD^{tree}')" == 572a1756e49f57709e43aa53368115eb373bf65b ]]
+          git diff --exit-code
+          node --input-type=module <<'JS'
+          import { strict as assert } from 'node:assert';
+          import { createHash } from 'node:crypto';
+          import { mkdir, readFile, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const manifest = JSON.parse(await readFile('package.json', 'utf8'));
+          const lockBytes = await readFile('package-lock.json');
+          const lock = JSON.parse(lockBytes);
+          assert.equal(process.platform, 'win32');
+          assert.equal(process.arch, process.env.EXPECTED_ARCH);
+          assert.equal(process.version, 'v22.23.2');
+          assert.deepEqual([manifest.version, lock.version, lock.packages[''].version], ['0.0.54', '0.0.54', '0.0.54']);
+          await mkdir(process.env.PREFLIGHT_EVIDENCE, { recursive: true });
+          await writeFile(join(process.env.PREFLIGHT_EVIDENCE, 'source.json'), JSON.stringify({
+            schema: 1, purpose: 'preview-installed-upgrade-preflight', sourceSha: process.env.RELEASE_SOURCE_SHA,
+            sourceTree: '572a1756e49f57709e43aa53368115eb373bf65b', currentVersion: '0.0.54', predecessorVersion: '0.0.53',
+            platform: process.platform, architecture: process.arch, node: process.version,
+            lockSha256: createHash('sha256').update(lockBytes).digest('hex'),
+            signing: 'unsigned-manual-install', finalMainOrTagCertification: false,
+          }, null, 2) + '\n', { flag: 'wx' });
+          JS
+
+      - name: Match native CI temporary directories
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+
+      - name: Match native CI Defender exclusions
+        shell: pwsh
         continue-on-error: true
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 
-      - name: Install the product's locked dependency graph
-        id: locked_install
-        continue-on-error: true
+      - name: Install the release locked dependencies
         run: npm ci
 
-      - name: Exercise locked provider types and protocol fixtures
-        id: locked_tests
-        if: >-
-          steps.guardian_toolchain.outcome == 'success'
-          && steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        run: |
-          npm run pretest
-          npm run typecheck
-          npm run test:portable
+      # Normal release npm test invokes this hook; omit unrelated units here,
+      # but retain the exact native helpers before bundling on BOTH runners.
+      - name: Build native runtime helpers
+        run: npm run pretest
 
-      - name: Resolve and download the latest official Cursor CLI in isolation
-        id: cursor_install
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/provider-drift"
-          installer="${RUNNER_TEMP}/provider-drift/cursor-install.sh"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            https://cursor.com/install \
-            --output "$installer"
-          sha256sum "$installer"
-          download_url="$(
-            sed -n 's/^DOWNLOAD_URL="\(https:\/\/[^"]*\)"/\1/p' "$installer"
-          )"
-          download_url="${download_url/\$\{OS\}/linux}"
-          download_url="${download_url/\$\{ARCH\}/x64}"
-          case "$download_url" in
-            https://downloads.cursor.com/*/linux/x64/agent-cli-package.tar.gz) ;;
-            *) echo "Unexpected Cursor download URL: $download_url" >&2; exit 1 ;;
-          esac
-          archive="${RUNNER_TEMP}/provider-drift/cursor-agent.tar.gz"
-          cursor_root="${RUNNER_TEMP}/provider-drift/cursor"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            "$download_url" \
-            --output "$archive"
-          sha256sum "$archive"
-          mkdir -p "$cursor_root"
-          tar --extract --gzip --file "$archive" --strip-components=1 --directory "$cursor_root"
-          cursor_agent="$cursor_root/cursor-agent"
-          test -x "$cursor_agent"
-          printf 'cursor_agent=%s\n' "$cursor_agent" >> "$GITHUB_OUTPUT"
-
-      - name: Probe latest SDK types, runtime surfaces, and official CLI help
-        id: latest_probe
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
+      - name: Verify native dependency architecture
+        id: architecture
         env:
-          CURSOR_AGENT: ${{ steps.cursor_install.outputs.cursor_agent }}
-        run: |
-          set -euo pipefail
-          probe_args=(
-            --workspace "${RUNNER_TEMP}/provider-drift/npm"
-            --report "${RUNNER_TEMP}/provider-drift/report.json"
-          )
-          if [[ -n "$CURSOR_AGENT" ]]; then
-            probe_args+=(--cursor-agent "$CURSOR_AGENT")
-          fi
-          node scripts/provider-drift-probe.mjs "${probe_args[@]}"
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
 
-      - name: Collect privacy-limited canary result
-        id: collect
-        if: always()
-        shell: bash
+      - name: Build the application bundle once
+        run: npm run build:packaged
+
+      - name: Build the native release package without publishing
         env:
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ steps.guardian_toolchain.outcome }}
-          LOCKED_INSTALL_OUTCOME: ${{ steps.locked_install.outcome }}
-          LOCKED_TESTS_OUTCOME: ${{ steps.locked_tests.outcome }}
-          CURSOR_INSTALL_OUTCOME: ${{ steps.cursor_install.outcome }}
-          LATEST_PROBE_OUTCOME: ${{ steps.latest_probe.outcome }}
+          PACKAGE_SCRIPT: ${{ matrix.package_script }}
         run: |
           set -euo pipefail
-          failed=false
-          for outcome in \
-            "$GUARDIAN_TOOLCHAIN_OUTCOME" \
-            "$LOCKED_INSTALL_OUTCOME" \
-            "$LOCKED_TESTS_OUTCOME" \
-            "$CURSOR_INSTALL_OUTCOME" \
-            "$LATEST_PROBE_OUTCOME"
-          do
-            if [[ "$outcome" == "failure" ]]; then
-              failed=true
+          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              unset "$name"
             fi
           done
-          report="${RUNNER_TEMP}/provider-drift/report.json"
-          versions="$(
-            node -e '
-              const fs = require("node:fs");
-              const allowed = new Set([
-                "@agentclientprotocol/sdk",
-                "@anthropic-ai/claude-agent-sdk",
-                "@anthropic-ai/sdk",
-                "@modelcontextprotocol/sdk",
-                "@opencode-ai/sdk",
-                "@openai/codex",
-                "@anthropic-ai/claude-code",
-                "@google/gemini-cli",
-                "@moonshot-ai/kimi-code",
-                "opencode-ai",
-              ]);
-              let report = {};
-              try { report = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
-              const values = Object.entries(report.latestPackages ?? {})
-                .filter(([name, version]) =>
-                  allowed.has(name) &&
-                  typeof version === "string" &&
-                  /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)
-                )
-                .map(([name, version]) => name + "@" + version);
-              process.stdout.write(values.join(", "));
-            ' "$report"
-          )"
-          printf 'failed=%s\n' "$failed" >> "$GITHUB_OUTPUT"
-          printf 'latest_versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
+          npm run "$PACKAGE_SCRIPT"
 
-  report-failure:
-    name: Report provider compatibility failure
-    needs: provider-drift
-    if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    continue-on-error: true
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Open or update the provider drift issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Normalize the exact Windows release filename
         env:
-          PROVIDER_DRIFT_RESULT: ${{ needs.provider-drift.result }}
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ needs.provider-drift.outputs.guardian_toolchain }}
-          LOCKED_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.locked_install }}
-          LOCKED_TESTS_OUTCOME: ${{ needs.provider-drift.outputs.locked_tests }}
-          CURSOR_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.cursor_install }}
-          LATEST_PROBE_OUTCOME: ${{ needs.provider-drift.outputs.latest_probe }}
-          LATEST_VERSIONS: ${{ needs.provider-drift.outputs.latest_versions }}
+          EXPECTED_ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          expected="release/$EXPECTED_ASSET"
+          if [[ ! -f "$expected" ]]; then
+            mapfile -d '' -t generated < <(find release -maxdepth 1 -type f -name '*.exe' -print0)
+            if [[ "${#generated[@]}" -ne 1 ]]; then
+              echo "Expected exactly one generated Windows installer; found ${#generated[@]}." >&2
+              exit 1
+            fi
+            cp -- "${generated[0]}" "$expected"
+          fi
+
+      - name: Verify packaged Electron fuses
+        id: fuses
+        env:
+          APP_PATH: ${{ matrix.app_path }}
+        run: |
+          set -euo pipefail
+          test -e "$APP_PATH"
+          npm run verify:fuses -- "$APP_PATH"
+
+      # stage is a local integrity operation only. This policy label creates no
+      # Git tag, release or public asset; no finalize/publication step exists.
+      - name: Validate and hash the candidate with the existing release staging contract
+        id: candidate
+        env:
+          RELEASE_TAG: v0.0.54
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"
+          node --input-type=module <<'JS'
+          import { strict as assert } from 'node:assert';
+          import { lstat, readFile, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const path = join(process.env.INERTIA_RELEASE_STAGE_DIR, process.env.RELEASE_PLATFORM, 'manifest.json');
+          const stat = await lstat(path);
+          assert(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= 8192);
+          const value = JSON.parse(await readFile(path, 'utf8'));
+          assert.equal(value.version, '0.0.54');
+          assert.equal(value.sourceSha, process.env.RELEASE_SOURCE_SHA);
+          assert.equal(value.platform, process.env.RELEASE_PLATFORM);
+          assert.deepEqual(value.updateCapability, { delivery: 'manual', reason: 'windows-signing-unavailable' });
+          assert.equal(value.assets.length, 1);
+          const asset = value.assets[0];
+          const expectedName = `Inertia.Setup.0.0.54${process.arch === 'arm64' ? '.arm64' : ''}.exe`;
+          assert.equal(asset.name, expectedName);
+          assert(Number.isSafeInteger(asset.size) && asset.size > 0 && asset.size <= 512 * 1024 * 1024);
+          assert.match(asset.sha256, /^[0-9a-f]{64}$/);
+          await writeFile(join(process.env.PREFLIGHT_EVIDENCE, 'candidate.json'), JSON.stringify({
+            schema: 1, sourceSha: value.sourceSha, version: value.version, architecture: process.arch,
+            assetName: asset.name, byteLength: asset.size, sha256: asset.sha256, delivery: 'manual',
+          }, null, 2) + '\n', { flag: 'wx' });
+          JS
+          git diff --exit-code -- package.json package-lock.json src scripts
+
+      - name: Download the checksummed published Windows N-1 installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          node scripts/ci/download-windows-n-minus-one.mjs \
+            --current-version "$current_version" \
+            --channel stable \
+            --architecture "$EXPECTED_ARCH" \
+            --output-directory release/n-minus-one
+
+      - name: Require exactly published v0.0.53 of the native architecture
+        id: predecessor
+        run: |
+          node --input-type=module <<'JS'
+          import { strict as assert } from 'node:assert';
+          import { lstat, readFile, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const stat = await lstat('release/n-minus-one/metadata.json');
+          assert(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= 8192);
+          const value = JSON.parse(await readFile('release/n-minus-one/metadata.json', 'utf8'));
+          assert.equal(value.schemaVersion, 1);
+          assert.equal(value.repository, 'eduardtomas1/inertia');
+          assert.equal(value.currentVersion, '0.0.54');
+          assert.equal(value.version, '0.0.53');
+          assert.equal(value.tag, 'v0.0.53');
+          assert.equal(value.channel, 'stable');
+          assert.equal(value.architecture, process.arch);
+          assert.equal(value.assetName, `Inertia.Setup.0.0.53${process.arch === 'arm64' ? '.arm64' : ''}.exe`);
+          assert(Number.isSafeInteger(value.byteLength) && value.byteLength > 0 && value.byteLength <= 512 * 1024 * 1024);
+          assert.match(value.sha256, /^[0-9a-f]{64}$/);
+          await writeFile(join(process.env.PREFLIGHT_EVIDENCE, 'predecessor.json'), JSON.stringify({
+            schema: 1, repository: value.repository, tag: value.tag, version: value.version, currentVersion: value.currentVersion,
+            architecture: value.architecture, assetName: value.assetName, byteLength: value.byteLength, sha256: value.sha256,
+          }, null, 2) + '\n', { flag: 'wx' });
+          JS
+
+      - name: Smoke the exact native unpacked application
+        id: unpacked
+        env:
+          INERTIA_PACKAGE_BENCHMARK_REPORT: ${{ runner.temp }}/inertia-v54-windows-preflight/unpacked-smoke.json
+        run: npm run test:package-smoke
+
+      - name: Install v53, upgrade in place to v54, smoke retained history, and uninstall
+        id: installed
+        env:
+          INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
+          INERTIA_PACKAGE_BENCHMARK_REPORT: ${{ runner.temp }}/inertia-v54-windows-preflight/last-installed-smoke.json
+        run: npm run test:windows-installer-smoke
+
+      # This is metadata only, including on failure; never launch more native
+      # work or remove a quarantined fixture after an unconfirmed smoke close.
+      - name: Record exact check outcomes without hiding failures
+        if: ${{ always() && steps.source.outcome == 'success' }}
+        env:
+          ARCHITECTURE_OUTCOME: ${{ steps.architecture.outcome }}
+          FUSES_OUTCOME: ${{ steps.fuses.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.candidate.outcome }}
+          PREDECESSOR_OUTCOME: ${{ steps.predecessor.outcome }}
+          UNPACKED_OUTCOME: ${{ steps.unpacked.outcome }}
+          INSTALLED_OUTCOME: ${{ steps.installed.outcome }}
+        run: |
+          node --input-type=module <<'JS'
+          import { strict as assert } from 'node:assert';
+          import { writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const checks = Object.fromEntries(['ARCHITECTURE', 'FUSES', 'CANDIDATE', 'PREDECESSOR', 'UNPACKED', 'INSTALLED'].map((name) => {
+            const outcome = process.env[`${name}_OUTCOME`];
+            assert(['success', 'failure', 'cancelled', 'skipped'].includes(outcome));
+            return [name.toLowerCase(), outcome];
+          }));
+          await writeFile(join(process.env.PREFLIGHT_EVIDENCE, 'result.json'), JSON.stringify({
+            schema: 1, sourceSha: process.env.RELEASE_SOURCE_SHA, platform: process.platform, architecture: process.arch,
+            currentVersion: '0.0.54', predecessorVersion: '0.0.53', checks,
+            installedUpgradePassed: Object.values(checks).every((outcome) => outcome === 'success'),
+            scope: 'Exact preview source, actual published predecessor, unsigned native manual installed upgrade; final main and tag certification still required.',
+          }, null, 2) + '\n', { flag: 'wx' });
+          JS
+
+      - name: Upload only bounded identity and smoke metadata
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          script: |
-            const title = "Weekly provider compatibility canary failed";
-            const marker = "<!-- inertia-provider-contract-drift -->";
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const outcomes = [
-              ["Canary job", process.env.PROVIDER_DRIFT_RESULT],
-              ["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME],
-              ["Locked dependency install", process.env.LOCKED_INSTALL_OUTCOME],
-              ["Locked type and protocol suite", process.env.LOCKED_TESTS_OUTCOME],
-              ["Isolated Cursor CLI install", process.env.CURSOR_INSTALL_OUTCOME],
-              ["Latest SDK and CLI probe", process.env.LATEST_PROBE_OUTCOME],
-            ];
-            const versions = (process.env.LATEST_VERSIONS || "")
-              .split(", ")
-              .filter(Boolean)
-              .map((value) => `- \`${value}\``)
-              .join("\n");
-            const body = [
-              marker,
-              "The secret-free weekly provider compatibility canary failed.",
-              "",
-              `[Inspect the workflow run](${runUrl})`,
-              "",
-              "### Step outcomes",
-              ...outcomes.map(([name, outcome]) => `- ${name}: **${outcome || "unavailable"}**`),
-              "",
-              "### Resolved latest packages",
-              versions || "- Unavailable because installation did not complete.",
-              "",
-              "The issue intentionally contains no raw CLI output, environment values, prompts,",
-              "workspace content, paths, credentials, or diagnostics. Use the linked secret-free",
-              "runner log for bounded command output.",
-            ].join("\n");
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo,
-              state: "all",
-              per_page: 100,
-            });
-            const existing = issues.find((issue) =>
-              !issue.pull_request &&
-              (issue.title === title || issue.body?.includes(marker))
-            );
-            if (!existing) {
-              await github.rest.issues.create({ ...context.repo, title, body });
-              return;
-            }
-            if (existing.state !== "open") {
-              await github.rest.issues.update({
-                ...context.repo,
-                issue_number: existing.number,
-                state: "open",
-              });
-            }
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: existing.number,
-              body,
-            });
+          name: windows-v54-installed-upgrade-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/inertia-v54-windows-preflight/source.json
+            ${{ runner.temp }}/inertia-v54-windows-preflight/candidate.json
+            ${{ runner.temp }}/inertia-v54-windows-preflight/predecessor.json
+            ${{ runner.temp }}/inertia-v54-windows-preflight/unpacked-smoke.json
+            ${{ runner.temp }}/inertia-v54-windows-preflight/last-installed-smoke.json
+            ${{ runner.temp }}/inertia-v54-windows-preflight/result.json
+          retention-days: 7
+          if-no-files-found: warn

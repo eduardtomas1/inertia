@@ -49,6 +49,19 @@ function signedRecord(record: Record<string, unknown>): string {
 }
 
 describe("runtime diagnostics", () => {
+  it("retains a fixed first-cause probe through journal reload and support export", () => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.recordRestartRequested({ type: "runtime.restart-requested", reason: "owned-process-tainted",
+      diagnostic: { stage: "linux-stop", probe: "codex-control" } }, 1);
+    const report = new RuntimeDiagnostics(directory).supportReport({
+      version: "0.0.54", platform: "linux", architecture: "x64", runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain("stage=linux-stop");
+    expect(report.text).toContain("probe=codex-control");
+  });
+
   it("logs only allowlisted lifecycle fields and redacts unsafe failure values", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);
@@ -84,7 +97,7 @@ describe("runtime diagnostics", () => {
     const directory = runtimeDiagnosticsDirectory(fixture());
     const diagnostics = new RuntimeDiagnostics(directory);
     diagnostics.record("runtime.restart-requested", { generation: 1, reason: "owned-process-tainted",
-      stage: "PRIVATE", signal: "PRIVATE", exitCode: 256, argv: ["PRIVATE"] });
+      stage: "PRIVATE", signal: "PRIVATE", exitCode: 256, probe: "/PRIVATE/provider", argv: ["PRIVATE"] });
     diagnostics.record("runtime.restart-requested", { generation: 2, reason: "owned-process-cleanup-unconfirmed",
       stage: "darwin-guardian-close", signal: "SIGKILL", stderr: "PRIVATE" });
     diagnostics.record("runtime.restart-requested", { generation: -1, reason: "owned-process-tainted" });
@@ -162,6 +175,7 @@ describe("runtime diagnostics", () => {
 
   it.each([
     "Runtime initialization failed (git-timeout). Runtime shutdown could not confirm cleanup after incomplete startup.",
+    "The runtime restarted because owned process containment could not be confirmed. (stage=linux-stop, probe=codex-control)",
     "Runtime startup completion failed (filesystem-permission). Runtime shutdown failed while closing local resources.",
     "The runtime restarted because owned process containment could not be confirmed. (stage=darwin-readiness, signal=SIGKILL, exit-code=1) Runtime shutdown could not confirm cleanup after incomplete startup.",
   ])("retains the validated initiating failure in persisted support evidence: %s", (message) => {

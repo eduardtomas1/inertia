@@ -56,7 +56,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force diagnostic-results/tools | Out-Null
-          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo /optimize+ /target:exe /reference:System.Web.Extensions.dll /out:diagnostic-results/tools/cleanup-snapshot.exe scripts/diagnostics/windows-runtime-cleanup-snapshot.cs
+          $source = Join-Path $env:GITHUB_WORKSPACE 'scripts\diagnostics\windows-runtime-cleanup-snapshot.cs'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'diagnostic-results\tools\cleanup-snapshot.exe'
+          $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          & $compiler /nologo /optimize+ /target:exe /reference:System.Web.Extensions.dll "/out:$output" $source
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic helper compilation failed' }
       - name: Runtime integration sequence 1 of 5
         id: sample1

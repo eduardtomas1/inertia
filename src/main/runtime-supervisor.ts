@@ -31,7 +31,7 @@ import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
   claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
-  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recordRuntimeShutdownFailure, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
+  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recordRuntimeShutdownFailure, recoverUnconfirmedRuntimeCleanup, runtimeRecordAcceptsBrokerRequests, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from "../node/runtime-shutdown-deadline.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js"; import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
@@ -709,6 +709,13 @@ export class RuntimeSupervisor {
     }
     if (event.type === "runtime.restart-requested") {
       recordRuntimeRestartRequested(record, event, this.onRestartRequested);
+      record.acceptingReady = false;
+      record.ready = false;
+      this.websocketUrl = null;
+      this.clearTimerValue("stableTimer");
+      this.phase = this.desiredRunning ? "restarting" : "stopping";
+      this.lastError = record.reportedFailure;
+      this.emitState();
       return;
     }
     if (event.type === "runtime.startup-failed") {
@@ -1061,6 +1068,13 @@ export class RuntimeSupervisor {
   }
   private scheduleRestart(): void {
     if (!this.desiredRunning || this.current || this.restartTimer) return;
+    if (this.restartAttempt >= runtimeSupervisorDefaults.maxConsecutiveRestarts) {
+      this.restartBlocked = true;
+      this.desiredRunning = false;
+      this.phase = "stopped";
+      this.emitState();
+      return;
+    }
     const delay = runtimeRestartDelayMs(this.restartAttempt);
     this.restartAttempt += 1;
     this.phase = "restarting";
@@ -1181,14 +1195,7 @@ export class RuntimeSupervisor {
     this.privateConnectPrompts.reject(record, message);
   }
   private acceptsBrokerRequests(record: RuntimeProcessRecord): boolean {
-    return this.current === record
-      && this.desiredRunning
-      && record.acceptingReady
-      && (
-        this.phase === "starting"
-        || this.phase === "restarting"
-        || this.phase === "ready"
-      );
+    return runtimeRecordAcceptsBrokerRequests(record, this.current, this.desiredRunning, this.phase);
   }
   private requiresExplicitModernDarwinRecovery(): boolean {
     return process.platform === "darwin"

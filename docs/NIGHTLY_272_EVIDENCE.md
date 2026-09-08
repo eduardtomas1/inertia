@@ -25,8 +25,28 @@ tested `889970d8fd09d25159b9b36b070394fb910b3f79`.
   fixture database. PR 270 independently reproduced and fixed premature success
   from concurrent/later runtime close calls and retained failed teardown owners
   instead of allowing subsequent tests to retarget them. Those changes do not
-  establish why the original `taskkill` returned 128. That first cause remains
-  unproven; PID absence and a later passing test are not process-tree proof.
+  establish why the original `taskkill` returned 128 or identify the original
+  `EBUSY` lock holder. Those first causes remain unproven; PID absence and a
+  later passing test are not process-tree proof.
+
+## Independently reproduced missing lifecycle suite
+
+The first local macOS repetition run selected seven suites in its summary but
+executed only six files / 111 tests in each of three attempts. The Darwin list
+referenced nonexistent `tests/main/terminal-darwin-shutdown.test.ts`; the actual
+suite is `tests/server/terminal-darwin-shutdown.test.ts`. Vitest treats command-line
+filenames as filters, so the other matching files could pass while this intended
+suite silently disappeared. Exit zero did not establish complete selection.
+
+The candidate corrects that path and checks that every selected suite is a
+regular file before constructing the bounded invocation. Missing, unreadable,
+directory and symlink entries fail before a child is launched. Tests verify
+that all three platform lists name existing files and that missing/non-file
+entries reject instead of reaching Vitest. These checks failed before the fix.
+The repetition count, six-minute attempt deadline, output bound, process-tree
+wrapper, retained outcomes and mixed-result failure policy remain unchanged.
+This is a scheduled-certification coverage defect, distinct from the original
+Windows launch error and the newer empty catalog observation.
 
 ## Newer occurrence
 

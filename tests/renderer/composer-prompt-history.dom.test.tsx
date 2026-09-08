@@ -184,6 +184,18 @@ afterEach(() => {
 });
 
 describe("composer prompt history", () => {
+  it("recalls consecutive prompts before the next animation frame", () => {
+    render(<Composer {...props({ conversation: conversation("history-fast-repeat") })} />);
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Latest prompt");
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Middle prompt");
+    press(input, "ArrowUp");
+    expect(input).toHaveValue("Oldest prompt");
+  });
+
   it.each(["focus", "conversation", "edit"])("does not apply a queued history caret after a newer %s", (change) => {
     const frames: FrameRequestCallback[] = [];
     const rendered = render(<Composer {...props({ conversation: conversation("queued-history-a") })} />);
@@ -295,7 +307,7 @@ describe("composer prompt history", () => {
     const onSend = vi.fn(async () => undefined);
     const baseProps = props({ conversation: current, onSend });
     const view = render(<Composer {...baseProps} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
 
     press(input, "ArrowUp");
     fireEvent.change(input, { target: { value: "Edited and resent prompt" } });
@@ -322,6 +334,7 @@ describe("composer prompt history", () => {
     />);
     press(input, "ArrowUp");
     expect(input).toHaveValue("Edited and resent prompt");
+    input.setSelectionRange(input.value.length, input.value.length);
     press(input, "ArrowDown");
     expect(input).toHaveValue("");
   });
@@ -335,7 +348,7 @@ describe("composer prompt history", () => {
       conversation: conversation("history-submitting"),
       onSend,
     })} />);
-    const input = screen.getByRole("textbox", { name: "Message" });
+    const input = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Submitting draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledOnce());

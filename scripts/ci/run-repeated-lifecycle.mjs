@@ -1,4 +1,4 @@
-import { createWriteStream } from "node:fs";
+import { createWriteStream, lstatSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { resolve } from "node:path";
@@ -24,7 +24,7 @@ const PLATFORM_SUITES = {
   darwin: [
     "tests/main/runtime-live-darwin-recovery.test.ts",
     "tests/main/runtime-owned-process-darwin-helper.test.ts",
-    "tests/main/terminal-darwin-shutdown.test.ts",
+    "tests/server/terminal-darwin-shutdown.test.ts",
   ],
   linux: [
     "tests/main/app-update-startup.test.ts",
@@ -168,6 +168,15 @@ export async function runLifecycleAttempt({
 }
 
 export function repeatedLifecycleInvocation(suites) {
+  for (const suite of suites) {
+    try {
+      if (lstatSync(new URL(`../../${suite}`, import.meta.url)).isFile()) continue;
+    } catch {
+      // Missing or unreadable entries must fail before Vitest can silently
+      // ignore a stale filename among its other command-line filters.
+    }
+    throw new Error("A selected lifecycle suite is missing or not a regular file.");
+  }
   // npm.cmd cannot be started by the shell-free Windows Job trampoline.
   // Use the locked local runner directly on every platform.
   return {

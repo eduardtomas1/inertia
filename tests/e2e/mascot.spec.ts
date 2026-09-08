@@ -165,16 +165,23 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       })).toEqual(focusBeforeDrag);
       // Control the CSS transition clock, so early-release coverage does not
       // depend on whether a loaded native CI host responds within 400ms.
-      await overlay.locator(".mascot-lift").evaluate((element) => {
+      const reversal = await overlay.locator(".mascot-lift").evaluateHandle((element) => {
         const main = element.closest("main")!;
+        let pickedUp = false;
+        let visibility: string | undefined;
         const observer = new MutationObserver(() => {
-          if (main.dataset.dragging !== "true") return;
-          observer.disconnect();
-          for (const animation of element.getAnimations()) {
-            if (animation instanceof CSSTransition && animation.transitionProperty === "background-position-x") animation.pause();
+          if (main.dataset.dragging === "true") {
+            pickedUp = true;
+            for (const animation of element.getAnimations()) {
+              if (animation instanceof CSSTransition && animation.transitionProperty === "background-position-x") animation.pause();
+            }
+          } else if (pickedUp) {
+            visibility = getComputedStyle(element).visibility;
+            observer.disconnect();
           }
         });
         observer.observe(main, { attributes: true, attributeFilter: ["data-dragging"] });
+        return { visibility: () => visibility };
       });
       await overlay.mouse.down();
       await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
@@ -188,7 +195,10 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       expect(partial).toBeLessThan(0);
       expect(partial).toBeGreaterThan(-1152);
       await overlay.mouse.up();
-      await expect(overlay.locator(".mascot-lift")).toHaveCSS("visibility", "visible");
+      // Read visibility at the state change, not after a delayed transition
+      // could have finished and hidden the entire landing from the user.
+      await expect.poll(() => reversal.evaluate((value) => value.visibility())).toBe("visible");
+      await reversal.dispose();
       expect(await overlay.locator(".mascot-lift").evaluate((element) =>
         Number.parseFloat(getComputedStyle(element).backgroundPositionX))).toBeGreaterThanOrEqual(partial);
       await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "0px");

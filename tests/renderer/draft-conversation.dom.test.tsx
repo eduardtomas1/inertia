@@ -116,6 +116,30 @@ describe("useDraftConversation", () => {
     });
   });
 
+  it("restores a draft's identity and composer storage after a cross-project search", () => {
+    const values = new Map<string, string>();
+    vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);
+    vi.mocked(window.localStorage.setItem).mockImplementation((key, value) => { values.set(key, value); });
+    const other = { ...project, id: "33333333-3333-4333-8333-333333333333" };
+    const run = vi.fn();
+    let current = { ...snapshot, projects: [project, other] };
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: current, settings: defaultSettings, run, sendMessage: vi.fn(),
+      persistedConversationId: conversationId, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    const original = hook.result.current.conversation!;
+    window.localStorage.setItem(`inertia:draft:${original.id}`, "Unsent prompt");
+    act(() => hook.result.current.clear());
+    current = { ...current, activeProjectId: other.id };
+    hook.rerender();
+    expect(hook.result.current.conversation).toBeNull();
+    act(() => hook.result.current.start(other.id, true, true));
+    expect(hook.result.current.conversation).toMatchObject({ id: original.id, projectId, modelSelection: original.modelSelection });
+    expect(window.localStorage.getItem(`inertia:draft:${original.id}`)).toBe("Unsent prompt");
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("starts from the project backend default before the global default", () => {
     const globalSelection = providerNativeModelSelection({
       providerId: "codex",

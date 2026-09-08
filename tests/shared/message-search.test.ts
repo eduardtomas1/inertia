@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { clientCommandSchema } from "../../src/shared/contracts";
 import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
-import { messageSearchExcerpt, messageSearchPattern, messageSearchQuerySchema, messageSearchResultSchema } from "../../src/shared/message-search";
+import { messageSearchExcerpt, messageSearchPattern } from "../../src/shared/message-search";
+import { messageSearchQuerySchema, messageSearchResultSchema } from "../../src/shared/message-search-schema";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const hit = {
@@ -30,7 +31,12 @@ describe("message search contract", () => {
       { ...result, hits: [{ ...hit, matchEnd: 100 }] },
       { ...result, hits: [{ ...hit, role: "system" }] },
       { ...result, hits: [{ ...hit, conversationId: "other" }] },
-    ]) expect(messageSearchResultSchema.safeParse(invalid).success).toBe(false);
+      { ...result, unexpected: true },
+      { ...result, hits: [{ ...hit, createdAt: "2026-02-30T10:00:00.000Z" }] },
+    ]) {
+      expect(messageSearchResultSchema.safeParse(invalid).success).toBe(false);
+      expect(serverEventSchema.safeParse({ type: "request.result", requestId: id, result: invalid }).success).toBe(false);
+    }
   });
 
   it.each(["[x]%_\\", "(a+)+$", "¿ÁRBOL?", "🐈 café", "./src/App.tsx"])("matches %s literally and case insensitively", (query) => {
@@ -38,6 +44,22 @@ describe("message search contract", () => {
     const excerpt = messageSearchExcerpt(content, messageSearchPattern(query))!;
     expect(excerpt.snippet.slice(excerpt.matchStart, excerpt.matchEnd)).toBe(query.toLocaleLowerCase());
     expect(messageSearchExcerpt("unrelated text", messageSearchPattern(query))).toBeNull();
+  });
+
+  it("shows readable Markdown and preserves explicit source searches", () => {
+    const content = "### Recovery\n\nSet the **retry budget** to `three` attempts. [Details](https://example.test/retry).";
+    const excerpt = messageSearchExcerpt(content, messageSearchPattern("retry budget"))!;
+    expect(excerpt.snippet).toBe("Recovery Set the retry budget to three attempts. Details.");
+    expect(excerpt.snippet.slice(excerpt.matchStart, excerpt.matchEnd)).toBe("retry budget");
+    for (const query of ["**retry", "https://example.test/retry", "`three`"])
+      expect(messageSearchExcerpt(content, messageSearchPattern(query))!.snippet).toContain(query);
+  });
+
+  it("keeps long malformed link markup searchable", () => {
+    const content = "[".repeat(100_000) + "label](unterminated needle";
+    const excerpt = messageSearchExcerpt(content, messageSearchPattern("needle"))!;
+    expect(excerpt.snippet.slice(excerpt.matchStart, excerpt.matchEnd)).toBe("needle");
+    expect(excerpt.snippet.length).toBeLessThanOrEqual(240);
   });
 
   it("keeps a maximum-length match and complete Unicode characters inside the snippet", () => {

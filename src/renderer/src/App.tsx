@@ -1162,7 +1162,7 @@ export default function App(): React.JSX.Element {
         openGlobalChat,
         selectProject,
         selectConversation,
-        selectMessage,
+        selectMessage: (hit) => selectMessage(hit, () => setView("workspace")),
         openConversationInSplit,
         openConversationInWindow,
         closeConversationSplit: () => updateSplitConversationId(null),

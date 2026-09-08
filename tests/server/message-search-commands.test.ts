@@ -51,9 +51,8 @@ describe("message search runtime ownership", () => {
 
   it("revalidates all result identities and archive state before routing focus", async () => {
     const target: MessageSearchTarget = { projectId: "project", conversationId: "chat", turnId: "legacy-turn", messageId: "message" };
-    const conversation = { id: "chat", projectId: "project", archivedAt: null as string | null };
-    const message = { id: "message", conversationId: "chat", turnId: "legacy-turn" };
-    const store = { conversation: () => conversation, message: () => message } as unknown as Pick<RuntimeStore, "message" | "conversation">;
+    let current: MessageSearchTarget | null = target;
+    const store: Pick<RuntimeStore, "messageSearchTarget"> = { messageSearchTarget: () => current };
     const reveal = vi.fn();
     const send = vi.fn();
     const searches = new MessageSearchController("unused", async (_path, query) => result(query));
@@ -62,10 +61,10 @@ describe("message search runtime ownership", () => {
     for (const payload of [
       { ...target, projectId: "other" }, { ...target, conversationId: "other" }, { ...target, turnId: "other" },
     ]) await expect(handler(client, { type: "conversation.message.reveal", requestId: "request", payload })).rejects.toThrow(/no longer available/u);
-    conversation.archivedAt = "2026-09-07T00:00:00Z";
+    current = null;
     await expect(handler(client, { type: "conversation.message.reveal", requestId: "request", payload: target })).rejects.toThrow(/no longer available/u);
     expect(reveal).not.toHaveBeenCalled();
-    conversation.archivedAt = null;
+    current = target;
     expect(await handler(client, { type: "conversation.message.reveal", requestId: "request", payload: target })).toBe("handled");
     expect(reveal).toHaveBeenCalledWith(target);
     expect(send).toHaveBeenCalledWith(client, { type: "request.ok", requestId: "request" });

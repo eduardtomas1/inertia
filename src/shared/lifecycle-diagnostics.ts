@@ -32,7 +32,9 @@ export const APP_UPDATE_HANDOFF_PHASES = [
 ] as const;
 
 const boundedCount = z.number().int().min(0).max(1_000_000);
-export const windowsCleanupFailureSchema = z.object({
+// Schema factories have no side effects. Renderer consumers of the types and
+// constants can omit unused validators; runtime consumers retain all checks.
+export const windowsCleanupFailureSchema = /* @__PURE__ */ (() => z.object({
   phase: z.enum([
     "taskkill-spawn", "taskkill-error", "taskkill-exit", "taskkill-timeout",
     "root-close", "resource-settle", "ownership-retirement",
@@ -45,7 +47,7 @@ export const windowsCleanupFailureSchema = z.object({
   outputClassification: z.enum([
     "not-found", "access-denied", "other", "unavailable",
   ]).optional(),
-}).strict();
+}).strict())();
 export type WindowsCleanupFailure = z.infer<typeof windowsCleanupFailureSchema>;
 const safeVersion = z
   .string()
@@ -53,7 +55,7 @@ const safeVersion = z
   .max(96)
   .regex(/^v?\d{1,10}\.\d{1,10}(?:\.\d{1,10})?(?:[-+][0-9A-Za-z.-]{1,64})?$/u);
 
-const lifecycleOwnedResourceCountsSchema = z
+const lifecycleOwnedResourceCountsSchema = /* @__PURE__ */ (() => z
   .object({
     providerRuns: boundedCount,
     turns: boundedCount,
@@ -62,9 +64,9 @@ const lifecycleOwnedResourceCountsSchema = z
     interactions: boundedCount,
     maintenanceOperations: boundedCount,
   })
-  .strict();
+  .strict())();
 
-const lifecycleActiveProviderSchema = z
+const lifecycleActiveProviderSchema = /* @__PURE__ */ (() => z
   .object({
     providerId: providerMaintenanceProviderIdSchema,
     harnessId: currentKnownHarnessIdSchema,
@@ -82,9 +84,9 @@ const lifecycleActiveProviderSchema = z
       "quarantined",
     ]),
   })
-  .strict();
+  .strict())();
 
-const providerMaintenanceDiagnosticStateSchema = z
+const providerMaintenanceDiagnosticStateSchema = /* @__PURE__ */ (() => z
   .object({
     providerId: providerMaintenanceProviderIdSchema,
     state: z.enum([
@@ -95,14 +97,14 @@ const providerMaintenanceDiagnosticStateSchema = z
       "quarantined",
     ]),
   })
-  .strict();
+  .strict())();
 
 /**
  * Renderer-safe lifecycle projection. It is deliberately code- and count-only:
  * no IDs, paths, prompts, provider output, environment, or arbitrary errors
  * cross this boundary. The desktop validates it again before an issue report.
  */
-export const runtimeLifecycleDiagnosticSnapshotSchema = z
+export const runtimeLifecycleDiagnosticSnapshotSchema = /* @__PURE__ */ (() => z
   .object({
     schemaVersion: z.literal(1),
     capturedAt: z.iso.datetime(),
@@ -152,7 +154,7 @@ export const runtimeLifecycleDiagnosticSnapshotSchema = z
     actionableState: z.enum(LIFECYCLE_ACTIONABLE_STATES),
     windowsCleanupFailures: z.array(windowsCleanupFailureSchema).max(8).optional(),
   })
-  .strict();
+  .strict())();
 
 export type RuntimeLifecycleDiagnosticSnapshot = z.infer<
   typeof runtimeLifecycleDiagnosticSnapshotSchema

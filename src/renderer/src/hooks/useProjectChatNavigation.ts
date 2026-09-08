@@ -22,13 +22,14 @@ import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
 type DraftConversationNavigation = {
   changeProject: (projectId: string) => void;
   discard: () => void;
+  clear: () => void;
   importProject: (input?: ProjectImportInput) => Promise<boolean>;
   sendFromComposer: (
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
   ) => Promise<TranscriptMessageSendAcceptance | null>;
-  start: (projectId: string, independent?: boolean) => void;
+  start: (projectId: string, independent?: boolean, resume?: boolean) => void;
 };
 
 type SelectionCommandQueue = (
@@ -63,15 +64,18 @@ export function useProjectChatNavigation({
 }) {
   const [globalChatActive, setGlobalChatActive] = useState(false);
   const globalChatGenerationRef = useRef(0);
+  const resumeSearchDraftRef = useRef(false);
 
   const deactivateGlobalChat = useCallback(() => {
     globalChatGenerationRef.current += 1;
     conversationSelectionGenerationRef.current += 1;
     setGlobalChatActive(false);
   }, [conversationSelectionGenerationRef]);
-  const exitGlobalChat = useCallback(() => {
+  const exitGlobalChat = useCallback((preserveDraft = false) => {
     deactivateGlobalChat();
-    draftConversation.discard();
+    resumeSearchDraftRef.current = preserveDraft;
+    if (preserveDraft) draftConversation.clear();
+    else draftConversation.discard();
   }, [deactivateGlobalChat, draftConversation]);
 
   const navigateToView = useCallback((nextView: AppView) => {
@@ -115,7 +119,9 @@ export function useProjectChatNavigation({
       setGlobalChatActive(false);
       return;
     }
-    draftConversation.start(targetProject.id, true);
+    if (resumeSearchDraftRef.current) draftConversation.start(targetProject.id, true, true);
+    else draftConversation.start(targetProject.id, true);
+    resumeSearchDraftRef.current = false;
     setGlobalChatActive(true);
   }, [
     conversationSelectionGenerationRef,

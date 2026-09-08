@@ -1,37 +1,16 @@
-import { z } from "zod";
-
 export const MESSAGE_SEARCH_LIMIT = 20;
 export const MESSAGE_SEARCH_QUERY_MAX = 200;
 export const MESSAGE_SEARCH_SNIPPET_MAX = 240;
 
-export const messageSearchQuerySchema = z.string().trim().min(2)
-  .max(MESSAGE_SEARCH_QUERY_MAX).refine((query) => !query.includes("\0"));
-
-export const messageSearchTargetSchema = z.strictObject({
-  projectId: z.string().uuid(),
-  conversationId: z.string().uuid(),
-  turnId: z.string().min(1).max(200).nullable(),
-  messageId: z.string().min(1).max(200),
-});
-export type MessageSearchTarget = z.infer<typeof messageSearchTargetSchema>;
-
-export const messageSearchHitSchema = messageSearchTargetSchema.extend({
-  role: z.enum(["user", "assistant"]),
-  createdAt: z.string().datetime({ offset: true }),
-  snippet: z.string().max(MESSAGE_SEARCH_SNIPPET_MAX),
-  matchStart: z.number().int().min(0).max(MESSAGE_SEARCH_SNIPPET_MAX),
-  matchEnd: z.number().int().min(1).max(MESSAGE_SEARCH_SNIPPET_MAX),
-}).refine((hit) => hit.matchStart < hit.matchEnd && hit.matchEnd <= hit.snippet.length);
-export type MessageSearchHit = z.infer<typeof messageSearchHitSchema>;
-
-export const messageSearchResultSchema = z.strictObject({
-  kind: z.literal("conversation.messages.search"),
-  query: messageSearchQuerySchema,
-  hits: z.array(messageSearchHitSchema).max(MESSAGE_SEARCH_LIMIT),
-  hasMore: z.boolean(),
-  incomplete: z.boolean(),
-}).refine((result) => new Set(result.hits.map((hit) => hit.messageId)).size === result.hits.length);
-export type MessageSearchResult = z.infer<typeof messageSearchResultSchema>;
+export type MessageSearchTarget = {
+  projectId: string; conversationId: string; turnId: string | null; messageId: string;
+};
+export type MessageSearchHit = MessageSearchTarget & {
+  role: "user" | "assistant"; createdAt: string; snippet: string; matchStart: number; matchEnd: number;
+};
+export type MessageSearchResult = {
+  kind: "conversation.messages.search"; query: string; hits: MessageSearchHit[]; hasMore: boolean; incomplete: boolean;
+};
 
 /** Literal Unicode-aware matching; punctuation never becomes query syntax. */
 export function messageSearchPattern(query: string): RegExp {
@@ -42,8 +21,20 @@ export function messageSearchExcerpt(
   content: string,
   pattern: RegExp,
 ): Pick<MessageSearchHit, "snippet" | "matchStart" | "matchEnd"> | null {
-  const match = pattern.exec(content);
+  // Keep previews readable without rendering untrusted Markdown. If a query
+  // explicitly matches markup, a URL, or exact whitespace, preserve that source.
+  const plain = content
+    .replace(/^ {0,3}(?:#{1,6}\s+|>\s?|[-+*]\s+|\d+\.\s+)/gmu, "")
+    .replace(/^ {0,3}(?:`{3,}|~{3,})[^\n]*$/gmu, "")
+    .replace(/!?\[([^\n[\]]+)\]\([^()\n]*\)/gu, "$1")
+    .replace(/`([^`\n]+)`/gu, "$1")
+    .replace(/\*\*([^*\n]+)\*\*/gu, "$1")
+    .replace(/__([^_\n]+)__/gu, "$1")
+    .replace(/\s+/gu, " ").trim();
+  const plainMatch = pattern.exec(plain);
+  const match = plainMatch ?? pattern.exec(content);
   if (!match) return null;
+  if (plainMatch) content = plain;
   let start = Math.max(0, match.index - 35);
   // Preserve UTF-16 pairs at snippet boundaries. Match offsets stay in the
   // original text rather than a lowercased string with possibly different length.

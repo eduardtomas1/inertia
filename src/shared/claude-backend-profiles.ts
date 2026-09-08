@@ -188,47 +188,49 @@ export function modelSelectionIdentityLabel(selection: ModelSelection): string {
   return `${harness} · ${selection.backendProfileDisplayName} · ${model}`;
 }
 
-const modelIdSchema = z.string()
+// Schema factories have no side effects. Renderer consumers of the types and
+// constants can omit unused validators; runtime consumers retain all checks.
+const modelIdSchema = /* @__PURE__ */ (() => z.string()
   .trim()
   .min(1)
   .max(500)
-  .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters.");
-const backendSecretReferenceSchema = z.string()
+  .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters."))();
+const backendSecretReferenceSchema = /* @__PURE__ */ (() => z.string()
   .min(8)
   .max(200)
   .regex(
     /^secret:[A-Za-z0-9][A-Za-z0-9._:-]*$/u,
     "Secret references must be opaque identifiers beginning with 'secret:'.",
-  );
-const contextWindowSchema = z.number().int().min(8_192).max(4_194_304);
-const tierModelsSchema = z.object({
+  ))();
+const contextWindowSchema = /* @__PURE__ */ (() => z.number().int().min(8_192).max(4_194_304))();
+const tierModelsSchema = /* @__PURE__ */ (() => z.object({
   fable: modelIdSchema,
   opus: modelIdSchema,
   sonnet: modelIdSchema,
   haiku: modelIdSchema,
-}).strict();
-const effortMappingSchema = z.object({
+}).strict())();
+const effortMappingSchema = /* @__PURE__ */ (() => z.object({
   auto: z.enum(CLAUDE_EFFORT_LEVELS),
   low: z.enum(CLAUDE_EFFORT_LEVELS),
   medium: z.enum(CLAUDE_EFFORT_LEVELS),
   high: z.enum(CLAUDE_EFFORT_LEVELS),
   xhigh: z.enum(CLAUDE_EFFORT_LEVELS),
   max: z.enum(CLAUDE_EFFORT_LEVELS),
-}).strict();
-const runtimeOptionsSchema = z.object({
+}).strict())();
+const runtimeOptionsSchema = /* @__PURE__ */ (() => z.object({
   enableToolSearch: z.boolean(),
   alwaysEnableEffort: z.boolean(),
   enableThirdPartyStreamWatchdog: z.boolean(),
   applyVendorContextTokenOverride: z.boolean(),
-}).strict();
-const compactionModelSchema = z.object({
+}).strict())();
+const compactionModelSchema = /* @__PURE__ */ (() => z.object({
   state: z.literal("unavailable"),
   modelId: z.null(),
   provenance: z.literal("harness"),
   detail: z.string().min(1).max(500),
-}).strict();
+}).strict())();
 
-const claudeProfileShape = modelBackendProfileSchema.extend({
+const claudeProfileShape = /* @__PURE__ */ (() => modelBackendProfileSchema.extend({
   schemaVersion: z.literal(CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION),
   preset: z.enum(["anthropic", "kimi-code", "custom"]),
   baseUrl: z.string().url().max(2_048).nullable(),
@@ -258,7 +260,7 @@ const claudeProfileShape = modelBackendProfileSchema.extend({
   effortLevelMapping: effortMappingSchema,
   runtimeOptions: runtimeOptionsSchema,
   capabilityOverrides: z.array(modelCapabilitySchema).max(32),
-});
+}))();
 
 export function isKimiCodingModelId(value: string): value is KimiCodingModelId {
   return (KIMI_CODING_MODEL_IDS as readonly string[]).includes(value);
@@ -287,7 +289,7 @@ function modelIdsForProfile(profile: {
   ];
 }
 
-export const claudeCompatibleBackendProfileSchema = claudeProfileShape.superRefine((profile, context) => {
+export const claudeCompatibleBackendProfileSchema = /* @__PURE__ */ (() => claudeProfileShape.superRefine((profile, context) => {
   if (profile.protocol !== "anthropic-messages") {
     context.addIssue({
       code: "custom",
@@ -421,7 +423,7 @@ export const claudeCompatibleBackendProfileSchema = claudeProfileShape.superRefi
       }
     }
   }
-});
+}))();
 
 const IDENTITY_EFFORT_MAPPING = Object.freeze({
   auto: "auto",

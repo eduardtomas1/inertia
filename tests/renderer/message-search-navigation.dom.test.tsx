@@ -33,15 +33,17 @@ function fixture(splitConversation: Conversation | null = null, detached = false
 afterEach(() => { clearMessageSearchFocus(); vi.restoreAllMocks(); });
 
 describe("message search navigation", () => {
-  it("waits for authoritative selection and validation, then retains focus until detail arrives", async () => {
+  it("validates before navigation, waits for authoritative selection, then retains focus until detail arrives", async () => {
     const f = fixture();
-    act(() => f.hook.result.current.selectMessage(hit));
-    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    await act(async () => { f.hook.result.current.selectMessage(hit); await vi.dynamicImportSettled(); });
+    expect(f.select).not.toHaveBeenCalled();
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
-    await act(async () => f.selected.resolve(ok));
     expect(f.request).toHaveBeenCalledWith({ type: "conversation.message.reveal", payload: { projectId: other.projectId, conversationId: other.id, turnId: "turn", messageId: "message" } });
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
     await act(async () => f.revealed.resolve(ok));
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(pendingMessageSearchFocus(other.id)).toBeNull();
+    await act(async () => f.selected.resolve(ok));
     expect(pendingMessageSearchFocus(other.id)?.messageId).toBe(hit.messageId);
     f.generation.current += 1;
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
@@ -49,16 +51,28 @@ describe("message search navigation", () => {
 
   it("does not steal focus when another navigation overtakes validation", async () => {
     const f = fixture();
-    act(() => f.hook.result.current.selectMessage(hit));
-    await act(async () => f.selected.resolve(ok));
+    await act(async () => { f.hook.result.current.selectMessage(hit); await vi.dynamicImportSettled(); });
     act(() => f.hook.result.current.selectConversation(primary));
     await act(async () => f.revealed.resolve(ok));
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
+    expect(f.select).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("keeps the current workspace when persisted validation fails (detached: %s)", async (detached) => {
+    const f = fixture(null, detached);
+    const ready = vi.fn();
+    await act(async () => { f.hook.result.current.selectMessage(hit, ready); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.reject(new Error("Deleted result")));
+    expect(f.select).not.toHaveBeenCalled();
+    expect(f.focus).not.toHaveBeenCalled();
+    expect(f.secondaryFirst).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+    expect(f.error).toHaveBeenCalledWith(expect.stringContaining("could not be opened"));
   });
 
   it("promotes an existing split pane without changing its conversation controllers", async () => {
     const f = fixture(other);
-    act(() => f.hook.result.current.selectMessage(hit));
+    await act(async () => { f.hook.result.current.selectMessage(hit); await vi.dynamicImportSettled(); });
     await act(async () => f.revealed.resolve(ok));
     expect(f.secondaryFirst).toHaveBeenCalledWith(true);
     expect(f.select).not.toHaveBeenCalled();
@@ -67,17 +81,19 @@ describe("message search navigation", () => {
 
   it("routes detached results to their owning window without selecting the main chat", async () => {
     const f = fixture(null, true);
-    act(() => f.hook.result.current.selectMessage(hit));
+    const ready = vi.fn();
+    await act(async () => { f.hook.result.current.selectMessage(hit, ready); await vi.dynamicImportSettled(); });
     await act(async () => f.revealed.resolve(ok));
     expect(f.focus).toHaveBeenCalledWith(other.id);
     expect(f.request).toHaveBeenCalledOnce();
+    expect(ready).not.toHaveBeenCalled();
     expect(f.select).not.toHaveBeenCalled();
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
   });
 
-  it("rejects a stale shell identity without navigation", () => {
+  it("rejects a stale shell identity without navigation", async () => {
     const f = fixture();
-    act(() => f.hook.result.current.selectMessage({ ...hit, projectId: "foreign" }));
+    await act(async () => { f.hook.result.current.selectMessage({ ...hit, projectId: "foreign" }); await vi.dynamicImportSettled(); });
     expect(f.error).toHaveBeenCalledWith("This search result is no longer available.");
     expect(f.select).not.toHaveBeenCalled();
     expect(f.request).not.toHaveBeenCalled();

@@ -125,7 +125,14 @@ export function useDraftConversation({
     if (next && persist) writePersistedDraftConversation(next);
   }, []);
 
-  const start = (projectId: string, independent = false): void => {
+  const start = (projectId: string, independent = false, resume = false): void => {
+    const stored = resume ? readPersistedDraftConversation() : null;
+    if (stored && snapshot?.projects.some(({ id }) => id === stored.conversation.projectId)) {
+      independentDraftRef.current = independent;
+      selectionWhenDraftOpenedRef.current = persistedConversationId;
+      replaceDraft({ ...stored, materialized: null }, false);
+      return;
+    }
     discard();
     independentDraftRef.current = independent;
     explicitModelRef.current = false;

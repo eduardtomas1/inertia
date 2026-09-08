@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { searchMessages } from "../../src/server/persistence/message-search";
-import { messageSearchResultSchema } from "../../src/shared/message-search";
+import { messageSearchResultSchema } from "../../src/shared/message-search-schema";
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.reverse()) await close(); cleanup.length = 0; });
@@ -44,7 +44,9 @@ describe("persisted message search", () => {
     const { turn, message } = answer(store, conversation.id, "The answer contains the split nee", "legacy-turn-123");
     store.appendMessageContent(message.id, "dle across");
     store.appendMessageContent(message.id, " chunks.");
-    store.createMessage(conversation.id, "needle hidden commentary", "assistant", [], turn.id);
+    const commentary = store.createMessage(conversation.id, "needle hidden commentary", "assistant", [], turn.id);
+    expect(store.messageSearchTarget(commentary.id)).toBeNull();
+    expect(store.messageSearchTarget(message.id)).toEqual({ projectId: project.id, conversationId: conversation.id, turnId: turn.id, messageId: message.id });
     store.createMessage(conversation.id, "needle system", "system");
     store.createMessage(conversation.id, "needle unfinalized", "assistant");
     const archived = store.createConversation(project.id, "Archived");
@@ -60,6 +62,7 @@ describe("persisted message search", () => {
     expect(searchMessages(database, "árbol").hits[0]?.messageId).toBe(user.id);
     store.archiveConversation(conversation.id, true);
     expect(searchMessages(database, "needle").hits).toEqual([]);
+    expect(store.messageSearchTarget(message.id)).toBeNull();
   });
 
   it("returns a deterministic bounded newest-first page and reports incomplete scans", async () => {
@@ -75,6 +78,7 @@ describe("persisted message search", () => {
     );
     expect(searchMessages(database, "absent", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: true });
     expect(searchMessages(database, "needle", { maxScanMs: 0 })).toMatchObject({ hits: [], incomplete: true });
+    expect(searchMessages(database, "needle", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: true });
   });
 
   it("remains current after edits, deletion and a fresh read connection, without writing an index", async () => {

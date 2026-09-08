@@ -65,7 +65,7 @@ export class MessageSearchController {
 
 export function createMessageSearchCommandHandler(input: {
   searches: MessageSearchController;
-  store: Pick<RuntimeStore, "message" | "conversation">;
+  store: Pick<RuntimeStore, "messageSearchTarget">;
   send(socket: WebSocket, event: ServerEvent): void;
   reveal(target: MessageSearchTarget): void;
 }): RuntimeCommandHandler {
@@ -84,10 +84,9 @@ export function createMessageSearchCommandHandler(input: {
         return "handled";
       case "conversation.message.reveal": {
         const target = command.payload;
-        const conversation = input.store.conversation(target.conversationId);
-        const message = input.store.message(target.messageId);
-        if (conversation.archivedAt !== null || conversation.projectId !== target.projectId
-          || message.conversationId !== target.conversationId || message.turnId !== target.turnId) {
+        const current = input.store.messageSearchTarget(target.messageId);
+        if (!current || current.projectId !== target.projectId
+          || current.conversationId !== target.conversationId || current.turnId !== target.turnId) {
           throw new RuntimeRequestError("This search result is no longer available.");
         }
         input.reveal(target);

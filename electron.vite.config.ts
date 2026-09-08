@@ -164,7 +164,17 @@ export default defineConfig({
               "archive-restore": "restore",
               workspaceFileReference: "file-ref",
             };
-            return `assets/${compactNames[name] ?? name}-[hash].js`;
+            // Preserve feature names consumed by the bundle gates. Short utility
+            // names reduce repeated import/preload metadata without changing code.
+            const budgetedChunks = new Set([
+              "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
+              "MascotSettings", "IssueReportSettings", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
+              "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
+              "DiscordSettings", "DocumentAttachmentPreview", "AppUpdateNotice", "CanaryRollbackSetting",
+              "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
+            ]);
+            const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
+            return `assets/${label ? `${label}-` : ""}[hash].js`;
           },
           manualChunks(id) {
             const normalizedId = id.replaceAll("\\", "/");

@@ -32,6 +32,7 @@ function setup() {
   const start = vi.fn();
   const changeProject = vi.fn();
   const discard = vi.fn();
+  const clear = vi.fn();
   const sendFromComposer = vi.fn(async () => ({
     kind: "message.accepted" as const,
     conversationId: "draft",
@@ -50,6 +51,7 @@ function setup() {
     draftConversation: {
       changeProject,
       discard,
+      clear,
       importProject: async () => false,
       sendFromComposer,
       start,
@@ -65,6 +67,7 @@ function setup() {
   return {
     changeProject,
     discard,
+    clear,
     first,
     generation,
     hook,
@@ -78,6 +81,18 @@ function setup() {
 }
 
 describe("project chat navigation", () => {
+  it("resumes a draft after search without deleting its persisted contents", () => {
+    const { first, hook, clear, discard, start } = setup();
+    act(() => hook.result.current.openGlobalChat());
+    discard.mockClear();
+    act(() => hook.result.current.exitGlobalChat(true));
+    expect(hook.result.current.globalChatActive).toBe(false);
+    expect(clear).toHaveBeenCalledOnce();
+    expect(discard).not.toHaveBeenCalled();
+    act(() => hook.result.current.openGlobalChat());
+    expect(start).toHaveBeenLastCalledWith(first.id, true, true);
+  });
+
   it("opens the real draft chat for the active project", () => {
     const { first, hook, setSidebarOpen, setView, start } = setup();
 

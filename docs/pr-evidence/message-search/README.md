@@ -4,7 +4,8 @@ Ctrl/Cmd+K now finds literal phrases in saved user messages and canonical final
 agent answers across unarchived chats. Results include a highlighted text snippet,
 project, chat title and message role. Opening a result focuses its turn or final
 answer, including in an existing split pane or detached window. Composer drafts
-stay in their owning conversation.
+stay in their owning conversation. Search also preserves an unsent new-chat
+draft when returning to the chat view.
 
 ## Implementation
 
@@ -22,28 +23,33 @@ Closing the palette, changing the query, disconnecting, or shutting down cancels
 obsolete work. Query text and message content are not logged.
 
 Result navigation validates project, conversation, turn and message ownership
-again before revealing the match. Detached clients cannot request global
+again before switching chats or windows. The lookup reads identities without
+materializing message content. Detached clients cannot request global
 searches, and focus notifications only reach the window owning the chat.
 
 ## Verification
 
-- Focused unit and DOM coverage: literal punctuation and Unicode; chunked and
-  canonical answers; archived and settled chats; legacy IDs; result bounds;
-  cancellation and shutdown; stale responses; keyboard selection; draft-safe
-  navigation; split/detached ownership; bridge validation.
+- Focused unit, DOM and contract checks passed. Coverage includes literal punctuation and Unicode; readable Markdown previews;
+  canonical/chunked answers; archived and settled chats; legacy IDs; scan and
+  result bounds; cancellation and shutdown; stale responses and result ownership;
+  visible keyboard order; composition input; retry and focus; split/detached
+  ownership; and the shared validators affected by bundling.
 - The actual emitted worker searches a synthetic 100,000-message history while
-  timers and concurrent database writes remain responsive.
+  timers and concurrent database writes remain responsive. A final worker and
+  persistence rerun passed after tightening the scan byte limit.
 - `npm run check:quality`: passed (migration lineage, architecture, lint and all
   TypeScript projects).
-- `npm run build:bundle`: passed, including the emitted worker, private-connect
-  bundle and renderer size budgets. The measured main route is 734.8 KiB and
-  core JavaScript is approximately 1,977.2 KiB; ceilings retain narrow headroom.
-- Electron Playwright: all three scenarios in `tests/e2e/message-search.spec.ts`
-  passed on macOS ARM64, covering unloaded historical turns, draft retention,
-  split/detached focus, compact layout and a full application restart.
-- Full `npm run check`: passed with one low-priority Vitest worker: 685 test
-  files passed, 12 skipped; 7,125 tests passed, 122 skipped. The quality,
-  private-connect and production build gates also passed.
+- `npm run build:bundle`: passed with every existing budget unchanged. Unused
+  schema construction is omitted, utility assets use compact hashed names, and
+  search navigation loads on demand. The measured main route is 735.6 KiB and
+  core JavaScript is 1,973.1 KiB; the limits remain 736 and 1,977 KiB.
+- Fresh Electron Playwright: all four scenarios passed on macOS ARM64 in 7.3 s.
+  They cover unloaded historical turns, saved and unsent-draft retention across
+  projects, split/detached focus, compact layout, and a full application restart.
+- Full `npm run check`: passed on Node 22.23.2. All 722 active test files passed
+  (7,690 tests passed; 12 files / 122 tests skipped by existing platform and
+  environment conditions), followed by the production build and bundle gates.
+  The test phase took 337.87 s with two workers.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 

@@ -1,6 +1,6 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
-import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search";
+import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";

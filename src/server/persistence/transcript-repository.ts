@@ -1,3 +1,4 @@
+import type { MessageSearchTarget } from "../../shared/message-search";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -272,6 +273,20 @@ export class TranscriptRepository {
       .flatMap((row) => rendererSafeAttachments(
         parseAttachments(row.attachments_json),
       ));
+  }
+
+  messageSearchTarget(messageId: string): MessageSearchTarget | null {
+    // Identity-only lookup: revealing a hit must never reconstruct a transcript
+    // on the runtime's main thread. Repeat the search eligibility check here.
+    return this.context.database.prepare(`
+      SELECT c.project_id AS projectId, m.conversation_id AS conversationId,
+        m.turn_id AS turnId, m.id AS messageId
+      FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
+      WHERE m.id = ? AND c.archived_at IS NULL AND (
+        m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+      )
+    `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }
 
   message(messageId: string): ChatMessage {

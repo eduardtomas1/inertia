@@ -68,7 +68,6 @@ export function AppNavigationOverlays({
             onClose={() => setPaletteOpen(false)}
             sendCommand={sendCommand}
             onSelectMessage={(hit) => {
-              setWorkspaceView();
               selectMessage(hit);
             }}
             onSelectProject={(project) => {

@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
@@ -45,6 +46,11 @@ test.beforeAll(async () => {
             capturedAt: at, terminalAssistantMessageId: answer.id, updatedAt: at,
           });
         }
+        const primary = shell.conversations.find(({ id }) => id === shell.activeConversationId)!;
+        const planning = store.createConversation(primary.projectId, "Improve API resilience");
+        store.createMessage(planning.id, "Can we make the retry budget configurable per endpoint? Keep cancellation immediate.", "user", [], null, "2026-09-05T09:00:00.000Z");
+        const testing = store.createConversation(chat.projectId, "Integration test plan");
+        store.createMessage(testing.id, "Cover the retry budget, transient failures, and successful recovery in the integration tests.", "user", [], null, "2026-09-04T09:00:00.000Z");
         store.selectConversation(shell.activeConversationId!);
       } finally { store.close(); }
     },
@@ -60,7 +66,7 @@ async function search() {
   await expect(input).toBeFocused();
   await input.fill(phrase);
   await expect(page.getByRole("option", { name: new RegExp(targetTitle) })).toBeVisible();
-  await expect(page.locator(".palette-message-snippet mark")).toHaveText(phrase);
+  await expect(page.locator(".palette-message-snippet mark").first()).toHaveText(phrase);
   return input;
 }
 
@@ -100,6 +106,8 @@ test("finds chunked content in an unloaded chat, jumps to an old virtual row and
 });
 
 test("reveals a match in an existing split pane and in its detached window", async ({ browserName: _browserName }, info) => {
+  const earlier = page.getByRole("button", { name: /^Earlier/u });
+  if (await earlier.getAttribute("aria-expanded") === "false") await earlier.click();
   await page.getByRole("button", { name: `Thread actions for ${targetTitle}` }).click();
   await page.getByRole("menuitem", { name: "Add this chat to split view" }).click();
   const input = await search();
@@ -132,5 +140,19 @@ test("searches persisted history after a full application restart", async () => 
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
   await expect(finalAnswer(page)).toBeInViewport();
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("returns to an unsent new-chat draft after following a search result", async () => {
+  await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
+  await expect(page.getByRole("heading", { name: /message-search fixture/u, level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
+  const unsent = "Keep this new-chat draft while I look up the retry decision.";
+  await page.getByRole("textbox", { name: "Message" }).fill(unsent);
+  const input = await search();
+  await input.press("Enter");
+  await expect(finalAnswer(page)).toBeFocused();
+  await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(unsent);
   expect(app.rendererErrors).toEqual([]);
 });

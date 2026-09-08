@@ -1,10 +1,9 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { AppSnapshot, Conversation, ServerEvent } from "@shared/contracts";
-import type { MessageSearchHit, MessageSearchTarget } from "@shared/message-search";
+import type { MessageSearchHit } from "@shared/message-search";
 import type { DetachedChatWindowsController } from "./useDetachedChatWindows";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { splitConversationAfterPrimaryChange } from "../utils/splitConversation";
-import { clearMessageSearchFocus, requestMessageSearchFocus } from "../utils/messageSearchFocus";
 
 export function useConversationNavigation({
   snapshot, conversation, splitConversation, detachedChats, exitGlobalChat,
@@ -16,7 +15,7 @@ export function useConversationNavigation({
   conversation: Conversation | null;
   splitConversation: Conversation | null;
   detachedChats: DetachedChatWindowsController;
-  exitGlobalChat: () => void;
+  exitGlobalChat: (preserveDraft?: boolean) => void;
   conversationSelectionGenerationRef: RefObject<number>;
   splitSelectionTransitionsRef: RefObject<number>;
   setSuppressedMainConversationIds: Dispatch<SetStateAction<Set<string>>>;
@@ -28,10 +27,9 @@ export function useConversationNavigation({
 }) {
   const selectConversationInMain = useCallback((
     nextConversation: Conversation,
-    focusComposer = true,
+    { focusComposer = true, preserveDraft = false } = {},
   ): Promise<boolean> => {
-    clearMessageSearchFocus();
-    exitGlobalChat();
+    exitGlobalChat(preserveDraft);
     const selectionGeneration = ++conversationSelectionGenerationRef.current;
     setSuppressedMainConversationIds((current) => {
       if (!current.has(nextConversation.id)) return current;
@@ -88,7 +86,6 @@ export function useConversationNavigation({
     updateSplitConversationId,
   ]);
   const selectConversation = useCallback((nextConversation: Conversation) => {
-    clearMessageSearchFocus();
     const generation = ++conversationSelectionGenerationRef.current;
     if (!detachedChats.conversationIds.has(nextConversation.id)) {
       void selectConversationInMain(nextConversation);
@@ -102,36 +99,14 @@ export function useConversationNavigation({
       if (generation === conversationSelectionGenerationRef.current) void selectConversationInMain(nextConversation);
     });
   }, [conversationSelectionGenerationRef, detachedChats, selectConversationInMain]);
-  const selectMessage = useCallback((hit: MessageSearchHit): void => {
-    const nextConversation = snapshot?.conversations.find(({ id, projectId, archivedAt }) =>
-      id === hit.conversationId && projectId === hit.projectId && archivedAt === null);
-    if (!nextConversation) {
-      setActionError("This search result is no longer available.");
-      return;
-    }
-    const target: MessageSearchTarget = {
-      projectId: hit.projectId, conversationId: hit.conversationId, turnId: hit.turnId, messageId: hit.messageId,
-    };
+  const selectMessage = useCallback((hit: MessageSearchHit, onReady?: () => void): void => {
     const intent = ++conversationSelectionGenerationRef.current;
-    let navigationGeneration = intent;
-    clearMessageSearchFocus();
-    setActionError(null);
-    void (async () => {
-      if (detachedChats.conversationIds.has(hit.conversationId) && await detachedChats.focus(hit.conversationId)) {
-        if (intent === conversationSelectionGenerationRef.current) await request({ type: "conversation.message.reveal", payload: target });
-        return;
-      }
+    void import("../utils/openMessageSearchResult").then(({ openMessageSearchResult }) => {
       if (intent !== conversationSelectionGenerationRef.current) return;
-      const selection = selectConversationInMain(nextConversation, false);
-      const generation = conversationSelectionGenerationRef.current;
-      navigationGeneration = generation;
-      if (!await selection || generation !== conversationSelectionGenerationRef.current) return;
-      await request({ type: "conversation.message.reveal", payload: target });
-      if (generation === conversationSelectionGenerationRef.current) requestMessageSearchFocus(target, () => generation === conversationSelectionGenerationRef.current);
-    })().catch(() => {
-      if (navigationGeneration === conversationSelectionGenerationRef.current) {
-        setActionError("This search result could not be opened. Search again to refresh it.");
-      }
+      openMessageSearchResult(hit, { snapshot, conversationSelectionGenerationRef, intent,
+        detachedChats, request, selectConversationInMain, setActionError, onReady });
+    }).catch(() => {
+      if (intent === conversationSelectionGenerationRef.current) setActionError("Search navigation is unavailable. Try again.");
     });
   }, [snapshot, conversationSelectionGenerationRef, detachedChats, request, selectConversationInMain, setActionError]);
   return { selectConversation, selectMessage };

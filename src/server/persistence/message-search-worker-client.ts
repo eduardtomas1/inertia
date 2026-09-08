@@ -1,5 +1,6 @@
 import { Worker } from "node:worker_threads";
-import { messageSearchResultSchema, type MessageSearchResult } from "../../shared/message-search";
+import { type MessageSearchResult } from "../../shared/message-search";
+import { messageSearchResultSchema } from "../../shared/message-search-schema";
 
 export function runMessageSearchWorker(
   databasePath: string,

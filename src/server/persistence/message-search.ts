@@ -1,12 +1,6 @@
 import type Database from "better-sqlite3";
-import {
-  MESSAGE_SEARCH_LIMIT,
-  messageSearchExcerpt,
-  messageSearchPattern,
-  messageSearchQuerySchema,
-  type MessageSearchHit,
-  type MessageSearchResult,
-} from "../../shared/message-search";
+import { MESSAGE_SEARCH_LIMIT, messageSearchExcerpt, messageSearchPattern, type MessageSearchHit, type MessageSearchResult } from "../../shared/message-search";
+import { messageSearchQuerySchema } from "../../shared/message-search-schema";
 import { MESSAGE_PROJECTION_COLUMNS } from "./stream-text-storage";
 
 const MAX_MESSAGE_BYTES = 16 * 1_048_576;
@@ -46,7 +40,9 @@ export function searchMessages(
       SELECT sum(length(CAST(content AS BLOB))) FROM message_content_chunks WHERE message_id = messages.id
     ), 0) AS bytes FROM messages WHERE id = ?
   `);
-  const text = database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`);
+  const text = database.prepare(`SELECT content FROM (
+    SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?
+  )`);
   let scannedBytes = 0;
   database.transaction(() => {
     for (const candidate of candidates.iterate() as Iterable<Omit<MessageSearchHit, "snippet" | "matchStart" | "matchEnd">>) {
@@ -58,6 +54,10 @@ export function searchMessages(
       if (bytes > MAX_MESSAGE_BYTES) {
         result.incomplete = true;
         continue;
+      }
+      if (scannedBytes + bytes > maximumBytes) {
+        result.incomplete = true;
+        break;
       }
       scannedBytes += bytes;
       const content = (text.get(candidate.messageId) as { content: string }).content;

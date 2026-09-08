@@ -86,16 +86,74 @@ describe("message search in the palette", () => {
     expect(onSelectMessage).toHaveBeenCalledWith(hit);
   });
 
-  it("surfaces failures without claiming no matches, and retries when the query changes", async () => {
+  it("retries a failed search from the palette and returns focus to the input", async () => {
+    vi.useFakeTimers();
+    const send = vi.fn<(_: ClientCommand) => Promise<ServerEvent>>()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValueOnce(response());
+    const noOp = (): void => undefined;
+    render(<CommandPalette open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
+      newThreadShortcut="Ctrl+N" sendCommand={send} onSelectMessage={noOp}
+      onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+    />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "needle" } });
+    await debounce();
+    expect(screen.queryByText("No matches")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(input).toHaveFocus();
+    await debounce();
+    expect(screen.getByRole("option")).toHaveTextContent(hit.snippet);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("navigates in displayed group order, keeps selection by identity and ignores composition Enter", async () => {
+    vi.useFakeTimers();
+    const select = vi.fn();
+    const noOp = (): void => undefined;
+    const props = {
+      open: true, projects: [{ id: chat.projectId, name: "A needle project", path: "/workspace" } as Project],
+      conversations: [{ ...chat, title: "Needle chat" }], newThreadShortcut: "Ctrl+N",
+      sendCommand: async () => response("needle", { hits: [{ ...hit, snippet: "needle and NEEDLE", matchStart: 0, matchEnd: 6 }] }),
+      onSelectMessage: select, onClose: noOp, onSelectProject: noOp, onSelectConversation: noOp,
+      onNewThread: noOp, onAddProject: noOp, onOpenSettings: noOp,
+    };
+    const view = render(<CommandPalette {...props} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "needle" } });
+    await debounce();
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveTextContent("A needle project");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0]!.id);
+    for (const option of options.slice(1)) {
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+      expect(input).toHaveAttribute("aria-activedescendant", option.id);
+    }
+    expect(options[2]!.querySelectorAll(".palette-message-snippet mark")).toHaveLength(2);
+    fireEvent.pointerEnter(options[0]!);
+    expect(input).toHaveAttribute("aria-activedescendant", options[2]!.id);
+    fireEvent.pointerMove(options[0]!);
+    expect(input).toHaveAttribute("aria-activedescendant", options[0]!.id);
+    fireEvent.pointerMove(options[2]!);
+    view.rerender(<CommandPalette {...props} projects={[{ ...props.projects[0]!, id: "additional", name: "Needle" }, ...props.projects]} />);
+    expect(input).toHaveAttribute("aria-activedescendant", options[2]!.id);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(select).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces failures without leaking details, and retries the same query", async () => {
     vi.useFakeTimers();
     const send = vi.fn<(_: ClientCommand) => Promise<ServerEvent>>()
       .mockRejectedValueOnce(new Error("private path"))
-      .mockResolvedValueOnce(response("retry"));
+      .mockResolvedValueOnce(response());
     const hook = renderHook(({ query }) => useMessageSearch(true, query, send), { initialProps: { query: "needle" } });
     await debounce();
     expect(hook.result.current.error).toContain("unavailable");
     expect(hook.result.current.error).not.toContain("private");
-    hook.rerender({ query: "retry" });
+    act(() => hook.result.current.retry());
     await debounce();
     expect(hook.result.current.error).toBeNull();
     expect(hook.result.current.result?.hits).toEqual([hit]);

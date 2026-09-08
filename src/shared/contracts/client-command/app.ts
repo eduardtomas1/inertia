@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search";
+import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
 
 import {

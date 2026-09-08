@@ -37,6 +37,7 @@ describe("Git workflows", () => {
     git(local, "config", "fetch.prune", "true");
     git(local, "config", "fetch.pruneTags", "true");
     git(local, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*");
+    git(local, "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/unrelated/*");
     writeFileSync(join(local, "tracked.txt"), "staged\n");
     git(local, "add", "tracked.txt");
     writeFileSync(join(local, "tracked.txt"), "unstaged\n");
@@ -46,6 +47,7 @@ describe("Git workflows", () => {
     await fetchRepository(local);
     expect(git(local, "rev-parse", "refs/remotes/origin/feature/remote")).toBe(git(remote, "rev-parse", "main"));
     expect(git(local, "branch", "--list", "feature/remote")).toBe("");
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/unrelated")).toBe("");
     expect(git(local, "tag")).toBe("local-only");
     expect(readFileSync(join(local, "tracked.txt"), "utf8")).toBe("unstaged\n");
     expect(readFileSync(join(local, "untracked.txt"), "utf8")).toBe("keep\n");
@@ -72,6 +74,7 @@ describe("Git workflows", () => {
     mkdirSync(fresh);
     git(fresh, "init", "-b", "unborn");
     git(fresh, "remote", "add", "team", remote);
+    git(fresh, "config", "--unset-all", "remote.team.fetch");
     writeFileSync(join(fresh, "draft.txt"), "unfinished new project\n");
     await fetchRepository(fresh);
     expect(git(fresh, "rev-parse", "refs/remotes/team/main")).toBe(git(remote, "rev-parse", "main"));
@@ -150,6 +153,32 @@ describe("Git workflows", () => {
     expect(result.status.upstream).toBe("origin/client");
     expect(git(local, "config", "branch.client.merge")).toBe("refs/heads/server");
     expect(git(local, "rev-parse", "HEAD")).toBe(git(remote, "rev-parse", "server"));
+  });
+
+  it("refreshes a safely renamed tracking destination when its remote source advances", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "server", "main");
+    git(local, "config", "remote.origin.fetch", "+refs/heads/server:refs/remotes/origin/client");
+    git(local, "fetch", "origin");
+    const serverTip = git(remote, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+      "commit-tree", "refs/heads/server^{tree}", "-p", "refs/heads/server", "-m", "New server tip");
+    git(remote, "update-ref", "refs/heads/server", serverTip);
+    const head = git(local, "rev-parse", "HEAD");
+    await fetchRepository(local);
+    expect(git(local, "rev-parse", "refs/remotes/origin/client")).toBe(serverTip);
+    expect(git(local, "rev-parse", "HEAD")).toBe(head);
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/server")).toBe("");
+  });
+
+  it("honors excluded source branches within a safe tracking refspec", async () => {
+    const { local, remote } = fixture();
+    git(remote, "branch", "public", "main");
+    git(remote, "branch", "private", "main");
+    git(local, "config", "--add", "remote.origin.fetch", "^refs/heads/private");
+    git(local, "config", "--add", "remote.origin.fetch", "");
+    await fetchRepository(local);
+    expect(git(local, "rev-parse", "refs/remotes/origin/public")).toBe(git(remote, "rev-parse", "main"));
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/private")).toBe("");
   });
 
   it("rejects an excluded renamed source before creating the local tracking branch", async () => {

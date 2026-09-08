@@ -75,7 +75,10 @@ reporting this ambiguity, so this check runs before mutation.
 Fetch has a shared 180-second workflow deadline and a 120-second network limit;
 the output limit is 64 KiB. Its explicit refspec updates only that remote's
 tracking branches, with tags, pruning, `FETCH_HEAD`, submodule recursion and
-automatic maintenance disabled. Overlapping remote names such as `origin` and
+automatic maintenance disabled. Configured head mappings within that remote's
+tracking namespace, including renamed destinations and source exclusions, are
+honored. Mappings to local branches, tags or another remote are ignored; when no
+safe positive mapping exists, Fetch uses the normal remote-tracking namespace. Overlapping remote names such as `origin` and
 `origin/team` are rejected before fetch can overwrite another remote's tracking
 refs; this guard is covered by a reproducing regression test. It uses the same scoped mutation serialization
 and invalidation as other Git actions. Cancellation and disconnect retain

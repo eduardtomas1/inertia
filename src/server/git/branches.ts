@@ -46,22 +46,28 @@ export async function listBranches(
   const root = await repositoryRoot(repositoryPath, options);
   const format =
     "%(refname)%00%(objectname)%00%(upstream:short)%00%(HEAD)%00%(if)%(worktreepath)%(then)occupied%(end)%00%(symref)";
-  const result = await runGitInspection(root, [
-    "for-each-ref",
+  const args = [
     `--format=${format}`,
     "--sort=refname",
-    "--count=1001",
     "refs/heads",
     "refs/remotes",
-  ], {
+  ];
+  const inspection = {
     ...options,
     maxOutputBytes: 1024 * 1024,
     failureMessage: "Unable to list repository branches.",
-  });
-  if (result.stdout.toString("utf8").split("\n").filter(Boolean).length > 1000) {
+  };
+  const result = await runGitInspection(root, ["for-each-ref", "--count=1001", ...args], inspection);
+  let branches = parseBranches(result.stdout);
+  if (branches.length <= 1000 && result.stdout.toString("utf8").split("\n").filter(Boolean).length > 1000) {
+    // Symbolic aliases can consume the raw sentinel. Read all refs under the
+    // same output/deadline limits so aliases cannot hide selectable overflow.
+    const complete = await runGitInspection(root, ["for-each-ref", ...args], inspection);
+    branches = parseBranches(complete.stdout);
+  }
+  if (branches.length > 1000) {
     throw new GitError("output-limit", "This repository has more than 1,000 branches. Use the terminal to select a branch.");
   }
-  const branches = parseBranches(result.stdout);
   const local = branches.filter((branch) => branch.kind === "local");
   const remote = branches.filter((branch) => branch.kind === "remote");
   return {

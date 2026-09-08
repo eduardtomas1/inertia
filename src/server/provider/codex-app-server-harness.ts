@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import { startCodexAppServerRun } from "../codex-app-server";
 import { withCodexControlClient } from "../codex/control-client";
 import {
@@ -56,6 +58,7 @@ export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
 } as const satisfies CodexAppServerHarnessCapabilities;
 
 const MAX_CODEX_COMPACTION_CANDIDATES = 32;
+const CODEX_COMPACTION_PERSISTENCE_RETRY_MS = 250;
 const CODEX_COMPACTION_TURN_SUFFIX_LIMIT =
   MAX_CODEX_COMPACTION_CANDIDATES + 1;
 
@@ -566,7 +569,21 @@ function startCodexCompaction(
             candidate.turnId,
             priorLatestTurnId,
             latestTurnIds,
-          )) continue;
+          )) {
+            if (!latestTurnIds.includes(candidate.turnId)) {
+              // A completion notification can precede visibility in the
+              // durable turn page. Retain it without requiring a second event.
+              // Requeue behind newly received candidates so stale notifications
+              // cannot starve the real completion; the existing deadline,
+              // candidate cap, and exact baseline check still apply.
+              await delay(CODEX_COMPACTION_PERSISTENCE_RETRY_MS, undefined, {
+                signal: abortController.signal,
+              });
+              if (candidateFailure) throw candidateFailure;
+              candidates.push(candidate);
+            }
+            continue;
+          }
           if (!candidate.successful) {
             throw new Error(
               "Codex context compaction turn did not complete successfully.",

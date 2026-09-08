@@ -572,6 +572,60 @@ describe("provider compaction adapters", { concurrent: false }, () => {
     });
   });
 
+  it("rechecks a completed compaction whose durable turn page is briefly stale", async () => {
+    let turnListRequests = 0;
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => await runWithClient({
+      request: async (method, params = {}) => {
+        if (method === "thread/resume") {
+          return {
+            thread: { id: params.threadId },
+            initialTurnsPage: { data: [{ id: "previous-turn" }] },
+          };
+        }
+        if (method === "thread/compact/start") {
+          if (!options.onNotification) throw new Error("Missing notifications.");
+          // One completion only: persistence becoming visible must not require
+          // a second provider event (or another model operation) to unlock.
+          emitCodexCompactionLifecycle(options.onNotification, {
+            itemId: "compact-delayed-page",
+            threadId: "thread-existing",
+            turnId: "compact-turn-delayed-page",
+          });
+          return {};
+        }
+        if (method === "thread/turns/list") {
+          turnListRequests += 1;
+          return {
+            data: turnListRequests < 3
+              ? [{ id: "previous-turn" }]
+              : [{ id: "compact-turn-delayed-page" }, { id: "previous-turn" }],
+          };
+        }
+        throw new Error(`Unexpected control request: ${method}`);
+      },
+    });
+    const manager = trackManager(ProviderManager.createForTests(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([
+        createCodexAppServerHarness({ compactionTimeoutMs: 2_000, withControlClient }),
+      ]),
+    ));
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-delayed-page",
+      cwd: process.cwd(),
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
+    expect(turnListRequests).toBe(3);
+    expect(manager.isRunning("codex-compact-delayed-page")).toBe(false);
+  });
+
   it("does not authorize compaction from item completion alone", async () => {
     const withControlClient: NonNullable<
       CodexAppServerHarnessDependencies["withControlClient"]

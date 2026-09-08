@@ -20,7 +20,8 @@ three moving thought dots, Idea the golden bulb, and Working the adjusted laptop
 Pickup is a new pose of the original 3D rig, exported onto the same pixel grid.
 The 13-frame [lift strip](pickup-lift.webp) is a 400 ms rig transition into that
 pose. CSS reverses from its current frame on release, including an early drop.
-The suspended loop fades in only after the lift; the latest activity returns
+The suspended loop fades in only after the lift; the strip then hides so its
+resting pose cannot show through the transparent loop. The latest activity returns
 after the landing. Matching display-referred whites avoid a gray flash between
 the existing activity art and the new captures.
 Its editable source, provenance and regeneration instructions live in

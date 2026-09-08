@@ -7,16 +7,17 @@ body { user-select: none; }
 .mascot[data-placement="system"] .mascot-drag { -webkit-app-region: drag; }
 .mascot img { position: absolute; inset: 0; width: 96px; height: 96px; image-rendering: pixelated; pointer-events: none; }
 .mascot-pickup, .mascot-lift { opacity: 0; }
-.mascot-lift { position: absolute; inset: 0; width: 96px; height: 96px; pointer-events: none; image-rendering: pixelated; background: url("../assets/mascot/pickup-lift.webp?no-inline") 0px 0px / 1248px 96px no-repeat; }
+.mascot-lift { position: absolute; inset: 0; width: 96px; height: 96px; visibility: visible; pointer-events: none; image-rendering: pixelated; background: url("../assets/mascot/pickup-lift.webp?no-inline") 0px 0px / 1248px 96px no-repeat; }
 .mascot[data-dragging="true"] .mascot-drag { cursor: grabbing; }
 .mascot[data-dragging="true"] .mascot-activity { opacity: 0; }
 .mascot[data-dragging="true"] .mascot-pickup { opacity: 1; }
-/* The strip is a genuine rig lift. CSS reverses from the current frame on an
-   early release; the suspended loop only fades in after the lift is complete. */
-.mascot[data-motion="true"] .mascot-lift { transition: background-position 400ms steps(12), opacity 100ms linear 300ms; }
+/* Reverse from the current lift frame on early release. Hide the strip when
+   the transparent loop finishes fading in, or its old feet show beneath sway.
+   Release restores visibility immediately, then fades the landing away. */
+.mascot[data-motion="true"] .mascot-lift { transition: background-position 400ms steps(12), opacity 100ms linear 300ms, visibility 0s; }
 .mascot[data-motion="true"] .mascot-activity { transition: opacity 100ms linear 300ms; }
 .mascot[data-motion="true"] .mascot-pickup { transition: opacity 80ms linear; }
-.mascot[data-motion="true"][data-dragging="true"] .mascot-lift { opacity: 1; background-position-x: -1152px; transition: background-position 400ms steps(12), opacity 80ms linear; }
+.mascot[data-motion="true"][data-dragging="true"] .mascot-lift { opacity: 1; visibility: hidden; background-position-x: -1152px; transition: background-position 400ms steps(12), opacity 80ms linear, visibility 0s linear 500ms; }
 .mascot[data-motion="true"][data-dragging="true"] .mascot-activity { transition: opacity 80ms linear; }
 .mascot[data-motion="true"][data-dragging="true"] .mascot-pickup { transition: opacity 100ms linear 400ms; }
 .mascot-status { position: absolute; top: 0; left: 4px; -webkit-app-region: no-drag; width: 232px; height: 116px; padding: 8px 10px; display: flex; flex-direction: column; text-align: left; border: 1px solid #ffffff24; border-radius: 14px; background: #1d2229; color: #f1f2e9; cursor: pointer; font: inherit; transition: background-color 140ms ease, border-color 140ms ease; }

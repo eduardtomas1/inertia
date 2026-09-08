@@ -147,6 +147,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       await expect.poll(() => overlay.locator(".mascot-pickup").evaluate((element) =>
         element instanceof HTMLImageElement && element.complete && element.naturalWidth === 96)).toBe(true);
       await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "-1152px");
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("visibility", "hidden");
       await capture(overlay, "pickup", info);
       await overlay.emulateMedia({ reducedMotion: "reduce" });
       await expect(overlay.locator(".mascot-pickup")).toHaveAttribute("data-animated", "false");
@@ -187,6 +188,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       expect(partial).toBeLessThan(0);
       expect(partial).toBeGreaterThan(-1152);
       await overlay.mouse.up();
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("visibility", "visible");
       expect(await overlay.locator(".mascot-lift").evaluate((element) =>
         Number.parseFloat(getComputedStyle(element).backgroundPositionX))).toBeGreaterThanOrEqual(partial);
       await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "0px");

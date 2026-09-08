@@ -506,7 +506,7 @@ describe("workspace Git repository discovery", () => {
     expect(snapshot.repositories).toEqual([]);
     expect(snapshot.truncated).toBe(true);
     const repository = await resolveWorkspaceGitRepository(root, nestedPath);
-    expect(repository.root).toBe(realpathSync(join(root, nestedPath)));
+    expect(repository.root).toBe(realpathSync.native(join(root, nestedPath)));
   });
 
   it("loads the complete diff for one small change in a root-less nested repository", async () => {

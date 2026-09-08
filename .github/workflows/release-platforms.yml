@@ -60,9 +60,27 @@ jobs:
             node scripts/validate-release.mjs
           printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
 
+  quality:
+    name: Release shared quality
+    needs: release_identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - name: Check out frozen release quality contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release_identity.outputs.release_sha }}
+          persist-credentials: false
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+      - name: Verify shared release quality once
+        run: npm run check:quality
+
   build:
     name: Build ${{ matrix.label }}
-    needs: release_identity
+    needs: [release_identity, quality]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     defaults:
@@ -91,7 +109,7 @@ jobs:
             platform: windows-x64
             arch: x64
             package_script: package:release:win
-            timeout_minutes: 60
+            timeout_minutes: 75
             app_path: release/win-unpacked/Inertia.exe
             windows_asset_suffix: ""
           - label: Windows ARM64
@@ -174,29 +192,14 @@ jobs:
       - name: Enforce the isolated browser-evidence CPU budget
         run: npm run test:browser-evidence-cpu-budget
 
-      - name: Verify quality and run the complete unit suite
+      - name: Run the complete release unit suite
         run: |
-          npm run check:quality
           # Keep native fixture contention aligned with PR CI.
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             npm test -- --maxWorkers=2
           else
             npm test
           fi
-
-      # Package and every subsequent smoke consume this exact bundle. The
-      # package commands below deliberately do not rebuild it.
-      - name: Build the release application bundle once
-        id: application_bundle
-        run: npm run build:packaged
-
-      - name: Measure release-candidate desktop workloads
-        if: runner.os != 'Linux'
-        run: npm run benchmark:desktop:built
-
-      - name: Measure release-candidate desktop workloads under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
@@ -207,42 +210,11 @@ jobs:
         continue-on-error: true
         run: npm audit --audit-level=high
 
-      # These phases share the native desktop and must never overlap. Keep
-      # release certification aligned with PR/main CI: foreground first, then
-      # isolated apps, then destructive recovery, with distinct diagnostics.
-      - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
-        run: node -e "console.log(require('electron'))"
-
-      - name: Run display-sensitive Electron end-to-end tests
-        if: runner.os != 'Linux'
-        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      # Keep this as a separate step with an explicit status condition: an
-      # assertion in the display-sensitive phase must fail the job without
-      # preventing the independent coverage from running.
-      - name: Run isolated Electron end-to-end tests
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
-        env:
-          # Bound Windows load after hosted socket-buffer exhaustion.
-          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
-        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
-
-      - name: Run display-sensitive Electron end-to-end tests under Xvfb
-        if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
-
-      - name: Run isolated Electron end-to-end tests under Xvfb
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
-
-      - name: Run destructive runtime-recovery tests sequentially under Xvfb
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+      # Package and every subsequent smoke consume this exact bundle. The
+      # package commands below deliberately do not rebuild it.
+      - name: Build the release application bundle once
+        id: application_bundle
+        run: npm run build:packaged
 
       - name: Prepare temporary macOS notarization key
         if: runner.os == 'macOS'
@@ -464,6 +436,50 @@ jobs:
               throw "The Windows release signature is not valid: $($signature.Status)"
             }
           }
+
+      - name: Measure release-candidate desktop workloads
+        if: runner.os != 'Linux'
+        run: npm run benchmark:desktop:built
+
+      - name: Measure release-candidate desktop workloads under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+
+      # These phases share the native desktop and must never overlap. Keep
+      # release certification aligned with PR/main CI: foreground first, then
+      # isolated apps, then destructive recovery, with distinct diagnostics.
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
+      - name: Run display-sensitive Electron end-to-end tests
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      # Package evidence is already complete. Do not continue native work
+      # after a failed phase whose fixture cleanup may be unconfirmed.
+      - name: Run isolated Electron end-to-end tests
+        if: runner.os != 'Linux'
+        env:
+          # Bound Windows load after hosted socket-buffer exhaustion.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
+        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Run display-sensitive Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run isolated Electron end-to-end tests under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Stage exact release assets and checksums
         env:

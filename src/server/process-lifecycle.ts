@@ -427,9 +427,33 @@ function terminateWindowsProcessTree(
   scope: WindowsCleanupFailure["scope"],
 ): Promise<boolean> {
   const startedAt = performance.now();
+  // Inspect only a bounded prefix of trusted taskkill output. Persist the
+  // fixed classification alone; localized/unrecognized text remains "other".
+  let output = "";
+  let remainingOutputBytes = 4_096;
+  const onOutput = (chunk: Buffer | string): void => {
+    if (remainingOutputBytes === 0) return;
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    const retained = bytes.subarray(0, remainingOutputBytes);
+    remainingOutputBytes -= retained.length;
+    output += retained.toString("utf8");
+  };
+  const classifyOutput = (): WindowsCleanupFailure["outputClassification"] => {
+    if (!output) return "unavailable";
+    if (/^(?:ERROR|Reason): Access is denied\.\s*$/imu.test(output)) {
+      return "access-denied";
+    }
+    if (/^ERROR: The process "\d+" not found\.\s*$/imu.test(output)
+      || /^Reason: There is no running instance of the task\.\s*$/imu.test(output)) {
+      return "not-found";
+    }
+    return "other";
+  };
   const record = (phase: WindowsCleanupFailure["phase"], exitCode: number | null = null): void => {
     recordWindowsCleanupFailure({ phase, scope, force, exitCode,
-      elapsedMs: windowsCleanupElapsedMs(startedAt) });
+      elapsedMs: windowsCleanupElapsedMs(startedAt),
+      ...(phase === "taskkill-exit" ? { outputClassification: classifyOutput() } : {}),
+    });
   };
   return new Promise<boolean>((resolve) => {
     let taskkill: ReturnType<typeof spawn>;
@@ -440,7 +464,7 @@ function terminateWindowsProcessTree(
         {
           shell: false,
           windowsHide: true,
-          stdio: "ignore",
+          stdio: ["ignore", "pipe", "pipe"],
         },
       );
     } catch {
@@ -448,6 +472,8 @@ function terminateWindowsProcessTree(
       resolve(false);
       return;
     }
+    taskkill.stdout?.on("data", onOutput);
+    taskkill.stderr?.on("data", onOutput);
     let settled = false;
     const finish = (terminated: boolean): void => {
       if (settled) return;
@@ -455,6 +481,8 @@ function terminateWindowsProcessTree(
       clearTimeout(timer);
       taskkill.off("error", onError);
       taskkill.off("close", onClose);
+      output = "";
+      remainingOutputBytes = 0;
       resolve(terminated);
     };
     const onError = (): void => { record("taskkill-error"); finish(false); };

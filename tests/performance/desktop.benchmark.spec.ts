@@ -43,6 +43,7 @@ import {
   summarizeVisibleStreamingCadence,
 } from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
+import { measureDesktopDiscovery } from "../helpers/desktop-discovery-benchmark";
 import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
@@ -472,6 +473,7 @@ async function launchApp(
   dataDirectory: string,
   workspace: string,
   profile: string,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<AppRun> {
   const acquisition = cleanupContext.applications.beginAcquisition();
   const startedAt = performance.now();
@@ -480,12 +482,12 @@ async function launchApp(
       args: [".", `--user-data-dir=${profile}`],
       timeout: ELECTRON_LAUNCH_TIMEOUT_MS,
       env: {
-        ...process.env,
+        ...environment,
         NODE_ENV: "test",
         INERTIA_STREAMING_TRACE: "1",
         INERTIA_DATA_DIR: dataDirectory,
         INERTIA_WORKSPACE_DIR: workspace,
-        INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
+        INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: environment.INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED ?? process.execPath,
       },
     });
     const resource: BenchmarkAppResource = { electronApp, runtimePid: null };
@@ -2004,6 +2006,17 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       warm,
       warmSample.runtimePid,
     );
+    const discoveryRoot = join(fixtureRoot, "controlled-discovery");
+    await mkdir(discoveryRoot, { recursive: true });
+    const controlledDiscovery = await measureDesktopDiscovery({
+      root: discoveryRoot,
+      workspace,
+      seed: (directory) => { seedRuntime(directory, workspace); },
+      launch: (directory, discoveryProfile, environment) => launchApp(
+        cleanupContext, directory, workspace, discoveryProfile, environment,
+      ),
+      close: (run) => closeMeasuredBenchmarkApp(run, null),
+    });
     const cpu = cpus();
     const sessionType = process.env.XDG_SESSION_TYPE?.trim().toLocaleLowerCase()
       || null;
@@ -2048,13 +2061,14 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         streamingSamples: streamingSampleCount,
       },
         scenarios: {
+        controlledDiscovery,
         coldStartup: {
           ...coldStartup,
-          definition: "fresh Electron profile and pre-seeded runtime database in provider-disabled NODE_ENV=test; operating-system cache uncontrolled",
+          definition: "fresh Electron profile and pre-seeded runtime database; package-smoke executable override enables discovery in NODE_ENV=test; inherited provider environment and operating-system cache uncontrolled",
         },
         warmStartup: {
           ...warmStartup,
-          definition: "same Electron profile and runtime database after the prior utility-runtime PID was confirmed stopped; providers remain disabled in NODE_ENV=test",
+          definition: "same Electron profile and runtime database after the prior utility-runtime PID was confirmed stopped; package-smoke executable override keeps discovery enabled in NODE_ENV=test",
         },
         idle: { durationMs: 1_500, start: idleStart, end: idleEnd },
         authoritativeLongConversation,

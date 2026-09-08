@@ -999,7 +999,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       repositoryRoot: workspacePath,
       repositoryRelativePath: "packages/app",
     });
-    expect(project.gitRepositoryLimit).toBe(128);
+    expect(project.gitRepositoryLimit).toBe(16);
     store.updateProject(project.id, {
       groupingMode: "repository-path",
       gitRepositoryLimit: 256,

@@ -1,3 +1,4 @@
+import type { RuntimeOwnedProcessDiagnostic } from "../node/runtime-owned-process-diagnostic.js";
 import {
   parseRuntimeWorkerCommand,
   type RuntimeRestartReason,
@@ -29,11 +30,7 @@ import {
   activateAfterRuntimeWorkerStartupPreflight,
   RuntimeWorkerStartupPreflightError,
 } from "./runtime-worker-startup-preflight.js";
-import {
-  runtimeStartupBlockerCode,
-  runtimeStartupFailureMessage,
-} from
-  "../shared/runtime-startup-diagnostics.js";
+import { observeRuntimeStartup } from "./runtime-worker-startup-failure.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -141,11 +138,11 @@ async function shutdown(exitCode = 0): Promise<void> {
   await finishShutdown(activeRuntime, shutdownExitCode);
 }
 
-function requestRuntimeRestart(reason: RuntimeRestartReason): void {
+function requestRuntimeRestart(reason: RuntimeRestartReason, diagnostic?: RuntimeOwnedProcessDiagnostic): void {
   try {
     if (!restartReason) {
       restartReason = reason;
-      post({ type: "runtime.restart-requested", reason });
+      post({ type: "runtime.restart-requested", reason, ...(diagnostic ? { diagnostic } : {}) });
     }
   } finally {
     void shutdown(1);
@@ -619,7 +616,7 @@ parentPort.on("message", (messageEvent) => {
         {
           ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
           ...(linuxGuardianExecutable ? { linuxGuardianExecutable } : {}),
-          onTainted: () => requestRuntimeRestart("owned-process-tainted"),
+          onTainted: (diagnostic) => requestRuntimeRestart("owned-process-tainted", diagnostic),
         },
       ),
     );
@@ -637,7 +634,7 @@ parentPort.on("message", (messageEvent) => {
     void shutdown(1);
     return;
   }
-  void startRuntime({
+  void observeRuntimeStartup(startRuntime({
     onMascotStatus: (status) => post({ type: "runtime.mascot-status", status }),
     ...command.options,
     onCleanupReceiptConsumed: (
@@ -673,7 +670,7 @@ parentPort.on("message", (messageEvent) => {
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
     secureFiles,
     agentBrowser,
-  }).then(async (startedRuntime) => {
+  }), async (startedRuntime) => {
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
@@ -710,14 +707,9 @@ parentPort.on("message", (messageEvent) => {
         packageSmokeImageOperation = null;
       });
     }
-  }).catch(async (error: unknown) => {
+  }, async (failure) => {
     starting = false;
-    const blockerCode = runtimeStartupBlockerCode(error);
-    post({
-      type: "runtime.startup-failed",
-      message: runtimeStartupFailureMessage(blockerCode),
-      ...(blockerCode ? { blockerCode } : {}),
-    });
+    post(failure);
     if (stopping) {
       await finishShutdown(null, 1);
       return;

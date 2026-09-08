@@ -16,6 +16,13 @@ export interface TurnStreamChannelOptions {
   onFlushStarted?(): void;
 }
 
+/** Distinguishes missing durable text from a failed renderer publication. */
+export class TurnStreamPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super("The streamed response could not be saved.", { cause });
+  }
+}
+
 /**
  * Gives live rendering and durable storage one bounded, ordered cadence.
  *
@@ -39,7 +46,11 @@ export class TurnStreamChannel {
         // Never make text user-visible before the same ordered prefix is
         // durable. This keeps abrupt utility-process loss from rolling the
         // transcript behind what the renderer already showed.
-        options.onPersistenceFlush(flush);
+        try {
+          options.onPersistenceFlush(flush);
+        } catch (error) {
+          throw new TurnStreamPersistenceError(error);
+        }
         options.onProjectionFlush(flush);
       },
       onTimerError: options.onTimerError,

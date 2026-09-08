@@ -75,6 +75,7 @@ import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
+import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import type {
   AgentTurnRow,
@@ -98,7 +99,6 @@ import type {
   UpsertSubagentTraceResult,
 } from "./persistence/types";
 import type { WorktreeFilesystemReceipt } from "./worktree-filesystem-identity";
-
 export { RecordNotFoundError } from "./persistence/errors";
 export type * from "./database-public-types";
 
@@ -127,7 +127,6 @@ export class RuntimeStore {
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
-
   constructor(
     databasePath: string,
     _defaultWorkspacePath: string,
@@ -274,7 +273,7 @@ export class RuntimeStore {
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
       reconcileRecoveryImportJournal(this.database);
-      this.initializeState();
+      this.settingsRepository.initialize();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
     } catch (error) {
       if (this.database.open) this.database.close();
@@ -838,7 +837,7 @@ export class RuntimeStore {
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return this.turnLedgerRepository.settle(turnId, update);
+    return settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update));
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
@@ -1111,6 +1110,11 @@ export class RuntimeStore {
     );
   }
 
+  readIssueReport(): unknown {
+    const row = this.database.prepare("SELECT report_json FROM issue_report_draft WHERE singleton = 1").get() as { report_json: string } | undefined;
+    return row ? JSON.parse(row.report_json) : null;
+  }
+  saveIssueReport(report: import("../shared/issue-report").IssueReport): void { this.database.prepare("INSERT INTO issue_report_draft (singleton, report_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET report_json = excluded.report_json").run(JSON.stringify(report)); }
   createWorkspaceRun(
     input: Omit<WorkspaceRun, "id" | "actionId" | "attentionState" | "canStop" | "startedAt" | "finishedAt"> & {
       id?: string;
@@ -1237,10 +1241,6 @@ export class RuntimeStore {
     const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
     if (!turn) throw new RecordNotFoundError("Agent turn not found.");
     return turn;
-  }
-
-  private initializeState(): void {
-    this.settingsRepository.initialize();
   }
 
   recoverInterruptedRuns(): void {

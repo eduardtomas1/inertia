@@ -76,7 +76,7 @@ import {
   toolActivityPhase,
   validateKimiInitialize,
 } from "./kimi-acp-projection";
-import { selectAcpAgentAuthMethod } from "./acp-auth";
+import { selectKimiAcpAuthMethod } from "./acp-terminal-auth";
 import {
   AcpCompactionProjection,
   unconfirmedAcpCompactionFailure,
@@ -158,8 +158,9 @@ export function kimiAcpProcessInvocation(
   executable: string,
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
+  extraArgs: readonly string[] = [],
 ) {
-  return providerProcessInvocation(executable, ["acp"], environment, platform);
+  return providerProcessInvocation(executable, ["acp", ...extraArgs], environment, platform);
 }
 
 export function createKimiAcpHarness(
@@ -197,6 +198,7 @@ function startKimiRun(
     options.input.cwd,
   );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+  const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
@@ -437,7 +439,7 @@ function startKimiRun(
       const initialized = await requestControl(
         context.request(acp.methods.agent.initialize, {
           protocolVersion: 1,
-          clientCapabilities: { plan: {}, session: { compaction: {} } },
+          clientCapabilities: { auth: { terminal: true }, plan: {}, session: { compaction: {} } },
           clientInfo: { name: "Inertia", version: INERTIA_VERSION },
         }),
         "initialize",
@@ -445,12 +447,14 @@ function startKimiRun(
       validateKimiInitialize(initialized);
       supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
       emitter.capability("images", supportsImages);
-      const login = selectAcpAgentAuthMethod(
-        "Kimi Code",
+      const login = selectKimiAcpAuthMethod(
         initialized.authMethods,
-        "login",
+        options.environment,
       );
-      if (login) {
+      // Terminal login belongs to the explicit Connect action, never to a turn.
+      // Already-signed-in installations proceed to the session auth gate; a
+      // terminal method ID must not be sent to ACP authenticate.
+      if (login && !("type" in login)) {
         activeFailurePhase = "auth";
         activeTerminalEvent = "authenticate";
         await requestControl(
@@ -568,6 +572,7 @@ function startKimiRun(
         providerPrompt,
         options.input.imagePaths ?? [],
         initialized,
+        promptPreparationAbort.signal,
       );
       if (cancelRequested) {
         requestProcessTermination(true);
@@ -736,6 +741,7 @@ function startKimiRun(
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    promptPreparationAbort.abort();
     hostToolRuntime?.settle();
     void hostMcpSession?.close().catch(() => requestProcessTermination(true));
     emitter.status("cancelling");

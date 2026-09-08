@@ -4598,7 +4598,10 @@ button.environment-row:focus-visible,
 }
 .composer-preview-context:hover,
 .composer-preview-context.is-selected { border-style: solid; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--accent-strong); background: var(--accent-soft); }
-.composer-preview-context > span { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.composer-preview-context-toggle { display: flex; min-width: 0; flex: 1; align-items: center; gap: 7px; padding: 0; color: inherit; background: transparent; text-align: left; }
+.composer-preview-context-toggle > span { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.composer-preview-context-dismiss { display: grid; flex: none; width: 20px; height: 20px; padding: 0; place-items: center; border-radius: var(--radius-small); color: var(--text-muted); background: transparent; }
+.composer-preview-context-dismiss:hover { color: var(--text); background: var(--surface-hover); }
 .composer-preview-context strong { color: var(--text-soft); font-size: var(--ui-font-micro); }
 .composer-preview-context small { overflow: hidden; font-size: max(calc(var(--ui-font-micro) - 1px), 8px); text-overflow: ellipsis; white-space: nowrap; }
 

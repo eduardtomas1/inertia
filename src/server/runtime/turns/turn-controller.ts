@@ -52,6 +52,7 @@ import { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnActivityProjection } from "./turn-activity-projection";
 import { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
+import { trackTurnSettlementTask } from "./turn-settlement-tasks";
 import { TurnProviderEventProjector } from "./turn-provider-event-projector";
 import { TurnArtifactSequencer } from "./turn-artifact-sequencer";
 import { confirmDuoProviderCleanup } from "../duo/duo-provider-cleanup";
@@ -115,7 +116,7 @@ export class TurnController {
   private readonly runStates: TurnRunStateCoordinator;
   private readonly providerEvents: TurnProviderEventProjector;
   private readonly nativeGoals: TurnNativeGoalCoordinator;
-  private readonly settlementTasks = new Set<Promise<unknown>>();
+  private readonly settlementTasks = new Set<Promise<void>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
   private readonly admissions: TurnAdmissionCoordinator;
@@ -190,7 +191,6 @@ export class TurnController {
     this.artifacts = new TurnArtifactSequencer({
       hooks: this.hooks,
       barriers: this.gitArtifactBarriers,
-      track: (value) => this.track(value),
     });
     this.streams = new TurnStreamProjection({
       store: this.store,
@@ -216,7 +216,7 @@ export class TurnController {
       streams: this.streams,
       now: () => this.now(),
       cleanup: (active) => this.cleanup(active),
-      track: (value) => this.track(value),
+      track: (value, onSettled) => this.track(value, onSettled),
     });
     this.runStates = new TurnRunStateCoordinator({
       store: this.store,
@@ -1224,19 +1224,19 @@ export class TurnController {
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
     clearPendingInteractionsForTurn(active, this.pendingApprovals, this.pendingInputs);
-    this.activeByConversation.delete(active.conversation.id);
-    this.activeByTurn.delete(active.turn.id);
+    if (this.activeByConversation.get(active.conversation.id) === active) {
+      this.activeByConversation.delete(active.conversation.id);
+    }
+    if (this.activeByTurn.get(active.turn.id) === active) {
+      this.activeByTurn.delete(active.turn.id);
+    }
   }
 
-  private track(value: void | Promise<void> | undefined): void {
-    if (!value) return;
-    const task = Promise.resolve(value)
-      .catch(() => undefined)
-      .finally(() => {
-        this.settlementTasks.delete(task);
-        this.hooks.broadcastSnapshot();
-      });
-    this.settlementTasks.add(task);
+  private track(
+    value: void | Promise<void> | undefined,
+    onSettled: () => void | Promise<void> = () => this.hooks.broadcastSnapshot(),
+  ): void {
+    trackTurnSettlementTask(this.settlementTasks, value, onSettled);
   }
 
   private now(): string {

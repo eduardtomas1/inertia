@@ -7,7 +7,7 @@ inputs:
   node-version:
     description: Node.js version to set up.
     required: false
-    default: "22"
+    default: "22.23.2"
   npm-ci-arguments:
     description: Extra arguments appended to npm ci when the cache misses.
     required: false

@@ -137,7 +137,7 @@ server.listen(port, "127.0.0.1", () => {
 `;
 }
 
-describe.sequential("OpenCode owned-server boundary", () => {
+describe("OpenCode owned-server boundary", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 

@@ -299,6 +299,11 @@ export function ComposerToolbar({
           <ModelChooser
             routes={modelRoutes}
             selectedRoute={selectedModelRoute}
+            configuration={{
+              accessMode: conversation.accessMode,
+              interactionMode: conversation.interactionMode,
+              fastMode: selectedFastMode,
+            }}
             disabled={disabled || running}
             closeSignal={menu}
             onOpenChange={(open) => {

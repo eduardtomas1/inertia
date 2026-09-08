@@ -1,3 +1,5 @@
+import { parseRuntimeOwnedProcessDiagnostic } from "../../../src/node/runtime-owned-process-diagnostic";
+import { parseRuntimeFailureDiagnosticMessage } from "../../../src/node/runtime-failure-diagnostic";
 import type { TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -40,6 +42,10 @@ const failurePrefixes = [
 function failureCode(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string" || value.length > 4_096) return "detail-omitted";
+  const known = parseRuntimeFailureDiagnosticMessage(value);
+  if (known?.initiatingCode) return [known.initiatingCode,
+    ...(known.shutdownMessage ? [failureCodes.get(known.shutdownMessage)] : []),
+  ].join("+");
   return failureCodes.get(value)
     ?? failurePrefixes.find(([prefix]) => value.startsWith(prefix))?.[1]
     ?? (/^(?:The runtime|Runtime) process exited unexpectedly \(code -?\d{1,10}\)\.$/u.test(value)
@@ -69,17 +75,31 @@ export function projectImageSendRuntimeSnapshot(value: unknown): Record<string, 
 function projectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== 1 || !["runtime.state", "runtime.failure"].includes(String(record.event))
+  if (record.schemaVersion !== 1 || !["runtime.state", "runtime.failure", "runtime.restart-requested"].includes(String(record.event))
     || typeof record.at !== "string" || record.at.length > 40 || !Number.isFinite(Date.parse(record.at))
     || new Date(record.at).toISOString() !== record.at
     || typeof record.recordDigest !== "string" || !/^[a-f0-9]{64}$/u.test(record.recordDigest)) return null;
   const allowed = new Set(["schemaVersion", "at", "event", "recordDigest", "phase", "generation",
-    "processId", "restartAttempt", "restartScheduled", "startupBlockerCode", "message"]);
+    "processId", "restartAttempt", "restartScheduled", "startupBlockerCode", "message",
+    ...(record.event === "runtime.restart-requested" ? ["reason", "stage", "signal", "exitCode"] : [])]);
   if (Object.keys(record).some((key) => !allowed.has(key))) return null;
   const payload = JSON.stringify(Object.fromEntries(Object.entries(record)
     .filter(([key]) => key !== "recordDigest")
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)));
   if (createHash("sha256").update(payload).digest("hex") !== record.recordDigest) return null;
+  if (record.event === "runtime.restart-requested") {
+    if ((record.reason !== "owned-process-tainted" && record.reason !== "owned-process-cleanup-unconfirmed")
+      || integer(record.generation) === null) return null;
+    const diagnostic = parseRuntimeOwnedProcessDiagnostic({
+      stage: record.stage,
+      ...(record.signal !== undefined ? { signal: record.signal } : {}),
+      ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+    });
+    if ((record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined)
+      && (!diagnostic || record.reason !== "owned-process-tainted")) return null;
+    return { at: record.at, event: record.event, generation: record.generation,
+      reason: record.reason, ...diagnostic };
+  }
   return { at: record.at, event: record.event, ...projectImageSendRuntimeSnapshot({
     ...record, pid: record.processId, lastError: record.message,
   }) };
@@ -100,6 +120,7 @@ export async function readImageSendRuntimeRecords(
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(directory) !== directory) return [];
   }
   let result: Record<string, unknown>[] = [];
+  let firstRestart: Record<string, unknown> | null = null;
   for (const name of ["runtime.3.log", "runtime.2.log", "runtime.1.log", "runtime.log"]) {
     signal.throwIfAborted();
     const path = join(directory, name);
@@ -121,11 +142,14 @@ export async function readImageSendRuntimeRecords(
         if (line.length > 4_096) continue;
         let record: Record<string, unknown> | null;
         try { record = projectRecord(JSON.parse(line)); } catch { continue; }
-        if (record) result = [...result.slice(-31), record];
+        if (record) {
+          if (record.event === "runtime.restart-requested" && !firstRestart) firstRestart = record;
+          result = [...result.slice(-31), record];
+        }
       }
     } finally { await handle.close(); }
   }
-  return result;
+  return firstRestart && !result.includes(firstRestart) ? [firstRestart, ...result.slice(-31)] : result;
 }
 
 export async function attachImageSendFailureDiagnostics(

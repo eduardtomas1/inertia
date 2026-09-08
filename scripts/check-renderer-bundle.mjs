@@ -15,12 +15,12 @@ const budgets = {
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
   // detachment ownership live here while their larger UI stays deferred.
-  // Prompt-history recall, cancellation recovery, Gemini-aware routing, and
-  // Zod 4.5 validation hardening measure 731.6 KiB on Linux x64; the detached
-  // route measures 559.8 KiB. Keep less than 2 KiB of headroom on each.
-  // Message-search navigation brings the measured main route to 734.8 KiB.
+  // Complete favorite profiles add validation and restore access, mode and
+  // response speed across draft, split and detached chats. The workbench
+  // measures 734.9 KiB and detached route 561.8 KiB on macOS ARM64.
+  // Keep less than 2 KiB of headroom on each.
   mainWorkbenchFirstLoadJavaScript: 736 * kibibyte,
-  detachedChatFirstLoadJavaScript: 561 * kibibyte,
+  detachedChatFirstLoadJavaScript: 563 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -29,6 +29,7 @@ const budgets = {
   colorThemesCss: 12 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
+  deferredIssueReportJavaScript: 13 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
@@ -52,12 +53,9 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // The provider-queue, project-picker, draft-ownership, prompt-history,
-  // exact-focus, Gemini routing, and Zod 4.5 validator core measures 1,969.9
-  // KiB on macOS ARM64 after the lifecycle merge. Every deferred surface retains
-  // its strict independent ceiling.
-  // Bounded search validation, snippets and turn navigation measure 1,977.1 KiB.
-  coreJavaScript: 1_979 * kibibyte,
+  // Guided report command/result validation adds 2.7 KiB to shared core.
+  // Measured 1,976.1 KiB on macOS ARM64; the report UI is separately deferred.
+  coreJavaScript: 1_977 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -450,8 +448,13 @@ const mascotJavaScriptBytes = await closureBytes(mascotClosure, entryJavaScriptC
 const mascotSettingsJavaScriptBytes = await closureBytes(mascotSettingsClosure, new Set([
   ...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...mascotClosure,
 ]));
+const issueReportEntry = assetNames.find((name) => /^IssueReportSettings-.*\.js$/u.test(name));
+if (!issueReportEntry) throw new Error("Missing deferred issue report surface");
+if (mainWorkbenchJavaScriptClosure.has(issueReportEntry)) throw new Error("Issue reporting must remain deferred");
+const deferredIssueReportJavaScriptBytes = await assetBytes(`assets/${issueReportEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredIssueReportJavaScriptBytes
   - mascotJavaScriptBytes
   - mascotSettingsJavaScriptBytes
   - deferredPdfJavaScriptBytes
@@ -475,6 +478,7 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredIssueReportJavaScript: deferredIssueReportJavaScriptBytes,
   mascotFirstLoadJavaScript: await closureBytes(mascotClosure),
   mascotJavaScript: mascotJavaScriptBytes,
   mascotSettingsJavaScript: mascotSettingsJavaScriptBytes,

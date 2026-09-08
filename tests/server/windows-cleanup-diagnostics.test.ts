@@ -25,6 +25,7 @@ describe("bounded Windows cleanup first-cause evidence", () => {
     captured[0]!.exitCode = 999;
     recordWindowsCleanupFailure({ ...captured[0]!, message: "secret" } as never);
     recordWindowsCleanupFailure({ ...captured[0]!, elapsedMs: Infinity });
+    recordWindowsCleanupFailure({ ...captured[0]!, outputClassification: "private output" } as never);
     expect(windowsCleanupFailures()[0]!.exitCode).toBe(12);
   });
 
@@ -79,6 +80,60 @@ describe("bounded Windows cleanup first-cause evidence", () => {
     await expect(terminate()).resolves.toBe(false);
     expect(spawnProcess).toHaveBeenCalledOnce();
     expect(windowsCleanupFailures().at(-1)).toMatchObject({ phase: "root-close", scope: "pid" });
+  });
+
+  it.each([
+    { output: 'ERROR: The process "4242" not found.\r\n', classification: "not-found" },
+    { output: "Reason: There is no running instance of the task.\r\n", classification: "not-found" },
+    { output: "Reason: Access is denied.\r\n", classification: "access-denied" },
+    { output: "ERROR: Access is denied.\r\n", classification: "access-denied" },
+    { output: "ERROR: Le processus est introuvable.\r\n", classification: "other" },
+    { output: "private argument says Access is denied.\r\n", classification: "other" },
+    { output: "", classification: "unavailable" },
+  ])("classifies $classification without accepting taskkill 255 as proof", async ({ output, classification }) => {
+    const taskkill = Object.assign(child(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(),
+    });
+    const spawnProcess = vi.fn(() => taskkill);
+    const waitForExit = vi.fn(async () => true);
+    const terminate = createOwnedPidProcessTreeTermination(4242, waitForExit, {
+      platform: "win32", spawnProcess: spawnProcess as never, waitMs: 200,
+    });
+    const termination = terminate();
+    // Both streams are consumed, including messages split across pipe chunks.
+    taskkill.stderr.emit("data", Buffer.from(output.slice(0, 10)));
+    taskkill.stderr.emit("data", Buffer.from(output.slice(10)));
+    if (output) taskkill.stdout.emit("data", Buffer.from("private executable and credentials\r\n"));
+    taskkill.emit("close", 255);
+
+    await expect(termination).resolves.toBe(false);
+    await expect(terminate()).resolves.toBe(false);
+    expect(spawnProcess).toHaveBeenCalledOnce();
+    expect(waitForExit).not.toHaveBeenCalled();
+    const evidence = windowsCleanupFailures().at(-1);
+    expect(evidence).toEqual({
+      phase: "taskkill-exit", scope: "pid", force: true, exitCode: 255,
+      elapsedMs: expect.any(Number), outputClassification: classification,
+    });
+    expect(JSON.stringify(evidence)).not.toMatch(/4242|private|credentials|ERROR|Reason/u);
+  });
+
+  it("bounds the combined output prefix and keeps draining later data", async () => {
+    const taskkill = Object.assign(child(), {
+      stdout: new EventEmitter(), stderr: new EventEmitter(),
+    });
+    const termination = createOwnedPidProcessTreeTermination(4242, async () => true, {
+      platform: "win32", spawnProcess: vi.fn(() => taskkill) as never, waitMs: 200,
+    })();
+    taskkill.stdout.emit("data", Buffer.alloc(4_096, "x"));
+    taskkill.stderr.emit("data", Buffer.from('\r\nERROR: The process "4242" not found.\r\n'));
+    taskkill.stdout.emit("data", Buffer.alloc(128_000, "y"));
+    taskkill.emit("close", 255);
+
+    await expect(termination).resolves.toBe(false);
+    expect(windowsCleanupFailures().at(-1)).toMatchObject({
+      exitCode: 255, outputClassification: "other",
+    });
   });
 
   it("does not record successful cleanup as a failure", async () => {

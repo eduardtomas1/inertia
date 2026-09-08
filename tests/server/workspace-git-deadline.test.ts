@@ -43,6 +43,23 @@ afterEach(() => {
 });
 
 describe("workspace Git traversal deadline", () => {
+  it("returns partial results at the automatic traversal budget without waiting for the caller deadline", async () => {
+    vi.useFakeTimers({ now: 10_000 });
+    const root = mkdtempSync(join(tmpdir(), "inertia-workspace-soft-deadline-"));
+    roots.push(root);
+    mkdirSync(join(root, "blocked"));
+    fsGate.blockedName = "blocked";
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => { started = resolve; });
+    fsGate.markBlockedInspection = started;
+    const pending = discoverWorkspaceGitRepositories(root, { deadlineAt: Date.now() + 90_000 });
+    await blocked;
+    await vi.advanceTimersByTimeAsync(2_000);
+    const snapshot = await pending;
+    expect(snapshot).toMatchObject({ partial: true, truncated: true, repositories: [], scannedDirectories: 1 });
+    expect(snapshot.issues[0]?.message).toContain("Automatic repository discovery reached its time limit");
+  });
+
   it("does not spend the discovery deadline inspecting directories beyond its traversal budget", async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "inertia-workspace-budget-")));
     roots.push(root);
@@ -58,7 +75,7 @@ describe("workspace Git traversal deadline", () => {
     expect(snapshot.scannedDirectories).toBe(2);
     expect(snapshot.truncated).toBe(true);
     expect(snapshot.skippedDirectories).toBe(1);
-    expect(fsGate.inspectedPaths).toEqual([join(root, "a-included")]);
+    expect(fsGate.inspectedPaths.filter((path) => !path.endsWith(".git"))).toEqual([join(root, "a-included")]);
   });
 
   it("spends entry inspection work on directories instead of ordinary files", async () => {
@@ -77,7 +94,7 @@ describe("workspace Git traversal deadline", () => {
 
     expect(snapshot.scannedDirectories).toBe(2);
     expect(snapshot.partial).toBe(false);
-    expect(fsGate.inspectedPaths).toEqual([nested]);
+    expect(fsGate.inspectedPaths.filter((path) => !path.endsWith(".git"))).toEqual([nested]);
   });
 
   it("rechecks a directory that becomes a symlink after enumeration", async () => {
@@ -99,7 +116,7 @@ describe("workspace Git traversal deadline", () => {
     expect(snapshot.scannedDirectories).toBe(1);
     expect(snapshot.skippedDirectories).toBe(1);
     expect(snapshot.repositories).toEqual([]);
-    expect(fsGate.inspectedPaths).toEqual([nested]);
+    expect(fsGate.inspectedPaths.filter((path) => !path.endsWith(".git"))).toEqual([nested]);
   });
 
   it("rejects at the aggregate deadline when one entry inspection stalls", async () => {

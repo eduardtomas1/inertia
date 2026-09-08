@@ -12,6 +12,7 @@ import {
   type ModelFavoriteReference,
 } from "../../src/renderer/src/utils/modelFavorites";
 import type { ModelSearchRoute } from "../../src/renderer/src/utils/modelSearch";
+import { continuationIdentityForSelection, providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function favorite(
   modelId: string,
@@ -63,6 +64,59 @@ function memoryStorage(
 }
 
 describe("model favorites", () => {
+  it("round-trips distinct explicit run profiles without persisting unrelated fields", () => {
+    const full = favorite("agent", { reasoningEffort: "xhigh", configuration: {
+      accessMode: "full", interactionMode: "plan", fastMode: true,
+    } });
+    const supervised = { ...full, configuration: {
+      ...full.configuration!, accessMode: "supervised" as const, fastMode: false,
+    } };
+    const storage = memoryStorage();
+    expect(writeModelFavorites(storage, [full, supervised])).toBe(true);
+    expect(readModelFavorites(storage)).toEqual([full, supervised]);
+    expect(modelFavoriteKey(full)).not.toBe(modelFavoriteKey(supervised));
+    expect(toggleModelFavorite([full, supervised], full)).toEqual([supervised]);
+    expect(modelFavoriteReference({ ...full, configuration: {
+      ...full.configuration!, credential: "must-not-be-copied",
+    } } as ModelFavoriteReference)).toEqual(full);
+  });
+
+  it.each([
+    { accessMode: "root", interactionMode: "build" },
+    { accessMode: "full", interactionMode: "shell" },
+    { accessMode: "full", interactionMode: "build", fastMode: "true" },
+    { accessMode: "full" },
+  ])("rejects malformed saved configuration %j", (configuration) => {
+    expect(readModelFavorites(memoryStorage(JSON.stringify({
+      version: 2, favorites: [{ ...favorite("agent"), configuration }],
+    })))).toEqual([]);
+  });
+
+  it("restores explicit Fast and Standard with the current route identity, while legacy favorites inherit no access", () => {
+    const selection = providerNativeModelSelection({
+      providerId: "codex", modelId: "agent", providerOptions: { fastMode: "priority" },
+    });
+    const available = { ...route("agent"), selection,
+      reasoningOptions: ["high"], supportsNativeFastModeControl: true,
+      continuationIdentity: continuationIdentityForSelection(selection),
+    };
+    const standard = favorite("agent", { reasoningEffort: "high", configuration: {
+      accessMode: "full", interactionMode: "plan", fastMode: false,
+    } });
+    const [restored] = resolveModelFavorites([standard], [available]);
+    expect(restored?.route?.configuration).toEqual(standard.configuration);
+    expect(restored?.route?.selection).toMatchObject({ reasoningEffort: "high", providerOptions: {} });
+    expect(restored?.route?.continuationIdentity.performanceModeIdentity).toBeNull();
+    expect(restored?.route?.responseSpeed).toBe("Standard");
+    const fast = { ...standard, configuration: { ...standard.configuration!, fastMode: true } };
+    expect(resolveModelFavorites([fast], [available])[0]?.route?.selection.providerOptions)
+      .toEqual({ fastMode: "priority" });
+    expect(resolveModelFavorites([fast], [{ ...available, supportsNativeFastModeControl: false }])[0]?.route)
+      .toBeNull();
+    expect(resolveModelFavorites([favorite("agent")], [{ ...available, configuration: standard.configuration }])[0]?.route?.configuration)
+      .toBeUndefined();
+  });
+
   it("persists only bounded stable route references", () => {
     const storage = memoryStorage();
     const selection = {

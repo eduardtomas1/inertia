@@ -35,6 +35,8 @@ export interface ProviderAcpHandshakeDependencies extends ProviderAcpProbeDepend
 }
 
 export interface ProviderAcpInitializeValidation {
+  /** Trusted caller-staged bundle of the production Kimi-only policy. */
+  kimiTerminalAuthPolicyPath?: string;
   advertiseCompaction?: boolean;
   allowMissingAgentInfo?: boolean;
   allowSessionCapabilitiesResume?: boolean;

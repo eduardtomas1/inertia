@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
@@ -28,9 +29,12 @@ if (args[0] === "status") {
 if (args[0] === "login") {
   process.stdout.write("Opening browser to sign in...\\r\\n");
   process.stdout.write("/bin/sh: 1: xdg-open: not found\\r\\n");
-  process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/auth");
+  // Cursor/style controls can split ConPTY output independently of printable
+  // text. Keep the actual native PTY/browser handoff test deterministic on all
+  // hosts instead of relying on Windows to happen to inject such a split.
+  process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/auth\\x1b[?25h");
   setTimeout(() => {
-    process.stdout.write("orize?client_id=fixture&response_type=code&state=fixture-state&code_challenge=fixture-challenge\\r\\n");
+    process.stdout.write("\\x1b[?25l\\x1b[0morize?client_id=fixture&response_type=code&state=fixture-state&code_challenge=fixture-challenge\\r\\n");
     process.stdout.write("Paste code here if prompted > ");
   }, 25);
   setInterval(() => {}, 1_000);

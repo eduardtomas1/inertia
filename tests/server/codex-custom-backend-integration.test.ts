@@ -20,7 +20,7 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 
-describe.sequential("Codex custom Responses backend integration", () => {
+describe("Codex custom Responses backend integration", { concurrent: false }, () => {
   const roots: string[] = [];
   const managers: ProviderManager[] = [];
   const servers: ReturnType<typeof createServer>[] = [];

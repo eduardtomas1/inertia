@@ -30,7 +30,7 @@ import {
 } from "../helpers/codex-app-server-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-describe.sequential("Codex App Server runtime", () => {
+describe("Codex App Server runtime", { concurrent: false }, () => {
   const roots: string[] = [];
   const fakeAppServer = () => createFakeAppServer(roots);
   const managers: ProviderManager[] = [];

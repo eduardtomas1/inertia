@@ -26,11 +26,13 @@ function unavailable(options: InspectionOptions): boolean {
 export class GitInspectionLifecycle {
   private readonly active = new Set<ActiveInspection>();
   private holds = 0;
+  private cleanupFailure: unknown;
 
   run<Result>(
     options: InspectionOptions,
     operation: (signal: AbortSignal) => Promise<Result>,
   ): Promise<Result> {
+    if (this.cleanupFailure !== undefined) return Promise.reject(this.cleanupFailure);
     if (this.holds > 0 || unavailable(options)) return Promise.reject(cancelled());
     const controller = new AbortController();
     const cancel = (): void => controller.abort();
@@ -46,14 +48,15 @@ export class GitInspectionLifecycle {
     }).finally(() => {
       options.signal?.removeEventListener("abort", cancel);
       controller.abort();
-      this.active.delete(active);
     });
     active.settlement = result.then(
       () => undefined,
       (error: unknown) => {
-        if (isGitProcessTreeTerminationFailure(error)) throw error;
+        // The caller owns result's rejection. Retain cleanup uncertainty for
+        // shutdown without creating an independently unhandled rejection.
+        if (isGitProcessTreeTerminationFailure(error)) this.cleanupFailure ??= error;
       },
-    );
+    ).finally(() => { this.active.delete(active); });
     return result;
   }
 
@@ -73,18 +76,14 @@ export class GitInspectionLifecycle {
   }
 
   private async cancelAndDrain(): Promise<void> {
-    let cleanupFailure: unknown;
     while (this.active.size > 0) {
       const current = [...this.active];
       current.forEach(({ controller }) => controller.abort());
-      const results = await Promise.allSettled(
+      await Promise.all(
         current.map(({ settlement }) => settlement),
       );
-      cleanupFailure ??= results.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      )?.reason;
     }
-    if (cleanupFailure !== undefined) throw cleanupFailure;
+    if (this.cleanupFailure !== undefined) throw this.cleanupFailure;
   }
 }
 

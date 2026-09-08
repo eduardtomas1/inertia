@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -15,6 +16,7 @@ import {
   ProcessTreeCleanupError,
   runBounded,
 } from "../../scripts/bounded-process-tree.mjs";
+import { stageOpenCodeRuntime } from "../../scripts/provider-drift-staging.mjs";
 
 function processExists(pid: number): boolean {
   try {
@@ -33,16 +35,14 @@ function processExists(pid: number): boolean {
 describe.runIf(process.platform !== "win32")(
   "provider drift OpenCode semantic isolation",
   () => {
-    it("detects project-plugin execution by a --pure server", async () => {
+    it("stages the complete runtime import closure and detects project-plugin execution by a --pure server", async () => {
       const root = mkdtempSync(join(tmpdir(), "inertia-opencode-pure-"));
       const command = join(root, "opencode-fixture");
       const pidMarker = join(root, "server.pid");
       const sentinel = join(root, "plugin-executed");
       let serverPid = 0;
-      const runtime = join(
-        process.cwd(),
-        "scripts/provider-drift-opencode-runtime.mjs",
-      );
+      symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "junction");
+      const runtime = await stageOpenCodeRuntime(join(process.cwd(), "scripts"), root);
       writeFileSync(command, [
         "#!/usr/bin/env node",
         'const { writeFileSync } = require("node:fs");',

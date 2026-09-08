@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

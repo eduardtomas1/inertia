@@ -89,7 +89,7 @@ export interface ComposerProps {
   ) => Promise<void>;
   onCreateConversationForSelection?: (
     selection: ModelSelection,
-    options?: { prefillText?: string },
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
   ) => Promise<void>;
   onChooseAttachments: (
     mode?: AttachmentPickerMode,
@@ -155,6 +155,7 @@ export type MoreSection = "actions" | "reasoning" | "speed" | "mode" | "access";
 
 export interface PendingModelRoute {
   selection: ModelSelection;
+  configuration?: Pick<Conversation, "accessMode" | "interactionMode">;
   label: string;
   reason: string;
   sourceConversationId: string;

@@ -25,7 +25,7 @@ const WINDOWS_ENVIRONMENT_KEYS = [
   "VOLTA_HOME",
 ] as const;
 
-describe.skipIf(process.platform !== "win32").sequential("native Windows Codex discovery", () => {
+describe.skipIf(process.platform !== "win32")("native Windows Codex discovery", { concurrent: false }, () => {
   const roots: string[] = [];
   const originalEnvironment = Object.fromEntries(WINDOWS_ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 

@@ -172,6 +172,23 @@ export function startCodexAppServerRun(
     };
   };
 
+  const rememberTransportFailure = (message: string, technicalDetail?: string): void => {
+    // Node records process exit before stdio closes. Preserve that evidence
+    // before arming cleanup; a cleanup-induced exit is not the initiating cause.
+    if (!ownedTerminationArmed && (child.exitCode !== null || child.signalCode !== null)) {
+      exitedBeforeOwnedTermination = true;
+      rememberFailure(
+        child.signalCode ? "process-signal" : "process-exit",
+        child.signalCode
+          ? "Codex App Server stopped unexpectedly."
+          : "Codex App Server exited before the turn completed.",
+        technicalDetail,
+      );
+    } else {
+      rememberFailure("transport-closed", message, technicalDetail);
+    }
+  };
+
   const settledFailure = (
     exitCode: number | null,
     signal: NodeJS.Signals | null,
@@ -218,8 +235,7 @@ export function startCodexAppServerRun(
       ? error.message
       : "The Codex App Server input stream closed.";
     lastError ??= message;
-    rememberFailure(
-      "transport-closed",
+    rememberTransportFailure(
       "The Codex App Server connection closed while sending a request.",
       message,
     );
@@ -603,8 +619,7 @@ export function startCodexAppServerRun(
     transportCloseTimer = setTimeout(() => {
       transportCloseTimer = undefined;
       if (settled) return;
-      rememberFailure(
-        "transport-closed",
+      rememberTransportFailure(
         "The Codex App Server connection closed before the turn completed.",
       );
       finish("failed", null, null);
@@ -715,16 +730,19 @@ export function startCodexAppServerRun(
       || !providerThreadId
       || !activeTurnId
     ) return false;
+    const expectedTurnId = activeTurnId;
     try {
-      await request("turn/steer", {
+      const receipt = await request("turn/steer", {
         threadId: providerThreadId,
         input: [
           { type: "text", text, text_elements: [] },
           ...input.imagePaths.map((path) => ({ type: "localImage", path })),
         ],
-        expectedTurnId: activeTurnId,
+        expectedTurnId,
       }, undefined, false);
-      return true;
+      // Capture ownership before awaiting: completion can share the response's
+      // stdout batch, but only this exact provider turn can acknowledge input.
+      return receipt.turnId === expectedTurnId;
     } catch {
       return false;
     }

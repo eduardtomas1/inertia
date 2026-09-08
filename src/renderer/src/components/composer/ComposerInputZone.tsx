@@ -36,6 +36,7 @@ import {
 } from "./config";
 import { RouteChangeConfirmation } from "./RouteChangeConfirmation";
 import type { PendingModelRoute } from "./types";
+import type { ComposerCommandMenuItem } from "./ComposerCommandMenu";
 
 type RouteReadiness = ReturnType<typeof composerRouteReadiness>;
 
@@ -43,12 +44,7 @@ const ComposerCommandMenu = lazy(async () => ({
   default: (await import("./ComposerCommandMenu")).ComposerCommandMenu,
 }));
 
-interface ComposerSlashCommand {
-  id: string;
-  label: string;
-  disabled: boolean;
-  disabledWhileRunning: boolean;
-  section: "built-in" | "provider";
+interface ComposerSlashCommand extends ComposerCommandMenuItem {
   action?: () => void;
   mode?: InteractionMode;
 }
@@ -63,6 +59,7 @@ export interface ComposerInputZoneProps {
   previewContextUrl?: string | null;
   previewContextSelected: boolean;
   onTogglePreviewContext: () => void;
+  onDismissPreviewContext: () => void;
   attachments: ChatAttachment[];
   attachmentsDisabled?: boolean;
   pendingAttachmentIds?: ReadonlySet<string>;
@@ -123,6 +120,7 @@ export function ComposerInputZone({
   previewContextUrl,
   previewContextSelected,
   onTogglePreviewContext,
+  onDismissPreviewContext,
   attachments,
   attachmentsDisabled = false,
   pendingAttachmentIds,
@@ -165,34 +163,33 @@ export function ComposerInputZone({
   onOpenResume,
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
-  const slashCommands: ComposerSlashCommand[] = [
-    { id: "goal", label: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: !goalAvailable, disabledWhileRunning: false },
-    { id: "plan", label: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: false, disabledWhileRunning: true },
-    { id: "build", label: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: false, disabledWhileRunning: true },
-    { id: "resume", label: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled: false, disabledWhileRunning: false },
+  const modeChangesDisabled = disabled || running;
+  const slashQuery = slashMatch?.[1].toLowerCase();
+  const slashCommands: ComposerSlashCommand[] = slashMatch ? [
+    { id: "goal", description: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: disabled || !goalAvailable },
+    { id: "plan", description: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: modeChangesDisabled },
+    { id: "build", description: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: modeChangesDisabled },
+    { id: "resume", description: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled },
     {
       id: "compact",
-      label: compactUnavailableReason
+      description: compactUnavailableReason
         ? `Unavailable: ${compactUnavailableReason}`
         : "Compact this chat's provider context",
       section: "provider",
       action: onCompactCommand,
-      disabled: compactUnavailableReason !== null,
-      disabledWhileRunning: true,
+      disabled: modeChangesDisabled || compactUnavailableReason !== null,
     },
-  ];
+  ] : [];
   const matchingSlashCommands = slashMatch
     ? slashCommands.filter(({ id }) =>
-        id.startsWith(slashMatch[1].toLowerCase()))
+        id.startsWith(slashQuery!))
     : [];
-  const slashCommandDisabled = (item: ComposerSlashCommand): boolean =>
-    disabled || item.disabled || (running && item.disabledWhileRunning);
-  const selectableSlashCommands = matchingSlashCommands.filter((item) =>
-    !slashCommandDisabled(item));
+  const selectableSlashCommands = matchingSlashCommands.filter(({ disabled }) => !disabled);
   const [highlightedSlashCommandId, setHighlightedSlashCommandId] = useState<string | null>(null);
   const [dismissedSuggestionValue, setDismissedSuggestionValue] = useState<string | null>(
     null,
   );
+  const dismissSuggestions = (): void => setDismissedSuggestionValue(message);
   const activeSlashCommand = selectableSlashCommands.find((item) =>
     item.id === highlightedSlashCommandId)
     ?? selectableSlashCommands[0]
@@ -211,15 +208,20 @@ export function ComposerInputZone({
     && visibleMentionResults.length > 0
     && dismissedSuggestionValue !== message,
   );
+  const reviewNoteContext = promptContext?.startsWith("Local review note for ");
+  const contextKind = reviewNoteContext ? "review note" : "diff";
+  const previewDismissLabel = previewContextSelected
+    ? "Remove attached preview" : "Dismiss preview suggestion";
+  const suggestionMenuVisible = skillOpen || mentionMenuVisible;
+  const compactWorking = compactNotice?.kind === "working";
+  const compactError = compactNotice?.kind === "error";
 
   const moveMentionHighlight = (
     key: SidebarNavigationKey,
   ): void => {
     if (visibleMentionResults.length === 0) return;
-    const activeIndex = visibleMentionResults.findIndex(({ path }) =>
-      path === activeMention?.path);
     const nextIndex = nextSidebarNavigationIndex(
-      activeIndex,
+      visibleMentionResults.indexOf(activeMention!),
       key,
       visibleMentionResults.length,
     );
@@ -238,18 +240,16 @@ export function ComposerInputZone({
     key: SidebarNavigationKey,
   ): void => {
     if (selectableSlashCommands.length === 0) return;
-    const activeIndex = selectableSlashCommands.findIndex((item) =>
-      item.id === activeSlashCommand?.id);
     const nextIndex = nextSidebarNavigationIndex(
-      activeIndex,
+      selectableSlashCommands.indexOf(activeSlashCommand!),
       key,
       selectableSlashCommands.length,
     );
     setHighlightedSlashCommandId(selectableSlashCommands[nextIndex]!.id);
   };
   const activateSlashCommand = (item: ComposerSlashCommand): void => {
-    if (slashCommandDisabled(item)) return;
-    setDismissedSuggestionValue(message);
+    if (item.disabled) return;
+    dismissSuggestions();
     if (item.action) {
       item.action();
       return;
@@ -311,14 +311,12 @@ export function ComposerInputZone({
         {promptContext && (
           <div
             className="composer-context"
-            aria-label={promptContext.startsWith("Local review note for ")
-              ? "Selected review note context"
-              : "Selected diff context"}
+            aria-label={`Selected ${contextKind} context`}
           >
             <MessageSquarePlus size={13} />
             <span>
               <strong>
-                {promptContext.startsWith("Local review note for ")
+                {reviewNoteContext
                   ? "Review note "
                   : "Diff selection "}
               </strong>
@@ -326,9 +324,7 @@ export function ComposerInputZone({
             </span>
             <button
               type="button"
-              aria-label={promptContext.startsWith("Local review note for ")
-                ? "Remove selected review note context"
-                : "Remove selected diff context"}
+              aria-label={`Remove selected ${contextKind} context`}
               onClick={onClearPromptContext}
             >
               <X size={12} />
@@ -336,21 +332,34 @@ export function ComposerInputZone({
           </div>
         )}
         {previewContextUrl && (
-          <button
-            type="button"
+          <div
             className={clsx(
               "composer-preview-context",
               previewContextSelected && "is-selected",
             )}
-            aria-pressed={previewContextSelected}
-            onClick={onTogglePreviewContext}
           >
-            <span>
-              <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
-              <small>{previewContextUrl}</small>
-            </span>
-            <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
-          </button>
+            <button
+              type="button"
+              className="composer-preview-context-toggle"
+              aria-pressed={previewContextSelected}
+              onClick={onTogglePreviewContext}
+            >
+              <span>
+                <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
+                <small>{previewContextUrl}</small>
+              </span>
+              <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
+            </button>
+            <button
+              type="button"
+              className="composer-preview-context-dismiss"
+              aria-label={previewDismissLabel}
+              title={previewDismissLabel}
+              onClick={onDismissPreviewContext}
+            >
+              <X size={12} />
+            </button>
+          </div>
         )}
         <ComposerAttachmentList
           attachments={attachments}
@@ -375,15 +384,15 @@ export function ComposerInputZone({
               "composer-compact-notice",
               `is-${compactNotice.kind}`,
             )}
-            role={compactNotice.kind === "error" ? "alert" : "status"}
-            aria-live={compactNotice.kind === "error" ? "assertive" : "polite"}
+            role={compactError ? "alert" : "status"}
+            aria-live={compactError ? "assertive" : "polite"}
           >
             <span className="composer-compact-notice-icon" aria-hidden="true">
-              {compactNotice.kind === "working" ? <ContextCompactionIcon /> : <Box size={14} />}
+              {compactWorking ? <ContextCompactionIcon /> : <Box size={14} />}
             </span>
             <span>{compactNotice.message}</span>
             <span className="composer-compact-notice-state" aria-hidden="true">
-              {compactNotice.kind === "working" ? null : compactNotice.kind === "success" ? (
+              {compactWorking ? null : compactNotice.kind === "success" ? (
                 <Check size={13} />
               ) : (
                 <CircleAlert size={13} />
@@ -416,13 +425,13 @@ export function ComposerInputZone({
             )) return;
             if (mentionMenuVisible && activeMention && handleComposerSuggestionKey(
               event,
-              () => setDismissedSuggestionValue(message),
+              dismissSuggestions,
               moveMentionHighlight,
               () => acceptMention(activeMention),
             )) return;
             if (slashMenuVisible && slashMatch && handleComposerSuggestionKey(
               event,
-              () => setDismissedSuggestionValue(message),
+              dismissSuggestions,
               moveSlashHighlight,
               activeSlashCommand
                 ? () => activateSlashCommand(activeSlashCommand)
@@ -438,7 +447,7 @@ export function ComposerInputZone({
               if (activeSlashCommand) {
                 activateSlashCommand(activeSlashCommand);
               } else if (
-                slashMatch?.[1].toLowerCase() === "compact"
+                slashQuery === "compact"
                 && compactUnavailableReason
               ) {
                 void onSubmit();
@@ -478,9 +487,9 @@ export function ComposerInputZone({
           maxLength={typedMessageLimit}
           disabled={disabled}
           readOnly={submissionPending || followUpPending}
-          role={skillOpen || mentionMenuVisible ? "combobox" : undefined}
-          aria-autocomplete={skillOpen || mentionMenuVisible ? "list" : undefined}
-          aria-expanded={skillOpen || mentionMenuVisible ? true : undefined}
+          role={suggestionMenuVisible ? "combobox" : undefined}
+          aria-autocomplete={suggestionMenuVisible ? "list" : undefined}
+          aria-expanded={suggestionMenuVisible || undefined}
           aria-controls={skillOpen
             ? skillListboxId
             : mentionMenuVisible ? mentionListboxId : undefined}
@@ -528,18 +537,10 @@ export function ComposerInputZone({
         <div className="composer-command-layer">
           <Suspense fallback={null}>
             <ComposerCommandMenu
-              items={matchingSlashCommands.map((item) => ({
-                id: item.id,
-                label: `/${item.id}`,
-                description: item.label,
-                section: item.section,
-                disabled: slashCommandDisabled(item),
-              }))}
+              items={matchingSlashCommands}
               activeItemId={activeSlashCommand?.id ?? null}
               grouped={slashMatch[1] === ""}
-              onActiveItemChange={(id) => {
-                setHighlightedSlashCommandId(id);
-              }}
+              onActiveItemChange={setHighlightedSlashCommandId}
               onSelect={(id) => {
                 const item = matchingSlashCommands.find((candidate) =>
                   candidate.id === id);

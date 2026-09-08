@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type Locator } from "@playwright/test";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { openLocalProjectFromDialog } from "./support/add-project";
 
 const execFileAsync = promisify(execFile);
 async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
@@ -19,7 +20,6 @@ let initialBranch: string;
 test.beforeEach(async () => {
   app = await createAppFixture({
     name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
-    seedSecondProject: test.info().tags.includes("@draft-scope"),
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
       remote = join(testDirectory, "remote.git");
       await git(testDirectory, "init", "--bare", remote);
@@ -225,33 +225,26 @@ test("tracks an exact remote branch and fast-forwards incoming commits", async (
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("fetch uses the draft workspace after changing projects", { tag: "@draft-scope" }, async () => {
-  const { page, workspaceDirectory, secondWorkspaceDirectory } = app;
-  if (!secondWorkspaceDirectory) throw new Error("The draft scope fixture needs a second project.");
-  await git(secondWorkspaceDirectory, "remote", "add", "origin", remote);
+test("fetch uses the imported project draft workspace", async () => {
+  const { page, workspaceDirectory } = app;
+  const before = await readFile(join(workspaceDirectory, "sample.ts"), "utf8");
+  await app.electronApp.evaluate(({ dialog }, directory) => {
+    Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: [directory], bookmarks: [] }));
+  }, workspaceDirectory);
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
-  await sidebar.getByRole("button", { name: "Start a new chat" }).click();
-  const heading = page.getByRole("heading", { name: "What should we build today?" });
+  await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
+  await openLocalProjectFromDialog(page);
+  const heading = page.getByRole("heading", { name: /^What should we build in .+\?$/u });
   await expect(heading).toBeVisible();
   const input = page.getByRole("textbox", { name: "Message", exact: true });
   await input.fill("Keep this draft while I fetch");
-  for (const [name, directory, branch, file] of [
-    ["Inertia", workspaceDirectory, "feature/draft-first", "sample.ts"],
-    ["Companion", secondWorkspaceDirectory, "feature/draft-second", "beta-only.ts"],
-  ] as const) {
-    const before = await readFile(join(directory, file), "utf8");
-    await git(remote, "branch", branch, initialBranch);
-    const project = page.getByRole("button", { name: "Project", exact: true });
-    await project.click();
-    await page.getByRole("dialog", { name: "Choose project", exact: true })
-      .getByRole("option", { name, exact: true }).click();
-    await fetchFromUi();
-    await expect.poll(() => git(directory, "for-each-ref", "--format=%(objectname)", `refs/remotes/origin/${branch}`))
-      .toBe(await git(remote, "rev-parse", branch));
-    expect(await readFile(join(directory, file), "utf8")).toBe(before);
-    await expect(input).toHaveValue("Keep this draft while I fetch");
-    await expect(heading).toBeVisible();
-    await expect(page.locator(".error-toast")).toHaveCount(0);
-  }
+  await git(remote, "branch", "feature/draft-fetch", initialBranch);
+  await fetchFromUi();
+  await expect.poll(() => git(workspaceDirectory, "for-each-ref", "--format=%(objectname)", "refs/remotes/origin/feature/draft-fetch"))
+    .toBe(await git(remote, "rev-parse", "feature/draft-fetch"));
+  expect(await readFile(join(workspaceDirectory, "sample.ts"), "utf8")).toBe(before);
+  await expect(input).toHaveValue("Keep this draft while I fetch");
+  await expect(heading).toBeVisible();
+  await expect(page.locator(".error-toast")).toHaveCount(0);
   expect(app.rendererErrors).toEqual([]);
 });

@@ -1,6 +1,8 @@
 # Git workflows
 
-Git controls operate on the active chat's checkout. The Changes panel can also
+Git controls operate on the active chat's checkout, or the project root in an
+imported-project draft. Header Fetch/Pull/Push commands use the same scope that
+loaded the repository authority. The Changes panel can also
 target one discovered nested repository; each action retains that repository's
 runtime-issued authority. Opening the menus does not start a network scan.
 
@@ -105,7 +107,7 @@ safe errors, optional-boolean validation at the IPC boundary, command authority,
 stale checkout ownership, search, keyboard focus,
 and single-surface mutation errors.
 
-Four independent Electron scenarios in `tests/e2e/git-workflows.spec.ts` exercise
+Five independent Electron scenarios in `tests/e2e/git-workflows.spec.ts` exercise
 actual IPC and Git operations against temporary repositories and local bare
 remotes:
 
@@ -120,8 +122,10 @@ remotes:
    branch, fetch incoming commits, and pull a fast-forward in a compact light-theme
    window without viewport overflow. Verify checkout bytes with Git’s configured
    filters, including CRLF checkout behavior.
+5. Fetch from an imported-project draft while preserving its text and local
+   changes, without materializing a chat.
 
-The four scenarios pass on macOS arm64 using Node 22 and Electron 44, including
+The five scenarios pass on macOS arm64 using Node 22 and Electron 44, including
 a run under `CI=true` with Git’s initial branch forced to `master`. A separate
 five-run Browser restart/cleanup repetition also passes on the same build.
 Screenshots below are actual desktop captures. Before images use

@@ -85,8 +85,36 @@ describe("message search navigation", () => {
     await act(async () => { f.hook.result.current.selectMessage(hit, ready); await vi.dynamicImportSettled(); });
     await act(async () => f.revealed.resolve(ok));
     expect(f.focus).toHaveBeenCalledWith(other.id);
-    expect(f.request).toHaveBeenCalledOnce();
+    expect(f.request).toHaveBeenCalledTimes(2);
+    expect(f.request).toHaveBeenLastCalledWith({ type: "conversation.message.reveal", payload: {
+      projectId: hit.projectId, conversationId: hit.conversationId, turnId: hit.turnId, messageId: hit.messageId, focusDetached: true,
+    } });
     expect(ready).not.toHaveBeenCalled();
+    expect(f.select).not.toHaveBeenCalled();
+    expect(pendingMessageSearchFocus(other.id)).toBeNull();
+  });
+
+  it("falls back to the main workspace without queuing focus when the detached window closes", async () => {
+    const f = fixture(null, true);
+    f.focus.mockResolvedValue(false);
+    await act(async () => { f.hook.result.current.selectMessage(hit); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.resolve(ok));
+    await act(async () => f.selected.resolve(ok));
+    expect(f.request).toHaveBeenCalledOnce();
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(pendingMessageSearchFocus(other.id)?.messageId).toBe(hit.messageId);
+  });
+
+  it("does not queue detached focus after a newer navigation overtakes the native window request", async () => {
+    const f = fixture(null, true);
+    const focused = deferred<boolean>();
+    f.focus.mockReturnValue(focused.promise);
+    await act(async () => { f.hook.result.current.selectMessage(hit); await vi.dynamicImportSettled(); });
+    await act(async () => f.revealed.resolve(ok));
+    expect(f.focus).toHaveBeenCalledOnce();
+    act(() => f.hook.result.current.selectConversation(primary));
+    await act(async () => focused.resolve(true));
+    expect(f.request).toHaveBeenCalledOnce();
     expect(f.select).not.toHaveBeenCalled();
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
   });

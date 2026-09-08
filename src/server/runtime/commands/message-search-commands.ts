@@ -89,7 +89,7 @@ export function createMessageSearchCommandHandler(input: {
           || current.conversationId !== target.conversationId || current.turnId !== target.turnId) {
           throw new RuntimeRequestError("This search result is no longer available.");
         }
-        input.reveal(target);
+        if (target.focusDetached) input.reveal(current);
         input.send(socket, { type: "request.ok", requestId: command.requestId });
         return "handled";
       }

@@ -52,7 +52,7 @@ import type { ResponseTimelineProps } from "./types";
 
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
-type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string };
+type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string; turnId?: string };
 const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
 
 export function responseTimelineArticleLabel(
@@ -1095,7 +1095,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
             );
         if (!row) return null;
         const destination = typeof target === "object"
-          ? resolveMessageSearchDestination(row, target.messageId)
+          ? resolveMessageSearchDestination(row, target.messageId, target.turnId)
           : target === "turn"
           ? row
           : row.querySelector<HTMLElement>(

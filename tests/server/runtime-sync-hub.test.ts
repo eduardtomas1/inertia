@@ -703,6 +703,41 @@ describe("runtime sync hub", () => {
 
 
 describe("search focus routing", () => {
+  it("delivers the latest pending target only after its detached client is hydrated", () => {
+    const runtime = fixture();
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    const target = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "turn", messageId: "first" };
+    runtime.hub.focusDetachedMessage(target);
+    runtime.hub.focusDetachedMessage({ ...target, messageId: "latest" });
+    runtime.hub.connect("main", { kind: "none" }, context);
+    runtime.hub.connect("other", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_B, clientId: "other" });
+    for (const key of ["main", "other"]) expect(runtime.events.get(key)?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+    runtime.hub.connect("owner", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    expect(runtime.events.get("owner")?.slice(-2)).toEqual([
+      expect.objectContaining({ type: "runtime.sync.completed" }),
+      { type: "conversation.message.focus", target: { ...target, messageId: "latest" } },
+    ]);
+    runtime.hub.disconnect("owner");
+    runtime.hub.connect("reconnected", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    expect(runtime.events.get("reconnected")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+  });
+
+  it("bounds pending targets and expires undelivered navigation", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    try {
+      const runtime = fixture();
+      const context = { snapshot, approvals: [], inputs: [], plans: [] };
+      for (let index = 0; index < 21; index += 1) runtime.hub.focusDetachedMessage({
+        projectId: GENERATION, conversationId: String(index), turnId: "turn", messageId: "message",
+      });
+      runtime.hub.connect("evicted", { kind: "none" }, context, { kind: "detached-chat", conversationId: "0", clientId: "evicted" });
+      expect(runtime.events.get("evicted")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+      clock.mockReturnValue(10_001);
+      runtime.hub.connect("expired", { kind: "none" }, context, { kind: "detached-chat", conversationId: "20", clientId: "expired" });
+      expect(runtime.events.get("expired")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+    } finally { clock.mockRestore(); }
+  });
+
   it("sends focus only to the detached window that owns the conversation", () => {
     const runtime = fixture();
     const context = { snapshot, approvals: [], inputs: [], plans: [] };

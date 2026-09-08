@@ -20,6 +20,7 @@ describe("message search contract", () => {
     }
     expect(clientCommandSchema.safeParse({ type: "conversation.messages.search", requestId: id, payload: { query: "hello" } }).success).toBe(true);
     expect(clientCommandSchema.safeParse({ type: "conversation.message.reveal", requestId: id, payload: { projectId: id, conversationId: id, turnId: hit.turnId, messageId: id } }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({ type: "conversation.message.reveal", requestId: id, payload: { projectId: id, conversationId: id, turnId: hit.turnId, messageId: id, focusDetached: "true" } }).success).toBe(false);
     expect(serverEventSchema.safeParse({ type: "request.result", requestId: id, result }).success).toBe(true);
   });
 

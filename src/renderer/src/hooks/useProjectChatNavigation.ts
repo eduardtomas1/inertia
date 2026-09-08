@@ -73,10 +73,14 @@ export function useProjectChatNavigation({
   }, [conversationSelectionGenerationRef]);
   const exitGlobalChat = useCallback((preserveDraft = false) => {
     deactivateGlobalChat();
-    resumeSearchDraftRef.current = preserveDraft;
-    if (preserveDraft) draftConversation.clear();
-    else draftConversation.discard();
-  }, [deactivateGlobalChat, draftConversation]);
+    if (preserveDraft) {
+      resumeSearchDraftRef.current = true;
+      draftConversation.clear();
+    } else if (globalChatActive || !resumeSearchDraftRef.current) {
+      resumeSearchDraftRef.current = false;
+      draftConversation.discard();
+    }
+  }, [deactivateGlobalChat, draftConversation, globalChatActive]);
 
   const navigateToView = useCallback((nextView: AppView) => {
     if (nextView !== "workspace") {

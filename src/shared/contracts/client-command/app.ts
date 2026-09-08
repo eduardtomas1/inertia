@@ -68,7 +68,7 @@ const conversationContextSelectionFields = {
 export const appCommandSchemas = [
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search.cancel"), payload: z.strictObject({ searchRequestId: z.string().uuid() }) }),
-  z.strictObject({ ...requestBase, type: z.literal("conversation.message.reveal"), payload: messageSearchTargetSchema }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.message.reveal"), payload: messageSearchTargetSchema.extend({ focusDetached: z.boolean().optional() }) }),
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
   z.strictObject({
     ...requestBase,

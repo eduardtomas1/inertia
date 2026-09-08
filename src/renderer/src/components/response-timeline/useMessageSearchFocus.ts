@@ -4,10 +4,25 @@ import type { ResponseTimelineProps } from "./types";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { MESSAGE_SEARCH_FOCUS_EVENT, clearMessageSearchFocus, pendingMessageSearchFocus } from "../../utils/messageSearchFocus";
 
-export function resolveMessageSearchDestination(row: HTMLElement, messageId: string): HTMLElement | null {
-  const destination = Array.from(row.querySelectorAll<HTMLElement>("[data-follow-up-message-id], [data-message-search-id]"))
-    .find((element) => (element.dataset.followUpMessageId ?? element.dataset.messageSearchId) === messageId);
-  if (destination) return destination;
+export function resolveMessageSearchDestination(row: HTMLElement, messageId: string, turnId?: string): HTMLElement | null {
+  if (turnId && row.dataset.turnId !== turnId) {
+    const nested = Array.from(row.querySelectorAll<HTMLElement>("[data-turn-id]"))
+      .find((element) => element.dataset.turnId === turnId);
+    if (!nested) {
+      const history = row.querySelector<HTMLDetailsElement>(":scope > details");
+      if (history) history.open = true;
+      return null;
+    }
+    row = nested;
+  }
+  const destination = Array.from(row.querySelectorAll<HTMLElement>("[data-follow-up-message-id], [data-message-search-id], [data-terminal-answer-id]"))
+    .find((element) => (element.dataset.followUpMessageId ?? element.dataset.messageSearchId ?? element.dataset.terminalAnswerId) === messageId);
+  if (destination) {
+    const expand = destination.querySelector<HTMLButtonElement>('.turn-user-request-expand[aria-expanded="false"]');
+    if (!expand) return destination;
+    expand.click();
+    return null;
+  }
   // Collapsed work/legacy disclosures mount their content only after expansion.
   // The timeline's bounded focus controller keeps resolving until that commit.
   const details = row.querySelector<HTMLDetailsElement>(".turn-work-log.is-settled > details, :scope > details");
@@ -20,7 +35,7 @@ export function useMessageSearchFocus(
   props: Pick<ResponseTimelineProps, "conversationId" | "projectId" | "messages">,
   timeline: ResponseTimelineItem[],
   beginReaderTimelineNavigation: () => void,
-  focusTimelineItem: (index: number, target: "turn" | "request" | "final" | { messageId: string }) => void,
+  focusTimelineItem: (index: number, target: "turn" | { messageId: string; turnId?: string }) => void,
 ): void {
   useEffect(() => {
     const focusSearchResult = (): void => {
@@ -29,16 +44,20 @@ export function useMessageSearchFocus(
       const message = props.messages.find(({ id, conversationId, turnId }) =>
         id === target.messageId && conversationId === target.conversationId && turnId === target.turnId);
       if (!message) return;
-      const index = timeline.findIndex((item) => item.kind === "turn"
-        ? item.turn.id === target.turnId || item.turn.userMessage.id === target.messageId
-        : item.compatibility.messages.some(({ id }) => id === target.messageId));
+      let ownerId: string | undefined;
+      const index = timeline.findIndex((item) => {
+        const turns = item.kind === "turn" ? [item.turn] : item.compatibility.inferredTurns;
+        // The timeline projection scopes every owned message by this same
+        // persisted turn identity, including inferred requests and follow-ups.
+        const owner = turns.find((turn) => turn.id === target.turnId);
+        if (owner) ownerId = owner.id;
+        return owner !== undefined || (item.kind === "compatibility"
+          && item.compatibility.messages.some(({ id }) => id === target.messageId));
+      });
       if (index < 0) return;
       clearMessageSearchFocus();
       beginReaderTimelineNavigation();
-      const item = timeline[index]!;
-      focusTimelineItem(index, message.role === "assistant" ? "final"
-        : item.kind === "turn" && item.turn.userMessage.id === message.id ? "request"
-          : { messageId: message.id });
+      focusTimelineItem(index, { messageId: message.id, turnId: ownerId });
     };
     window.addEventListener(MESSAGE_SEARCH_FOCUS_EVENT, focusSearchResult);
     focusSearchResult();

@@ -93,6 +93,20 @@ describe("project chat navigation", () => {
     expect(start).toHaveBeenLastCalledWith(first.id, true, true);
   });
 
+  it("retains a preserved draft across later chat and project navigation", () => {
+    const { first, second, hook, discard, start } = setup();
+    act(() => hook.result.current.openGlobalChat());
+    act(() => hook.result.current.exitGlobalChat(true));
+    act(() => hook.result.current.exitGlobalChat());
+    act(() => hook.result.current.selectProject(second));
+    act(() => hook.result.current.navigateToView("settings"));
+    expect(discard).not.toHaveBeenCalled();
+    act(() => hook.result.current.openGlobalChat());
+    expect(start).toHaveBeenLastCalledWith(first.id, true, true);
+    act(() => hook.result.current.exitGlobalChat());
+    expect(discard).toHaveBeenCalledOnce();
+  });
+
   it("opens the real draft chat for the active project", () => {
     const { first, hook, setSidebarOpen, setView, start } = setup();
 

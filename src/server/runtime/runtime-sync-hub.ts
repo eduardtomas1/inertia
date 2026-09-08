@@ -49,6 +49,7 @@ interface RuntimeClientSubscription extends RuntimeDetailSubscription {
  */
 export class RuntimeSyncHub<Socket> {
   private readonly clients = new Map<Socket, RuntimeClientSubscription>();
+  private readonly pendingMessageFocus = new Map<string, { target: MessageSearchTarget; expires: number }>();
 
   constructor(
     private readonly send: (socket: Socket, event: ServerEvent) => void,
@@ -61,10 +62,21 @@ export class RuntimeSyncHub<Socket> {
 
   /** Ephemeral navigation only reaches the native window owning this chat. */
   focusDetachedMessage(target: MessageSearchTarget): void {
+    const now = Date.now();
+    for (const [id, pending] of this.pendingMessageFocus) {
+      if (pending.expires <= now) this.pendingMessageFocus.delete(id);
+    }
+    this.pendingMessageFocus.delete(target.conversationId);
+    let delivered = false;
     for (const [socket, { authority }] of this.clients) {
       if (authority.kind === "detached-chat" && authority.conversationId === target.conversationId) {
         this.send(socket, { type: "conversation.message.focus", target });
+        delivered = true;
       }
+    }
+    if (!delivered) {
+      if (this.pendingMessageFocus.size >= 20) this.pendingMessageFocus.delete(this.pendingMessageFocus.keys().next().value!);
+      this.pendingMessageFocus.set(target.conversationId, { target, expires: now + 10_000 });
     }
   }
 
@@ -169,6 +181,13 @@ export class RuntimeSyncHub<Socket> {
       type: "runtime.sync.completed",
       sync: this.sequencer.cursor(),
     });
+    if (authority.kind === "detached-chat" && this.clients.has(socket)) {
+      const pending = this.pendingMessageFocus.get(authority.conversationId);
+      this.pendingMessageFocus.delete(authority.conversationId);
+      if (pending && pending.expires > Date.now()) {
+        this.send(socket, { type: "conversation.message.focus", target: pending.target });
+      }
+    }
   }
 
   setConversationSubscription(

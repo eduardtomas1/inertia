@@ -164,14 +164,15 @@ export default function DetachedChatApp({
   const documentPresence = useDocumentPresence();
   const connection = useStableController(useInertiaConnection());
   const conversationId = windowContext.conversationId;
+  const subscribe = connection.subscribe;
   useEffect(() => {
-    const unsubscribe = connection.subscribe((event) => {
+    const unsubscribe = subscribe((event) => {
       if (event.type === "conversation.message.focus" && event.target.conversationId === conversationId) {
         requestMessageSearchFocus(event.target);
       }
     });
     return () => { unsubscribe(); clearMessageSearchFocus(); };
-  }, [connection, conversationId]);
+  }, [subscribe, conversationId]);
   const sendCommand = connection.sendCommand;
   const request = useCallback(
     (command: CommandWithoutId) => sendCommand(withRequestId(command)),

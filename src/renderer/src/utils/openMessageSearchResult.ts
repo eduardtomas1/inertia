@@ -34,7 +34,12 @@ export function openMessageSearchResult(hit: MessageSearchHit, {
     // A stale result must leave the user's current workspace in place.
     await request({ type: "conversation.message.reveal", payload: target });
     if (intent !== conversationSelectionGenerationRef.current) return;
-    if (detachedChats.conversationIds.has(hit.conversationId) && await detachedChats.focus(hit.conversationId)) return;
+    if (detachedChats.conversationIds.has(hit.conversationId) && await detachedChats.focus(hit.conversationId)) {
+      if (intent === conversationSelectionGenerationRef.current) {
+        await request({ type: "conversation.message.reveal", payload: { ...target, focusDetached: true } });
+      }
+      return;
+    }
     if (intent !== conversationSelectionGenerationRef.current) return;
     onReady?.();
     const selection = selectConversationInMain(nextConversation, { focusComposer: false, preserveDraft: true });

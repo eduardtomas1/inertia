@@ -90,6 +90,7 @@ export function UserRequestLayer({
       data-turn-layer="user-request"
       data-turn-request-context={turn.id}
       data-turn-jump-target="request"
+      data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
     >
       <div className="message-meta">

@@ -66,6 +66,8 @@ describe("message search runtime ownership", () => {
     expect(reveal).not.toHaveBeenCalled();
     current = target;
     expect(await handler(client, { type: "conversation.message.reveal", requestId: "request", payload: target })).toBe("handled");
+    expect(reveal).not.toHaveBeenCalled();
+    expect(await handler(client, { type: "conversation.message.reveal", requestId: "request", payload: { ...target, focusDetached: true } })).toBe("handled");
     expect(reveal).toHaveBeenCalledWith(target);
     expect(send).toHaveBeenCalledWith(client, { type: "request.ok", requestId: "request" });
     await searches.close();

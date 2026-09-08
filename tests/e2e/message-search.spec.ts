@@ -1,7 +1,7 @@
 // @inertia-e2e-resource primary-display
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page, type TestInfo, type WebSocketRoute } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -9,6 +9,8 @@ let app: AppFixture;
 let page: Page;
 let targetTurnId: string;
 let followUpMessageId: string;
+const legacyTitle = "Recovered history";
+const legacyMatches: Array<{ query: string; messageId: string }> = [];
 const targetTitle = "Investigate request failures";
 const phrase = "retry budget";
 const draft = "Keep this unsent draft while I look up an earlier decision.";
@@ -54,6 +56,26 @@ test.beforeAll(async () => {
         store.createMessage(planning.id, "Can we make the retry budget configurable per endpoint? Keep cancellation immediate.", "user", [], null, "2026-09-05T09:00:00.000Z");
         const testing = store.createConversation(chat.projectId, "Integration test plan");
         store.createMessage(testing.id, "Cover the retry budget, transient failures, and successful recovery in the integration tests.", "user", [], null, "2026-09-04T09:00:00.000Z");
+        const legacy = store.createConversation(chat.projectId, legacyTitle);
+        legacyMatches.length = 0;
+        for (let index = 0; index < 80; index += 1) {
+          const at = new Date(Date.UTC(2026, 8, 3, 9, index)).toISOString();
+          const user = store.createMessage(legacy.id, index === 5 ? `${"Review the earlier context before proceeding.\n".repeat(25)}Check the legacy request boundary.` : `Recovered request ${index}.`, "user", [], null, at);
+          const turn = store.createAgentTurn({
+            id: `legacy-search-${index}`, conversationId: legacy.id, runId: randomUUID(), userMessageId: user.id,
+            providerId: "codex", harnessId: "codex-app-server", backendProfileId: "native:codex:app-server",
+            model: "test", reasoningEffort: "", interactionMode: "build", accessMode: "supervised",
+            configurationRevision: 0, association: "inferred", requestedAt: at,
+          });
+          const answer = store.createMessage(legacy.id, index === 5 ? "The legacy answer boundary is preserved." : `Recovered answer ${index}.`, "assistant", [], turn.id, at);
+          store.updateAgentTurnLifecycle(turn.id, { status: "completed", terminalAssistantMessageId: answer.id, startedAt: at, completedAt: at, terminalReason: "provider-completed" });
+          if (index === 5) {
+            const followUp = store.createAcknowledgedFollowUpMessage(legacy.id, turn.id, "Also check the legacy follow-up boundary.", at);
+            legacyMatches.push({ query: "legacy request boundary", messageId: user.id },
+              { query: "legacy answer boundary", messageId: answer.id },
+              { query: "legacy follow-up boundary", messageId: followUp.id });
+          }
+        }
         store.selectConversation(shell.activeConversationId!);
       } finally { store.close(); }
     },
@@ -62,13 +84,13 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await app?.close(); });
 
-async function search(query = phrase) {
+async function search(query = phrase, title = targetTitle) {
   await page.bringToFront();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
   const input = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
   await expect(input).toBeFocused();
   await input.fill(query);
-  await expect(page.getByRole("option", { name: new RegExp(targetTitle) })).toBeVisible();
+  await expect(page.getByRole("option", { name: new RegExp(title) })).toBeVisible();
   await expect(page.locator(".palette-message-snippet mark").first()).toHaveText(query);
   return input;
 }
@@ -156,8 +178,72 @@ test("returns to an unsent new-chat draft after following a search result", asyn
   const input = await search();
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
+  await page.locator(".activity-thread-select").filter({ hasText: "message-search fixture" }).click();
   await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(unsent);
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("opens requests, answers and follow-ups inside collapsed inferred history", async ({ browserName: _browserName }, info) => {
+  expect(legacyMatches).toHaveLength(3);
+  for (const match of legacyMatches) {
+    const input = await search(match.query, legacyTitle);
+    await input.press("Enter");
+    const destination = page.locator(`[data-message-search-id="${match.messageId}"], [data-terminal-answer-id="${match.messageId}"], [data-follow-up-message-id="${match.messageId}"]`);
+    await expect(destination).toBeFocused();
+    await expect(destination).toBeInViewport();
+    await expect(destination).toContainText(match.query);
+    await expect(page.locator(".orphan-run-flow > details")).toHaveAttribute("open");
+  }
+  await evidence(page, info, "legacy-match");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("retains detached focus while the owning runtime client reconnects", async ({ browserName: _browserName }, info) => {
+  const input = await search();
+  await input.press("Enter");
+  await expect(finalAnswer(page)).toBeFocused();
+  const opened = app.electronApp.waitForEvent("window");
+  await page.getByRole("button", { name: `Open ${targetTitle} in a new window` }).click();
+  const popup = await opened;
+  await popup.getByRole("textbox", { name: "Message" }).waitFor();
+  let acceptSocket!: (route: WebSocketRoute) => void;
+  const pendingSocket = new Promise<WebSocketRoute>((resolve) => { acceptSocket = resolve; });
+  await popup.routeWebSocket(/.*/u, (route) => acceptSocket(route));
+  const session = await page.context().newCDPSession(page);
+  await session.send("Network.enable");
+  let focusRequestId: string | null = null;
+  let acknowledge!: () => void;
+  const acknowledged = new Promise<void>((resolve) => { acknowledge = resolve; });
+  session.on("Network.webSocketFrameSent", ({ response }) => {
+    if (response.opcode !== 1) return;
+    const command = JSON.parse(response.payloadData) as { type?: string; requestId?: string; payload?: { focusDetached?: boolean } };
+    if (command.type === "conversation.message.reveal" && command.payload?.focusDetached) focusRequestId = command.requestId ?? null;
+  });
+  session.on("Network.webSocketFrameReceived", ({ response }) => {
+    if (response.opcode !== 1) return;
+    const event = JSON.parse(response.payloadData) as { type?: string; requestId?: string };
+    if (event.type === "request.ok" && event.requestId === focusRequestId) acknowledge();
+  });
+  try {
+    await popup.reload();
+    const held = await pendingSocket;
+    const reconnectSearch = await search();
+    await reconnectSearch.press("Enter");
+    // The server has acknowledged the focus intent while this client cannot
+    // receive it. Releasing the socket now proves delivery after hydration.
+    await acknowledged;
+    const received: string[] = [];
+    held.connectToServer().onMessage((data) => {
+      received.push((JSON.parse(data.toString()) as { type: string }).type);
+      held.send(data);
+    });
+    await expect.poll(() => received).toContain("conversation.message.focus");
+    await expect(finalAnswer(popup)).toBeFocused();
+    await expect(finalAnswer(popup)).toBeInViewport();
+    await evidence(popup, info, "reconnected-match");
+    await popup.getByRole("button", { name: /Return.*main|Dock/u }).click();
+  } finally { await session.detach(); }
   expect(app.rendererErrors).toEqual([]);
 });
 

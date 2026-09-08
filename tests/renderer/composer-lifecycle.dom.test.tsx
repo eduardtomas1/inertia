@@ -952,7 +952,7 @@ describe("composer asynchronous ownership", () => {
 
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/" } });
-    const commands = screen.getByRole("listbox", { name: "Composer commands" });
+    const commands = await screen.findByRole("listbox", { name: "Composer commands" });
     expect(commands).toHaveTextContent("Built-in");
     expect(commands).toHaveTextContent("Provider");
     expect(commands).toHaveTextContent("/goal");
@@ -972,6 +972,7 @@ describe("composer asynchronous ownership", () => {
 
     fireEvent.change(input, { target: { value: "/goal" } });
     fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => { await import("../../src/renderer/src/components/ChatGoalControl"); });
     expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
     expect(input).toHaveValue("");
   });

@@ -369,6 +369,63 @@ describe("detached chat window manager", () => {
     }
   });
 
+  it("excludes a closing owner from selection while retaining it for shutdown", async () => {
+    const fixture = managerFixture();
+    try {
+      await fixture.manager.open({ conversationId: conversationId(1), title: "Closing chat" });
+      const window = fixture.windows[0]!;
+      window.focused = false;
+      window.minimized = true;
+      // Native close and closed are separate events while beforeunload runs.
+      window.emit("close");
+      expect(window.isDestroyed()).toBe(false);
+      expect(fixture.manager.summary()).toHaveLength(1);
+      expect(fixture.manager.summary({ includeClosing: false })).toEqual([]);
+      expect(fixture.manager.focus(conversationId(1))).toBe(false);
+      expect(window.focused).toBe(false);
+      expect(window.restoreCalls).toBe(0);
+      expect(fixture.manager.ownsSender(window.contents as unknown as WebContents)).toBe(true);
+
+      fixture.changed.mockClear();
+      window.contents.emit("will-prevent-unload");
+      expect(fixture.manager.summary({ includeClosing: false })).toEqual(fixture.manager.summary());
+      expect(fixture.changed).toHaveBeenCalledWith(fixture.manager.summary());
+      expect(fixture.manager.focus(conversationId(1))).toBe(true);
+      expect(window.focused).toBe(true);
+      expect(window.restoreCalls).toBe(1);
+    } finally {
+      await fixture.manager.closeAll();
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not apply queued focus if native close begins before the renderer is ready", async () => {
+    let finishLoad!: () => void;
+    const loading = new Promise<void>((resolve) => { finishLoad = resolve; });
+    const fixture = managerFixture({ loadWindow: () => loading });
+    try {
+      const opening = fixture.manager.open({ conversationId: conversationId(1), title: "Loading chat" });
+      const window = fixture.windows[0]!;
+      expect(fixture.manager.focus(conversationId(1))).toBe(true);
+      window.emit("close");
+      finishLoad();
+      await opening;
+      expect(window.isDestroyed()).toBe(false);
+      expect(window.visible).toBe(false);
+      expect(window.focused).toBe(false);
+      expect(fixture.manager.focus(conversationId(1))).toBe(false);
+
+      window.contents.emit("will-prevent-unload");
+      expect(fixture.manager.focus(conversationId(1))).toBe(true);
+      expect(window.visible).toBe(true);
+      expect(window.focused).toBe(true);
+    } finally {
+      finishLoad();
+      await fixture.manager.closeAll();
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
   it("recovers crash handling after a renderer cancels native close", async () => {
     const fixture = managerFixture();
     try {

@@ -224,7 +224,7 @@ export class DetachedChatMain {
       DETACHED_CHAT_IPC.getWindows,
       (event, ...args) => {
         this.assertMainIpc(event, args.length);
-        return this.#manager.summary();
+        return this.#manager.summary({ includeClosing: false });
       },
     );
     this.#options.ipcMain.handle(

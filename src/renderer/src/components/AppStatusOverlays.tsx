@@ -5,7 +5,6 @@ import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 import type { useAppUpdate } from "../hooks/useAppUpdate";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
-import { DatabaseRecoveryNotice } from "./DatabaseRecoveryNotice";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
 import { loadProviderAuthDialog } from "./lazySurfaceLoaders";
@@ -15,6 +14,9 @@ const ProviderAuthDialog = lazy(async () => ({
 }));
 const AppUpdateNotice = lazy(async () => ({
   default: (await import("./AppUpdateNotice")).AppUpdateNotice,
+}));
+const DatabaseRecoveryNotice = lazy(async () => ({
+  default: (await import("./DatabaseRecoveryNotice")).DatabaseRecoveryNotice,
 }));
 
 interface AppStatusOverlaysProps {
@@ -59,12 +61,28 @@ export function AppStatusOverlays({
         </Suspense>
       )}
       {databaseRecoveryNotice && (
-        <DatabaseRecoveryNotice
-          notice={databaseRecoveryNotice}
-          onDismiss={onDismissDatabaseRecoveryNotice}
-          onImportRecovery={onImportRecovery}
-          onCopyReport={onCopyRecoveryReport}
-        />
+        <Suspense fallback={(
+          <aside
+            className={`database-recovery-notice${databaseRecoveryNotice.outcome === "created-empty" ? " is-critical" : ""}`}
+            aria-label="Database recovery warning"
+            role="alert"
+          >
+            <AlertCircle size={17} aria-hidden="true" />
+            <span>
+              <strong>{databaseRecoveryNotice.outcome === "created-empty"
+                ? "Inertia started with empty data"
+                : "Inertia restored a validated backup"}</strong>
+              <small>Loading recovery actions…</small>
+            </span>
+          </aside>
+        )}>
+          <DatabaseRecoveryNotice
+            notice={databaseRecoveryNotice}
+            onDismiss={onDismissDatabaseRecoveryNotice}
+            onImportRecovery={onImportRecovery}
+            onCopyReport={onCopyRecoveryReport}
+          />
+        </Suspense>
       )}
       {(appUpdate.visible || appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
         <div className="status-overlay-stack">

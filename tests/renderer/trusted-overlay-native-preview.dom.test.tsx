@@ -334,6 +334,13 @@ describe("trusted overlay native preview suspension", () => {
       />,
     );
     expect(nativePreviewSuspended()).toBe(true);
+    expect(screen.getByRole("alert", { name: "Database recovery warning" }))
+      .toHaveTextContent("Inertia started with empty data");
+    expect(screen.getByText("Loading recovery actions…")).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Import recovery file/u }))
+      .toBeVisible();
+    expect(screen.queryByText("Loading recovery actions…")).toBeNull();
+    expect(nativePreviewSuspended()).toBe(true);
     view.rerender(
       <AppStatusOverlays
         providerAuth={{ ...providerAuth, provider: null }}

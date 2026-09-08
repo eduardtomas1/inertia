@@ -79,4 +79,11 @@ describe("snapshot native worker ownership", () => {
   it("passes no provider credentials or dynamic runtime loader options to workers", () => {
     expect(snapshotWorkerEnvironment({ DISPLAY: ":0", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/test/bus", OPENAI_API_KEY: "fixture", NODE_OPTIONS: "--require=unsafe", DYLD_INSERT_LIBRARIES: "unsafe" })).toEqual({ DISPLAY: ":0", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/test/bus" });
   });
+
+  it("preserves X11 authority lookup without requiring XAUTHORITY", () => {
+    expect(snapshotWorkerEnvironment({ HOME: "/home/snapshot-user", DISPLAY: ":1" })).toEqual({ HOME: "/home/snapshot-user", DISPLAY: ":1" });
+    expect(snapshotWorkerEnvironment({ HOME: "/home/snapshot-user", XAUTHORITY: "/run/user/1000/Xauthority" })).toEqual({ HOME: "/home/snapshot-user", XAUTHORITY: "/run/user/1000/Xauthority" });
+    expect(snapshotWorkerEnvironment({ HOME: "relative-home" })).toEqual({});
+    expect(snapshotWorkerEnvironment({ HOME: "/home/invalid\0" })).toEqual({});
+  });
 });

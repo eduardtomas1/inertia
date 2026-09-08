@@ -897,6 +897,7 @@ describe("durable conversation attachment storage", () => {
     const store = await ConversationAttachmentStore.open(dataDirectory, {
       maxRecords: 2,
       operationRunner,
+      reconciliationBatchEntries: 1,
     });
 
     await expect(store.retain([first, failed]))
@@ -910,6 +911,9 @@ describe("durable conversation attachment storage", () => {
 
     cleanupFails = false;
     await store.reconcile([]);
+    await vi.waitFor(async () => {
+      await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
+    });
     await expect(store.retain(retry)).resolves.toHaveLength(2);
   });
 

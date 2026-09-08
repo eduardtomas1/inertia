@@ -1,11 +1,14 @@
+import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, globalShortcut, systemPreferences, utilityProcess, type UtilityProcess } from "electron";
 import { SNAPSHOT_MAX_IMAGE_BYTES, snapshotPlatformAvailable, snapshotSourceSchema, type SnapshotSource, type SnapshotState } from "../shared/snapshots.js";
 
 export function snapshotWorkerEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
-  for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "LANG"]) {
+  for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP", "HOME", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "LANG"]) {
     const value = Object.entries(env).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
+    // X11 falls back to $HOME/.Xauthority when XAUTHORITY is unset.
+    if (key === "HOME" && value && (!isAbsolute(value) || value.includes("\0"))) continue;
     if (value) result[key] = value;
   }
   return result;

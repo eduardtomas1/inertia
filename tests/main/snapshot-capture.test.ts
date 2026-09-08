@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({ foreground: vi.fn(), screenshot: vi.fn() }));
 vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground }, screenshot: native.screenshot } }));
@@ -36,5 +37,21 @@ describe("foreground snapshot pixels and context", () => {
     native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground()).mockResolvedValue(foreground("Other window"));
     await expect(captureForegroundSnapshot()).rejects.toThrow("changed");
     expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it("exits an orphaned utility worker without waiting indefinitely for its parent", async () => {
+    const prior = Object.getOwnPropertyDescriptor(process, "parentPort");
+    vi.useFakeTimers();
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    Object.defineProperty(process, "parentPort", { configurable: true, value: new EventEmitter() });
+    try {
+      vi.resetModules(); await import("../../src/main/snapshot-capture-worker");
+      await vi.advanceTimersByTimeAsync(11_999); expect(exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1); expect(exit).toHaveBeenCalledWith(1);
+      expect(native.foreground).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore(); vi.useRealTimers();
+      if (prior) Object.defineProperty(process, "parentPort", prior);
+      else Reflect.deleteProperty(process, "parentPort");
+    }
   });
 });

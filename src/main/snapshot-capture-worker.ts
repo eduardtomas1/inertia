@@ -54,6 +54,8 @@ export async function captureForegroundSnapshot() {
 }
 
 const parent = process.parentPort;
+// Keep an orphaned worker bounded even if main disappears before sending capture.
+if (parent) setTimeout(() => process.exit(1), 12_000);
 if (parent) parent.once("message", (event) => {
   if (event.data !== "capture") { process.exit(1); return; }
   const finish = (result: unknown): void => {

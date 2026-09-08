@@ -79,8 +79,9 @@ preview, keyboard focus, compact geometry, reduced motion, receipt reload, and
 loading the actual native bindings in a utility process. Visual scenarios use
 synthetic Notes content; they do not claim to capture a permission-protected OS
 desktop. Package smoke also loads the shipped bindings without desktop access.
-Interactive OS permission grants and real capture on Windows/Linux require
-manual platform validation; deterministic tests do not substitute for it.
+Interactive permission grants and real foreground capture were not exercised on
+the locked macOS host. Windows/Linux capture also requires manual platform
+validation; deterministic tests do not substitute for it.
 
 Reviewed Electron captures from synthetic Notes content:
 [dark](screenshots/inertia-snapshots-compaction-dark.png),

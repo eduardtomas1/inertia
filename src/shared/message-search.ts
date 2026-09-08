@@ -21,6 +21,9 @@ export function messageSearchExcerpt(
   content: string,
   pattern: RegExp,
 ): Pick<MessageSearchHit, "snippet" | "matchStart" | "matchEnd"> | null {
+  // Formatting must never turn absent literal source text into a search hit.
+  const sourceMatch = pattern.exec(content);
+  if (!sourceMatch) return null;
   // Keep previews readable without rendering untrusted Markdown. If a query
   // explicitly matches markup, a URL, or exact whitespace, preserve that source.
   const plain = content
@@ -32,8 +35,7 @@ export function messageSearchExcerpt(
     .replace(/__([^_\n]+)__/gu, "$1")
     .replace(/\s+/gu, " ").trim();
   const plainMatch = pattern.exec(plain);
-  const match = plainMatch ?? pattern.exec(content);
-  if (!match) return null;
+  const match = plainMatch ?? sourceMatch;
   if (plainMatch) content = plain;
   let start = Math.max(0, match.index - 35);
   // Preserve UTF-16 pairs at snippet boundaries. Match offsets stay in the

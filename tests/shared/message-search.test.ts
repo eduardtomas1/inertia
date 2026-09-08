@@ -47,6 +47,19 @@ describe("message search contract", () => {
     expect(messageSearchExcerpt("unrelated text", messageSearchPattern(query))).toBeNull();
   });
 
+  it.each([
+    ["foo\nbar", "foo bar"],
+    ["foo\tbar", "foo bar"],
+    ["foo  bar", "foo bar"],
+    ["Set **retry**", "Set retry"],
+    ["Set `retry`", "Set retry"],
+    ["See [details](https://example.test)", "See details"],
+  ])("does not invent a literal %s match while formatting the preview", (content, query) => {
+    expect(messageSearchExcerpt(content, messageSearchPattern(query))).toBeNull();
+    const exactSource = messageSearchExcerpt(content, messageSearchPattern(content))!;
+    expect(exactSource.snippet.slice(exactSource.matchStart, exactSource.matchEnd)).toBe(content);
+  });
+
   it("shows readable Markdown and preserves explicit source searches", () => {
     const content = "### Recovery\n\nSet the **retry budget** to `three` attempts. [Details](https://example.test/retry).";
     const excerpt = messageSearchExcerpt(content, messageSearchPattern("retry budget"))!;

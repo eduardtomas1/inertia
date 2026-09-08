@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -75,6 +75,10 @@ test("keeps common lifecycle ownership proof in every platform repetition", asyn
       "tests/server/runtime-shutdown-authority.test.ts",
     ]));
     expect(new Set(suites).size).toBe(suites.length);
+    for (const suite of suites) {
+      expect(existsSync(join(import.meta.dirname, "..", "..", suite)), suite)
+        .toBe(true);
+    }
   }
   expect(repeatedLifecycleSuites("linux")).toContain(
     "tests/main/app-update-startup.test.ts",
@@ -85,7 +89,19 @@ test("keeps common lifecycle ownership proof in every platform repetition", asyn
   expect(repeatedLifecycleSuites("darwin")).toContain(
     "tests/main/runtime-live-darwin-recovery.test.ts",
   );
+  expect(repeatedLifecycleSuites("darwin")).toContain(
+    "tests/server/terminal-darwin-shutdown.test.ts",
+  );
 });
+
+test.each(["tests/main/terminal-darwin-shutdown.test.ts", "tests/main"])(
+  "rejects unavailable or non-file suite %s before launching Vitest",
+  async (suite) => {
+    const { repeatedLifecycleInvocation } = await repeatedLifecycleModule();
+    expect(() => repeatedLifecycleInvocation([suite]))
+      .toThrow("A selected lifecycle suite is missing or not a regular file.");
+  },
+);
 
 test("records mixed attempts as flakes without converting them to success", async () => {
   const { repeatedLifecycleClassification } = await repeatedLifecycleModule();

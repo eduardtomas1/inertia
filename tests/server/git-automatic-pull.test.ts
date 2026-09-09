@@ -10,14 +10,17 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 }).trim();
 }
-function fixture() {
+function fixture(autocrlf = false) {
   const root = mkdtempSync(join(tmpdir(), "inertia-auto-pull-")); roots.push(root);
   const remote = join(root, "upstream"); mkdirSync(remote);
   git(remote, "init", "-b", "trunk");
+  git(remote, "config", "core.autocrlf", "false");
   git(remote, "config", "user.name", "Test"); git(remote, "config", "user.email", "test@example.invalid");
   writeFileSync(join(remote, "tracked.txt"), "first\n");
   git(remote, "add", "."); git(remote, "commit", "-m", "initial");
-  const local = join(root, "checkout"); git(root, "clone", "--origin", "company", remote, local);
+  // Configure before the initial checkout; do not inherit the runner's line-ending policy.
+  const local = join(root, "checkout");
+  git(root, "clone", "--config", `core.autocrlf=${autocrlf}`, "--origin", "company", remote, local);
   git(local, "config", "user.name", "Test"); git(local, "config", "user.email", "test@example.invalid");
   const before = git(local, "rev-parse", "HEAD");
   writeFileSync(join(remote, "tracked.txt"), "second\n");
@@ -25,12 +28,12 @@ function fixture() {
   return { remote, local, before, tracking: "refs/remotes/company/trunk" };
 }
 describe("opt-in automatic pull", () => {
-  it("discovers a nonstandard default and remote, fetches, and fast-forwards", async () => {
-    const f = fixture();
+  it.each([false, true])("discovers the default and fast-forwards with core.autocrlf=%s", async (autocrlf) => {
+    const f = fixture(autocrlf);
     expect(await automaticPullCandidate(f.local)).toBe(f.tracking);
     expect(await automaticPull(f.local, f.tracking, {}, async () => true)).toBe(true);
     expect(git(f.local, "rev-parse", "HEAD")).toBe(git(f.remote, "rev-parse", "HEAD"));
-    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe("second\n");
+    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe(autocrlf ? "second\r\n" : "second\n");
     expect(git(f.local, "stash", "list")).toBe("");
   });
 
@@ -50,12 +53,14 @@ describe("opt-in automatic pull", () => {
     if (state === "untracked") expect(readFileSync(join(f.local, "new.txt"), "utf8")).toBe("precious new file\n");
   });
 
-  it("does not merge if work starts or the setting is disabled while fetching", async () => {
-    const f = fixture(); let calls = 0;
+  it.each([false, true])("preserves checkout bytes if work starts during fetch with core.autocrlf=%s", async (autocrlf) => {
+    const f = fixture(autocrlf); let calls = 0;
+    const beforeContents = readFileSync(join(f.local, "tracked.txt"));
+    expect(beforeContents.toString("utf8")).toBe(autocrlf ? "first\r\n" : "first\n");
     expect(await automaticPull(f.local, f.tracking, {}, async () => ++calls === 1)).toBe(false);
     expect(calls).toBe(2);
     expect(git(f.local, "rev-parse", "HEAD")).toBe(f.before);
-    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe("first\n");
+    expect(readFileSync(join(f.local, "tracked.txt"))).toEqual(beforeContents);
   });
 
   it("never executes checkout hooks, including a repository-root hook", async () => {

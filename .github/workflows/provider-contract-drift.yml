@@ -1,259 +1,154 @@
-name: Provider contract drift
-
+name: Diagnose frozen v55 Intel desktop performance
 on:
-  schedule:
-    - cron: "17 5 * * 1"
   workflow_dispatch:
-
 permissions:
   contents: read
-
-concurrency:
-  group: provider-contract-drift
-  cancel-in-progress: true
-
 jobs:
-  provider-drift:
-    name: Latest provider compatibility canary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    continue-on-error: true
-    permissions:
-      contents: read
-    outputs:
-      failed: ${{ steps.collect.outputs.failed }}
-      guardian_toolchain: ${{ steps.guardian_toolchain.outcome }}
-      locked_install: ${{ steps.locked_install.outcome }}
-      locked_tests: ${{ steps.locked_tests.outcome }}
-      cursor_install: ${{ steps.cursor_install.outcome }}
-      latest_probe: ${{ steps.latest_probe.outcome }}
-      latest_versions: ${{ steps.collect.outputs.latest_versions }}
+  profile:
+    name: Frozen v55 baseline and bounded Intel profile
+    runs-on: macos-15-intel
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
     env:
       CI: "true"
-
+      SOURCE_SHA: 71652cccc8c2e1cb6cee6c79c60fe4bde55440c6
+      RELEASE_SOURCE_SHA: 71652cccc8c2e1cb6cee6c79c60fe4bde55440c6
+      INERTIA_RELEASE_CHANNEL: stable
     steps:
-      - name: Check out source
+      - name: Check out external diagnostic harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
           persist-credentials: false
-
-      - name: Set up Node.js
+      - name: Retain only benchmark instrumentation
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/intel-harness" "$RUNNER_TEMP/intel-evidence"
+          cp tests/performance/desktop.benchmark.spec.ts "$RUNNER_TEMP/intel-harness/"
+          cp tests/helpers/intel-benchmark-profile.ts "$RUNNER_TEMP/intel-harness/"
+      - name: Check out immutable tagged application and baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 71652cccc8c2e1cb6cee6c79c60fe4bde55440c6
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact source and tag before building
+        env:
+          DRIVER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = d0b10ad1c01e18022b8f3b27d6f845e93e6bcfb7
+          test "$(git rev-parse refs/tags/v0.0.55)" = 34131651aa847ef2ed9fbc31918424e4cac6b14f
+          test "$(git rev-parse 'refs/tags/v0.0.55^{commit}')" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          writeFileSync(join(process.env.RUNNER_TEMP, 'intel-evidence/source.json'), JSON.stringify({
+            sourceSha: process.env.SOURCE_SHA, driverSha: process.env.DRIVER_SHA,
+            applicationBuiltBeforeOverlay: true, limitsAndSampleCountsUnchanged: true,
+            limitation: 'Diagnostic rebuild, not release certification. Profiling adds overhead; baseline is uninstrumented. No publication.'
+          }, null, 2));
+          JS
+      - name: Set up release Node version
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version: 22.23.2
           cache: npm
           cache-dependency-path: package-lock.json
-
-      - name: Install Linux guardian toolchain
-        id: guardian_toolchain
-        continue-on-error: true
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
-
-      - name: Install the product's locked dependency graph
-        id: locked_install
-        continue-on-error: true
+      - name: Install locked dependencies
         run: npm ci
-
-      - name: Exercise locked provider types and protocol fixtures
-        id: locked_tests
-        if: >-
-          steps.guardian_toolchain.outcome == 'success'
-          && steps.locked_install.outcome == 'success'
+      - name: Build pristine application once
+        run: npm run build:packaged
+      - name: Prepare Electron outside benchmark deadline
+        run: node -e "console.log(require('electron'))"
+      - name: Measure original benchmark without profiling
+        id: baseline
         continue-on-error: true
-        run: |
-          npm run pretest
-          npm run typecheck
-          npm run test:portable
-
-      - name: Resolve and download the latest official Cursor CLI in isolation
-        id: cursor_install
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/provider-drift"
-          installer="${RUNNER_TEMP}/provider-drift/cursor-install.sh"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            https://cursor.com/install \
-            --output "$installer"
-          sha256sum "$installer"
-          download_url="$(
-            sed -n 's/^DOWNLOAD_URL="\(https:\/\/[^"]*\)"/\1/p' "$installer"
-          )"
-          download_url="${download_url/\$\{OS\}/linux}"
-          download_url="${download_url/\$\{ARCH\}/x64}"
-          case "$download_url" in
-            https://downloads.cursor.com/*/linux/x64/agent-cli-package.tar.gz) ;;
-            *) echo "Unexpected Cursor download URL: $download_url" >&2; exit 1 ;;
-          esac
-          archive="${RUNNER_TEMP}/provider-drift/cursor-agent.tar.gz"
-          cursor_root="${RUNNER_TEMP}/provider-drift/cursor"
-          curl --fail --silent --show-error --location \
-            --connect-timeout 20 --max-time 120 \
-            "$download_url" \
-            --output "$archive"
-          sha256sum "$archive"
-          mkdir -p "$cursor_root"
-          tar --extract --gzip --file "$archive" --strip-components=1 --directory "$cursor_root"
-          cursor_agent="$cursor_root/cursor-agent"
-          test -x "$cursor_agent"
-          printf 'cursor_agent=%s\n' "$cursor_agent" >> "$GITHUB_OUTPUT"
-
-      - name: Probe latest SDK types, runtime surfaces, and official CLI help
-        id: latest_probe
-        if: steps.locked_install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
         env:
-          CURSOR_AGENT: ${{ steps.cursor_install.outputs.cursor_agent }}
+          INERTIA_DESKTOP_BENCHMARK_REPORT: ${{ runner.temp }}/intel-evidence/baseline.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/intel-evidence/baseline-test.json
         run: |
           set -euo pipefail
-          probe_args=(
-            --workspace "${RUNNER_TEMP}/provider-drift/npm"
-            --report "${RUNNER_TEMP}/provider-drift/report.json"
-          )
-          if [[ -n "$CURSOR_AGENT" ]]; then
-            probe_args+=(--cursor-agent "$CURSOR_AGENT")
-          fi
-          node scripts/provider-drift-probe.mjs "${probe_args[@]}"
-
-      - name: Collect privacy-limited canary result
-        id: collect
+          git diff --exit-code -- src package.json package-lock.json tests/performance/desktop.benchmark.spec.ts
+          node node_modules/@playwright/test/cli.js test --config playwright.benchmark.config.ts --reporter=line,json --output=test-results/intel-baseline
+      - name: Require completed baseline and confirmed cleanup before profiling
+        env:
+          BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const dir = join(process.env.RUNNER_TEMP, 'intel-evidence');
+          const evidence = JSON.parse(readFileSync(join(dir, 'baseline.json'), 'utf8'));
+          const result = JSON.parse(readFileSync(join(dir, 'baseline-test.json'), 'utf8'));
+          assert.equal(evidence.scenarios.streamingResponsiveness.sampleCount, 3);
+          assert.ok(Number.isFinite(evidence.scenarios.shutdown.coldMs));
+          assert.ok(Number.isFinite(evidence.scenarios.shutdown.warmMs));
+          assert.equal(result.errors.length, 0, 'Global or cleanup error blocks profiling');
+          const tests = [];
+          const visit = suite => { for (const spec of suite.specs ?? []) tests.push(...spec.tests); for (const child of suite.suites ?? []) visit(child); };
+          for (const suite of result.suites) visit(suite);
+          assert.equal(tests.length, 1);
+          assert.equal(tests[0].results.length, 1, 'Retries are prohibited');
+          const attempt = tests[0].results[0];
+          if (process.env.BASELINE_OUTCOME === 'success') {
+            assert.equal(attempt.status, 'passed');
+            assert.equal(attempt.errors.length, 0);
+          } else {
+            assert.equal(attempt.status, 'failed');
+            assert.equal(attempt.errors.length, 1, 'Multiple errors or cleanup failure blocks profiling');
+            const error = attempt.errors[0];
+            const location = error.location ?? attempt.errorLocation;
+            assert.match(location?.file ?? '', /(?:^|\/)tests\/performance\/desktop\.benchmark\.spec\.ts$/);
+            assert.ok([2181, 2234, 2236].includes(location?.line), 'Only original performance assertions permit profiling');
+            assert.match(attempt.error?.message ?? '', /toBeLessThan/);
+          }
+          const pids = ['active', 'warm'].flatMap(key => [evidence.scenarios[key]?.runtimePid, evidence.scenarios[key]?.rendererPid]).filter(Number.isInteger);
+          for (const pid of new Set(pids)) {
+            try { process.kill(pid, 0); assert.fail(`Benchmark-owned PID ${pid} remains alive`); }
+            catch (error) { if (error.code !== 'ESRCH') throw error; }
+          }
+          writeFileSync(join(dir, 'baseline-outcome.json'), JSON.stringify({ outcome: process.env.BASELINE_OUTCOME, originalThresholdsPreserved: true, cleanupConfirmed: true }));
+          JS
+      - name: Restore only diagnostic test overlay after pristine baseline
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/intel-harness/desktop.benchmark.spec.ts" tests/performance/
+          cp "$RUNNER_TEMP/intel-harness/intel-benchmark-profile.ts" tests/helpers/
+          git diff --exit-code -- src package.json package-lock.json
+      - name: Capture bounded profile using unchanged workload and thresholds
+        id: profiled
+        continue-on-error: true
+        env:
+          INERTIA_V55_INTEL_PROFILE_DIR: ${{ runner.temp }}/intel-evidence/profile
+          INERTIA_DESKTOP_BENCHMARK_REPORT: ${{ runner.temp }}/intel-evidence/profiled.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/intel-evidence/profiled-test.json
+        run: node node_modules/@playwright/test/cli.js test --config playwright.benchmark.config.ts --reporter=line,json --output=test-results/intel-profiled
+      - name: Record diagnostic outcome without treating it as release certification
+        env:
+          PROFILED_OUTCOME: ${{ steps.profiled.outcome }}
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const dir = join(process.env.RUNNER_TEMP, 'intel-evidence');
+          const receipt = JSON.parse(readFileSync(join(dir, 'profile/profile-receipt.json'), 'utf8'));
+          const result = JSON.parse(readFileSync(join(dir, 'profiled-test.json'), 'utf8'));
+          writeFileSync(join(dir, 'diagnostic-outcome.json'), JSON.stringify({
+            profiledOutcome: process.env.PROFILED_OUTCOME, captureComplete: receipt.complete,
+            captureFaults: receipt.faults, testStats: result.stats,
+            releaseCertification: false
+          }));
+          JS
+      - name: Retain bounded diagnostic evidence
         if: always()
-        shell: bash
-        env:
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ steps.guardian_toolchain.outcome }}
-          LOCKED_INSTALL_OUTCOME: ${{ steps.locked_install.outcome }}
-          LOCKED_TESTS_OUTCOME: ${{ steps.locked_tests.outcome }}
-          CURSOR_INSTALL_OUTCOME: ${{ steps.cursor_install.outcome }}
-          LATEST_PROBE_OUTCOME: ${{ steps.latest_probe.outcome }}
-        run: |
-          set -euo pipefail
-          failed=false
-          for outcome in \
-            "$GUARDIAN_TOOLCHAIN_OUTCOME" \
-            "$LOCKED_INSTALL_OUTCOME" \
-            "$LOCKED_TESTS_OUTCOME" \
-            "$CURSOR_INSTALL_OUTCOME" \
-            "$LATEST_PROBE_OUTCOME"
-          do
-            if [[ "$outcome" == "failure" ]]; then
-              failed=true
-            fi
-          done
-          report="${RUNNER_TEMP}/provider-drift/report.json"
-          versions="$(
-            node -e '
-              const fs = require("node:fs");
-              const allowed = new Set([
-                "@agentclientprotocol/sdk",
-                "@anthropic-ai/claude-agent-sdk",
-                "@anthropic-ai/sdk",
-                "@modelcontextprotocol/sdk",
-                "@opencode-ai/sdk",
-                "@openai/codex",
-                "@anthropic-ai/claude-code",
-                "@google/gemini-cli",
-                "@moonshot-ai/kimi-code",
-                "opencode-ai",
-              ]);
-              let report = {};
-              try { report = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
-              const values = Object.entries(report.latestPackages ?? {})
-                .filter(([name, version]) =>
-                  allowed.has(name) &&
-                  typeof version === "string" &&
-                  /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)
-                )
-                .map(([name, version]) => name + "@" + version);
-              process.stdout.write(values.join(", "));
-            ' "$report"
-          )"
-          printf 'failed=%s\n' "$failed" >> "$GITHUB_OUTPUT"
-          printf 'latest_versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
-
-  report-failure:
-    name: Report provider compatibility failure
-    needs: provider-drift
-    if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    continue-on-error: true
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Open or update the provider drift issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          PROVIDER_DRIFT_RESULT: ${{ needs.provider-drift.result }}
-          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ needs.provider-drift.outputs.guardian_toolchain }}
-          LOCKED_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.locked_install }}
-          LOCKED_TESTS_OUTCOME: ${{ needs.provider-drift.outputs.locked_tests }}
-          CURSOR_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.cursor_install }}
-          LATEST_PROBE_OUTCOME: ${{ needs.provider-drift.outputs.latest_probe }}
-          LATEST_VERSIONS: ${{ needs.provider-drift.outputs.latest_versions }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          script: |
-            const title = "Weekly provider compatibility canary failed";
-            const marker = "<!-- inertia-provider-contract-drift -->";
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const outcomes = [
-              ["Canary job", process.env.PROVIDER_DRIFT_RESULT],
-              ["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME],
-              ["Locked dependency install", process.env.LOCKED_INSTALL_OUTCOME],
-              ["Locked type and protocol suite", process.env.LOCKED_TESTS_OUTCOME],
-              ["Isolated Cursor CLI install", process.env.CURSOR_INSTALL_OUTCOME],
-              ["Latest SDK and CLI probe", process.env.LATEST_PROBE_OUTCOME],
-            ];
-            const versions = (process.env.LATEST_VERSIONS || "")
-              .split(", ")
-              .filter(Boolean)
-              .map((value) => `- \`${value}\``)
-              .join("\n");
-            const body = [
-              marker,
-              "The secret-free weekly provider compatibility canary failed.",
-              "",
-              `[Inspect the workflow run](${runUrl})`,
-              "",
-              "### Step outcomes",
-              ...outcomes.map(([name, outcome]) => `- ${name}: **${outcome || "unavailable"}**`),
-              "",
-              "### Resolved latest packages",
-              versions || "- Unavailable because installation did not complete.",
-              "",
-              "The issue intentionally contains no raw CLI output, environment values, prompts,",
-              "workspace content, paths, credentials, or diagnostics. Use the linked secret-free",
-              "runner log for bounded command output.",
-            ].join("\n");
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo,
-              state: "all",
-              per_page: 100,
-            });
-            const existing = issues.find((issue) =>
-              !issue.pull_request &&
-              (issue.title === title || issue.body?.includes(marker))
-            );
-            if (!existing) {
-              await github.rest.issues.create({ ...context.repo, title, body });
-              return;
-            }
-            if (existing.state !== "open") {
-              await github.rest.issues.update({
-                ...context.repo,
-                issue_number: existing.number,
-                state: "open",
-              });
-            }
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: existing.number,
-              body,
-            });
+          name: intel-v55-bounded-profile-${{ github.run_id }}
+          path: ${{ runner.temp }}/intel-evidence
+          retention-days: 7
+          if-no-files-found: error

@@ -44,6 +44,7 @@ import {
 } from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import { measureDesktopDiscovery } from "../helpers/desktop-discovery-benchmark";
+import { startIntelBenchmarkProfile, type IntelBenchmarkProfile } from "../helpers/intel-benchmark-profile";
 import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
@@ -61,6 +62,8 @@ import {
 } from "../helpers/desktop-benchmark-streaming-fixture";
 
 const execFileAsync = promisify(execFile);
+let intelProfile: IntelBenchmarkProfile | null = null;
+let intelProfileStarted = false;
 const reportPath = resolve(
   process.env.INERTIA_DESKTOP_BENCHMARK_REPORT
     ?? `performance-results/desktop-${process.platform}-${process.arch}.json`,
@@ -494,6 +497,10 @@ async function launchApp(
     const cleanup = acquisition.adopt(resource);
     try {
       const page = await electronApp.firstWindow();
+      if (!intelProfileStarted) {
+        intelProfileStarted = true;
+        intelProfile = await startIntelBenchmarkProfile(page);
+      }
       page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
         guardianFailureCodes.set(electronApp, collectGuardianFailureCodes(
           guardianFailureCodes.get(electronApp) ?? [], payload,
@@ -509,6 +516,7 @@ async function launchApp(
           });
         });
       });
+      await intelProfile?.mark("runtime-interactive");
       return {
         electronApp,
         page,
@@ -1501,7 +1509,9 @@ async function rendererMemorySample(
       rendererMemorySessions.set(page, sessionPromise);
     }
     const session = await sessionPromise;
+    await intelProfile?.mark(`gc-${phase}-start`);
     await session.send("HeapProfiler.collectGarbage");
+    await intelProfile?.mark(`gc-${phase}-end`);
     await page.evaluate(async () => {
       await new Promise<void>((resolveFrame) => requestAnimationFrame(() => {
         requestAnimationFrame(() => resolveFrame());
@@ -1681,10 +1691,12 @@ async function rendererInteractionMeasurement(
 }
 
 async function coldIntentDialogMeasurement(page: Page): Promise<number> {
+  await intelProfile?.mark("cold-dialog-start");
   const elapsed = await rendererInteractionMeasurement(page, {
     triggerSelector: 'button[aria-label="Launch two chats"]',
     targetSelector: '.multi-spawn-dialog[role="dialog"]',
   });
+  await intelProfile?.mark("cold-dialog-end");
   await page.getByRole("button", { name: "Close multi-spawn" }).click();
   return elapsed;
 }
@@ -1693,17 +1705,21 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   commandPaletteFirstOpenMs: number;
   settingsFirstOpenMs: number;
 }> {
+  await intelProfile?.mark("settings-start");
   const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
     triggerSelector: '.sidebar-footer button[aria-label="Settings"]',
     targetSelector: ".settings-view",
   });
+  await intelProfile?.mark("settings-end");
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.locator(".chat-workspace").waitFor();
 
+  await intelProfile?.mark("palette-start");
   const commandPaletteFirstOpenMs = await rendererInteractionMeasurement(page, {
     shortcut: "command-palette",
     targetSelector: '.command-palette[role="dialog"]',
   });
+  await intelProfile?.mark("palette-end");
   await page.getByRole("button", { name: "Close search" }).click();
   return {
     commandPaletteFirstOpenMs,
@@ -1839,10 +1855,13 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       cold.page,
       "idle-baseline",
     );
+    await intelProfile?.mark("authoritative-scroll-start");
     const authoritativeLongConversation = await authoritativeScrollSample(cold.page);
+    await intelProfile?.mark("authoritative-scroll-end");
     const streamingSampleCount = process.env.CI ? 3 : 5;
     const streamingSamples: StreamingResponsivenessSample[] = [];
     for (let sampleNumber = 1; sampleNumber <= streamingSampleCount; sampleNumber += 1) {
+      await intelProfile?.mark(`stream-sample-${sampleNumber}-start`);
       streamingSamples.push(await streamingResponsivenessSample(
         cold.electronApp,
         cold.page,
@@ -1850,7 +1869,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         workspace,
         sampleNumber,
       ));
+      await intelProfile?.mark(`stream-sample-${sampleNumber}-end`);
     }
+    await intelProfile?.stop();
     const streamingResponsiveness = summarizeStreamingResponsiveness(
       streamingSamples,
     );
@@ -2296,6 +2317,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     }
     throw cause;
   } finally {
+    await intelProfile?.stop("test-finally");
     cleanupContext.finishBody();
     // afterEach owns the final retry and failure report from its fresh timeout
     // slot; this attempt lets the normal path release resources immediately.

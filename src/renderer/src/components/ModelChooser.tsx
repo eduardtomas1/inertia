@@ -555,7 +555,7 @@ export function ModelChooser({
     let stop: (() => void) | undefined;
     void import("../utils/composerPopoverPlacement").then(({ observeComposerPopover }) => {
       if (!active) return;
-      stop = observeComposerPopover(trigger, popover, () => undefined);
+      stop = observeComposerPopover(trigger, popover, () => undefined, "below");
       searchRef.current?.focus();
       searchRef.current?.select();
     });

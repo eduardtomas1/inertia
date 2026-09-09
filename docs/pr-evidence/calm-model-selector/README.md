@@ -40,7 +40,8 @@ INERTIA_E2E_WORKERS=1 npx playwright test tests/e2e/model-chooser.spec.ts --proj
 
 Use an isolated display on a machine where a user is working. The two scenarios
 verify established-chat and new-chat placement, visible/clickable search,
-viewport containment, content-sized height (including one-result and empty
+viewport containment, downward opening when it fits and upward fallback when
+it does not, content-sized height (including one-result and empty
 searches), loaded provider images, source selection, keyboard focus
 and dismissal, favorites and reasoning identities, bounded 600-model
 virtualization, runtime recycling, and persisted route boundaries. A provider

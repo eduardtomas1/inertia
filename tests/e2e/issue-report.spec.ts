@@ -8,8 +8,26 @@ test("preserves the private report chat and requires a reviewed preview before p
   try {
     await app.resizeWindow(1440, 1050);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("radio", { name: "Light", exact: true }).click();
-    await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+    for (const theme of ["Dark", "Light"]) {
+      await page.getByRole("button", { name: "General", exact: true }).click();
+      await page.getByRole("radio", { name: theme, exact: true }).click();
+      await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+      await expect(page.getByLabel("What happened?")).toBeEnabled();
+      await app.expectNoViewportOverflow();
+      const layout = await page.locator(".issue-report").evaluate((element) => {
+        const content = element.closest(".settings-content")!.getBoundingClientRect();
+        const report = element.getBoundingClientRect();
+        const primary = element.querySelector(".issue-report-create-actions .primary-button")!.getBoundingClientRect();
+        const field = element.querySelector("textarea")!.getBoundingClientRect();
+        return { left: report.left - content.left, right: content.right - report.right, aligned: Math.abs(field.right - primary.right) < 1 };
+      });
+      expect(layout.left).toBeGreaterThanOrEqual(20);
+      expect(layout.right).toBeGreaterThanOrEqual(20);
+      expect(layout.aligned).toBe(true);
+      const path = testInfo.outputPath(`issue-report-${theme.toLowerCase()}.png`);
+      await page.screenshot({ path, animations: "disabled" });
+      await testInfo.attach(`issue-report-${theme.toLowerCase()}`, { path, contentType: "image/png" });
+    }
     // Settings menus must stay in Chromium's top layer on Linux too.
     for (const name of ["Report agent and model", "Report reasoning", "Diagnostic scope"]) {
       const control = page.getByRole("combobox", { name, exact: true });
@@ -37,6 +55,17 @@ test("preserves the private report chat and requires a reviewed preview before p
     await page.getByLabel("Issue title").fill("Cancelled chat remains waiting on the next message");
     await page.getByRole("button", { name: "Save and review preview" }).click();
     await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeEnabled();
+    const actionAlignment = await page.locator(".issue-report-publication-actions").evaluate((element) => {
+      const primary = element.querySelector(".primary-button")!.getBoundingClientRect();
+      const secondary = element.querySelector(".secondary-button")!.getBoundingClientRect();
+      return Math.abs(primary.top + primary.height / 2 - secondary.top - secondary.height / 2);
+    });
+    expect(actionAlignment).toBeLessThan(1);
+    await expect(page.locator(".issue-report-footer").getByRole("button", { name: "Start another draft" })).toBeVisible();
+    await page.getByRole("button", { name: "Open GitHub manually" }).focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toHaveCSS("outline-style", "solid");
     const chat = testInfo.outputPath("issue-report-chat.png");
     await page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: chat, animations: "disabled" });
@@ -52,5 +81,17 @@ test("preserves the private report chat and requires a reviewed preview before p
     await app.resizeWindow(900, 850);
     await app.expectNoViewportOverflow();
     await expect(page.getByRole("button", { name: "Submit issue to GitHub" })).toBeEnabled();
+    const overflowing = await page.locator(".issue-report").evaluate((element) => {
+      const container = element.getBoundingClientRect();
+      return [...element.querySelectorAll("button, input, textarea, select")].flatMap((control) => {
+        const rect = control.getBoundingClientRect();
+        return rect.width === 0 || rect.left >= container.left - 1 && rect.right <= container.right + 1 ? []
+          : [{ text: control.textContent, left: rect.left, right: rect.right, container: [container.left, container.right] }];
+      });
+    });
+    const narrow = testInfo.outputPath("issue-report-narrow.png");
+    await page.screenshot({ path: narrow, animations: "disabled" });
+    await testInfo.attach("issue-report-narrow", { path: narrow, contentType: "image/png" });
+    expect(overflowing).toEqual([]);
   } finally { await app.close(); }
 });

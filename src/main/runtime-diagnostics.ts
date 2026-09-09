@@ -20,6 +20,14 @@ import {
 } from "node:fs";
 import type { Stats } from "node:fs";
 import { join, resolve } from "node:path";
+import { ApplicationIncidentIndex } from "./application-incident-index.js";
+import {
+  diagnosticDefinition,
+  diagnosticRecordSchema,
+  type DiagnosticIncident,
+  type DiagnosticPage,
+  type DiagnosticQuery,
+} from "../shared/application-diagnostics.js";
 
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
@@ -197,7 +205,7 @@ function diagnosticRecordDigest(value: Record<string, unknown>): string {
 }
 
 function serializeDiagnosticRecord(
-  value: Record<string, string | number | boolean>,
+  value: Record<string, unknown>,
 ): string {
   const recordDigest = diagnosticRecordDigest(value);
   return `${JSON.stringify({ ...value, recordDigest })}\n`;
@@ -210,6 +218,14 @@ function parseDiagnosticRecord(
     return null;
   }
   const record = value as Record<string, unknown>;
+  if (record.schemaVersion === 2 && record.event === "application.incident") {
+    const incident = diagnosticRecordSchema.safeParse(record.incident);
+    if (!incident.success || record.at !== incident.data.at
+      || Object.keys(record).some((key) => !["schemaVersion", "event", "at", "incident", "recordDigest"].includes(key))
+      || typeof record.recordDigest !== "string"
+      || diagnosticRecordDigest(record) !== record.recordDigest) return null;
+    return { ...record, incident: incident.data };
+  }
   if (
     record.schemaVersion !== DIAGNOSTIC_SCHEMA_VERSION
     || typeof record.at !== "string"
@@ -326,6 +342,7 @@ export class RuntimeDiagnostics {
   private readonly retentionMs: number;
   private readonly now: () => number;
   private readonly write: NonNullable<RuntimeDiagnosticsOptions["write"]>;
+  private readonly incidents: ApplicationIncidentIndex;
 
   constructor(directory: string, options: RuntimeDiagnosticsOptions = {}) {
     this.directory = resolve(directory);
@@ -336,7 +353,39 @@ export class RuntimeDiagnostics {
     this.now = options.now ?? Date.now;
     this.write = options.write ?? ((descriptor, buffer, offset, length) =>
       writeSync(descriptor, buffer, offset, length));
+    this.incidents = new ApplicationIncidentIndex({
+      now: this.now, retentionMs: this.retentionMs,
+      load: () => {
+        this.ensureDirectory();
+        const records: unknown[] = [];
+        this.readEvents((record) => {
+          // Legacy lifecycle records remain in support summaries. Do not invent
+          // incident identities/causes for them or duplicate modern failures.
+          if (record.event === "application.incident") records.push(record.incident);
+        });
+        return records;
+      },
+      append: (incident) => {
+        this.ensureDirectory();
+        const line = serializeDiagnosticRecord({
+          schemaVersion: 2, event: "application.incident", at: incident.at, incident,
+        });
+        if (Buffer.byteLength(line) > this.maxFileBytes) throw new Error("Diagnostic record exceeds the journal bound.");
+        this.rotateIfNeeded(Buffer.byteLength(line));
+        this.append(line);
+      },
+    });
   }
+
+  recordIncident(incident: DiagnosticIncident): ReturnType<ApplicationIncidentIndex["record"]> {
+    try { return this.incidents.record(incident); } catch { return null; }
+  }
+
+  queryIncidents(query: DiagnosticQuery): DiagnosticPage { return this.incidents.query(query); }
+  exportIncidents(query: DiagnosticQuery): string { return this.incidents.export(query); }
+  flushIncidents(): void { this.incidents.flush(); }
+  onIncidentsChanged(notify: () => void): void { this.incidents.onChange(notify); }
+  setIncidentRuntimeReady(ready: boolean, generationHash: string | null = null): void { this.incidents.setRuntime(ready, generationHash); }
 
   ensureDirectory(): string {
     mkdirSync(this.directory, { recursive: true, mode: DIRECTORY_MODE });
@@ -351,6 +400,7 @@ export class RuntimeDiagnostics {
 
   record(event: RuntimeDiagnosticEvent, fields: DiagnosticFields = {}): void {
     try {
+      if (event === "app.stop") this.flushIncidents();
       this.ensureDirectory();
       const entry: Record<string, string | number | boolean> = {
         schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
@@ -575,7 +625,7 @@ export class RuntimeDiagnostics {
     };
   }
 
-  private readEvents(): string[] {
+  private readEvents(onRecord?: (record: Record<string, unknown>) => void): string[] {
     const names = readdirSync(this.directory)
       .filter((name) => LOG_FILE_PATTERN.test(name))
       .sort((left, right) => {
@@ -584,7 +634,7 @@ export class RuntimeDiagnostics {
         const leftIndex = Number(left.match(/\.(\d+)\./u)?.[1] ?? 0);
         const rightIndex = Number(right.match(/\.(\d+)\./u)?.[1] ?? 0);
         return rightIndex - leftIndex;
-      });
+      }).slice(-this.maxFiles);
     const events: string[] = [];
     for (const name of names) {
       let content: string;
@@ -620,6 +670,12 @@ export class RuntimeDiagnostics {
         try {
           const value = parseDiagnosticRecord(JSON.parse(line));
           if (!value) continue;
+          onRecord?.(value);
+          if (value.event === "application.incident") {
+            const incident = diagnosticRecordSchema.parse(value.incident);
+            events.push(`${incident.at} · ${incident.code} · ${diagnosticDefinition(incident.code).title} · ${incident.outcome}`);
+            continue;
+          }
           const event = value.event as RuntimeDiagnosticEvent;
           const at = value.at as string;
           const lifecycleEvent = event !== "detached-draft.recovery";

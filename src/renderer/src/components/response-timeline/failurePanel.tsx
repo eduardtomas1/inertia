@@ -23,6 +23,7 @@ import {
   type FailureDiagnosticFact,
 } from "../../utils/failureDiagnostics";
 import { writeClipboardText } from "../../utils/clipboard";
+import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
 import "./failureDiagnostics.css";
 
 function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.JSX.Element {
@@ -100,6 +101,9 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
           <p id={headingId}>{presentation.summary}</p>
         </div>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
+          {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
+            section: "diagnostics", selection: { turnId: turn.id },
+          })}>View diagnostics</button>}
           <button
             type="button"
             className="turn-failure-action"

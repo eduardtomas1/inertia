@@ -244,6 +244,19 @@ export class TurnSettlementCoordinator {
         : null;
     });
     if (wonSettlement && (status === "failed" || status === "interrupted")) {
+      // Emit only after authoritative settlement, carrying identity captured by
+      // this turn. Never persist the failure message or provider output here.
+      try {
+        this.options.hooks.reportIncident?.({ correlationId: active.turn.id,
+          code: active.diagnosticFailureCode ?? (terminalReason === "turn-start-failed" ? "provider.start-failed"
+            : failure?.reason === "transport-closed" || failure?.reason === "rpc-timeout"
+              ? "provider.connection-failed" : "turn.failed"),
+          outcome: "failed", context: {
+            providerId: active.turn.providerId, projectId: active.conversation.projectId,
+            conversationId: active.conversation.id, turnId: active.turn.id,
+          },
+        });
+      } catch { /* Diagnostics cannot break settlement or trigger a retry. */ }
       const failureMessage = message ?? (
         status === "interrupted"
           ? "The agent turn was interrupted."

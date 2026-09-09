@@ -1,0 +1,5 @@
+.file-git-badge { display: inline-flex; flex: 0 0 18px; justify-content: center; align-items: center; margin-left: auto; font-size: var(--ui-font-secondary); font-weight: 650; font-family: var(--font-mono, monospace); }
+.file-git-badge.is-modified { color: var(--warning); }
+.file-git-badge.is-added { color: var(--success); }
+.file-git-badge.is-deleted, .file-git-badge.is-conflict { color: var(--danger); }
+.file-git-status { margin: 0; padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text-soft); font-size: var(--ui-font-secondary); line-height: 1.5; overflow-wrap: anywhere; }

@@ -10,6 +10,7 @@ import type {
   RuntimeConnectionResult,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
+import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const IPC = {
@@ -267,6 +268,19 @@ const bridge: DesktopBridge = Object.freeze({
       DesktopBridge["importRecoveryData"]
     >,
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
+  queryDiagnostics: (query: Parameters<DesktopBridge["queryDiagnostics"]>[0]) =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.query, query) as ReturnType<DesktopBridge["queryDiagnostics"]>,
+  copyDiagnostics: (query: Parameters<DesktopBridge["copyDiagnostics"]>[0]) =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.copy, query) as ReturnType<DesktopBridge["copyDiagnostics"]>,
+  exportDiagnostics: (query: Parameters<DesktopBridge["exportDiagnostics"]>[0]) =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.export, query) as ReturnType<DesktopBridge["exportDiagnostics"]>,
+  reportValidationDiagnostic: (report: Parameters<DesktopBridge["reportValidationDiagnostic"]>[0]) =>
+    ipcRenderer.invoke(DIAGNOSTICS_IPC.reportValidation, report) as ReturnType<DesktopBridge["reportValidationDiagnostic"]>,
+  onDiagnosticsChanged: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on(DIAGNOSTICS_IPC.changed, handler);
+    return () => ipcRenderer.removeListener(DIAGNOSTICS_IPC.changed, handler);
+  },
   copyRuntimeDiagnosticReport: (
     lifecycle: Parameters<DesktopBridge["copyRuntimeDiagnosticReport"]>[0],
   ) =>

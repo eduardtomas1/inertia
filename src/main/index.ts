@@ -81,6 +81,8 @@ import {
   backendSecretReferenceForProfile,
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
+import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
+import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
@@ -376,6 +378,27 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
 }
 
 function registerIpcHandlers(): void {
+  registerApplicationDiagnosticsIpc({
+    ipcMain, assertTrusted: assertTrustedIpc,
+    diagnostics: () => {
+      runtimeDiagnostics ??= new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+      runtimeDiagnostics.onIncidentsChanged(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DIAGNOSTICS_IPC.changed);
+      });
+      return runtimeDiagnostics;
+    },
+    copyText: (text) => clipboard.writeText(text),
+    chooseExportPath: async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) throw new Error("The diagnostics window is unavailable.");
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "Export filtered diagnostics",
+        defaultPath: join(app.getPath("documents"), `inertia-diagnostics-${new Date().toISOString().slice(0, 10)}.json`),
+        buttonLabel: "Export diagnostics", filters: [{ name: "JSON", extensions: ["json"] }],
+        properties: ["createDirectory", "showOverwriteConfirmation"],
+      });
+      return result.canceled ? null : result.filePath ?? null;
+    },
+  });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
@@ -526,6 +549,7 @@ function registerIpcHandlers(): void {
     net.fetch as typeof globalThis.fetch,
     () => credentialVault,
     assertTrustedIpc,
+    (incident) => runtimeDiagnostics?.recordIncident(incident),
   );
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
@@ -709,7 +733,8 @@ function registerIpcHandlers(): void {
     }
   });
 
-  registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc);
+  registerCredentialVaultIpc(ipcMain, () => credentialVault, assertTrustedIpc,
+    (incident) => runtimeDiagnostics?.recordIncident(incident));
 }
 
 async function createMainWindow(): Promise<void> {
@@ -1095,12 +1120,14 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onMascotStatus: (status) => mascotMain?.observe(status),
+    onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {
       mascotMain?.runtimePhase(snapshot.phase);
       appUpdateRuntimeReadiness.observe(snapshot);
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
+      runtimeDiagnostics?.setIncidentRuntimeReady(snapshot.phase === "ready", snapshot.runtimeGenerationHash);
       if (
         snapshot.phase === "ready"
         && mainWindow

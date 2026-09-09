@@ -252,6 +252,23 @@ describe("durable Git reconnect reconciliation", () => {
       promoted: true,
     },
     {
+      label: "background cancellation with a diagnostic reference",
+      error: new RuntimeCommandError("Git inspection was cancelled.", "rejected",
+        "11111111-1111-4111-8111-111111111111"),
+      promoted: false,
+    },
+    {
+      label: "other rejection with a diagnostic reference",
+      error: new RuntimeCommandError("The repository is no longer available.", "rejected",
+        "11111111-1111-4111-8111-111111111111"),
+      promoted: true,
+    },
+    {
+      label: "cancellation with a malformed diagnostic reference",
+      error: new RuntimeCommandError("Git inspection was cancelled. [incident:invalid]", "rejected"),
+      promoted: true,
+    },
+    {
       label: "ordinary cancellation-shaped failure",
       error: new Error("Git inspection was cancelled."),
       promoted: true,
@@ -335,6 +352,18 @@ describe("durable Git reconnect reconciliation", () => {
     {
       label: "ordinary failure",
       error: new Error("The branch response was unreadable."),
+      promoted: true,
+    },
+    {
+      label: "background cancellation with a diagnostic reference",
+      error: new RuntimeCommandError("Git inspection was cancelled.", "rejected",
+        "11111111-1111-4111-8111-111111111111"),
+      promoted: false,
+    },
+    {
+      label: "other rejection with a diagnostic reference",
+      error: new RuntimeCommandError("The repository is no longer available.", "rejected",
+        "11111111-1111-4111-8111-111111111111"),
       promoted: true,
     },
   ])("classifies $label during passive branch reconciliation", async ({

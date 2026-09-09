@@ -139,6 +139,7 @@ export interface TurnAttachmentReleaseHookInput {
 }
 
 export interface TurnControllerHooks {
+  reportIncident?(observation: import("../../../node/application-incidents").IncidentObservation): unknown;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void | Promise<void>;
   /**
@@ -264,6 +265,7 @@ export interface NativeGoalStartAcknowledgement {
 }
 
 export interface ActiveTurn {
+  diagnosticFailureCode?: "turn.inactivity-timeout" | "turn.lifetime-timeout";
   turn: AgentTurn;
   conversation: Conversation;
   providerInput: ProviderRunInput;

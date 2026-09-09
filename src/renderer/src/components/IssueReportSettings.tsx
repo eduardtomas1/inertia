@@ -111,8 +111,10 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
         <label>Diagnostic scope<select aria-label="Diagnostic scope" value={projectId} disabled={locked} onChange={(event) => setProjectId(event.target.value)}><option value="">App only</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · counts only</option>)}</select></label>
       </div>
       <p className="settings-card-note">Automatic validation currently supports Claude Agent SDK with tools disabled. Other providers can continue with a manual preview. Your existing model authentication is used.</p>
-      {!ready && <button type="button" className="secondary-button" disabled={locked} onClick={() => { void perform(async () => { if (description.trim().length >= 10) await prepare(); onProviderSetup(); }); }}>Open provider setup</button>}
-      <button type="button" className="primary-button" disabled={locked || description.trim().length < 10} onClick={() => { void perform(prepare); }}>Create private report chat</button>
+      <div className="issue-report-actions issue-report-create-actions">
+        {!ready && <button type="button" className="secondary-button" disabled={locked} onClick={() => { void perform(async () => { if (description.trim().length >= 10) await prepare(); onProviderSetup(); }); }}>Open provider setup</button>}
+        <button type="button" className="primary-button" disabled={locked || description.trim().length < 10} onClick={() => { void perform(prepare); }}>Create private report chat</button>
+      </div>
     </div>}
     {report && <>
       <div className="issue-report-chat" aria-label="Private report chat">
@@ -136,18 +138,17 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
           <button type="button" className="secondary-button" disabled={locked || title.trim().length < 3 || body.trim().length < 10} onClick={() => { void perform(async () => { await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title, body } }); setEditing(false); }); }}>Save and review preview</button>
         </> : <><h4>{report.title}</h4><pre>{report.body}</pre></>}
       </section>
-      <div className="issue-report-actions">
+      <div className="issue-report-actions issue-report-publication-actions">
         {submitted ? <button type="button" className="primary-button" onClick={() => { void window.inertia.openExternal(report.issueUrl!); }}><Check size={16} />View published issue</button> : <>
-          {!retired && <button type="button" className="primary-button" disabled={locked || editing} onClick={() => { void perform(async () => {
-            if (report.status !== "preview") { await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title: report.title, body: report.body } }); return; }
-            await command({ type: "support.report.submit", payload: { id: report.id, revision: report.revision } });
-          }); }}>{report.status === "submitting" ? "Submitting…" : report.status === "preview" ? "Submit issue to GitHub" : "Confirm preview"}</button>}
           {report.status === "uncertain" && <button type="button" className="secondary-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.reconcile", payload: { id: report.id, revision: report.revision } })); }}>Check submission</button>}
           {report.status === "uncertain" && <button ref={retirementTrigger} type="button" className="secondary-button" disabled={busy || disabled} onClick={() => setRetiring(true)}>Retire this report</button>}
           <button type="button" className="secondary-button" disabled={editing} onClick={() => { void navigator.clipboard.writeText(`${report.title}\n\n${report.body}`).then(() => setCopyStatus("Preview copied."), () => setCopyStatus("Could not copy. Select the preview text manually.")); }}><Copy size={14} />Copy preview</button>
           <button type="button" className="secondary-button" onClick={() => { void window.inertia.openExternal(report.status === "uncertain" || retired ? ISSUE_REPOSITORY_URL : `${ISSUE_REPOSITORY_URL}/new`); }}><ExternalLink size={14} />Open GitHub manually</button>
+          {!retired && <button type="button" className="primary-button" disabled={locked || editing} onClick={() => { void perform(async () => {
+            if (report.status !== "preview") { await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title: report.title, body: report.body } }); return; }
+            await command({ type: "support.report.submit", payload: { id: report.id, revision: report.revision } });
+          }); }}>{report.status === "submitting" ? "Submitting…" : report.status === "preview" ? "Submit issue to GitHub" : "Confirm preview"}</button>}
         </>}
-        <button type="button" className="secondary-button" disabled={locked} onClick={() => { setReport(null); setDescription(retired ? "" : scrubReportText(description)); setTitle(""); setBody(""); setRetiring(false); setEditing(false); }}>Start another draft</button>
       </div>
       {retiring && report.status === "uncertain" && <div className="issue-report-preview" role="group" aria-labelledby="retire-report-heading" tabIndex={-1} ref={retirementConfirmation}>
         <h4 id="retire-report-heading">Retire uncertain publication?</h4>
@@ -160,6 +161,9 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
       <p role="status">{copyStatus}</p>
     </>}
     {error && !report && <p role="alert">{error}</p>}
-    <button type="button" className="secondary-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.get" })); }}>Reload saved progress</button>
+    <footer className="issue-report-footer">
+      <button type="button" className="secondary-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.get" })); }}>Reload saved progress</button>
+      {report && <button type="button" className="secondary-button" disabled={locked} onClick={() => { setReport(null); setDescription(retired ? "" : scrubReportText(description)); setTitle(""); setBody(""); setRetiring(false); setEditing(false); }}>Start another draft</button>}
+    </footer>
   </section>;
 }

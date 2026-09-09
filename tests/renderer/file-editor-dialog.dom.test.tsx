@@ -13,6 +13,30 @@ const file = {
 };
 
 describe("FileEditorDialog", () => {
+  it("colors escaped source only, retaining native text and IME composition", async () => {
+    const content = 'public class Example { String text = "<img src=x onerror=alert(1)>"; }\n';
+    const { container: _container } = render(<FileEditorDialog file={{ ...file, path: "Example.java", content }}
+      canSave={() => true} onClose={vi.fn()} onSave={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    await waitFor(() => expect(document.querySelector(".syntax-textarea-mirror .hljs-keyword")).not.toBeNull());
+    expect(document.querySelector(".syntax-textarea-mirror")?.textContent).toBe(`${content}\n`);
+    expect(document.querySelector(".syntax-textarea-mirror img")).toBeNull();
+    expect(editor).toHaveValue(content);
+    fireEvent.compositionStart(editor);
+    expect(document.querySelector(".syntax-textarea")).not.toHaveClass("is-highlighted");
+    fireEvent.change(editor, { target: { value: `${content}// é中文` } });
+    expect(editor).toHaveValue(`${content}// é中文`);
+    fireEvent.compositionEnd(editor);
+    await waitFor(() => expect(document.querySelector(".syntax-textarea")).toHaveClass("is-highlighted"));
+  });
+
+  it("falls back to native plain text for oversized input without truncating the editable content", async () => {
+    const content = `// ${"x".repeat(50_001)}`;
+    render(<FileEditorDialog file={{ ...file, content }} canSave={() => true} onClose={vi.fn()} onSave={vi.fn()} />);
+    expect(await screen.findByText(/Plain text · highlighting unavailable/u)).toBeVisible();
+    expect(screen.getByRole("textbox")).toHaveValue(content);
+    expect(document.querySelector(".syntax-textarea")).not.toHaveClass("is-highlighted");
+  });
   it("saves the edited text against the exact preview digest", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn(async (

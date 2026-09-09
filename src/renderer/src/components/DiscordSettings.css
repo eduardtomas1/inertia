@@ -1,0 +1,18 @@
+.discord-settings { min-width: 0; }
+.discord-settings .settings-card-heading { align-items: center; margin-bottom: 24px; }
+.discord-settings .settings-card-heading h3 { font-size: 20px; margin: 0 0 5px; }
+.discord-settings .settings-card-heading p { font-size: 12px; line-height: 1.6; }
+.discord-field { display: grid; gap: 10px; min-width: 0; margin-top: 20px; }
+.discord-field > span { display: grid; gap: 5px; }
+.discord-field strong { font-size: 12px; font-weight: 600; }
+.discord-field small, .discord-settings .settings-card-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.discord-field input { width: 100%; min-width: 0; box-sizing: border-box; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); color: var(--text); font: inherit; font-size: 12px; }
+.discord-settings .settings-inline-actions { flex-wrap: wrap; margin-top: 12px; }
+.discord-settings .runtime-log-setting { flex-wrap: wrap; align-items: center; margin-top: 24px; padding-top: 24px; }
+.discord-settings .runtime-log-setting > span { flex: 1 1 260px; }
+.discord-settings .runtime-log-setting > div { margin-left: auto; }
+.discord-settings .runtime-log-setting strong { font-size: 13px; }
+.discord-settings .runtime-log-setting small { font-size: 12px; }
+.discord-settings :is(.primary-button, .secondary-button) { margin-top: 0; min-height: 36px; height: auto; padding: 9px 12px; font-size: 11px; }
+.discord-settings .discord-diagnostic-link { margin-top: 12px; }
+.discord-settings :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

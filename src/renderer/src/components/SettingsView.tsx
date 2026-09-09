@@ -59,6 +59,7 @@ import {
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
+  loadDiagnosticsSettings,
   loadIssueReportSettings,
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
@@ -72,8 +73,9 @@ import "./SettingsView.css";
 export type SettingsViewProps = {
   onReportCommand?: IssueReportSettingsProps["request"];
   target?: {
-    section: "providers" | "backends" | "connections";
+    section: "providers" | "backends" | "connections" | "discord" | "diagnostics";
     profileId?: string;
+    selection?: import("../utils/diagnosticNavigation").DiagnosticSelection;
   } | null;
   settings: AppSettings;
   disabled: boolean;
@@ -133,6 +135,7 @@ type SettingsSection =
   | "backends"
   | "connections"
   | "discord"
+  | "diagnostics"
   | "source"
   | "keybindings"
   | "archive";
@@ -143,6 +146,7 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
   { id: "backends", label: "Model backends", icon: ServerCog },
   { id: "connections", label: "Connections & devices", icon: Laptop },
   { id: "discord", label: "Discord", icon: Bot },
+  { id: "diagnostics", label: "Diagnostics", icon: Activity },
   { id: "source", label: "Source control", icon: GitCompareArrows },
   { id: "keybindings", label: "Keybindings", icon: Keyboard },
   { id: "support", label: "Report an issue", icon: Bot },
@@ -209,7 +213,7 @@ export function SettingsView({
   backendProfiles,
   backendDefaults,
   projects,
-  conversations: _conversations,
+  conversations,
   archived,
   databaseBackup,
   lifecycleDiagnostics,
@@ -256,6 +260,7 @@ export function SettingsView({
     target?.section ?? "general",
   );
   const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, section === "support");
+  const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, section === "diagnostics");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -552,6 +557,8 @@ export function SettingsView({
         "settings-content",
         section === "backends" && "is-backends",
         section === "providers" && "is-providers",
+        section === "diagnostics" && "is-diagnostics",
+        section === "support" && "is-issue-report",
       )}>
         <h2 className="visually-hidden">
           {sections.find((item) => item.id === section)?.label ?? "Settings"}
@@ -1038,6 +1045,11 @@ export function SettingsView({
             />
           ) : <SettingsSectionFallback />
         )}
+
+        {section === "diagnostics" && (DiagnosticsSettings ? <DiagnosticsSettings
+          projects={projects} conversations={[...conversations, ...archived]} providers={providers}
+          selection={target?.section === "diagnostics" ? target.selection : undefined}
+        /> : <SettingsSectionFallback />)}
 
         {section === "source" && (
           <section className="settings-card" aria-labelledby="source-heading">

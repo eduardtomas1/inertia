@@ -52,11 +52,11 @@ describe("Inertia release IPC", () => {
       if (url.includes("/compare/")) {
         return jsonResponse({ commits: [], files: [] });
       }
-      expect(url).toBe("https://discord.com/api/webhooks/123/token");
+      expect(url).toBe("https://discord.com/api/webhooks/123/token?wait=true");
       const body = JSON.parse(String(init?.body)) as { content: string };
       expect(body.content).toBe("**Authoritative Inertia 0.0.41**");
       expect(body.content).not.toContain("Spoofed");
-      return new Response(null, { status: 204 });
+      return jsonResponse({ id: "123456789" });
     });
     registerInertiaReleaseIpc(
       ipcMain,
@@ -71,7 +71,7 @@ describe("Inertia release IPC", () => {
       repositoryUrl: "https://github.com/eduardtomas1/inertia",
       release: { tag: "v9.9.9", name: "Spoofed release" },
       previousRelease: { tag: "v9.9.8", name: "Spoofed previous release" },
-    })).resolves.toEqual({ sent: true });
+    })).resolves.toEqual({ sent: true, comparisonLimited: false });
     expect(assertTrusted).toHaveBeenCalledWith(expect.anything(), 1, 1);
     expect(resolve).toHaveBeenCalledWith(expect.stringMatching(/^secret:backend:/u));
     expect(fetch).toHaveBeenCalledTimes(3);
@@ -92,9 +92,7 @@ describe("Inertia release IPC", () => {
     const handler = handlers.get("inertia:send-discord-release-info");
     await expect(handler?.({} as IpcMainInvokeEvent, {
       repositoryUrl: "",
-    })).rejects.toThrow(
-      "release repository URL is required",
-    );
+    })).resolves.toEqual({ sent: false, code: "discord.repository-missing" });
     expect(resolve).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -124,7 +122,7 @@ describe("Inertia release IPC", () => {
     const handler = handlers.get("inertia:send-discord-release-info");
     await expect(handler?.({} as IpcMainInvokeEvent, {
       repositoryUrl: "https://github.com/eduardtomas1/inertia",
-    })).rejects.toThrow("Secure credential storage is unavailable");
+    })).resolves.toEqual({ sent: false, code: "discord.credential-unavailable" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

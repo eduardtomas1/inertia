@@ -27,8 +27,9 @@ export class RuntimeCommandError extends Error {
   constructor(
     message: string,
     readonly delivery: RuntimeCommandDelivery,
+    readonly diagnosticId?: string,
   ) {
-    super(message);
+    super(diagnosticId && /^[0-9a-f-]{36}$/iu.test(diagnosticId) ? `${message} [incident:${diagnosticId}]` : message);
     this.name = "RuntimeCommandError";
   }
 }
@@ -118,7 +119,7 @@ export function settlePendingConnectionRequest(
     return "late";
   }
   if (event.type === "request.error") {
-    pending.reject(new RuntimeCommandError(event.message, "rejected"));
+    pending.reject(new RuntimeCommandError(event.message, "rejected", event.diagnosticId));
   } else {
     pending.resolve(event);
   }

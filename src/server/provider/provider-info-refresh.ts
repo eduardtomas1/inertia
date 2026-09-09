@@ -1,10 +1,13 @@
 import type { ProviderInfo } from "../../shared/contracts";
+import { ProviderReadinessIncidents } from "./readiness-incidents";
+import type { IncidentObservation } from "../../node/application-incidents";
 import type { ProviderManager, ProviderDetection } from "../providers";
 import { providerSnapshot } from "../runtime-snapshots";
 import type { ProviderInstallationVerificationAuthority } from
   "./installation-lease";
 
 export interface ProviderInfoRefreshDependencies {
+  reportIncident?: (observation: IncidentObservation) => unknown;
   enabled: boolean;
   providers: ProviderManager;
   defaultWorkspacePath: string;
@@ -37,6 +40,7 @@ function retainMaintenance(
 export function createProviderInfoRefresh(
   dependencies: ProviderInfoRefreshDependencies,
 ): RefreshProviderInfo {
+  const incidents = dependencies.reportIncident ? new ProviderReadinessIncidents(dependencies.reportIncident) : null;
   const owners = new Map<ProviderInfo["id"], symbol>();
   const claim = (providerId?: ProviderInfo["id"]): symbol => {
     const owner = Symbol("provider-info-refresh");
@@ -58,7 +62,10 @@ export function createProviderInfoRefresh(
       replaced = true;
       return retainMaintenance(current, candidate);
     });
-    if (replaced) dependencies.replaceProviderInfo(next);
+    if (replaced) {
+      dependencies.replaceProviderInfo(next);
+      incidents?.observe(next);
+    }
     return replaced;
   };
 

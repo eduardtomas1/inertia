@@ -73,6 +73,29 @@ const alphaChat = conversation(
   alpha,
 );
 describe("remote Git workspace scope", () => {
+  it("loads bounded workspace status for the Files tree without requesting diffs or stale cross-project status", async () => {
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") return result({ kind: "git.status", status: {
+        isRepository: true, root: alpha.path, branch: "main", upstream: null, ahead: 0, behind: 0,
+        hasRemote: false, files: [], insertions: 0, deletions: 0,
+      } });
+      if (command.type === "git.workspace.refresh") return result({ kind: "git.workspace.status", status: {
+        repositories: [], files: 0, insertions: 0, deletions: 0, scannedDirectories: 1, skippedDirectories: 0,
+        discoveredRepositories: 0, repositoryLimit: 16, partial: false, truncated: false, issues: [],
+      } });
+      throw new Error(`Files must not request ${command.type}`);
+    });
+    const options = { enabled: true, online: true, loadStatusOnMount: true, loadWorkspaceOnMount: true,
+      statusOnly: true, conversation: null, ignoreWhitespace: false, refreshVersion: 0, request,
+      run: vi.fn(), subscribe: noopSubscribe, setActionError: vi.fn() };
+    const hook = renderHook(({ owner, online }) => useWorkspaceGit({ ...options, project: owner, online }),
+      { initialProps: { owner: alpha, online: true } });
+    await waitFor(() => expect(hook.result.current.workspaceGitStatus).not.toBeNull());
+    expect(request.mock.calls.map(([command]) => command.type).sort()).toEqual(["git.refresh", "git.workspace.refresh"]);
+    hook.rerender({ owner: beta, online: false });
+    expect(hook.result.current.workspaceGitStatus).toBeNull();
+    expect(options.setActionError).not.toHaveBeenCalled();
+  });
   it.each(["git.fetch", "git.pull", "git.push"] as const)("keeps %s in the loaded chat or draft workspace scope", async (type) => {
     const alphaAuthority = "66666666-6666-4666-8666-666666666666";
     const betaAuthority = "77777777-7777-4777-8777-777777777777";

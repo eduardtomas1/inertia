@@ -1,5 +1,9 @@
 import { createSurfaceLoader } from "../utils/surfaceLoader";
 
+export const loadDiagnosticsSettings = createSurfaceLoader(async () => ({
+  default: (await import("./DiagnosticsSettings")).DiagnosticsSettings,
+}));
+
 export const loadConnectionsAndDevicesSettings = createSurfaceLoader(
   async () => ({
     default: (await import("./ConnectionsAndDevicesSettings"))
@@ -25,6 +29,7 @@ export const loadMascotSettings = createSurfaceLoader(async () => ({
 }));
 
 export function prefetchSettingsSection(section: string): void {
+  if (section === "diagnostics") void loadDiagnosticsSettings();
   if (section === "providers" || section === "archive") {
     void loadLifecycleIntegritySettings();
   }

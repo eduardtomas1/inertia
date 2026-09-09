@@ -1,3 +1,5 @@
+import type { MessageSearchTarget } from "../../shared/message-search";
+import { isContextCompaction } from "../../shared/context-compaction";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -7,7 +9,7 @@ import type {
 import {
   agentTurnFromRow,
   messageFromRow,
-  parseAttachments,
+  parseSnapshotAttachments as parseAttachments,
   rendererSafeAttachments,
   requireTimestamp,
 } from "./codecs";
@@ -94,10 +96,11 @@ export class TranscriptRepository {
     const now = createdAt === undefined
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Message creation time");
-    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now };
+    if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}) };
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments) });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,
@@ -272,6 +275,20 @@ export class TranscriptRepository {
       .flatMap((row) => rendererSafeAttachments(
         parseAttachments(row.attachments_json),
       ));
+  }
+
+  messageSearchTarget(messageId: string): MessageSearchTarget | null {
+    // Identity-only lookup: revealing a hit must never reconstruct a transcript
+    // on the runtime's main thread. Repeat the search eligibility check here.
+    return this.context.database.prepare(`
+      SELECT c.project_id AS projectId, m.conversation_id AS conversationId,
+        m.turn_id AS turnId, m.id AS messageId
+      FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
+      WHERE m.id = ? AND c.archived_at IS NULL AND (
+        m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+      )
+    `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }
 
   message(messageId: string): ChatMessage {

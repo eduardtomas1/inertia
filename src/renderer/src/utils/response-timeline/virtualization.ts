@@ -50,6 +50,7 @@ export function estimateTimelineRenderWeight(
 export function estimateTimelineItemRenderWeight(
   item: ResponseTimelineItem,
 ): number {
+  if (item.kind === "compaction") return 1 + item.message.content.length / 400;
   if (item.kind === "compatibility") {
     const inferredTurnWeight = item.compatibility.inferredTurns.reduce(
       (total, turn) => total + estimateResponseTurnRenderWeight(turn),
@@ -605,6 +606,7 @@ export function estimateTimelineRowSize(
   item: ResponseTimelineItem,
   options: TimelineRowEstimateOptions = {},
 ): number {
+  if (item.kind === "compaction") return 120 + Math.ceil(item.message.content.length / 80) * 20;
   if (item.kind === "compatibility") {
     const availableWidth = boundedEstimateWidth(options.availableWidth);
     const columns = estimatedTextColumns(Math.min(760, availableWidth - 40), 96);

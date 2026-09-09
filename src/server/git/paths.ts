@@ -13,7 +13,6 @@ import {
 import {
   gitInspectionSettlementValues,
   isGitProcessTreeTerminationFailure,
-  runGit,
   runGitInspection,
 } from "./runner";
 import { GitError } from "./types";
@@ -348,12 +347,15 @@ export function validateName(value: string, label: string): string {
 export async function validateBranch(
   root: string,
   branch: string,
+  options: GitPathInspectionOptions = {},
 ): Promise<string> {
   const name = validateName(branch, "The branch name");
-  await runGit(root, ["check-ref-format", "--branch", name], {
+  await runGitInspection(root, ["check-ref-format", "--branch", name], {
+    ...options,
     maxOutputBytes: 1_024,
     failureMessage: "The branch name is invalid.",
-  }).catch(() => {
+  }).catch((error: unknown) => {
+    if (!(error instanceof GitError) || error.code !== "operation-failed" || isGitProcessTreeTerminationFailure(error)) throw error;
     throw new GitError("invalid-input", "The branch name is invalid.");
   });
   return name;

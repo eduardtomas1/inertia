@@ -457,7 +457,7 @@ describe("new-turn admission recovery", () => {
       if (failure === "transition") {
         expect((firstError as RuntimeRequestError).code).toBeUndefined();
         expect((firstError as Error).message).toContain(
-          "End the resumed provider terminal",
+          "Wait for this chat's current operation",
         );
       } else {
         const code = `message-send/${stage}/unexpected`;
@@ -811,7 +811,7 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, messageCommand())).rejects.toThrow(
-      "End the resumed provider terminal",
+      "Wait for this chat's current operation",
     );
     expect(queue).not.toHaveBeenCalled();
     expect(
@@ -831,7 +831,7 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, messageCommand())).rejects.toThrow(
-      "End the resumed provider terminal",
+      "Wait for this chat's current operation",
     );
     expect(queue).not.toHaveBeenCalled();
     expect(

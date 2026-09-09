@@ -153,6 +153,7 @@ export interface BeginAgentTurnInput
 }
 
 export interface CreateMessageOptions {
+  compaction?: import("../../shared/context-compaction").ContextCompaction;
   activateConversation?: boolean;
 }
 

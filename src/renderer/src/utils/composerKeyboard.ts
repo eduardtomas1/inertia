@@ -39,9 +39,8 @@ export function composerPromptHistoryDirection(
     || selection.selectionStart !== selection.selectionEnd
   ) return null;
 
-  if (!selection.value.includes("\n")) {
-    return event.key === "ArrowUp" ? "previous" : "next";
-  }
+  // Let Chromium move through visual lines, including soft-wrapped text.
+  // History takes over only once the caret reaches the corresponding edge.
   if (event.key === "ArrowUp" && selection.selectionStart === 0) {
     return "previous";
   }

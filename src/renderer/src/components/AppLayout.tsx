@@ -27,6 +27,7 @@ import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
+import type { MessageSearchHit } from "@shared/message-search";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
@@ -83,6 +84,7 @@ interface AppLayoutActions {
   openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
+  selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: () => void;
@@ -102,8 +104,10 @@ interface AppLayoutActions {
   mutateBranch: (
     type: "git.branch.create" | "git.branch.switch",
     name: string,
-  ) => void;
+    remote?: boolean,
+  ) => void | Promise<void>;
   loadGit: () => Promise<void>;
+  mutateRemote: (type: "git.fetch" | "git.pull" | "git.push") => Promise<void>;
   loadCommitReview: () => Promise<GitDiffSnapshot | null>;
   discardCommitReview: () => void;
   commitReviewRevision: number;
@@ -155,6 +159,8 @@ interface AppLayoutProps {
   workspaceToolsUnavailableReason: string | null;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
+  branchesLoading?: boolean;
+  branchesError?: string | null;
   projectActions: ProjectAction[];
   reviewStates: CommitDialogProps["reviewStates"];
   multiSpawn: MultiSpawnController;
@@ -246,6 +252,8 @@ export function AppLayout({
   workspaceToolsUnavailableReason,
   gitStatus,
   branches,
+  branchesLoading,
+  branchesError,
   projectActions,
   reviewStates,
   multiSpawn,
@@ -544,6 +552,8 @@ export function AppLayout({
             theme={settings.theme}
             gitStatus={gitStatus}
             branches={branches}
+            branchesLoading={branchesLoading}
+            branchesError={branchesError}
             actions={projectActions}
             busy={Boolean(busyAction)}
             conversationDetached={Boolean(
@@ -574,8 +584,8 @@ export function AppLayout({
               }
             }}
             onRefreshBranches={actions.loadBranches}
-            onSwitchBranch={(name) =>
-              actions.mutateBranch("git.branch.switch", name)}
+            onSwitchBranch={(name, remote) =>
+              actions.mutateBranch("git.branch.switch", name, remote)}
             onCreateBranch={(name) =>
               actions.mutateBranch("git.branch.create", name)}
             onCommit={() => setCommitDialogOpen(true)}
@@ -605,36 +615,9 @@ export function AppLayout({
               }
               setPullRequestDialogOpen(true);
             }}
-            onPull={() => {
-              if (!project) return;
-              if (!rootRepository) {
-                setActionError("Refresh repository status before pulling.");
-                return;
-              }
-              void actions.run("git.pull", {
-                type: "git.pull",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                  ...rootRepository,
-                },
-              }).catch(() => undefined);
-            }}
-            onPush={() => {
-              if (!project) return;
-              if (!rootRepository) {
-                setActionError("Refresh repository status before pushing.");
-                return;
-              }
-              void actions.run("git.push", {
-                type: "git.push",
-                payload: {
-                  projectId: project.id,
-                  conversationId: conversation?.id,
-                  ...rootRepository,
-                },
-              }).catch(() => undefined);
-            }}
+            onFetch={() => { void actions.mutateRemote("git.fetch").catch(() => undefined); }}
+            onPull={() => { void actions.mutateRemote("git.pull").catch(() => undefined); }}
+            onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
           />
 
           <div
@@ -755,6 +738,8 @@ export function AppLayout({
         setWorkspaceView={() => setView("workspace")}
         selectProject={actions.selectProject}
         selectConversation={actions.selectConversation}
+        selectMessage={actions.selectMessage}
+        sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}

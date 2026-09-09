@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
@@ -254,7 +255,7 @@ it("upgrades schema 68 transactionally and retains saved report progress", () =>
     migrateRuntimeDatabase(database);
     expect(database.prepare("SELECT value FROM retained_marker").pluck().get()).toBe("kept");
     expect(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get()).toContain("Safe saved report");
-    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(69);
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
   } finally { database.close(); }
 });
 

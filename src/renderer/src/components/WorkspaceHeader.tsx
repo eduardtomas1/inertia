@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Globe2, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, FolderOpen, GitBranch, Globe2, ListFilter, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -14,6 +14,8 @@ import {
 import type { AppView } from "../appView";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 
+const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
+
 const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
 const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
 
@@ -26,6 +28,8 @@ type WorkspaceHeaderProps = {
   theme: ThemePreference;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
+  branchesLoading?: boolean;
+  branchesError?: string | null;
   actions: ProjectAction[];
   busy: boolean;
   conversationDetached?: boolean;
@@ -41,13 +45,14 @@ type WorkspaceHeaderProps = {
   onOpenProject: () => void;
   onOpenConversationInWindow?: (conversation: Conversation) => void;
   onRefreshBranches: () => void;
-  onSwitchBranch: (name: string) => void;
-  onCreateBranch: (name: string) => void;
+  onSwitchBranch: (name: string, remote?: boolean) => void | Promise<void>;
+  onCreateBranch: (name: string) => void | Promise<void>;
   onCreateConversationOnBranch: (branch: string) => void;
   onCreateConversationInWorktree: () => void;
   onCreateConversationInIsolatedWorktree: () => void;
   onCommit: () => void;
   onOpenPullRequest: () => void;
+  onFetch?: () => void;
   onPull: () => void;
   onPush: () => void;
   onRunAction: (action: ProjectAction) => void;
@@ -62,6 +67,8 @@ export function WorkspaceHeader({
   theme,
   gitStatus,
   branches,
+  branchesLoading,
+  branchesError,
   actions,
   busy,
   conversationDetached = false,
@@ -84,11 +91,13 @@ export function WorkspaceHeader({
   onCreateConversationInIsolatedWorktree,
   onCommit,
   onOpenPullRequest,
+  onFetch,
   onPull,
   onPush,
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
+  useEffect(() => setMenu(null), [project?.id, conversation?.id, gitStatus?.root]);
   const privateConnectLoad = usePrivateConnectState();
   const privateConnect = privateConnectLoad.state;
   const pendingPrivateConnectPairings = privateConnect?.pendingPairings.length ?? 0;
@@ -106,9 +115,6 @@ export function WorkspaceHeader({
     ? null
     : project?.name && conversation ? project.name : "Inertia";
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
-  const canCreateInWorktree = Boolean(conversation?.worktreePath);
-  const canCreateOnBranch = !canCreateInWorktree && Boolean(gitStatus?.branch);
-  const canCreateIsolatedWorktree = Boolean(gitStatus?.branch);
   const primaryGitAction = primaryHeaderGitAction(gitStatus);
   const runGitAction = (action: HeaderGitActionId): void => {
     if (menu === "git") {
@@ -118,6 +124,7 @@ export function WorkspaceHeader({
     }
     setMenu(null);
     if (action === "commit") onCommit();
+    else if (action === "fetch") onFetch?.();
     else if (action === "pull") onPull();
     else if (action === "push") onPush();
     else onOpenPullRequest();
@@ -129,9 +136,10 @@ export function WorkspaceHeader({
     );
     const focusTimer = window.setTimeout(() => {
       if (menu !== "git") {
-        activeAnchor?.querySelector<HTMLElement>(
-          '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
-        )?.focus();
+        (activeAnchor?.querySelector<HTMLElement>('input[type="search"]')
+          ?? activeAnchor?.querySelector<HTMLElement>(
+            '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
+          ))?.focus();
       }
     }, 0);
     const closeOnPointerDown = (event: PointerEvent): void => {
@@ -271,55 +279,17 @@ export function WorkspaceHeader({
                   <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
                 </button>
                 {menu === "branch" && (
-                  <div className="header-popover branch-popover" id="workspace-header-branch-menu" role="menu" aria-label="Branches" onKeyDown={navigateMenuItems}>
-                    <div className="header-popover-title">Branches</div>
-                    {contextMismatch && (
-                      <div className="checkout-context-note" role="status">
-                        <Info size={14} aria-hidden="true" />
-                        <span>
-                          <strong>Chat and checkout differ</strong>
-                          {contextMismatch.branchDiffers && (
-                            <small>This chat was saved on <code>{contextMismatch.expectedBranch}</code>. The checkout is now <code>{contextMismatch.actualBranch}</code>.</small>
-                          )}
-                          {contextMismatch.checkoutDiffers && (
-                            <small>The saved worktree and current Git checkout resolve to different folders.</small>
-                          )}
-                        </span>
-                        {contextMismatch.branchDiffers && contextMismatch.expectedBranch && !conversation?.worktreePath && (
-                          <button type="button" onClick={() => { setMenu(null); onSwitchBranch(contextMismatch.expectedBranch!); }}>
-                            Switch to {contextMismatch.expectedBranch}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {branches.filter((branch) => !branch.remote).map((branch) => (
-                      <button type="button" role="menuitemradio" aria-checked={branch.current} key={branch.name} onClick={() => { setMenu(null); if (!branch.current) onSwitchBranch(branch.name); }}><span>{branch.name}</span>{branch.current && <span className="branch-current">Current</span>}</button>
-                    ))}
-                    <form className="new-branch-form" onSubmit={(event) => { event.preventDefault(); const input = new FormData(event.currentTarget).get("branch"); if (typeof input === "string" && input.trim()) { onCreateBranch(input.trim()); setMenu(null); } }}>
-                      <input name="branch" placeholder="new-branch" aria-label="New branch name" maxLength={255} />
-                      <button type="submit">Create</button>
-                    </form>
-                    {(canCreateInWorktree || canCreateOnBranch || canCreateIsolatedWorktree) && (
-                      <div className="new-chat-location-actions">
-                        <div className="header-popover-title">Start another chat</div>
-                        {canCreateInWorktree && (
-                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationInWorktree(); }}>
-                            <MessageSquarePlus size={13} /><span>New chat in this worktree</span>
-                          </button>
-                        )}
-                        {canCreateOnBranch && gitStatus.branch && (
-                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationOnBranch(gitStatus.branch!); }}>
-                            <MessageSquarePlus size={13} /><span>New chat on {gitStatus.branch}</span>
-                          </button>
-                        )}
-                        {canCreateIsolatedWorktree && (
-                          <button type="button" role="menuitem" onClick={() => { setMenu(null); onCreateConversationInIsolatedWorktree(); }}>
-                            <MessageSquarePlus size={13} /><span>New chat in new isolated worktree</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <Suspense fallback={<div className="header-popover" role="status">Loading branches…</div>}>
+                    <WorkspaceBranchMenu project={project} conversation={conversation} gitStatus={gitStatus}
+                      branches={branches} branchesLoading={branchesLoading} branchesError={branchesError} busy={busy}
+                      onClose={() => {
+                        headerActionsRef.current?.querySelector<HTMLElement>('[data-header-menu="branch"] > button')?.focus();
+                        setMenu(null);
+                      }} onRefreshBranches={onRefreshBranches} onSwitchBranch={onSwitchBranch}
+                      onCreateBranch={onCreateBranch} onCreateConversationInWorktree={onCreateConversationInWorktree}
+                      onCreateConversationOnBranch={onCreateConversationOnBranch}
+                      onCreateConversationInIsolatedWorktree={onCreateConversationInIsolatedWorktree} />
+                  </Suspense>
                 )}
               </div>
             )}

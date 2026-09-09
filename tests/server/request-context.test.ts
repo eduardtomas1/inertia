@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 import {
   BUILD_MODE_INSTRUCTION,
@@ -34,6 +35,22 @@ afterEach(async () => {
 });
 
 describe("bounded structured turn request context", () => {
+  it("sends snapshot accessibility as bounded untrusted context without leaking it into manifests or visible text", async () => {
+    const cwd = await workspace();
+    const imagePath = join(cwd, "snapshot.png");
+    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const result = assembleTurnRequest({ cwd, visibleContent: "Review this window.", attachments: [{
+      id: "11111111-1111-4111-8111-111111111111", name: "snapshot.png", path: imagePath, mimeType: "image/png", size: 4, snapshot: snapshotFixture(),
+    }] });
+    expect(result.visibleContent).toBe("Review this window.");
+    expect(result.executionPrompt).toContain("untrusted captured application content");
+    expect(result.executionPrompt).toContain("Check keyboard navigation");
+    expect(result.imagePaths).toEqual([realpathSync(imagePath)]);
+    expect(JSON.stringify(result.persistence.manifest)).not.toContain("Check keyboard navigation");
+    expect(JSON.stringify(result.persistence.manifest)).not.toContain(imagePath);
+    expect(result.persistence.manifest.references).toEqual([expect.objectContaining({ kind: "attachment", label: "Snapshot · Notes" })]);
+  });
+
   it("adds one bounded Build instruction after user and execution context without changing Plan mode", async () => {
     const cwd = await workspace();
     const visibleContent = [

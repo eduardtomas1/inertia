@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -16,10 +17,6 @@ import type {
 } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
-import {
-  isTimelineFocusDetail,
-  TIMELINE_FOCUS_EVENT,
-} from "../../utils/timelineFocus";
 import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
 import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import {
@@ -39,6 +36,9 @@ import {
   type BuildResponseTimelineInput,
   type ResponseTimelineItem,
 } from "../../utils/responseTimeline";
+import { ContextCompactionRow } from "./ContextCompactionRow";
+import { responseTimelineArticleLabel } from "./row-label";
+export { responseTimelineArticleLabel } from "./row-label";
 import { CompatibilityTimeline } from "./compatibility";
 import { startFinalAnswerAnchor } from "./final-answer-anchor";
 import {
@@ -55,25 +55,7 @@ import type { ResponseTimelineProps } from "./types";
 
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
-type TimelineJumpTarget = "turn" | "request" | "final" | "artifact";
-const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
-
-export function responseTimelineArticleLabel(
-  item: ResponseTimelineItem,
-): string {
-  if (item.kind === "compatibility") {
-    return "Recovered legacy and orphaned history";
-  }
-  const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
-  const requestLabel = request
-    ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS
-      ? `${request.slice(0, TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS - 1)}…`
-      : request
-    : item.turn.userMessage.attachments.length > 0
-      ? "Request with attachments"
-      : "Request";
-  return `Turn ${item.turn.index}: ${requestLabel}`;
-}
+type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string; turnId?: string };
 
 function findTurnElement(
   root: HTMLElement | null | undefined,
@@ -1094,15 +1076,17 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         const row = item.kind === "turn"
           ? findTurnElement(root, item.turn.id)
           : root.querySelector<HTMLElement>(
-              '[data-response-row-id="legacy-orphan-history"]',
+              `[data-response-row-id="${CSS.escape(item.id)}"]`,
             );
         if (!row) return null;
-        const destination = target === "turn"
+        const destination = typeof target === "object"
+          ? resolveMessageSearchDestination(row, target.messageId, target.turnId)
+          : target === "turn"
           ? row
           : row.querySelector<HTMLElement>(
               `[data-turn-jump-target="${target}"]`,
             ) ?? row;
-        return { row, destination };
+        return destination ? { row, destination } : null;
       },
       scrollToIndex: (targetIndex, targetAlign) =>
         virtualizer.scrollToIndex(targetIndex, {
@@ -1123,31 +1107,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
-  useLayoutEffect(() => {
-    const focusRequestedTurn = (event: Event): void => {
-      const detail = (event as CustomEvent<unknown>).detail;
-      if (
-        !isTimelineFocusDetail(detail)
-        || detail.conversationId !== props.conversationId
-      ) return;
-      const index = timeline.findIndex((item) =>
-        item.kind === "turn" && item.turn.id === detail.turnId);
-      if (index >= 0) {
-        beginReaderTimelineNavigation();
-        focusTimelineItem(index, "turn");
-      }
-    };
-    window.addEventListener(TIMELINE_FOCUS_EVENT, focusRequestedTurn);
-    return () => window.removeEventListener(
-      TIMELINE_FOCUS_EVENT,
-      focusRequestedTurn,
-    );
-  }, [
-    beginReaderTimelineNavigation,
-    focusTimelineItem,
-    props.conversationId,
-    timeline,
-  ]);
+  useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem);
+
 
   useEffect(() => {
     const scrollElement = props.scrollElementRef?.current;
@@ -1191,7 +1152,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         onAfterToggle={restoreExpansionAnchor}
       />
     )
-    : (
+    : item.kind === "compaction" ? <ContextCompactionRow message={item.message} /> : (
       <CompatibilityTimeline
         key={props.conversationId}
         compatibility={item.compatibility}

@@ -65,7 +65,7 @@ function CompatibilityDisclosure({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   return (
-    <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history">
+    <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history" tabIndex={-1}>
       <details
         open={expanded}
         onToggle={(event) => setExpanded(event.currentTarget.open)}
@@ -90,7 +90,7 @@ function CompatibilityDisclosure({
               </div>
             ))}
             {compatibility.messages.map((message) => (
-              <article className={clsx("message", `is-${message.role}`)} key={message.id}>
+              <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1}>
                 <div className="message-meta"><span>{message.role === "assistant" ? "Agent" : message.role === "user" ? "You" : "System"}</span>{props.showTimestamps && <time dateTime={message.createdAt}>{formatClockTime(message.createdAt)}</time>}</div>
                 {message.role === "assistant"
                   ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />

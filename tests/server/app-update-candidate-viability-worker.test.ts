@@ -29,7 +29,7 @@ import { runtimeOwnedProcessWriterName } from
   "../../src/node/runtime-owned-process-session-journal";
 import { validateAppUpdateCandidateViability } from
   "../../src/server/app-update-candidate-viability-worker";
-import { migrateRuntimeDatabase, runtimeMigrationCatalog } from
+import { migrateRuntimeDatabase } from
   "../../src/server/persistence/migrations/runtime-catalog";
 import {
   providerInstallationIdentity,
@@ -38,6 +38,8 @@ import { ProviderMaintenanceJournal } from
   "../../src/server/provider/maintenance-journal";
 
 const roots: string[] = [];
+// Public v0.0.54 is the release predecessor, even when multiple new migrations append.
+const PUBLISHED_V54_SCHEMA_VERSION = 69;
 const operationId = "11111111-1111-4111-8111-111111111111";
 const runtimeGenerationId = "22222222-2222-4222-8222-222222222222:1";
 const systemBootId = "test:33333333-3333-4333-8333-333333333333";
@@ -99,7 +101,7 @@ describe("app update candidate viability worker", () => {
     const database = new Database(databasePath);
     database.pragma("journal_mode = WAL");
     database.pragma("wal_autocheckpoint = 0");
-    const previousVersion = runtimeMigrationCatalog().length - 1;
+    const previousVersion = PUBLISHED_V54_SCHEMA_VERSION;
     migrateRuntimeDatabase(database, previousVersion);
     database.exec(`
       CREATE TABLE app_update_clone_marker (
@@ -108,6 +110,7 @@ describe("app update candidate viability worker", () => {
       INSERT INTO app_update_clone_marker (value) VALUES ('live-n-minus-one');
     `);
 
+    const schemaBefore = database.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
     expect(() => validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
     )).not.toThrow();
@@ -119,21 +122,24 @@ describe("app update candidate viability worker", () => {
       "SELECT value FROM app_update_clone_marker",
     ).pluck().get()).toBe("live-n-minus-one");
     expect(database.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'issue_report_draft'",
-    ).get()).toBeUndefined();
+      "SELECT type, name, sql FROM sqlite_master ORDER BY type, name",
+    ).all()).toEqual(schemaBefore);
     expect(tableSql(database, "model_backend_profiles"))
       .toContain("'gemini-acp'");
     database.close();
   });
 
-  it("rejects a failing N-1 migration while leaving live schema and data untouched", async () => {
+  it.each([
+    ["search index", "CREATE TABLE messages_created_id_idx (blocked TEXT);"],
+    ["compaction receipt", "ALTER TABLE messages ADD COLUMN compaction_json BLOB;"],
+  ])("rejects a failing N-1 %s migration while leaving live schema and data untouched", async (_label, conflictingSchema) => {
     const dataDirectory = await dataRoot();
     const databasePath = join(dataDirectory, "inertia.sqlite");
     const database = new Database(databasePath);
-    const previousVersion = runtimeMigrationCatalog().length - 1;
+    const previousVersion = PUBLISHED_V54_SCHEMA_VERSION;
     migrateRuntimeDatabase(database, previousVersion);
     database.exec(`
-      CREATE INDEX issue_report_draft ON agent_turns(id);
+      ${conflictingSchema}
       CREATE TABLE app_update_clone_marker (marker TEXT NOT NULL);
       INSERT INTO app_update_clone_marker (marker) VALUES ('live-only');
     `);

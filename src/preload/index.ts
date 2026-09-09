@@ -320,6 +320,12 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.sendDiscordReleaseInfo, request) as ReturnType<
       DesktopBridge["sendDiscordReleaseInfo"]
     >,
+  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke("inertia:snapshot", request),
+  onSnapshot: (listener: (delivery: import("../shared/snapshots").SnapshotDelivery) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, delivery: import("../shared/snapshots").SnapshotDelivery): void => listener(delivery);
+    ipcRenderer.on("inertia:snapshot-ready", handler);
+    return () => { ipcRenderer.removeListener("inertia:snapshot-ready", handler); };
+  },
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   beginAttachmentImport: () => ipcRenderer.invoke(IPC.beginAttachmentImport) as ReturnType<DesktopBridge["beginAttachmentImport"]>,
   importAttachments: (batchId: string, files: Parameters<DesktopBridge["importAttachments"]>[1]) => ipcRenderer.invoke(IPC.importAttachments, batchId, files) as ReturnType<DesktopBridge["importAttachments"]>,

@@ -253,7 +253,10 @@ export function createConversationCompactionCommandHandler(
           "The chat configuration changed while compaction was starting. Try again with the current provider settings.",
         );
       }
+      const beforeTokens = dependencies.store.usageForConversation(conversation.id)?.usedTokens ?? null;
+      let afterTokens: number | null = null;
       let usageObserved = false;
+      let usageProjectionFailed = false;
       let result: Awaited<ReturnType<ProviderManager["compact"]>>;
       try {
         result = await dependencies.providers.compact({
@@ -278,8 +281,10 @@ export function createConversationCompactionCommandHandler(
           ...(supportedFastMode ? { supportedFastMode } : {}),
         }, command.payload.instruction, {
           onUsage: (event) => {
-            projectUsage(dependencies, conversation.id, event.usage);
+            afterTokens = event.usage.usedTokens;
             usageObserved = true;
+            try { projectUsage(dependencies, conversation.id, event.usage); }
+            catch { usageProjectionFailed = true; }
           },
         });
       } catch (error) {
@@ -312,8 +317,22 @@ export function createConversationCompactionCommandHandler(
         throw new RuntimeRequestError(result.message);
       }
       if (!usageObserved) {
-        invalidateStaleContextUsage(dependencies, conversation.id);
+        try { invalidateStaleContextUsage(dependencies, conversation.id); }
+        catch { usageProjectionFailed = true; }
       }
+      // Provider completion is irreversible; local reporting must not invite a retry.
+      let resultMessage = result.message;
+      if (usageProjectionFailed) resultMessage += " Usage could not be refreshed.";
+      try {
+        const message = dependencies.store.createMessage(
+          conversation.id,
+          command.payload.instruction ? `/compact ${command.payload.instruction}` : "/compact",
+          "system", [], null, undefined,
+          { compaction: { providerId: result.providerId, beforeTokens, afterTokens, instructionForwarded: result.instructionForwarded } },
+        );
+        try { dependencies.broadcast({ type: "conversation.message.persisted", message }); }
+        catch { resultMessage += " The receipt was saved, but the timeline could not refresh. Reload this chat to view it."; }
+      } catch { resultMessage += " The compaction receipt could not be saved."; }
       dependencies.send(socket, {
         type: "request.result",
         requestId: command.requestId,
@@ -322,7 +341,7 @@ export function createConversationCompactionCommandHandler(
           conversationId: result.conversationId,
           providerId: result.providerId,
           instructionForwarded: result.instructionForwarded,
-          message: result.message,
+          message: resultMessage,
         },
       });
       return "handled";

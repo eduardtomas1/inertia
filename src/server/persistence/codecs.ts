@@ -1,3 +1,5 @@
+import { snapshotSourceSchema } from "../../shared/snapshots";
+import { isContextCompaction } from "../../shared/context-compaction";
 import {
   AGENT_RUN_STATES,
   type AgentActivity,
@@ -626,6 +628,17 @@ export function parseJsonArray(value: string): unknown[] {
   }
 }
 
+/** Extend live projection without changing migration 56's frozen attachment parser. */
+export function parseSnapshotAttachments(value: string): ChatAttachment[] {
+  const attachments = parseAttachments(value);
+  const sources = parseJsonArray(value).filter(isPersistedChatAttachment);
+  return attachments.map((attachment) => {
+    const source = sources.find(({ id }) => id === attachment.id);
+    const snapshot = snapshotSourceSchema.safeParse(source?.snapshot);
+    return snapshot.success ? { ...attachment, snapshot: snapshot.data } : attachment;
+  });
+}
+
 export function rendererSafeAttachments(
   attachments: readonly ChatAttachment[],
 ): ChatAttachment[] {
@@ -636,14 +649,17 @@ export function rendererSafeAttachments(
 }
 
 export function messageFromRow(row: MessageRow): ChatMessage {
+  let compaction: unknown;
+  try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   return {
+    ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,
     role: row.role,
     content: row.content,
     attachments: rendererSafeAttachments(
-      parseAttachments(row.attachments_json),
+      parseSnapshotAttachments(row.attachments_json),
     ),
     createdAt: row.created_at,
   };

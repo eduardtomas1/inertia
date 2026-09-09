@@ -7,7 +7,48 @@
     <title>Inertia mascot</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="mascot" tabindex="0">
+        <div class="mascot-speech-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="mascot-drag" title="Drag to move. Right-click for options.">
+          <img class="mascot-activity" width="96" height="96" alt="" draggable="false" />
+          <div class="mascot-lift" aria-hidden="true"></div>
+          <img class="mascot-pickup" width="96" height="96" alt="" draggable="false" />
+        </div>
+        <button class="mascot-status" type="button" disabled title="Open chat. Arrow keys move the mascot; Escape hides it.">
+          <span class="mascot-content" role="status" aria-live="polite" aria-atomic="true">
+            <span class="mascot-label"></span>
+            <span class="mascot-chat"></span>
+            <span class="mascot-message"></span>
+          </span>
+          <span class="mascot-footer"><span class="mascot-detail"></span><span class="mascot-action"></span></span>
+        </button>
+      </main>
+      <!-- Inert artwork declarations keep URLs out of JavaScript and do not
+           fetch/decode inactive animation loops. Vite emits these local assets. -->
+      <template id="mascot-artwork">
+        <picture data-artwork="idle">
+          <source type="image/webp" srcset="/src/assets/mascot/idle.webp?no-inline" />
+          <img src="/src/assets/mascot/idle.png?no-inline" alt="" />
+        </picture>
+        <picture data-artwork="thinking">
+          <source type="image/webp" srcset="/src/assets/mascot/thinking.webp?no-inline" />
+          <img src="/src/assets/mascot/thinking.png?no-inline" alt="" />
+        </picture>
+        <picture data-artwork="working">
+          <source type="image/webp" srcset="/src/assets/mascot/working.webp?no-inline" />
+          <img src="/src/assets/mascot/working.png?no-inline" alt="" />
+        </picture>
+        <picture data-artwork="idea">
+          <source type="image/webp" srcset="/src/assets/mascot/idea.webp?no-inline" />
+          <img src="/src/assets/mascot/idea.png?no-inline" alt="" />
+        </picture>
+        <picture data-artwork="pickup">
+          <source type="image/webp" srcset="/src/assets/mascot/pickup.webp?no-inline" />
+          <img src="/src/assets/mascot/pickup.png?no-inline" alt="" />
+        </picture>
+      </template>
+    </div>
     <script type="module" src="/src/mascot/main.ts"></script>
   </body>
 </html>

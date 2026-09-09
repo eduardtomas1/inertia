@@ -32,11 +32,33 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await toggle.click();
     let overlay = await opened;
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "idle");
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
+    await expect.poll(() => overlay.locator(".mascot-activity").evaluate((element) =>
+      element instanceof HTMLImageElement && element.complete && element.naturalWidth === 96)).toBe(true);
     const bubble = await overlay.locator(".mascot-status").boundingBox();
-    const character = await overlay.locator("img").boundingBox();
+    const character = await overlay.locator(".mascot-activity").boundingBox();
     expect(bubble!.y + bubble!.height).toBeLessThan(character!.y);
     await expect(overlay.locator(".mascot-speech-dots i")).toHaveCount(3);
+    if (process.platform === "darwin") {
+      const input = await app.electronApp.evaluateHandle(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+        const original = window.setIgnoreMouseEvents.bind(window);
+        let last: boolean | undefined;
+        window.setIgnoreMouseEvents = (ignore, options) => { last = ignore; original(ignore, options); };
+        return { last: () => last, restore: () => { window.setIgnoreMouseEvents = original; } };
+      });
+      try {
+        await overlay.mouse.move(120, 184);
+        await overlay.mouse.move(20, 220);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
+        await overlay.mouse.move(120, 40);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);
+        await overlay.mouse.move(4, 0);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
+        await overlay.mouse.move(120, 184);
+        await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);
+      } finally { await input.evaluate((value) => value.restore()); await input.dispose(); }
+    }
     await capture(overlay, "idle", info);
     await main.locator(".mascot-settings").evaluate((element) => element.scrollIntoView({ block: "center" }));
     await main.screenshot({ path: info.outputPath("mascot-setting.png") });
@@ -53,7 +75,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       settingsBridge: "inertiaMascot" in window,
       methods: Object.keys((window as unknown as { mascot: MascotBridge }).mascot).sort(),
     }))).toEqual({ mainBridge: false, settingsBridge: false, methods: ["action", "onChanged", "snapshot"] });
-    expect(await overlay.locator(".mascot-drag").evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region"))).toBe("drag");
+    expect(await overlay.locator(".mascot-drag").evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region"))).toBe("no-drag");
 
     await main.getByRole("button", { name: "Move with keyboard" }).click();
     await expect(overlay.locator("main")).toBeFocused();
@@ -92,17 +114,128 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await state("starting");
     await capture(overlay, "thinking", info);
     await state("running");
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "true");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "true");
     await capture(overlay, "working", info);
+    // Keyboard movement above explicitly opts into focus. Window managers
+    // differ in when they deliver its later blur; dragging must preserve the
+    // existing native mode rather than assuming that opt-in has already ended.
+    const focusBeforeDrag = await app.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+      return { focused: window.isFocused(), focusable: window.isFocusable() };
+    });
+    // CDP mouse events do not move the OS cursor. Supply deterministic DIP
+    // samples while exercising real pointer capture, IPC and native window bounds.
+    const cursor = await app.electronApp.evaluateHandle(({ screen, BrowserWindow }) => {
+      const original = screen.getCursorScreenPoint;
+      const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+      const bounds = window.getBounds();
+      let point = { x: bounds.x + 120, y: bounds.y + 184 };
+      screen.getCursorScreenPoint = () => point;
+      return {
+        move: () => { point = { x: point.x - 100, y: point.y - 80 }; },
+        restore: () => { screen.getCursorScreenPoint = original; }, bounds,
+      };
+    });
+    try {
+      await overlay.mouse.move(120, 184);
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      await cursor.evaluate((value) => value.move());
+      const target = await cursor.evaluate((value) => [value.bounds.x - 100, value.bounds.y - 80]);
+      await expect.poll(() => app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === "Inertia mascot")!.getPosition())).toEqual(target);
+      await expect(overlay.locator(".mascot-pickup")).toHaveCSS("opacity", "1");
+      await expect.poll(() => overlay.locator(".mascot-pickup").evaluate((element) =>
+        element instanceof HTMLImageElement && element.complete && element.naturalWidth === 96)).toBe(true);
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "-1152px");
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("visibility", "hidden");
+      await capture(overlay, "pickup", info);
+      await overlay.emulateMedia({ reducedMotion: "reduce" });
+      await expect(overlay.locator(".mascot-pickup")).toHaveAttribute("data-animated", "false");
+      await capture(overlay, "pickup-reduced-motion", info);
+      await overlay.emulateMedia({ reducedMotion: "no-preference" });
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
+      await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "true");
+      await capture(overlay, "dropped-working", info);
+      await expect.poll(async () => JSON.parse(await readFile(join(app.testDirectory, "electron-profile", "mascot-window-state.json"), "utf8")).position).toEqual({ x: target[0], y: target[1] });
+      expect(await app.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+        return { focused: window.isFocused(), focusable: window.isFocusable() };
+      })).toEqual(focusBeforeDrag);
+      // Control the CSS transition clock, so early-release coverage does not
+      // depend on whether a loaded native CI host responds within 400ms.
+      const reversal = await overlay.locator(".mascot-lift").evaluateHandle((element) => {
+        const main = element.closest("main")!;
+        let pickedUp = false;
+        let visibility: string | undefined;
+        const observer = new MutationObserver(() => {
+          if (main.dataset.dragging === "true") {
+            pickedUp = true;
+            for (const animation of element.getAnimations()) {
+              if (animation instanceof CSSTransition && animation.transitionProperty === "background-position-x") animation.pause();
+            }
+          } else if (pickedUp) {
+            visibility = getComputedStyle(element).visibility;
+            observer.disconnect();
+          }
+        });
+        observer.observe(main, { attributes: true, attributeFilter: ["data-dragging"] });
+        return { visibility: () => visibility };
+      });
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      const partial = await overlay.locator(".mascot-lift").evaluate((element) => {
+        const transition = element.getAnimations().find((animation) =>
+          animation instanceof CSSTransition && animation.transitionProperty === "background-position-x");
+        if (!transition) throw new Error("The rig lift transition did not start");
+        transition.currentTime = 160;
+        return Number.parseFloat(getComputedStyle(element).backgroundPositionX);
+      });
+      expect(partial).toBeLessThan(0);
+      expect(partial).toBeGreaterThan(-1152);
+      await overlay.mouse.up();
+      // Read visibility at the state change, not after a delayed transition
+      // could have finished and hidden the entire landing from the user.
+      await expect.poll(() => reversal.evaluate((value) => value.visibility())).toBe("visible");
+      await reversal.dispose();
+      expect(await overlay.locator(".mascot-lift").evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).backgroundPositionX))).toBeGreaterThanOrEqual(partial);
+      await expect(overlay.locator(".mascot-lift")).toHaveCSS("background-position-x", "0px");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      const previousGesture = await overlay.evaluate(async () =>
+        (await (window as unknown as { mascot: MascotBridge }).mascot.snapshot()).gesture!);
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      // This capture listener sends the old drop after main receives the new
+      // native press, but before the normal renderer pickup handler runs.
+      await overlay.evaluate((previous) => {
+        const bridge = (window as unknown as { mascot: MascotBridge }).mascot;
+        document.querySelector(".mascot-drag")!.addEventListener("pointerdown", () => {
+          void bridge.action("drop", previous);
+        }, { capture: true, once: true });
+      }, previousGesture);
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      // The same stale cancellation is harmless after the new pickup too.
+      await overlay.evaluate((previous) =>
+        (window as unknown as { mascot: MascotBridge }).mascot.action("drop", previous), previousGesture);
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
+    } finally { await cursor.evaluate((value) => value.restore()); await cursor.dispose(); }
     await overlay.emulateMedia({ reducedMotion: "reduce" });
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
     await overlay.emulateMedia({ reducedMotion: "no-preference" });
     await state("waiting-for-input");
     await capture(overlay, "waiting", info);
     await state("running");
     await state("completed");
     await capture(overlay, "complete", info);
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
     turn = store.beginAgentTurn({
       conversationId: chat.id, runId: "mascot-error-run", content: "Exercise failure status.",
       providerId: "codex", modelSelection: selection, reasoningEffort: "high", interactionMode: "build",

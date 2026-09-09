@@ -6,8 +6,8 @@ const MASCOT_IPC = { snapshot: "inertia:mascot-snapshot", configure: "inertia:ma
 
 const bridge: MascotBridge = {
   snapshot: () => ipcRenderer.invoke(MASCOT_IPC.snapshot) as Promise<MascotSnapshot>,
-  action: (action, expectedStatus) => (action === "open-chat"
-    ? ipcRenderer.invoke(MASCOT_IPC.action, action, expectedStatus)
+  action: (action, expected) => (action === "open-chat" || action === "pickup" || action === "drop"
+    ? ipcRenderer.invoke(MASCOT_IPC.action, action, expected)
     : ipcRenderer.invoke(MASCOT_IPC.action, action)) as Promise<void>,
   onChanged: (listener) => {
     const receive = (_event: Electron.IpcRendererEvent, snapshot: MascotSnapshot): void => listener(snapshot);

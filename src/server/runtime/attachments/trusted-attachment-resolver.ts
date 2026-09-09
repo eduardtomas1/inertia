@@ -1,3 +1,4 @@
+import { snapshotSourceSchema } from "../../../shared/snapshots";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
@@ -195,6 +196,7 @@ export class TrustedAttachmentResolver {
           path: canonicalPath,
           mimeType: trusted.mimeType,
           size: trusted.size,
+          ...(trusted.snapshot ? { snapshot: snapshotSourceSchema.parse(trusted.snapshot) } : {}),
         },
         bytes,
       };

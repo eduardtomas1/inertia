@@ -14,13 +14,13 @@ describe("command palette selection", () => {
     expect(source).not.toContain("autoFocus");
     expect(source).not.toContain("focusTimer");
     expect(source).toContain(
-      "setQuery(event.target.value); setActiveIndex(0);",
+      "setQuery(event.target.value); setActiveId(null);",
     );
     expect(source).toContain(
-      "onPointerMove={() => setActiveIndex(index)}",
+      "onPointerMove={() => setActiveId(item.id)}",
     );
     expect(source).not.toContain(
-      "onMouseEnter={() => setActiveIndex(index)}",
+      "onMouseEnter=",
     );
   });
 });

@@ -6,6 +6,7 @@ import type { ChatAttachmentMimeType } from "./attachments";
  * cannot author any field in this descriptor.
  */
 export interface TrustedRuntimeAttachment {
+  snapshot?: import("./snapshots").SnapshotSource;
   id: string;
   name: string;
   path: string;

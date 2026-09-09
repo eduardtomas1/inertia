@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import type {
   AgentApprovalRequest,
@@ -10,6 +11,7 @@ import type {
 } from "../../src/shared/contracts";
 import { RuntimeSequencer } from "../../src/server/runtime-sequencing";
 import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
+import { sendRuntimeEvent } from "../../src/server/runtime-protocol";
 
 const GENERATION = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -113,10 +115,11 @@ function maintenanceOperation(): ProviderMaintenanceOperation {
 
 function fixture() {
   const events = new Map<string, ServerEvent[]>();
-  const send = (socket: string, event: ServerEvent): void => {
+  const send = (socket: string, event: ServerEvent, onSent?: (sent: boolean) => void): void => {
     const current = events.get(socket) ?? [];
     current.push(event);
     events.set(socket, current);
+    onSent?.(true);
   };
   const hub = new RuntimeSyncHub(
     send,
@@ -698,5 +701,142 @@ describe("runtime sync hub", () => {
         output: null,
       }),
     ]);
+  });
+});
+
+
+describe("search focus routing", () => {
+  it.each(["failed", "superseded"] as const)("preserves the current focus intent after a %s asynchronous write", (outcome) => {
+    const hub = new RuntimeSyncHub(sendRuntimeEvent);
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    const authority = { kind: "detached-chat" as const, conversationId: CONVERSATION_A, clientId: "owner" };
+    const first = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "turn", messageId: "first" };
+    const latest = { ...first, messageId: "latest" };
+    let closing = false;
+    let completeFocus!: (error?: Error) => void;
+    const socket = {
+      get readyState() { return closing ? WebSocket.CLOSING : WebSocket.OPEN; },
+      bufferedAmount: 0,
+      terminate: vi.fn(),
+      send: (serialized: string, complete: (error?: Error) => void) => {
+        const event = JSON.parse(serialized) as ServerEvent;
+        if (event.type === "conversation.message.focus") completeFocus = complete;
+        else complete();
+      },
+    } as unknown as WebSocket;
+    hub.connect(socket, { kind: "none" }, context, authority);
+    hub.focusDetachedMessage(first);
+    closing = true;
+    if (outcome === "superseded") hub.focusDetachedMessage(latest);
+    completeFocus(outcome === "failed" ? new Error("write failed") : undefined);
+    expect(socket.terminate).toHaveBeenCalledTimes(outcome === "failed" ? 1 : 0);
+    hub.disconnect(socket);
+    const received: ServerEvent[] = [];
+    const reconnected = {
+      readyState: WebSocket.OPEN, bufferedAmount: 0,
+      send: (serialized: string, complete: (error?: Error) => void) => {
+        received.push(JSON.parse(serialized) as ServerEvent);
+        complete();
+      },
+    } as unknown as WebSocket;
+    hub.connect(reconnected, { kind: "none" }, context, authority);
+    expect(received.slice(-2)).toEqual([
+      expect.objectContaining({ type: "runtime.sync.completed" }),
+      { type: "conversation.message.focus", target: outcome === "failed" ? first : latest },
+    ]);
+  });
+
+  it.each(["live", "hydration"] as const)("retains focus rejected by a closing socket during %s delivery", (phase) => {
+    const hub = new RuntimeSyncHub(sendRuntimeEvent);
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    const authority = { kind: "detached-chat" as const, conversationId: CONVERSATION_A, clientId: "owner" };
+    const target = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "turn", messageId: "message" };
+    let closing = false;
+    const blockedEvents: ServerEvent[] = [];
+    const blocked = {
+      get readyState() { return closing ? WebSocket.CLOSING : WebSocket.OPEN; },
+      bufferedAmount: 0,
+      send: (serialized: string, complete: (error?: Error) => void) => {
+        const event = JSON.parse(serialized) as ServerEvent;
+        blockedEvents.push(event);
+        if (phase === "hydration" && event.type === "runtime.sync.completed") closing = true;
+        complete();
+      },
+    } as unknown as WebSocket;
+    if (phase === "hydration") hub.focusDetachedMessage(target);
+    hub.connect(blocked, { kind: "none" }, context, authority);
+    if (phase === "live") {
+      closing = true;
+      hub.focusDetachedMessage(target);
+    }
+    expect(hub.connectionCount).toBe(1);
+    expect(blockedEvents.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+    hub.disconnect(blocked);
+    const received: ServerEvent[] = [];
+    const reconnected = {
+      readyState: WebSocket.OPEN, bufferedAmount: 0,
+      send: (serialized: string, complete: (error?: Error) => void) => {
+        received.push(JSON.parse(serialized) as ServerEvent);
+        complete();
+      },
+    } as unknown as WebSocket;
+    hub.connect(reconnected, { kind: "none" }, context, authority);
+    expect(received.slice(-2)).toEqual([
+      expect.objectContaining({ type: "runtime.sync.completed" }),
+      { type: "conversation.message.focus", target },
+    ]);
+    hub.disconnect(reconnected);
+    received.length = 0;
+    hub.connect(reconnected, { kind: "none" }, context, authority);
+    expect(received.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+  });
+
+  it("delivers the latest pending target only after its detached client is hydrated", () => {
+    const runtime = fixture();
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    const target = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "turn", messageId: "first" };
+    runtime.hub.focusDetachedMessage(target);
+    runtime.hub.focusDetachedMessage({ ...target, messageId: "latest" });
+    runtime.hub.connect("main", { kind: "none" }, context);
+    runtime.hub.connect("other", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_B, clientId: "other" });
+    for (const key of ["main", "other"]) expect(runtime.events.get(key)?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+    runtime.hub.connect("owner", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    expect(runtime.events.get("owner")?.slice(-2)).toEqual([
+      expect.objectContaining({ type: "runtime.sync.completed" }),
+      { type: "conversation.message.focus", target: { ...target, messageId: "latest" } },
+    ]);
+    runtime.hub.disconnect("owner");
+    runtime.hub.connect("reconnected", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    expect(runtime.events.get("reconnected")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+  });
+
+  it("bounds pending targets and expires undelivered navigation", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    try {
+      const runtime = fixture();
+      const context = { snapshot, approvals: [], inputs: [], plans: [] };
+      for (let index = 0; index < 21; index += 1) runtime.hub.focusDetachedMessage({
+        projectId: GENERATION, conversationId: String(index), turnId: "turn", messageId: "message",
+      });
+      runtime.hub.connect("evicted", { kind: "none" }, context, { kind: "detached-chat", conversationId: "0", clientId: "evicted" });
+      expect(runtime.events.get("evicted")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+      clock.mockReturnValue(10_001);
+      runtime.hub.connect("expired", { kind: "none" }, context, { kind: "detached-chat", conversationId: "20", clientId: "expired" });
+      expect(runtime.events.get("expired")?.some(({ type }) => type === "conversation.message.focus")).toBe(false);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("sends focus only to the detached window that owns the conversation", () => {
+    const runtime = fixture();
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    runtime.hub.connect("main", { kind: "none" }, context, { kind: "main" });
+    runtime.hub.connect("owner", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    runtime.hub.connect("other", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_B, clientId: "other" });
+    for (const events of runtime.events.values()) events.length = 0;
+    const target = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "legacy-turn", messageId: "message" };
+    runtime.hub.focusDetachedMessage(target);
+    expect(runtime.events.get("owner")).toEqual([{ type: "conversation.message.focus", target }]);
+    expect(runtime.events.get("main")).toEqual([]);
+    expect(runtime.events.get("other")).toEqual([]);
   });
 });

@@ -26,6 +26,7 @@ import {
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const CANCELLED_PROCESS_DRAIN_MS = 250;
+const WINDOWS_CANCELLED_INSPECTION_CLOSE_MS = 2_000;
 const PREPARED_ABORT_CLEANUP_MS = 500;
 // Admission and a cold Apple tool lookup share this startup-only clock.
 // Leave room within the supervisor's 30 seconds for owned cleanup and the
@@ -183,6 +184,7 @@ function inspectionArguments(args: readonly string[]): string[] {
     : [command, ...rest];
   return [
     "--no-pager",
+    "--no-optional-locks",
     "-c",
     "core.fsmonitor=false",
     ...commandArguments,
@@ -238,6 +240,21 @@ function classifyFailure(stderr: string, fallback: string): GitError {
       "Git authentication failed. Check the repository credentials and try again.",
     );
   }
+  if (detail.includes("non-fast-forward") || detail.includes("fetch first")) {
+    return new GitError("conflict", "The remote has commits that are not in this branch. Fetch, then reconcile the branches before pushing again.");
+  }
+  if (detail.includes("could not resolve host") || detail.includes("could not resolve hostname") || detail.includes("failed to connect") || detail.includes("network is unreachable")) {
+    return new GitError("operation-failed", "The Git remote could not be reached. Check your network connection and remote configuration, then retry.");
+  }
+  if (detail.includes("index.lock") && detail.includes("file exists")) {
+    return new GitError("conflict", "Another Git operation holds the index lock. Wait for it to finish. If it has stopped, inspect the lock in the terminal before retrying.");
+  }
+  if (detail.includes("already checked out at") || detail.includes("already used by worktree")) {
+    return new GitError("conflict", "This branch is checked out in another worktree. Open that worktree to use it.");
+  }
+  if (detail.includes("unable to auto-detect email address") || detail.includes("author identity unknown")) {
+    return new GitError("invalid-input", "Git needs your author identity. Configure user.name and user.email for this repository, then retry.");
+  }
   if (
     detail.includes("would be overwritten")
     || detail.includes("merge conflict")
@@ -268,6 +285,7 @@ function runGitProcess(
   args: readonly string[],
   options: RunGitOptions,
   dependencies: GitRunnerDependencies = {},
+  readOnlyInspection = false,
 ): Promise<GitProcessResult> {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
   const configuredTimeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
@@ -310,6 +328,7 @@ function runGitProcess(
     let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
     let cancelledProcessDrainTimer: NodeJS.Timeout | undefined;
+    let readOnlyCancellationTimer: NodeJS.Timeout | undefined;
     const abortError = new GitError(
       "timeout",
       "Git inspection was cancelled.",
@@ -317,6 +336,10 @@ function runGitProcess(
     const drainBeforeTermination = (error: GitError): void => {
       terminalError ??= error;
       if (settled || termination || cancelledProcessDrainTimer) return;
+      if (readOnlyCancellationTimer) {
+        clearTimeout(readOnlyCancellationTimer);
+        readOnlyCancellationTimer = undefined;
+      }
       // Cancellation is final at its deadline, including a timeout. Let an
       // already-finishing process close within the existing cleanup window
       // before signalling its guardian or a Windows PID that may have exited.
@@ -327,7 +350,25 @@ function runGitProcess(
       }, CANCELLED_PROCESS_DRAIN_MS);
       cancelledProcessDrainTimer.unref();
     };
-    const onAbort = (): void => drainBeforeTermination(abortError);
+    const onAbort = (): void => {
+      if (!readOnlyInspection || process.platform !== "win32") {
+        drainBeforeTermination(abortError);
+        return;
+      }
+      // Revoke the result immediately, but let this admitted read-only child
+      // close normally before racing Windows taskkill startup. This never
+      // waits out a long command deadline or admits another inspection.
+      terminalError ??= abortError;
+      if (settled || termination || cancelledProcessDrainTimer || readOnlyCancellationTimer) return;
+      if (processDeadlineAt - Date.now() > WINDOWS_CANCELLED_INSPECTION_CLOSE_MS) {
+        readOnlyCancellationTimer = setTimeout(() => {
+          readOnlyCancellationTimer = undefined;
+          terminateAndFinish();
+        }, WINDOWS_CANCELLED_INSPECTION_CLOSE_MS);
+        readOnlyCancellationTimer.unref();
+      }
+      // An earlier command deadline still owns its existing 250ms final drain.
+    };
 
     const finish = (
       error?: GitError,
@@ -342,6 +383,7 @@ function runGitProcess(
       if (cancelledProcessDrainTimer) {
         clearTimeout(cancelledProcessDrainTimer);
       }
+      if (readOnlyCancellationTimer) clearTimeout(readOnlyCancellationTimer);
       options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
       else if (result) resolveProcess(result);
@@ -377,6 +419,7 @@ function runGitProcess(
       );
     };
 
+    const processDeadlineAt = Date.now() + timeoutMs;
     const timer = setTimeout(() => {
       drainBeforeTermination(new GitError(
         "timeout",
@@ -487,7 +530,10 @@ export function runGitInspection(
   const prepared = inspectionArguments(args);
   return withGitScanProcessSlot(
     options,
-    async (signal) => await runGit(cwd, prepared, { ...options, signal }),
+    async (signal) => await runGitProcess(
+      gitExecutable.command(gitProcessEnvironment(process.env, options.environment)),
+      cwd, prepared, { ...options, signal }, {}, true,
+    ),
   );
 }
 

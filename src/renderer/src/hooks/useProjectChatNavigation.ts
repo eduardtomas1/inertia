@@ -18,17 +18,19 @@ import type { AppView } from "../appView";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigation";
 import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
+import { readPersistedDraftConversation, writePersistedDraftConversation } from "../utils/draftConversationPersistence";
 
 type DraftConversationNavigation = {
   changeProject: (projectId: string) => void;
   discard: () => void;
+  clear: () => void;
   importProject: (input?: ProjectImportInput) => Promise<boolean>;
   sendFromComposer: (
     content: string,
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
   ) => Promise<TranscriptMessageSendAcceptance | null>;
-  start: (projectId: string, independent?: boolean) => void;
+  start: (projectId: string, independent?: boolean, resume?: boolean) => void;
 };
 
 type SelectionCommandQueue = (
@@ -63,16 +65,25 @@ export function useProjectChatNavigation({
 }) {
   const [globalChatActive, setGlobalChatActive] = useState(false);
   const globalChatGenerationRef = useRef(0);
+  const resumeSearchDraftRef = useRef(false);
 
   const deactivateGlobalChat = useCallback(() => {
     globalChatGenerationRef.current += 1;
     conversationSelectionGenerationRef.current += 1;
     setGlobalChatActive(false);
   }, [conversationSelectionGenerationRef]);
-  const exitGlobalChat = useCallback(() => {
+  const exitGlobalChat = useCallback((preserveDraft = false) => {
     deactivateGlobalChat();
-    draftConversation.discard();
-  }, [deactivateGlobalChat, draftConversation]);
+    if (preserveDraft) {
+      resumeSearchDraftRef.current = true;
+      const stored = readPersistedDraftConversation();
+      if (stored) writePersistedDraftConversation({ ...stored, resumeAfterSearch: true });
+      draftConversation.clear();
+    } else if (globalChatActive || !(resumeSearchDraftRef.current || readPersistedDraftConversation()?.resumeAfterSearch)) {
+      resumeSearchDraftRef.current = false;
+      draftConversation.discard();
+    }
+  }, [deactivateGlobalChat, draftConversation, globalChatActive]);
 
   const navigateToView = useCallback((nextView: AppView) => {
     if (nextView !== "workspace") {
@@ -115,7 +126,9 @@ export function useProjectChatNavigation({
       setGlobalChatActive(false);
       return;
     }
-    draftConversation.start(targetProject.id, true);
+    if (resumeSearchDraftRef.current || readPersistedDraftConversation()?.resumeAfterSearch) draftConversation.start(targetProject.id, true, true);
+    else draftConversation.start(targetProject.id, true);
+    resumeSearchDraftRef.current = false;
     setGlobalChatActive(true);
   }, [
     conversationSelectionGenerationRef,

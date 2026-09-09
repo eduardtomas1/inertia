@@ -55,7 +55,7 @@ test("opens the command palette and manages a thread", async () => {
   const terminalInput = page.locator(".xterm-helper-textarea").first();
   await terminalInput.focus();
   await page.keyboard.press("Control+K");
-  const search = page.getByRole("combobox", { name: "Search commands, projects, and threads" });
+  const search = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
   await expect(search).toBeFocused();
   await search.pressSequentially("settings");
   await expect(search).toHaveValue("settings");

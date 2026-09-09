@@ -139,15 +139,16 @@ export class DetachedChatWindowManager {
     return { disposition: "opened", ...this.#recordSummary(record) };
   }
 
-  summary(): DetachedChatWindowSummary[] {
+  // Shutdown and draft handoff retain closing owners until their closed event.
+  summary({ includeClosing = true }: { includeClosing?: boolean } = {}): DetachedChatWindowSummary[] {
     return [...this.#byConversation.values()]
-      .filter((record) => !record.window.isDestroyed())
+      .filter((record) => (includeClosing || !record.closing) && !record.window.isDestroyed())
       .map((record) => this.#recordSummary(record));
   }
 
   focus(conversationId: string): boolean {
     const record = this.#byConversation.get(conversationId);
-    if (!record || record.window.isDestroyed()) return false;
+    if (!record || record.closing || record.window.isDestroyed()) return false;
     if (record.loaded) {
       this.#focusRecord(record);
     } else {
@@ -287,6 +288,7 @@ export class DetachedChatWindowManager {
     record.contents.on("will-prevent-unload", () => {
       if (this.#ownsRecord(record) && !record.window.isDestroyed()) {
         record.closing = false;
+        this.#emitWindowsChanged();
       }
     });
     record.window.once("closed", () => {
@@ -370,7 +372,7 @@ export class DetachedChatWindowManager {
 
   #focusRecord(record: DetachedChatWindowRecord): void {
     const window = record.window;
-    if (window.isDestroyed()) return;
+    if (record.closing || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();

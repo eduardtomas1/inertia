@@ -1,6 +1,6 @@
 // @inertia-e2e-resource isolated
 import { openLocalProjectFromDialog } from "./support/add-project";
-import { expect, test } from "@playwright/test";
+import { expect, test, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -16,6 +16,8 @@ import {
 import { expectRuntimeCrashRecovery } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
 import { selectWorkspaceTool } from "./support/workspace-tools";
+import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
+import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +29,19 @@ let workspaceDirectory!: AppFixture["workspaceDirectory"];
 let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
+let browserTraceStarted = false;
+
+async function finishBrowserTrace(testInfo?: TestInfo): Promise<void> {
+  if (!browserTraceStarted) return;
+  browserTraceStarted = false;
+  await captureBoundedFailureDiagnostic(async () => {
+    const path = testInfo?.outputPath("app-shell-browser-trace.zip");
+    await electronApp.context().tracing.stop(path ? { path } : undefined);
+    if (testInfo && path) await testInfo.attach("app-shell-browser-trace", {
+      path, contentType: "application/zip",
+    });
+  }, 2_000);
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -39,10 +54,19 @@ test.beforeAll(async () => {
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;
   expectNoViewportOverflow = app.expectNoViewportOverflow;
+  await electronApp.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
+  browserTraceStarted = true;
+});
+
+test.afterEach(async ({ browserName: _browserName }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || !app) return;
+  try { await attachImageSendFailureDiagnostics(testInfo, app); }
+  finally { await finishBrowserTrace(testInfo); }
 });
 
 test.afterAll(async () => {
-  await app.close();
+  try { await finishBrowserTrace(); }
+  finally { await app.close(); }
 });
 
 test("starts without a demo and adds the first real project", async () => {

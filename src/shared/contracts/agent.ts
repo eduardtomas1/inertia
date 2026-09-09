@@ -94,6 +94,7 @@ export interface TurnRequestContext {
 }
 
 export interface ChatAttachment {
+  snapshot?: import("../snapshots").SnapshotSource;
   id: string;
   name: string;
   /** Renderer projections use the opaque attachment id; only privileged code may carry a local path. */
@@ -221,6 +222,8 @@ export interface AgentReasoning {
 }
 
 export interface ChatMessage {
+  /** Confirmed manual compaction, scoped to this conversation without a fabricated turn. */
+  compaction?: import("../context-compaction").ContextCompaction;
   id: string;
   conversationId: string;
   /** System messages may be conversation-scoped; user/assistant turn messages are explicit. */

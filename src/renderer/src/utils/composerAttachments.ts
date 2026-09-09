@@ -19,6 +19,8 @@ export interface ComposerAttachmentImportLease {
   cancel(): Promise<void>;
 }
 
+export type ComposerAttachmentAdoptionResult = "adopted" | "rejected" | "cancelled";
+
 function duplicateKey(attachment: ChatAttachment): string {
   return [
     attachment.name.normalize("NFKC").trim().toLocaleLowerCase("en-US"),

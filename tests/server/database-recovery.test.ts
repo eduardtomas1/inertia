@@ -1317,6 +1317,7 @@ describe("database backup and startup recovery", () => {
       DROP TABLE reasoning_content_chunks;
       DROP TABLE provider_run_ownership;
       DROP INDEX agent_turns_provider_run_identity_idx;
+      DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 42;
     `);
     released.close();
@@ -1481,6 +1482,7 @@ describe("database backup and startup recovery", () => {
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 56;
     `);
     schema55.close();
@@ -1548,6 +1550,7 @@ describe("database backup and startup recovery", () => {
         DROP TABLE agent_thread_operations;
         DROP TABLE agent_managed_conversations;
         DROP INDEX agent_turns_usage_dashboard_completed_idx;
+        DROP INDEX messages_created_id_idx;
         DELETE FROM schema_migrations WHERE version >= 57;
       `);
       schema56.close();

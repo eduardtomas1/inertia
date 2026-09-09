@@ -904,3 +904,17 @@ export function formatMigrationDiagnostic(diagnostic: DatabaseMigrationDiagnosti
       : []),
   ].join(" ");
 }
+
+export function reportMigrationDiagnostic(diagnostic: DatabaseMigrationDiagnostic): void {
+  if (diagnostic.outcome === "failed") {
+    console.error(formatMigrationDiagnostic(diagnostic));
+  } else if (
+    diagnostic.appliedVersions.length > 0
+    && (
+      diagnostic.sourceReleases.length > 0
+      || (diagnostic.legacyBackfill?.responseGroups ?? 0) > 0
+    )
+  ) {
+    console.info(formatMigrationDiagnostic(diagnostic));
+  }
+}

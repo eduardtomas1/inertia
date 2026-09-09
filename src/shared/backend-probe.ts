@@ -99,26 +99,28 @@ export interface BackendProbeAdmissionHighWater {
   admissionSequence: number;
 }
 
-const timestampSchema = z.string().datetime({ offset: true });
-const probeAuthoritySchema = z.object({
+// Schema factories have no side effects. Renderer consumers of the types and
+// constants can omit unused validators; runtime consumers retain all checks.
+const timestampSchema = /* @__PURE__ */ (() => z.string().datetime({ offset: true }))();
+const probeAuthoritySchema = /* @__PURE__ */ (() => z.object({
   schemaVersion: z.literal(BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION),
   operationId: z.string().uuid(),
   admissionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   installationFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
   expiresAt: timestampSchema,
-}).strict();
-const modelIdSchema = z.string().trim().min(1).max(500)
-  .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters.");
-const secretReferenceSchema = z.string()
+}).strict())();
+const modelIdSchema = /* @__PURE__ */ (() => z.string().trim().min(1).max(500)
+  .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters."))();
+const secretReferenceSchema = /* @__PURE__ */ (() => z.string()
   .min(8)
   .max(200)
-  .regex(/^secret:[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const capabilityHintSchema = modelCapabilitySchema.refine(
+  .regex(/^secret:[A-Za-z0-9][A-Za-z0-9._:-]*$/u))();
+const capabilityHintSchema = /* @__PURE__ */ (() => modelCapabilitySchema.refine(
   (capability) => capability.provenance !== "probe",
   "Probe evidence cannot be supplied as a hint.",
-);
+))();
 
-export const backendCompatibilityProbeRequestSchema = z.object({
+export const backendCompatibilityProbeRequestSchema = /* @__PURE__ */ (() => z.object({
   profile: modelBackendProfileSchema,
   endpointUrl: z.string().trim().min(1).max(2_048).nullable(),
   modelId: modelIdSchema,
@@ -172,13 +174,13 @@ export const backendCompatibilityProbeRequestSchema = z.object({
       message: "Custom HTTP backends require a stable endpoint identity.",
     });
   }
-});
+}))();
 
-export const backendProbeCapabilityEvidenceSchema = modelCapabilitySchema.extend({
+export const backendProbeCapabilityEvidenceSchema = /* @__PURE__ */ (() => modelCapabilitySchema.extend({
   checkedAt: timestampSchema,
-}).strict();
+}).strict())();
 
-export const backendCompatibilityProbeResultSchema = z.object({
+export const backendCompatibilityProbeResultSchema = /* @__PURE__ */ (() => z.object({
   profileId: z.string().min(1).max(200),
   backendConfigurationRevision: z.number().int().nonnegative(),
   endpointIdentity: z.string()
@@ -227,19 +229,19 @@ export const backendCompatibilityProbeResultSchema = z.object({
       message: "Probe authority must have a bounded validity window.",
     });
   }
-});
+}))();
 
-export const backendProbeAdmissionHighWaterSchema = z.object({
+export const backendProbeAdmissionHighWaterSchema = /* @__PURE__ */ (() => z.object({
   modelId: modelIdSchema,
   admissionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-}).strict();
+}).strict())();
 
 /**
  * Durable probe evidence is cached independently for each configured model.
  * The versioned envelope keeps the existing single-result JSON readable while
  * making future persistence migrations explicit and fail-closed.
  */
-export const backendCompatibilityProbeResultCollectionSchema = z.object({
+export const backendCompatibilityProbeResultCollectionSchema = /* @__PURE__ */ (() => z.object({
   schemaVersion: z.literal(1),
   results: z.array(backendCompatibilityProbeResultSchema)
     .max(MAX_BACKEND_PROBE_RESULTS_PER_PROFILE),
@@ -289,7 +291,7 @@ export const backendCompatibilityProbeResultCollectionSchema = z.object({
       }
     }
   }
-});
+}))();
 
 export interface BackendCompatibilityProbeResultCollection {
   schemaVersion: 1;

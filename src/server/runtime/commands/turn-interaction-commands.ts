@@ -188,7 +188,7 @@ export function createTurnInteractionCommandHandler(
         messageSendStage = "active-route";
         if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
           throw new RuntimeRequestError(
-            "End the resumed provider terminal for this chat before sending another message.",
+            "Wait for this chat's current operation (such as compaction) to finish. If you resumed it in a terminal, close that terminal first.",
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
@@ -588,7 +588,7 @@ export function createTurnInteractionCommandHandler(
             assertMessageSendPreparationPending(preparationDeadlineAt);
             if (!acquired) {
               throw new RuntimeRequestError(
-                "End the resumed provider terminal for this chat before sending another message.",
+                "Wait for this chat's current operation (such as compaction) to finish. If you resumed it in a terminal, close that terminal first.",
               );
             }
             dependencies.workflows.assertTurnSkillsCurrent(
@@ -937,7 +937,7 @@ export function createTurnInteractionCommandHandler(
             "That activity has already finished.",
           );
         }
-        if (activity.kind === "check" || activity.kind === "service") {
+        if (activity.kind === "check" || activity.kind === "service" || activity.kind === "source-control") {
           if (!await dependencies.workspaceRuns.stopManagedAction(activity.id)) {
             throw new RuntimeRequestError(
               "That process is no longer owned by the local runtime.",

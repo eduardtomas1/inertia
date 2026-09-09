@@ -14,11 +14,21 @@ vi.mock("../../src/server/git/runner", async (importOriginal) => ({
   ...gitRunner,
 }));
 
-import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
+import { repositoryMetadataMarkerIdentity, validateBranch } from "../../src/server/git/paths";
 import { GitError } from "../../src/server/git/types";
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+it.each([
+  new GitError("timeout", "Git inspection was cancelled."),
+  new GitError("operation-failed", "Git stopped responding, and its process tree could not be confirmed stopped."),
+  new GitError("git-unavailable", "Git could not be started."),
+])("preserves branch validation execution failure: $code", async (failure) => {
+  gitRunner.runGitInspection.mockRejectedValue(failure);
+  await expect(validateBranch("/workspace", "feature/safe"))
+    .rejects.toBe(failure);
 });
 
 it("settles both metadata probes before rejecting one malformed marker", async () => {

@@ -55,6 +55,7 @@ describe("detached chat preload", () => {
       "importAttachments",
       "mirrorDetachedChatDraft",
       "onRuntimeReady",
+      "onSnapshot",
       "openAttachmentExternally",
       "openExternal",
       "openProjectPath",
@@ -64,6 +65,7 @@ describe("detached chat preload", () => {
       "retargetDetachedChat",
       "selectAttachments",
       "setDetachedChatAlwaysOnTop",
+      "snapshot",
     ]);
 
     for (const forbidden of [

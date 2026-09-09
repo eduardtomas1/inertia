@@ -6,6 +6,7 @@ export function primaryHeaderGitAction(
   status: GitStatusSnapshot | null,
 ): HeaderGitAction | null {
   if (!status?.isRepository) return null;
+  if (status.truncated || status.files.some((file) => file.status === "unmerged")) return null;
   if (status.files.length > 0) {
     return {
       id: "commit",

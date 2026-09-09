@@ -22,6 +22,7 @@ import {
   MAIN_RUNTIME_CLIENT_AUTHORITY,
   type RuntimeClientAuthority,
 } from "./runtime-client-authority";
+import type { MessageSearchTarget } from "../../shared/message-search";
 
 export interface RuntimeSyncHydration {
   beforeFreshSnapshot?(): void;
@@ -32,6 +33,11 @@ export interface RuntimeSyncHydration {
 }
 
 type RuntimeSubscriptionOwner = "primary" | "secondary";
+
+interface PendingMessageFocus {
+  target: MessageSearchTarget;
+  expires: number;
+}
 
 interface RuntimeClientSubscription extends RuntimeDetailSubscription {
   authority: RuntimeClientAuthority;
@@ -48,14 +54,44 @@ interface RuntimeClientSubscription extends RuntimeDetailSubscription {
  */
 export class RuntimeSyncHub<Socket> {
   private readonly clients = new Map<Socket, RuntimeClientSubscription>();
+  private readonly pendingMessageFocus = new Map<string, PendingMessageFocus>();
 
   constructor(
-    private readonly send: (socket: Socket, event: ServerEvent) => void,
+    private readonly send: (socket: Socket, event: ServerEvent, onSent?: (sent: boolean) => void) => void,
     private readonly sequencer = new RuntimeSequencer(),
   ) {}
 
   get connectionCount(): number {
     return this.clients.size;
+  }
+
+  /** Ephemeral navigation only reaches the native window owning this chat. */
+  focusDetachedMessage(target: MessageSearchTarget): void {
+    const now = Date.now();
+    for (const [id, pending] of this.pendingMessageFocus) {
+      if (pending.expires <= now) this.pendingMessageFocus.delete(id);
+    }
+    this.pendingMessageFocus.delete(target.conversationId);
+    const pending = { target, expires: now + 10_000 };
+    this.pendingMessageFocus.set(target.conversationId, pending);
+    for (const [socket, { authority }] of this.clients) {
+      if (authority.kind === "detached-chat" && authority.conversationId === target.conversationId) {
+        this.sendMessageFocus(socket, pending);
+      }
+    }
+    if (this.pendingMessageFocus.size > 20) {
+      this.pendingMessageFocus.delete(this.pendingMessageFocus.keys().next().value!);
+    }
+  }
+
+  private sendMessageFocus(socket: Socket, pending: PendingMessageFocus): void {
+    this.send(socket, { type: "conversation.message.focus", target: pending.target }, (sent) => {
+      // A closing socket or failed write leaves the target for reconnect. A
+      // late successful write must never consume a newer navigation intent.
+      if (sent && this.pendingMessageFocus.get(pending.target.conversationId) === pending) {
+        this.pendingMessageFocus.delete(pending.target.conversationId);
+      }
+    });
   }
 
   cursor(): RuntimeSyncCursor {
@@ -159,6 +195,14 @@ export class RuntimeSyncHub<Socket> {
       type: "runtime.sync.completed",
       sync: this.sequencer.cursor(),
     });
+    if (authority.kind === "detached-chat" && this.clients.has(socket)) {
+      const pending = this.pendingMessageFocus.get(authority.conversationId);
+      if (pending && pending.expires > Date.now()) {
+        this.sendMessageFocus(socket, pending);
+      } else {
+        this.pendingMessageFocus.delete(authority.conversationId);
+      }
+    }
   }
 
   setConversationSubscription(

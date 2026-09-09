@@ -114,6 +114,7 @@ function responseTurn(turn: AgentTurn): ResponseTurn {
   })[0];
   if (!item) throw new Error("Missing response turn");
   if (item.kind === "turn") return item.turn;
+  if (item.kind !== "compatibility") throw new Error("Expected a response turn, received compaction");
   const inferred = item.compatibility.inferredTurns.find(
     (candidate) => candidate.id === turn.id,
   );

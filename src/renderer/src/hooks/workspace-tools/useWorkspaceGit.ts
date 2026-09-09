@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AppRuntimeActions } from "../useAppRuntimeActions";
 import type {
   Conversation,
   GitBranchInfo,
@@ -32,7 +33,7 @@ interface WorkspaceGitOptions {
   ignoreWhitespace: boolean;
   refreshVersion: number;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  run: AppRuntimeActions["run"];
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
 }
@@ -88,6 +89,9 @@ export function useWorkspaceGit({
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
   const [workspaceGitStatus, setWorkspaceGitStatus] =
     useState<WorkspaceGitSnapshot | null>(null);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const branchRequestRef = useRef(0);
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -272,6 +276,9 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
     setWorkspaceGitStatus(null);
     setBranches([]);
+    branchRequestRef.current += 1;
+    setBranchesLoading(false);
+    setBranchesError(null);
     setLoading(false);
     setLoadError(null);
     setChangesRequest(null);
@@ -411,31 +418,46 @@ export function useWorkspaceGit({
 
   const loadBranches = useCallback((passive = false) => {
     if (!project || !gitStatus?.isRepository) return;
+    if (!gitStatus.authorityRef) {
+      setBranchesError("Refresh Git status before loading branches.");
+      return;
+    }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
+    const sequence = ++branchRequestRef.current;
+    setBranchesLoading(true);
+    setBranchesError(null);
     void request({
       type: "git.branches",
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
+        authorityRef: gitStatus.authorityRef,
       },
     }).then(resultEvent).then((event) => {
       if (
         authorityRef.current === owner
+        && sequence === branchRequestRef.current
         && event.result.kind === "git.branches"
       ) {
         setBranches(event.result.branches);
       }
     }).catch((error) => {
+      if (authorityRef.current !== owner || sequence !== branchRequestRef.current) return;
+      setBranches([]);
+      setBranchesError(gitErrorMessage(error, "Branches could not be loaded."));
       const fallback = "Branches could not be loaded.";
       if (passive) {
         reportPassiveGitError(error, fallback, setActionError);
       } else {
         setActionError(gitErrorMessage(error, fallback));
       }
+    }).finally(() => {
+      if (authorityRef.current === owner && sequence === branchRequestRef.current) setBranchesLoading(false);
     });
   }, [
     conversation?.id,
     gitStatus?.isRepository,
+    gitStatus?.authorityRef,
     project,
     request,
     setActionError,
@@ -494,25 +516,39 @@ export function useWorkspaceGit({
     subscribe,
   ]);
 
-  const mutateBranch = useCallback((
+  const mutateBranch = useCallback(async (
     type: "git.branch.create" | "git.branch.switch",
     name: string,
+    remote?: boolean,
   ) => {
-    if (!project) return;
+    if (!project) throw new Error("Select a project before changing branches.");
     const repository = rootGitMutationScope(gitStatus);
     if (!repository) {
-      setActionError("Refresh repository status before changing branches.");
-      return;
+      throw new Error("Refresh repository status before changing branches.");
     }
-    void run(type, {
+    await run(type, {
       type,
       payload: {
         projectId: project.id,
         conversationId: conversation?.id,
         ...repository,
         name,
+        ...(type === "git.branch.switch" && remote ? { remote } : {}),
       },
-    } as CommandWithoutId).catch(() => undefined);
+    } as CommandWithoutId, { reportError: false });
+  }, [conversation?.id, gitStatus, project, run]);
+
+  const mutateRemote = useCallback(async (type: "git.fetch" | "git.pull" | "git.push"): Promise<void> => {
+    if (!project) return;
+    const repository = rootGitMutationScope(gitStatus);
+    if (!repository) {
+      setActionError("Refresh repository status before running a remote Git action.");
+      return;
+    }
+    await run(type, {
+      type,
+      payload: { projectId: project.id, conversationId: conversation?.id, ...repository },
+    });
   }, [conversation?.id, gitStatus, project, run, setActionError]);
 
   const commit = useCallback(async (
@@ -588,6 +624,8 @@ export function useWorkspaceGit({
     setGitDiff,
     workspaceGitStatus,
     branches,
+    branchesLoading,
+    branchesError,
     loading,
     loadError,
     loadGit,
@@ -597,6 +635,7 @@ export function useWorkspaceGit({
     commitReviewRevision,
     loadBranches,
     mutateBranch,
+    mutateRemote,
     commit,
     changesRequest,
     requestWorkspaceChanges,

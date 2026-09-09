@@ -190,7 +190,7 @@ describe("global shortcut DOM integration", () => {
 
     fireEvent.keyDown(terminal, { key: "k", ctrlKey: true });
     const search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
     expect(search).toHaveFocus();
 
@@ -283,7 +283,7 @@ describe("global shortcut DOM integration", () => {
       ([name]) => name === "keydown" || name === "keyup",
     )).toHaveLength(2));
     const search = screen.getByRole("combobox", {
-      name: "Search commands, projects, and threads",
+      name: "Search commands, projects, chats, and messages",
     });
     for (const key of ["b", "j", "k", "n"]) {
       const event = new KeyboardEvent("keydown", {

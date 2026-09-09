@@ -8,6 +8,7 @@ import {
   type ServerEvent,
 } from "../../src/shared/contracts";
 import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConversation";
+import { useProjectChatNavigation } from "../../src/renderer/src/hooks/useProjectChatNavigation";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
@@ -19,6 +20,7 @@ import type {
   TranscriptMessageSendAcceptance,
 } from "../../src/renderer/src/utils/transcriptNavigation";
 import {
+  readPersistedDraftConversation,
   readPersistedMaterializedDraftConversation,
 } from "../../src/renderer/src/utils/draftConversationPersistence";
 
@@ -114,6 +116,80 @@ describe("useDraftConversation", () => {
         setItem: vi.fn(),
       } satisfies Storage,
     });
+  });
+
+  it("restores a draft's identity and composer storage after a cross-project search", () => {
+    const values = new Map<string, string>();
+    vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);
+    vi.mocked(window.localStorage.setItem).mockImplementation((key, value) => { values.set(key, value); });
+    const other = { ...project, id: "33333333-3333-4333-8333-333333333333" };
+    const run = vi.fn();
+    let current = { ...snapshot, projects: [project, other] };
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: current, settings: defaultSettings, run, sendMessage: vi.fn(),
+      persistedConversationId: conversationId, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    const original = hook.result.current.conversation!;
+    window.localStorage.setItem(`inertia:draft:${original.id}`, "Unsent prompt");
+    act(() => hook.result.current.clear());
+    current = { ...current, activeProjectId: other.id };
+    hook.rerender();
+    expect(hook.result.current.conversation).toBeNull();
+    act(() => hook.result.current.start(other.id, true, true));
+    expect(hook.result.current.conversation).toMatchObject({ id: original.id, projectId, modelSelection: original.modelSelection });
+    expect(window.localStorage.getItem(`inertia:draft:${original.id}`)).toBe("Unsent prompt");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { navigate: false, selected: true },
+    { navigate: true, selected: true },
+    { navigate: false, selected: false },
+  ])("retains search-preserved draft ownership after remount (navigation: $navigate, selected chat: $selected)", ({ navigate, selected }) => {
+    const values = new Map<string, string>();
+    vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);
+    vi.mocked(window.localStorage.setItem).mockImplementation((key, value) => { values.set(key, value); });
+    vi.mocked(window.localStorage.removeItem).mockImplementation((key) => { values.delete(key); });
+    const other = { ...project, id: "33333333-3333-4333-8333-333333333333" };
+    let current = { ...snapshot, projects: [project, other] };
+    let persistedConversationId: string | null = conversationId;
+    const mount = () => renderHook(() => {
+      const draft = useDraftConversation({
+        snapshot: current, settings: defaultSettings, run: vi.fn(), sendMessage: vi.fn(),
+        persistedConversationId, updatePersistedConversation: vi.fn(),
+      });
+      const navigation = useProjectChatNavigation({
+        project: current.projects.find(({ id }) => id === current.activeProjectId)!, projects: current.projects,
+        busyAction: null, draftConversation: draft, conversationSelectionGenerationRef: { current: 0 },
+        selectionCommandQueue: vi.fn(), startupSurface: "summary", showStartupSurface: vi.fn(),
+        updateSplitConversationId: vi.fn(), setSidebarOpen: vi.fn(), setView: vi.fn(),
+      });
+      return { draft, navigation };
+    });
+    const first = mount();
+    act(() => first.result.current.navigation.openGlobalChat());
+    const original = first.result.current.draft.conversation!;
+    const composerKey = `inertia:draft:${original.id}`;
+    window.localStorage.setItem(composerKey, "Unsent prompt and attachment state");
+    window.localStorage.setItem("inertia:draft:unrelated", "Another chat's draft");
+    act(() => first.result.current.navigation.exitGlobalChat(true));
+    first.unmount();
+    current = { ...current, activeProjectId: selected ? other.id : projectId };
+    persistedConversationId = selected ? conversationId : null;
+    const restarted = mount();
+    expect(restarted.result.current.draft.conversation).toBeNull();
+    if (navigate) act(() => restarted.result.current.navigation.exitGlobalChat());
+    act(() => restarted.result.current.navigation.openGlobalChat());
+    expect(restarted.result.current.draft.conversation).toMatchObject({
+      id: original.id, projectId, modelSelection: original.modelSelection,
+    });
+    expect(window.localStorage.getItem(composerKey)).toBe("Unsent prompt and attachment state");
+    expect(readPersistedDraftConversation()?.resumeAfterSearch).not.toBe(true);
+    act(() => restarted.result.current.navigation.exitGlobalChat());
+    expect(readPersistedDraftConversation()).toBeNull();
+    expect(window.localStorage.getItem(composerKey)).toBeNull();
+    expect(window.localStorage.getItem("inertia:draft:unrelated")).toBe("Another chat's draft");
   });
 
   it("starts from the project backend default before the global default", () => {

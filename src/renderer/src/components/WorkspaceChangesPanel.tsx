@@ -9,6 +9,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Info,
+  RefreshCw,
   Upload,
 } from "lucide-react";
 
@@ -320,6 +321,7 @@ export function WorkspaceChangesPanel({
   const activeGitStatus = useMemo(() => activeRepository?.state === "ready"
     ? {
         isRepository: true,
+        truncated: activeRepository.truncated,
         authorityRef: activeRepository.authorityRef,
         root: null,
         branch: activeRepository.branch,
@@ -661,6 +663,9 @@ export function WorkspaceChangesPanel({
             >
               <GitCommitHorizontal size={12} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
             </button>
+            <button type="button" disabled={!authorityRef || Boolean(busyAction) || !activeRepository.hasRemote} title="Refresh remote branches while preserving local changes" onClick={() => {
+              void run("git.fetch", { type: "git.fetch", payload: { projectId, conversationId, repositoryPath: activeRepository.repositoryPath, authorityRef } }).then(onRefresh).catch(() => undefined);
+            }}><RefreshCw size={12} aria-hidden="true" /><span>Fetch</span></button>
             <button
               type="button"
               disabled={!authorityRef || (pullAction?.disabled ?? true)}

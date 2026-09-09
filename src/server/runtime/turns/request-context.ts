@@ -1,3 +1,4 @@
+import { snapshotPromptContext } from "../../../shared/snapshots";
 import { createHash } from "node:crypto";
 import {
   readFileSync,
@@ -619,7 +620,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   const contexts = materializeContext(
     input.cwd,
     input.context,
-    input.documentContexts,
+    [...(input.documentContexts ?? []), ...(input.attachments ?? []).filter((attachment) => attachment.snapshot).map((attachment) => ({
+      attachmentId: attachment.id, label: `Snapshot · ${attachment.snapshot!.appName}`,
+      content: snapshotPromptContext([attachment]), truncated: attachment.snapshot!.accessibility.truncated,
+    }))],
   );
   const { imagePaths, imageBytes } = validateImages(
     input.attachments ?? [],

@@ -48,6 +48,14 @@ await inspectNativeBinaryArchitecture(claudeExecutable, {
   platform: process.platform,
 });
 
+for (const packageName of ["@crowecawcaw/xa11y", "ffi-rs"]) {
+  const module = await import(packageName);
+  const binding = module.default ?? module;
+  if (packageName === "@crowecawcaw/xa11y" ? typeof binding.App?.foreground !== "function" : typeof binding.load !== "function") {
+    throw new Error(`Snapshot native binding could not load: ${packageName}`);
+  }
+}
+
 const database = new Database(":memory:");
 try {
   const row = database.prepare("SELECT 27 AS audit_item").get();

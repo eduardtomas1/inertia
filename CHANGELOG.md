@@ -2,6 +2,68 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.55 — 2026-09-09
+
+### Find and share context
+
+- Search saved messages and final answers from Cmd/Ctrl+K and open the matching
+  passage across long histories, split panes and detached chats. New-chat drafts
+  survive navigation and restart. Large histories can return labeled partial
+  results; reasoning, tool logs and unfinished output stay outside search.
+- Enable experimental Snapshots to capture another app's foreground window
+  and review its screenshot and accessibility context before sending. Detected
+  editable fields are masked, but sensitive content may remain, including in
+  overlapping windows. Capture is optional and permission-gated. Linux requires
+  X11; Wayland capture is unavailable.
+- Disabling Snapshots cancels pending capture and attachment import. A revoked
+  capture cannot attach or bring a window forward after re-enabling.
+- Successful context compaction leaves a saved timeline receipt, with token
+  counts when the provider reports them. Codex compaction tolerates a brief delay
+  before its completed turn appears in durable history.
+- Up and Down move through wrapped and multiline drafts normally. At the text
+  boundaries, repeated presses recall older or newer prompts while preserving
+  the unsent draft and edits.
+
+### Git and the desktop mascot
+
+- See branch tracking and incoming/outgoing commits, search local and remote
+  branches, and create tracking branches. Fetch preserves local work; Pull
+  requires a clean checkout and fast-forwards only. Existing commits can be
+  pushed while unrelated edits remain.
+- Branch search and arrow-key navigation stay usable during a background
+  refresh. Selections wait for fresh results; changing the query or moving
+  focus cancels a waiting selection.
+- Git actions keep errors and retry controls near the operation. Branches used
+  by other worktrees are identified, and ambiguous remote destinations are
+  rejected before a fetch can overwrite another remote's tracking refs.
+- Fetch respects configured branch exclusions, including patterns that span
+  reference namespaces.
+- The mascot has pickup, suspended and landing poses, preserves the grab point,
+  and supports repeated dragging and cancellation. Reduced motion remains
+  supported; Wayland placement is controlled by the compositor.
+
+### Reliability and maintenance
+
+- Linux startup retires completed discovery probes correctly. Repeated runtime
+  recovery failures stop instead of restarting indefinitely.
+- Each provider's completed model catalog appears independently. Settings
+  Refresh can recover an unavailable catalog without restarting the app.
+- Quitting during provider detection lets an already-finished authentication
+  check settle its process cleanup while keeping cancellation final.
+- Cancelling a read-only Git inspection on Windows gives it a bounded chance
+  to close normally, avoiding a termination race that could block new chats.
+  Hung inspections still require confirmed process-tree cleanup.
+- Lifecycle certification rejects missing test suites, and cross-platform test
+  fixtures publish their ownership receipts atomically.
+- Update Lucide React to 1.41.0, Claude Agent SDK to 0.3.261, OpenCode SDK to
+  1.18.29, Anthropic SDK to 0.124.0, and Playwright to 1.63.0.
+- Patch the transitive Hono and js-yaml dependencies to 4.13.5 and 4.3.2,
+  addressing newly reported security advisories.
+
+Windows and macOS retain manual installation while release signing is
+unavailable. Linux installations still on 0.0.52 need one manual upgrade,
+preserving the existing profile.
+
 ## 0.0.54 — 2026-09-08
 
 ### Reliable turns and provider interactions

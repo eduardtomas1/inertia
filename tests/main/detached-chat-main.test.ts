@@ -260,6 +260,34 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
+  it("lists only selectable owners through IPC without dropping closing drafts or shutdown ownership", async () => {
+    const value = fixture();
+    try {
+      await value.ipc.invoke(DETACHED_CHAT_IPC.open, eventFor(value.main.webContents), {
+        conversationId: FIRST_ID, title: "Closing chat", draft: "Keep the closing draft",
+      });
+      const popup = value.popups[0]!;
+      popup.emit("close");
+      expect(popup.isDestroyed()).toBe(false);
+      expect(await value.ipc.invoke(DETACHED_CHAT_IPC.getWindows, eventFor(value.main.webContents))).toEqual([]);
+      expect(await value.ipc.invoke(DETACHED_CHAT_IPC.focus, eventFor(value.main.webContents), FIRST_ID)).toBe(false);
+      expect(value.coordinator.summaries()).toEqual([{ conversationId: FIRST_ID, alwaysOnTop: false }]);
+
+      // An unrelated lifecycle broadcast must not retire the still-owned draft.
+      await value.ipc.invoke(DETACHED_CHAT_IPC.open, eventFor(value.main.webContents), {
+        conversationId: SECOND_ID, title: "Other chat", draft: "",
+      });
+      expect(await value.ipc.invoke(DETACHED_CHAT_IPC.getWindowContext, eventFor(popup.webContents))).toMatchObject({
+        conversationId: FIRST_ID, draft: "Keep the closing draft",
+      });
+      popup.webContents.emit("will-prevent-unload");
+      expect(await value.ipc.invoke(DETACHED_CHAT_IPC.getWindows, eventFor(value.main.webContents))).toEqual(value.coordinator.summaries());
+      expect(await value.ipc.invoke(DETACHED_CHAT_IPC.focus, eventFor(value.main.webContents), FIRST_ID)).toBe(true);
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("creates one hardened native window at the fixed renderer URL", async () => {
     const value = fixture();
     try {

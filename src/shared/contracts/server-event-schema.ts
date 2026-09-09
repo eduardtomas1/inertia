@@ -1,5 +1,7 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
+import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
+import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
@@ -584,13 +586,6 @@ function agentWorkflow(value: unknown): boolean {
     && skillDiscovery(value.skillDiscovery);
 }
 
-function gitBranch(value: unknown): boolean {
-  return recordWithStrings(value, "name")
-    && booleanField(value, "current")
-    && booleanField(value, "remote")
-    && nullableStringField(value, "worktreePath");
-}
-
 function workspaceEntry(value: unknown): boolean {
   return recordWithStrings(value, "path")
     && oneOf(value, "kind", ["file", "directory"]);
@@ -719,6 +714,7 @@ function pullRequestCapability(
 function gitStatus(value: unknown): boolean {
   return record(value)
     && booleanField(value, "isRepository")
+    && optionalBooleanField(value, "truncated")
     && optionalNullableStringField(value, "authorityRef")
     && nullableStringField(value, "root")
     && nullableStringField(value, "branch")
@@ -1097,6 +1093,7 @@ import { issueReportSchema } from "../issue-report";
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
@@ -1166,6 +1163,8 @@ function requestResult(value: unknown): value is RequestResult {
 function isServerEvent(value: unknown): value is ServerEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   switch (value.type) {
+    case "conversation.message.focus":
+      return messageSearchTargetSchema.safeParse(value.target).success;
     case "server.welcome":
       return value.protocolVersion === 1
         && appSnapshot(value.snapshot)

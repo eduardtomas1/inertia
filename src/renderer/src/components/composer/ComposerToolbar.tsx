@@ -66,6 +66,8 @@ const ComposerSendActions = lazy(async () => ({
   default: (await import("./ComposerSendActions")).ConversationComposerSendActions,
 }));
 
+const SnapshotControl = lazy(async () => ({ default: (await import("./SnapshotControl")).SnapshotControl }));
+
 const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
@@ -266,6 +268,7 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
+        <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} /></Suspense>
         <Suspense
           fallback={(
             <ComposerSendActionsFallback

@@ -9,6 +9,26 @@ import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
+import { observeImagePreviewFailure } from "./support/image-preview-failure-evidence";
+
+let activeApp: Awaited<ReturnType<typeof createAppFixture>> | undefined;
+let bodyFailure: { error: unknown } | undefined;
+let previewEvidence: ReturnType<typeof observeImagePreviewFailure> | undefined;
+
+test.afterEach(async () => {
+  const app = activeApp;
+  const failure = bodyFailure;
+  const evidence = previewEvidence;
+  previewEvidence = undefined;
+  activeApp = undefined;
+  bodyFailure = undefined;
+  // Playwright gives teardown its own budget; the 45-second body must not
+  // truncate the existing privileged cleanup receipt and process proof.
+  if (app) {
+    try { await evidence?.finish(test.info(), Boolean(failure)); }
+    finally { await closeElectronAfterTest(() => app.close(), () => test.info(), failure); }
+  }
+});
 
 const imageAwareCodexAppServer = `
 const fs = require("node:fs");
@@ -57,13 +77,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 
 test("repeatedly sends a pasted image after startup reconciliation in a non-Git project", async () => {
-  const app = await createAppFixture({
+  const app = activeApp = await createAppFixture({
     name: "image-send-regression",
     initialState: "conversation",
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,
   });
-  let bodyFailure: { error: unknown } | undefined;
   try {
     const imageBytes = [...withEmptyPngDataChunks(await readFile(app.attachmentImagePath))];
     const expectedDigest = createHash("sha256")
@@ -101,20 +120,22 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     bodyFailure = { error };
     await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
     throw error;
-  } finally {
-    await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });
 
 test("native clipboard, dropped, and selected screenshots survive send and restart", async () => {
-  const app = await createAppFixture({
+  const app = activeApp = await createAppFixture({
     name: "native-attachment-lifecycle",
     initialState: "conversation",
     windowDisplay: "primary",
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,
   });
-  let bodyFailure: { error: unknown } | undefined;
+  // Retain the post-restart click boundary when the full Windows x64 lane
+  // reproduces a preview failure; other scenarios and platforms do not trace.
+  if (process.platform === "win32" && process.arch === "x64" && process.env.CI) {
+    previewEvidence = observeImagePreviewFailure(app);
+  }
   try {
     const canvas = createCanvas(1_920, 1_080);
     const context = canvas.getContext("2d");
@@ -211,6 +232,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     }
 
     await app.restart();
+    await previewEvidence?.afterRestart();
     for (const attachment of retained) {
       const path = join(app.testDirectory, "data", "conversation-attachments",
         attachment.id, `${attachment.id}.png`);
@@ -234,7 +256,5 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     bodyFailure = { error };
     await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
     throw error;
-  } finally {
-    await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });

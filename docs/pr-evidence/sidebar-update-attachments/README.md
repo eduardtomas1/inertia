@@ -35,6 +35,16 @@ Focused tests also cover note classification/bounds/exact tags/cache/timeouts, s
 
 Local platform: Linux x64, Node 22.23.2, Electron 44.2.0. Native macOS/Windows execution and signed/public installed-update delivery were not exercised. The new UI feature's deferred bundle allowance is measured separately (10.5 KiB, 10.75 KiB ceiling); existing entry, workbench, core and other feature ceilings are unchanged.
 
+### CI follow-up: scoped assertions and native hover/focus ownership
+
+The initial native CI failures on all six targets included the same post-restart preview selector: the shared attachment-card class now appears in both the transcript and Recent attachments. The old global selector matched both legitimate buttons. Local reproduction also exposed the equivalent retained-PDF ambiguity and global status selectors colliding with the new updater's accessibility announcement in tests that CI had not reached.
+
+Attachment/health tests now use the existing Request/Message attachments list names, scope import status to the composer and health status to Local data. The native clipboard scenario explicitly asserts one matching preview in each surface before opening the original request's attachment. File hashes, dimensions, retention/restart, missing-file handling, IPC and process-cleanup assertions remain intact.
+
+The final macOS x64 job also exposed a dismissed updater hover panel, subsequently reproduced locally. Moving from the panel back to its trigger stays inside their shared wrapper, so the wrapper's pointer-enter handler did not cancel the panel's close timer. The trigger now explicitly cancels that timer on entry, and the control retains pointer ownership across native focus loss when actions change. The controlled return-to-trigger regression failed before this fix and passed after it; an explicit native blur while hovering exercises this on every platform. Keyboard/outside dismissal remains covered. Another macOS failure concerned the transient diagnostics-copy label. That Electron assertion now verifies the actual native clipboard contents and exact turn/run identity, starting with a sentinel; the existing controlled DOM test continues to verify success feedback. There are no skipped tests or raised timeouts. Existing screenshots still represent the unchanged layout.
+
+Final follow-up verification: `npm run check` passed with **8,253 tests passed and 83 existing skips**, including the final source, type checks and unchanged bundle ceilings. The focused update/diagnostics DOM batch passed **16 tests**. All **10 Electron scenarios passed together in 1.9 minutes** on the rebuilt app, covering image send/restart, retained PDF, attachment cleanup/runtime recovery, recent previews, update controls, local health and Quiet Ledger. An earlier run concurrent with another full check exceeded two existing desktop deadlines; the final run used an exclusive verification window and the same deadlines. Native macOS/Windows confirmation remains for CI; no next-run monitoring, merge, release or user-app restart was performed.
+
 ## Screenshots
 
 Screenshots are captured by the scenarios above with synthetic release metadata and disposable local attachments. Versions `1.2.2`/`1.2.3` are fixture candidates, not released versions. The application itself retains its current version.

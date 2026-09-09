@@ -238,9 +238,17 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
         attachment.id, `${attachment.id}.png`);
       expect(createHash("sha256").update(await readFile(path)).digest("hex"))
         .toBe(attachment.digest);
-      await app.page.locator(".sent-attachments").getByRole("button", {
-        name: `Preview attachment ${attachment.name}`,
-      }).click();
+      // The same retained file is also offered in Recent attachments. Verify
+      // both surfaces exist, then exercise the original message's preview.
+      const previewName = `Preview attachment ${attachment.name}`;
+      const messagePreview = app.page.getByRole("list", {
+        name: "Request attachments", exact: true,
+      }).getByRole("button", { name: previewName, exact: true });
+      await expect(messagePreview).toHaveCount(1);
+      await expect(app.page.getByRole("list", {
+        name: "Recent attachments", exact: true,
+      }).getByRole("button", { name: previewName, exact: true })).toHaveCount(1);
+      await messagePreview.click();
       const dialog = app.page.getByRole("dialog", {
         name: attachment.name, exact: true,
       });

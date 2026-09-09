@@ -25,6 +25,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
   const cancelInFlight = useRef(false);
   const releaseInFlight = useRef(false);
   const restoringFocus = useRef(false);
+  const pointerInside = useRef(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,7 +92,12 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
     if (closeTimer.current) clearTimeout(closeTimer.current);
     if (confirmation === null) setOpen(true);
   };
+  const pointerEnter = (): void => {
+    pointerInside.current = true;
+    enter();
+  };
   const leave = (): void => {
+    pointerInside.current = false;
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => {
       if (!popup.current?.contains(document.activeElement) && !trigger.current?.matches(":focus-visible")) setOpen(false);
@@ -141,9 +147,11 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
   };
   const currentVersion = status?.currentVersion;
   const readyToConfirm = status?.state === "downloaded" && status.latestVersion === confirmation;
-  return <div className="sidebar-update-control" onPointerEnter={enter} onPointerLeave={leave}
+  return <div className="sidebar-update-control" onPointerEnter={pointerEnter} onPointerLeave={leave}
     onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
+      // Native focus can return to the document when a download action is
+      // disabled/removed. Hover still owns the panel until the pointer leaves.
+      if (!pointerInside.current && !event.currentTarget.contains(event.relatedTarget as Node | null)) close();
     }} onKeyDown={(event) => {
       if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); close(true); }
     }}>
@@ -151,6 +159,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
       data-update-state={presentation.icon} aria-label={presentation.label} aria-disabled={disabled || undefined}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? popupId : undefined}
       aria-description="Press Arrow Up for update details and more actions."
+      onPointerEnter={pointerEnter}
       onClick={activate} onFocus={(event) => { if (!restoringFocus.current && event.currentTarget.matches(":focus-visible")) enter(); }}
       onContextMenu={(event) => { event.preventDefault(); enter(); }}
       onKeyDown={(event) => {
@@ -165,7 +174,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
     </button>
     <span className="update-status-announcement" role="status" aria-live="polite">{status?.message ?? ""}</span>
     {open && <div ref={popup} id={popupId} popover="manual" className="sidebar-update-details" role="dialog"
-      aria-label="Application update details" onPointerEnter={enter} onPointerLeave={leave}
+      aria-label="Application update details" onPointerEnter={pointerEnter} onPointerLeave={leave}
       onToggle={(event) => { if (event.newState === "closed") close(); }}>
       <header><div><strong>{presentation.label}</strong>
         {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>

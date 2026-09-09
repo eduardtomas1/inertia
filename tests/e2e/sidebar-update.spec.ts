@@ -72,6 +72,10 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
       await popup.getByRole("button", { name: "Cancel download" }).click();
       await expect(button).toHaveAccessibleName("Update download cancelled — retry");
       await button.click(); await expect(button).toHaveAttribute("data-update-state", "downloading");
+      // Native focus loss must not dismiss details still owned by the pointer.
+      // Exercise this explicitly on every OS, not only macOS's focus behavior.
+      await button.focus(); await button.evaluate((node) => node.blur());
+      await expect(popup).toBeVisible();
       await app.electronApp.evaluate(() => (globalThis as FixtureGlobal).sidebarUpdateFixture.failDownload());
       await expect(button).toHaveAttribute("data-update-state", "attention");
       await button.hover(); await expect(popup).toContainText("The update could not be downloaded.");

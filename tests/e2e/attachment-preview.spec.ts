@@ -335,11 +335,14 @@ test("sends a Linux-style pasted PDF as verified agent context", async ({
   // seconds cold-loading the bounded PDF stack. Keep this assertion inside
   // the production initialization deadline instead of racing valid work.
   await expect(acceptedRequest).toBeVisible({ timeout: 30_000 });
-  const retainedDocument = page.getByRole("button", {
+  const messageAttachments = page.getByRole("list", {
+    name: "Message attachments", exact: true,
+  });
+  const retainedDocument = messageAttachments.getByRole("button", {
     name: "Preview attachment linux-send.pdf",
   });
   await expect(retainedDocument).toBeVisible();
-  await expect(page.getByText(
+  await expect(messageAttachments.getByText(
     `PDF document · ${pdfBytes.length} B`,
     { exact: true },
   ))

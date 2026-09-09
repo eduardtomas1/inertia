@@ -92,6 +92,37 @@ describe("real update controller in the sidebar", () => {
     fireEvent.pointerEnter(trigger().parentElement!); fireEvent.pointerDown(editor);
     expect(screen.queryByRole("dialog")).toBeNull(); expect(editor).toHaveFocus();
   });
+  it("keeps hover ownership when native focus leaves a changing download action", async () => {
+    render(<Harness />); publish({ state: "downloading" });
+    const control = trigger().parentElement!;
+    fireEvent.pointerEnter(control);
+    const cancelButton = screen.getByRole("button", { name: "Cancel download" });
+    fireEvent.focus(cancelButton);
+    // On macOS, a pointer action need not move focus to the trigger. A removed
+    // or disabled action can instead blur to the document while still hovered.
+    fireEvent.blur(cancelButton, { relatedTarget: document.body });
+    publish({ state: "failed", message: "The update could not be downloaded." });
+    await act(async () => vi.advanceTimersByTime(200));
+    expect(details()).toHaveTextContent("The update could not be downloaded.");
+    fireEvent.pointerLeave(control);
+    await act(async () => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(nativePreviewSuspended()).toBe(false);
+  });
+  it("cancels the panel leave timer when moving back to its trigger inside the same control", async () => {
+    render(<Harness />); publish();
+    fireEvent.pointerEnter(trigger().parentElement!);
+    const panel = details();
+    fireEvent.pointerEnter(panel);
+    // Both nodes share the wrapper: its pointer-enter event does not fire again.
+    fireEvent.pointerOut(panel, { relatedTarget: trigger() });
+    fireEvent.pointerOver(trigger(), { relatedTarget: panel });
+    await act(async () => vi.advanceTimersByTime(200));
+    expect(details()).toBeInTheDocument();
+    fireEvent.pointerOut(trigger(), { relatedTarget: document.body });
+    await act(async () => vi.advanceTimersByTime(150));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   it("keeps cancel and release notes usable during a pending download; a stale response cannot overwrite cancellation", async () => {
     const request = deferred<AppUpdateStatus>(); download.mockReturnValue(request.promise);
     cancel.mockImplementation(async () => updateStatus({ revision: ++sequence, state: "cancelled" }));

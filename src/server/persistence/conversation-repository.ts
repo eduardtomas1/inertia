@@ -132,7 +132,7 @@ export class ConversationRepository {
     this.context.database.transaction(() => {
       // This timestamp remains a legacy transcript-visit marker. Canonical
       // run attention is changed only by the explicit attention commands.
-      this.context.database.prepare("UPDATE conversations SET last_viewed_at = ? WHERE id = ?")
+      this.context.database.prepare("UPDATE conversations SET last_viewed_at = ?, marked_unread_at = NULL WHERE id = ?")
         .run(now, conversationId);
       this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
         .run(conversation.project_id, conversationId);
@@ -142,6 +142,28 @@ export class ConversationRepository {
   hasMessages(conversationId: string): boolean {
     this.context.requireConversation(conversationId);
     return this.context.database.prepare("SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
+  }
+
+  markUnread(conversationId: string): void {
+    this.context.requireConversation(conversationId);
+    this.context.database.prepare("UPDATE conversations SET marked_unread_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), conversationId);
+  }
+
+  /** Uses the latest user message, locally; never launches a provider turn. */
+  regenerateTitle(conversationId: string): void {
+    const conversation = this.context.requireConversation(conversationId);
+    if (conversation.status === "running" || conversation.status === "needs-input") {
+      throw new Error("Wait for active work to finish before regenerating the title.");
+    }
+    const message = this.context.database.prepare(`
+      SELECT substr(content, 1, 512) AS content FROM messages
+      WHERE conversation_id = ? AND role = 'user'
+      ORDER BY created_at DESC, id DESC LIMIT 1
+    `).get(conversationId) as { content: string } | undefined;
+    const title = message?.content.replace(/\s+/gu, " ").trim().slice(0, 64);
+    if (!title) throw new Error("Send a text message before regenerating this thread's title.");
+    this.update(conversationId, { title });
   }
 
   hasTurns(conversationId: string): boolean {
@@ -276,10 +298,10 @@ export class ConversationRepository {
     }
     const now = new Date().toISOString();
     const settledAt = settled ? now : null;
-    this.context.database.prepare("UPDATE conversations SET settled_at = ?, last_viewed_at = CASE WHEN ? THEN ? ELSE last_viewed_at END, updated_at = ? WHERE id = ?")
-      .run(settledAt, Number(settled), now, now, conversationId);
+    this.context.database.prepare("UPDATE conversations SET settled_at = ?, marked_unread_at = CASE WHEN ? THEN NULL ELSE marked_unread_at END, last_viewed_at = CASE WHEN ? THEN ? ELSE last_viewed_at END, updated_at = ? WHERE id = ?")
+      .run(settledAt, Number(settled), Number(settled), now, now, conversationId);
     this.context.touchProject(current.projectId, now);
-    return { ...current, settledAt, lastViewedAt: settled ? now : current.lastViewedAt, updatedAt: now };
+    return { ...current, settledAt, markedUnreadAt: settled ? null : current.markedUnreadAt, lastViewedAt: settled ? now : current.lastViewedAt, updatedAt: now };
   }
 
   archive(conversationId: string, archived: boolean): void {

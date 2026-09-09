@@ -3,25 +3,36 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
-  ArchiveRestore,
   CheckCircle2,
   Columns2,
   History,
-  MessageSquare,
   Pencil,
   PictureInPicture2,
   Trash2,
   X,
+  Clock,
+  Copy,
+  FolderOpen,
+  Hash,
+  Mail,
+  Pin,
+  RefreshCw,
+  Settings,
 } from "lucide-react";
 import type { Conversation, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import type { SidebarThreadView } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
+import { canOrganizeThread, threadSnoozePresets } from "../../../shared/thread-organization";
+import { ThreadSubmenu } from "./sidebar/ThreadSubmenu";
+import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
 
@@ -59,6 +70,12 @@ function ConversationMenuItem({
 }
 
 interface ConversationActionsMenuProps {
+  anchor?: { x: number; y: number };
+  initialSubmenu?: "snooze";
+  projectPath?: string;
+  onMarkUnread?: () => void;
+  onRegenerateTitle?: () => void;
+  onProjectSettings?: () => void;
   activeConversationId: string | null;
   activity: boolean;
   conversation: Conversation;
@@ -84,6 +101,12 @@ interface ConversationActionsMenuProps {
 }
 
 export function ConversationActionsMenu({
+  anchor,
+  initialSubmenu,
+  projectPath,
+  onMarkUnread,
+  onRegenerateTitle,
+  onProjectSettings,
   activeConversationId,
   activity,
   conversation,
@@ -108,16 +131,31 @@ export function ConversationActionsMenu({
   onStartRename,
 }: ConversationActionsMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [presets] = useState(() => threadSnoozePresets(new Date()));
   const setMenuRef = useCallback((node: HTMLDivElement | null) => {
     menuRef.current = node;
     onSetPopover(node);
   }, [onSetPopover]);
 
   useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const position = (): void => {
+      if (!menu) return;
+      const trigger = document.querySelector<HTMLElement>(`[aria-controls="conversation-actions-${conversation.id}"]`);
+      const bounds = trigger?.getBoundingClientRect();
+      const x = anchor?.x ?? bounds?.right ?? 8;
+      const y = anchor?.y ?? bounds?.bottom ?? 8;
+      menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;
+    };
+    position();
+    window.addEventListener("resize", position);
     menuRef.current
       ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')
       ?.focus({ preventScroll: true });
-  }, []);
+    return () => window.removeEventListener("resize", position);
+  }, [anchor, conversation.id]);
 
   useEffect(() => {
     const dismissAfterFocusLeaves = (event: FocusEvent): void => {
@@ -145,32 +183,57 @@ export function ConversationActionsMenu({
     && activeConversationId !== conversation.id,
   );
   const itemProps = { onDismiss };
+  const copy = async (text: string): Promise<void> => {
+    try {
+      if (!await window.inertia.copyText(text)) throw new Error("Clipboard unavailable");
+      onDismiss("selection");
+    } catch { setCopyError("Could not copy. Please try again."); }
+  };
 
-  return (
+  return createPortal(
     <div
       ref={setMenuRef}
       id={`conversation-actions-${conversation.id}`}
-      className="conversation-menu"
+      className="conversation-menu thread-actions-popover"
       role="menu"
       aria-label={`Thread actions for ${conversation.title}`}
       data-work-focus-owner={activity
         ? `thread-actions:${conversation.id}`
         : undefined}
-      onKeyDown={navigateMenuItems}
+      onKeyDown={(event) => navigateMenuItems(event, ':scope > button:not(:disabled), :scope > .thread-submenu-owner > button:not(:disabled)')}
     >
-      <ConversationMenuItem
-        {...itemProps}
-        restoreFocus={false}
-        onActivate={onStartRename}
-      >
-        <Pencil size={13} />Rename
-      </ConversationMenuItem>
       <ConversationMenuItem
         {...itemProps}
         onActivate={() => onPinConversation(conversation, !conversation.pinnedAt)}
       >
-        <MessageSquare size={13} />{conversation.pinnedAt ? "Unpin" : "Pin"}
+        <Pin size={13} />{conversation.pinnedAt ? "Unpin thread" : "Pin thread"}
       </ConversationMenuItem>
+      <ConversationMenuItem
+        {...itemProps}
+        disabled={!canSettle}
+        onActivate={() => conversation.settledAt ? onRestoreConversation(conversation) : onSettleConversation(conversation)}
+      >
+        <CheckCircle2 size={13} />{conversation.settledAt ? "Reopen thread" : "Settle thread"}
+      </ConversationMenuItem>
+      <ThreadSubmenu label="Snooze" icon={<Clock size={13} />} disabled={!canOrganizeThread(conversation, runs)} initiallyOpen={initialSubmenu === "snooze"}>
+        {conversation.snoozedUntil && <ConversationMenuItem {...itemProps} onActivate={() => onSnoozeConversation(conversation, null)}><History size={13} />Unsnooze</ConversationMenuItem>}
+        {presets.map((preset) => <ConversationMenuItem {...itemProps} key={preset.id} onActivate={() => {
+          const current = threadSnoozePresets(new Date()).find(({ id }) => id === preset.id);
+          if (current) onSnoozeConversation(conversation, current.until);
+        }}>{preset.label}</ConversationMenuItem>)}
+      </ThreadSubmenu>
+      <div role="separator" />
+      <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={13} />Rename thread</ConversationMenuItem>
+      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} title="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={13} />Regenerate title</ConversationMenuItem>}
+      {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={13} />Mark unread</ConversationMenuItem>}
+      <div role="separator" />
+      <ThreadSubmenu label="Copy" icon={<Copy size={13} />}>
+        <button type="button" role="menuitem" tabIndex={-1} disabled={!conversation.worktreePath && !projectPath} onClick={() => void copy(conversation.worktreePath ?? projectPath ?? "")}><FolderOpen size={13} />Path</button>
+        <button type="button" role="menuitem" tabIndex={-1} onClick={() => void copy(conversation.id)}><Hash size={13} />Thread ID</button>
+      </ThreadSubmenu>
+      {copyError && <p className="thread-menu-error" role="alert">{copyError}</p>}
+      {onProjectSettings && <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onProjectSettings}><Settings size={13} />Project settings</ConversationMenuItem>}
+      <div role="separator" />
       {onOpenConversationInWindow && (
         <ConversationMenuItem
           {...itemProps}
@@ -183,35 +246,6 @@ export function ConversationActionsMenu({
           <PictureInPicture2 size={13} />
           {isDetached ? "Focus chat window" : "Open chat in new window"}
         </ConversationMenuItem>
-      )}
-      {conversation.snoozedUntil && Date.parse(conversation.snoozedUntil) > Date.now() ? (
-        <ConversationMenuItem
-          {...itemProps}
-          onActivate={() => onSnoozeConversation(conversation, null)}
-        >
-          <History size={13} />Unsnooze
-        </ConversationMenuItem>
-      ) : (
-        <>
-          <ConversationMenuItem
-            {...itemProps}
-            onActivate={() => onSnoozeConversation(
-              conversation,
-              new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
-            )}
-          >
-            <History size={13} />Snooze for 1 hour
-          </ConversationMenuItem>
-          <ConversationMenuItem
-            {...itemProps}
-            onActivate={() => onSnoozeConversation(
-              conversation,
-              new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString(),
-            )}
-          >
-            <History size={13} />Snooze for 1 day
-          </ConversationMenuItem>
-        </>
       )}
       {splitConversationId === conversation.id ? (
         <ConversationMenuItem
@@ -250,35 +284,21 @@ export function ConversationActionsMenu({
           <X size={13} />Dismiss from Work
         </ConversationMenuItem>
       )}
-      {conversation.settledAt ? (
-        <ConversationMenuItem
-          {...itemProps}
-          onActivate={() => onRestoreConversation(conversation)}
-        >
-          <ArchiveRestore size={13} />Reopen
-        </ConversationMenuItem>
-      ) : canSettle ? (
-        <ConversationMenuItem
-          {...itemProps}
-          onActivate={() => onSettleConversation(conversation)}
-        >
-          <CheckCircle2 size={13} />Done
-        </ConversationMenuItem>
-      ) : null}
+      <div role="separator" />
       <ConversationMenuItem
         {...itemProps}
-        disabled={hasActiveWork || isDetached}
+        disabled={!canSettle || isDetached}
         title={isDetached
           ? "Return this chat to the main window before archiving it."
           : undefined}
         onActivate={() => onArchiveConversation(conversation)}
       >
-        <Archive size={13} />Archive
+        <Archive size={13} />Archive thread
       </ConversationMenuItem>
       <ConversationMenuItem
         {...itemProps}
         className="is-danger"
-        disabled={hasActiveWork || isDetached}
+        disabled={!canSettle || isDetached}
         title={isDetached
           ? "Return this chat to the main window before deleting it."
           : undefined}
@@ -286,6 +306,6 @@ export function ConversationActionsMenu({
       >
         <Trash2 size={13} />Delete
       </ConversationMenuItem>
-    </div>
+    </div>, document.body,
   );
 }

@@ -162,6 +162,9 @@ export interface ProviderInfo {
 export interface AppSettings {
   theme: ThemePreference;
   colorTheme: ColorThemeId;
+  /** Legacy snapshots fall back to colorTheme for both appearances. */
+  lightColorTheme?: ColorThemeId;
+  darkColorTheme?: ColorThemeId;
   compactSidebar: boolean;
   showTimestamps: boolean;
   terminalFontSize: number;
@@ -198,6 +201,8 @@ export interface AppSettings {
 }
 
 export interface Project {
+  /** Optional only for snapshots created before project defaults shipped. */
+  preferences?: import("../project-preferences").ProjectPreferences;
   id: string;
   name: string;
   path: string;
@@ -236,6 +241,8 @@ export interface Conversation {
   settledAt: string | null;
   completedAt: string | null;
   lastViewedAt: string | null;
+  /** Explicit reminder, independent of provider completion or run attention. */
+  markedUnreadAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */
   pinnedAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */

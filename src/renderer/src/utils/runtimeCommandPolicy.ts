@@ -181,6 +181,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "project.remove": shortMutation,
   "project.select": shortMutation,
   "project.update": shortMutation,
+  "conversation.mark-unread": shortMutation,
+  "conversation.regenerate-title": shortMutation,
   "prompt-preset.create": shortMutation,
   "prompt-preset.delete": shortMutation,
   "prompt-preset.duplicate": shortMutation,

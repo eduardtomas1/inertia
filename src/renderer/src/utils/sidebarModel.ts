@@ -177,7 +177,7 @@ function sidebarThreadViewForRun(
     status,
     needsAttention: runAttention?.needsAttention
       ?? (status === "approval" || status === "input" || status === "failed"),
-    unread: runAttention?.unread ?? hasUnreadCompletion(conversation, activeConversationId),
+    unread: Boolean(conversation.markedUnreadAt) || (runAttention?.unread ?? hasUnreadCompletion(conversation, activeConversationId)),
     hidden: runAttention?.bucket === "hidden",
     settled: conversation.settledAt !== null,
   };

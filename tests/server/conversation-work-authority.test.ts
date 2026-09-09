@@ -14,6 +14,21 @@ afterEach(async () => {
 });
 
 describe("conversation work authority", () => {
+  it("excludes nested work and symlink aliases during an automatic checkout mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-work-exclusive-")); temporaryDirectories.push(root);
+    const nested = join(root, "app"); await mkdir(nested);
+    const alias = join(root, "alias"); await symlink(nested, alias, process.platform === "win32" ? "junction" : "dir");
+    const authority = new ConversationWorkAuthority(() => ({ projectId: "nested", checkoutPath: alias }));
+    expect(authority.reserve("turn")).toBe(true);
+    expect(authority.reserveExclusiveCheckout("background", "root", root)).toBe(false);
+    authority.release("turn");
+    expect(authority.reserveExclusiveCheckout("background", "root", root)).toBe(true);
+    expect(authority.hasExclusiveCheckout(alias)).toBe(true);
+    expect(authority.reserve("turn")).toBe(false);
+    expect(authority.reserveCheckout("action", "nested", nested)).toBe(false);
+    authority.release("background");
+    expect(authority.reserve("turn")).toBe(true);
+  });
   it("serializes conversations that resolve to the same canonical checkout", async () => {
     const root = await mkdtemp(join(tmpdir(), "inertia-work-authority-"));
     temporaryDirectories.push(root);

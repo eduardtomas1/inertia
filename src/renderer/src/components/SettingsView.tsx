@@ -60,6 +60,7 @@ import {
   loadCanaryRollbackSetting,
   loadDiscordSettings,
   loadDiagnosticsSettings,
+  loadProjectSettings,
   loadIssueReportSettings,
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
@@ -73,7 +74,8 @@ import "./SettingsView.css";
 export type SettingsViewProps = {
   onReportCommand?: IssueReportSettingsProps["request"];
   target?: {
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics";
+    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    projectId?: string;
     profileId?: string;
     selection?: import("../utils/diagnosticNavigation").DiagnosticSelection;
   } | null;
@@ -131,6 +133,7 @@ export type SettingsViewProps = {
 type SettingsSection =
   | "support"
   | "general"
+  | "projects"
   | "providers"
   | "backends"
   | "connections"
@@ -142,6 +145,7 @@ type SettingsSection =
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
+  { id: "projects", label: "Projects", icon: FolderOpen },
   { id: "providers", label: "Providers", icon: Bot },
   { id: "backends", label: "Model backends", icon: ServerCog },
   { id: "connections", label: "Connections & devices", icon: Laptop },
@@ -261,6 +265,7 @@ export function SettingsView({
   );
   const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, section === "support");
   const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, section === "diagnostics");
+  const ProjectSettings = useLoadedSurface(loadProjectSettings, section === "projects");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -563,6 +568,13 @@ export function SettingsView({
         <h2 className="visually-hidden">
           {sections.find((item) => item.id === section)?.label ?? "Settings"}
         </h2>
+        {section === "projects" && (ProjectSettings
+          ? <ProjectSettings key={target?.section === "projects" ? target.projectId ?? "all" : "all"}
+              initialProjectId={target?.section === "projects" ? target.projectId : undefined}
+              projects={projects} conversations={conversations} providers={providers} settings={settings}
+              backendDefaults={backendDefaults} backendProfiles={backendProfiles}
+              disabled={disabled} request={onReportCommand} onUpdateSettings={onUpdate} />
+          : <SettingsSectionFallback />)}
         {section === "general" && (
           <div className="settings-toolbar">
             <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
+import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -1305,6 +1306,7 @@ describe("database backup and startup recovery", () => {
       backup.filename,
     );
     const released = new Database(backupPath);
+    removeProjectSettingsFromLegacyFixture(released);
     released.exec(`
       DROP TRIGGER conversation_context_packets_discard_source_drafts;
       DROP TABLE agent_context_requests;
@@ -1464,6 +1466,7 @@ describe("database backup and startup recovery", () => {
       backup.filename,
     );
     const schema55 = new Database(backupPath);
+    removeProjectSettingsFromLegacyFixture(schema55);
     schema55.prepare(`
       UPDATE messages
       SET attachments_json = ?
@@ -1543,6 +1546,7 @@ describe("database backup and startup recovery", () => {
     const paths = databaseRecoveryPaths(databasePath);
     for (const backup of [older, newer]) {
       const schema56 = new Database(join(paths.backupsDirectory, backup.filename));
+      removeProjectSettingsFromLegacyFixture(schema56);
       schema56.exec(`
         DROP TRIGGER conversation_context_packets_discard_source_drafts;
         DROP TABLE agent_context_requests;

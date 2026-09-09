@@ -73,10 +73,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const primaryTitle = "conversation-split fixture";
   const secondaryTitle = "conversation-split companion";
 
-  await sidebar.getByRole("button", {
-    name: `Thread actions for ${secondaryTitle}`,
-  }).click();
-  await sidebar.getByRole("menuitem", {
+  await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
 

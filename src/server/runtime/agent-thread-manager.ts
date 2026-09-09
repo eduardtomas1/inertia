@@ -428,6 +428,9 @@ export class AgentThreadManager {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
+        if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
+          return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");
+        }
         return await this.agentBrowser.invoke(current, call, {
           conversationId: current.id,
           runId: source.turn.runId,

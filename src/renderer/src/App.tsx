@@ -110,7 +110,8 @@ export default function App(): React.JSX.Element {
   );
   const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics";
+    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    projectId?: string;
     profileId?: string;
     selection?: DiagnosticSelection;
   } | null>(null);
@@ -142,10 +143,12 @@ export default function App(): React.JSX.Element {
       theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
       colorTheme: cachedColorTheme(window.localStorage)
         ?? defaultSettings.colorTheme,
+      lightColorTheme: cachedColorTheme(window.localStorage, "light") ?? defaultSettings.colorTheme,
+      darkColorTheme: cachedColorTheme(window.localStorage, "dark") ?? defaultSettings.colorTheme,
     },
     [connection.snapshot?.settings],
   );
-  useTheme(settings.theme, settings.colorTheme);
+  useTheme(settings.theme, settings.colorTheme, settings.lightColorTheme, settings.darkColorTheme);
   useEffect(() => {
     if (detachedChats.conversationIds.size === 0) return;
     setSuppressedMainConversationIds((current) => {
@@ -170,7 +173,9 @@ export default function App(): React.JSX.Element {
     const colorTheme = connection.snapshot?.settings.colorTheme;
     if (!colorTheme) return;
     cacheColorTheme(window.localStorage, colorTheme);
-  }, [connection.snapshot?.settings.colorTheme]);
+    cacheColorTheme(window.localStorage, connection.snapshot?.settings.lightColorTheme ?? colorTheme, "light");
+    cacheColorTheme(window.localStorage, connection.snapshot?.settings.darkColorTheme ?? colorTheme, "dark");
+  }, [connection.snapshot?.settings.colorTheme, connection.snapshot?.settings.lightColorTheme, connection.snapshot?.settings.darkColorTheme]);
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
@@ -743,7 +748,7 @@ export default function App(): React.JSX.Element {
       type: "conversation.create",
       payload: {
         ...withNewConversationModelSelection(
-          buildNewConversationPayload(project.id, settings),
+          buildNewConversationPayload(project, settings),
           selection,
         ),
         ...options?.configuration,
@@ -843,6 +848,10 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
   const openConnectionsSettings = useCallback(() => {
     setSettingsTarget({ section: "connections" });
+    navigateToView("settings");
+  }, [navigateToView]);
+  const openProjectSettings = useCallback((projectId: string) => {
+    setSettingsTarget({ section: "projects", projectId });
     navigateToView("settings");
   }, [navigateToView]);
 
@@ -1189,6 +1198,7 @@ export default function App(): React.JSX.Element {
         openProviderSetup,
         openBackendSetup,
         openConnectionsSettings,
+        openProjectSettings,
         createConversation,
         updateSettings,
         openProjectPath,

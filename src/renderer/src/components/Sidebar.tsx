@@ -12,6 +12,8 @@ import {
   ArrowLeft,
   BarChart3,
   CheckCircle2,
+  Check,
+  Clock,
   ChevronDown,
   ChevronRight,
   CircleDot,
@@ -23,7 +25,6 @@ import {
   Layers3,
   MessageCircleQuestion,
   Minus,
-  MoreHorizontal,
   Pencil,
   Search,
   Settings,
@@ -35,6 +36,9 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
+import { canOrganizeThread } from "../../../shared/thread-organization";
+import { useThreadPreview } from "./sidebar/useThreadPreview";
+import { ProjectIcon } from "./ProjectIcon";
 import { formatRelativeTime, formatWorkAge } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
@@ -59,7 +63,9 @@ import {
 } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
-import { ConversationActionsMenu } from "./ConversationActionsMenu";
+import { loadThreadActions } from "./sidebar/threadActionLoader";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
@@ -148,6 +154,9 @@ function SidebarView({
   onOpenDailyWork,
   dailyWorkOpen,
   onRenameConversation,
+  onMarkConversationUnread,
+  onRegenerateConversationTitle,
+  onOpenProjectSettings,
   onPinConversation,
   onSnoozeConversation,
   onArchiveConversation,
@@ -174,6 +183,9 @@ function SidebarView({
   } = useDismissibleMenu<string>();
   const projectMenu = menu?.[0] === ":" ? menu.slice(1) : null;
   const conversationMenu = projectMenu ? null : menu;
+  const ConversationActionsMenu = useLoadedSurface(loadThreadActions, conversationMenu !== null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | undefined>();
+  const [initialSubmenu, setInitialSubmenu] = useState<"snooze" | undefined>();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
@@ -189,6 +201,7 @@ function SidebarView({
     } catch { return new Set(); }
   });
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
+  const preview = useThreadPreview(conversations, snapshot?.projects ?? [], Boolean(menu));
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
   const navigationRef = useRef<HTMLDivElement>(null);
@@ -233,7 +246,8 @@ function SidebarView({
       const focusOwner = target instanceof Element
         ? target.closest("[data-work-focus-id], [data-work-focus-owner]")
         : null;
-      if (focusOwner && sidebarRef.current?.contains(focusOwner)) return;
+      if (focusOwner && (sidebarRef.current?.contains(focusOwner)
+        || (focusOwner instanceof HTMLElement && focusOwner.dataset.workFocusOwner?.startsWith("thread-actions:")))) return;
       workFocusIdentityRef.current = null;
       workFocusIndexRef.current = null;
       workFocusConversationIdsRef.current = [];
@@ -409,7 +423,6 @@ function SidebarView({
     const focusedConversationIds = focusedConversationId
       ? [focusedConversationId]
       : workFocusConversationIdsRef.current;
-    const wantsThreadAction = identity.startsWith("thread-actions:");
     const destinationThreadIdentity = focusedConversationIds
       .map((conversationId) => `thread:${conversationId}` as const)
       .find((candidate) => workIndexByIdentity.has(candidate));
@@ -424,18 +437,16 @@ function SidebarView({
       && !expandedWorkSections.has(destinationSection.id)
       ? destinationSection
       : undefined;
-    const currentItemIdentity = wantsThreadAction
+    const currentItemIdentity = identity.startsWith("thread-actions:")
       ? `thread:${identity.slice("thread-actions:".length)}`
       : identity;
     const fallbackIdentity = previousIndex === null
       ? undefined
       : workFocusOrder[Math.min(previousIndex, workFocusOrder.length - 1)];
     const targetIdentity = workIndexByIdentity.has(currentItemIdentity)
-      ? identity
+      ? currentItemIdentity
       : destinationThreadIdentity
-        ? wantsThreadAction
-          ? `thread-actions:${destinationThreadIdentity.slice("thread:".length)}`
-          : destinationThreadIdentity
+        ? destinationThreadIdentity
         : collapsedDestinationSection
           ? `section:${collapsedDestinationSection.id}`
           : fallbackIdentity;
@@ -486,10 +497,7 @@ function SidebarView({
       || eventTarget?.isContentEditable
     ) return;
     const focusOwner = eventTarget?.closest<HTMLElement>("[data-work-focus-id]");
-    const rawIdentity = focusOwner?.dataset.workFocusId;
-    const identity = rawIdentity?.startsWith("thread-actions:")
-      ? `thread:${rawIdentity.slice("thread-actions:".length)}`
-      : rawIdentity;
+    const identity = focusOwner?.dataset.workFocusId;
     const currentIndex = identity
       ? workNavigationOrder.indexOf(identity)
       : -1;
@@ -525,6 +533,7 @@ function SidebarView({
     >
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={13} />New chat in {project.name}</button>
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
+      {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={13} />Project settings</button>}
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
       <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
       <button
@@ -598,10 +607,18 @@ function SidebarView({
   );
 
   const conversationActions = (conversation: Conversation) => {
+    if (!ConversationActionsMenu) return null;
     const thread = threadViewsById.get(conversation.id)
       ?? sidebarThreadView(conversation, snapshot?.activeConversationId ?? null);
     return (
       <ConversationActionsMenu
+        anchor={menuAnchor}
+        initialSubmenu={initialSubmenu}
+        projectPath={projectById.get(conversation.projectId)?.path}
+        onMarkUnread={onMarkConversationUnread ? () => onMarkConversationUnread(conversation) : undefined}
+        onRegenerateTitle={onRegenerateConversationTitle ? () => onRegenerateConversationTitle(conversation) : undefined}
+        onProjectSettings={onOpenProjectSettings && projectById.has(conversation.projectId)
+          ? () => onOpenProjectSettings(projectById.get(conversation.projectId)!) : undefined}
         activeConversationId={snapshot?.activeConversationId ?? null}
         activity
         conversation={conversation}
@@ -672,6 +689,7 @@ function SidebarView({
     const repositoryLabel = workRepositoryLabel(project);
     const WorkStatusIcon = workStatusIcons[model.status];
     const isDetached = detachedConversationIds.has(conversation.id);
+    const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const accessibleContext = [
       conversation.title,
       providerLabel,
@@ -685,7 +703,7 @@ function SidebarView({
       conversation.pinnedAt ? "Pinned" : null,
       isDetached ? "Open in a separate chat window" : null,
       splitConversationId === conversation.id ? "Open in split view" : null,
-      model.unread ? "New completion" : null,
+      model.unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
@@ -696,25 +714,52 @@ function SidebarView({
           isDetached && "is-detached",
           splitConversationId === conversation.id && "is-split",
           model.unread && "is-unread",
+          conversationMenu === conversation.id && "has-open-menu",
+          canOrganize && "has-thread-inline-actions",
         )}
         role="listitem"
         aria-posinset={position}
         aria-setsize={visibleWorkConversationIds.size}
         data-sidebar-motion-id={`thread:${conversation.id}`}
         data-work-section={sectionId}
+        onContextMenu={(event) => {
+          if ((event.target as HTMLElement).closest("input")) return;
+          event.preventDefault(); preview.close();
+          setMenuAnchor({ x: event.clientX, y: event.clientY });
+          setInitialSubmenu(undefined);
+          if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
+        }}
       >
         {renaming === conversation.id ? renameForm(conversation) : (
           <button
             type="button"
+            ref={(node) => setMenuTrigger(conversation.id, node)}
             className="activity-thread-select"
             data-sidebar-nav
             data-work-focus-id={`thread:${conversation.id}`}
             aria-current={isActive ? "page" : undefined}
             aria-label={accessibleContext}
+            aria-description="Right-click or press Shift+F10 for thread actions."
+            aria-haspopup="menu"
+            aria-expanded={conversationMenu === conversation.id}
+            aria-controls={conversationMenu === conversation.id ? `conversation-actions-${conversation.id}` : undefined}
+            aria-describedby={preview.conversationId === conversation.id ? preview.describedId : undefined}
+            onPointerEnter={(event) => preview.enter(conversation.id, event.currentTarget)}
+            onPointerLeave={preview.leave}
+            onFocus={(event) => preview.enter(conversation.id, event.currentTarget)}
+            onBlur={preview.leave}
+            onKeyDown={(event) => {
+              if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+              event.preventDefault(); event.stopPropagation(); preview.close();
+              const bounds = event.currentTarget.getBoundingClientRect();
+              setMenuAnchor({ x: bounds.right, y: bounds.top });
+              setInitialSubmenu(undefined);
+              if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
+            }}
             onClick={() => activateConversation(conversation)}
           >
             <span className="activity-thread-projectline">
-              <FolderGit2 size={15} className="activity-project-icon" style={{ color: project?.color }} aria-hidden="true" />
+              {project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
               <span className="activity-thread-project-meta" title={project?.path}>{projectLabel}</span>
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationId === conversation.id} />
               <span className="activity-thread-trailing" aria-hidden="true">
@@ -731,22 +776,20 @@ function SidebarView({
             </span>
           </button>
         )}
-        <IconButton
-          ref={(node) => setMenuTrigger(conversation.id, node)}
-          label={`Thread actions for ${conversation.title}`}
-          className="activity-thread-menu-button"
-          data-work-focus-id={`thread-actions:${conversation.id}`}
-          aria-haspopup="menu"
-          aria-expanded={conversationMenu === conversation.id}
-          aria-controls={conversationMenu === conversation.id
-            ? `conversation-actions-${conversation.id}`
-            : undefined}
-          onClick={() => {
-            toggleMenu(conversation.id);
-          }}
-        >
-          <MoreHorizontal size={13} />
-        </IconButton>
+        {canOrganize && <div className="thread-inline-actions">
+            <button type="button" aria-label={`Snooze ${conversation.title}`} title="Snooze thread"
+              onClick={(event) => {
+                preview.close(); setInitialSubmenu("snooze");
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setMenuAnchor({ x: bounds.right, y: bounds.bottom });
+                if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
+              }}><Clock size={13} /></button>
+            <button type="button" aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
+              title={conversation.settledAt ? "Reopen thread" : "Settle thread"}
+              onClick={() => { preview.close(); if (conversation.settledAt) onRestoreConversation(conversation); else onSettleConversation(conversation); }}>
+              <Check size={13} />{conversation.settledAt ? "Reopen" : "Settle"}
+            </button>
+        </div>}
         {conversationMenu === conversation.id && conversationActions(conversation)}
       </div>
     );
@@ -856,6 +899,7 @@ function SidebarView({
         }}
       >
         <div className="sidebar-brand drag-region">
+          {preview.preview}
           <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>

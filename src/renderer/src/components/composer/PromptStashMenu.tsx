@@ -87,7 +87,7 @@ export function PromptStashMenu({
             <Archive size={14} />
             <span>
               <strong>{COMPOSER_LABELS.saveScratchPrompt}</strong>
-              <small>{blockedReason ?? "Text and route only"}</small>
+              <small>{blockedReason ?? "Text and route · this chat only"}</small>
             </span>
           </button>
           {entries.length === 0 ? (

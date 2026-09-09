@@ -84,6 +84,12 @@ export class ConversationCreationService {
     payload: ConversationCreatePayload,
     requestId: string,
   ): Promise<Conversation> {
+    if (payload.useWorktree === undefined && !payload.worktreePath && !payload.branch) {
+      const preference = this.dependencies.store.project(payload.projectId).preferences?.workspace;
+      if (preference !== undefined && preference !== null) {
+        payload = { ...payload, useWorktree: preference === "worktree" };
+      }
+    }
     const { providerId, selection } = this.canonicalSelection(payload);
     const repositoryPath = this.dependencies.store.projectPath(payload.projectId);
     if (payload.useWorktree && payload.worktreePath) {

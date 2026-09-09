@@ -14,6 +14,7 @@ import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
+import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema";
@@ -154,7 +155,8 @@ function project(value: unknown): boolean {
     && nullableStringField(value, "repositoryRoot")
     && (value.groupingMode === null
       || oneOf(value, "groupingMode", PROJECT_GROUPING))
-    && integerFieldAtLeast(value, "gitRepositoryLimit", 1);
+    && integerFieldAtLeast(value, "gitRepositoryLimit", 1)
+    && (value.preferences === undefined || projectPreferencesSchema.safeParse(value.preferences).success);
 }
 
 function latestTurn(value: unknown): boolean {
@@ -213,8 +215,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "settledAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
-    && (value.pinnedAt === undefined || nullableStringField(value, "pinnedAt"))
-    && (value.snoozedUntil === undefined || nullableStringField(value, "snoozedUntil"));
+    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key));
 }
 
 function conversationShell(value: unknown): boolean {
@@ -338,6 +339,8 @@ function appSettings(value: unknown): boolean {
     "confirmDestructiveActions", "desktopNotifications",
   ];
   return strings.every((key) => stringField(value, key))
+    && (value.lightColorTheme === undefined || oneOf(value, "lightColorTheme", COLOR_THEME_IDS))
+    && (value.darkColorTheme === undefined || oneOf(value, "darkColorTheme", COLOR_THEME_IDS))
     && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))
     && booleans.every((key) => booleanField(value, key))
     && integerField(value, "terminalFontSize")

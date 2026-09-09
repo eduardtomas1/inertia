@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import {
   ConversationContextRequestCoordinator,
@@ -212,6 +213,21 @@ afterEach(async () => {
 });
 
 describe("AgentThreadManager", () => {
+  it("blocks browser calls by original project policy for every provider without invoking the browser", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      for (const harnessId of ["codex-app-server", "claude-agent-sdk", "cursor-acp", "gemini-acp", "kimi-acp", "opencode-sdk"] as const) {
+        const bridge = manager.bridgeFor({ conversation: source, turn: { ...sourceTurn, harnessId } });
+        const result = await bridge!.invoke(call("inertia_browser_snapshot", {}));
+        expect(result.success).toBe(false);
+        expect(result.text).toContain("browser_disabled");
+      }
+      expect(browser.perform).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
   it("exposes the same real host bridge to every audited provider harness", async () => {
     const browser = { perform: vi.fn() };
     const { manager, source, sourceTurn, store } = await runtime(browser);

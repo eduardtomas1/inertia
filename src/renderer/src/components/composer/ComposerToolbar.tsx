@@ -489,7 +489,7 @@ export function ComposerToolbar({
                 role="menu"
                 aria-label="Project actions"
               >
-                <div className="popover-title">Package scripts</div>
+                <div className="popover-title">Project actions</div>
                 {actions.map((action) => (
                   <button
                     type="button"

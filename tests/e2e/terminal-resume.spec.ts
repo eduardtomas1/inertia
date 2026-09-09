@@ -134,10 +134,8 @@ test("resumes the selected provider session only in its owning split pane", asyn
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", {
-    name: `Thread actions for ${secondaryTitle}`,
-  }).click();
-  await sidebar.getByRole("menuitem", {
+  await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
 

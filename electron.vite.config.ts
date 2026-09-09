@@ -171,7 +171,7 @@ export default defineConfig({
             // names reduce repeated import/preload metadata without changing code.
             const budgetedChunks = new Set([
               "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
-              "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
+              "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "ProjectSettings", "ConversationActionsMenu", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "AppUpdateNotice", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",

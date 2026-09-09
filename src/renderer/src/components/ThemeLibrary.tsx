@@ -71,7 +71,7 @@ export function ThemeLibrary({
   disabled,
   onUpdate,
 }: {
-  settings: Pick<AppSettings, "theme" | "colorTheme">;
+  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme">;
   disabled: boolean;
   onUpdate: (settings: Partial<AppSettings>) => void;
 }): React.JSX.Element {
@@ -118,29 +118,38 @@ export function ThemeLibrary({
 
       <div className="theme-library-heading">
         <h4>Theme library</h4>
-        <p>Every family includes a tuned light and dark palette.</p>
+        <p>Choose a circle for one appearance, or a card to use its theme for both.</p>
       </div>
       <div
         className="color-theme-options"
-        role="radiogroup"
+        role="group"
         aria-label="Color theme"
       >
         {COLOR_THEME_OPTIONS.map((option) => {
-          const active = settings.colorTheme === option.id;
+          const lightActive = (settings.lightColorTheme ?? settings.colorTheme) === option.id;
+          const darkActive = (settings.darkColorTheme ?? settings.colorTheme) === option.id;
+          const active = lightActive && darkActive;
           return (
-            <button
-              type="button"
-              role="radio"
-              aria-label={`${option.label} theme`}
-              aria-checked={active}
+            <div
               className={clsx("color-theme-option", active && "is-active")}
-              disabled={disabled}
               key={option.id}
-              onClick={() => selectColorTheme(option.id)}
             >
+              <button type="button" className="color-theme-apply-both" disabled={disabled}
+                aria-label={`${option.label} theme`} aria-pressed={active}
+                title={`Use ${option.label} for both light and dark`}
+                onClick={() => selectColorTheme(option.id)} />
               <span className="color-theme-preview-pair">
-                <ColorThemeSwatch mode="light" colorTheme={option.id} />
-                <ColorThemeSwatch mode="dark" colorTheme={option.id} />
+                {(["light", "dark"] as const).map((mode) => {
+                  const selected = mode === "light" ? lightActive : darkActive;
+                  return <button type="button" key={mode} disabled={disabled}
+                    className={clsx("color-theme-mode-button", selected && "is-selected")}
+                    aria-label={`Use ${option.label} for ${mode}`} aria-pressed={selected}
+                    title={`Use ${option.label} for ${mode} only`}
+                    onClick={() => onUpdate(mode === "light" ? { lightColorTheme: option.id } : { darkColorTheme: option.id })}>
+                    <ColorThemeSwatch mode={mode} colorTheme={option.id} />
+                    {selected && <span className="color-theme-mode-badge" aria-hidden="true"><span className={`appearance-mode-icon is-${mode}`} /></span>}
+                  </button>;
+                })}
               </span>
               <span className="color-theme-option-copy">
                 <strong>{option.label}</strong>
@@ -149,7 +158,7 @@ export function ThemeLibrary({
               {active && (
                 <span className="color-theme-selected" aria-hidden="true" />
               )}
-            </button>
+            </div>
           );
         })}
       </div>

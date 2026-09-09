@@ -27,6 +27,8 @@ import { conversationContextPacketsMigration } from "./conversation-context-pack
 import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
 import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import { issueReportsMigration } from "./issue-reports"; import { contextCompactionMigration } from "./context-compaction";
+import { projectPreferencesMigration } from "./project-preferences";
+import { appearanceThemePairMigration } from "./appearance-theme-pair";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -1232,6 +1234,8 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
         up: "CREATE INDEX messages_created_id_idx ON messages(created_at DESC, id DESC);",
       },
       contextCompactionMigration,
+      projectPreferencesMigration,
+      appearanceThemePairMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

@@ -244,7 +244,10 @@ export function createProjectWorkspaceCommandHandler(
         }
       }
       case "project.update": {
-        const { projectId, ...update } = command.payload;
+        const { projectId, expectedUpdatedAt, ...update } = command.payload;
+        if (expectedUpdatedAt !== undefined && dependencies.store.project(projectId).updatedAt !== expectedUpdatedAt) {
+          throw new RuntimeRequestError("This project changed in another view. Review the current settings and try again.");
+        }
         dependencies.store.updateProject(projectId, update);
         return "mutation";
       }
@@ -406,6 +409,7 @@ export function createProjectWorkspaceCommandHandler(
             command.payload.projectId,
             command.payload.conversationId,
           ),
+          command.payload.projectId,
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -483,6 +487,9 @@ export function createProjectWorkspaceCommandHandler(
           command.payload.projectId,
           command.payload.conversationId,
         );
+        if (dependencies.store.conversationWork.hasExclusiveCheckout(cwd)) {
+          throw new RuntimeRequestError("This checkout is finishing an automatic Git update. Try opening the terminal again shortly.");
+        }
         const terminalId = dependencies.terminals.create(
           socket,
           cwd,

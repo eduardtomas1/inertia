@@ -5,6 +5,7 @@ import type { Project } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { trapModalFocus } from "../utils/modalFocus";
 import { IconButton } from "./ui";
+import { ProjectIcon } from "./ProjectIcon";
 import "./ProjectSearchDialog.css";
 
 export function ProjectSearchDialog({ projects, selectedId, includeAll = false, label, trigger, onClose, onSelect, onManage }: {
@@ -109,7 +110,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
                   aria-describedby={project.path ? `${id}-${index}-path` : undefined}
                   aria-selected={project.id === selectedId} className={index === activeIndex ? "is-active" : undefined}
                   onPointerMove={() => setActiveId(project.id)} onClick={() => choose(project.id)}>
-                  <Folder size={15} aria-hidden="true" />
+                  {"color" in project ? <ProjectIcon project={project} size={15} /> : <Folder size={15} aria-hidden="true" />}
                   <span><strong>{project.name}</strong>{project.path && <small id={`${id}-${index}-path`}>{project.path}</small>}</span>
                   {project.id === selectedId && <Check size={13} aria-hidden="true" />}
                 </button>

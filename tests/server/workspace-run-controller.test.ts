@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GitError } from "../../src/server/git/types";
 import { RuntimeStore } from "../../src/server/database";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import {
   WorkspaceRunController,
   providerDisplayName,
@@ -148,6 +149,44 @@ afterEach(async () => {
 });
 
 describe("workspace run controller", () => {
+  it.each([false, true])("executes a saved action literally and retains correct ownership when early exit is %s", async (earlyExit) => {
+    const runtime = await fixture();
+    try {
+      const action = { id: "44444444-4444-4444-8444-444444444444", name: "Review build", executable: process.execPath,
+        args: ["--version", "literal $(not-a-command) & value"] };
+      runtime.store.updateProject(runtime.project.id, { preferences: { ...defaultProjectPreferences(), actions: [action] } });
+      const replaceProcess = vi.fn<NonNullable<WorkspaceActionTerminalManager<object>["replaceProcess"]>>(
+        async (owner, id, cwd, _executable, _args, _env, cols, rows, onExit, onOutput) => {
+          const result = await runtime.terminals.replace(owner, id, cwd, cols, rows, onExit, onOutput);
+          if (earlyExit) runtime.terminals.finish(result, 0);
+          return result;
+        });
+      Object.assign(runtime.terminals, { replaceProcess });
+      expect((await runtime.controller.listActions(runtime.workspace, runtime.project.id)).find(({ id }) => id === `custom:${action.id}`)?.label).toBe(action.name);
+      expect(replaceProcess).not.toHaveBeenCalled();
+      await runtime.controller.startAction({ owner: runtime.terminalOwner, cwd: runtime.workspace, projectId: runtime.project.id,
+        conversationId: runtime.conversation.id, actionId: `custom:${action.id}`, terminalId: runtime.terminalId,
+        cols: 80, rows: 24, onStarted: vi.fn() });
+      expect(replaceProcess).toHaveBeenCalledTimes(1);
+      expect(replaceProcess.mock.calls[0]?.[4]).toEqual(action.args);
+      expect(runtime.terminals.inputs).toEqual([]);
+      const run = runtime.store.shellSnapshot().runs.find(({ actionId }) => actionId === `custom:${action.id}`)!;
+      expect(run.status).toBe(earlyExit ? "succeeded" : "running");
+      expect(runtime.controller.canStopManagedAction(run)).toBe(!earlyExit);
+      expect(runtime.store.conversationWork.hasCheckout(runtime.workspace)).toBe(!earlyExit);
+      if (!earlyExit) {
+        await runtime.controller.stopManagedAction(run.id);
+        expect(runtime.store.workspaceRun(run.id).status).toBe("cancelled");
+        expect(runtime.store.conversationWork.hasCheckout(runtime.workspace)).toBe(false);
+      }
+      runtime.store.updateProject(runtime.project.id, { preferences: defaultProjectPreferences() });
+      await expect(runtime.controller.startAction({ owner: runtime.terminalOwner, cwd: runtime.workspace, projectId: runtime.project.id,
+        actionId: `custom:${action.id}`, terminalId: runtime.terminalId, cols: 80, rows: 24, onStarted: vi.fn() })).rejects.toThrow("no longer available");
+      expect(replaceProcess).toHaveBeenCalledTimes(1);
+      expect(runtime.store.conversationWork.hasCheckout(runtime.workspace)).toBe(false);
+    } finally { runtime.store.close(); }
+  });
+
   it("classifies checks and services and extracts safe local service ports", () => {
     expect(providerDisplayName("gemini")).toBe("Gemini");
     expect(workspaceActionKind("test", "vitest run", false)).toBe("check");

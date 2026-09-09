@@ -22,4 +22,4 @@ The latest report is stored in the application database through append-only sche
 
 Tests use synthetic input and mocked publication; they never create public test issues. Related incident context is [#298](https://github.com/eduardtomas1/inertia/issues/298), which remains independently scoped.
 
-These captures show the real Electron interface with synthetic report input: [description and model selection](screenshots/issue-report-describe.png), [saved private report chat](screenshots/issue-report-chat.png), and [reviewed public preview](screenshots/issue-report-preview.png). No issue was published during capture.
+The current [visual evidence gallery](pr-evidence/offline-diagnostics/README.md) includes dark/light report forms, the saved private chat, reviewed publication controls and a narrow-window layout. Primary actions align with the form; copy/manual continuation and saved-progress/new-draft actions have separate groups. No issue was published during capture.

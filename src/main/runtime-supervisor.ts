@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "electron";
+import { RuntimeIncidentObserver, isRuntimeIncidentMessage } from "./runtime-incident-observer.js";
 import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
@@ -14,7 +15,7 @@ import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connec
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
-import { boundedDuration, publicProcessError, runtimeRestartDelayMs,
+import { boundedDuration, publicProcessError, runtimeRestartDelayMs, postRuntimeWorkerCommand, clearSupervisorTimer,
   runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage } from "./runtime-supervisor-values.js";
 import { detachedRuntimeConnection, runtimeConnection,
   runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
@@ -68,6 +69,7 @@ export class RuntimeSupervisor {
   private readonly attachmentRequests:
     RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
   private readonly onRestartRequested?: RuntimeSupervisorOptions["onRestartRequested"];
+  private readonly incidents: RuntimeIncidentObserver;
   private readonly onMascotStatus?: RuntimeSupervisorOptions["onMascotStatus"]; private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
@@ -231,6 +233,7 @@ export class RuntimeSupervisor {
     });
     this.onRestartRequested = options.onRestartRequested;
     this.onMascotStatus = options.onMascotStatus; this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
+    this.incidents = new RuntimeIncidentObserver(options.onIncident);
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
     this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
@@ -642,6 +645,8 @@ export class RuntimeSupervisor {
   private handleMessage(record: RuntimeProcessRecord, message: unknown): void {
     if (this.current !== record) return;
     const event = parseRuntimeWorkerEvent(message);
+    if (event?.type === "runtime.incident") return this.incidents.accept(event.incident, record.runtimeGenerationId);
+    if (isRuntimeIncidentMessage(message)) return; // Invalid diagnostics cannot break lifecycle.
     if (!event) {
       this.lastError = "The runtime process sent an invalid lifecycle message.";
       this.rejectTestRecycle(record, this.lastError, true);
@@ -842,6 +847,7 @@ export class RuntimeSupervisor {
   }
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
+    this.incidents.exited(record.runtimeGenerationId, record.ready, this.desiredRunning && !record.cleanupConfirmed, code);
     const exitedBeforeCleanRecycleReadiness = this.testRecycle.owns(record)
       && (!record.cleanupConfirmed || !record.ready);
     record.acceptingReady = false;
@@ -1085,19 +1091,14 @@ export class RuntimeSupervisor {
     this.emitState();
   }
   private post(child: UtilityProcess, message: RuntimeWorkerCommand): boolean {
-    try {
-      child.postMessage(message);
-      return true;
-    } catch (error) {
-      this.lastError = publicProcessError(error, "The runtime process could not receive a lifecycle message.");
-      const record = this.current;
-      if (record?.child === child) {
-        this.rejectTestRecycle(record, this.lastError, true);
-      }
-      this.forceTerminate(child);
-      this.emitState();
-      return false;
-    }
+    const failure = postRuntimeWorkerCommand(child, message);
+    if (failure === null) return true;
+    this.lastError = failure;
+    const record = this.current;
+    if (record?.child === child) this.rejectTestRecycle(record, this.lastError, true);
+    this.forceTerminate(child);
+    this.emitState();
+    return false;
   }
   private forceTerminate(child: UtilityProcess): void {
     const pid = child.pid;
@@ -1238,12 +1239,10 @@ export class RuntimeSupervisor {
     this.resolveStop = null;
   }
   private clearTimerValue(key: "restartTimer" | "startupTimer" | "stableTimer" | "shutdownTimer" | "shutdownDeadlineTimer"): void {
-    const timer = this[key];
-    if (!timer) return;
-    this.clearTimer(timer);
-    this[key] = null;
+    this[key] = clearSupervisorTimer(this[key], this.clearTimer);
   }
   private emitState(): void {
+    this.incidents.state(this.phase, this.current?.runtimeGenerationId ?? null);
     this.onStateChange?.(this.snapshot());
   }
 }

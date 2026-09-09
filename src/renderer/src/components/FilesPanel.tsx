@@ -56,6 +56,10 @@ import {
 } from "../utils/workspaceFileReference";
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
+import { FileGitBadge } from "./FileGitBadge";
+import { buildFileTreeGitIndex, type FileTreeGitState } from "../utils/fileTreeGit";
+import { directoryChain, freshWorkspaceDirectoryPages, visibleDirectoryEntries } from "../utils/workspaceDirectoryPages";
+export { freshWorkspaceDirectoryPages, type DirectoryPage } from "../utils/workspaceDirectoryPages";
 
 type ResponseMarkdownComponent =
   typeof import("./ResponseMarkdown")["ResponseMarkdown"];
@@ -137,6 +141,7 @@ export interface WorkspaceEntriesPage {
 }
 
 export type FilesPanelProps = {
+  git?: FileTreeGitState;
   entries: WorkspaceEntry[];
   preview: WorkspaceFilePreview | null;
   selectedPath: string | null;
@@ -180,20 +185,6 @@ export type FilesPanelProps = {
   ) => boolean;
 };
 
-export interface DirectoryPage {
-  entries: WorkspaceEntry[];
-  truncated: boolean;
-}
-
-export function freshWorkspaceDirectoryPages(
-  entries: WorkspaceEntry[],
-  truncated: boolean,
-): Map<string, DirectoryPage> {
-  return new Map([
-    ["", { entries: sortWorkspaceEntries(entries), truncated }],
-  ]);
-}
-
 interface SearchState {
   entries: WorkspaceEntry[] | null;
   truncated: boolean;
@@ -222,35 +213,8 @@ function safeError(error: unknown, fallback: string): string {
     : fallback;
 }
 
-function directoryChain(path: string): string[] {
-  return path
-    ? path.split("/").map((_, index, segments) =>
-        segments.slice(0, index + 1).join("/"))
-    : [];
-}
-
-function visibleDirectoryEntries(
-  pages: ReadonlyMap<string, DirectoryPage>,
-  selectedPath: string | null,
-): Map<string, readonly WorkspaceEntry[]> {
-  const entries = new Map<string, readonly WorkspaceEntry[]>(
-    [...pages].map(([path, page]) => [path, page.entries]),
-  );
-  if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return entries;
-  for (const path of directoryChain(selectedPath)) {
-    const parent = workspaceParentPath(path);
-    const page = pages.get(parent);
-    if (page?.truncated && !page.entries.some((entry) => entry.path === path)) {
-      entries.set(parent, [...page.entries, {
-        path,
-        kind: path === selectedPath ? "file" : "directory",
-      }]);
-    }
-  }
-  return entries;
-}
-
 export function FilesPanel({
+  git,
   entries,
   preview,
   selectedPath,
@@ -272,6 +236,8 @@ export function FilesPanel({
   onSaveFile,
   canSaveFile,
 }: FilesPanelProps): React.JSX.Element {
+  const { snapshot: gitSnapshot = null, loading: gitLoading = false, unavailable: gitUnavailable = false } = git ?? {};
+  const gitIndex = useMemo(() => buildFileTreeGitIndex({ snapshot: gitSnapshot, loading: gitLoading, unavailable: gitUnavailable }), [gitSnapshot, gitLoading, gitUnavailable]);
   const [fileExplorerOpen, setFileExplorerOpen] = useState(true);
   const [directoryPages, setDirectoryPages] = useState(
     () => freshWorkspaceDirectoryPages(entries, entriesTruncated),
@@ -903,6 +869,7 @@ export function FilesPanel({
           aria-label={searchActive ? "Search results" : "Files"}
           aria-busy={treeBusy}
         >
+          {git && <p className="file-git-status" role="status">{gitIndex.notice}</p>}
           {showTreeLoading ? (
             <div className={PANEL_LOADING_CLASS} role="status">
               <LoadingMark label={searchActive ? "Searching" : "Loading"} />
@@ -988,6 +955,7 @@ export function FilesPanel({
                     <span className={`${FILE_ENTRY_CLASS}-name`}>{name}</span>
                     {parent && <span className={`${FILE_ENTRY_CLASS}-path`}>{parent}</span>}
                   </span>
+                  <FileGitBadge index={gitIndex} path={entry.path} directory={entry.kind === "directory"} />
                 </button>
                 {showDirectoryStatus && (
                   <div
@@ -1038,6 +1006,7 @@ export function FilesPanel({
               <span>{preview?.path ?? selectedPath ?? countLabel}</span>
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
+              {selectedPath && <FileGitBadge index={gitIndex} path={selectedPath} />}
               {previewLanguage && (
                 <span
                   className={FILE_LANGUAGE_CLASS}

@@ -225,8 +225,9 @@ export interface WorkspaceSceneActions {
 export interface WorkspaceSceneModelInput {
   view: "workspace" | "settings";
   settingsTarget: {
-    section: "providers" | "backends" | "connections";
+    section: "providers" | "backends" | "connections" | "discord" | "diagnostics";
     profileId?: string;
+    selection?: import("../../utils/diagnosticNavigation").DiagnosticSelection;
   } | null;
   settings: AppSettings;
   busyAction: string | null;
@@ -845,6 +846,8 @@ export function createWorkspaceSceneModel({
           workspaceTools.setPendingDiffContext(selection.reference),
       },
       files: {
+        git: { snapshot: workspaceTools.workspaceGitStatus, loading: workspaceTools.gitLoading,
+          unavailable: connection.status !== "online" || Boolean(workspaceTools.gitError) },
         entries: workspaceTools.workspaceEntries,
         preview: workspaceTools.filePreview,
         selectedPath: workspaceTools.selectedFile,
@@ -862,6 +865,7 @@ export function createWorkspaceSceneModel({
         onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
         onRefresh: () => {
+          void workspaceTools.loadGit({ scope: "workspace-status", authoritative: true }).catch(() => undefined);
           void workspaceTools.loadFiles().catch((error) => setActionError(
             error instanceof Error
               ? error.message
@@ -875,7 +879,11 @@ export function createWorkspaceSceneModel({
           action: "open-externally",
         }),
         canSaveFile: workspaceTools.canSaveWorkspaceFile,
-        onSaveFile: workspaceTools.saveWorkspaceFile,
+        onSaveFile: async (...args) => {
+          const saved = await workspaceTools.saveWorkspaceFile(...args);
+          void workspaceTools.loadGit({ scope: "workspace-status", authoritative: true }).catch(() => undefined);
+          return saved;
+        },
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {

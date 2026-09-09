@@ -599,7 +599,7 @@ describe("Settings composite updates", () => {
   });
 
   it("sends the latest release info to Discord", async () => {
-    const sendDiscordReleaseInfo = vi.fn(async () => ({ sent: true as const }));
+    const sendDiscordReleaseInfo = vi.fn(async () => ({ sent: true as const, comparisonLimited: false }));
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: {
@@ -634,7 +634,7 @@ describe("Settings composite updates", () => {
       expect(sendDiscordReleaseInfo).toHaveBeenCalledWith({
         repositoryUrl: "https://github.com/eduardtomas1/inertia",
       }));
-    expect(await screen.findByText("Release info sent to Discord."))
+    expect(await screen.findByText("Discord confirmed delivery of the release info."))
       .toHaveAttribute("role", "status");
   });
 

@@ -247,7 +247,9 @@ export function useSplitWorkspaceScene({
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
     loadGitOnMount:
       layout.activeTool === "changes"
-      || layout.activeTool === "environment",
+      || layout.activeTool === "environment"
+      || layout.activeTool === "files",
+    gitStatusOnly: layout.activeTool === "files",
     loadFilesOnMount: layout.activeTool === "files",
   }));
   const desktopTools = useStableController(useDesktopTools({

@@ -2,6 +2,18 @@ import {
   RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
   runtimeSupervisorShutdownGraceMs,
 } from "../node/runtime-shutdown-deadline.js";
+import type { UtilityProcess } from "electron";
+import type { RuntimeWorkerCommand } from "../node/runtime-process-protocol.js";
+
+export function postRuntimeWorkerCommand(child: UtilityProcess, message: RuntimeWorkerCommand): string | null {
+  try { child.postMessage(message); return null; }
+  catch (error) { return publicProcessError(error, "The runtime process could not receive a lifecycle message."); }
+}
+
+export function clearSupervisorTimer(timer: ReturnType<typeof setTimeout> | null, clear: typeof clearTimeout): null {
+  if (timer) clear(timer);
+  return null;
+}
 
 const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import { RuntimeIncidentObserver } from "../../src/main/runtime-incident-observer";
+import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 
 describe("runtime incidents", () => {
@@ -18,12 +19,18 @@ describe("runtime incidents", () => {
     child.pid = 10000; child.postMessage = (command) => commands.push(command); child.kill = vi.fn(() => true);
     const onIncident = vi.fn();
     const supervisor = new RuntimeSupervisor({
-      platform: "linux", systemBootId: `test:${randomUUID()}`,
+      systemBootId: `test:${randomUUID()}`,
       spawn: () => child as never, workerOptions: { dataDirectory: directory, defaultWorkspacePath: directory, enableProviders: false },
-      onIncident, forceKill: () => true, recoverOwnedProcesses: () => true, armProcessContainment: () => null,
+      onIncident, forceKill: () => true, recoverOwnedProcesses: () => true,
+      // Model the same exact-generation containment as the supervisor fixtures.
+      // A missing Windows Job must reject startup, even in this fake child.
+      armProcessContainment: (generation) => process.platform === "win32"
+        ? { kind: "windows-job-v1", name: windowsRuntimeJobName(generation) }
+        : null,
     });
     try {
       supervisor.start(); child.emit("spawn");
+      expect(supervisor.snapshot().lastError).toBeNull();
       const start = commands.find((command) => command.type === "runtime.start");
       if (start?.type !== "runtime.start") throw new Error("Missing runtime start");
       const incident = { schemaVersion: 1, id: randomUUID(), correlationId: randomUUID(), code: "turn.failed",

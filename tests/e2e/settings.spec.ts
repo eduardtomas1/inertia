@@ -75,7 +75,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
     themeSource: nativeTheme.themeSource,
   }));
   expect(nativeAppearance.themeSource).toBe("dark");
-  expect(nativeAppearance.background).toMatch(/^#101013(?:ff)?$/iu);
+  expect(nativeAppearance.background).toMatch(/^#050507(?:ff)?$/iu);
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Response density" }).getByRole("radio", { name: "Comfortable" }).click();

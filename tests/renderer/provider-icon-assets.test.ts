@@ -64,12 +64,12 @@ describe("provider icon assets", () => {
 
   it("keeps each supplied mark distinguishable in light and dark themes", () => {
     const contrastPairs = [
-      ["OpenAI light", "#000000", "#f1f1f3"],
-      ["OpenAI dark", "#ffffff", "#09090b"],
+      ["OpenAI light", "#000000", "#ebebee"],
+      ["OpenAI dark", "#ffffff", "#050507"],
       ["Anthropic light backing", "#D97757", "#ffffff"],
-      ["Anthropic dark", "#D97757", "#09090b"],
-      ["Cursor light", "#26251e", "#f1f1f3"],
-      ["Cursor dark", "#edecec", "#09090b"],
+      ["Anthropic dark", "#D97757", "#050507"],
+      ["Cursor light", "#26251e", "#ebebee"],
+      ["Cursor dark", "#edecec", "#050507"],
       ["OpenCode light", "#17181C", "#FDFCFC"],
       ["OpenCode dark", "#ffffff", "#131010"],
     ] as const;

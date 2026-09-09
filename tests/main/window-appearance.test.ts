@@ -20,10 +20,10 @@ describe("window appearance", () => {
   });
 
   it("matches the native first-paint background to the resolved theme", () => {
-    expect(resolveWindowBackground("light", true)).toBe("#f1f1f3");
-    expect(resolveWindowBackground("dark", false)).toBe("#101013");
-    expect(resolveWindowBackground("system", false)).toBe("#f1f1f3");
-    expect(resolveWindowBackground("system", true)).toBe("#101013");
+    expect(resolveWindowBackground("light", true)).toBe("#ebebee");
+    expect(resolveWindowBackground("dark", false)).toBe("#050507");
+    expect(resolveWindowBackground("system", false)).toBe("#ebebee");
+    expect(resolveWindowBackground("system", true)).toBe("#050507");
   });
 
   it("persists a small validated cache and safely falls back from invalid files", () => {

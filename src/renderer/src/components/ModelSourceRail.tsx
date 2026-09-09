@@ -152,3 +152,5 @@ export function ModelSourceRail({
     </nav>
   );
 }
+
+export default ModelSourceRail;

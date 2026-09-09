@@ -71,15 +71,6 @@ export function readyModelChooserRoutes<Route extends { providerReady: boolean }
   return routes.filter((route) => route.providerReady || isActiveRoute(route));
 }
 
-function routeProviderReady(
-  harnessId: string,
-  providers: readonly ProviderInfo[],
-): boolean {
-  const providerId = providerIdForHarness(harnessId);
-  if (!providerId) return true;
-  return providerRunsModels(providers.find(({ id }) => id === providerId));
-}
-
 export function modelChooserHarnessLabel(harnessId: string): string {
   const providerId = providerIdForHarness(harnessId);
   if (providerId) return harnessLabels[providerId];
@@ -284,7 +275,7 @@ function profileRoute(
     compatibility: profile.compatibility,
     rowCompatibility: compatibilityForRow(profile.compatibility),
     providerId,
-    providerReady: routeProviderReady(profile.harnessId, providers),
+    providerReady: providerId === null || providerRunsModels(provider),
   };
 }
 

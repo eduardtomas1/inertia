@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
+import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 
 import { RuntimeStore } from "../../src/server/database";
 import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
@@ -47,6 +48,29 @@ test.beforeAll(async () => {
   rendererErrors = app.rendererErrors;
   runtimeSnapshot = app.runtimeSnapshot;
   resizeWindow = app.resizeWindow;
+  // This fixture disables provider execution. Supply discovery readiness at
+  // the renderer transport boundary, without enabling real CLIs or bypassing
+  // the runtime's route/continuation checks below. Other providers stay absent.
+  const readySnapshot = (snapshot: AppSnapshot): AppSnapshot => ({
+    ...snapshot,
+    providers: snapshot.providers.map((provider) =>
+      provider.id === "codex" || provider.id === "claude"
+        ? { ...provider, available: true, installState: "installed", authState: "authenticated", canRun: true }
+        : provider),
+  });
+  await page.routeWebSocket(/.*/u, (route) => {
+    route.connectToServer().onMessage((data) => {
+      const event = JSON.parse(data.toString()) as ServerEvent;
+      if (event.type === "server.welcome" || event.type === "snapshot.updated") {
+        event.snapshot = readySnapshot(event.snapshot);
+      } else if (event.type === "runtime.event" && event.event.type === "snapshot.updated") {
+        event.event.snapshot = readySnapshot(event.event.snapshot);
+      }
+      route.send(JSON.stringify(event));
+    });
+  });
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 });
 
 test.afterAll(async () => {
@@ -169,6 +193,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const claudeSource = modelChooser.getByRole("button", {
     name: /^Claude, \d+ models?$/u,
   });
+  await expect(modelChooser.getByRole("button", { name: /^Cursor, \d+ models?$/u })).toHaveCount(0);
   await claudeSource.click();
   await expect(searchModels).toBeFocused();
   const initialActiveDescendant = await searchModels.getAttribute(
@@ -659,6 +684,71 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await resizeWindow(1440, 720);
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
+  }
+  expect(rendererErrors).toEqual([]);
+});
+
+test("keeps branded model sources and rows legible across themes and narrow windows", async ({ browserName: _browserName }, testInfo) => {
+  await resizeWindow(1440, 920);
+  await page.getByRole("complementary", { name: "Project navigation", exact: true })
+    .getByRole("button", { name: "New chat", exact: true }).click();
+  const chooser = page.getByRole("dialog", { name: "Choose model" });
+  const trigger = page.getByRole("button", { name: /^Choose model\./u });
+  const capture = async (name: string): Promise<void> => {
+    await expect(chooser).toHaveAttribute("data-composer-popover-positioned", "true");
+    await expect(trigger.locator(".provider-brand-icon")).toBeVisible();
+    const search = chooser.getByRole("searchbox", { name: "Search models" });
+    await expect(search).toBeInViewport({ ratio: 1 });
+    await expect.poll(() => search.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) === element;
+    })).toBe(true);
+    await expect.poll(() => chooser.locator("img").evaluateAll((images) =>
+      images.length > 0 && images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
+    )).toBe(true);
+    const bounds = await chooser.boundingBox();
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    await app.expectNoViewportOverflow();
+    const path = testInfo.outputPath(`${name}.png`);
+    await page.screenshot({ path, animations: "disabled" });
+    await testInfo.attach(name, { path, contentType: "image/png" });
+  };
+
+  for (const theme of ["Light", "Dark"] as const) {
+    await resizeWindow(1440, 920);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("radio", { name: theme, exact: true }).click();
+    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    await trigger.click();
+    const search = chooser.getByRole("searchbox", { name: "Search models" });
+    await expect(search).toBeFocused();
+    for (const [provider, id] of [["Codex", "codex"], ["Claude", "claude"]] as const) {
+      const source = chooser.getByRole("button", { name: new RegExp(`^${provider}, \\d+ models?$`, "u") });
+      await source.click();
+      await expect(source).toHaveAttribute("aria-pressed", "true");
+      await expect(search).toBeFocused();
+      await expect(source.locator(".provider-brand-icon")).toHaveAttribute("data-provider-id", id);
+      await expect(chooser.locator(".model-chooser-row-brand").first()).toHaveAttribute("data-provider-id", id);
+      await capture(`model-chooser-${id}-${theme.toLowerCase()}`);
+    }
+    await resizeWindow(720, 640);
+    await capture(`model-chooser-narrow-${theme.toLowerCase()}`);
+    const source = chooser.getByRole("button", { name: /^Codex, \d+ models?$/u });
+    await source.focus();
+    await source.press("ArrowDown");
+    await expect(chooser.getByRole("button", { name: /^Claude, \d+ models?$/u })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(chooser).toBeHidden();
+    await expect(trigger).toBeFocused();
+    const chipPath = testInfo.outputPath(`selected-model-chip-${theme.toLowerCase()}.png`);
+    await page.locator(".composer").screenshot({ path: chipPath, animations: "disabled" });
+    await testInfo.attach(`selected-model-chip-${theme.toLowerCase()}`, { path: chipPath, contentType: "image/png" });
   }
   expect(rendererErrors).toEqual([]);
 });

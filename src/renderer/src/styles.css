@@ -14390,15 +14390,17 @@ button.sent-attachment-open:focus-visible {
   display: grid;
   width: var(--model-chooser-width);
   height: min(396px, calc(100dvh - 178px));
-  min-height: min(286px, calc(100dvh - 178px));
+  min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border-strong) 82%, transparent);
   border-radius: 13px;
-  background: color-mix(in srgb, var(--surface-strong) 98%, transparent);
-  box-shadow:
-    0 14px 40px color-mix(in srgb, var(--shadow) 72%, transparent),
-    0 1px 3px color-mix(in srgb, var(--text) 6%, transparent);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.model-chooser-palette:not([data-composer-popover-positioned="true"]) {
+  visibility: hidden;
 }
 
 .model-chooser-header {
@@ -14533,7 +14535,7 @@ button.sent-attachment-open:focus-visible {
 @container conversation-workspace (min-height: 0px) {
   .model-chooser-palette {
     height: min(396px, calc(100dvh - 178px), calc(100cqh - 84px));
-    min-height: min(286px, calc(100dvh - 178px), calc(100cqh - 84px));
+    min-height: 0;
   }
 }
 
@@ -14544,7 +14546,7 @@ button.sent-attachment-open:focus-visible {
   }
 
   .model-chooser-palette {
-    width: min(600px, calc(100vw - 22px), calc(100cqw - 18px));
+    width: min(var(--model-chooser-width), calc(100cqw - 18px));
   }
 }
 
@@ -14560,7 +14562,6 @@ button.sent-attachment-open:focus-visible {
     padding-left: 6px;
   }
 
-  .model-chooser-anchor .selected-model-chip-glyph,
   .model-chooser-anchor .selected-model-chip-chevron {
     display: none;
   }
@@ -14573,9 +14574,9 @@ button.sent-attachment-open:focus-visible {
 
   .model-chooser-palette {
     right: 5px;
-    width: min(calc(100vw - 18px), calc(100cqw - 14px));
+    width: min(var(--model-chooser-width), calc(100cqw - 14px));
     height: min(390px, calc(100dvh - 154px));
-    min-height: min(280px, calc(100dvh - 154px));
+    min-height: 0;
   }
 
   .model-chooser-body {
@@ -14596,7 +14597,7 @@ button.sent-attachment-open:focus-visible {
   @container conversation-workspace (min-height: 0px) {
     .workspace-body.has-tools .model-chooser-palette {
       height: min(390px, calc(100dvh - 154px), calc(100cqh - 84px));
-      min-height: min(280px, calc(100dvh - 154px), calc(100cqh - 84px));
+      min-height: 0;
     }
   }
 }

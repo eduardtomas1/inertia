@@ -7,7 +7,7 @@ import {
 import { Check, Star } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
-import { providerIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness, providerNativeBackendProfile } from "../../../shared/model-routing";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "../utils/modelSourceRail";
 import type { ModelSearchRoute } from "../utils/modelSearch";
 import type { ProviderId } from "../../../shared/contracts";
@@ -41,6 +41,7 @@ interface ModelChooserRowBase {
   configuration?: ModelSearchRoute["configuration"];
   harnessLabel: string;
   backendProfileName: string;
+  nativeBackend: boolean;
   source: "built-in" | "custom";
   providerId: ProviderId | null;
   active: boolean;
@@ -95,6 +96,7 @@ export function modelChooserRowFromRoute(
   if (!route.selectable && !disabledReason) {
     throw new Error("A disabled model chooser row requires a compatibility explanation.");
   }
+  const providerId = route.source === "built-in" ? providerIdForHarness(route.harnessId) : null;
   const base: ModelChooserRowBase = {
     key: route.key,
     displayName: route.displayName,
@@ -105,10 +107,9 @@ export function modelChooserRowFromRoute(
     ...(route.configuration ? { configuration: route.configuration } : {}),
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
+    nativeBackend: providerId !== null && route.backendProfileId === providerNativeBackendProfile(providerId).id,
     source: route.source,
-    providerId: route.source === "built-in"
-      ? providerIdForHarness(route.harnessId)
-      : null,
+    providerId,
     active: state.active,
     favorite: state.favorite,
     shortcut: state.shortcut ?? null,
@@ -119,21 +120,13 @@ export function modelChooserRowFromRoute(
     : { ...base, selectable: false, disabledReason: disabledReason! };
 }
 
-export function modelChooserSourceLabel(
-  row: Pick<ModelChooserRowData, "providerId" | "harnessLabel">,
-): string {
-  return row.providerId
-    ? MODEL_SOURCE_PROVIDER_LABELS[row.providerId]
-    : row.harnessLabel;
-}
-
 export function modelChooserSecondaryIdentity(
   row: Pick<
     ModelChooserRowData,
     | "providerId"
     | "harnessLabel"
     | "backendProfileName"
-    | "source"
+    | "nativeBackend"
     | "reasoningEffort"
     | "responseSpeed"
     | "speedChangeNote"
@@ -141,8 +134,8 @@ export function modelChooserSecondaryIdentity(
   >,
 ): string {
   return [
-    modelChooserSourceLabel(row),
-    ...(row.source === "custom" ? [row.backendProfileName] : []),
+    row.providerId ? MODEL_SOURCE_PROVIDER_LABELS[row.providerId] : row.harnessLabel,
+    ...(row.nativeBackend ? [] : [row.backendProfileName]),
     ...(row.reasoningEffort ? [`${row.reasoningEffort} reasoning`] : []),
     ...(row.responseSpeed === "Fast" ? ["Fast"] : []),
     ...(row.configuration ? [

@@ -1,7 +1,9 @@
 import { Search } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -19,7 +21,6 @@ import {
   ModelChooserRow,
   type ModelChooserRowData,
 } from "./ModelChooserRow";
-import { ModelSourceRail } from "./ModelSourceRail";
 import { SelectedModelChip } from "./SelectedModelChip";
 import {
   modelFavoriteKey,
@@ -52,6 +53,8 @@ import {
   isSidebarNavigationKey,
   nextSelectableNavigationIndex,
 } from "../utils/sidebarModel";
+
+const ModelSourceRail = lazy(() => import("./ModelSourceRail"));
 
 export type ModelChooserNavigationKey =
   | "ArrowDown"
@@ -397,14 +400,6 @@ export function ModelChooser({
     return () => window.cancelAnimationFrame(frame);
   }, [disabled, open, restoreTriggerFocus]);
 
-  useEffect(() => {
-    if (!open) return;
-    window.requestAnimationFrame(() => {
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    });
-  }, [open]);
-
   useLayoutEffect(() => {
     if (!open) {
       activeRouteKeyRef.current = null;
@@ -552,6 +547,21 @@ export function ModelChooser({
     })), [favoriteKeys, favoriteReference, matchesSelection, results.items, shortcutsByRoute]);
 
   useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const popover = document.getElementById(dialogId);
+    if (!open || !trigger || !popover) return;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void import("../utils/composerPopoverPlacement").then(({ observeComposerPopover }) => {
+      if (!active) return;
+      stop = observeComposerPopover(trigger, popover, () => undefined);
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    });
+    return () => { active = false; stop?.(); };
+  }, [dialogId, open]);
+
+  useLayoutEffect(() => {
     if (!open || !virtualized || activeIndex < 0) return;
     resultVirtualizer.scrollToIndex(activeIndex, { align: "auto" });
   }, [activeIndex, open, resultVirtualizer, virtualized]);
@@ -606,15 +616,21 @@ export function ModelChooser({
             />
           </div>
           <div className="model-chooser-body">
-            <ModelSourceRail
-              items={railItems}
-              selectedId={selectedSourceId}
-              resultsId={resultsId}
-              onFilterChange={(filter) => {
-                setSourceFilter(filter);
-                window.requestAnimationFrame(() => searchRef.current?.focus());
-              }}
-            />
+            <Suspense fallback={
+              <nav className="model-source-rail" aria-label="Model sources" aria-busy="true">
+                <span className="model-source-rail-item" aria-hidden="true" />
+              </nav>
+            }>
+              <ModelSourceRail
+                items={railItems}
+                selectedId={selectedSourceId}
+                resultsId={resultsId}
+                onFilterChange={(filter) => {
+                  setSourceFilter(filter);
+                  window.requestAnimationFrame(() => searchRef.current?.focus());
+                }}
+              />
+            </Suspense>
             <div className="model-chooser-results-wrap">
               <div
                 ref={resultsScrollRef}

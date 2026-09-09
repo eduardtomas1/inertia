@@ -1319,7 +1319,7 @@ describe("composer asynchronous ownership", () => {
       target: { value: "Carry this exact text." },
     });
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: "Claude, 2 models" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Claude, 2 models" }));
     const claudeRoute = screen.getByTitle("Claude Route").closest("button");
     if (!claudeRoute) throw new Error("Expected the Claude route action.");
     fireEvent.click(claudeRoute);

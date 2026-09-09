@@ -122,6 +122,21 @@ describe("ModelChooserRow", () => {
     expect(html).not.toContain('role="option"');
   });
 
+  it("keeps a bundled non-native backend distinct from its provider harness", () => {
+    const html = render(row({
+      harnessId: "claude-agent-sdk",
+      harnessLabel: "Claude",
+      backendProfileId: "builtin:kimi-code",
+      backendProfileName: "Kimi",
+      modelId: "k3",
+      displayName: "K3",
+      reasoningEffort: "high",
+    }));
+    expect(html).toContain("Claude · Kimi · high reasoning");
+    expect(html).toContain('data-provider-brand="anthropic"');
+    expect(html).not.toContain("<em>Custom</em>");
+  });
+
   it("uses only harness and backend identity and explicitly marks custom routes", () => {
     const html = render(row({
       harnessId: "claude-agent-sdk",

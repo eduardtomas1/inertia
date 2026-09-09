@@ -160,7 +160,7 @@ describe("model chooser active route", () => {
     render(<ModelChooser routes={[route]} selectedRoute={route}
       configuration={{ accessMode: "supervised", interactionMode: "build" }} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /^Team gateway, custom backend /u }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Team gateway, custom backend /u }));
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "1", code: "Digit1", ctrlKey: true });
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());

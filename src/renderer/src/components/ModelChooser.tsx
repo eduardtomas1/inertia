@@ -1,7 +1,9 @@
-import { Search, Star } from "lucide-react";
+import { Search } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -19,7 +21,6 @@ import {
   ModelChooserRow,
   type ModelChooserRowData,
 } from "./ModelChooserRow";
-import { ModelSourceRail } from "./ModelSourceRail";
 import { SelectedModelChip } from "./SelectedModelChip";
 import {
   modelFavoriteKey,
@@ -30,7 +31,10 @@ import {
   type ModelFavoriteReference,
   type ModelFavoriteConfiguration,
 } from "../utils/modelFavorites";
-import type { ComposerModelRoute } from "../utils/modelChooserRoutes";
+import {
+  readyModelChooserRoutes,
+  type ComposerModelRoute,
+} from "../utils/modelChooserRoutes";
 import { searchModelRoutes } from "../utils/modelSearch";
 import {
   deriveModelSourceRailItems,
@@ -49,6 +53,8 @@ import {
   isSidebarNavigationKey,
   nextSelectableNavigationIndex,
 } from "../utils/sidebarModel";
+
+const ModelSourceRail = lazy(() => import("./ModelSourceRail"));
 
 export type ModelChooserNavigationKey =
   | "ArrowDown"
@@ -251,6 +257,14 @@ export function ModelChooser({
     () => new Set(favorites.map(modelFavoriteKey)),
     [favorites],
   );
+  const selectedKey = activeKeyForRoute(selectedRoute);
+  const offeredRoutes = useMemo(
+    () => readyModelChooserRoutes(
+      routes,
+      (route) => activeKeyForRoute(route) === selectedKey,
+    ),
+    [routes, selectedKey],
+  );
   const favoriteReference = useCallback((route: ComposerModelRoute): ModelFavoriteReference => ({
     ...route,
     ...(favoriteKeys.has(route.key) || !configuration ? {} : {
@@ -263,34 +277,35 @@ export function ModelChooser({
     }),
   }), [configuration, favoriteKeys]);
   const resolvedFavorites = useMemo(
-    () => resolveModelFavorites(favorites, routes),
-    [favorites, routes],
+    () => resolveModelFavorites(favorites, offeredRoutes),
+    [favorites, offeredRoutes],
   );
   const resolvedFavoriteRoutes = useMemo(
     () => resolvedFavorites.flatMap(({ route }) => route ? [route] : []),
     [resolvedFavorites],
   );
   const railItems = useMemo(
-    () => deriveModelSourceRailItems(routes, {
+    () => deriveModelSourceRailItems(offeredRoutes, {
       favoriteRoutes: resolvedFavoriteRoutes,
-    }),
-    [resolvedFavoriteRoutes, routes],
+    }).filter((item) => item.routes.some((route) =>
+      route.providerReady && route.selectable)),
+    [offeredRoutes, resolvedFavoriteRoutes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);
   const searchableRoutes = useMemo(
-    () => searchableModelChooserRoutes(routes, resolvedFavoriteRoutes),
-    [resolvedFavoriteRoutes, routes],
+    () => searchableModelChooserRoutes(offeredRoutes, resolvedFavoriteRoutes),
+    [offeredRoutes, resolvedFavoriteRoutes],
   );
   const sourceRoutes = useMemo(
     () => query.trim()
       ? searchableRoutes
       : sourceFilter.kind === "favorites"
         ? resolvedFavoriteRoutes
-        : filterModelRoutesBySource(routes, sourceFilter),
+        : filterModelRoutesBySource(offeredRoutes, sourceFilter),
     [
+      offeredRoutes,
       query,
       resolvedFavoriteRoutes,
-      routes,
       searchableRoutes,
       sourceFilter,
     ],
@@ -356,7 +371,6 @@ export function ModelChooser({
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
     [shortcuts],
   );
-  const selectedKey = activeKeyForRoute(selectedRoute);
   const selectedConfigurationKey = JSON.stringify(configuration ?? null);
   const matchesSelection = useCallback((route: ComposerModelRoute): boolean =>
     activeKeyForRoute(route) === selectedKey && (!route.configuration || (
@@ -386,14 +400,6 @@ export function ModelChooser({
     const frame = window.requestAnimationFrame(restoreTriggerFocus);
     return () => window.cancelAnimationFrame(frame);
   }, [disabled, open, restoreTriggerFocus]);
-
-  useEffect(() => {
-    if (!open) return;
-    window.requestAnimationFrame(() => {
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    });
-  }, [open]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -542,6 +548,21 @@ export function ModelChooser({
     })), [favoriteKeys, favoriteReference, matchesSelection, results.items, shortcutsByRoute]);
 
   useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const popover = document.getElementById(dialogId);
+    if (!open || !trigger || !popover) return;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void import("../utils/composerPopoverPlacement").then(({ observeComposerPopover }) => {
+      if (!active) return;
+      stop = observeComposerPopover(trigger, popover, () => undefined, "below");
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    });
+    return () => { active = false; stop?.(); };
+  }, [dialogId, open]);
+
+  useLayoutEffect(() => {
     if (!open || !virtualized || activeIndex < 0) return;
     resultVirtualizer.scrollToIndex(activeIndex, { align: "auto" });
   }, [activeIndex, open, resultVirtualizer, virtualized]);
@@ -588,7 +609,7 @@ export function ModelChooser({
               value={query}
               autoComplete="off"
               spellCheck="false"
-              placeholder="Search models, backends, or harnesses…"
+              placeholder="Search models…"
               aria-label="Search models"
               aria-controls={resultsId}
               aria-activedescendant={activeDescendant}
@@ -596,15 +617,21 @@ export function ModelChooser({
             />
           </div>
           <div className="model-chooser-body">
-            <ModelSourceRail
-              items={railItems}
-              selectedId={selectedSourceId}
-              resultsId={resultsId}
-              onFilterChange={(filter) => {
-                setSourceFilter(filter);
-                window.requestAnimationFrame(() => searchRef.current?.focus());
-              }}
-            />
+            <Suspense fallback={
+              <nav className="model-source-rail" aria-label="Model sources" aria-busy="true">
+                <span className="model-source-rail-item" aria-hidden="true" />
+              </nav>
+            }>
+              <ModelSourceRail
+                items={railItems}
+                selectedId={selectedSourceId}
+                resultsId={resultsId}
+                onFilterChange={(filter) => {
+                  setSourceFilter(filter);
+                  window.requestAnimationFrame(() => searchRef.current?.focus());
+                }}
+              />
+            </Suspense>
             <div className="model-chooser-results-wrap">
               <div
                 ref={resultsScrollRef}
@@ -654,19 +681,6 @@ export function ModelChooser({
                 )}
               </div>
             </div>
-          </div>
-          <div className="model-chooser-footer">
-            <span><kbd>↑↓</kbd> navigate</span>
-            <span><kbd>Enter</kbd> select</span>
-            <span><kbd>Esc</kbd> close</span>
-            {shortcuts.length > 0 && (
-              <span className="model-chooser-favorite-hint">
-                <Star size={10} aria-hidden="true" />
-                {shortcuts.length} favorite {shortcuts.length === 1
-                  ? "shortcut"
-                  : "shortcuts"}
-              </span>
-            )}
           </div>
         </div>
       )}

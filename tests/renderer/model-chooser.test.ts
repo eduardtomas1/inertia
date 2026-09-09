@@ -59,6 +59,7 @@ function route(
     },
     rowCompatibility: null,
     providerId: "codex",
+    providerReady: true,
   };
 }
 

@@ -1,12 +1,6 @@
 import {
-  Bot,
   ChevronDown,
   CloudCog,
-  Code2,
-  Command,
-  MousePointer2,
-  Sparkles,
-  type LucideIcon,
 } from "lucide-react";
 import {
   forwardRef,
@@ -16,9 +10,9 @@ import {
 
 import {
   selectedModelChipIdentity,
-  type SelectedModelChipGlyph,
   type SelectedModelChipRoute,
 } from "../utils/selectedModelChip";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 
 export interface SelectedModelChipProps {
   route: SelectedModelChipRoute;
@@ -33,17 +27,6 @@ export interface SelectedModelChipProps {
   >;
 }
 
-const sourceIcons: Readonly<Record<SelectedModelChipGlyph, LucideIcon>> = {
-  codex: Command,
-  claude: Bot,
-  cursor: MousePointer2,
-  gemini: Sparkles,
-  kimi: Bot,
-  opencode: Code2,
-  custom: CloudCog,
-  unknown: Sparkles,
-};
-
 export const SelectedModelChip = forwardRef<
   HTMLButtonElement,
   SelectedModelChipProps
@@ -57,7 +40,6 @@ export const SelectedModelChip = forwardRef<
   ariaHasPopup = "dialog",
 }, ref): JSX.Element {
   const identity = selectedModelChipIdentity(route);
-  const SourceIcon = sourceIcons[identity.glyph];
 
   return (
     <button
@@ -76,7 +58,9 @@ export const SelectedModelChip = forwardRef<
     >
       {showSourceGlyph && (
         <span className="selected-model-chip-glyph" aria-hidden="true">
-          <SourceIcon size={13} strokeWidth={1.8} />
+          {identity.glyph === "custom"
+            ? <CloudCog size={13} strokeWidth={1.8} />
+            : <ProviderBrandIcon providerId={identity.glyph} size={13} decorative />}
         </span>
       )}
       <span className="selected-model-chip-label">{identity.label}</span>

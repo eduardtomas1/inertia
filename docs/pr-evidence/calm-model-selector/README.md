@@ -27,6 +27,11 @@ then disappear from the chooser; usable custom gateways remain accessible.
 
 The desktop captures use 1440 × 920 content bounds. Narrow captures request
 720 × 640; Electron's minimum width produces 760 × 640 on this platform.
+Hosted macOS screens can clamp tall requests to 1440 × 684. The test checks
+the expected opening direction from actual renderer geometry, reproduces
+that shorter window explicitly, and uses native Electron zoom to prove the
+downward preference with 920 CSS pixels before restoring normal zoom for
+the narrow upward-fallback scenario. The captures use normal zoom.
 The selector captures are direct Playwright captures of the composer element.
 No screenshot was retouched or generated.
 

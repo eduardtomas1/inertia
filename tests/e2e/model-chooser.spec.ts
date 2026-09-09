@@ -20,6 +20,7 @@ import {
   type AppFixture,
 } from "./support/app-fixture";
 import { seedLargeModelCatalog } from "./support/model-catalog-fixture";
+import { expectModelChooserPlacement, expectModelChooserVerticalFallback } from "./support/model-chooser-geometry";
 
 const execFileAsync = promisify(execFile);
 
@@ -712,12 +713,14 @@ test("keeps branded model sources and rows legible across themes and narrow wind
     .getByRole("button", { name: "New chat", exact: true }).click();
   const chooser = page.getByRole("dialog", { name: "Choose model" });
   const trigger = page.getByRole("button", { name: /^Choose model\./u });
-  const capture = async (name: string, vertical = "below"): Promise<void> => {
-    await expect(chooser).toHaveAttribute("data-composer-popover-positioned", "true");
-    await expect(chooser).toHaveAttribute("data-popover-vertical", vertical);
+  const capture = async (name: string, vertical?: "above" | "below"): Promise<void> => {
+    await expectModelChooserPlacement(chooser, vertical);
     await expect(chooser.locator('[data-model-source-rail-item^="custom:"]')).toHaveCount(0);
     await expect(chooser.locator('[data-model-source-rail-item^="provider:"]')).toHaveCount(2);
     await expect(trigger.locator(".provider-brand-icon")).toBeVisible();
+    for (const source of await chooser.locator("[data-model-source-rail-item]").all()) {
+      await expect(source).toBeInViewport({ ratio: 1 });
+    }
     const search = chooser.getByRole("searchbox", { name: "Search models" });
     await expect(search).toBeInViewport({ ratio: 1 });
     await expect.poll(() => search.evaluate((element) => {
@@ -734,9 +737,6 @@ test("keeps branded model sources and rows legible across themes and narrow wind
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
-    const anchor = await trigger.boundingBox();
-    if (vertical === "below") expect(bounds!.y).toBeGreaterThanOrEqual(anchor!.y + anchor!.height);
-    else expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(anchor!.y);
     await app.expectNoViewportOverflow();
     const path = testInfo.outputPath(`${name}.png`);
     await page.screenshot({ path, animations: "disabled" });
@@ -780,6 +780,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
           .toBeCloseTo(frame!.height, 0);
       }
     }
+    await expectModelChooserVerticalFallback(app, chooser);
     await resizeWindow(720, 640);
     await capture(`model-chooser-narrow-${theme.toLowerCase()}`, "above");
     const source = chooser.getByRole("button", { name: /^Codex, \d+ models?$/u });

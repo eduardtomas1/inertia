@@ -64,7 +64,8 @@ describe("bounded Git decorations in the Files editor", () => {
     const props = { ...project, entries: [{ path: "bundle.js", kind: "file" as const }, { path: "clean.ts", kind: "file" as const }],
       preview: null, selectedPath: null, onSelectFile, onLoadEntries };
     const { rerender } = render(<FilesPanel {...props} git={state(snapshot([repo(".", [file("bundle.js")])]))} />);
-    const changed = screen.getByRole("treeitem", { name: /bundle.js Git: Modified/u });
+    const changed = screen.getByRole("treeitem", { name: "bundle.js" });
+    expect(changed).toHaveAccessibleDescription("Git: Modified · unstaged");
     expect(changed.querySelector(".file-entry-name")).toHaveTextContent("bundle.js");
     expect(screen.getByRole("treeitem", { name: "clean.ts" }).querySelector(".file-git-badge")).toBeNull();
     fireEvent.keyDown(changed, { key: "ArrowDown" });
@@ -74,8 +75,29 @@ describe("bounded Git decorations in the Files editor", () => {
     expect(onSelectFile).toHaveBeenCalledWith("bundle.js");
     rerender(<FilesPanel {...props} git={state(snapshot([repo(".", [])]))} />);
     expect(screen.getByRole("treeitem", { name: "bundle.js" }).querySelector(".file-git-badge")).toBeNull();
+    expect(changed).not.toHaveAttribute("aria-description");
     rerender(<FilesPanel {...props} git={{ snapshot: null, loading: false, unavailable: true }} />);
     expect(screen.getByText(/Git status unavailable/u)).toBeVisible();
     expect(onLoadEntries).not.toHaveBeenCalled();
+  });
+
+  it("preserves expanded folder names and keyboard focus when a Git scan adds a badge", async () => {
+    const props = { ...project, entries: [{ path: "src", kind: "directory" as const }],
+      preview: null, selectedPath: null, onSelectFile: vi.fn(),
+      onLoadEntries: vi.fn(async () => ({ directory: "src", truncated: false,
+        entries: [{ path: "src/edit.ts", kind: "file" as const }] })) };
+    const { rerender } = render(<FilesPanel {...props} git={state(snapshot([repo(".", [])]))} />);
+    const folder = screen.getByRole("treeitem", { name: "src" });
+    fireEvent.click(folder);
+    const child = await screen.findByRole("treeitem", { name: "edit.ts" });
+    rerender(<FilesPanel {...props} git={state(snapshot([repo(".", [file("src/edit.ts")])]))} />);
+    expect(screen.getByRole("treeitem", { name: "src" })).toBe(folder);
+    expect(folder).toHaveAttribute("aria-expanded", "true");
+    expect(folder).toHaveAccessibleDescription("Contains Git changes");
+    expect(screen.getByRole("treeitem", { name: "edit.ts" })).toBe(child);
+    expect(child).toHaveAccessibleDescription("Git: Modified · unstaged");
+    fireEvent.keyDown(folder, { key: "ArrowRight" });
+    await waitFor(() => expect(child).toHaveFocus());
+    expect(props.onLoadEntries).toHaveBeenCalledTimes(1);
   });
 });

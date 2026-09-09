@@ -892,6 +892,9 @@ export function FilesPanel({
               ? sourceLanguageForFile(entry.path)
               : null;
             const parent = searchActive ? workspaceParentPath(entry.path) : "";
+            const gitDescription = entry.kind === "directory"
+              ? gitIndex.directories.has(entry.path) ? "Contains Git changes" : undefined
+              : gitIndex.files.has(entry.path) ? `Git: ${gitIndex.files.get(entry.path)!.label}` : undefined;
             const directoryPage = entry.kind === "directory"
               ? directoryPages.get(entry.path)
               : undefined;
@@ -911,6 +914,8 @@ export function FilesPanel({
                 <button
                   type="button"
                   role="treeitem"
+                  aria-label={parent ? `${name} ${parent}` : name}
+                  aria-description={gitDescription}
                   className={clsx(
                     FILE_ENTRY_CLASS,
                     `is-${entry.kind}`,

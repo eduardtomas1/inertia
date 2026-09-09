@@ -15,6 +15,7 @@ import {
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { diagnosticErrorReference } from "../../utils/diagnosticNavigation";
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
@@ -66,7 +67,7 @@ function reportPassiveGitError(
   // scan before its socket closes. Keep that expected cancellation local to
   // the Git surface instead of obscuring unrelated workspace content with a
   // global alert. Other server rejections and ordinary failures remain global.
-  if (delivery === "rejected" && message === "Git inspection was cancelled.") {
+  if (delivery === "rejected" && diagnosticErrorReference(message).message === "Git inspection was cancelled.") {
     return message;
   }
   if (!delivery || delivery === "rejected") setActionError(message);

@@ -403,7 +403,8 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
 
   const emptyFolder = tree.getByRole("treeitem", { name: "empty-folder", exact: true });
   await emptyFolder.press("Enter");
-  await expect(tree.getByRole("status")).toContainText("empty-folder is empty");
+  await expect(tree.getByRole("status").filter({ hasText: "empty-folder" }))
+    .toHaveText("empty-folder is empty.");
   await page.screenshot({ path: testInfo.outputPath("recursive-files-tree-1440x920.png") });
 
   await resizeWindow(760, 800);

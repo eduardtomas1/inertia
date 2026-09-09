@@ -6,7 +6,11 @@ import {
 } from "react";
 import { Check, Star } from "lucide-react";
 
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { providerIdForHarness } from "../../../shared/model-routing";
+import { MODEL_SOURCE_PROVIDER_LABELS } from "../utils/modelSourceRail";
 import type { ModelSearchRoute } from "../utils/modelSearch";
+import type { ProviderId } from "../../../shared/contracts";
 
 export type ModelChooserCompatibilityState = "verified" | "partial" | "unknown";
 
@@ -38,6 +42,7 @@ interface ModelChooserRowBase {
   harnessLabel: string;
   backendProfileName: string;
   source: "built-in" | "custom";
+  providerId: ProviderId | null;
   active: boolean;
   favorite: boolean;
   shortcut: ModelChooserRowShortcut | null;
@@ -101,6 +106,9 @@ export function modelChooserRowFromRoute(
     harnessLabel: route.harnessLabel,
     backendProfileName: route.backendProfileName,
     source: route.source,
+    providerId: route.source === "built-in"
+      ? providerIdForHarness(route.harnessId)
+      : null,
     active: state.active,
     favorite: state.favorite,
     shortcut: state.shortcut ?? null,
@@ -111,11 +119,21 @@ export function modelChooserRowFromRoute(
     : { ...base, selectable: false, disabledReason: disabledReason! };
 }
 
+export function modelChooserSourceLabel(
+  row: Pick<ModelChooserRowData, "providerId" | "harnessLabel">,
+): string {
+  return row.providerId
+    ? MODEL_SOURCE_PROVIDER_LABELS[row.providerId]
+    : row.harnessLabel;
+}
+
 export function modelChooserSecondaryIdentity(
   row: Pick<
     ModelChooserRowData,
+    | "providerId"
     | "harnessLabel"
     | "backendProfileName"
+    | "source"
     | "reasoningEffort"
     | "responseSpeed"
     | "speedChangeNote"
@@ -123,24 +141,16 @@ export function modelChooserSecondaryIdentity(
   >,
 ): string {
   return [
-    row.harnessLabel,
-    row.backendProfileName,
-    row.reasoningEffort
-      ? `${row.reasoningEffort} reasoning`
-      : "Provider default reasoning",
-    ...(row.responseSpeed ? [`${row.responseSpeed} speed`] : []),
+    modelChooserSourceLabel(row),
+    ...(row.source === "custom" ? [row.backendProfileName] : []),
+    ...(row.reasoningEffort ? [`${row.reasoningEffort} reasoning`] : []),
+    ...(row.responseSpeed === "Fast" ? ["Fast"] : []),
     ...(row.configuration ? [
       row.configuration.interactionMode === "plan" ? "Plan" : "Build",
       { supervised: "Supervised", "auto-edit": "Auto-edit", full: "Full access" }[row.configuration.accessMode],
     ] : []),
     ...(row.speedChangeNote ? [row.speedChangeNote] : []),
   ].join(" · ");
-}
-
-export function modelChooserShowsRawModelId(
-  row: Pick<ModelChooserRowData, "displayName" | "modelId">,
-): boolean {
-  return row.displayName !== row.modelId;
 }
 
 export function modelChooserCompatibilityLabel(
@@ -190,7 +200,6 @@ export const ModelChooserRow = memo(function ModelChooserRow({
   const reasonId = `${reactId}-model-disabled-reason`;
   const compatibilityId = `${reactId}-model-compatibility`;
   const secondaryIdentity = modelChooserSecondaryIdentity(row);
-  const showRawModelId = modelChooserShowsRawModelId(row);
   const compatibilityLabel = modelChooserCompatibilityLabel(row.compatibility);
   const describedBy = [
     row.disabledReason ? reasonId : null,
@@ -225,6 +234,14 @@ export const ModelChooserRow = memo(function ModelChooserRow({
             )}
           </span>
           <span className="model-chooser-row-secondary">
+            {row.providerId && (
+              <ProviderBrandIcon
+                providerId={row.providerId}
+                size={11}
+                className="model-chooser-row-brand"
+                decorative
+              />
+            )}
             <span title={secondaryIdentity}>{secondaryIdentity}</span>
             {row.source === "custom" && <em>Custom</em>}
             {compatibilityLabel && (
@@ -238,9 +255,6 @@ export const ModelChooserRow = memo(function ModelChooserRow({
               </span>
             )}
           </span>
-          {showRawModelId && (
-            <code className="model-chooser-row-model-id" title={row.modelId}>{row.modelId}</code>
-          )}
           {row.disabledReason && (
             <small id={reasonId} className="model-chooser-row-disabled-reason">
               {row.disabledReason}

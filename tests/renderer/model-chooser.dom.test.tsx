@@ -110,6 +110,7 @@ function currentRoute(): ComposerModelRoute {
     },
     rowCompatibility: null,
     providerId: "codex",
+    providerReady: true,
   };
 }
 
@@ -354,5 +355,48 @@ describe("model chooser active route", () => {
         "Team Model 119",
       );
     });
+  });
+
+  it("offers only models whose provider can run, keeping the active route", () => {
+    const ready = currentRoute();
+    const unreadyBase = currentRoute();
+    const unreadySelection = {
+      ...unreadyBase.selection,
+      modelId: "unready-model",
+      alias: "Unready Model",
+    };
+    const unready: ComposerModelRoute = {
+      ...unreadyBase,
+      key: "unready-route",
+      displayName: "Unready Model",
+      modelId: "unready-model",
+      alias: "Unready Model",
+      selection: unreadySelection,
+      providerReady: false,
+    };
+
+    const rendered = render(
+      <ModelChooser
+        routes={[ready, unready]}
+        selectedRoute={ready}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+
+    expect(screen.getByTitle("Team Alpha")).toBeInTheDocument();
+    expect(screen.queryByTitle("Unready Model")).toBeNull();
+    rendered.unmount();
+
+    render(
+      <ModelChooser
+        routes={[ready, unready]}
+        selectedRoute={unready}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+
+    expect(screen.getByTitle("Unready Model")).toBeInTheDocument();
   });
 });

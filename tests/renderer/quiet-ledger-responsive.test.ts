@@ -50,7 +50,7 @@ describe("Quiet Ledger responsive transcript", () => {
     expect(split).toMatch(/\.message-scroll\s*\{[^}]*clamp\(20px,\s*4cqi,\s*40px\)/su);
     expect(narrowSplit).toMatch(/\.message-scroll\s*\{[^}]*clamp\(12px,\s*3cqi,\s*18px\)/su);
     expect(boundedChooser).toMatch(
-      /\.model-chooser-palette\s*\{[^}]*height:\s*min\(430px,[^;]*100cqh - 84px[^;]*\);[^}]*min-height:\s*min\(310px,[^;]*100cqh - 84px/su,
+      /\.model-chooser-palette\s*\{[^}]*height:\s*min\(396px,[^;]*100cqh - 84px[^;]*\);[^}]*min-height:\s*min\(286px,[^;]*100cqh - 84px/su,
     );
     expect(stackedChooser).toMatch(
       /\.workspace-body\.has-tools \.model-chooser-palette\s*\{[^}]*height:\s*min\(390px,[^;]*100cqh - 84px[^;]*\);[^}]*min-height:\s*min\(280px,[^;]*100cqh - 84px/su,

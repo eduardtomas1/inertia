@@ -326,6 +326,7 @@ describe("multi-spawn preset", () => {
       },
       rowCompatibility: null,
       providerId: "codex",
+      providerReady: true,
     };
     expect(selectionFromPreset([route], {
       harnessId: route.harnessId,
@@ -378,6 +379,7 @@ describe("multi-spawn preset", () => {
       },
       rowCompatibility: null,
       providerId: "codex",
+      providerReady: true,
     };
     const stale = {
       ...currentSelection,

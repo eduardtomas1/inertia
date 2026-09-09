@@ -1,4 +1,4 @@
-import { Search, Star } from "lucide-react";
+import { Search } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   memo,
@@ -30,7 +30,10 @@ import {
   type ModelFavoriteReference,
   type ModelFavoriteConfiguration,
 } from "../utils/modelFavorites";
-import type { ComposerModelRoute } from "../utils/modelChooserRoutes";
+import {
+  readyModelChooserRoutes,
+  type ComposerModelRoute,
+} from "../utils/modelChooserRoutes";
 import { searchModelRoutes } from "../utils/modelSearch";
 import {
   deriveModelSourceRailItems,
@@ -251,6 +254,14 @@ export function ModelChooser({
     () => new Set(favorites.map(modelFavoriteKey)),
     [favorites],
   );
+  const selectedKey = activeKeyForRoute(selectedRoute);
+  const offeredRoutes = useMemo(
+    () => readyModelChooserRoutes(
+      routes,
+      (route) => activeKeyForRoute(route) === selectedKey,
+    ),
+    [routes, selectedKey],
+  );
   const favoriteReference = useCallback((route: ComposerModelRoute): ModelFavoriteReference => ({
     ...route,
     ...(favoriteKeys.has(route.key) || !configuration ? {} : {
@@ -263,34 +274,34 @@ export function ModelChooser({
     }),
   }), [configuration, favoriteKeys]);
   const resolvedFavorites = useMemo(
-    () => resolveModelFavorites(favorites, routes),
-    [favorites, routes],
+    () => resolveModelFavorites(favorites, offeredRoutes),
+    [favorites, offeredRoutes],
   );
   const resolvedFavoriteRoutes = useMemo(
     () => resolvedFavorites.flatMap(({ route }) => route ? [route] : []),
     [resolvedFavorites],
   );
   const railItems = useMemo(
-    () => deriveModelSourceRailItems(routes, {
+    () => deriveModelSourceRailItems(offeredRoutes, {
       favoriteRoutes: resolvedFavoriteRoutes,
     }),
-    [resolvedFavoriteRoutes, routes],
+    [offeredRoutes, resolvedFavoriteRoutes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);
   const searchableRoutes = useMemo(
-    () => searchableModelChooserRoutes(routes, resolvedFavoriteRoutes),
-    [resolvedFavoriteRoutes, routes],
+    () => searchableModelChooserRoutes(offeredRoutes, resolvedFavoriteRoutes),
+    [offeredRoutes, resolvedFavoriteRoutes],
   );
   const sourceRoutes = useMemo(
     () => query.trim()
       ? searchableRoutes
       : sourceFilter.kind === "favorites"
         ? resolvedFavoriteRoutes
-        : filterModelRoutesBySource(routes, sourceFilter),
+        : filterModelRoutesBySource(offeredRoutes, sourceFilter),
     [
+      offeredRoutes,
       query,
       resolvedFavoriteRoutes,
-      routes,
       searchableRoutes,
       sourceFilter,
     ],
@@ -356,7 +367,6 @@ export function ModelChooser({
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
     [shortcuts],
   );
-  const selectedKey = activeKeyForRoute(selectedRoute);
   const selectedConfigurationKey = JSON.stringify(configuration ?? null);
   const matchesSelection = useCallback((route: ComposerModelRoute): boolean =>
     activeKeyForRoute(route) === selectedKey && (!route.configuration || (
@@ -588,7 +598,7 @@ export function ModelChooser({
               value={query}
               autoComplete="off"
               spellCheck="false"
-              placeholder="Search models, backends, or harnesses…"
+              placeholder="Search models…"
               aria-label="Search models"
               aria-controls={resultsId}
               aria-activedescendant={activeDescendant}
@@ -654,19 +664,6 @@ export function ModelChooser({
                 )}
               </div>
             </div>
-          </div>
-          <div className="model-chooser-footer">
-            <span><kbd>↑↓</kbd> navigate</span>
-            <span><kbd>Enter</kbd> select</span>
-            <span><kbd>Esc</kbd> close</span>
-            {shortcuts.length > 0 && (
-              <span className="model-chooser-favorite-hint">
-                <Star size={10} aria-hidden="true" />
-                {shortcuts.length} favorite {shortcuts.length === 1
-                  ? "shortcut"
-                  : "shortcuts"}
-              </span>
-            )}
           </div>
         </div>
       )}

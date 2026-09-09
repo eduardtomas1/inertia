@@ -62,7 +62,7 @@ function renderFavorite(modelRow: ModelChooserRowData): string {
 }
 
 describe("ModelChooserRow", () => {
-  it("renders a compact option with truthful identity, raw ID, shortcut, and active state", () => {
+  it("renders a compact option with truthful identity, brand mark, shortcut, and active state", () => {
     const html = render(row({}, {
       active: true,
       favorite: true,
@@ -82,9 +82,9 @@ describe("ModelChooserRow", () => {
     expect(html).toContain('aria-keyshortcuts="Meta+1"');
     expect(html).toContain('tabindex="0"');
     expect(html).toContain("GPT 5.6 Sol");
-    expect(html).toContain("Codex · OpenAI");
-    expect(html).toContain("<code");
-    expect(html).toContain("gpt-5.6-sol");
+    expect(html).toContain(">Codex<");
+    expect(html).toContain('class="provider-brand-icon is-official is-dark-invert model-chooser-row-brand"');
+    expect(html).toContain('data-provider-brand="openai"');
     expect(html).toContain("<kbd");
     expect(html).toContain("⌘1");
     expect(html).toContain("Verified");
@@ -95,13 +95,17 @@ describe("ModelChooserRow", () => {
     }))).toContain('aria-pressed="true"');
   });
 
-  it("includes effective response speed in native route identity", () => {
-    expect(render(row({ responseSpeed: "Fast" })))
-      .toContain("Codex · OpenAI · Provider default reasoning · Fast speed");
+  it("names only the identity terms that actually vary for a route", () => {
+    expect(render(row({ responseSpeed: "Fast" }))).toContain("Codex · Fast");
     expect(render(row({ responseSpeed: "Standard" })))
-      .toContain("Codex · OpenAI · Provider default reasoning · Standard speed");
+      .toContain('title="Codex"');
+    expect(render(row({ reasoningEffort: "xhigh" })))
+      .toContain("Codex · xhigh reasoning");
     expect(render(row({ speedChangeNote: "Fast turns off" })))
-      .toContain("Codex · OpenAI · Provider default reasoning · Fast turns off");
+      .toContain("Codex · Fast turns off");
+    expect(render(row())).not.toContain("Provider default reasoning");
+    expect(render(row())).not.toContain("Standard speed");
+    expect(render(row())).not.toContain(">Codex · OpenAI<");
   });
 
   it("renders independent result and favorite buttons in one semantic row", () => {
@@ -133,9 +137,12 @@ describe("ModelChooserRow", () => {
     expect(html).not.toContain("Official provider label must not leak");
   });
 
-  it("shows raw model IDs only when the display name differs", () => {
-    expect(render(row({ displayName: "gpt-5.6-sol" }))).not.toContain("<code");
-    expect(render(row())).toContain('<code class="model-chooser-row-model-id"');
+  it("keeps raw model identifiers out of the calm result row", () => {
+    expect(render(row())).not.toContain("<code");
+    expect(render(row())).not.toContain("model-chooser-row-model-id");
+    expect(render(row())).not.toContain(">gpt-5.6-sol<");
+    expect(render(row({ modelId: "custom/provider/raw-identifier" })))
+      .not.toContain(">custom/provider/raw-identifier<");
   });
 
   it("surfaces compatibility states only when they affect selection", () => {
@@ -177,7 +184,7 @@ describe("ModelChooserRow", () => {
     }));
     expect(html).toContain('aria-disabled="true"');
     expect(html).toContain('class="model-chooser-row-disabled-reason"');
-    expect(html).toContain("custom/provider/model-with-a-distinct-raw-identifier");
+    expect(html).not.toContain("custom/provider/model-with-a-distinct-raw-identifier");
     expect(html).toContain("This harness cannot switch models in the current session.");
   });
 

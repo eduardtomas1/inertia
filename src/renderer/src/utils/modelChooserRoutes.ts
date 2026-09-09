@@ -35,6 +35,7 @@ export interface ComposerModelRoute extends ModelSearchRoute {
   compatibility: RouteCompatibility;
   rowCompatibility: ModelChooserSelectionCompatibility | null;
   providerId: ProviderId | null;
+  providerReady: boolean;
   reasoningEffort: string | null;
   reasoningOptions: readonly string[];
   supportsNativeFastModeControl?: boolean;
@@ -50,6 +51,34 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
 };
 
 const refreshModelsReason = "Refresh models to select this route.";
+
+export function providerRunsModels(
+  provider: Pick<
+    ProviderInfo,
+    "available" | "installState" | "canRun"
+  > | undefined,
+): boolean {
+  if (!provider) return false;
+  return provider.available
+    && provider.installState === "installed"
+    && provider.canRun;
+}
+
+export function readyModelChooserRoutes<Route extends { providerReady: boolean }>(
+  routes: readonly Route[],
+  isActiveRoute: (route: Route) => boolean = () => false,
+): Route[] {
+  return routes.filter((route) => route.providerReady || isActiveRoute(route));
+}
+
+function routeProviderReady(
+  harnessId: string,
+  providers: readonly ProviderInfo[],
+): boolean {
+  const providerId = providerIdForHarness(harnessId);
+  if (!providerId) return true;
+  return providerRunsModels(providers.find(({ id }) => id === providerId));
+}
 
 export function modelChooserHarnessLabel(harnessId: string): string {
   const providerId = providerIdForHarness(harnessId);
@@ -255,6 +284,7 @@ function profileRoute(
     compatibility: profile.compatibility,
     rowCompatibility: compatibilityForRow(profile.compatibility),
     providerId,
+    providerReady: routeProviderReady(profile.harnessId, providers),
   };
 }
 
@@ -337,6 +367,7 @@ function fallbackNativeRoutes(
         compatibility,
         rowCompatibility: null,
         providerId: provider.id,
+        providerReady: providerRunsModels(provider),
       };
     });
   });

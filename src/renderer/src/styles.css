@@ -10437,7 +10437,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     padding-left: 40px;
   }
 
-  .header-button span {
+  .header-button span:not(.header-plus-icon) {
     display: none;
   }
 

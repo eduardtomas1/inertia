@@ -1550,9 +1550,10 @@ async function openWorkspaceTools(page: Page): Promise<void> {
 }
 
 async function openSplitChat(page: Page): Promise<void> {
-  await page.getByRole("button", {
-    name: "Thread actions for Performance secondary",
-  }).click();
+  await page.getByRole("complementary", { name: "Project navigation" })
+    .locator(".activity-thread-select")
+    .filter({ hasText: "Performance secondary" })
+    .click({ button: "right" });
   await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();

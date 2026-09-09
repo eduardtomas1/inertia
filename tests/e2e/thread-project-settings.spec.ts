@@ -1,4 +1,4 @@
-// @inertia-e2e-resource isolated
+// @inertia-e2e-resource primary-display
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
@@ -9,7 +9,8 @@ let app: AppFixture;
 let projectId: string;
 let threadId: string;
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true,
+  // Delayed hover previews and the native clipboard need exclusive display ownership.
+  app = await createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
       try {
@@ -170,7 +171,11 @@ test("runs a saved action only on explicit selection through the real terminal",
   const page = app.page;
   await page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
-  await page.getByRole("button", { name: "Add action", exact: true }).click();
+  await app.resizeWindow(1000, 700);
+  const actionButton = page.getByRole("button", { name: "Add action", exact: true });
+  await expect(actionButton).toBeVisible();
+  await expect(actionButton.locator(".header-plus-icon")).toBeVisible();
+  await actionButton.click();
   const menu = page.getByRole("menu", { name: "Project actions", exact: true });
   await expect(menu.getByRole("menuitem", { name: /Check workspace/u })).toBeVisible();
   await capture(info, "saved-project-action-menu-dark");

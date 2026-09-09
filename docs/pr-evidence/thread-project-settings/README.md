@@ -63,7 +63,8 @@ The plain square image is the deliberately minimal image-upload fixture.
 
 ```sh
 npm run check
-INERTIA_E2E_WORKERS=1 npx playwright test tests/e2e/thread-project-settings.spec.ts tests/e2e/theme-library.spec.ts --project=isolated
+INERTIA_E2E_WORKERS=1 npx playwright test tests/e2e/thread-project-settings.spec.ts --project=display-sensitive
+INERTIA_E2E_WORKERS=1 npx playwright test tests/e2e/theme-library.spec.ts --project=isolated
 ```
 
 Local results: `npm run check` passed (8,251 tests passed, 83 skipped;

@@ -233,7 +233,7 @@ export function WorkspaceHeader({
           <>
             {actions.length > 0 && (
               <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
+                <button type="button" className="header-button" aria-label="Add action" title="Add action" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
                   <span className="header-plus-icon" aria-hidden="true" /><span>Add action</span>
                 </button>
                 {menu === "action" && (

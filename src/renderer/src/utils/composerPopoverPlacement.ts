@@ -163,6 +163,7 @@ function popoverSurface(popover: HTMLElement): HTMLElement {
 export function positionComposerPopover(
   trigger: HTMLElement,
   popover: HTMLElement,
+  preferredVertical: PopoverVerticalPlacement = "above",
 ): ComposerPopoverPlacement {
   const surface = popoverSurface(popover);
   popover.style.translate = "none";
@@ -191,6 +192,7 @@ export function positionComposerPopover(
   const placement = calculateComposerPopoverPlacement({
     trigger: trigger.getBoundingClientRect(),
     boundary,
+    preferredVertical,
     popover: {
       width: widthConstrainedBounds.width,
       height: naturalHeight,
@@ -244,11 +246,12 @@ export function observeComposerPopover(
   trigger: HTMLElement,
   popover: HTMLElement,
   onPlacement: (submenuSide: "left" | "right" | null) => void,
+  preferredVertical: PopoverVerticalPlacement = "above",
 ): () => void {
   let frame: number | null = null;
   const update = (): void => {
     frame = null;
-    positionComposerPopover(trigger, popover);
+    positionComposerPopover(trigger, popover, preferredVertical);
     const submenuSide = chooseComposerSubmenuSide(
       popoverSurface(popover),
       288,

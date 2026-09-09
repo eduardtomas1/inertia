@@ -110,10 +110,44 @@ function currentRoute(): ComposerModelRoute {
     },
     rowCompatibility: null,
     providerId: "codex",
+    providerReady: true,
   };
 }
 
 describe("model chooser active route", () => {
+  it("shows only sources with usable models and responds to availability changes", async () => {
+    const current = currentRoute();
+    const unavailable: ComposerModelRoute = {
+      ...catalogRoute(1),
+      backendProfileId: "custom:disabled",
+      backendProfileName: "Disabled gateway",
+      selectable: false,
+      unavailableReason: "This backend is disabled.",
+    };
+    const onSelect = vi.fn();
+    const view = render(<ModelChooser routes={[current, unavailable]}
+      selectedRoute={current} onSelect={onSelect} />);
+    const trigger = screen.getByRole("button", { name: /Choose model/u });
+    fireEvent.click(trigger);
+    await screen.findByRole("button", { name: /^Team gateway, custom backend /u });
+    expect(screen.queryByRole("button", { name: /^Disabled gateway, custom backend /u }))
+      .not.toBeInTheDocument();
+
+    const ready = { ...unavailable, selectable: true, unavailableReason: null };
+    view.rerender(<ModelChooser routes={[current, ready]}
+      selectedRoute={current} onSelect={onSelect} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Disabled gateway, custom backend /u }));
+    expect(screen.getByRole("list", { name: "Model results" })).toHaveTextContent("Team Model 1");
+
+    view.rerender(<ModelChooser routes={[{ ...current, providerReady: false }, unavailable]}
+      selectedRoute={current} onSelect={onSelect} />);
+    await waitFor(() => expect(screen.getByRole("toolbar", { name: "Model sources filters" })
+      .querySelectorAll("button")).toHaveLength(0));
+    // Unavailable choices do not erase the current conversation's identity.
+    expect(trigger).toHaveAccessibleName(/Team Alpha/u);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("restores the starred access, mode, effort and speed after reopening from another configuration", async () => {
     const selection = providerNativeModelSelection({ providerId: "codex", modelId: "team-alpha",
       reasoningEffort: "high", providerOptions: { fastMode: "priority" } });
@@ -159,7 +193,7 @@ describe("model chooser active route", () => {
     render(<ModelChooser routes={[route]} selectedRoute={route}
       configuration={{ accessMode: "supervised", interactionMode: "build" }} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /^Team gateway, custom backend /u }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Team gateway, custom backend /u }));
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "1", code: "Digit1", ctrlKey: true });
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
@@ -354,5 +388,48 @@ describe("model chooser active route", () => {
         "Team Model 119",
       );
     });
+  });
+
+  it("offers only models whose provider can run, keeping the active route", () => {
+    const ready = currentRoute();
+    const unreadyBase = currentRoute();
+    const unreadySelection = {
+      ...unreadyBase.selection,
+      modelId: "unready-model",
+      alias: "Unready Model",
+    };
+    const unready: ComposerModelRoute = {
+      ...unreadyBase,
+      key: "unready-route",
+      displayName: "Unready Model",
+      modelId: "unready-model",
+      alias: "Unready Model",
+      selection: unreadySelection,
+      providerReady: false,
+    };
+
+    const rendered = render(
+      <ModelChooser
+        routes={[ready, unready]}
+        selectedRoute={ready}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+
+    expect(screen.getByTitle("Team Alpha")).toBeInTheDocument();
+    expect(screen.queryByTitle("Unready Model")).toBeNull();
+    rendered.unmount();
+
+    render(
+      <ModelChooser
+        routes={[ready, unready]}
+        selectedRoute={unready}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+
+    expect(screen.getByTitle("Unready Model")).toBeInTheDocument();
   });
 });

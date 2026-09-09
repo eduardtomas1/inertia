@@ -1,16 +1,13 @@
 import {
   Bot,
-  Check,
   CloudCog,
-  Code2,
-  Command,
-  MousePointer2,
-  Sparkles,
   Star,
   type LucideIcon,
 } from "lucide-react";
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import type { ProviderId } from "../../../shared/contracts";
 import {
   isModelSourceRailActivationKey,
   type ModelSourceFilter,
@@ -34,22 +31,21 @@ export interface ModelSourceRailProps {
   resultsId?: string;
 }
 
-const providerIcons: Readonly<Record<string, LucideIcon>> = {
-  codex: Command,
-  claude: Bot,
-  cursor: MousePointer2,
-  gemini: Sparkles,
-  opencode: Code2,
-};
+export type ModelSourceRailGlyph =
+  | { kind: "provider"; providerId: ProviderId }
+  | { kind: "icon"; Icon: LucideIcon };
 
-export function modelSourceRailItemIcon(
+export function modelSourceRailItemGlyph(
   item: ModelSourceRailItem,
-): LucideIcon {
-  if (item.filter.kind === "favorites") return Star;
+): ModelSourceRailGlyph {
+  if (item.filter.kind === "favorites") return { kind: "icon", Icon: Star };
   if (item.filter.kind === "provider") {
-    return providerIcons[item.filter.providerId] ?? Bot;
+    return { kind: "provider", providerId: item.filter.providerId };
   }
-  return item.filter.kind === "custom" ? CloudCog : Bot;
+  return {
+    kind: "icon",
+    Icon: item.filter.kind === "custom" ? CloudCog : Bot,
+  };
 }
 
 export function modelSourceRailItemAccessibleLabel(
@@ -114,7 +110,7 @@ export function ModelSourceRail({
         {items.map((item, index) => {
           const selected = item.id === selectedId && item.setupAction === null;
           const disabled = item.setupAction !== null && !onSetupAction;
-          const ItemIcon = modelSourceRailItemIcon(item);
+          const glyph = modelSourceRailItemGlyph(item);
           const accessibleLabel = modelSourceRailItemAccessibleLabel(item);
           return (
             <button
@@ -137,25 +133,18 @@ export function ModelSourceRail({
                 activate(item);
               }}
             >
-              <span className="model-source-rail-glyph" aria-hidden="true">
-                <ItemIcon size={15} strokeWidth={1.8} />
+              <span className="model-source-rail-glyph">
+                {glyph.kind === "provider"
+                  ? (
+                      <ProviderBrandIcon
+                        providerId={glyph.providerId}
+                        size={16}
+                        decorative
+                      />
+                    )
+                  : <glyph.Icon size={15} strokeWidth={1.8} aria-hidden="true" />}
               </span>
-              <span className="model-source-rail-copy">
-                <strong>{item.label}</strong>
-                {item.detail && <small>{item.detail}</small>}
-              </span>
-              {selected
-                ? (
-                    <span className="model-source-rail-selected">
-                      <Check size={11} aria-hidden="true" />
-                      <span className="visually-hidden">Selected</span>
-                    </span>
-                  )
-                : item.routeCount > 0 && (
-                    <small className="model-source-rail-count" aria-hidden="true">
-                      {item.routeCount}
-                    </small>
-                  )}
+              <span className="model-source-rail-mark" aria-hidden="true" />
             </button>
           );
         })}
@@ -163,3 +152,5 @@ export function ModelSourceRail({
     </nav>
   );
 }
+
+export default ModelSourceRail;

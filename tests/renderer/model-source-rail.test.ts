@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Bot, CloudCog, Command, MousePointer2, Sparkles, Star } from "lucide-react";
+import { Bot, CloudCog, Star } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   ModelSourceRail,
   activateModelSourceRailItem,
   modelSourceRailItemAccessibleLabel,
-  modelSourceRailItemIcon,
+  modelSourceRailItemGlyph,
 } from "../../src/renderer/src/components/ModelSourceRail";
 import {
   deriveModelSourceRailItems,
@@ -202,7 +202,10 @@ describe("model source rail", () => {
 
     expect(gemini.label).toBe("Gemini");
     expect(gemini.routes).toEqual([geminiRoute]);
-    expect(modelSourceRailItemIcon(gemini)).toBe(Sparkles);
+    expect(modelSourceRailItemGlyph(gemini)).toEqual({
+      kind: "provider",
+      providerId: "gemini",
+    });
     expect(filterModelRoutesBySource([geminiRoute], {
       kind: "provider",
       providerId: "gemini",
@@ -295,8 +298,8 @@ describe("model source rail", () => {
     expect(html).toContain('aria-orientation="vertical"');
     expect(html).toContain('aria-controls="model-results"');
     expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('class="model-source-rail-selected"');
-    expect(html).toContain("Selected");
+    expect(html).toContain('class="model-source-rail-item is-selected"');
+    expect(html).toContain('class="model-source-rail-mark"');
     expect(html).toContain('tabindex="0"');
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain("<svg");
@@ -316,18 +319,39 @@ describe("model source rail", () => {
       && filter.backendProfileId === "custom:team-a")!;
     const unknown = items.find(({ filter }) => filter.kind === "harness")!;
 
-    expect(modelSourceRailItemIcon(favorites)).toBe(Star);
-    expect(modelSourceRailItemIcon(codex)).toBe(Command);
-    expect(modelSourceRailItemIcon(cursor)).toBe(MousePointer2);
-    expect(modelSourceRailItemIcon(custom)).toBe(CloudCog);
-    expect(modelSourceRailItemIcon(unknown)).toBe(Bot);
+    expect(modelSourceRailItemGlyph(favorites)).toEqual({
+      kind: "icon",
+      Icon: Star,
+    });
+    expect(modelSourceRailItemGlyph(codex)).toEqual({
+      kind: "provider",
+      providerId: "codex",
+    });
+    expect(modelSourceRailItemGlyph(cursor)).toEqual({
+      kind: "provider",
+      providerId: "cursor",
+    });
+    expect(modelSourceRailItemGlyph(custom)).toEqual({
+      kind: "icon",
+      Icon: CloudCog,
+    });
+    expect(modelSourceRailItemGlyph(unknown)).toEqual({
+      kind: "icon",
+      Icon: Bot,
+    });
     expect(modelSourceRailItemAccessibleLabel(custom)).toBe(
       "Team gateway, custom backend via Claude, 2 models, profile custom:team-a",
     );
 
     const html = renderRail(items);
-    expect(html).toContain("Custom · Claude");
-    expect(html).toContain("Custom · Codex");
+    expect(html).toContain(
+      'title="Team gateway, custom backend via Claude, 2 models, profile custom:team-a"',
+    );
+    expect(html).toContain(
+      'title="Team gateway, custom backend via Codex, 1 model, profile custom:team-b"',
+    );
+    expect(html).toContain('data-provider-brand="openai"');
+    expect(html).toContain('data-provider-brand="anthropic"');
     expect(html).toContain("profile custom:team-a");
     expect(html).toContain("profile custom:team-b");
   });
@@ -356,12 +380,12 @@ describe("model source rail", () => {
     expect(block).toContain(".model-source-rail-item.is-selected");
     expect(block).toContain(".model-source-rail-item:focus-visible");
     expect(block).toContain(".model-source-rail-item:disabled");
-    expect(block).toContain("box-shadow: inset 2px 0 0");
+    expect(block).toContain(".model-source-rail-mark");
     expect(block).toContain("var(--ui-control-height)");
     expect(block).toContain("var(--ui-font-micro)");
     expect(block).toContain("var(--surface-hover)");
     expect(block).toContain("text-overflow: ellipsis");
-    expect(block).toContain("@container (max-width: 520px)");
+    expect(block).toContain("@container (max-width: 420px)");
     expect(block).toContain("@media (max-width: 640px)");
   });
 

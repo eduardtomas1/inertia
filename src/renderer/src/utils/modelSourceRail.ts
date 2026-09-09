@@ -15,7 +15,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "opencode",
 ] as const satisfies readonly ProviderId[];
 
-const providerLabels: Readonly<Record<ProviderId, string>> = {
+export const MODEL_SOURCE_PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
@@ -178,7 +178,7 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
       : null;
     if (groupedRoutes.length === 0 && !setupAction) continue;
     items.push(railItem({
-      label: providerLabels[providerId],
+      label: MODEL_SOURCE_PROVIDER_LABELS[providerId],
       detail: setupAction ? "Setup" : null,
       filter: { kind: "provider", providerId },
       routes: groupedRoutes,

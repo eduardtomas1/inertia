@@ -65,6 +65,6 @@ describe("anchored composer model chooser", () => {
     expect(css).toMatch(/@media \(max-width:\s*560px\)[\s\S]*?\.backend-identity-card\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
     expect(css).toMatch(/@media \(max-width:\s*560px\)[\s\S]*?\.backend-secret-row input\s*\{[^}]*width:\s*100%/u);
     expect(css).toMatch(/\.model-chooser-palette\s*\{[^}]*bottom:\s*calc\(100% \+ 9px\)/u);
-    expect(css).toMatch(/@container \(max-width:\s*480px\)[\s\S]*?\.model-chooser-palette\s*\{[^}]*width:\s*min\(calc\(100vw - 18px\),\s*calc\(100cqw - 14px\)\)/u);
+    expect(css).toMatch(/@container \(max-width:\s*480px\)[\s\S]*?\.model-chooser-palette\s*\{[^}]*width:\s*min\(var\(--model-chooser-width\),\s*calc\(100cqw - 14px\)\)/u);
   });
 });

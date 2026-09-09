@@ -829,7 +829,7 @@ describe("composer detachment ownership", () => {
     })} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: "Claude, 2 models" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Claude, 2 models" }));
     const destination = screen.getByTitle("Claude Route").closest("button");
     if (!destination) throw new Error("Expected the destination model route.");
     fireEvent.click(destination);

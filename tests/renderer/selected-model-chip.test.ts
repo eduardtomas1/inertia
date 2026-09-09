@@ -178,10 +178,20 @@ describe("selected model chip", () => {
     const withoutGlyph = render(route(), { showSourceGlyph: false });
 
     expect(withGlyph).toContain('class="selected-model-chip-glyph"');
-    expect(withGlyph.match(/<svg/gu)).toHaveLength(2);
+    expect(withGlyph).toContain('data-provider-brand="openai"');
+    expect(withGlyph).toContain('class="provider-brand-icon-source is-light"');
+    expect(withGlyph.match(/<svg/gu)).toHaveLength(1);
     expect(withoutGlyph).not.toContain('class="selected-model-chip-glyph"');
     expect(withoutGlyph.match(/<svg/gu)).toHaveLength(1);
     expect(withoutGlyph).toContain("selected-model-chip-chevron");
+  });
+
+  it("uses the provider brand in the trigger without branding custom backends as official", () => {
+    const claude = render(route({ harnessId: "claude-agent-sdk" }));
+    expect(claude).toContain('data-provider-brand="anthropic"');
+    const custom = render(route({ source: "custom" }));
+    expect(custom).not.toContain('data-provider-brand="openai"');
+    expect(custom).toContain("lucide-cloud-cog");
   });
 
   it("keeps long and unsafe labels complete in metadata while React escapes markup", () => {

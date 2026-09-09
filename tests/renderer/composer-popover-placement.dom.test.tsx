@@ -56,6 +56,33 @@ afterEach(() => {
 });
 
 describe("composer popover DOM placement", () => {
+  it.each([
+    { top: 240, vertical: "below" },
+    { top: 560, vertical: "above" },
+  ] as const)("honors downward preference with upward fallback at trigger top $top", ({ top, vertical }) => {
+    document.body.innerHTML = `<div class="chat-workspace"><button>Model</button><div id="chooser"></div></div>`;
+    const workspace = document.querySelector<HTMLElement>(".chat-workspace")!;
+    const trigger = document.querySelector<HTMLButtonElement>("button")!;
+    const popover = document.getElementById("chooser")!;
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(800);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(640);
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({ top: 64, left: 0, right: 800, bottom: 640 }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({ top, left: 200, right: 360, bottom: top + 32 }));
+    vi.spyOn(popover, "getBoundingClientRect").mockReturnValue(rect({ top: 0, left: 0, right: 320, bottom: 160 }));
+    Object.defineProperties(popover, {
+      clientHeight: { configurable: true, value: 160 },
+      scrollHeight: { configurable: true, value: 160 },
+    });
+
+    // Existing composer menus keep their default preference.
+    expect(positionComposerPopover(trigger, popover).vertical).toBe("above");
+    const placement = positionComposerPopover(trigger, popover, "below");
+    expect(placement.vertical).toBe(vertical);
+    expect(popover.dataset.popoverVertical).toBe(vertical);
+    if (vertical === "below") expect(placement.top).toBeGreaterThan(top + 32);
+    else expect(placement.top + 160).toBeLessThan(top);
+  });
+
   it("preserves an item focused while initial menu placement is pending", () => {
     document.body.innerHTML = `<div class="composer">
       <button id="trigger">More options</button>

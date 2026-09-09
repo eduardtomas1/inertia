@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildComposerModelRoutes,
   modelChooserHarnessLabel,
+  providerRunsModels,
+  readyModelChooserRoutes,
   selectedModelSearchRoute,
 } from "../../src/renderer/src/utils/modelChooserRoutes";
 import type {
@@ -441,5 +443,51 @@ describe("composer model chooser route projection", () => {
       selectable: false,
       unavailableReason: "Saved model route unavailable.",
     });
+  });
+
+  it("annotates whether each route's provider can actually run it", () => {
+    const current = providerNativeModelSelection({ providerId: "codex" });
+    const routes = buildComposerModelRoutes(
+      [provider(), claudeWithoutCatalog()],
+      [],
+      current,
+    );
+
+    expect(routes.filter(({ providerId }) => providerId === "codex"))
+      .toSatisfy((codexRoutes: typeof routes) =>
+        codexRoutes.length > 0
+        && codexRoutes.every(({ providerReady }) => providerReady));
+    expect(routes.filter(({ providerId }) => providerId === "claude"))
+      .toSatisfy((claudeRoutes: typeof routes) =>
+        claudeRoutes.length > 0
+        && claudeRoutes.every(({ providerReady }) => !providerReady));
+  });
+
+  it("treats a provider as runnable only when it is installed and can run", () => {
+    expect(providerRunsModels(provider())).toBe(true);
+    expect(providerRunsModels(claudeWithoutCatalog())).toBe(false);
+    expect(providerRunsModels({
+      ...provider(),
+      installState: "not-installed",
+    })).toBe(false);
+    expect(providerRunsModels({ ...provider(), available: false })).toBe(false);
+    expect(providerRunsModels(undefined)).toBe(false);
+  });
+
+  it("offers only runnable routes while never hiding the active selection", () => {
+    const current = providerNativeModelSelection({ providerId: "codex" });
+    const routes = buildComposerModelRoutes(
+      [provider(), claudeWithoutCatalog()],
+      [],
+      current,
+    );
+    const activeClaude = routes.find(({ providerId }) =>
+      providerId === "claude")!;
+
+    expect(readyModelChooserRoutes(routes).map(({ providerId }) => providerId))
+      .not.toContain("claude");
+    expect(
+      readyModelChooserRoutes(routes, ({ key }) => key === activeClaude.key),
+    ).toContain(activeClaude);
   });
 });

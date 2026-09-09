@@ -132,6 +132,7 @@ export function ConversationActionsMenu({
 }: ConversationActionsMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [submenu, setSubmenu] = useState<"snooze" | "copy" | null>(initialSubmenu ?? null);
   const [presets] = useState(() => threadSnoozePresets(new Date()));
   const setMenuRef = useCallback((node: HTMLDivElement | null) => {
     menuRef.current = node;
@@ -215,7 +216,8 @@ export function ConversationActionsMenu({
       >
         <CheckCircle2 size={13} />{conversation.settledAt ? "Reopen thread" : "Settle thread"}
       </ConversationMenuItem>
-      <ThreadSubmenu label="Snooze" icon={<Clock size={13} />} disabled={!canOrganizeThread(conversation, runs)} initiallyOpen={initialSubmenu === "snooze"}>
+      <ThreadSubmenu label="Snooze" icon={<Clock size={13} />} disabled={!canOrganizeThread(conversation, runs)}
+        open={submenu === "snooze"} onOpenChange={(open) => setSubmenu((current) => open ? "snooze" : current === "snooze" ? null : current)}>
         {conversation.snoozedUntil && <ConversationMenuItem {...itemProps} onActivate={() => onSnoozeConversation(conversation, null)}><History size={13} />Unsnooze</ConversationMenuItem>}
         {presets.map((preset) => <ConversationMenuItem {...itemProps} key={preset.id} onActivate={() => {
           const current = threadSnoozePresets(new Date()).find(({ id }) => id === preset.id);
@@ -227,7 +229,8 @@ export function ConversationActionsMenu({
       {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} title="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={13} />Regenerate title</ConversationMenuItem>}
       {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={13} />Mark unread</ConversationMenuItem>}
       <div role="separator" />
-      <ThreadSubmenu label="Copy" icon={<Copy size={13} />}>
+      <ThreadSubmenu label="Copy" icon={<Copy size={13} />} open={submenu === "copy"}
+        onOpenChange={(open) => setSubmenu((current) => open ? "copy" : current === "copy" ? null : current)}>
         <button type="button" role="menuitem" tabIndex={-1} disabled={!conversation.worktreePath && !projectPath} onClick={() => void copy(conversation.worktreePath ?? projectPath ?? "")}><FolderOpen size={13} />Path</button>
         <button type="button" role="menuitem" tabIndex={-1} onClick={() => void copy(conversation.id)}><Hash size={13} />Thread ID</button>
       </ThreadSubmenu>

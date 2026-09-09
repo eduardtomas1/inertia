@@ -1,12 +1,11 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { navigateMenuItems } from "../../utils/menuKeyboard";
 
 /** Kept inside the owning menu for outside-click and focus ownership. */
-export function ThreadSubmenu({ label, icon, disabled, children, initiallyOpen = false }: {
-  label: string; icon: ReactNode; disabled?: boolean; children: ReactNode; initiallyOpen?: boolean;
+export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenChange: setOpen }: {
+  label: string; icon: ReactNode; disabled?: boolean; children: ReactNode; open: boolean; onOpenChange: (open: boolean) => void;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(initiallyOpen);
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {

@@ -57,6 +57,7 @@ test("right-click, inline actions, delayed preview, and nested keyboard menus", 
   await page.keyboard.press("ArrowRight");
   const copyMenu = page.getByRole("menu", { name: "Copy", exact: true });
   await expect(copyMenu.getByRole("menuitem", { name: "Path", exact: true })).toBeFocused();
+  await expect(page.getByRole("menu", { name: "Snooze", exact: true })).toHaveCount(0);
   await capture(info, "thread-copy-light");
   await page.keyboard.press("ArrowLeft");
   await expect(menu.getByRole("menuitem", { name: "Copy", exact: true })).toBeFocused();
@@ -168,7 +169,8 @@ test("scratch prompts belong only to their original chat, including after restar
 test("runs a saved action only on explicit selection through the real terminal", async ({ browserName: _browserName }, info) => {
   const page = app.page;
   await page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
-  await page.getByRole("button", { name: "Open project actions", exact: true }).click();
+  await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
+  await page.getByRole("button", { name: "Add action", exact: true }).click();
   const menu = page.getByRole("menu", { name: "Project actions", exact: true });
   await expect(menu.getByRole("menuitem", { name: /Check workspace/u })).toBeVisible();
   await capture(info, "saved-project-action-menu-dark");
@@ -178,7 +180,7 @@ test("runs a saved action only on explicit selection through the real terminal",
     try { return store.shellSnapshot().runs.filter((run) => run.label === "Check workspace").map((run) => ({
       projectId: run.projectId, conversationId: run.conversationId, status: run.status,
     })); } finally { store.close(); }
-  }).toEqual([{ projectId, conversationId: threadId, status: "completed" }]);
+  }).toEqual([{ projectId, conversationId: threadId, status: "succeeded" }]);
   await expect(page.locator(".xterm-screen").first()).toBeVisible();
   await capture(info, "project-action-terminal-dark");
   expect(app.rendererErrors).toEqual([]);

@@ -768,7 +768,7 @@ function SidebarView({
             </span>
             <span className="activity-thread-topline">
               <span className="activity-thread-title">{conversation.title}</span>
-              {model.unread && <span className="thread-unread-mark">New</span>}
+              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
             </span>
             <span className="work-thread-meta">
               {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}

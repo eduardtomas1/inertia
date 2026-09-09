@@ -14,7 +14,7 @@ function release(tagName: string, headers?: HeadersInit): Response {
   return new Response(JSON.stringify({
     tag_name: tagName,
     html_url: "https://attacker.invalid/not-used",
-    body: "Release content is intentionally ignored.",
+    body: "Improved update controls.",
   }), {
     status: 200,
     headers: {
@@ -37,7 +37,7 @@ describe("app update checks", () => {
     );
   });
 
-  it("reports a newer public release without trusting remote URLs or content", async () => {
+  it("reports a newer public release with plain-text notes without trusting remote URLs", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
       expect(init).toMatchObject({
         method: "GET",
@@ -67,6 +67,7 @@ describe("app update checks", () => {
       progress: null,
       currentVersion: "0.0.10",
       latestVersion: "0.0.11",
+      releaseNotes: "Improved update controls.",
       releaseUrl:
         "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.11",
       checkedAt: "2030-01-02T03:04:05.000Z",
@@ -123,6 +124,7 @@ describe("app update checks", () => {
       return new Response(JSON.stringify({
         version: "0.0.12",
         tag: "canary-v0.0.12",
+        releaseNotes: "Canary improvements.",
         remoteUrl: "https://attacker.invalid/ignored",
       }));
     });
@@ -147,7 +149,7 @@ describe("app update checks", () => {
     let progress!: (value: AppUpdaterDownloadProgress) => void;
     const quitAndInstall = vi.fn(async () => "handoff-confirmed" as const);
     const updater: AppUpdaterAdapter = {
-      check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
+      check: vi.fn(async () => ({ available: true, version: "0.0.11", releaseNotes: "Improved update controls." })),
       download: vi.fn((callbacks): AppUpdaterDownload => {
         progress = callbacks.onProgress;
         return {

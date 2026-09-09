@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 
-import type { ChatAttachment } from "@shared/contracts";
 import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
@@ -20,13 +19,14 @@ import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
   formatAttachmentSize,
+  type AttachmentPreviewSource,
 } from "../utils/composerAttachments";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 function SentImageThumbnail({
   attachment,
 }: {
-  attachment: ChatAttachment;
+  attachment: AttachmentPreviewSource;
 }): React.JSX.Element {
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
     "loading",
@@ -56,11 +56,11 @@ export function SentMessageAttachmentList({
   attachments,
   label = "Message attachments",
 }: {
-  attachments: readonly ChatAttachment[];
+  attachments: readonly AttachmentPreviewSource[];
   label?: string;
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
-    useState<ChatAttachment | null>(null);
+    useState<AttachmentPreviewSource | null>(null);
   const metadataIdPrefix = useId();
   const closePreview = useCallback(() => setPreviewAttachment(null), []);
 

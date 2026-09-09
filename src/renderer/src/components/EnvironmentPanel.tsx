@@ -12,14 +12,11 @@ import {
   CloudUpload,
   ExternalLink,
   FileDiff,
-  FileSpreadsheet,
-  FileText,
   Folder,
   FolderGit2,
   GitBranch,
   GitFork,
   Globe2,
-  Image,
   Laptop,
   ListChecks,
   PanelLeft,
@@ -28,10 +25,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-import {
-  chatAttachmentKind,
-  isSpreadsheetAttachmentMimeType,
-} from "@shared/attachments";
 import type {
   EnvironmentRunItem,
   EnvironmentSummarySnapshot,
@@ -42,6 +35,7 @@ import {
 } from "../utils/workspaceGit";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { IconButton } from "./ui";
+import { SentMessageAttachmentList } from "./SentMessageAttachmentList";
 
 export type EnvironmentRepositoryAction = WorkspaceChangesRequestedAction;
 
@@ -685,20 +679,9 @@ export function EnvironmentPanel({
         )}
 
         {summary.attachments.length > 0 && (
-          <section className="environment-panel-section" aria-labelledby={attachmentsHeadingId}>
+          <section className="environment-panel-section environment-attachments" aria-labelledby={attachmentsHeadingId}>
             <h3 id={attachmentsHeadingId}>Recent attachments</h3>
-            <ul className="environment-plain-list">
-              {summary.attachments.map((attachment) => (
-                <li key={attachment.id}>
-                  {chatAttachmentKind(attachment.mimeType) === "image"
-                    ? <Image size={14} aria-hidden="true" />
-                    : isSpreadsheetAttachmentMimeType(attachment.mimeType)
-                      ? <FileSpreadsheet size={14} aria-hidden="true" />
-                      : <FileText size={14} aria-hidden="true" />}
-                  <span title={attachment.name}>{attachment.name}</span>
-                </li>
-              ))}
-            </ul>
+            <SentMessageAttachmentList attachments={summary.attachments} label="Recent attachments" />
           </section>
         )}
 

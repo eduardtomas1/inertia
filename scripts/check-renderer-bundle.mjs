@@ -50,7 +50,10 @@ const budgets = {
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
   deferredLifecycleIntegritySettingsJavaScript: 5 * kibibyte,
-  deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
+  // Replaces the 6 KiB notice allowance with the stateful footer control,
+  // keyboard/hover details and restart confirmation (10.5 KiB measured).
+  // Entry and core ceilings are unchanged; Markdown still loads only on demand.
+  deferredSidebarUpdateControlJavaScript: 10.75 * kibibyte,
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
@@ -166,8 +169,8 @@ const deferredCanaryRollbackJavaScript = assetNames.find(
 const deferredLifecycleIntegritySettingsJavaScript = assetNames.find(
   (name) => /^LifecycleIntegritySettings-.*\.js$/u.test(name),
 );
-const deferredAppUpdateNoticeJavaScript = assetNames.find(
-  (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
+const deferredSidebarUpdateControlJavaScript = assetNames.find(
+  (name) => /^SidebarUpdateControl-.*\.js$/u.test(name),
 );
 const deferredProviderAuthJavaScript = assetNames.find(
   (name) => /^ProviderAuthDialog-.*\.js$/u.test(name),
@@ -257,9 +260,9 @@ if (!deferredLifecycleIntegritySettingsJavaScript) {
     "Renderer bundle check could not find the deferred lifecycle integrity settings chunk.",
   );
 }
-if (!deferredAppUpdateNoticeJavaScript) {
+if (!deferredSidebarUpdateControlJavaScript) {
   throw new Error(
-    "Renderer bundle check could not find the deferred update notice chunk.",
+    "Renderer bundle check could not find the deferred sidebar update control chunk.",
   );
 }
 if (!deferredProviderAuthJavaScript) {
@@ -402,8 +405,8 @@ const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
 const deferredLifecycleIntegritySettingsJavaScriptBytes = await assetBytes(
   `assets/${deferredLifecycleIntegritySettingsJavaScript}`,
 );
-const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
-  `assets/${deferredAppUpdateNoticeJavaScript}`,
+const deferredSidebarUpdateControlJavaScriptBytes = await assetBytes(
+  `assets/${deferredSidebarUpdateControlJavaScript}`,
 );
 const deferredProviderAuthJavaScriptBytes = await assetBytes(
   `assets/${deferredProviderAuthJavaScript}`,
@@ -502,7 +505,7 @@ const coreJavaScriptBytes =
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
   - deferredLifecycleIntegritySettingsJavaScriptBytes
-  - deferredAppUpdateNoticeJavaScriptBytes
+  - deferredSidebarUpdateControlJavaScriptBytes
   - deferredProviderAuthJavaScriptBytes
   - deferredProviderMaintenanceJavaScriptBytes
   - deferredComposerQueueJavaScriptBytes
@@ -542,7 +545,7 @@ const measurements = {
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
   deferredLifecycleIntegritySettingsJavaScript:
     deferredLifecycleIntegritySettingsJavaScriptBytes,
-  deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
+  deferredSidebarUpdateControlJavaScript: deferredSidebarUpdateControlJavaScriptBytes,
   deferredProviderAuthJavaScript: deferredProviderAuthJavaScriptBytes,
   deferredProviderMaintenanceJavaScript: deferredProviderMaintenanceJavaScriptBytes,
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,

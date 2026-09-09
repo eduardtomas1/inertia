@@ -15,9 +15,10 @@ import {
   releasePageUrl,
   type InertiaReleaseChannel,
 } from "./release-channel.js";
+import { appUpdateReleaseNotes } from "./app-update-release-notes.js";
 
-const LATEST_RELEASE_URL =
-  "https://api.github.com/repos/eduardtomas1/inertia/releases/latest";
+const RELEASES_URL = "https://api.github.com/repos/eduardtomas1/inertia/releases";
+const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
 const DEFAULT_CACHE_MS = 6 * 60 * 60 * 1_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 64 * 1_024;
@@ -50,6 +51,7 @@ interface CachedCheck {
   state: "available" | "current";
   latestVersion: string;
   releaseUrl: string;
+  releaseNotes: string | null;
   checkedAt: string;
   message: string;
 }
@@ -207,6 +209,7 @@ export class AppUpdateService {
       currentVersion: this.currentVersion,
       latestVersion: null,
       releaseUrl: null,
+      releaseNotes: null,
       checkedAt: null,
       lastAttemptedAt: null,
       message: this.capability.delivery === "in-app"
@@ -378,7 +381,19 @@ export class AppUpdateService {
       const native = this.capability.delivery === "in-app"
         ? await this.nativeLatestVersion()
         : null;
-      const latestVersion = native?.version ?? await this.manualLatestVersion();
+      const release = native ?? await this.manualLatestVersion();
+      const latestVersion = release.version;
+      let notes = appUpdateReleaseNotes(release.releaseNotes, latestVersion);
+      // Generic updater feeds may omit notes. Fetch the exact tag, never "latest":
+      // a newer release appearing during the check must not change the candidate.
+      if (!notes) {
+        try {
+          const tag = `${channelConfiguration(this.channel).releaseTagPrefix}${latestVersion}`;
+          const metadata = await this.releaseMetadata(`${RELEASES_URL}/tags/${tag}`);
+          if (typeof metadata === "object" && metadata !== null && "tag_name" in metadata
+            && metadata.tag_name === tag && "body" in metadata) notes = appUpdateReleaseNotes(metadata.body, latestVersion);
+        } catch { /* Optional notes never make an otherwise valid update unavailable. */ }
+      }
       const checkedAt = new Date(this.now()).toISOString();
       const available = (native?.available ?? true)
         && compareAppVersions(latestVersion, this.currentVersion) > 0;
@@ -386,6 +401,7 @@ export class AppUpdateService {
         state: available ? "available" : "current",
         latestVersion,
         releaseUrl: releasePageUrl(this.channel, latestVersion),
+        releaseNotes: notes,
         checkedAt,
         message: this.capability.delivery === "manual"
           && this.capability.reason === "windows-signing-unavailable"
@@ -420,6 +436,7 @@ export class AppUpdateService {
         freshness: "unavailable",
         latestVersion: null,
         releaseUrl: null,
+        releaseNotes: null,
         checkedAt: null,
         lastAttemptedAt,
         installBlocker: null,
@@ -429,22 +446,28 @@ export class AppUpdateService {
     }
   }
 
-  private async nativeLatestVersion(): Promise<{ available: boolean; version: string }> {
+  private async nativeLatestVersion(): Promise<{ available: boolean; version: string; releaseNotes?: unknown }> {
     const result = await (await this.updater()).check();
     const latest = parsedVersion(result?.version);
     if (!latest) throw new Error("The updater returned an invalid version.");
-    return { available: result?.available === true, version: latest.text };
+    return { available: result?.available === true, version: latest.text, releaseNotes: result?.releaseNotes };
   }
 
-  private async manualLatestVersion(): Promise<string> {
+  private async manualLatestVersion(): Promise<{ version: string; releaseNotes: unknown }> {
+    const metadata = await this.releaseMetadata(this.channel === "canary"
+      ? `${channelConfiguration("canary").updateFeedUrl}/canary-status.json` : LATEST_RELEASE_URL);
+    const version = latestTag(metadata, this.channel);
+    return { version, releaseNotes: (metadata as { body?: unknown; releaseNotes?: unknown }).body
+      ?? (metadata as { releaseNotes?: unknown }).releaseNotes };
+  }
+
+  private async releaseMetadata(url: string): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     timeout.unref?.();
     try {
       const response = await this.fetch(
-        this.channel === "canary"
-          ? `${channelConfiguration("canary").updateFeedUrl}/canary-status.json`
-          : LATEST_RELEASE_URL,
+        url,
         {
         method: "GET",
         redirect: "error",
@@ -456,7 +479,7 @@ export class AppUpdateService {
         },
       });
       if (!response.ok) throw new Error(`Update request failed (${response.status}).`);
-      return latestTag(await boundedJson(response), this.channel);
+      return await boundedJson(response);
     } finally {
       clearTimeout(timeout);
     }

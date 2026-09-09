@@ -84,7 +84,9 @@ export function attachmentPreviewKind(
   return "text";
 }
 
-export function attachmentPreviewUrl(attachment: ChatAttachment): string {
+export type AttachmentPreviewSource = Pick<ChatAttachment, "id" | "name" | "mimeType" | "size" | "snapshot">;
+
+export function attachmentPreviewUrl(attachment: Pick<ChatAttachment, "id">): string {
   const scheme = globalThis.location?.protocol === "inertia-canary:"
     ? "inertia-canary"
     : "inertia";

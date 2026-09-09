@@ -298,7 +298,6 @@ describe("compact Work sidebar", () => {
       "Daily work",
       "Usage",
       "Settings",
-      "",
     ]);
     const dailyWork = screen.getByRole("button", { name: "Daily work" });
     const mark = dailyWork.querySelector(".daily-work-mark");

@@ -12,6 +12,7 @@ import type {
   BrowserEvidenceSnapshot,
 } from "./browser-evidence";
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
+import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -60,6 +61,10 @@ export interface InertiaReleaseInfo {
 export interface SendDiscordReleaseInfoRequest {
   repositoryUrl: string;
 }
+
+export type SendDiscordReleaseInfoResult =
+  | { sent: true; comparisonLimited: boolean; incidentId?: string }
+  | { sent: false; code: import("./application-diagnostics").DiagnosticCode; incidentId?: string };
 
 export interface DatabaseRecoveryImportSummary {
   projects: number;
@@ -606,6 +611,11 @@ export interface DesktopBridge {
   importRecoveryData: () => Promise<DatabaseRecoveryImportResult>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
   revealRuntimeLogs: () => Promise<string>;
+  queryDiagnostics: (query: DiagnosticQuery) => Promise<DiagnosticPage>;
+  copyDiagnostics: (query: DiagnosticQuery) => Promise<{ copied: boolean; count: number }>;
+  exportDiagnostics: (query: DiagnosticQuery) => Promise<{ status: "exported" | "cancelled" }>;
+  reportValidationDiagnostic: (report: RendererDiagnostic) => Promise<{ incidentId: string } | null>;
+  onDiagnosticsChanged: (listener: () => void) => () => void;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */
   copyRuntimeDiagnosticReport: (
     lifecycle: RuntimeLifecycleDiagnosticSnapshot | null,
@@ -629,7 +639,7 @@ export interface DesktopBridge {
   /** Fetches authoritative release metadata and sends the latest comparison to Discord. */
   sendDiscordReleaseInfo: (
     request: SendDiscordReleaseInfoRequest,
-  ) => Promise<{ sent: true }>;
+  ) => Promise<SendDiscordReleaseInfoResult>;
   snapshot: (request: import("./snapshots").SnapshotRequest) => Promise<import("./snapshots").SnapshotState>;
   onSnapshot: (listener: (event: import("./snapshots").SnapshotDelivery) => void) => () => void;
   selectAttachments: (

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentTurnStatus } from "../../src/shared/contracts";
 import type {
@@ -63,6 +63,72 @@ function timeoutRuntime(initialStatus: AgentTurnStatus = "running") {
 }
 
 describe("TurnTimeoutCoordinator", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function observedRuntime() {
+    vi.useFakeTimers(); vi.setSystemTime(0);
+    let status: AgentTurnStatus = "running";
+    const reportIncident = vi.fn();
+    const cancel = vi.fn(); const fail = vi.fn();
+    const coordinator = new TurnTimeoutCoordinator({
+      scheduler: { setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) },
+      inactivityMs: 1_000, maxLifetimeMs: 10_000, observationMs: 200,
+      status: () => status, cancel, fail, reportIncident, now: Date.now,
+    });
+    const active = activeTurn();
+    coordinator.start(active);
+    return { coordinator, active, cancel, fail, reportIncident, setStatus: (value: AgentTurnStatus) => { status = value; } };
+  }
+
+  it("observes one silence episode, recovers on activity, and leaves both safety deadlines intact", () => {
+    const h = observedRuntime();
+    const lifetime = h.active.lifetimeTimer;
+    vi.advanceTimersByTime(200);
+    expect(h.reportIncident).toHaveBeenCalledOnce();
+    const warning = h.reportIncident.mock.calls[0]![0];
+    expect(warning).toMatchObject({ code: "turn.inactivity", outcome: "observing", metadata: { silenceMs: 200 } });
+    vi.advanceTimersByTime(200);
+    expect(h.reportIncident).toHaveBeenCalledOnce();
+    expect(h.cancel).not.toHaveBeenCalled();
+    h.coordinator.activity(h.active);
+    expect(h.reportIncident.mock.calls[1]![0]).toMatchObject({ id: warning.id, outcome: "recovered", metadata: { silenceMs: 400 } });
+    expect(h.active.lifetimeTimer).toBe(lifetime);
+    vi.advanceTimersByTime(1_000);
+    expect(h.cancel).toHaveBeenCalledOnce();
+    expect(h.fail).toHaveBeenCalledOnce();
+    expect(h.active.diagnosticFailureCode).toBe("turn.inactivity-timeout");
+    h.coordinator.stop(h.active);
+    expect(h.reportIncident.mock.calls.at(-1)![0].outcome).toBe("ended");
+  });
+
+  it.each(["waiting-for-approval", "waiting-for-input"] as const)("exempts %s without calling it recovery or counting its elapsed time", (status) => {
+    const h = observedRuntime();
+    vi.advanceTimersByTime(200);
+    h.setStatus(status); h.coordinator.activity(h.active);
+    expect(h.reportIncident.mock.calls.at(-1)![0].outcome).toBe("ended");
+    vi.advanceTimersByTime(5_000);
+    expect(h.reportIncident).toHaveBeenCalledTimes(2);
+    expect(h.fail).not.toHaveBeenCalled();
+    h.setStatus("running"); h.coordinator.activity(h.active);
+    vi.advanceTimersByTime(199);
+    expect(h.reportIncident).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(1);
+    expect(h.reportIncident.mock.calls.at(-1)![0].metadata.silenceMs).toBe(200);
+  });
+
+  it("does not warn after terminal cleanup and cannot break deadlines when observation throws", () => {
+    const h = observedRuntime();
+    h.reportIncident.mockImplementation(() => { throw new Error("disk unavailable"); });
+    expect(() => vi.advanceTimersByTime(200)).not.toThrow();
+    expect(() => vi.advanceTimersByTime(800)).not.toThrow();
+    expect(h.fail).toHaveBeenCalledOnce();
+    h.coordinator.stop(h.active);
+    h.active.runState.settle("cancelled");
+    h.coordinator.activity(h.active);
+    h.reportIncident.mockClear();
+    vi.advanceTimersByTime(10_000);
+    expect(h.reportIncident).not.toHaveBeenCalled();
+  });
   it("refreshes provider inactivity without replacing the lifetime fail-safe", () => {
     const runtime = timeoutRuntime();
     const active = activeTurn();

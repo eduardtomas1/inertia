@@ -21,6 +21,7 @@ interface WorkspaceToolsOptions {
   enabled?: boolean;
   loadGitStatusOnMount?: boolean;
   loadGitOnMount?: boolean;
+  gitStatusOnly?: boolean;
   loadFilesOnMount?: boolean;
   project: Project | null;
   conversation: Conversation | null;
@@ -54,6 +55,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     enabled,
     loadStatusOnMount: options.loadGitStatusOnMount ?? true,
     loadWorkspaceOnMount: options.loadGitOnMount ?? false,
+    statusOnly: options.gitStatusOnly,
   });
   const files = useWorkspaceFiles({
     project: options.project,

@@ -1,4 +1,5 @@
 import { snapshotSourceSchema } from "../shared/snapshots";
+import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
 import { parseMascotStatus, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
@@ -255,6 +256,7 @@ export interface RuntimeSecureFileResult {
 export type { RuntimeRestartReason } from "./runtime-owned-process-diagnostic.js";
 
 export type RuntimeWorkerEvent =
+  | { type: "runtime.incident"; incident: import("../shared/application-diagnostics.js").DiagnosticIncident }
   | { type: "runtime.mascot-status"; status: MascotStatus }
   | {
       type: "runtime.ready";
@@ -696,7 +698,10 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
 
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
-  if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
+  if (value.type === "runtime.incident") {
+    const incident = Object.keys(value).length === 2 ? parseDiagnosticIncident(value.incident) : null;
+    return incident && incident.runtimeGeneration ? { type: "runtime.incident", incident } : null;
+  } else if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
   if (
     value.type === "runtime.system-suspend-result"
     && Object.keys(value).length === 3

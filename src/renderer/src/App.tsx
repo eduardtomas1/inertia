@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DIAGNOSTIC_NAVIGATION_EVENT, parseDiagnosticNavigation, type DiagnosticSelection } from "./utils/diagnosticNavigation";
 import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
@@ -109,8 +110,9 @@ export default function App(): React.JSX.Element {
   );
   const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
-    section: "providers" | "backends" | "connections";
+    section: "providers" | "backends" | "connections" | "discord" | "diagnostics";
     profileId?: string;
+    selection?: DiagnosticSelection;
   } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -488,7 +490,9 @@ export default function App(): React.JSX.Element {
         && (
           sceneActiveTool === "changes"
           || sceneActiveTool === "environment"
+          || sceneActiveTool === "files"
         ),
+      gitStatusOnly: sceneActiveTool === "files",
       loadFilesOnMount:
         !workspaceToolsUnavailable && sceneActiveTool === "files",
     }),
@@ -847,6 +851,25 @@ export default function App(): React.JSX.Element {
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;
+  useEffect(() => {
+    const navigate = (event: Event): void => {
+      const target = parseDiagnosticNavigation((event as CustomEvent<unknown>).detail);
+      if (!target) return;
+      if ("conversationId" in target) {
+        const affected = connection.snapshot?.conversations.find(({ id }) => id === target.conversationId);
+        if (!affected || connection.status !== "online") {
+          setActionError("This conversation is unavailable. Its diagnostic record is still readable.");
+          return;
+        }
+        selectConversation(affected);
+      } else {
+        setSettingsTarget(target);
+        navigateToView("settings");
+      }
+    };
+    window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
+    return () => window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
+  }, [connection.snapshot, connection.status, navigateToView, selectConversation]);
   const visibleConversationDetailState = conversationDetailState?.conversationId === conversation?.id
     ? conversationDetailState
     : null;

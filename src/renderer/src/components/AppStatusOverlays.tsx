@@ -8,6 +8,7 @@ import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNot
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
 import { loadProviderAuthDialog } from "./lazySurfaceLoaders";
+import { diagnosticErrorReference, navigateDiagnosticContext } from "../utils/diagnosticNavigation";
 
 const ProviderAuthDialog = lazy(async () => ({
   default: (await loadProviderAuthDialog()).ProviderAuthDialog,
@@ -42,6 +43,7 @@ export function AppStatusOverlays({
   onImportRecovery,
   onCopyRecoveryReport,
 }: AppStatusOverlaysProps): React.JSX.Element {
+  const diagnosticError = error ? diagnosticErrorReference(error) : null;
   // Own preview suspension from this always-loaded boundary. The credential
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
   // native preview content above the trusted authentication flow.
@@ -123,7 +125,8 @@ export function AppStatusOverlays({
           {error && (
             <div className="error-toast" role="alert">
               <AlertCircle size={17} />
-              <span>{error}</span>
+              <span>{diagnosticError?.message}</span>
+              {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "diagnostics", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
               <IconButton label="Dismiss error" onClick={onDismissError}>
                 <X size={15} />
               </IconButton>

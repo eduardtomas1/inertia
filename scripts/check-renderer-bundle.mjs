@@ -20,7 +20,9 @@ const budgets = {
   // Snapshot lease routing and compaction receipt projection bring the
   // workbench to 738.3 KiB and detached route to 565.1 KiB on macOS ARM64.
   // Keep less than 2 KiB of headroom on each.
-  mainWorkbenchFirstLoadJavaScript: 739 * kibibyte,
+  // Diagnostics deep links and status-only Files refresh add ~2 KiB; their
+  // larger settings UI/catalog stay deferred and have separate ceilings below.
+  mainWorkbenchFirstLoadJavaScript: 742 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -34,6 +36,8 @@ const budgets = {
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
+  deferredDiagnosticsJavaScript: 13 * kibibyte,
+  deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
@@ -55,14 +59,16 @@ const budgets = {
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
-  deferredGitMenusJavaScript: 8.75 * kibibyte,
+  deferredGitMenusJavaScript: 8.875 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
   // Snapshot validation, optional setup, arrival UI and persisted compaction
   // receipts bring shared core to 1,985.9 KiB on macOS ARM64; keep <2 KiB headroom.
-  coreJavaScript: 1_987 * kibibyte,
+  // Bounded file badges, native textarea color mirroring and diagnostic links.
+  // The independently capped deferred center/catalog are subtracted below.
+  coreJavaScript: 1_994 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -470,8 +476,20 @@ const issueReportEntry = assetNames.find((name) => /^IssueReportSettings-.*\.js$
 if (!issueReportEntry) throw new Error("Missing deferred issue report surface");
 if (mainWorkbenchJavaScriptClosure.has(issueReportEntry)) throw new Error("Issue reporting must remain deferred");
 const deferredIssueReportJavaScriptBytes = await assetBytes(`assets/${issueReportEntry}`);
+const diagnosticEntries = ["DiagnosticsSettings", "application-diagnostics"].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred diagnostics surface: ${prefix}`);
+  if (mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
+    throw new Error(`Diagnostics must stay off the initial workbench: ${prefix}`);
+  }
+  return entry;
+});
+const deferredDiagnosticsJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[0]}`);
+const deferredDiagnosticCatalogJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[1]}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredDiagnosticsJavaScriptBytes
+  - deferredDiagnosticCatalogJavaScriptBytes
   - deferredIssueReportJavaScriptBytes
   - mascotJavaScriptBytes
   - mascotSettingsJavaScriptBytes
@@ -497,6 +515,8 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,
+  deferredDiagnosticCatalogJavaScript: deferredDiagnosticCatalogJavaScriptBytes,
   deferredIssueReportJavaScript: deferredIssueReportJavaScriptBytes,
   mascotFirstLoadJavaScript: await closureBytes(mascotClosure),
   mascotJavaScript: mascotJavaScriptBytes,

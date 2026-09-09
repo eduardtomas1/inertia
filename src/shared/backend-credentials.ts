@@ -15,6 +15,8 @@ export interface BackendCredentialStorageState {
 }
 
 export interface BackendCredentialState {
+  /** Optional safe incident reference; never a credential or vault error. */
+  diagnosticId?: string;
   profileId: string;
   hasSecret: boolean;
   maskedValue: typeof BACKEND_CREDENTIAL_MASK | null;

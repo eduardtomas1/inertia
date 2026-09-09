@@ -171,11 +171,11 @@ export default defineConfig({
             // names reduce repeated import/preload metadata without changing code.
             const budgetedChunks = new Set([
               "App", "DetachedChatApp", "FilesPanel", "ResponseTimeline", "ResponseMarkdown", "SettingsView",
-              "MascotSettings", "IssueReportSettings", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
+              "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "AppUpdateNotice", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
-              "WorkspaceBranchMenu", "WorkspaceGitActionMenu",
+              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

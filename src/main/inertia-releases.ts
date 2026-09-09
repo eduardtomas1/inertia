@@ -2,6 +2,17 @@ import type {
   InertiaReleaseInfo,
   SendDiscordReleaseInfoRequest,
 } from "../shared/desktop.js";
+import type { DiagnosticCode } from "../shared/application-diagnostics.js";
+
+export class ReleaseOperationError extends Error {
+  constructor(readonly code: DiagnosticCode, message: string, readonly httpStatus?: number) {
+    super(message);
+    this.name = "ReleaseOperationError";
+  }
+}
+class ReleaseResponseTooLarge extends Error {
+  constructor() { super("The release response was too large."); }
+}
 
 const MAX_RELEASE_RESPONSE_BYTES = 1_024 * 1_024;
 const RELEASE_FETCH_TIMEOUT_MS = 10_000;
@@ -23,16 +34,10 @@ type RepositoryDescriptor =
     compareWebUrl(base: string, head: string): string;
   };
 
-interface ReleaseCompareChange {
-  path: string;
-  status: string;
-  patch: string | null;
-}
-
 interface ReleaseCompare {
-  url: string | null;
+  url: string;
   commits: string[];
-  files: ReleaseCompareChange[];
+  limited: boolean;
 }
 
 function boundedString(value: unknown, maximum: number): string | null {
@@ -48,7 +53,8 @@ async function boundedJson(response: Response): Promise<unknown> {
     Number.isFinite(declaredLength)
     && declaredLength > MAX_RELEASE_RESPONSE_BYTES
   ) {
-    throw new Error("The release response was too large.");
+    await response.body?.cancel();
+    throw new ReleaseResponseTooLarge();
   }
   if (!response.body) throw new Error("The release response was empty.");
   const reader = response.body.getReader();
@@ -61,7 +67,7 @@ async function boundedJson(response: Response): Promise<unknown> {
       length += value.byteLength;
       if (length > MAX_RELEASE_RESPONSE_BYTES) {
         await reader.cancel("The release response was too large.");
-        throw new Error("The release response was too large.");
+        throw new ReleaseResponseTooLarge();
       }
       chunks.push(value);
     }
@@ -86,13 +92,18 @@ function normalizedRepositoryUrl(value: unknown): URL {
   } catch {
     throw new Error("The release repository URL is invalid.");
   }
-  if (parsed.protocol !== "https:") {
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) {
     throw new Error("The release repository URL must use HTTPS.");
   }
   parsed.hash = "";
   parsed.search = "";
   parsed.pathname = parsed.pathname.replace(/\.git$/u, "").replace(/\/+$/u, "");
   return parsed;
+}
+
+export function validateReleaseRepository(value: unknown): void {
+  try { repositoryDescriptor(value); }
+  catch { throw new ReleaseOperationError("discord.repository-missing", "A supported public release repository URL is required."); }
 }
 
 function repositoryDescriptor(value: unknown): RepositoryDescriptor {
@@ -140,6 +151,7 @@ function parseReleaseItem(value: unknown): InertiaReleaseInfo | null {
     return null;
   }
   const item = value as Record<string, unknown>;
+  if (item.draft === true || item.prerelease === true) return null;
   const links = typeof item._links === "object" && item._links !== null
     && !Array.isArray(item._links)
     ? item._links as Record<string, unknown>
@@ -160,7 +172,8 @@ function parseReleaseItem(value: unknown): InertiaReleaseInfo | null {
       item.releasedAt ?? item.released_at ?? item.published_at,
       80,
     ),
-    description: boundedString(item.description ?? item.body, 8_000),
+    description: typeof (item.description ?? item.body) === "string"
+      ? String(item.description ?? item.body).trim().slice(0, 8_000) || null : null,
   };
 }
 
@@ -177,10 +190,13 @@ function discordWebhookUrl(value: unknown): string {
   if (
     parsed.protocol !== "https:"
     || (host !== "discord.com" && host !== "discordapp.com")
-    || !parsed.pathname.startsWith("/api/webhooks/")
+    || parsed.username || parsed.password || parsed.port
+    || !/^\/api\/webhooks\/[0-9]+\/[A-Za-z0-9_-]+$/u.test(parsed.pathname)
   ) {
     throw new Error("The Discord webhook URL is invalid.");
   }
+  parsed.hash = "";
+  parsed.searchParams.set("wait", "true");
   return parsed.toString();
 }
 
@@ -216,108 +232,32 @@ function uniqueLimited(values: string[], maximum = 5): string[] {
   return result;
 }
 
-function cleanedCommitSummary(value: string): string {
-  return compactText(
-    firstLine(value)
-      .replace(/^\s*(feat|fix|chore|refactor|perf|test|docs|style|build|ci)(\([^)]+\))?:\s*/iu, "")
-      .replace(/\s+\(#[0-9]+\)\s*$/u, ""),
-    150,
-  );
-}
-
-function classifyChange(text: string): "Millores" | "Implementacions" | "Bugs" | "Altres" {
-  if (/\b(fix|bug|crash|error|fail|failure|regression|broken|invalid|null|undefined|exception|repair|recover)\b/iu.test(text)) {
-    return "Bugs";
-  }
-  if (/^\s*(add|create|implement|support|persist|integrat|feature|endpoint|api|webhook|migration|schema)\b/iu.test(text)) {
-    return "Implementacions";
-  }
-  if (/\b(improve|polish|refactor|cleanup|simplif|optim|performance|ux|ui|rename|update|better|enhance)\b/iu.test(text)) {
-    return "Millores";
-  }
-  if (/\b(add|create|implement|support|persist|integrat|feature|endpoint|api|webhook|migration|schema|release|config|setting)\b/iu.test(text)) {
-    return "Implementacions";
-  }
-  return "Altres";
-}
-
-function fileChangeSummary(file: ReleaseCompareChange): string {
-  if (/settingsview|styles\.css/iu.test(file.path)) {
-    return "Millorada la configuració de Discord i el flux de generació.";
-  }
-  if (/inertia-releases/iu.test(file.path)) {
-    return "Afegida generació d'un resum de release a partir del compare entre tags.";
-  }
-  if (/persistence|migration|settings-repository|codecs|rows/iu.test(file.path)) {
-    return "Persistida la configuració de Discord perquè l'app arrenqui amb valors buits si no està configurada.";
-  }
-  if (/contracts|preload|main\/index|desktop/iu.test(file.path)) {
-    return "Connectada la configuració de Discord entre la UI i el procés principal.";
-  }
-  if (/test|spec/iu.test(file.path)) {
-    return "Afegida cobertura automàtica del flux de releases i de les migracions.";
-  }
-  if (/check-renderer-bundle/iu.test(file.path)) {
-    return "Ajustat el pressupost del bundle després d'afegir la nova funcionalitat.";
-  }
-  const basename = file.path.split(/[\\/]/u).at(-1) ?? file.path;
-  return file.status === "removed"
-    ? `Eliminada una peça interna relacionada amb ${basename}.`
-    : `Actualitzada una peça interna relacionada amb ${basename}.`;
-}
-
-function releaseAnalysis(compare: ReleaseCompare): Record<"Millores" | "Implementacions" | "Bugs" | "Altres", string[]> {
-  const grouped: Record<"Millores" | "Implementacions" | "Bugs" | "Altres", string[]> = {
-    Millores: [],
-    Implementacions: [],
-    Bugs: [],
-    Altres: [],
-  };
-  for (const commit of compare.commits) {
-    const line = cleanedCommitSummary(commit);
-    grouped[classifyChange(line)].push(line);
-  }
-  for (const file of compare.files) {
-    const evidence = `${file.status} ${file.path} ${file.patch ?? ""}`;
-    grouped[classifyChange(evidence)].push(fileChangeSummary(file));
-  }
-  return {
-    Millores: uniqueLimited(grouped.Millores),
-    Implementacions: uniqueLimited(grouped.Implementacions),
-    Bugs: uniqueLimited(grouped.Bugs),
-    Altres: uniqueLimited(grouped.Altres),
-  };
-}
-
-function sectionText(items: string[]): string {
-  const bullets = items.length > 0 ? items : ["Sense canvis detectats en aquesta categoria."];
-  return compactMarkdown(bullets.map((item) => `- ${item}`).join("\n"), DISCORD_FIELD_LIMIT);
-}
-
 function releaseMessage(
   release: InertiaReleaseInfo,
   previousRelease: InertiaReleaseInfo,
   compare: ReleaseCompare,
 ): Record<string, unknown> {
-  const analysis = releaseAnalysis(compare);
+  const subjects = uniqueLimited(compare.commits.map(firstLine));
   const title = release.name || release.tag;
   return {
     content: `**${title}**`,
     embeds: [{
       title: `Comparativa ${previousRelease.tag} -> ${release.tag}`,
-      url: compare.url ?? release.url ?? undefined,
+      url: compare.url,
       description: compactMarkdown(
-        "Resum explicat dels canvis detectats entre aquesta release i l'anterior.",
+        release.description || "Aquesta release no inclou notes publicades. Consulta la comparativa completa.",
         DISCORD_DESCRIPTION_LIMIT,
       ),
       color: 0x5865f2,
       fields: [
-        { name: "Millores", value: sectionText(analysis.Millores), inline: false },
-        { name: "Implementacions", value: sectionText(analysis.Implementacions), inline: false },
-        { name: "Bugs", value: sectionText(analysis.Bugs), inline: false },
-        { name: "Altres", value: sectionText(analysis.Altres), inline: false },
+        ...(subjects.length ? [{ name: "Commits · vista prèvia", value: compactMarkdown(
+          subjects.map((subject) => `- ${subject}`).join("\n"), DISCORD_FIELD_LIMIT,
+        ), inline: false }] : []),
+        ...(compare.limited ? [{ name: "Comparativa limitada", value:
+          "La resposta supera el límit de previsualització. Es mostren les notes publicades, no una anàlisi completa del diff.",
+        inline: false }] : []),
       ],
-      footer: compare.url ? { text: "Obre el títol per veure el diff complet." } : undefined,
+      footer: { text: "Notes de release i vista prèvia de commits. Obre el títol per veure tots els canvis." },
     }],
     allowed_mentions: { parse: [] },
   };
@@ -345,26 +285,6 @@ function compareCommitMessages(value: unknown): string[] {
   });
 }
 
-function compareFiles(value: unknown): ReleaseCompareChange[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((file) => {
-    if (typeof file !== "object" || file === null || Array.isArray(file)) {
-      return [];
-    }
-    const record = file as Record<string, unknown>;
-    const path = boundedString(
-      record.filename ?? record.new_path ?? record.old_path,
-      300,
-    );
-    if (!path) return [];
-    return [{
-      path,
-      status: boundedString(record.status ?? record.change_type, 40) ?? "modified",
-      patch: boundedString(record.patch ?? record.diff, 2_000),
-    }];
-  });
-}
-
 async function releaseCompare(
   fetch: typeof globalThis.fetch,
   repository: RepositoryDescriptor,
@@ -387,17 +307,19 @@ async function releaseCompare(
       signal,
     },
   );
-  if (!response.ok) throw new Error("The release diff could not be loaded.");
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new ReleaseOperationError("discord.release-fetch-failed", "The release diff could not be loaded.", response.status);
+  }
   const json = await boundedJson(response);
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
     throw new Error("The release diff response was invalid.");
   }
   const record = json as Record<string, unknown>;
   return {
-    url: boundedString(record.html_url ?? record.web_url, 500)
-      ?? repository.compareWebUrl(previousRelease.tag, release.tag),
+    url: repository.compareWebUrl(previousRelease.tag, release.tag),
     commits: compareCommitMessages(record.commits),
-    files: compareFiles(record.files ?? record.diffs),
+    limited: false,
   };
 }
 
@@ -421,7 +343,10 @@ export async function listInertiaReleases(
         signal: controller.signal,
       },
     );
-    if (!response.ok) throw new Error("The release list could not be loaded.");
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new ReleaseOperationError("discord.release-fetch-failed", "The release list could not be loaded.", response.status);
+    }
     const json = await boundedJson(response);
     if (!Array.isArray(json)) {
       throw new Error("The release response was invalid.");
@@ -430,7 +355,7 @@ export async function listInertiaReleases(
       .map(parseReleaseItem)
       .filter((release): release is InertiaReleaseInfo => release !== null)
       .sort((left, right) =>
-        Date.parse(right.createdAt) - Date.parse(left.createdAt));
+        Date.parse(right.releasedAt ?? right.createdAt) - Date.parse(left.releasedAt ?? left.createdAt));
   } finally {
     clearTimeout(timer);
   }
@@ -443,21 +368,32 @@ export async function sendDiscordReleaseInfo(
     previousRelease: InertiaReleaseInfo;
     release: InertiaReleaseInfo;
   },
-): Promise<{ sent: true }> {
-  const webhookUrl = discordWebhookUrl(webhook);
+): Promise<{ sent: true; comparisonLimited: boolean }> {
+  let webhookUrl: string;
+  try { webhookUrl = discordWebhookUrl(webhook); }
+  catch { throw new ReleaseOperationError("discord.webhook-missing", "A valid Discord webhook URL is required."); }
   const repository = repositoryDescriptor(request?.repositoryUrl);
   const previousRelease = validatedRelease(request?.previousRelease);
   const release = validatedRelease(request?.release);
+  const preparation = new AbortController();
+  const preparationTimer = setTimeout(() => preparation.abort(), RELEASE_FETCH_TIMEOUT_MS);
+  let compare: ReleaseCompare;
+  try {
+    compare = await releaseCompare(fetch, repository, previousRelease, release, preparation.signal);
+  } catch (error) {
+    if (error instanceof ReleaseResponseTooLarge) {
+      compare = { url: repository.compareWebUrl(previousRelease.tag, release.tag), commits: [], limited: true };
+    } else {
+      throw error instanceof ReleaseOperationError ? error : new ReleaseOperationError(
+        "discord.release-fetch-failed", "Release information could not be prepared. Nothing was sent.",
+      );
+    }
+  } finally { clearTimeout(preparationTimer); }
+  // Preparation cannot consume the delivery deadline. Once POST begins, a
+  // transport failure is ambiguous: never silently retry or claim non-delivery.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DISCORD_WEBHOOK_TIMEOUT_MS);
   try {
-    const compare = await releaseCompare(
-      fetch,
-      repository,
-      previousRelease,
-      release,
-      controller.signal,
-    );
     const response = await fetch(webhookUrl, {
       method: "POST",
       redirect: "error",
@@ -469,9 +405,22 @@ export async function sendDiscordReleaseInfo(
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new Error("The release info could not be sent to Discord.");
+      await response.body?.cancel();
+      const ambiguous = response.status >= 500 || response.status === 408;
+      throw new ReleaseOperationError(ambiguous ? "discord.delivery-unknown" : "discord.delivery-rejected",
+        ambiguous ? "Discord delivery could not be confirmed. Check the channel before sending again." : "Discord rejected the release message.", response.status);
     }
-    return { sent: true };
+    const confirmation = await boundedJson(response);
+    if (!confirmation || typeof confirmation !== "object" || Array.isArray(confirmation)
+      || !("id" in confirmation) || typeof confirmation.id !== "string"
+      || !/^[0-9]{1,20}$/u.test(confirmation.id)) {
+      throw new ReleaseOperationError("discord.delivery-unknown", "Discord delivery could not be confirmed. Check the channel before sending again.");
+    }
+    return { sent: true, comparisonLimited: compare.limited };
+  } catch (error) {
+    throw error instanceof ReleaseOperationError ? error : new ReleaseOperationError(
+      "discord.delivery-unknown", "Discord delivery could not be confirmed. Check the channel before sending again.",
+    );
   } finally {
     clearTimeout(timer);
   }

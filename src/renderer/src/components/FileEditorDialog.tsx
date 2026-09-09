@@ -15,6 +15,7 @@ import {
   trapModalFocus,
 } from "../utils/modalFocus";
 import { LoadingMark } from "./ui";
+import { SyntaxTextarea } from "./SyntaxTextarea";
 
 function normalizedEditorText(value: string): string {
   return value.replace(/\r\n?/gu, "\n");
@@ -152,14 +153,13 @@ export function FileEditorDialog({
             <X size={16} aria-hidden="true" />
           </button>
         </header>
-        <textarea
-          ref={editorRef}
+        <SyntaxTextarea
+          editorRef={editorRef}
+          path={file.path}
           value={content}
-          aria-label={`Edit contents of ${file.path}`}
-          spellCheck={false}
           disabled={saving}
-          onChange={(event) => {
-            setContent(event.currentTarget.value);
+          onChange={(value) => {
+            setContent(value);
             setError(null);
           }}
         />

@@ -1,4 +1,9 @@
-.issue-report { max-width: 1000px; }
+.settings-content.is-issue-report { width: 100%; min-width: 0; max-width: none; flex: 1; box-sizing: border-box; padding: 32px clamp(20px, 3vw, 40px) 48px; container-type: inline-size; }
+.issue-report { width: 100%; max-width: 900px; margin-inline: auto; box-sizing: border-box; }
+.issue-report .primary-button { margin-top: 0; }
+.issue-report .settings-card-heading { align-items: center; margin-bottom: 22px; }
+.issue-report .settings-card-heading h3 { font-size: 20px; margin: 0 0 5px; letter-spacing: -.3px; }
+.issue-report .settings-card-heading p { font-size: 12px; line-height: 1.6; }
 .issue-report-steps { display: flex; gap: 20px; padding: 0 0 18px; margin: 0; list-style: none; border-bottom: 1px solid var(--border); }
 .issue-report-steps li { opacity: .55; font-size: 12px; }
 .issue-report-steps li[aria-current] { opacity: 1; font-weight: 650; }
@@ -9,7 +14,7 @@
 .issue-report label { display: grid; gap: 7px; font-size: 12px; font-weight: 550; min-width: 0; }
 .issue-report textarea, .issue-report input, .issue-report select { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; line-height: 1.5; }
 .issue-report textarea { resize: vertical; min-height: 110px; }
-.issue-report-options { display: grid; grid-template-columns: 2fr 1fr 1.5fr; gap: 12px; }
+.issue-report-options { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 12px; }
 .issue-report-chat { display: grid; gap: 12px; }
 .issue-report-chat article { padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
 .issue-report-chat article p { font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -23,4 +28,14 @@
 .issue-report-preview h4 { margin: 0; overflow-wrap: anywhere; }
 .issue-report-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .issue-report-preview-heading span { font-size: 11px; opacity: .65; }
-@media (max-width: 800px) { .issue-report-options { grid-template-columns: 1fr; } .issue-report-steps { gap: 12px; } }
+.issue-report-actions > button, .issue-report-footer > button, .issue-report-preview > button { min-height: 36px; max-width: 100%; justify-content: center; white-space: normal; height: auto; text-align: center; padding: 9px 12px; }
+.issue-report-actions > span { flex-basis: 100%; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.issue-report-create-actions { justify-content: flex-end; margin: 4px 0 0; }
+.issue-report-preview > button { justify-self: end; }
+.issue-report-footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding-top: 18px; margin-top: 22px; border-top: 1px solid var(--border); }
+.issue-report-publication-actions > .primary-button { margin-left: auto; }
+.issue-report :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.issue-report-steps { flex-wrap: wrap; row-gap: 8px; }
+.issue-report-preview-heading { flex-wrap: wrap; }
+@container (max-width: 620px) { .issue-report-options { grid-template-columns: minmax(0, 1fr); } .issue-report-steps { gap: 12px; } }
+@container (max-width: 430px) { .issue-report-actions > button, .issue-report-footer > button { flex: 1 1 100%; } .issue-report-preview > button { justify-self: stretch; } }

@@ -47,6 +47,25 @@ async function complete(runtime: TurnControllerTestRuntime, turnId: string) {
 }
 
 describe("terminal commitment survives downstream faults", () => {
+  it("publishes one content-free incident after a failed terminal write, not for a later successful turn", async () => {
+    const reportIncident = vi.fn();
+    const runtime = await createTurnControllerTestRuntime({ reportIncident });
+    runtimes.push(runtime);
+    const first = start(runtime);
+    runtime.provider.resolve({ status: "failed", exitCode: 9, error: "PRIVATE provider output" });
+    await expect.poll(() => runtime.store.agentTurn(first.turn.id).status).toBe("failed");
+    await runtime.controller.drainSettlementTasks();
+    expect(reportIncident).toHaveBeenCalledOnce();
+    expect(reportIncident.mock.calls[0]![0]).toMatchObject({ code: "turn.failed", outcome: "failed",
+      correlationId: first.turn.id, context: { turnId: first.turn.id, conversationId: runtime.conversationId,
+        projectId: runtime.store.conversation(runtime.conversationId).projectId, providerId: "codex" } });
+    expect(JSON.stringify(reportIncident.mock.calls)).not.toContain("PRIVATE");
+    const next = start(runtime);
+    await complete(runtime, next.turn.id);
+    expect(reportIncident).toHaveBeenCalledOnce();
+    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+  });
+
   it.each((["metadata", "runtime-settled", "turn-settled", "artifacts"] as const)
     .flatMap((stage) => ["throw", "reject"].map((mode) => ({ stage, mode }))))(
     "does not contradict a durable completion after $stage $mode",

@@ -44,7 +44,7 @@ import {
   projectIdentityIsUsable,
 } from "./project-identity-refresh";
 import { TurnGitArtifactManager } from "./turn-git-artifacts";
-import { sendRuntimeEvent } from "./runtime-protocol";
+import { CommandIncidents } from "./runtime/command-incidents";
 import { createTestStreamingTrace } from "./runtime/test-streaming-trace";
 import { initialProviderSnapshots } from "./runtime-snapshots";
 import { DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS } from "./review-summary";
@@ -198,14 +198,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
     updatePreparation.track(operation);
   const streamingTrace = createTestStreamingTrace(dataDirectory);
-  const send: typeof sendRuntimeEvent = (socket, event, onSent) => {
-    const isStreamingEvent = event.type === "runtime.event"
-      && event.event.type === "agent.text";
-    if (isStreamingEvent) streamingTrace.mark("runtime-event-serialized");
-    if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-started");
-    sendRuntimeEvent(socket, event, onSent);
-    if (isStreamingEvent) streamingTrace.mark("runtime-websocket-send-accepted");
-  };
+  const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null);
+  const send = commandIncidents.sender(streamingTrace);
   let onDatabaseBackupCreated = (): void => undefined;
   const store = new RuntimeStore(
     databasePath,
@@ -524,6 +518,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     lifetimeSignal: runtimeLifetimeAbort.signal,
     providerInfo: () => providerInfo,
     replaceProviderInfo: (value) => { providerInfo = value; },
+    reportIncident: commandIncidents.report,
     broadcastSnapshot,
     isClosed: () => closed,
     track: trackRuntimeOperation,
@@ -601,6 +596,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastSnapshot,
       broadcastConversationShell,
       providerInfo: () => providerInfo,
+      reportIncident: commandIncidents.report,
       harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
       hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
@@ -876,7 +872,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     runtimeSync,
     terminals,
     isolatedRuns,
-    dispatchCommand,
+    dispatchCommand: (socket, command, authority) => commandIncidents.run(command, () => dispatchCommand(socket, command, authority)),
     consumeDetachedCapability: (url) => detachedChatRuntimeSecurity.consumeCapability(url),
     beforeFreshSnapshot: () => turns.flushActiveStreamsForHydration(),
     currentSnapshot,

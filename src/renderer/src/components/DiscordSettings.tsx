@@ -7,6 +7,13 @@ import {
   type BackendCredentialState,
 } from "@shared/backend-credentials";
 import type { AppSettings } from "@shared/contracts";
+import { diagnosticDefinition, type RendererDiagnostic } from "@shared/application-diagnostics";
+import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
+import "./DiscordSettings.css";
+
+function storageIncidentId(error: unknown): string | null {
+  return error instanceof Error ? /\[incident:([0-9a-f-]{36})\]$/u.exec(error.message)?.[1] ?? null : null;
+}
 
 export function DiscordSettings({
   disabled,
@@ -24,15 +31,26 @@ export function DiscordSettings({
   const [webhookState, setWebhookState] =
     useState<BackendCredentialState | null>(null);
   const [webhookSaving, setWebhookSaving] = useState(false);
+  const [incidentId, setIncidentId] = useState<string | null>(null);
+  const reportValidation = async (code: RendererDiagnostic["code"]): Promise<void> => {
+    try {
+      const result = await window.inertia.reportValidationDiagnostic({ code, correlationId: crypto.randomUUID() });
+      setIncidentId(result?.incidentId ?? null);
+    } catch { /* Inline validation remains usable without diagnostics persistence. */ }
+  };
 
   useEffect(() => {
     let active = true;
     void window.inertia.getBackendCredentialState({
       profileId: DISCORD_RELEASE_WEBHOOK_PROFILE_ID,
     }).then((state) => {
-      if (active) setWebhookState(state);
-    }).catch(() => {
-      if (active) setReleaseInfoError("Secure webhook storage is unavailable.");
+      if (active) {
+        setWebhookState(state);
+        setIncidentId(state.diagnosticId ?? null);
+        if (!state.storage.available) setReleaseInfoError("Secure webhook storage is unavailable. No Discord message was sent.");
+      }
+    }).catch((error: unknown) => {
+      if (active) { setReleaseInfoError("Secure webhook storage is unavailable."); setIncidentId(storageIncidentId(error)); }
     });
     return () => {
       active = false;
@@ -47,6 +65,7 @@ export function DiscordSettings({
       secret: webhookUrl,
     });
     setWebhookState(state);
+    if (!state.storage.available || !state.hasSecret) throw new Error(`Secure webhook storage is unavailable.${state.diagnosticId ? ` [incident:${state.diagnosticId}]` : ""}`);
     setWebhookDraft("");
     return state;
   };
@@ -59,7 +78,8 @@ export function DiscordSettings({
     try {
       await storeWebhook();
       setReleaseInfoStatus("Discord webhook saved securely.");
-    } catch {
+    } catch (error) {
+      setIncidentId(storageIncidentId(error));
       setReleaseInfoError("The Discord webhook could not be saved securely.");
     } finally {
       setWebhookSaving(false);
@@ -78,7 +98,8 @@ export function DiscordSettings({
       setWebhookState(state);
       setWebhookDraft("");
       setReleaseInfoStatus("Discord webhook removed.");
-    } catch {
+    } catch (error) {
+      setIncidentId(storageIncidentId(error));
       setReleaseInfoError("The Discord webhook could not be removed.");
     } finally {
       setWebhookSaving(false);
@@ -89,32 +110,46 @@ export function DiscordSettings({
     if (releaseInfoLoading) return;
     const normalizedRepositoryUrl = repositoryUrl.trim();
     if (!normalizedRepositoryUrl) {
+      void reportValidation("discord.repository-missing");
       setReleaseInfoError("Add a release repository URL before generating.");
       setReleaseInfoStatus(null);
       return;
     }
     setReleaseInfoLoading(true);
+    setIncidentId(null);
     setReleaseInfoError(null);
     setReleaseInfoStatus(null);
+    let deliveryRequested = false;
     try {
       const storedWebhook = await storeWebhook();
       if (!storedWebhook?.hasSecret) {
+        void reportValidation("discord.webhook-missing");
         setReleaseInfoError("Add and save a Discord webhook before generating.");
         return;
       }
-      await window.inertia.sendDiscordReleaseInfo({
+      deliveryRequested = true;
+      const result = await window.inertia.sendDiscordReleaseInfo({
         repositoryUrl: normalizedRepositoryUrl,
       });
-      setReleaseInfoStatus("Release info sent to Discord.");
-    } catch {
-      setReleaseInfoError("The release info could not be sent to Discord.");
+      setIncidentId(result.incidentId ?? null);
+      if (!result.sent) {
+        const explanation = diagnosticDefinition(result.code);
+        setReleaseInfoError(`${explanation.title}. ${explanation.nextStep}`);
+      } else setReleaseInfoStatus(result.comparisonLimited
+        ? "Discord confirmed delivery. The comparison exceeded the preview limit; published release notes and the full comparison link were sent."
+        : "Discord confirmed delivery of the release info.");
+    } catch (error) {
+      setIncidentId(storageIncidentId(error));
+      setReleaseInfoError(deliveryRequested
+        ? "Delivery could not be confirmed. Check the Discord channel before trying again; the message may have arrived."
+        : "Secure webhook storage is unavailable. No Discord message was sent.");
     } finally {
       setReleaseInfoLoading(false);
     }
   };
 
   return (
-    <section className="settings-card" aria-labelledby="discord-heading">
+    <section className="settings-card discord-settings" aria-labelledby="discord-heading">
       <div className="settings-card-heading">
         <div><Bot size={18} /></div>
         <span>
@@ -122,7 +157,7 @@ export function DiscordSettings({
           <p>Prepare release details before publishing them to Discord.</p>
         </span>
       </div>
-      <label className="provider-identity-alias">
+      <label className="discord-field">
         <span>
           <strong>Repository URL</strong>
           <small>Public GitHub or GitLab repository used to find releases.</small>
@@ -139,7 +174,7 @@ export function DiscordSettings({
           }}
         />
       </label>
-      <label className="provider-identity-alias">
+      <label className="discord-field">
         <span>
           <strong>Webhook URL</strong>
           <small>
@@ -165,6 +200,7 @@ export function DiscordSettings({
       <div className="settings-inline-actions">
         <button
           type="button"
+          className="secondary-button"
           disabled={disabled || webhookSaving || !webhookDraft.trim()}
           onClick={() => { void saveWebhook(); }}
         >
@@ -172,6 +208,7 @@ export function DiscordSettings({
         </button>
         <button
           type="button"
+          className="secondary-button"
           disabled={disabled || webhookSaving || !webhookState?.hasSecret}
           onClick={() => { void clearWebhook(); }}
         >
@@ -186,7 +223,7 @@ export function DiscordSettings({
       <div className="codex-binary-path runtime-log-setting">
         <span>
           <strong>Release info</strong>
-          <small>Build a bounded local diff summary and send the latest release.</small>
+          <small>Send published release notes and a bounded commit preview. No AI request is made.</small>
         </span>
         <div>
           <button
@@ -211,6 +248,9 @@ export function DiscordSettings({
           {releaseInfoStatus}
         </p>
       )}
+      {incidentId && <button type="button" className="secondary-button discord-diagnostic-link" onClick={() => navigateDiagnosticContext({
+        section: "diagnostics", selection: { incidentId },
+      })}>View diagnostics</button>}
     </section>
   );
 }

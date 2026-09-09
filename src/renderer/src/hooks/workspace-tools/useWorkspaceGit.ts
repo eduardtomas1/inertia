@@ -15,6 +15,7 @@ import {
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { diagnosticErrorReference } from "../../utils/diagnosticNavigation";
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
@@ -27,6 +28,7 @@ interface WorkspaceGitOptions {
   enabled: boolean;
   loadStatusOnMount: boolean;
   loadWorkspaceOnMount: boolean;
+  statusOnly?: boolean;
   project: Project | null;
   conversation: Conversation | null;
   online: boolean;
@@ -40,8 +42,9 @@ interface WorkspaceGitOptions {
 
 export interface WorkspaceGitLoadOptions {
   authoritative?: boolean;
-  scope?: "status" | "workspace";
+  scope?: "status" | "workspace-status" | "workspace";
 }
+const gitScopeRank = { status: 0, "workspace-status": 1, workspace: 2 } as const;
 
 export type LoadWorkspaceGit = (
   options?: WorkspaceGitLoadOptions,
@@ -64,7 +67,7 @@ function reportPassiveGitError(
   // scan before its socket closes. Keep that expected cancellation local to
   // the Git surface instead of obscuring unrelated workspace content with a
   // global alert. Other server rejections and ordinary failures remain global.
-  if (delivery === "rejected" && message === "Git inspection was cancelled.") {
+  if (delivery === "rejected" && diagnosticErrorReference(message).message === "Git inspection was cancelled.") {
     return message;
   }
   if (!delivery || delivery === "rejected") setActionError(message);
@@ -84,11 +87,13 @@ export function useWorkspaceGit({
   enabled,
   loadStatusOnMount,
   loadWorkspaceOnMount,
+  statusOnly = false,
 }: WorkspaceGitOptions) {
   const [gitStatus, setGitStatus] = useState<GitStatusSnapshot | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
   const [workspaceGitStatus, setWorkspaceGitStatus] =
     useState<WorkspaceGitSnapshot | null>(null);
+  const [workspaceGitOwner, setWorkspaceGitOwner] = useState<string | null>(null);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const branchRequestRef = useRef(0);
@@ -110,13 +115,13 @@ export function useWorkspaceGit({
   const loadGitInFlightRef = useRef<{
     identity: string;
     generation: number;
-    scope: "status" | "workspace";
+    scope: "status" | "workspace-status" | "workspace";
     promise: Promise<void>;
   } | null>(null);
   const trailingGitLoadRef = useRef<{
     identity: string;
     generation: number;
-    scope: "status" | "workspace";
+    scope: "status" | "workspace-status" | "workspace";
     promise: Promise<void>;
   } | null>(null);
   authorityRef.current = authority;
@@ -138,13 +143,13 @@ export function useWorkspaceGit({
     if (active?.identity === identity) {
       if (
         active.generation === generation
-        && (active.scope === "workspace" || scope === "status")
+        && gitScopeRank[active.scope] >= gitScopeRank[scope]
       ) {
         return active.promise;
       }
 
       const bypassStaleWorkspaceScan = scope === "status"
-        && active.scope === "workspace"
+        && active.scope !== "status"
         && active.generation !== generation;
       if (bypassStaleWorkspaceScan) {
         loadGitInFlightRef.current = null;
@@ -152,7 +157,7 @@ export function useWorkspaceGit({
         const queued = trailingGitLoadRef.current;
         if (queued?.identity === identity) {
           queued.generation = generation;
-          if (scope === "workspace") queued.scope = scope;
+          if (gitScopeRank[scope] > gitScopeRank[queued.scope]) queued.scope = scope;
           return queued.promise;
         }
 
@@ -204,7 +209,7 @@ export function useWorkspaceGit({
         }
         return status;
       });
-      const workspaceRequest = scope === "workspace"
+      const workspaceRequest = scope !== "status"
         ? request({
             type: "git.workspace.refresh",
             payload: {
@@ -223,6 +228,8 @@ export function useWorkspaceGit({
       }
       if (!ownsResponse()) return;
       setWorkspaceGitStatus(workspaceEvent.result.status);
+      setWorkspaceGitOwner(`${owner}:${projectRefreshIdentity}`);
+      if (scope === "workspace-status") return;
       if (!status.isRepository) return;
       if (!status.authorityRef) {
         throw new Error("The Git status authorization is unavailable.");
@@ -266,6 +273,7 @@ export function useWorkspaceGit({
     conversation?.id,
     ignoreWhitespace,
     project?.id,
+    projectRefreshIdentity,
     request,
   ]);
 
@@ -318,7 +326,7 @@ export function useWorkspaceGit({
     setLoading(true);
     setLoadError(null);
     void loadGit({
-      scope: loadWorkspaceOnMount ? "workspace" : "status",
+      scope: loadWorkspaceOnMount ? statusOnly ? "workspace-status" : "workspace" : "status",
     }).catch((error) => {
       if (!cancelled) {
         if (
@@ -342,6 +350,7 @@ export function useWorkspaceGit({
     online,
     loadStatusOnMount,
     loadWorkspaceOnMount,
+    statusOnly,
     project?.id,
     projectRefreshIdentity,
     refreshVersion,
@@ -479,7 +488,7 @@ export function useWorkspaceGit({
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const refresh = loadGit({
       authoritative: true,
-      scope: loadWorkspaceOnMount ? "workspace" : "status",
+      scope: loadWorkspaceOnMount ? statusOnly ? "workspace-status" : "workspace" : "status",
     });
     const generation = requestGenerationRef.current;
     void refresh.then(() => {
@@ -510,6 +519,7 @@ export function useWorkspaceGit({
     loadBranches,
     loadGit,
     loadWorkspaceOnMount,
+    statusOnly,
     online,
     project?.id,
     setActionError,
@@ -622,7 +632,7 @@ export function useWorkspaceGit({
     gitStatus,
     gitDiff,
     setGitDiff,
-    workspaceGitStatus,
+    workspaceGitStatus: workspaceGitOwner === `${authority}:${projectRefreshIdentity}` ? workspaceGitStatus : null,
     branches,
     branchesLoading,
     branchesError,

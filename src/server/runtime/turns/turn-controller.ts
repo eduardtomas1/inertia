@@ -174,6 +174,8 @@ export class TurnController {
     this.timeouts = new TurnTimeoutCoordinator({
       scheduler: this.scheduler,
       inactivityMs: turnTimeoutMs,
+      reportIncident: this.hooks.reportIncident,
+      now: () => this.clock().getTime(),
       maxLifetimeMs: turnMaxLifetimeMs,
       status: (active) => this.store.agentTurn(active.turn.id).status,
       cancel: (active) => {
@@ -1220,6 +1222,7 @@ export class TurnController {
   }
 
   private cleanup(active: ActiveTurn): void {
+    this.timeouts.stop(active);
     this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();

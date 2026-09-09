@@ -1,4 +1,5 @@
 import type { BackendCredentialStatus } from "../shared/backend-credentials.js";
+import type { IncidentSink } from "../node/application-incidents.js";
 import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles.js";
 import type { AgentTurn } from "../shared/contracts.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
@@ -30,6 +31,7 @@ import type {
 
 export interface RuntimeOptions {
   onMascotStatus?: (status: import("../shared/mascot").MascotStatus) => void;
+  onIncident?: IncidentSink;
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders?: boolean;

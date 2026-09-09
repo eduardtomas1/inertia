@@ -99,6 +99,50 @@ describe("Inertia release list", () => {
 });
 
 describe("Discord release info", () => {
+  const request = {
+    repositoryUrl: "https://github.com/example/project",
+    previousRelease: { tag: "v1", name: null, url: null, createdAt: "2026-01-01T00:00:00Z", releasedAt: null, description: null },
+    release: { tag: "v2", name: null, url: null, createdAt: "2026-01-02T00:00:00Z", releasedAt: null, description: "Real published notes, not inferred from filenames." },
+  };
+
+  it("cancels an oversized compare stream and delivers an explicitly limited, real release-notes preview", async () => {
+    const cancel = vi.fn();
+    let count = 0;
+    const posts: Record<string, unknown>[] = [];
+    const signals: AbortSignal[] = [];
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+      signals.push(init?.signal as AbortSignal);
+      if (init?.method === "GET") return new Response(new ReadableStream({
+        pull(controller) { controller.enqueue(new Uint8Array(256 * 1_024)); count++; }, cancel,
+      }));
+      posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return jsonResponse({ id: "1234" });
+    });
+    await expect(sendDiscordReleaseInfo(fetch, "https://discord.com/api/webhooks/123/token", request))
+      .resolves.toEqual({ sent: true, comparisonLimited: true });
+    expect(cancel).toHaveBeenCalledOnce(); expect(count).toBeLessThanOrEqual(6);
+    expect(posts).toHaveLength(1);
+    expect(JSON.stringify(posts[0])).toContain(request.release.description);
+    expect(JSON.stringify(posts[0])).toContain("Comparativa limitada");
+    expect(JSON.stringify(posts[0])).not.toContain("Sense canvis detectats");
+    expect(signals[0]).not.toBe(signals[1]);
+  });
+
+  it.each([204, 500])("treats an unconfirmed HTTP %s delivery as unknown without resending", async (status) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => init?.method === "GET"
+      ? jsonResponse({ commits: [] }) : new Response(null, { status }));
+    await expect(sendDiscordReleaseInfo(fetch, "https://discord.com/api/webhooks/123/token", request))
+      .rejects.toMatchObject({ code: "discord.delivery-unknown" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send when comparison preparation fails, and does not infer release descriptions from unrelated file paths", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse({ message: "PRIVATE_SERVER_OUTPUT" }, { }));
+    fetch.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(sendDiscordReleaseInfo(fetch, "https://discord.com/api/webhooks/123/token", request))
+      .rejects.toMatchObject({ code: "discord.release-fetch-failed", httpStatus: 403 });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it("sends the selected release to a Discord webhook", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       if (String(input).includes("/compare/")) {
@@ -133,24 +177,13 @@ describe("Discord release info", () => {
         title: "Comparativa v0.0.40 -> v0.0.41",
         url: "https://github.com/eduardtomas1/inertia/compare/v0.0.40...v0.0.41",
       });
-      expect(body.embeds[0].fields).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          name: "Millores",
-          value: expect.stringContaining("- Improve release popup layout"),
-          inline: false,
-        }),
-        expect.objectContaining({
-          name: "Implementacions",
-          value: expect.stringContaining("- Add release settings UI"),
-          inline: false,
-        }),
-        expect.objectContaining({
-          name: "Bugs",
-          value: expect.stringContaining("- Fix Discord webhook payload validation"),
-          inline: false,
-        }),
-      ]));
-      return new Response(null, { status: 204 });
+      expect(body.embeds[0].description).toBe("Release notes");
+      expect(body.embeds[0].fields).toEqual([{
+        name: "Commits · vista prèvia", inline: false,
+        value: "- Fix Discord webhook payload validation\n- Add release settings UI\n- Improve release popup layout",
+      }]);
+      expect(JSON.stringify(body)).not.toContain("Millorada la configuració");
+      return jsonResponse({ id: "123456789" });
     });
 
     await expect(sendDiscordReleaseInfo(
@@ -175,7 +208,7 @@ describe("Discord release info", () => {
           description: "Release notes",
         },
       },
-    )).resolves.toEqual({ sent: true });
+    )).resolves.toEqual({ sent: true, comparisonLimited: false });
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -184,7 +217,7 @@ describe("Discord release info", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "https://discord.com/api/webhooks/123/token",
+      "https://discord.com/api/webhooks/123/token?wait=true",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -193,7 +226,7 @@ describe("Discord release info", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) =>
       String(input).includes("/compare/")
         ? jsonResponse({ commits: [], files: [] })
-        : new Response(null, { status: 204 }));
+        : jsonResponse({ id: "123456789" }));
 
     await expect(sendDiscordReleaseInfo(
       fetch,
@@ -217,7 +250,7 @@ describe("Discord release info", () => {
           description: "Release notes",
         },
       },
-    )).resolves.toEqual({ sent: true });
+    )).resolves.toEqual({ sent: true, comparisonLimited: false });
 
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -247,7 +280,7 @@ describe("Discord release info", () => {
           description: null,
         },
       },
-    )).rejects.toThrow("Discord webhook URL is invalid");
+    )).rejects.toMatchObject({ code: "discord.webhook-missing" });
     expect(fetch).not.toHaveBeenCalled();
   });
 });

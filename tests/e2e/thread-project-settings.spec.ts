@@ -1,5 +1,6 @@
 // @inertia-e2e-resource primary-display
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
@@ -8,23 +9,34 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 let app: AppFixture;
 let projectId: string;
 let threadId: string;
-test.beforeAll(async () => {
+let otherThreadId: string;
+
+async function createThreadFixture(withSavedAction = false): Promise<AppFixture> {
   // Delayed hover previews and the native clipboard need exclusive display ownership.
-  app = await createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+  return createAppFixture({ name: "thread-project-settings", initialState: "conversation", seedSecondProject: true, windowDisplay: "primary",
+    beforeLaunch: ({ testDirectory, workspaceDirectory, secondWorkspaceDirectory }) => {
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory);
       try {
         const state = store.shellSnapshot();
-        const project = state.projects[0]!;
+        // Project creation timestamps can tie; the snapshot order is not an identity.
+        const project = state.projects.find(({ path }) => path === secondWorkspaceDirectory)!;
         projectId = project.id;
         const thread = state.conversations.find((chat) => chat.projectId === project.id)!;
         threadId = thread.id;
-        store.updateProject(project.id, { name: "Workspace studio", preferences: { ...defaultProjectPreferences(), icon: { kind: "symbol", name: "code" } } });
+        otherThreadId = state.conversations.find((chat) => chat.projectId !== project.id)!.id;
+        store.updateProject(project.id, { name: "Workspace studio", preferences: {
+          ...defaultProjectPreferences(), icon: { kind: "symbol", name: "code" },
+          actions: withSavedAction ? [{ id: randomUUID(), name: "Check workspace", executable: "node", args: ["--version"] }] : [],
+        } });
         store.updateConversation(thread.id, { title: "Review authentication flow" });
-        store.updateSettings({ theme: "light", newThreadMode: "local" });
+        store.updateSettings({ theme: withSavedAction ? "dark" : "light", newThreadMode: "local" });
       } finally { store.close(); }
     },
   });
+}
+
+test.beforeAll(async () => {
+  app = await createThreadFixture();
 });
 test.afterAll(async () => { await app?.close(); });
 
@@ -151,7 +163,7 @@ test("scratch prompts belong only to their original chat, including after restar
   await expect(page.getByRole("menuitem", { name: /^Review the authentication tests/u })).toBeVisible();
   await capture(info, "chat-owned-scratch-prompt-dark");
   await page.keyboard.press("Escape");
-  const other = page.locator(`[data-work-focus-id^="thread:"]:not([data-work-focus-id="thread:${threadId}"])`).first();
+  const other = page.locator(`[data-work-focus-id="thread:${otherThreadId}"]`);
   await other.click();
   await expect(other).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".header-title-wrap h1")).toHaveText("thread-project-settings fixture");
@@ -168,6 +180,10 @@ test("scratch prompts belong only to their original chat, including after restar
 });
 
 test("runs a saved action only on explicit selection through the real terminal", async ({ browserName: _browserName }, info) => {
+  // Own the saved-action precondition even when this scenario runs by itself
+  // or Playwright replaces the worker after a preceding scenario fails.
+  await app.close();
+  app = await createThreadFixture(true);
   const page = app.page;
   await page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");

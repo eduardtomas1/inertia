@@ -287,7 +287,8 @@ export function ModelChooser({
   const railItems = useMemo(
     () => deriveModelSourceRailItems(offeredRoutes, {
       favoriteRoutes: resolvedFavoriteRoutes,
-    }),
+    }).filter((item) => item.routes.some((route) =>
+      route.providerReady && route.selectable)),
     [offeredRoutes, resolvedFavoriteRoutes],
   );
   const selectedSourceId = modelSourceFilterId(sourceFilter);

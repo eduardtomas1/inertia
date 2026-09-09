@@ -11,6 +11,10 @@ conversation identity and continuation checks still use the real runtime.
 These captures are UI evidence, not authenticated provider or signed-package
 certification. Windows and macOS were not exercised locally.
 
+Before the captures, the five custom gateways used by the 600-model stress
+scenario are disabled through the real Model backends settings. Their icons
+then disappear from the chooser; usable custom gateways remain accessible.
+
 ## Captures
 
 | Surface | Light | Dark |
@@ -38,5 +42,6 @@ verify established-chat and new-chat placement, visible/clickable search,
 viewport containment, loaded provider images, source selection, keyboard focus
 and dismissal, favorites and reasoning identities, bounded 600-model
 virtualization, runtime recycling, and persisted route boundaries. A provider
-that is not ready remains absent from the chooser. They produce these images
+that is not ready, and any source with no selectable models, remain absent
+from the source rail without erasing the current selection. They produce these images
 as test attachments in `test-results`.

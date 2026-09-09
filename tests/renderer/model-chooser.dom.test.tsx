@@ -115,6 +115,39 @@ function currentRoute(): ComposerModelRoute {
 }
 
 describe("model chooser active route", () => {
+  it("shows only sources with usable models and responds to availability changes", async () => {
+    const current = currentRoute();
+    const unavailable: ComposerModelRoute = {
+      ...catalogRoute(1),
+      backendProfileId: "custom:disabled",
+      backendProfileName: "Disabled gateway",
+      selectable: false,
+      unavailableReason: "This backend is disabled.",
+    };
+    const onSelect = vi.fn();
+    const view = render(<ModelChooser routes={[current, unavailable]}
+      selectedRoute={current} onSelect={onSelect} />);
+    const trigger = screen.getByRole("button", { name: /Choose model/u });
+    fireEvent.click(trigger);
+    await screen.findByRole("button", { name: /^Team gateway, custom backend /u });
+    expect(screen.queryByRole("button", { name: /^Disabled gateway, custom backend /u }))
+      .not.toBeInTheDocument();
+
+    const ready = { ...unavailable, selectable: true, unavailableReason: null };
+    view.rerender(<ModelChooser routes={[current, ready]}
+      selectedRoute={current} onSelect={onSelect} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Disabled gateway, custom backend /u }));
+    expect(screen.getByRole("list", { name: "Model results" })).toHaveTextContent("Team Model 1");
+
+    view.rerender(<ModelChooser routes={[{ ...current, providerReady: false }, unavailable]}
+      selectedRoute={current} onSelect={onSelect} />);
+    await waitFor(() => expect(screen.getByRole("toolbar", { name: "Model sources filters" })
+      .querySelectorAll("button")).toHaveLength(0));
+    // Unavailable choices do not erase the current conversation's identity.
+    expect(trigger).toHaveAccessibleName(/Team Alpha/u);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("restores the starred access, mode, effort and speed after reopening from another configuration", async () => {
     const selection = providerNativeModelSelection({ providerId: "codex", modelId: "team-alpha",
       reasoningEffort: "high", providerOptions: { fastMode: "priority" } });

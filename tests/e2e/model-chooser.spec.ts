@@ -690,12 +690,31 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
 
 test("keeps branded model sources and rows legible across themes and narrow windows", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  // The previous scenario exercises 600 models across five real fixture
+  // profiles. Disable them through Settings before photographing an ordinary
+  // setup, also proving unavailable profiles do not leave empty rail icons.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Model backends", exact: true }).click();
+  const profiles = page.getByLabel("Backend profiles");
+  const gateways = profiles.getByRole("button", { name: /^Catalog gateway /u });
+  await expect(gateways).toHaveCount(5);
+  for (const gateway of await gateways.all()) {
+    await gateway.click();
+    const enabled = page.getByRole("switch", { name: /^Enable Catalog gateway /u });
+    await expect(enabled).toBeChecked();
+    await enabled.click();
+    await expect(enabled).not.toBeChecked();
+    await expect(enabled).toBeEnabled();
+  }
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByRole("complementary", { name: "Project navigation", exact: true })
     .getByRole("button", { name: "New chat", exact: true }).click();
   const chooser = page.getByRole("dialog", { name: "Choose model" });
   const trigger = page.getByRole("button", { name: /^Choose model\./u });
   const capture = async (name: string): Promise<void> => {
     await expect(chooser).toHaveAttribute("data-composer-popover-positioned", "true");
+    await expect(chooser.locator('[data-model-source-rail-item^="custom:"]')).toHaveCount(0);
+    await expect(chooser.locator('[data-model-source-rail-item^="provider:"]')).toHaveCount(2);
     await expect(trigger.locator(".provider-brand-icon")).toBeVisible();
     const search = chooser.getByRole("searchbox", { name: "Search models" });
     await expect(search).toBeInViewport({ ratio: 1 });

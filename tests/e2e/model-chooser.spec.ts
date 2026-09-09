@@ -755,6 +755,25 @@ test("keeps branded model sources and rows legible across themes and narrow wind
       await expect(source.locator(".provider-brand-icon")).toHaveAttribute("data-provider-id", id);
       await expect(chooser.locator(".model-chooser-row-brand").first()).toHaveAttribute("data-provider-id", id);
       await capture(`model-chooser-${id}-${theme.toLowerCase()}`);
+      // Without a viewport constraint, the frame ends with its content rather
+      // than reserving a fixed-height blank area below these few model rows.
+      const frame = await chooser.boundingBox();
+      const list = await chooser.getByRole("list", { name: "Model results" }).boundingBox();
+      expect(Math.abs((frame!.y + frame!.height) - (list!.y + list!.height))).toBeLessThanOrEqual(2);
+      if (id === "codex") {
+        await search.fill("Codex Beta");
+        await expect(chooser.locator(".model-chooser-row-option")).toHaveCount(1);
+        await expect.poll(async () => (await chooser.boundingBox())!.height)
+          .toBeLessThan(frame!.height);
+        await capture(`model-chooser-filtered-${theme.toLowerCase()}`);
+        await search.fill("route-that-does-not-exist");
+        await expect(chooser.getByText("No matching models", { exact: true })).toBeVisible();
+        await expect.poll(async () => (await chooser.boundingBox())!.height)
+          .toBeLessThan(frame!.height);
+        await search.fill("");
+        await expect.poll(async () => (await chooser.boundingBox())!.height)
+          .toBeCloseTo(frame!.height, 0);
+      }
     }
     await resizeWindow(720, 640);
     await capture(`model-chooser-narrow-${theme.toLowerCase()}`);

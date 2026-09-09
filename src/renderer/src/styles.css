@@ -14389,7 +14389,8 @@ button.sent-attachment-open:focus-visible {
   bottom: calc(100% + 9px);
   display: grid;
   width: var(--model-chooser-width);
-  height: min(396px, calc(100dvh - 178px));
+  height: auto;
+  max-height: calc(100dvh - 178px);
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -14506,7 +14507,7 @@ button.sent-attachment-open:focus-visible {
 
 .model-chooser-empty {
   display: flex;
-  min-height: 170px;
+  min-height: 0;
   grid-column: 1 / -1;
   align-items: center;
   justify-content: center;
@@ -14534,7 +14535,7 @@ button.sent-attachment-open:focus-visible {
 
 @container conversation-workspace (min-height: 0px) {
   .model-chooser-palette {
-    height: min(396px, calc(100dvh - 178px), calc(100cqh - 84px));
+    max-height: min(calc(100dvh - 178px), calc(100cqh - 84px));
     min-height: 0;
   }
 }
@@ -14575,7 +14576,7 @@ button.sent-attachment-open:focus-visible {
   .model-chooser-palette {
     right: 5px;
     width: min(var(--model-chooser-width), calc(100cqw - 14px));
-    height: min(390px, calc(100dvh - 154px));
+    max-height: calc(100dvh - 154px);
     min-height: 0;
   }
 
@@ -14596,7 +14597,7 @@ button.sent-attachment-open:focus-visible {
 @media (max-width: 1024px) {
   @container conversation-workspace (min-height: 0px) {
     .workspace-body.has-tools .model-chooser-palette {
-      height: min(390px, calc(100dvh - 154px), calc(100cqh - 84px));
+      max-height: min(calc(100dvh - 154px), calc(100cqh - 84px));
       min-height: 0;
     }
   }

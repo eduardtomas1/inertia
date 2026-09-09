@@ -21,6 +21,7 @@ then disappear from the chooser; usable custom gateways remain accessible.
 | --- | --- | --- |
 | Codex source, native rows and selected-model logo | [Light](model-chooser-codex-light.png) | [Dark](model-chooser-codex-dark.png) |
 | Claude source and distinct Kimi backend identity | [Light](model-chooser-claude-light.png) | [Dark](model-chooser-claude-dark.png) |
+| Content-sized frame after filtering to one model | [Light](model-chooser-filtered-light.png) | [Dark](model-chooser-filtered-dark.png) |
 | Narrow new-chat layout with tools open | [Light](model-chooser-narrow-light.png) | [Dark](model-chooser-narrow-dark.png) |
 | Closed selector with the provider logo | [Light](selected-model-chip-light.png) | [Dark](selected-model-chip-dark.png) |
 
@@ -39,7 +40,8 @@ INERTIA_E2E_WORKERS=1 npx playwright test tests/e2e/model-chooser.spec.ts --proj
 
 Use an isolated display on a machine where a user is working. The two scenarios
 verify established-chat and new-chat placement, visible/clickable search,
-viewport containment, loaded provider images, source selection, keyboard focus
+viewport containment, content-sized height (including one-result and empty
+searches), loaded provider images, source selection, keyboard focus
 and dismissal, favorites and reasoning identities, bounded 600-model
 virtualization, runtime recycling, and persisted route boundaries. A provider
 that is not ready, and any source with no selectable models, remain absent

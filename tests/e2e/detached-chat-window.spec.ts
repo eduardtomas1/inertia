@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { buildPaletteTokens } from "../../scripts/color-theme-spec.mjs";
 import { RuntimeStore } from "../../src/server/database";
 import {
   createAppFixture,
@@ -148,6 +149,7 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
   await expect(popup.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(popup.locator("html")).toHaveAttribute("data-color-theme", "ocean");
+  const oceanDark = Object.fromEntries(buildPaletteTokens("ocean", "dark"));
   await expect.poll(() => popup.locator("html").evaluate((element) => {
     const styles = getComputedStyle(element);
     return {
@@ -156,9 +158,9 @@ test("moves one live chat between a remembered native window and the main app", 
       terminal: styles.getPropertyValue("--terminal-bg").trim(),
     };
   })).toEqual({
-    background: "#0e171d",
-    foreground: "#eef7fb",
-    terminal: "#0c151a",
+    background: oceanDark["app-bg"],
+    foreground: oceanDark.text,
+    terminal: oceanDark["terminal-bg"],
   });
   const themeEvidence = testInfo.outputPath("detached-chat-ocean-dark.png");
   await popup.screenshot({ path: themeEvidence, animations: "disabled" });

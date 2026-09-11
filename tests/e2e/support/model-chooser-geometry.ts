@@ -14,15 +14,21 @@ export async function expectModelChooserPlacement(
     const anchor = element.closest(".model-chooser-anchor")!
       .querySelector("button")!.getBoundingClientRect();
     const workspace = element.closest(".chat-workspace")!.getBoundingClientRect();
-    const availableBelow = Math.min(innerHeight, workspace.bottom) - anchor.bottom - 16;
+    // Placement uses the visual viewport (Electron zoom/hosted native windows
+    // can make it differ from the layout viewport). Keep the assertion on the
+    // same coordinate space as the production positioning utility.
+    const viewport = visualViewport;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportBottom = viewportTop + (viewport?.height ?? innerHeight);
+    const availableBelow = Math.min(viewportBottom, workspace.bottom) - anchor.bottom - 16;
     const expectedVertical = frame.height <= availableBelow ? "below" : "above";
     return {
       correctSide: element.getAttribute("data-popover-vertical") === expectedVertical,
       anchored: expectedVertical === "below"
         ? frame.top >= anchor.bottom + 7.5
         : frame.bottom <= anchor.top - 7.5,
-      insideWorkspace: frame.top >= Math.max(0, workspace.top) + 7.5
-        && frame.bottom <= Math.min(innerHeight, workspace.bottom) - 7.5,
+      insideWorkspace: frame.top >= Math.max(viewportTop, workspace.top) + 7.5
+        && frame.bottom <= Math.min(viewportBottom, workspace.bottom) - 7.5,
     };
   })).toEqual({ correctSide: true, anchored: true, insideWorkspace: true });
   if (requiredVertical) {

@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
+import { buildPaletteTokens } from "../../scripts/color-theme-spec.mjs";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app!: AppFixture;
@@ -50,13 +51,14 @@ test("applies paired color themes and restores them after restart", async ({
   await page.getByRole("radio", { name: "Ocean theme", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
+  const oceanLight = Object.fromEntries(buildPaletteTokens("ocean", "light"));
   await expect.poll(() => page.locator("html").evaluate((element) => {
     const styles = getComputedStyle(element);
     return {
       background: styles.getPropertyValue("--app-bg").trim(),
       accent: styles.getPropertyValue("--accent").trim(),
     };
-  })).toEqual({ background: "#edf3f6", accent: "#28698a" });
+  })).toEqual({ background: oceanLight["app-bg"], accent: oceanLight.accent });
   await expect.poll(() => {
     const database = new Database(join(app.testDirectory, "data", "inertia.sqlite"), {
       readonly: true,

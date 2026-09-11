@@ -320,13 +320,21 @@ for (const size of [
       await expect(mobileSidebar.getByRole("button", { name: "Close navigation" })).toBeFocused();
       await expect(page.locator(".workspace-shell")).toHaveAttribute("inert", "");
       await expectNoViewportOverflow();
-      const drawerControls = mobileSidebar.locator('button:not([disabled]), input:not([disabled])');
-      const firstDrawerControl = drawerControls.first();
-      const lastDrawerControl = drawerControls.last();
+      // Keep the original controls' identities: focusing the update trigger can
+      // append its detail panel, which must not change the expected wrap target.
+      const drawerControls = await mobileSidebar.locator('button:visible:not([disabled]), input:visible:not([disabled])').all();
+      const firstDrawerControl = drawerControls[0];
+      const lastDrawerControl = drawerControls[drawerControls.length - 1];
       await lastDrawerControl.focus();
       await page.keyboard.press("Tab");
       await expect(firstDrawerControl).toBeFocused();
       await page.keyboard.press("Shift+Tab");
+      await expect(lastDrawerControl).toBeFocused();
+      const updateDetails = mobileSidebar.getByRole("dialog", { name: "Application update details" });
+      await expect(updateDetails).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(updateDetails).toBeHidden();
+      await expect(mobileSidebar).toBeVisible();
       await expect(lastDrawerControl).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(mobileSidebar).toBeHidden();

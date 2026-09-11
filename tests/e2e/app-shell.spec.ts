@@ -31,6 +31,67 @@ let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 let browserTraceStarted = false;
 
+// Keep the submission lifecycle assertion independent from host/provider
+// latency. The real app-server boundary is exercised, but its terminal event
+// is intentionally delivered after the short-lived Send state has been
+// observed on every supported desktop runner.
+const appShellCodexAppServer = `
+const readline = require("node:readline");
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+if (process.argv[2] === "--help") {
+  process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
+  process.exit(0);
+}
+let threadId = "app-shell-thread";
+let turnSequence = 0;
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "app-shell-fixture" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "model/list") {
+    send({ id: message.id, result: { data: [], nextCursor: null } });
+    return;
+  }
+  if (message.method === "account/rateLimits/read") {
+    send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
+    return;
+  }
+  if (message.method === "thread/goal/get") {
+    send({ id: message.id, result: { goal: null } });
+    return;
+  }
+  if (message.method === "thread/start" || message.method === "thread/resume") {
+    threadId = message.params.threadId || threadId;
+    send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
+    return;
+  }
+  if (message.method !== "turn/start") return;
+  const turn = {
+    id: "app-shell-turn-" + (++turnSequence),
+    status: "inProgress",
+    items: [],
+    error: null,
+  };
+  send({ id: message.id, result: { turn } });
+  send({ method: "turn/started", params: { threadId, turn } });
+  setTimeout(() => {
+    send({ method: "item/agentMessage/delta", params: {
+      threadId,
+      turnId: turn.id,
+      itemId: "app-shell-answer",
+      delta: "Delayed app shell fixture response.",
+    } });
+    send({ method: "turn/completed", params: {
+      threadId,
+      turn: { ...turn, status: "completed" },
+    } });
+  }, 700);
+});
+`;
+
 async function finishBrowserTrace(testInfo?: TestInfo): Promise<void> {
   if (!browserTraceStarted) return;
   browserTraceStarted = false;
@@ -46,7 +107,11 @@ async function finishBrowserTrace(testInfo?: TestInfo): Promise<void> {
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "app-shell", initialState: "empty" });
+  app = await createAppFixture({
+    name: "app-shell",
+    initialState: "empty",
+    codexAppServerSource: appShellCodexAppServer,
+  });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;

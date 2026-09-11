@@ -22,9 +22,12 @@ export class SettingsRepository {
   update(update: Partial<AppSettings>): void {
     const current = settingsFromState(this.state());
     const next = { ...current, ...update };
+    // A legacy whole-family selection still updates both halves atomically.
+    const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
+    const darkColorTheme = update.darkColorTheme ?? update.colorTheme ?? current.darkColorTheme ?? current.colorTheme;
     this.context.database.prepare(`
       UPDATE app_state SET
-        theme = ?, color_theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
+        theme = ?, color_theme = ?, light_color_theme = ?, dark_color_theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
         default_provider = ?, default_model = ?, default_access_mode = ?,
         new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?,
         show_usage = ?, usage_display_mode = ?, interface_scale = ?, response_density = ?,
@@ -43,6 +46,8 @@ export class SettingsRepository {
     `).run(
       next.theme,
       next.colorTheme,
+      lightColorTheme,
+      darkColorTheme,
       Number(next.compactSidebar),
       Number(next.showTimestamps),
       next.terminalFontSize,

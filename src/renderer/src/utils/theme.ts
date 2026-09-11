@@ -30,8 +30,13 @@ export function isColorThemeId(value: unknown): value is ColorThemeId {
 
 export function cachedColorTheme(
   storage: Pick<ThemePreferenceStorage, "getItem">,
+  mode?: ResolvedTheme,
 ): ColorThemeId | null {
   try {
+    if (mode) {
+      const half = storage.getItem(`${COLOR_THEME_CACHE_KEY}:${mode}`);
+      if (isColorThemeId(half)) return half;
+    }
     const value = storage.getItem(COLOR_THEME_CACHE_KEY);
     return isColorThemeId(value) ? value : null;
   } catch {
@@ -51,9 +56,10 @@ export function cacheThemePreference(storage: Pick<ThemePreferenceStorage, "setI
 export function cacheColorTheme(
   storage: Pick<ThemePreferenceStorage, "setItem">,
   colorTheme: ColorThemeId,
+  mode?: ResolvedTheme,
 ): void {
   try {
-    storage.setItem(COLOR_THEME_CACHE_KEY, colorTheme);
+    storage.setItem(mode ? `${COLOR_THEME_CACHE_KEY}:${mode}` : COLOR_THEME_CACHE_KEY, colorTheme);
   } catch {
     // The persisted runtime snapshot remains authoritative when renderer
     // storage is unavailable.

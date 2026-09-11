@@ -147,9 +147,9 @@ test("opens a rendered project Markdown file directly from the chat", async () =
     name: "Project navigation",
   });
   await sidebar.getByRole("button", {
-    name: "Thread actions for markdown-file-preview companion",
-  }).click();
-  await sidebar.getByRole("menuitem", {
+    name: /^markdown-file-preview companion,/u,
+  }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
   const primary = page.getByRole("region", {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import type { Project } from "../../shared/contracts";
+import { defaultProjectPreferences, projectPreferencesSchema } from "../../shared/project-preferences";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { projectFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
@@ -35,6 +36,7 @@ export class ProjectRepository {
       repositoryRoot: identity.repositoryRoot ?? null,
       repositoryRelativePath: identity.repositoryRelativePath ?? ".",
       groupingMode: null,
+      preferences: defaultProjectPreferences(),
       gitRepositoryLimit: 16,
       color: PROJECT_COLORS[projectCount % PROJECT_COLORS.length],
       status: "ready",
@@ -66,12 +68,13 @@ export class ProjectRepository {
 
   update(
     projectId: string,
-    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
+    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath" | "preferences">>,
   ): Project {
     const current = projectFromRow(this.context.requireProject(projectId));
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
     if (unchanged) return current;
-    const next = { ...current, ...update, updatedAt: new Date().toISOString() };
+    const next = { ...current, ...update, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
+    const preferencesJson = JSON.stringify(projectPreferencesSchema.parse(next.preferences));
     this.context.database.transaction(() => {
       const repositoryChanged =
         next.repositoryIdentity !== current.repositoryIdentity
@@ -101,9 +104,10 @@ export class ProjectRepository {
           repository_relative_path = @repositoryRelativePath,
           grouping_mode = @groupingMode,
           git_repository_limit = @gitRepositoryLimit,
+          preferences_json = @preferencesJson,
           updated_at = @updatedAt
         WHERE id = @id
-      `).run(next);
+      `).run({ ...next, preferencesJson });
     })();
     return next;
   }

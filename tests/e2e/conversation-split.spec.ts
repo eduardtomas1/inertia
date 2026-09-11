@@ -73,10 +73,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const primaryTitle = "conversation-split fixture";
   const secondaryTitle = "conversation-split companion";
 
-  await sidebar.getByRole("button", {
-    name: `Thread actions for ${secondaryTitle}`,
-  }).click();
-  await sidebar.getByRole("menuitem", {
+  await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
 
@@ -175,21 +173,34 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .getByRole("menuitem", { name: /Save current prompt/u })
     .click();
   await expect(primaryMessage).toHaveValue("");
+  const primaryStash = primary.getByRole("button", {
+    name: "Scratch prompts, 1 saved",
+  });
+  await expect(primaryStash).toBeVisible();
+  await expect(secondary.getByRole("button", {
+    name: "Scratch prompts, 1 saved",
+  })).toHaveCount(0);
+  await secondary.getByRole("button", { name: "Scratch prompts", exact: true }).click();
+  const secondaryStashMenu = secondary.getByRole("menu", { name: "Scratch prompts" });
+  await expect(secondaryStashMenu).toContainText("No scratch prompts saved yet.");
+  await expect(secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u })).toHaveCount(0);
+  await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
+  await secondaryStashMenu.getByRole("menuitem", { name: /Save current prompt/u }).click();
+  await expect(secondaryMessage).toHaveValue("");
   const secondaryStash = secondary.getByRole("button", {
     name: "Scratch prompts, 1 saved",
   });
   await expect(secondaryStash).toBeVisible();
   await secondaryStash.click();
-  await secondary.getByRole("menu", { name: "Scratch prompts" })
-    .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
-    .click();
-  await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u })).toHaveCount(0);
+  await secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Companion/u }).click();
+  await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
   await expect(secondaryMessage).toBeFocused();
-  await expect(primary.getByRole("button", {
-    name: "Scratch prompts, 1 saved",
-  })).toBeVisible();
-  await primaryMessage.fill("Draft owned by Inertia");
-  await secondaryMessage.fill("Draft owned by Companion");
+  await primaryStash.click();
+  const primaryStashMenu = primary.getByRole("menu", { name: "Scratch prompts" });
+  await expect(primaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Companion/u })).toHaveCount(0);
+  await primaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u }).click();
+  await expect(primaryMessage).toBeFocused();
 
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
+import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -143,6 +144,7 @@ function workspaceResolver(store: RuntimeStore) {
 }
 
 function resetWorkspaceAuthorityMigration(database: Database.Database): void {
+  removeProjectSettingsFromLegacyFixture(database);
   database.exec(`
     DROP TRIGGER conversation_context_packets_discard_source_drafts;
     DROP TABLE agent_context_requests;

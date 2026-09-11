@@ -172,7 +172,7 @@ export function ProviderAuthDialog({
       convertEol: true,
       cursorBlink: true,
       cursorStyle: "bar",
-      fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "monospace",
       fontSize: latestFontSizeRef.current,
       lineHeight: 1.35,
       screenReaderMode: true,

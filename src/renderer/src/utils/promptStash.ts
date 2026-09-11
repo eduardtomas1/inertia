@@ -9,6 +9,12 @@ export const PROMPT_STASH_STORAGE_KEY = "inertia:prompt-stash:v1";
 export const PROMPT_STASH_CHANGED_EVENT = "inertia:prompt-stash-changed";
 export const MAX_PROMPT_STASH_ENTRIES = 12;
 
+/** Legacy prompts have no source identity; retain them, but never assign them to an arbitrary chat. */
+export function promptStashStorageKey(conversationId?: string): string {
+  return conversationId === undefined ? PROMPT_STASH_STORAGE_KEY
+    : `inertia:prompt-stash:v2:${encodeURIComponent(conversationId)}`;
+}
+
 const MAX_STORED_PROMPT_STASH_BYTES = 256 * 1024;
 const boundedIdentity = /^[A-Za-z][A-Za-z0-9._:-]{0,199}$/u;
 const boundedEntryId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
@@ -166,9 +172,10 @@ function storageBoundedEntries(
 
 export function readPromptStash(
   storage: Pick<PromptStashStorage, "getItem">,
+  conversationId?: string,
 ): PromptStashEntry[] {
   try {
-    const raw = storage.getItem(PROMPT_STASH_STORAGE_KEY);
+    const raw = storage.getItem(promptStashStorageKey(conversationId));
     if (
       !raw
       || new TextEncoder().encode(raw).byteLength
@@ -188,10 +195,11 @@ export function readPromptStash(
 export function writePromptStash(
   storage: Pick<PromptStashStorage, "setItem">,
   entries: readonly PromptStashEntry[],
+  conversationId?: string,
 ): boolean {
   try {
     storage.setItem(
-      PROMPT_STASH_STORAGE_KEY,
+      promptStashStorageKey(conversationId),
       storedPayload(storageBoundedEntries(entries)),
     );
     return true;
@@ -204,9 +212,24 @@ export function persistPromptStashUpdate(
   storage: Pick<PromptStashStorage, "setItem">,
   current: readonly PromptStashEntry[],
   update: (entries: readonly PromptStashEntry[]) => PromptStashEntry[],
+  conversationId?: string,
 ): PromptStashEntry[] | null {
   const next = update(current);
-  return writePromptStash(storage, next) ? next : null;
+  return writePromptStash(storage, next, conversationId) ? next : null;
+}
+
+/** A new-chat draft and its materialized thread are the same chat, not a cross-chat share. */
+export function movePromptStash(storage: PromptStashStorage & { removeItem(key: string): void }, sourceId: string, targetId: string): boolean {
+  if (sourceId === targetId) return true;
+  const source = readPromptStash(storage, sourceId);
+  if (source.length === 0) return true;
+  const next = storageBoundedEntries([...readPromptStash(storage, targetId), ...source]);
+  if (!writePromptStash(storage, next, targetId)) return false;
+  // Keep the recovery copy if retention limits excluded any source entry.
+  if (source.every((entry) => next.some(({ id }) => id === entry.id))) {
+    try { storage.removeItem(promptStashStorageKey(sourceId)); } catch { return false; }
+  }
+  return true;
 }
 
 export function addPromptStashEntry(

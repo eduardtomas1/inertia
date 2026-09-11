@@ -34,6 +34,9 @@ export interface SidebarProps {
   onOpenDailyWork: () => void;
   dailyWorkOpen: boolean;
   onRenameConversation: (conversation: Conversation, title: string) => void;
+  onMarkConversationUnread?: (conversation: Conversation) => void;
+  onRegenerateConversationTitle?: (conversation: Conversation) => void;
+  onOpenProjectSettings?: (project: Project) => void;
   onPinConversation: (conversation: Conversation, pinned: boolean) => void;
   onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
   onArchiveConversation: (conversation: Conversation) => void;

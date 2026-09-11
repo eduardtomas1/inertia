@@ -134,7 +134,7 @@ test("finds chunked content in an unloaded chat, jumps to an old virtual row and
 test("reveals a match in an existing split pane and in its detached window", async ({ browserName: _browserName }, info) => {
   const earlier = page.getByRole("button", { name: /^Earlier/u });
   if (await earlier.getAttribute("aria-expanded") === "false") await earlier.click();
-  await page.getByRole("button", { name: `Thread actions for ${targetTitle}` }).click();
+  await page.locator(".activity-thread-select").filter({ hasText: targetTitle }).click({ button: "right" });
   await page.getByRole("menuitem", { name: "Add this chat to split view" }).click();
   const input = await search();
   await input.press("Enter");

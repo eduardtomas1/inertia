@@ -33,10 +33,10 @@ test("applies paired color themes and restores them after restart", async ({
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("radio", { name: "Dark", exact: true }).click();
-  await page.getByRole("radio", { name: "Iris theme", exact: true }).click();
+  await page.getByRole("button", { name: "Iris theme", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "iris");
-  await expect(page.getByRole("radio", { name: "Iris theme" })).toBeChecked();
+  await expect(page.getByRole("button", { name: "Iris theme" })).toHaveAttribute("aria-pressed", "true");
   await app.expectNoViewportOverflow();
 
   const libraryScreenshot = testInfo.outputPath("theme-library-iris-dark.png");
@@ -47,7 +47,7 @@ test("applies paired color themes and restores them after restart", async ({
   });
 
   await page.getByRole("radio", { name: "Light", exact: true }).click();
-  await page.getByRole("radio", { name: "Ocean theme", exact: true }).click();
+  await page.getByRole("button", { name: "Use Ocean for light", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
   await expect.poll(() => page.locator("html").evaluate((element) => {
@@ -62,11 +62,11 @@ test("applies paired color themes and restores them after restart", async ({
       readonly: true,
     });
     const value = (database.prepare(
-      "SELECT color_theme AS colorTheme FROM app_state WHERE id = 1",
-    ).get() as { colorTheme: string }).colorTheme;
+      "SELECT light_color_theme AS light, dark_color_theme AS dark FROM app_state WHERE id = 1",
+    ).get() as { light: string; dark: string });
     database.close();
     return value;
-  }).toBe("ocean");
+  }).toEqual({ light: "ocean", dark: "iris" });
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const workspaceScreenshot = testInfo.outputPath("workspace-ocean-light.png");
@@ -80,7 +80,10 @@ test("applies paired color themes and restores them after restart", async ({
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "Ocean theme" })).toBeChecked();
+  await expect(page.getByRole("button", { name: "Use Ocean for light" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Use Iris for dark" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-color-theme", "iris");
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(app.rendererErrors).toEqual([]);
 });

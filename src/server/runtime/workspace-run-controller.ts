@@ -7,6 +7,10 @@ import type {
   WorkspaceRun,
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
+import { executableCandidates, providerEnvironment } from "../environment";
+import { gitProcessEnvironment } from "../git/environment";
+import { providerProcessInvocation, providerPtyArguments } from "../provider/process";
+import type { TerminalManager } from "../terminal";
 import { recoverReviewedCommitTransaction } from "../git";
 import { GitError, isGitProcessTreeTerminationFailure } from "../git/types";
 import {
@@ -30,9 +34,11 @@ type WorkspaceRunStore = Pick<
   | "createWorkspaceRun"
   | "updateWorkspaceRun"
   | "conversationWork"
+  | "project"
 >;
 
 export interface WorkspaceActionTerminalManager<Owner> {
+  replaceProcess?: (owner: Owner, ...args: Tail<Parameters<TerminalManager["replaceProcess"]>>) => Promise<string>;
   create(
     owner: Owner,
     cwd: string,
@@ -55,6 +61,8 @@ export interface WorkspaceActionTerminalManager<Owner> {
   close(owner: Owner, terminalId: string): Promise<void>;
   closeManaged(terminalId: string): Promise<boolean>;
 }
+
+type Tail<T extends unknown[]> = T extends [unknown, ...infer Rest] ? Rest : never;
 
 export interface WorkspaceAction {
   id: string;
@@ -182,21 +190,27 @@ export class WorkspaceRunController<Owner> {
       = recoverReviewedCommitTransaction,
   ) {}
 
-  async listActions(cwd: string): Promise<WorkspaceAction[]> {
+  async listActions(cwd: string, projectId?: string): Promise<WorkspaceAction[]> {
+    const custom = projectId ? this.store.project(projectId).preferences?.actions ?? [] : [];
+    const configured = custom.map((action) => ({
+      id: `custom:${action.id}`, label: action.name,
+      command: [action.executable, ...action.args].map((arg) => JSON.stringify(arg)).join(" "),
+      preview: false,
+    }));
     let scripts: Awaited<ReturnType<typeof discoverPackageScripts>>;
     try {
       scripts = await discoverPackageScripts(cwd);
     } catch (error) {
-      if (error instanceof WorkspaceError && error.code === "not-found") return [];
+      if (error instanceof WorkspaceError && error.code === "not-found") return configured;
       throw error;
     }
     const previews = new Set(identifyPreviewScripts(scripts.scripts).map((script) => script.name));
-    return scripts.scripts.slice(0, 50).map((script) => ({
+    return [...configured, ...scripts.scripts.slice(0, 50).map((script) => ({
       id: script.name,
       label: script.name,
       command: script.command,
       preview: previews.has(script.name),
-    }));
+    }))];
   }
 
   async startAction(input: StartWorkspaceActionInput<Owner>): Promise<string> {
@@ -212,11 +226,18 @@ export class WorkspaceRunController<Owner> {
     }
     let terminalOwnsReservation = false;
     try {
-      const scripts = await discoverPackageScripts(input.cwd);
-      const action = scripts.scripts.find((script) => script.name === input.actionId);
+      const custom = input.actionId.startsWith("custom:")
+        ? this.store.project(input.projectId).preferences?.actions.find(({ id }) => `custom:${id}` === input.actionId)
+        : undefined;
+      if (input.actionId.startsWith("custom:") && !custom) {
+        throw new RuntimeRequestError("That project action is no longer available.");
+      }
+      const scripts = custom ? null : await discoverPackageScripts(input.cwd);
+      const action = custom ? { name: custom.name, command: custom.executable }
+        : scripts?.scripts.find((script) => script.name === input.actionId);
       if (!action) throw new RuntimeRequestError("That project action is no longer available.");
 
-      const preview = identifyPreviewScripts(scripts.scripts).some((script) => script.name === action.name);
+      const preview = scripts ? identifyPreviewScripts(scripts.scripts).some((script) => script.name === action.name) : false;
       const kind = workspaceActionKind(action.name, action.command, preview);
       const conversation = input.conversationId
         ? this.store.conversation(input.conversationId)
@@ -225,7 +246,7 @@ export class WorkspaceRunController<Owner> {
         kind,
         projectId: input.projectId,
         conversationId: input.conversationId ?? null,
-        actionId: action.name,
+        actionId: input.actionId,
         label: action.name,
         detail: kind === "service" && conversation
           ? conversationDetail(conversation)
@@ -237,15 +258,11 @@ export class WorkspaceRunController<Owner> {
       let detectedPort: number | null = null;
       let serviceOutput = "";
       let startingFailed = false;
+      let exited = false;
       let terminalId: string;
       try {
-        terminalId = await this.terminals.replace(
-          input.owner,
-          input.terminalId,
-          input.cwd,
-          input.cols,
-          input.rows,
-          (exitCode) => {
+        const onExit = (exitCode: number): void => {
+            exited = true;
             this.store.conversationWork.release(reservationId);
             this.managedActions.delete(activity.id);
             if (startingFailed) return;
@@ -266,8 +283,8 @@ export class WorkspaceRunController<Owner> {
               return; // The project may have been removed while its process was exiting.
             }
             if (!this.isClosed()) this.broadcastSnapshot();
-          },
-          (output) => {
+          };
+        const onOutput = (output: string): void => {
             if (kind !== "service" || detectedPort !== null) return;
             serviceOutput = `${serviceOutput}${output}`.slice(-SERVICE_OUTPUT_WINDOW);
             const port = workspaceServicePort(serviceOutput);
@@ -279,10 +296,26 @@ export class WorkspaceRunController<Owner> {
               return;
             }
             if (!this.isClosed()) this.broadcastSnapshot();
-          },
-          input.replacementRequestId,
-        );
-        terminalOwnsReservation = true;
+          };
+        if (custom) {
+          if (!this.terminals.replaceProcess) throw new RuntimeRequestError("Direct project actions are unavailable.");
+          const discoveredEnvironment = await providerEnvironment();
+          const environment = gitProcessEnvironment(discoveredEnvironment.env);
+          const [executable] = await executableCandidates(custom.executable, discoveredEnvironment, input.cwd);
+          if (!executable) throw new RuntimeRequestError("The project action executable was not found. Check its path in Project settings.");
+          const invocation = providerProcessInvocation(executable, custom.args, environment);
+          terminalId = await this.terminals.replaceProcess(
+            input.owner, input.terminalId, input.cwd, invocation.command, providerPtyArguments(invocation),
+            environment, input.cols, input.rows, onExit, onOutput,
+            null, false, input.replacementRequestId,
+          );
+        } else {
+          terminalId = await this.terminals.replace(
+            input.owner, input.terminalId, input.cwd, input.cols, input.rows,
+            onExit, onOutput, input.replacementRequestId,
+          );
+        }
+        terminalOwnsReservation = !exited;
       } catch (error) {
         this.store.updateWorkspaceRun(activity.id, {
           status: "failed",
@@ -291,10 +324,10 @@ export class WorkspaceRunController<Owner> {
         this.broadcastSnapshot();
         throw error;
       }
-      this.managedActions.set(activity.id, { terminalId });
+      if (!exited) this.managedActions.set(activity.id, { terminalId });
 
       try {
-        this.terminals.input(
+        if (scripts) this.terminals.input(
           input.owner,
           terminalId,
           `${projectActionCommand(scripts.packageManager, action.name)}\r`,
@@ -361,6 +394,7 @@ export class WorkspaceRunController<Owner> {
       onMutationSettled?: () => void;
       /** Only operations with independently bounded cancellation may opt in. */
       cancellation?: AbortController;
+      exclusiveCheckout?: boolean;
     } = {},
   ): Promise<T> {
     // Multiple projects may point at different folders in one Git checkout.
@@ -370,13 +404,17 @@ export class WorkspaceRunController<Owner> {
     const serializationRoot = options.serializationRoot ?? checkoutRoot;
     return await this.withExclusiveSourceControl(serializationRoot, async () => {
       const reservationId = `source-control:${requestId}`;
-      if (!this.store.conversationWork.reserveCheckout(
+      const reserve = options.exclusiveCheckout
+        ? this.store.conversationWork.reserveExclusiveCheckout.bind(this.store.conversationWork)
+        : this.store.conversationWork.reserveCheckout.bind(this.store.conversationWork);
+      if (!reserve(
         reservationId,
         projectId,
         checkoutRoot,
       )) {
         throw new RuntimeRequestError(
-          "End the resumed provider terminal before changing this workspace with Git.",
+          options.exclusiveCheckout ? "Stop active work before changing this workspace with Git."
+            : "End the resumed provider terminal before changing this workspace with Git.",
         );
       }
       try {

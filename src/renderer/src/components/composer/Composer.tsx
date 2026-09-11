@@ -28,6 +28,7 @@ import {
   promptStashRouteMatches,
   promptStashRestoreBlockedReason,
   removePromptStashEntry,
+  readPromptStash,
   setPromptStashRecurrence,
   type PromptStashEntry,
 } from "../../utils/promptStash";
@@ -122,6 +123,7 @@ export const Composer = memo(function Composer({
   );
   const [promptStash, setPromptStash] = useComposerPromptStash(
     promptStashEnabled,
+    conversation.id,
   );
   const draftValueRef = useRef(message);
   const pendingDraftRef = useRef<{
@@ -888,8 +890,9 @@ export const Composer = memo(function Composer({
     if (!promptStashEnabled) return false;
     const next = persistPromptStashUpdate(
       window.localStorage,
-      promptStash,
+      readPromptStash(window.localStorage, conversation.id),
       update,
+      conversation.id,
     );
     if (!next) return false;
     setPromptStash(next);
@@ -920,6 +923,7 @@ export const Composer = memo(function Composer({
   const restoreStashedPrompt = (entry: PromptStashEntry): void => {
     if (
       attachments.length > 0
+      || !readPromptStash(window.localStorage, conversation.id).some((saved) => saved.id === entry.id && saved.content === entry.content)
       || !promptStashRouteMatches(
         conversation.modelSelection,
         entry.route,

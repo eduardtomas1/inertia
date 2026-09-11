@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
+import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -438,6 +439,7 @@ describe("append-oriented stream text persistence", () => {
     current.store.close();
 
     const old = new Database(current.databasePath);
+    removeProjectSettingsFromLegacyFixture(old);
     old.exec(`
       DROP TRIGGER conversation_context_packets_discard_source_drafts;
       DROP TABLE agent_context_requests;
@@ -494,6 +496,7 @@ describe("append-oriented stream text persistence", () => {
     current.store.close();
 
     const old = new Database(current.databasePath);
+    removeProjectSettingsFromLegacyFixture(old);
     old.exec(`
       DROP TRIGGER conversation_context_packets_discard_source_drafts;
       DROP TABLE agent_context_requests;

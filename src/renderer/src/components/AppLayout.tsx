@@ -91,6 +91,7 @@ interface AppLayoutActions {
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openConnectionsSettings: () => void;
+  openProjectSettings?: (projectId: string) => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -318,6 +319,13 @@ export function AppLayout({
         payload: { conversationId: thread.id, pinned },
       }).catch(() => undefined);
     },
+    markConversationUnread: (thread: Conversation) => {
+      void actions.run("conversation.mark-unread", { type: "conversation.mark-unread", payload: { conversationId: thread.id } }).catch(() => undefined);
+    },
+    regenerateConversationTitle: (thread: Conversation) => {
+      void actions.run("conversation.regenerate-title", { type: "conversation.regenerate-title", payload: { conversationId: thread.id } }).catch(() => undefined);
+    },
+    openProjectSettings: (item: Project) => actions.openProjectSettings?.(item.id),
     snoozeConversation: (thread: Conversation, snoozedUntil: string | null) => {
       void actions.run("conversation.update", {
         type: "conversation.update",
@@ -503,6 +511,9 @@ export function AppLayout({
             onSnoozeConversation={sidebarActions.snoozeConversation}
             onArchiveConversation={sidebarActions.archiveConversation}
             onSettleConversation={sidebarActions.settleConversation}
+            onMarkConversationUnread={sidebarActions.markConversationUnread}
+            onRegenerateConversationTitle={sidebarActions.regenerateConversationTitle}
+            onOpenProjectSettings={sidebarActions.openProjectSettings}
             onRestoreConversation={sidebarActions.restoreConversation}
             onDeleteConversation={sidebarActions.deleteConversation}
             onAcknowledgeRun={sidebarActions.acknowledgeRun}

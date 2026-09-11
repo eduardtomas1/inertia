@@ -9,7 +9,7 @@ import {
 } from "../../src/shared/model-routing";
 import {
   PROMPT_STASH_CHANGED_EVENT,
-  PROMPT_STASH_STORAGE_KEY,
+  promptStashStorageKey,
 } from "../../src/renderer/src/utils/promptStash";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -220,8 +220,9 @@ test("keeps every composer utility popover inside both split panes", async (
     "inertia:layout:conversation-split-percent:v1",
     "50",
   ));
-  await page.evaluate(({ storageKey, changedEvent }) => {
-    window.localStorage.setItem(storageKey, JSON.stringify({
+  const conversationIds = await page.locator(".activity-thread-select").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-work-focus-id")!.slice("thread:".length)));
+  await page.evaluate(({ storageKeys, changedEvent }) => {
+    for (const storageKey of storageKeys) window.localStorage.setItem(storageKey, JSON.stringify({
       version: 1,
       entries: Array.from({ length: 12 }, (_, index) => ({
         id: `popover-fixture-${index}`,
@@ -238,17 +239,15 @@ test("keeps every composer utility popover inside both split panes", async (
     }));
     window.dispatchEvent(new Event(changedEvent));
   }, {
-    storageKey: PROMPT_STASH_STORAGE_KEY,
+    storageKeys: conversationIds.map(promptStashStorageKey),
     changedEvent: PROMPT_STASH_CHANGED_EVENT,
   });
   const secondaryTitle = "composer-popover-placement companion";
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", {
-    name: `Thread actions for ${secondaryTitle}`,
-  }).click();
-  await sidebar.getByRole("menuitem", {
+  await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
 

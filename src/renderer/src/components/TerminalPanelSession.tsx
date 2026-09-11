@@ -165,7 +165,7 @@ export function TerminalSession({
       cursorBlink: true,
       cursorStyle: "bar",
       disableStdin: true,
-      fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "monospace",
       fontSize: initialOptionsRef.current.fontSize,
       lineHeight: 1.35,
       scrollback: 4_000,

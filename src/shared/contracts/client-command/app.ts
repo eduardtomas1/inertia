@@ -28,6 +28,7 @@ import {
   conversationCreatePayloadSchema,
 } from "./conversation-create";
 import { COLOR_THEME_IDS } from "../app";
+import { projectPreferencesSchema } from "../../project-preferences";
 import {
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
@@ -174,6 +175,8 @@ export const appCommandSchemas = [
         name: z.string().trim().min(1).max(80).optional(),
         groupingMode: z.enum(["repository", "repository-path", "separate"]).nullable().optional(),
         gitRepositoryLimit: z.number().int().min(16).max(1_024).optional(),
+        preferences: projectPreferencesSchema.optional(),
+        expectedUpdatedAt: z.iso.datetime().optional(),
       }).strict(),
     })
     .strict(),
@@ -317,6 +320,8 @@ export const appCommandSchemas = [
         "conversation.settle",
         "conversation.unsettle",
         "conversation.delete",
+        "conversation.mark-unread",
+        "conversation.regenerate-title",
       ]),
       payload: z.object({ conversationId: z.string().uuid() }).strict(),
     })
@@ -332,6 +337,8 @@ export const configurationCommandSchemas = [
         .object({
           theme: z.enum(["system", "light", "dark"]).optional(),
           colorTheme: z.enum(COLOR_THEME_IDS).optional(),
+          lightColorTheme: z.enum(COLOR_THEME_IDS).optional(),
+          darkColorTheme: z.enum(COLOR_THEME_IDS).optional(),
           compactSidebar: z.boolean().optional(),
           showTimestamps: z.boolean().optional(),
           terminalFontSize: z.number().int().min(11).max(22).optional(),

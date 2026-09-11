@@ -79,19 +79,17 @@ test("filters Work by project and manages chat history", async () => {
   await expect(trailing).toHaveCSS("opacity", "1");
   await activityCard.hover();
   await expect(trailing).toHaveCSS("opacity", "0");
-  const threadActions = activityCard.getByRole("button", {
-    name: "Thread actions for New chat",
-  });
-  await expect(threadActions).toHaveCSS("opacity", "1");
+  await expect(activityCard.getByRole("button", { name: "Thread actions for New chat" })).toHaveCount(0);
+  const inlineActions = activityCard.locator(".thread-inline-actions");
+  await expect(inlineActions).toHaveCSS("opacity", "1");
 
   const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
   await firstNavigationItem.focus();
   await firstNavigationItem.press("ArrowDown");
   expect(await firstNavigationItem.evaluate((item) => document.activeElement !== item)).toBe(true);
 
-  await expect(threadActions).toHaveCSS("opacity", "1");
-  await threadActions.click();
-  await sidebar.getByRole("menuitem", { name: "Done" }).click();
+  await threadCard.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Settle thread" }).click();
   const doneToggle = sidebar.getByRole("button", { name: "Done 1" });
   await expect(doneToggle).toHaveAttribute("aria-expanded", "false");
   await doneToggle.click();
@@ -99,8 +97,8 @@ test("filters Work by project and manages chat history", async () => {
   await expect(doneCard.getByRole("button", {
     name: newChatAccessibleName,
   })).toBeVisible();
-  await doneCard.getByRole("button", { name: "Thread actions for New chat" }).click();
-  await sidebar.getByRole("menuitem", { name: "Reopen" }).click();
+  await doneCard.getByRole("button", { name: newChatAccessibleName }).press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Reopen thread" }).click();
   await expect(sidebar.locator('.activity-thread[data-work-section="recent"].is-active').getByRole("button", {
     name: newChatAccessibleName,
   })).toBeVisible();

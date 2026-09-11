@@ -185,10 +185,12 @@ export default function DetachedChatApp({
         ?? defaultSettings.theme,
       colorTheme: cachedColorTheme(window.localStorage)
         ?? defaultSettings.colorTheme,
+      lightColorTheme: cachedColorTheme(window.localStorage, "light") ?? defaultSettings.colorTheme,
+      darkColorTheme: cachedColorTheme(window.localStorage, "dark") ?? defaultSettings.colorTheme,
     },
     [connection.snapshot?.settings],
   );
-  useTheme(settings.theme, settings.colorTheme);
+  useTheme(settings.theme, settings.colorTheme, settings.lightColorTheme, settings.darkColorTheme);
 
   useEffect(() => {
     return onComposerDraftPersisted((persistence) => {

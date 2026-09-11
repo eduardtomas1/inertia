@@ -94,6 +94,8 @@ describe("shared contracts boundary", () => {
       "conversation.settle",
       "conversation.unsettle",
       "conversation.delete",
+      "conversation.mark-unread",
+      "conversation.regenerate-title",
       "support.report.get",
       "support.report.prepare",
       "support.report.validate",

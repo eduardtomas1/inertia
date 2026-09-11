@@ -11,13 +11,16 @@
       ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : preference;
     document.documentElement.dataset.theme = resolved;
-    document.documentElement.dataset.colorTheme = [
+    const themes = [
       "inertia",
       "grove",
       "ocean",
       "ember",
       "iris",
-    ].includes(cachedColorTheme) ? cachedColorTheme : "inertia";
+    ];
+    const half = window.localStorage.getItem(`inertia:color-theme:v1:${resolved}`);
+    document.documentElement.dataset.colorTheme = themes.includes(half) ? half
+      : themes.includes(cachedColorTheme) ? cachedColorTheme : "inertia";
     document.documentElement.style.colorScheme = resolved;
   } catch {
     // CSS keeps a system-compatible default when renderer storage is blocked.

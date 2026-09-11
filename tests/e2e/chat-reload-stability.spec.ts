@@ -110,10 +110,8 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", {
-    name: `Thread actions for ${secondaryTitle}`,
-  }).click();
-  await sidebar.getByRole("menuitem", {
+  await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
+  await page.getByRole("menuitem", {
     name: "Add this chat to split view",
   }).click();
 

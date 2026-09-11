@@ -612,6 +612,16 @@
       "version": 71,
       "name": "PersistContextCompactionReceipts",
       "digest": "e29e884b3d2b738fe0ebc211dbdcd45ac3ac6524fdeb7f4b7139a483faaf2831"
+    },
+    {
+      "version": 72,
+      "name": "ProjectPreferencesAndExplicitUnreadThreads",
+      "digest": "14bca62c785ff242d86fe9baa052d3ef25e29f6f72bc4ef23ae6aa9b2b9e0656"
+    },
+    {
+      "version": 73,
+      "name": "IndependentLightAndDarkThemes",
+      "digest": "11f67b827773d2ad34d9fbfc26d1aead33c2697d6e1dbad794a061a0e4724638"
     }
   ]
 }

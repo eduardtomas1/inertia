@@ -138,7 +138,7 @@ export function useSidebarWorkIndex({
       if (item.kind === "thread") {
         visible.add(item.conversation.id);
         navigation.push(item.id);
-        focus.push(item.id, `thread-actions:${item.conversation.id}`);
+        focus.push(item.id);
       } else if (item.kind !== "section" || item.disclosure) {
         navigation.push(item.id);
         focus.push(item.id);
@@ -245,10 +245,7 @@ export function useSidebarWorkIndex({
     layoutKey,
   });
   const focusIdentity = useCallback((identity: string): boolean => {
-    const itemIdentity = identity.startsWith("thread-actions:")
-      ? `thread:${identity.slice("thread-actions:".length)}`
-      : identity;
-    const itemIndex = indexByIdentity.get(itemIdentity);
+    const itemIndex = indexByIdentity.get(identity);
     if (itemIndex === undefined) return false;
     if (virtualized) {
       setKeyboardTargetIndex(itemIndex);

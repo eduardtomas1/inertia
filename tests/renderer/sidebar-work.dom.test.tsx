@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
 import type {
@@ -12,6 +13,7 @@ import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
+beforeAll(async () => { await loadThreadActions(); });
 
 const project: Project = {
   id: "project-studio",
@@ -417,35 +419,36 @@ describe("compact Work sidebar", () => {
     const view = renderSidebar([menuConversation]);
 
     const trigger = screen.getByRole("button", {
-      name: "Thread actions for Keyboard menu work",
+      name: /^Keyboard menu work,/u,
     });
-    fireEvent.click(trigger);
+    expect(screen.queryByRole("button", { name: "Thread actions for Keyboard menu work" })).not.toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: "F10", shiftKey: true });
 
     const menu = screen.getByRole("menu", {
       name: "Thread actions for Keyboard menu work",
     });
-    const rename = within(menu).getByRole("menuitem", { name: "Rename" });
-    const pin = within(menu).getByRole("menuitem", { name: "Pin" });
+    const pin = within(menu).getByRole("menuitem", { name: "Pin thread" });
+    const settle = within(menu).getByRole("menuitem", { name: "Settle thread" });
     const remove = within(menu).getByRole("menuitem", { name: "Delete" });
-    expect(rename).toHaveFocus();
-    expect(rename).toHaveAttribute("tabindex", "-1");
+    expect(pin).toHaveFocus();
+    expect(pin).toHaveAttribute("tabindex", "-1");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
 
     view.rerenderSnapshot(snapshot([{ ...menuConversation }]));
     expect(screen.getByRole("menu", {
       name: "Thread actions for Keyboard menu work",
     })).toBeInTheDocument();
-    expect(rename).toHaveFocus();
+    expect(pin).toHaveFocus();
     expect(trigger).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.keyDown(rename, { key: "ArrowDown" });
-    expect(pin).toHaveFocus();
-    fireEvent.keyDown(pin, { key: "End" });
+    fireEvent.keyDown(pin, { key: "ArrowDown" });
+    expect(settle).toHaveFocus();
+    fireEvent.keyDown(settle, { key: "End" });
     expect(remove).toHaveFocus();
     fireEvent.keyDown(remove, { key: "Home" });
-    expect(rename).toHaveFocus();
+    expect(pin).toHaveFocus();
 
-    fireEvent.keyDown(rename, { key: "Escape" });
+    fireEvent.keyDown(pin, { key: "Escape" });
     act(() => {
       vi.advanceTimersByTime(50);
     });
@@ -455,10 +458,10 @@ describe("compact Work sidebar", () => {
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(trigger);
+    fireEvent.contextMenu(trigger);
     expect(within(screen.getByRole("menu", {
       name: "Thread actions for Keyboard menu work",
-    })).getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+    })).getByRole("menuitem", { name: "Pin thread" })).toHaveFocus();
     fireEvent.pointerDown(screen.getByRole("searchbox", {
       name: "Search projects and conversations",
     }));
@@ -703,10 +706,10 @@ describe("compact Work sidebar", () => {
 
     fireEvent.keyDown(screen.getByRole("button", { name: /^Classic actions 0,/ }), { key: "End" });
     act(() => { vi.advanceTimersByTime(100); });
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Classic actions 79",
+    fireEvent.contextMenu(screen.getByRole("button", {
+      name: /^Classic actions 79,/u,
     }));
-    const rename = screen.getByRole("menuitem", { name: "Rename" });
+    const rename = screen.getByRole("menuitem", { name: "Rename thread" });
     expect(rename).toBeInTheDocument();
     fireEvent.click(rename);
 
@@ -872,15 +875,15 @@ describe("compact Work sidebar", () => {
 
     const earlierToggle = screen.getByRole("button", { name: "Earlier 1" });
     fireEvent.click(earlierToggle);
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Earlier menu work",
+    fireEvent.contextMenu(screen.getByRole("button", {
+      name: /^Earlier menu work,/u,
     }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename thread" })).toBeInTheDocument();
 
     fireEvent.click(earlierToggle);
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).not.toBeInTheDocument();
     fireEvent.click(earlierToggle);
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).not.toBeInTheDocument();
   });
 
   it("clears a row menu when automatic regrouping hides its owner", () => {
@@ -894,18 +897,18 @@ describe("compact Work sidebar", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Hidden after snooze",
+    fireEvent.contextMenu(screen.getByRole("button", {
+      name: /^Hidden after snooze,/u,
     }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename thread" })).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(101);
     });
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename thread" })).not.toBeInTheDocument();
   });
 
   it("keeps Work and its search available when a saved legacy mode is loaded", () => {
@@ -944,10 +947,10 @@ describe("compact Work sidebar", () => {
     ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Rename before expiry",
+    fireEvent.contextMenu(screen.getByRole("button", {
+      name: /^Rename before expiry,/u,
     }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename thread" }));
     expect(screen.getByRole("textbox", { name: "Rename Rename before expiry" }))
       .toHaveFocus();
 
@@ -982,9 +985,10 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", {
       name: "Restore this task, OpenAI, Studio, Repository acme-monorepo/apps/studio, Failed, Snoozed",
     })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Restore this task",
+    fireEvent.contextMenu(screen.getByRole("button", {
+      name: /^Restore this task,/u,
     }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Snooze" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Unsnooze" }));
     expect(view.onSnoozeConversation).toHaveBeenCalledWith(snoozed, null);
   });
@@ -1184,7 +1188,7 @@ describe("compact Work sidebar", () => {
     });
     expect(screen.getByRole("button", { name: "Done 1" })).toHaveFocus();
     expect(screen.getByRole("button", {
-      name: "Thread actions for First snooze expires",
+      name: /^First snooze expires,/u,
     })).not.toHaveFocus();
   });
 
@@ -1201,10 +1205,10 @@ describe("compact Work sidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Snoozed 1" }));
     const trigger = screen.getByRole("button", {
-      name: "Thread actions for Menu snooze expires",
+      name: /^Menu snooze expires,/u,
     });
-    fireEvent.click(trigger);
-    const rename = screen.getByRole("menuitem", { name: "Rename" });
+    fireEvent.contextMenu(trigger);
+    const rename = screen.getByRole("menuitem", { name: "Rename thread" });
     rename.focus();
     act(() => {
       vi.advanceTimersByTime(101);
@@ -1261,7 +1265,7 @@ describe("compact Work sidebar", () => {
     });
 
     expect(screen.getByRole("button", {
-      name: "Thread actions for Existing recent work",
+      name: /^Existing recent work,/u,
     })).toHaveFocus();
   });
 

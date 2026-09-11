@@ -7,6 +7,7 @@ import {
   type Project,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -72,6 +73,17 @@ const gitStatus: GitStatusSnapshot & { root: string } = {
 };
 
 describe("new conversation isolation", () => {
+  it("applies a project's workspace default but preserves explicit checkout choices", () => {
+    const configured = { ...project, preferences: { ...defaultProjectPreferences(), workspace: "worktree" as const } };
+    expect(buildNewConversationPayload(configured, { ...defaultSettings, newThreadMode: "local" }).useWorktree).toBe(true);
+    expect(buildNewConversationPayload({ ...configured, preferences: { ...configured.preferences, workspace: "local" } },
+      { ...defaultSettings, newThreadMode: "worktree" }).useWorktree).toBe(false);
+    expect(buildNewConversationPayload(configured, defaultSettings, { kind: "branch", branch: "explicit" }))
+      .toMatchObject({ useWorktree: false, branch: "explicit", worktreePath: null });
+    expect(buildNewConversationPayload({ ...configured, preferences: defaultProjectPreferences() },
+      { ...defaultSettings, newThreadMode: "local" }).useWorktree).toBe(false);
+  });
+
   it("builds an ordinary new chat only from global defaults", () => {
     const payload = buildNewConversationPayload(project.id, {
       ...defaultSettings,

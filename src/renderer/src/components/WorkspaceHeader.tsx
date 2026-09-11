@@ -97,7 +97,12 @@ export function WorkspaceHeader({
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
-  useEffect(() => setMenu(null), [project?.id, conversation?.id, gitStatus?.root]);
+  useEffect(() => setMenu(null), [project?.id, conversation?.id]);
+  useEffect(() => {
+    // Git discovery can finish after opening project actions. Only Git menus
+    // belong to that root; project/chat navigation still dismisses every menu.
+    setMenu((current) => current === "action" ? current : null);
+  }, [gitStatus?.root]);
   const privateConnectLoad = usePrivateConnectState();
   const privateConnect = privateConnectLoad.state;
   const pendingPrivateConnectPairings = privateConnect?.pendingPairings.length ?? 0;
@@ -233,7 +238,7 @@ export function WorkspaceHeader({
           <>
             {actions.length > 0 && (
               <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
+                <button type="button" className="header-button" aria-label="Add action" title="Add action" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
                   <span className="header-plus-icon" aria-hidden="true" /><span>Add action</span>
                 </button>
                 {menu === "action" && (

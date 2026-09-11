@@ -124,8 +124,19 @@ export function createConversationCommandHandler(
     "conversation.settle",
     "conversation.unsettle",
     "conversation.delete",
+    "conversation.mark-unread",
+    "conversation.regenerate-title",
   ], async (socket, command) => {
     switch (command.type) {
+      case "conversation.mark-unread":
+        dependencies.store.markConversationUnread(command.payload.conversationId);
+        return "mutation";
+      case "conversation.regenerate-title":
+        if (dependencies.store.hasActiveWorkspaceRunForConversation(command.payload.conversationId)) {
+          throw new RuntimeRequestError("Wait for active work to finish before regenerating the title.");
+        }
+        dependencies.store.regenerateConversationTitle(command.payload.conversationId);
+        return "mutation";
       case "conversation.create": {
         const conversation = await creation.create(
           command.payload,

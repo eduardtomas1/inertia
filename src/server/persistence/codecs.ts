@@ -1,4 +1,5 @@
 import { snapshotSourceSchema } from "../../shared/snapshots";
+import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
 import {
   AGENT_RUN_STATES,
@@ -69,6 +70,7 @@ import type { StoredConversationWorktreeOwnership } from "./types";
 
 export function projectFromRow(row: ProjectRow): Project {
   return {
+    preferences: parseProjectPreferences(row.preferences_json),
     id: row.id,
     name: row.name,
     path: row.path,
@@ -238,6 +240,7 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     settledAt: row.settled_at,
     completedAt: row.completed_at,
     lastViewedAt: row.last_viewed_at,
+    markedUnreadAt: row.marked_unread_at ?? null,
     pinnedAt: row.pinned_at,
     snoozedUntil: row.snoozed_until,
     createdAt: row.created_at,
@@ -361,6 +364,7 @@ export function conversationShellFromRow(
     settledAt: conversation.settledAt,
     completedAt: conversation.completedAt,
     lastViewedAt: conversation.lastViewedAt,
+    markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
     createdAt: conversation.createdAt,
@@ -391,6 +395,8 @@ export function settingsFromState(state: StateRow): AppSettings {
   return {
     theme: state.theme,
     colorTheme: state.color_theme,
+    lightColorTheme: state.light_color_theme ?? state.color_theme,
+    darkColorTheme: state.dark_color_theme ?? state.color_theme,
     compactSidebar: state.compact_sidebar === 1,
     showTimestamps: state.show_timestamps === 1,
     terminalFontSize: state.terminal_font_size,

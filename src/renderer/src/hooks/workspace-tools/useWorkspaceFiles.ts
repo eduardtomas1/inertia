@@ -59,6 +59,7 @@ export function useWorkspaceFiles({
   const [filePreviewLoading, setFilePreviewLoading] = useState(false);
   const [filePreviewError, setFilePreviewError] = useState<string | null>(null);
   const [projectActions, setProjectActions] = useState<ProjectAction[]>([]);
+  const configuredActionsKey = JSON.stringify(project?.preferences?.actions ?? []);
   const fileListRequestGenerationRef = useRef(0);
   const filePreviewRequestGenerationRef = useRef(0);
   const actionsRequestGenerationRef = useRef(0);
@@ -169,9 +170,12 @@ export function useWorkspaceFiles({
     actionsRequestGenerationRef.current += 1;
     setFilesLoading(false);
     setFilePreviewLoading(false);
+  }, [enabled, loadActions, online, project?.id]);
+
+  useEffect(() => {
     if (!enabled || !project?.id || !online) return;
     void loadActions();
-  }, [enabled, loadActions, online, project?.id]);
+  }, [configuredActionsKey, enabled, loadActions, online, project?.id]);
 
   useEffect(() => {
     if (!online) {

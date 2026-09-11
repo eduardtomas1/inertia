@@ -190,7 +190,18 @@
   min-width: 0;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  pointer-events: none;
 }
+.color-theme-apply-both { position: absolute; inset: 0; z-index: 1; width: 100%; border-radius: inherit; background: transparent; }
+.color-theme-option:has(.color-theme-apply-both:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.color-theme-mode-button { position: relative; z-index: 2; display: grid; place-items: center; padding: 3px; border: 2px solid transparent; border-radius: 50%; background: transparent; pointer-events: auto; }
+.color-theme-mode-button.is-selected { border-color: var(--focus-ring); }
+.color-theme-mode-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.color-theme-mode-button:disabled { opacity: .5; cursor: not-allowed; }
+.color-theme-mode-badge { position: absolute; right: -1px; bottom: -1px; display: grid; place-items: center; width: 19px; height: 19px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-soft); box-shadow: var(--shadow); }
+.color-theme-mode-badge .appearance-mode-icon { width: 11px; height: 11px; }
+.color-theme-option-copy, .color-theme-selected { pointer-events: none; }
 
 .color-theme-swatch {
   position: relative;

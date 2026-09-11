@@ -94,13 +94,13 @@ export function defaultConversationPayloadForProject(
   snapshot: Pick<
     AppSnapshot,
     "backendDefaults" | "backendProfiles" | "providers"
-  >,
+  > & Partial<Pick<AppSnapshot, "projects">>,
   settings: AppSettings,
   projectId: string,
   location: NewConversationLocation = { kind: "defaults" },
 ): NewConversationPayload {
   return withNewConversationModelSelection(
-    buildNewConversationPayload(projectId, settings, location),
+    buildNewConversationPayload(snapshot.projects?.find(({ id }) => id === projectId) ?? projectId, settings, location),
     defaultSelectionForProject(snapshot, settings, projectId),
   );
 }

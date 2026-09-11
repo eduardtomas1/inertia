@@ -328,7 +328,7 @@ export function useSplitWorkspaceScene({
         type: "conversation.create",
         payload: {
           ...withNewConversationModelSelection(
-            buildNewConversationPayload(splitProject.id, settings),
+            buildNewConversationPayload(splitProject, settings),
             selection,
           ),
           ...options?.configuration,

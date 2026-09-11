@@ -407,10 +407,7 @@ export class RuntimeStore {
     return this.projectRepository.create(name, projectPath, identity);
   }
 
-  updateProject(
-    projectId: string,
-    update: Partial<Pick<Project, "name" | "groupingMode" | "gitRepositoryLimit" | "normalizedPath" | "repositoryIdentity" | "repositoryRoot" | "repositoryRelativePath">>,
-  ): Project {
+  updateProject(projectId: string, update: Parameters<ProjectRepository["update"]>[1]): Project {
     return this.projectRepository.update(projectId, update);
   }
 
@@ -422,6 +419,9 @@ export class RuntimeStore {
   selectProject(projectId: string): void {
     this.projectRepository.select(projectId);
   }
+
+  markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
+  regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
 
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation {
     return this.conversationRepository.create(projectId, title, options);

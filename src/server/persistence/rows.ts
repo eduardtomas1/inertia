@@ -32,6 +32,7 @@ import type { ContinuationReasonCode } from "../../shared/continuation-policy";
 import type { PersistedProviderMetadata } from "../provider/metadata";
 
 export interface ProjectRow {
+  preferences_json?: string | null;
   id: string;
   name: string;
   path: string;
@@ -67,6 +68,7 @@ export interface ConversationRow {
   settled_at: string | null;
   completed_at: string | null;
   last_viewed_at: string | null;
+  marked_unread_at?: string | null;
   pinned_at: string | null;
   snoozed_until: string | null;
   created_at: string;
@@ -305,6 +307,8 @@ export interface ThreadUsageRow {
 export interface StateRow {
   theme: ThemePreference;
   color_theme: ColorThemeId;
+  light_color_theme?: ColorThemeId | null;
+  dark_color_theme?: ColorThemeId | null;
   compact_sidebar: 0 | 1;
   show_timestamps: 0 | 1;
   terminal_font_size: number;

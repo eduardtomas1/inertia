@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import Database from "better-sqlite3";
+import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -73,6 +74,7 @@ function migrateFixtureInPlace(databasePath: string): void {
 function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
+  removeProjectSettingsFromLegacyFixture(database);
   database.exec(`
     DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
     DROP TABLE IF EXISTS agent_context_requests;
@@ -344,9 +346,9 @@ describe("published database fixtures", { timeout: 30_000 }, () => {
     store.close();
 
     const legacy = new Database(databasePath);
+    dropUnreleasedProviderOwnership(legacy);
     legacy.exec("DROP TABLE conversation_worktree_ownership");
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= 52").run();
-    dropUnreleasedProviderOwnership(legacy);
     legacy.close();
 
     migrateFixtureInPlace(databasePath);
@@ -1563,6 +1565,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema63 = new Database(databasePath);
+    removeProjectSettingsFromLegacyFixture(schema63);
     schema63.exec(`
       DROP INDEX messages_created_id_idx;
       DROP INDEX agent_turns_run_state_requested_idx;
@@ -1722,6 +1725,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema64 = new Database(databasePath);
+    removeProjectSettingsFromLegacyFixture(schema64);
     schema64.exec("DROP INDEX messages_created_id_idx");
     schema64.prepare("DELETE FROM schema_migrations WHERE version >= 65").run();
     expect((schema64.prepare(
@@ -2039,6 +2043,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema65 = new Database(databasePath);
+    removeProjectSettingsFromLegacyFixture(schema65);
     schema65.exec(`
       DROP INDEX messages_created_id_idx;
       DROP INDEX system_suspend_intervals_range_idx;
@@ -2116,6 +2121,8 @@ describe("runtime migration catalog", () => {
       { version: 69 },
       { version: 70 },
       { version: 71 },
+      { version: 72 },
+      { version: 73 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

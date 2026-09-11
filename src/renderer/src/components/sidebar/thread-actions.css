@@ -1,0 +1,106 @@
+.conversation-menu.thread-actions-popover {
+  position: fixed;
+  inset: auto;
+  z-index: 500;
+  width: 234px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.thread-actions-popover button, .thread-submenu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 31px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--text-soft);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.thread-actions-popover button:hover, .thread-actions-popover button:focus-visible {
+  outline: none;
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.thread-actions-popover button:disabled { opacity: .45; cursor: not-allowed; }
+.thread-actions-popover [role="separator"] { height: 1px; margin: 5px -5px; background: var(--border); }
+.thread-submenu-chevron { margin-left: auto; }
+.thread-submenu {
+  position: fixed;
+  z-index: 501;
+  width: max-content;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.thread-menu-error { padding: 6px 9px; color: var(--danger); font-size: 11px; }
+.thread-hover-preview {
+  position: fixed;
+  z-index: 490;
+  display: grid;
+  gap: 8px;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text-soft);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.thread-hover-preview strong { color: var(--text); font-size: 12px; font-weight: 550; }
+.thread-hover-preview > span { display: flex; align-items: center; gap: 8px; }
+.thread-hover-preview svg { flex-shrink: 0; }
+.sidebar .thread-inline-actions {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  right: 8px;
+  display: flex;
+  gap: 1px;
+  visibility: hidden;
+  opacity: 0;
+}
+.sidebar .thread-inline-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 23px;
+  padding: 3px 5px;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: 5px;
+  font-size: 10.5px;
+}
+.sidebar .thread-inline-actions button:hover { color: var(--text); background: var(--surface-hover); }
+.sidebar .activity-thread:hover .thread-inline-actions,
+.sidebar .activity-thread:focus-within .thread-inline-actions,
+.sidebar .activity-thread.has-open-menu .thread-inline-actions { visibility: visible; opacity: 1; }
+.sidebar .activity-thread.has-thread-inline-actions:hover .activity-thread-trailing,
+.sidebar .activity-thread.has-thread-inline-actions:focus-within .activity-thread-trailing,
+.sidebar .activity-thread.has-thread-inline-actions.has-open-menu .activity-thread-trailing { display: none; }
+.sidebar .activity-thread.has-thread-inline-actions:hover .activity-thread-projectline,
+.sidebar .activity-thread.has-thread-inline-actions:focus-within .activity-thread-projectline,
+.sidebar .activity-thread.has-thread-inline-actions.has-open-menu .activity-thread-projectline { padding-right: 80px; }
+@media (hover: none) {
+  .sidebar .thread-inline-actions { visibility: visible; opacity: 1; }
+  .sidebar .has-thread-inline-actions .activity-thread-trailing { visibility: hidden; }
+  .sidebar .has-thread-inline-actions .activity-thread-projectline { padding-right: 80px; }
+}

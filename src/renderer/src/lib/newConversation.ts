@@ -50,12 +50,12 @@ const newConversationDefaults = (
  * ordinary new chat.
  */
 export function buildNewConversationPayload(
-  projectId: string,
+  projectId: string | Project,
   settings: AppSettings,
   location: NewConversationLocation = { kind: "defaults" },
 ): NewConversationPayload {
   const base: NewConversationPayload = {
-    projectId,
+    projectId: typeof projectId === "string" ? projectId : projectId.id,
     title: "New chat",
     ...newConversationDefaults(settings),
   };
@@ -63,7 +63,7 @@ export function buildNewConversationPayload(
   if (location.kind === "defaults") {
     return {
       ...base,
-      useWorktree: settings.newThreadMode === "worktree",
+      useWorktree: (typeof projectId === "string" ? settings.newThreadMode : projectId.preferences?.workspace ?? settings.newThreadMode) === "worktree",
     };
   }
   if (location.kind === "isolated-worktree") {

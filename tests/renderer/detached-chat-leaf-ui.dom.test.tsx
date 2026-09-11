@@ -170,7 +170,7 @@ describe("detached chat leaf controls", () => {
     expect(screen.getByRole("menuitem", {
       name: "Add this chat to split view",
     })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Archive" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Archive thread" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
   });
 

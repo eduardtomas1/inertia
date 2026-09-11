@@ -57,6 +57,7 @@ import type { RuntimeClientAuthority } from "./runtime/runtime-client-authority"
 import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runtime-security";
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
+import { startProjectAutoPull } from "./runtime/project-auto-pull";
 import {
   createRuntimeCommandExecutor,
 } from "./runtime/commands/command-router";
@@ -502,6 +503,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       defaultTimeoutMs: options.reviewSummaryTimeoutMs ?? DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
     },
   );
+  startProjectAutoPull({
+    store, workspaceRuns, signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation,
+    idle: () => !closed && !updatePreparation.isAdmissionClosed() && activeRuntimeCommands === 0
+      && !databaseRecoveryImportActive && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
+    reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
+  });
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
     providerInfo = providerInfo.map((current) => current.id === providerId ? {
       ...current,

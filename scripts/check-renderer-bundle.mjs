@@ -22,11 +22,13 @@ const budgets = {
   // Keep less than 2 KiB of headroom on each.
   // Diagnostics deep links and status-only Files refresh add ~2 KiB; their
   // larger settings UI/catalog stay deferred and have separate ceilings below.
-  mainWorkbenchFirstLoadJavaScript: 742 * kibibyte,
+  // Project preference validation, independent appearance and chat-owned stash
+  // state add ~2 KiB here; the project editor and thread menus stay deferred.
+  mainWorkbenchFirstLoadJavaScript: 744.5 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 566.25 * kibibyte,
+  detachedChatFirstLoadJavaScript: 569 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -37,6 +39,8 @@ const budgets = {
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte,
+  deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
@@ -68,7 +72,9 @@ const budgets = {
   // receipts bring shared core to 1,985.9 KiB on macOS ARM64; keep <2 KiB headroom.
   // Bounded file badges, native textarea color mirroring and diagnostic links.
   // The independently capped deferred center/catalog are subtracted below.
-  coreJavaScript: 1_994 * kibibyte,
+  // Shared thread organization and project/appearance contracts add <6 KiB.
+  // New optional editor/menu bytes have their own narrow caps above.
+  coreJavaScript: 2_000.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -486,8 +492,20 @@ const diagnosticEntries = ["DiagnosticsSettings", "application-diagnostics"].map
 });
 const deferredDiagnosticsJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[0]}`);
 const deferredDiagnosticCatalogJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[1]}`);
+const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu"].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred project/thread surface: ${prefix}`);
+  if (mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
+    throw new Error(`Project/thread settings must remain deferred: ${prefix}`);
+  }
+  return entry;
+});
+const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
+const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredProjectSettingsJavaScriptBytes
+  - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
   - deferredDiagnosticCatalogJavaScriptBytes
   - deferredIssueReportJavaScriptBytes
@@ -515,6 +533,8 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
+  deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,
   deferredDiagnosticCatalogJavaScript: deferredDiagnosticCatalogJavaScriptBytes,
   deferredIssueReportJavaScript: deferredIssueReportJavaScriptBytes,

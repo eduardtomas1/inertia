@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { normalizeIdentityPath } from "../project-identity";
 
@@ -10,7 +10,7 @@ export interface ConversationWorkspaceIdentity {
 
 interface ReservedConversationWorkspace extends ConversationWorkspaceIdentity {
   checkoutIdentity: string;
-  kind: "provider" | "workspace";
+  kind: "provider" | "workspace" | "exclusive";
 }
 
 interface CheckoutReservations {
@@ -141,6 +141,17 @@ export class ConversationWorkAuthority {
     );
   }
 
+  /** Background checkout mutation must exclude work in nested project folders too. */
+  reserveExclusiveCheckout(reservationId: string, projectId: string, checkoutPath: string): boolean {
+    return this.reserveIdentity(reservationId, projectId, checkoutPath, "exclusive");
+  }
+
+  hasExclusiveCheckout(checkoutPath: string): boolean {
+    const identity = canonicalCheckoutIdentity(checkoutPath);
+    return [...this.workspaceByReservation.values()].some((reservation) =>
+      reservation.kind === "exclusive" && overlappingCheckout(identity, reservation.checkoutIdentity));
+  }
+
   release(reservationId: string): void {
     const workspace = this.workspaceByReservation.get(reservationId);
     if (!workspace) return;
@@ -210,6 +221,9 @@ export class ConversationWorkAuthority {
   ): boolean {
     if (this.workspaceByReservation.has(reservationId)) return false;
     const checkoutIdentity = canonicalCheckoutIdentity(checkoutPath);
+    if ([...this.workspaceByReservation.values()].some((reservation) =>
+      (kind === "exclusive" || reservation.kind === "exclusive")
+      && overlappingCheckout(checkoutIdentity, reservation.checkoutIdentity))) return false;
     const checkout = this.reservationsByCheckout.get(checkoutIdentity);
     if (checkout && (kind === "provider" || checkout.kind === "provider")) {
       return false;
@@ -230,4 +244,12 @@ export class ConversationWorkAuthority {
     }
     return true;
   }
+}
+
+function overlappingCheckout(left: string, right: string): boolean {
+  const contained = (root: string, path: string): boolean => {
+    const child = relative(root, path);
+    return !child || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`));
+  };
+  return contained(left, right) || contained(right, left);
 }

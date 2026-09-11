@@ -59,8 +59,8 @@
   --radius-lg: 18px;
   --radius-md: 13px;
   --sidebar-width: 276px;
-  --font-sans: "Inter Variable", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --surface-subtle: color-mix(in srgb, var(--surface) 72%, var(--surface-muted));
   --focus-ring: var(--accent);
   --focus-ring-soft: color-mix(in srgb, var(--focus-ring) 28%, transparent);
@@ -1607,33 +1607,6 @@ textarea {
   flex: 1 1 72px;
 }
 
-.activity-thread-menu-button {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  bottom: 0;
-  width: 28px;
-  height: 30px;
-  margin-block: auto;
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
-
-.activity-thread-menu-button {
-  right: 3px;
-}
-
-.activity-thread:hover .activity-thread-menu-button,
-.activity-thread:focus-within .activity-thread-menu-button,
-.activity-thread-menu-button:focus-visible {
-  opacity: 1;
-}
-
-.activity-thread .conversation-menu {
-  top: calc(50% + 15px);
-  right: 2px;
-}
-
 .activity-show-more {
   min-height: 33px;
   border-radius: var(--radius-medium);
@@ -1669,7 +1642,6 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .activity-thread,
-  .activity-thread-menu-button,
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
@@ -2845,7 +2817,7 @@ button.environment-row:focus-visible,
   border-radius: 8px;
   color: var(--text-muted);
   background: var(--surface-muted);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3226,7 +3198,7 @@ button.environment-row:focus-visible,
   border-radius: 7px;
   color: var(--text);
   background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 9px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -6736,7 +6708,7 @@ button.environment-row:focus-visible,
 .panel-heading-copy { display: flex; flex-direction: column; gap: 1px; }
 .panel-heading-copy h2 { margin: 0; font-size: 10.5px; font-weight: 650; }
 .panel-heading-copy span { color: var(--text-muted); font-size: 8px; }
-.panel-stats { gap: 6px; font-size: 8.5px; font-family: "SFMono-Regular", Consolas, monospace; }
+.panel-stats { gap: 6px; font-size: 8.5px; font-family: var(--font-mono); }
 .stat-additions, .file-insertions { color: var(--blue); }
 .stat-deletions, .file-deletions { color: var(--danger); }
 
@@ -6832,7 +6804,7 @@ button.environment-row:focus-visible,
 .change-file-copy, .file-entry-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
 .change-file-name, .file-entry-name { overflow: hidden; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
 .change-file-path, .file-entry-path { overflow: hidden; color: var(--text-muted); font-size: var(--ui-font-micro); text-overflow: ellipsis; white-space: nowrap; }
-.change-file-stats { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--ui-font-micro); font-family: monospace; }
+.change-file-stats { display: flex; flex-direction: column; align-items: flex-end; font-size: var(--ui-font-micro); font-family: var(--font-mono); }
 
 .workspace-repository-list {
   background: var(--surface);
@@ -7237,7 +7209,7 @@ button.environment-row:focus-visible,
   overflow: auto;
   color: var(--text-soft);
   background: var(--surface-strong);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 8px;
   line-height: 1.55;
 }
@@ -10465,7 +10437,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     padding-left: 40px;
   }
 
-  .header-button span {
+  .header-button span:not(.header-plus-icon) {
     display: none;
   }
 
@@ -13156,7 +13128,7 @@ button.sent-attachment-open:focus-visible {
   border-radius: 5px;
   color: var(--syntax-variable);
   background: var(--inline-code-surface);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.88em;
   white-space: break-spaces;
 }
@@ -13229,7 +13201,7 @@ button.sent-attachment-open:focus-visible {
 
 .response-code-block > header > span {
   overflow: hidden;
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -13290,7 +13262,7 @@ button.sent-attachment-open:focus-visible {
   display: block;
   min-width: max-content;
   padding: 13px 14px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.62;
   white-space: pre;

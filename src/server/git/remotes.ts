@@ -1,3 +1,4 @@
+import { devNull } from "node:os";
 import {
   NETWORK_TIMEOUT_MS,
 } from "./constants";
@@ -45,7 +46,7 @@ export async function pullRepository(
 /** Refresh one tracking remote without touching the index, checkout, tags or FETCH_HEAD. */
 export async function fetchRepository(
   repositoryPath: string,
-  options: GitPathInspectionOptions = {},
+  options: GitPathInspectionOptions & { disableHooks?: boolean } = {},
 ): Promise<GitMutationResult> {
   options = { ...options, deadlineAt: options.deadlineAt ?? Date.now() + NETWORK_TIMEOUT_MS + 60_000 };
   const root = await repositoryRoot(repositoryPath, options);
@@ -85,6 +86,7 @@ export async function fetchRepository(
   const configured = await readConfiguredFetchRefspecs(root, remote, options);
   const { refspecs } = scopedTrackingFetchRefspecs(remote, configured);
   await runGit(root, [
+    ...(options.disableHooks ? ["-c", `core.hooksPath=${devNull}`] : []),
     "fetch", "--no-recurse-submodules", "--no-auto-maintenance", "--no-tags",
     "--no-prune", "--no-prune-tags", "--no-write-fetch-head", "--refmap=", "--", remote,
     ...refspecs,

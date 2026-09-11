@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
 
 import { RuntimeStore } from "../../src/server/database";
 import { parseAttachments } from "../../src/server/persistence/codecs";
@@ -27,6 +28,7 @@ function migrateFixtureInPlace(databasePath: string): void {
 function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
+  removeProjectSettingsFromLegacyFixture(database);
   database.exec(`
     DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
     DROP TABLE IF EXISTS agent_context_requests;

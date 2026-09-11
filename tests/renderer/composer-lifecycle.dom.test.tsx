@@ -1224,7 +1224,7 @@ describe("composer asynchronous ownership", () => {
     fireEvent.change(input, { target: { value: "Stash this Fast prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
-    expect(readPromptStash(window.localStorage)[0]?.route.fastMode).toBe(true);
+    expect(readPromptStash(window.localStorage, current.id)[0]?.route.fastMode).toBe(true);
 
     fireEvent.change(input, { target: { value: "Preset this Fast prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
@@ -2298,7 +2298,7 @@ describe("composer asynchronous ownership", () => {
       name: /Save current prompt/u,
     }));
     expect(input).toHaveValue("");
-    expect(readPromptStash(window.localStorage)).toHaveLength(1);
+    expect(readPromptStash(window.localStorage, current.id)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", {
       name: "Attach images, documents, or spreadsheets",
@@ -2311,7 +2311,7 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(input).toHaveValue(preset.body));
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByText("kept.png")).toBeVisible();
-    expect(readPromptStash(window.localStorage)[0]?.content)
+    expect(readPromptStash(window.localStorage, current.id)[0]?.content)
       .toBe("Temporary unfinished draft");
   });
 

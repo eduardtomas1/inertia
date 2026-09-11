@@ -34,18 +34,18 @@ test("opens the command palette and manages a thread", async () => {
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
 
   await page.locator(".activity-thread.is-active")
-    .getByRole("button", { name: "Thread actions for New chat" })
-    .click();
-  await page.getByRole("menuitem", { name: "Rename" }).click();
+    .getByRole("button", { name: /^New chat,/u })
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename thread" }).click();
   const rename = page.getByRole("textbox", { name: "Rename New chat" });
   await rename.fill("Focused V1 pass");
   await rename.press("Enter");
   await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: "Thread actions for Focused V1 pass" }).click();
-  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await page.getByRole("button", { name: /^Focused V1 pass,/u }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Archive thread" }).click();
   await expect(page.getByRole("heading", { name: "Focused V1 pass", level: 1 })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Thread actions for Focused V1 pass" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Focused V1 pass,/u })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 
   if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {

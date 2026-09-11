@@ -1,4 +1,5 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+import { modelChooserPlacementChecks } from "../../support/model-chooser-placement";
 import type { AppFixture } from "./app-fixture";
 
 export async function expectModelChooserPlacement(
@@ -9,24 +10,38 @@ export async function expectModelChooserPlacement(
   // Native windows can be shorter than requested: hosted macOS runners
   // clamp 920px requests to 684px. Assert the independent fit calculation
   // against settled renderer geometry, including the 8px gap and padding.
-  await expect.poll(() => chooser.evaluate((element) => {
-    const frame = element.getBoundingClientRect();
-    const anchor = element.closest(".model-chooser-anchor")!
-      .querySelector("button")!.getBoundingClientRect();
-    const workspace = element.closest(".chat-workspace")!.getBoundingClientRect();
-    const availableBelow = Math.min(innerHeight, workspace.bottom) - anchor.bottom - 16;
-    const expectedVertical = frame.height <= availableBelow ? "below" : "above";
-    return {
-      correctSide: element.getAttribute("data-popover-vertical") === expectedVertical,
-      anchored: expectedVertical === "below"
-        ? frame.top >= anchor.bottom + 7.5
-        : frame.bottom <= anchor.top - 7.5,
-      insideWorkspace: frame.top >= Math.max(0, workspace.top) + 7.5
-        && frame.bottom <= Math.min(innerHeight, workspace.bottom) - 7.5,
-    };
-  })).toEqual({ correctSide: true, anchored: true, insideWorkspace: true });
-  if (requiredVertical) {
-    await expect(chooser).toHaveAttribute("data-popover-vertical", requiredVertical);
+  let lastGeometry: unknown;
+  try {
+    await expect.poll(async () => {
+      const geometry = await chooser.evaluate((element) => {
+        const frame = element.getBoundingClientRect();
+        const anchor = element.closest(".model-chooser-anchor")!
+          .querySelector("button")!.getBoundingClientRect();
+        const workspace = element.closest(".chat-workspace")!.getBoundingClientRect();
+        return {
+          frame: { top: frame.top, bottom: frame.bottom, height: frame.height },
+          anchor: { top: anchor.top, bottom: anchor.bottom },
+          workspace: { top: workspace.top, bottom: workspace.bottom },
+          viewportHeight: innerHeight,
+          visualViewportHeight: visualViewport?.height,
+          vertical: element.getAttribute("data-popover-vertical"),
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
+          maxHeight: getComputedStyle(element).maxHeight,
+        };
+      });
+      lastGeometry = geometry;
+      return modelChooserPlacementChecks(geometry);
+    }).toEqual({ correctSide: true, anchored: true, insideWorkspace: true });
+    if (requiredVertical) {
+      await expect(chooser).toHaveAttribute("data-popover-vertical", requiredVertical);
+    }
+  } catch (error) {
+    await test.info().attach("model-chooser-placement.json", {
+      body: JSON.stringify({ requiredVertical, geometry: lastGeometry }, null, 2),
+      contentType: "application/json",
+    });
+    throw error;
   }
 }
 

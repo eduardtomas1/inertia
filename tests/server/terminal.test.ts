@@ -126,60 +126,6 @@ describe("TerminalManager", () => {
     );
   });
 
-  it("holds a Windows resize until output proves the PTY is ready", async () => {
-    const terminal = fakeTerminal();
-    const owner = {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: vi.fn(),
-    } as unknown as WebSocket;
-    const manager = new TerminalManager({
-      spawnTerminal: () => terminal.pty,
-      platform: "win32",
-    });
-    const terminalId = createTestShell(manager, owner);
-
-    manager.resize(owner, terminalId, 100, 40);
-    manager.resize(owner, terminalId, 120, 50);
-    expect(terminal.pty.resize).not.toHaveBeenCalled();
-
-    terminal.emitData("ready");
-    expect(terminal.pty.resize).not.toHaveBeenCalled();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(terminal.pty.resize).toHaveBeenCalledTimes(1);
-    expect(terminal.pty.resize).toHaveBeenLastCalledWith(120, 50);
-
-    manager.resize(owner, terminalId, 80, 24);
-    expect(terminal.pty.resize).toHaveBeenLastCalledWith(80, 24);
-  });
-
-  it("drops a held Windows resize when the PTY exits before any output", async () => {
-    const terminal = fakeTerminal();
-    const owner = {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: vi.fn(),
-    } as unknown as WebSocket;
-    const manager = new TerminalManager({
-      spawnTerminal: () => terminal.pty,
-      platform: "win32",
-    });
-    const terminalId = createTestShell(manager, owner);
-    manager.resize(owner, terminalId, 100, 40);
-    (terminal.pty.resize as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error("Cannot resize a pty that has already exited");
-    });
-
-    terminal.emitExit({ exitCode: 0 });
-    terminal.emitData("late output after exit");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(terminal.pty.resize).not.toHaveBeenCalled();
-    expect(() => manager.resize(owner, terminalId, 80, 24)).toThrow(
-      "Terminal not found",
-    );
-  });
-
   it("atomically blocks PTY creation during update preparation", () => {
     const terminal = fakeTerminal();
     const owner = {

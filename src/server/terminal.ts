@@ -37,6 +37,7 @@ import {
 import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
+import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -58,7 +59,6 @@ interface TerminalSession {
   dataListener: IDisposable;
   exitListener: IDisposable;
   readonly outputObserved: boolean;
-  /** Windows resize held until node-pty is ready; see `resizePty`. */
   pendingResize: { cols: number; rows: number } | null;
   exitObserved: boolean;
   exitCode: number | null;
@@ -330,7 +330,7 @@ export class TerminalManager {
     // Keep the former owner authoritative until resize and bounded replay both
     // succeed. A failed transfer must not evict a still-healthy renderer.
     session.flushOutput();
-    this.resizePty(session, cols, rows);
+    this.resizeSessionPty(session, cols, rows);
     if (!session.replayOutput(owner)) {
       throw new TerminalError("The terminal client disconnected.");
     }
@@ -694,7 +694,7 @@ export class TerminalManager {
       outputObserved = true;
       onOutput?.(data);
       output.queue(data);
-      if (firstOutput) this.applyPendingResize(session);
+      if (firstOutput) applyPendingPtyResize(session);
     });
     const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
       if (session.exitObserved) return;
@@ -830,48 +830,13 @@ export class TerminalManager {
   }
 
   resize(owner: WebSocket, terminalId: string, cols: number, rows: number): void {
-    this.resizePty(this.ownedSession(owner, terminalId), cols, rows);
+    this.resizeSessionPty(this.ownedSession(owner, terminalId), cols, rows);
   }
 
-  /**
-   * Resize a session's PTY without letting node-pty crash the runtime.
-   *
-   * On Windows, node-pty queues every `resize` issued before the first output
-   * byte and replays the queue inside its own socket `data` handler. If the
-   * process exits before producing output (a fast-exiting command), that
-   * replay throws "Cannot resize a pty that has already exited" as an
-   * uncaught exception no caller can intercept. Hold the size until output
-   * proves readiness, then apply it on a fresh tick where a failure is
-   * catchable and an observed exit simply drops the stale request.
-   */
-  private resizePty(session: TerminalSession, cols: number, rows: number): void {
-    if (session.exitObserved) {
+  private resizeSessionPty(session: TerminalSession, cols: number, rows: number): void {
+    if (!resizePty(this.platform, session, cols, rows)) {
       throw new TerminalError("Unable to resize this terminal.");
     }
-    if (this.platform === "win32" && !session.outputObserved) {
-      session.pendingResize = { cols, rows };
-      return;
-    }
-    try {
-      session.pty.resize(cols, rows);
-    } catch {
-      throw new TerminalError("Unable to resize this terminal.");
-    }
-  }
-
-  private applyPendingResize(session: TerminalSession): void {
-    const pending = session.pendingResize;
-    if (!pending) return;
-    setImmediate(() => {
-      if (session.pendingResize !== pending || session.exitObserved) return;
-      session.pendingResize = null;
-      try {
-        session.pty.resize(pending.cols, pending.rows);
-      } catch {
-        // The process exited between readiness and this tick; the terminal
-        // exit path already owns the outcome and nothing depends on the size.
-      }
-    });
   }
 
   detach(owner: WebSocket, terminalId: string): void {

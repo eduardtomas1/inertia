@@ -58,7 +58,8 @@ The useful changes in each Inertia release, in plain language.
   context has stricter size and content checks before it reaches a provider.
 - Thread context menus expose common actions, and project menus stay open
   through background discovery. Model selection offers runnable providers with
-  clearer choices and placement in short windows.
+  clearer choices and placement in short windows. Open menus follow the composer
+  when loading finishes and the new-chat layout settles.
 - Choose independent light and dark palettes. Shared theme colors keep controls
   and status indicators readable across the built-in themes.
 - Sidebar updates show progress, release notes and restart confirmation. Recent

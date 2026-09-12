@@ -1121,7 +1121,7 @@ describe("TerminalManager", () => {
           type: "terminal.exit",
           terminalId,
           exitCode: 130,
-        }));
+        }), expect.any(Function));
       } else {
         expect(owner.send).not.toHaveBeenCalled();
       }

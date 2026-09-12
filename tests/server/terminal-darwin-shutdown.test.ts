@@ -83,7 +83,7 @@ describe("TerminalManager macOS shutdown", () => {
         type: "terminal.exit",
         terminalId,
         exitCode: 130,
-      }));
+      }), expect.any(Function));
     } finally {
       vi.useRealTimers();
     }
@@ -133,7 +133,7 @@ describe("TerminalManager macOS shutdown", () => {
         type: "terminal.exit",
         terminalId,
         exitCode: 130,
-      }));
+      }), expect.any(Function));
     } finally {
       vi.useRealTimers();
     }

@@ -783,7 +783,7 @@ async function createPdfFixture(root) {
   const inputPath = join(root, "package-smoke.pdf");
   const resultPath = join(root, "package-smoke-pdf-result.json");
   const text = "Packaged PDF extraction works";
-  const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET`;
+  const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET\n1 0 0 rg 72 150 60 200 re f`;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

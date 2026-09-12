@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   open,
+  mkdtemp,
   readFile,
   rename,
+  rm,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { documentAttachmentContexts } from "./document-attachment-context.js";
+import { prepareDocumentAttachments } from "./document-attachment-context.js";
+import { PrivateGeneratedAttachmentStore } from "./private-generated-attachments.js";
 
 const PACKAGE_SMOKE_ATTACHMENT_ID = "00000000-0000-4000-8000-000000000017";
 const PACKAGE_SMOKE_TEXT = "Packaged PDF extraction works";
@@ -91,9 +94,12 @@ export async function runPackagedPdfSmoke(
 ): Promise<void> {
   let result: PackagedPdfSmokeResult;
   let failure: unknown;
+  let generatedRoot: string | undefined;
   try {
+    generatedRoot = await mkdtemp(join(dirname(resultPath), ".pdf-smoke-"));
+    const store = await PrivateGeneratedAttachmentStore.create(join(generatedRoot, "generated"));
     const bytes = await readFile(inputPath);
-    const [context] = await documentAttachmentContexts([{
+    const prepared = await prepareDocumentAttachments([{
       attachment: {
         id: PACKAGE_SMOKE_ATTACHMENT_ID,
         name: "package-smoke.pdf",
@@ -102,14 +108,24 @@ export async function runPackagedPdfSmoke(
         size: bytes.byteLength,
       },
       bytes,
-    }], { signal });
+    }], { signal, generatedAttachmentStore: store });
+    const [context] = prepared.contexts;
     if (
       !context
       || context.label !== "PDF · package-smoke.pdf"
       || !context.content.includes(PACKAGE_SMOKE_TEXT)
+      || prepared.imagePaths.length !== 1
     ) {
-      throw new Error("The packaged PDF stack returned unexpected text.");
+      throw new Error("The packaged PDF stack did not preserve its text and chart.");
     }
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const image = await loadImage(prepared.imagePaths[0]!);
+    const canvas = createCanvas(image.width, image.height);
+    const drawing = canvas.getContext("2d");
+    drawing.drawImage(image, 0, 0);
+    const [red, green, blue] = drawing.getImageData(Math.floor(image.width * 100 / 612), Math.floor(image.height * 542 / 792), 1, 1).data;
+    if (red! < 200 || green! > 40 || blue! > 40) throw new Error("The packaged PDF chart pixels are missing.");
+    await store.release(prepared.generatedImagePaths);
     result = { ok: true, content: context.content };
   } catch (error) {
     failure = error;
@@ -120,6 +136,8 @@ export async function runPackagedPdfSmoke(
       ok: false,
       message: detail || "The packaged PDF stack failed.",
     };
+  } finally {
+    if (generatedRoot) await rm(generatedRoot, { recursive: true, force: true });
   }
   await writePackagedSmokeResult(
     resultPath,

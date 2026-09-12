@@ -60,9 +60,9 @@ const MAX_DATABASE_CLONE_BYTES = 256 * 1_024 * 1_024;
 const DATABASE_NAME = "inertia.sqlite";
 const RESULT_ACK_TIMEOUT_MS = 2_000;
 // A live runtime may finish an already-admitted ownership journal rename while
-// the candidate performs its read-only validation. Retry only that explicit
-// transient classification; malformed or otherwise invalid recovery state
-// remains fail-closed after the bounded window.
+// the candidate performs its read-only validation. Retry recovery-storage-invalid
+// failures within this window, repeating every validation each time. Persistent
+// malformed or otherwise invalid recovery state still fails closed.
 const RECOVERY_VALIDATION_RETRY_DELAYS_MS = [0, 25, 100, 250] as const;
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;

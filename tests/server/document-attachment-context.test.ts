@@ -15,6 +15,7 @@ import {
   prepareDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
+import { runPackagedPdfSmoke } from "../../src/server/runtime/attachments/package-smoke-pdf";
 import { assembleTurnRequest } from "../../src/server/runtime/turns/request-context";
 import {
   DocumentExtractionCancelledError,
@@ -233,7 +234,7 @@ describe("document attachment execution context", () => {
   it.skipIf(hostedWindowsCi)("preserves a chart on a PDF page with a selectable heading", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-chart-pdf-"));
     temporaryDirectories.push(directory);
-    const bytes = pdfWithText("Quarterly sales chart for fiscal year", "1 0 0 rg 72 150 60 200 re f 0 0 1 rg 180 150 60 350 re f");
+    const bytes = pdfWithText("Quarterly sales chart for fiscal year - Packaged PDF extraction works", "1 0 0 rg 72 150 60 200 re f 0 0 1 rg 180 150 60 350 re f");
     const pdf = attachment({ size: bytes.byteLength });
     const store = await generatedStore(directory);
     const prepared = await prepareDocumentAttachments([{ attachment: pdf, bytes }], { generatedAttachmentStore: store });
@@ -255,6 +256,11 @@ describe("document attachment execution context", () => {
     expect(green).toBeLessThan(40);
     expect(blue).toBeLessThan(40);
     await store.release(prepared.generatedImagePaths);
+    const inputPath = join(directory, "chart.pdf");
+    const resultPath = join(directory, "chart-result.json");
+    await writeFile(inputPath, bytes);
+    await runPackagedPdfSmoke(inputPath, resultPath);
+    expect(JSON.parse(await readFile(resultPath, "utf8"))).toMatchObject({ ok: true });
   }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it("bounds a cold PDF module wait without poisoning the shared cache", async () => {

@@ -727,6 +727,7 @@ function startClaudeRun(
           continue;
         }
       }
+      if (ownedProcess.transportError()) throw ownedProcess.transportError();
       if (!selectedSkillsVerified) {
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
@@ -817,7 +818,7 @@ function startClaudeRun(
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
       const rawError = claudeReadableRuntimeError(
-        safeError(error, "Claude Agent SDK stopped unexpectedly."),
+        safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
       );
       const message = routeFailure(rawError);
       return finishResult(
@@ -869,6 +870,12 @@ function startClaudeRun(
       // The SDK has delivered its terminal protocol result and the finally
       // block above has closed its streams. No useful graceful window remains.
       await ownedProcess.terminate(true);
+      const wireError = ownedProcess.transportError();
+      if (wireError && outcome.status !== "cancelled") {
+        const error = routeFailure(wireError.message);
+        terminal = { ...outcome, status: "failed", error,
+          failure: claudeRuntimeFailure(wireError.message, error) };
+      }
     } catch {
       terminal = {
         ...outcome,
@@ -1103,7 +1110,7 @@ function claudeRuntimeFailure(
   rawError: string,
   message: string,
 ): ProviderRunFailure {
-  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event rate/iu.test(rawError)
+  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event (?:rate|budget)/iu.test(rawError)
     ? "protocol-overflow"
     : /unserializable|malformed|non-canonical/iu.test(rawError)
       ? "malformed-protocol"

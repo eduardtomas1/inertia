@@ -136,6 +136,7 @@ export async function readClaudeAgentSdkMetadata(
     yield* [] as SDKUserMessage[];
   }
   let query: Query | undefined;
+  let metadata: Awaited<ReturnType<typeof readClaudeAgentSdkMetadata>> = {};
   let timer: NodeJS.Timeout | undefined;
   let rejectCancelled!: (error: Error) => void;
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -178,7 +179,7 @@ export async function readClaudeAgentSdkMetadata(
       timeout,
       cancelled,
     ]);
-    return {
+    metadata = {
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
@@ -191,6 +192,8 @@ export async function readClaudeAgentSdkMetadata(
     try { query?.close(); } catch { /* The metadata subprocess may already have exited. */ }
     await ownedProcess.terminate(true);
   }
+  if (ownedProcess.transportError()) throw ownedProcess.transportError();
+  return metadata;
 }
 
 export async function readClaudeAgentSdkModels(

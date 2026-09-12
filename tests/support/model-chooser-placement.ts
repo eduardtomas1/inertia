@@ -9,6 +9,22 @@ export interface ModelChooserPlacementGeometry {
   vertical: string | null;
 }
 
+/** Read related bounds in one renderer turn: a snapshot can move the entire
+ * composer between two separate Playwright boundingBox requests. */
+export function modelChooserContentGeometry(element: Element): {
+  frameHeight: number;
+  bottomGap: number;
+} {
+  const list = element.querySelector('[aria-label="Model results"]');
+  if (!list) throw new Error("The model chooser results list is missing.");
+  const frame = element.getBoundingClientRect();
+  const results = list.getBoundingClientRect();
+  return {
+    frameHeight: frame.height,
+    bottomGap: Math.abs(frame.bottom - results.bottom),
+  };
+}
+
 // Fractional Electron zoom can give mathematically equal DOMRect edges
 // differences of ~0.000015 CSS px. This is numerical precision, not gap slack.
 const FIT_ROUNDING_TOLERANCE = 0.001;

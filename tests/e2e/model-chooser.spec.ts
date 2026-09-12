@@ -21,6 +21,7 @@ import {
 } from "./support/app-fixture";
 import { seedLargeModelCatalog } from "./support/model-catalog-fixture";
 import { expectModelChooserPlacement, expectModelChooserVerticalFallback } from "./support/model-chooser-geometry";
+import { modelChooserContentGeometry } from "../support/model-chooser-placement";
 
 const execFileAsync = promisify(execFile);
 
@@ -762,22 +763,21 @@ test("keeps branded model sources and rows legible across themes and narrow wind
       await capture(`model-chooser-${id}-${theme.toLowerCase()}`);
       // Without a viewport constraint, the frame ends with its content rather
       // than reserving a fixed-height blank area below these few model rows.
-      const frame = await chooser.boundingBox();
-      const list = await chooser.getByRole("list", { name: "Model results" }).boundingBox();
-      expect(Math.abs((frame!.y + frame!.height) - (list!.y + list!.height))).toBeLessThanOrEqual(2);
+      const content = await chooser.evaluate(modelChooserContentGeometry);
+      expect(content.bottomGap).toBeLessThanOrEqual(2);
       if (id === "codex") {
         await search.fill("Codex Beta");
         await expect(chooser.locator(".model-chooser-row-option")).toHaveCount(1);
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeLessThan(frame!.height);
+          .toBeLessThan(content.frameHeight);
         await capture(`model-chooser-filtered-${theme.toLowerCase()}`);
         await search.fill("route-that-does-not-exist");
         await expect(chooser.getByText("No matching models", { exact: true })).toBeVisible();
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeLessThan(frame!.height);
+          .toBeLessThan(content.frameHeight);
         await search.fill("");
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeCloseTo(frame!.height, 0);
+          .toBeCloseTo(content.frameHeight, 0);
       }
     }
     await expectModelChooserVerticalFallback(app, chooser);

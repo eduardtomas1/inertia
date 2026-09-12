@@ -96,15 +96,15 @@ export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
 
 /**
  * Distinguishes "Claude answered and reported no limits for this account"
- * from a failed read (#344), so usage views can say so instead of keeping old
- * values on screen as stale.
+ * from a failed or malformed read (#344). Only explicit false can replace
+ * cached quota windows with confirmed unavailability.
  */
 export function claudeRateLimitReadResult(
   value: unknown,
 ): { rateLimits: ProviderRateLimit[]; rateLimitsUnavailable?: true } {
-  return objectValue(value)?.rate_limits_available === true
-    ? { rateLimits: parseClaudeRateLimits(value) }
-    : { rateLimits: [], rateLimitsUnavailable: true };
+  return objectValue(value)?.rate_limits_available === false
+    ? { rateLimits: [], rateLimitsUnavailable: true }
+    : { rateLimits: parseClaudeRateLimits(value) };
 }
 
 export async function readClaudeAgentSdkMetadata(

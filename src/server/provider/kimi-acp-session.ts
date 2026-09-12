@@ -101,7 +101,7 @@ export async function configureKimiSession(
       "session/set_config_option",
     );
     authoritativeConfigOptions = response.configOptions;
-  } else if (interactionMode === "plan") {
+  } else if (!nativeMode && interactionMode === "plan") {
     throw new Error("This Kimi ACP server does not advertise a plan mode.");
   }
 

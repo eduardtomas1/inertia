@@ -21,7 +21,10 @@ for (const appearance of PALETTE_APPEARANCES) {
         await page.getByRole("button", { name: "Settings", exact: true }).click();
         await page.getByRole("button", { name: "General", exact: true }).click();
         await page.getByRole("radio", { name: appearance === "light" ? "Light" : "Dark", exact: true }).click();
-        await page.getByRole("radio", { name: `${family.label} theme`, exact: true }).click();
+        // The theme library applies a family to both appearances with one
+        // pressed button per family (the per-mode buttons refine one side).
+        const familyTheme = page.getByRole("button", { name: `${family.label} theme`, exact: true });
+        await familyTheme.click();
         await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
         await expect(page.locator("html")).toHaveAttribute("data-color-theme", family.id);
         const palette = Object.fromEntries(buildPaletteTokens(family.id, appearance));
@@ -30,7 +33,7 @@ for (const appearance of PALETTE_APPEARANCES) {
           const styles = getComputedStyle(element);
           return Object.fromEntries(names.map((name) => [name, styles.getPropertyValue(`--${name}`).trim()]));
         }, roles)).toEqual(Object.fromEntries(roles.map((name) => [name, palette[name]])));
-        await expect(page.getByRole("radio", { name: `${family.label} theme`, exact: true })).toHaveAttribute("aria-checked", "true");
+        await expect(familyTheme).toHaveAttribute("aria-pressed", "true");
         if (family.id === "inertia") {
           await page.locator(".theme-library").scrollIntoViewIfNeeded();
           const path = info.outputPath(`theme-library-${appearance}.png`);

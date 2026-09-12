@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -740,21 +741,80 @@ describe("launch-owned Git cleanup", () => {
     )).toBe(`refs/heads/${descendant}`);
   });
 
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "retains recovery attribution when Git creates a branch but cannot create its worktree",
+    async () => {
+      const root = repository();
+      const path = ownedPath(root, "unwritable parent");
+      const branch = "inertia/failed-worktree-add";
+      const phases: string[] = [];
+      const originalHead = git(root, "rev-parse", "main");
+      chmodSync(dirname(path), 0o500);
+      try {
+        await expect(createWorktreeWithOwnershipReceipt(root, path, {
+          branch,
+          createBranch: true,
+          startPoint: "main",
+        }, {
+          beforeAdd: () => phases.push("before-add"),
+          notAdded: () => phases.push("not-added"),
+          added: () => phases.push("added"),
+        })).rejects.toMatchObject({ code: "operation-failed" });
+        expect(phases).toEqual(["before-add"]);
+        expect(existsSync(path)).toBe(false);
+        expect(git(root, "rev-parse", branch)).toBe(originalHead);
+        await expect(inspectUnacknowledgedWorktreeCreation(root, path, branch))
+          .resolves.toBe("retained");
+      } finally {
+        chmodSync(dirname(path), 0o700);
+      }
+    },
+  );
+
   it("leaves a pre-existing branch intact when worktree creation collides", async () => {
     const root = repository();
     const path = ownedPath(root, "colliding owned path");
     const branch = "inertia/pre-existing";
     git(root, "branch", branch, "main");
     const originalHead = git(root, "rev-parse", branch);
+    const phases: string[] = [];
 
-    await expect(createWorktree(root, path, {
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
       branch,
       createBranch: true,
       startPoint: "main",
-    })).rejects.toBeDefined();
+    }, {
+      beforeAdd: () => phases.push("before-add"),
+      notAdded: () => phases.push("not-added"),
+      added: () => phases.push("added"),
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(phases).toEqual([]);
     await expect(inspectRegisteredWorktreeOwnership(root, path, branch))
       .rejects.toMatchObject({ code: "not-found" });
     expect(git(root, "rev-parse", branch)).toBe(originalHead);
+  });
+
+  it("releases creation attribution only when Git left no worktree or branch", async () => {
+    const root = repository();
+    const path = ownedPath(root, "failed branch lock");
+    const branch = "failed-branch-lock";
+    const lockPath = join(root, ".git", "refs", "heads", `${branch}.lock`);
+    writeFileSync(lockPath, "another writer owns this lock");
+    const phases: string[] = [];
+    await expect(createWorktreeWithOwnershipReceipt(root, path, {
+      branch,
+      createBranch: true,
+      startPoint: "main",
+    }, {
+      beforeAdd: () => phases.push("before-add"),
+      notAdded: () => phases.push("not-added"),
+      added: () => phases.push("added"),
+    })).rejects.toMatchObject({ code: "operation-failed" });
+    expect(phases).toEqual(["before-add", "not-added"]);
+    expect(existsSync(path)).toBe(false);
+    expect(git(root, "for-each-ref", "--format=%(refname)", `refs/heads/${branch}`))
+      .toBe("");
+    expect(readFileSync(lockPath, "utf8")).toBe("another writer owns this lock");
   });
 
   it("does not acknowledge or alter a pre-existing registered path and branch", async () => {

@@ -62,6 +62,9 @@ const budgets = {
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
+  // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
+  // Account only this new module here; all existing ceilings remain unchanged.
+  deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
@@ -507,8 +510,15 @@ const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu"].map
 });
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
+const legacyPromptStashEntry = assetNames.find((name) => /^LegacyPromptStash-.*\.js$/u.test(name));
+if (!legacyPromptStashEntry) throw new Error("Missing deferred legacy prompt recovery");
+if (mainWorkbenchJavaScriptClosure.has(legacyPromptStashEntry) || detachedChatJavaScriptClosure.has(legacyPromptStashEntry)) {
+  throw new Error("Legacy prompt recovery must stay off the initial workbench");
+}
+const deferredLegacyPromptStashJavaScriptBytes = await assetBytes(`assets/${legacyPromptStashEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredLegacyPromptStashJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
@@ -538,6 +548,7 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,

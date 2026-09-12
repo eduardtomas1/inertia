@@ -93,4 +93,16 @@ describe("TerminalManager Windows resize", () => {
       "Terminal not found",
     );
   });
+
+  it("keeps a newer resize when it arrives before the readiness tick", async () => {
+    const { manager, owner, terminal, terminalId } = createWindowsShell();
+    manager.resize(owner, terminalId, 100, 40);
+
+    terminal.emitData("ready");
+    manager.resize(owner, terminalId, 120, 50);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(terminal.pty.resize).toHaveBeenCalledTimes(1);
+    expect(terminal.pty.resize).toHaveBeenLastCalledWith(120, 50);
+  });
 });

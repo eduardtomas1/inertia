@@ -29,6 +29,9 @@ export function resizePty(
     target.pendingResize = { cols, rows };
     return true;
   }
+  // A resize after first output supersedes any request held for the readiness
+  // tick; otherwise that older callback can overwrite the new dimensions.
+  target.pendingResize = null;
   try {
     target.pty.resize(cols, rows);
     return true;

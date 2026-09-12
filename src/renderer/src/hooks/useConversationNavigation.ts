@@ -20,7 +20,7 @@ export function useConversationNavigation({
   splitSelectionTransitionsRef: RefObject<number>;
   setSuppressedMainConversationIds: Dispatch<SetStateAction<Set<string>>>;
   setSecondaryPaneFirst: Dispatch<SetStateAction<boolean>>;
-  selectConversationCommand: (key: string, conversationId: string) => Promise<ServerEvent>;
+  selectConversationCommand: (key: string, conversationId: string, isCurrent?: () => boolean) => Promise<ServerEvent>;
   updateSplitConversationId: (id: string | null) => void;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: Dispatch<SetStateAction<string | null>>;
@@ -41,7 +41,9 @@ export function useConversationNavigation({
       });
       return conversationSelectionGenerationRef.current;
     };
-    if (nextConversation.id === conversation?.id) return Promise.resolve(commitSelection());
+    // A pending selection may already have reached the runtime while this
+    // snapshot still shows the old chat. Serialize an explicit return to it.
+    if (nextConversation.id === conversation?.id && splitSelectionTransitionsRef.current === 0) return Promise.resolve(commitSelection());
     if (nextConversation.id === splitConversation?.id) {
       // A split-pane promotion is visual only. Retargeting the primary and
       // secondary controllers would tear down conversation-owned terminals,
@@ -64,6 +66,7 @@ export function useConversationNavigation({
     return selectConversationCommand(
       "conversation.select",
       nextConversation.id,
+      preserveDraft ? () => selectionGeneration === conversationSelectionGenerationRef.current : undefined,
     ).then((): number | false => {
       if (
         selectionGeneration === conversationSelectionGenerationRef.current

@@ -382,10 +382,11 @@ export default function App(): React.JSX.Element {
   const selectConversationCommand = useCallback((
     key: string,
     conversationId: string,
+    isCurrent?: () => boolean,
   ) => selectionCommandQueue(key, {
     type: "conversation.select",
     payload: { conversationId },
-  }), [selectionCommandQueue]);
+  }, isCurrent), [selectionCommandQueue]);
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,

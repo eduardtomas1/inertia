@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DIAGNOSTIC_NAVIGATION_EVENT, parseDiagnosticNavigation, type DiagnosticSelection } from "./utils/diagnosticNavigation";
+import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
+import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
@@ -860,25 +861,14 @@ export default function App(): React.JSX.Element {
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;
-  useEffect(() => {
-    const navigate = (event: Event): void => {
-      const target = parseDiagnosticNavigation((event as CustomEvent<unknown>).detail);
-      if (!target) return;
-      if ("conversationId" in target) {
-        const affected = connection.snapshot?.conversations.find(({ id }) => id === target.conversationId);
-        if (!affected || connection.status !== "online") {
-          setActionError("This conversation is unavailable. Its diagnostic record is still readable.");
-          return;
-        }
-        selectConversation(affected);
-      } else {
-        setSettingsTarget(target);
-        navigateToView("settings");
-      }
-    };
-    window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
-    return () => window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, navigate);
-  }, [connection.snapshot, connection.status, navigateToView, selectConversation]);
+  useDiagnosticNavigation({
+    conversations: connection.snapshot?.conversations,
+    online: connection.status === "online",
+    selectConversation,
+    showWorkspace: () => { setView("workspace"); setSidebarOpen(false); },
+    openSettings: (target) => { setSettingsTarget(target); navigateToView("settings"); },
+    setActionError,
+  });
   const visibleConversationDetailState = conversationDetailState?.conversationId === conversation?.id
     ? conversationDetailState
     : null;

@@ -489,8 +489,8 @@ function SidebarView({
   };
 
   const activateConversation = (conversation: Conversation) => {
-    onSelectConversation(conversation);
     onViewChange("workspace");
+    onSelectConversation(conversation);
     onClose();
   };
 

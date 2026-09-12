@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import type { ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -23,7 +24,7 @@ function ownedFixture() {
   const process = { pid: 42 } as IPty;
   const retired = vi.fn(() => true);
   const released = vi.fn();
-  const spawnTerminal = vi.fn((_command: string, _args: string[]) => process);
+  const spawnTerminal = vi.fn((_command: string, _args: string) => process);
   const order: string[] = [];
   const owned = spawnWindowsManagedTerminal({
     authority: { path: "C:\\trusted\\guardian.exe", sha256: "a".repeat(64) },
@@ -109,12 +110,39 @@ describe("managed Windows terminal Job ownership", () => {
     expect(await watcher.wait()).toBe(true);
   });
 
+  it("bounds the full UTF-16 guardian command line before creating a PTY or claim", () => {
+    const spawnTerminal = vi.fn();
+    const spawnOwned = vi.fn();
+    expect(() => spawnWindowsManagedTerminal({
+      authority: { path: "C:\\guardian.exe", sha256: "a".repeat(64) },
+      command: "C:\\node.exe", args: ["😀".repeat(16384)], spawnTerminal, spawnOwned,
+    })).toThrow("command-line limit");
+    expect(spawnOwned).not.toHaveBeenCalled();
+    expect(spawnTerminal).not.toHaveBeenCalled();
+  });
+
   it("rejects missing authority before creating any PTY", () => {
     const spawnTerminal = vi.fn();
     expect(() => spawnWindowsManagedTerminal({ authority: undefined,
       command: "cmd.exe", args: [], spawnTerminal, spawnOwned: vi.fn(),
     })).toThrow("authority");
     expect(spawnTerminal).not.toHaveBeenCalled();
+  });
+
+  it("bypasses node-pty's prequoted-array heuristic for the nested guardian command line", () => {
+    const require = createRequire(import.meta.url);
+    const { argsToCommandLine } = require("node-pty/lib/windowsPtyAgent.js") as {
+      argsToCommandLine(command: string, args: string | string[]): string;
+    };
+    const payload = windowsTerminalArguments(["-e", 'process.stdout.write("ready")']);
+    const fields = ["terminal-launch", "token", "C:\\node.exe", payload, "digest"];
+    const safe = windowsTerminalArguments(fields);
+    expect(argsToCommandLine("C:\\guardian.exe", fields))
+      .not.toBe(`C:\\guardian.exe ${safe}`);
+    expect(argsToCommandLine("C:\\guardian.exe", safe))
+      .toBe(`C:\\guardian.exe ${safe}`);
+    const fixture = ownedFixture();
+    expect(typeof fixture.spawnTerminal.mock.calls[0]?.[1]).toBe("string");
   });
 
   it("preserves raw command lines and quotes array arguments including trailing slashes", () => {

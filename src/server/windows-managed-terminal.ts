@@ -66,17 +66,22 @@ export function spawnWindowsManagedTerminal(options: {
   command: string;
   args: readonly string[] | string;
   spawnOwned: (spawnProcess: () => IPty) => RuntimeOwnedPidProcess<IPty>;
-  spawnTerminal: (command: string, args: string[]) => IPty;
+  spawnTerminal: (command: string, args: string) => IPty;
   spawnWatcher?: typeof spawnChild;
 }): RuntimeOwnedPidProcess<IPty> {
   const authority = parseWindowsTerminalAuthority(options.authority);
   if (!authority) throw new Error("Windows managed terminal authority is unavailable.");
   const token = randomUUID();
+  const launcherArgs = windowsTerminalArguments([
+    "terminal-launch", token, options.command, windowsTerminalArguments(options.args), authority.sha256,
+  ]);
+  // CreateProcessW counts UTF-16 code units, including executable and NUL.
+  if (windowsTerminalArguments([authority.path]).length + launcherArgs.length + 2 > 32767) {
+    throw new Error("The managed terminal command exceeds the Windows command-line limit.");
+  }
   const earliest = Date.now();
   // Journal publication completes before the watcher can open the payload gate.
-  const owned = options.spawnOwned(() => options.spawnTerminal(authority.path, [
-    "terminal-launch", token, options.command, windowsTerminalArguments(options.args), authority.sha256,
-  ]));
+  const owned = options.spawnOwned(() => options.spawnTerminal(authority.path, launcherArgs));
   let watcher: WindowsTerminalWatch;
   try {
     watcher = observeWindowsTerminalWatch((options.spawnWatcher ?? spawnChild)(authority.path, [

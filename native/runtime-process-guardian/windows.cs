@@ -2452,7 +2452,8 @@ try {
     using (var executable = OpenVerifiedExecutable(arguments[arguments.Length - 1])) {
       if (executable == null) return Failure("self-integrity", 23, 0);
       if (String.Equals(arguments[0], "terminal-launch", StringComparison.Ordinal)) {
-        return arguments.Length == 5 ? TerminalLaunch(arguments[1], arguments[2], arguments[3]) : 24;
+        return arguments.Length == 5 ? TerminalLaunch(arguments[1], arguments[2], arguments[3])
+          : Failure("terminal-launch-arguments", 24, 0);
       }
       if (String.Equals(arguments[0], "terminal-watch", StringComparison.Ordinal)) {
         return arguments.Length == 7 ? TerminalWatch(arguments) : 24;

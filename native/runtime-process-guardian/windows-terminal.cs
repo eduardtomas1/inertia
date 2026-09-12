@@ -82,14 +82,14 @@ public static partial class InertiaRuntimeJob {
       using (var self = Process.GetCurrentProcess()) {
         for (int index = 0; index < handles.Length; index += 1) {
           if (!DuplicateHandle(self.Handle, GetStdHandle(-10 - index), self.Handle,
-            out handles[index], 0, true, 2)) return 50;
+            out handles[index], 0, true, 2)) return Failure("terminal-console-handles", 50, Marshal.GetLastWin32Error());
         }
       }
       UIntPtr size = UIntPtr.Zero;
       InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
-      if (size.ToUInt64() == 0 || size.ToUInt64() > 65536) return 50;
+      if (size.ToUInt64() == 0 || size.ToUInt64() > 65536) return Failure("terminal-console-attribute-size", 50, 0);
       attributes = Marshal.AllocHGlobal((Int32)size.ToUInt64());
-      if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) return 50;
+      if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) return Failure("terminal-console-attributes", 50, Marshal.GetLastWin32Error());
       initialized = true;
       handleList = Marshal.AllocHGlobal(handles.Length * IntPtr.Size);
       for (int index = 0; index < handles.Length; index += 1) {
@@ -97,7 +97,7 @@ public static partial class InertiaRuntimeJob {
       }
       if (!UpdateProcThreadAttribute(attributes, 0,
         new UIntPtr(PROC_THREAD_ATTRIBUTE_HANDLE_LIST), handleList,
-        new UIntPtr((UInt32)(handles.Length * IntPtr.Size)), IntPtr.Zero, IntPtr.Zero)) return 50;
+        new UIntPtr((UInt32)(handles.Length * IntPtr.Size)), IntPtr.Zero, IntPtr.Zero)) return Failure("terminal-console-inheritance", 50, Marshal.GetLastWin32Error());
       var startup = new STARTUPINFOEX();
       startup.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
       startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -110,7 +110,7 @@ public static partial class InertiaRuntimeJob {
       string application = executable.IndexOfAny(new char[] { '\\', '/' }) < 0 ? null : executable;
       if (!CreateProcessW(application, new StringBuilder("\"" + executable + "\" " + arguments),
         IntPtr.Zero, IntPtr.Zero, true, EXTENDED_STARTUPINFO_PRESENT,
-        IntPtr.Zero, null, ref startup, out information)) return 50;
+        IntPtr.Zero, null, ref startup, out information)) return Failure("terminal-console-create", 50, Marshal.GetLastWin32Error());
       if (WaitForSingleObject(information.hProcess, INFINITE) != WAIT_OBJECT_0) return 50;
       UInt32 exitCode;
       return GetExitCodeProcess(information.hProcess, out exitCode)
@@ -164,7 +164,7 @@ public static partial class InertiaRuntimeJob {
           || !ExpectedParent((UInt32)Process.GetCurrentProcess().Id, parentId)
           || !QueryFullProcessImageName(root, 0, image, ref imageLength)
           || !String.Equals(image.ToString(), System.Reflection.Assembly.GetExecutingAssembly().Location,
-            StringComparison.OrdinalIgnoreCase)) return 51;
+            StringComparison.OrdinalIgnoreCase)) return Failure("terminal-watch-identity", 51, 0);
         var admissionTime = Stopwatch.StartNew();
         bool member = false;
         while (admissionTime.ElapsedMilliseconds < TERMINAL_ADMISSION_MS) {
@@ -178,7 +178,7 @@ public static partial class InertiaRuntimeJob {
           if (WaitForSingleObject(root, 0) != WAIT_TIMEOUT) return 51;
           Thread.Sleep(10);
         }
-        if (job == IntPtr.Zero || !member) return 51;
+        if (job == IntPtr.Zero || !member) return Failure("terminal-watch-membership", 51, 0);
         WriteProtocolLine(Console.OpenStandardOutput(), "INERTIA_TERMINAL_JOB_READY");
         using (var admission = EventWaitHandle.OpenExisting(TerminalAdmissionName(arguments[1]))) {
           while (true) {

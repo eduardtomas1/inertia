@@ -10,7 +10,7 @@ const script = "const c=require('node:child_process').spawn(process.execPath,['-
 const quote = (arg) => '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
 const terminal = pty.spawn(authority, [
   'terminal-launch', token, process.execPath, ['-e', script].map(quote).join(' '), digest,
-], { name: 'xterm-256color', cols: 100, rows: 24, cwd: process.cwd(), env: process.env });
+].map(quote).join(' '), { name: 'xterm-256color', cols: 100, rows: 24, cwd: process.cwd(), env: process.env });
 const watcher = spawn(authority, [
   'terminal-watch', token, String(terminal.pid), String(process.pid), String(before), String(Date.now()), digest,
 ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });

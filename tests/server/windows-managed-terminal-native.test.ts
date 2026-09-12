@@ -1,6 +1,6 @@
 import { spawn as spawnChild, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, type IPty } from "node-pty";
@@ -12,11 +12,21 @@ import { testWindowsTerminalAuthority } from "../support/windows-terminal-author
 
 const pending: Array<() => Promise<void>> = [];
 const directories: string[] = [];
+const observations: Array<() => object> = [];
 
-afterEach(async () => {
-  vi.unstubAllEnvs();
-  for (const cleanup of pending.splice(0).reverse()) await cleanup();
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+
+afterEach(async (context) => {
+  try {
+    vi.unstubAllEnvs();
+    for (const cleanup of pending.splice(0).reverse()) await cleanup();
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  } finally {
+    const receipts = observations.splice(0).map((observe) => observe());
+    mkdirSync("test-results", { recursive: true });
+    appendFileSync("test-results/windows-managed-job-diagnostics.jsonl", `${JSON.stringify({
+      case: context.task.name, observations: receipts,
+    })}\n`);
+  }
 });
 
 function alive(pid: number): boolean {
@@ -27,6 +37,10 @@ function launched(script: string, mutateWatcher?: (args: string[]) => void, comm
   let output = "";
   let exit: number | null = null;
   let watcher!: ChildProcess;
+  let watcherCode: number | null = null;
+  let watcherSignal: string | null = null;
+  let watcherOutput = "";
+  let watcherError = "";
   const owned = spawnWindowsManagedTerminal({
     authority: testWindowsTerminalAuthority(), command, args,
     spawnOwned: (create) => ({ process: create(), confirmStopped: () => true,
@@ -38,11 +52,23 @@ function launched(script: string, mutateWatcher?: (args: string[]) => void, comm
     spawnWatcher: ((command: string, args: string[], options: object) => {
       mutateWatcher?.(args);
       watcher = spawnChild(command, args, options);
+      watcher.stdout?.on("data", (data: Buffer) => { watcherOutput = (watcherOutput + data.toString()).slice(0, 1024); });
+      watcher.stderr?.on("data", (data: Buffer) => { watcherError = (watcherError + data.toString()).slice(0, 1024); });
+      watcher.on("close", (code, signal) => { watcherCode = code; watcherSignal = signal; });
       return watcher;
     }) as typeof spawnChild,
   });
   owned.process.onData((data) => { output = (output + data).slice(-8192); });
   owned.process.onExit(({ exitCode }) => { exit = exitCode; });
+  observations.push(() => ({
+    guardianExitCode: exit, watcherCode, watcherSignal,
+    watcherReady: watcherOutput.startsWith("INERTIA_TERMINAL_JOB_READY\n"),
+    watcherStopped: watcherOutput === "INERTIA_TERMINAL_JOB_READY\nINERTIA_TERMINAL_JOB_STOPPED\n",
+    watcherOutputBytes: Buffer.byteLength(watcherOutput),
+    nativeStages: [output, watcherError].flatMap((text) => [...text.matchAll(
+      /INERTIA_JOB_ERROR stage=(terminal-(?:launch-arguments|launch|job-create|job-assign|admission-exists|console-handles|console-attribute-size|console-attributes|console-inheritance|console-create|watch-identity|watch-membership|watch)) win32=(\d+)/gu,
+    )].map((match) => ({ stage: match[1], win32: Number(match[2]) }))),
+  }));
   pending.push(async () => {
     owned.requestGuardianStop();
     await expect.poll(() => exit !== null, { timeout: 4000 }).toBe(true);

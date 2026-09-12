@@ -37,6 +37,7 @@ import {
 import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
+import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -58,6 +59,7 @@ interface TerminalSession {
   dataListener: IDisposable;
   exitListener: IDisposable;
   readonly outputObserved: boolean;
+  pendingResize: { cols: number; rows: number } | null;
   exitObserved: boolean;
   exitCode: number | null;
   exitSignal: number | null;
@@ -328,11 +330,7 @@ export class TerminalManager {
     // Keep the former owner authoritative until resize and bounded replay both
     // succeed. A failed transfer must not evict a still-healthy renderer.
     session.flushOutput();
-    try {
-      session.pty.resize(cols, rows);
-    } catch {
-      throw new TerminalError("Unable to resize this terminal.");
-    }
+    this.resizeSessionPty(session, cols, rows);
     if (!session.replayOutput(owner)) {
       throw new TerminalError("The terminal client disconnected.");
     }
@@ -692,9 +690,11 @@ export class TerminalManager {
     });
     let outputObserved = false;
     const dataListener = pseudoterminal.onData((data) => {
+      const firstOutput = !outputObserved;
       outputObserved = true;
       onOutput?.(data);
       output.queue(data);
+      if (firstOutput) applyPendingPtyResize(session);
     });
     const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
       if (session.exitObserved) return;
@@ -757,6 +757,7 @@ export class TerminalManager {
       dataListener,
       exitListener,
       get outputObserved() { return outputObserved; },
+      pendingResize: null,
       exitObserved: false,
       exitCode: null,
       exitSignal: null,
@@ -829,9 +830,11 @@ export class TerminalManager {
   }
 
   resize(owner: WebSocket, terminalId: string, cols: number, rows: number): void {
-    try {
-      this.ownedSession(owner, terminalId).pty.resize(cols, rows);
-    } catch {
+    this.resizeSessionPty(this.ownedSession(owner, terminalId), cols, rows);
+  }
+
+  private resizeSessionPty(session: TerminalSession, cols: number, rows: number): void {
+    if (!resizePty(this.platform, session, cols, rows)) {
       throw new TerminalError("Unable to resize this terminal.");
     }
   }

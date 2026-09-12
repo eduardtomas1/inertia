@@ -40,7 +40,9 @@ export function searchMessages(
   `);
   // Bound each native read: never aggregate an entire chunk history inside
   // SQLite before JavaScript can observe the scan deadline again.
-  const base = database.prepare("SELECT substr(CAST(content AS BLOB), 1, ?) AS content FROM messages WHERE id = ?");
+  // substr() over an empty blob yields NULL, not an empty blob. An eligible
+  // empty message (recovery imports allow one) must read as empty content.
+  const base = database.prepare("SELECT COALESCE(substr(CAST(content AS BLOB), 1, ?), x'') AS content FROM messages WHERE id = ?");
   const chunks = database.prepare(`
     SELECT substr(CAST(content AS BLOB), 1, ?) AS content
     FROM message_content_chunks INDEXED BY message_content_chunks_message_sequence_idx

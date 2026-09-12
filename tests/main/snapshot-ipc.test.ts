@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import type { SnapshotState } from "../../src/shared/snapshots";
 import type { ChatAttachment } from "../../src/shared/contracts";
-const native = vi.hoisted(() => ({ handle: vi.fn(), document: vi.fn(), write: vi.fn(), capture: vi.fn(), configure: vi.fn(), revoke: vi.fn(), trigger: null as (() => Promise<void>) | null }));
+const native = vi.hoisted(() => ({ handle: vi.fn(), document: vi.fn(), write: vi.fn(), clear: vi.fn(), capture: vi.fn(), configure: vi.fn(), revoke: vi.fn(), trigger: null as (() => Promise<void>) | null }));
 vi.mock("electron", () => ({ app: { getPath: () => "/private/fixture" }, ipcMain: { handle: native.handle }, shell: { openExternal: vi.fn() }, systemPreferences: { isTrustedAccessibilityClient: vi.fn() } }));
-vi.mock("../../src/main/snapshot-preferences", () => ({ readSnapshotPreferences: async () => ({ enabled: true, shortcut: "accelerator" }), writeSnapshotPreferences: native.write }));
+vi.mock("../../src/main/snapshot-preferences", () => ({ readSnapshotPreferences: async () => ({ enabled: true, shortcut: "accelerator" }), writeSnapshotPreferences: native.write, clearSnapshotPreferences: native.clear }));
 vi.mock("../../src/main/attachment-import-ipc", async (original) => ({ ...await original<typeof import("../../src/main/attachment-import-ipc")>(), attachmentImportDocumentFromEvent: native.document }));
 vi.mock("../../src/main/snapshot-service", () => ({
   SnapshotError: class extends Error {},
@@ -25,7 +25,7 @@ vi.mock("../../src/main/snapshot-service", () => ({
 import { registerSnapshotIpc } from "../../src/main/snapshot-ipc";
 import { SnapshotError } from "../../src/main/snapshot-service";
 import { RendererAttachmentImportCoordinator } from "../../src/main/attachment-import-ipc";
-beforeEach(() => { vi.clearAllMocks(); native.write.mockResolvedValue(undefined); });
+beforeEach(() => { vi.clearAllMocks(); native.write.mockResolvedValue(undefined); native.clear.mockResolvedValue(undefined); });
 function snapshotWindow() {
   const send = vi.fn();
   const webContents = Object.assign(new EventEmitter(), { send, isDestroyed: vi.fn(() => false), mainFrame: { processId: 1, routingId: 2, frameToken: "original-frame" } });
@@ -162,6 +162,21 @@ describe("snapshot destination and preference boundaries", () => {
     native.revoke.mockRejectedValueOnce(new SnapshotError("Snapshot worker cleanup is unconfirmed."));
     await expect(handler({}, { type: "configure", enabled: false, shortcut: "accelerator" })).rejects.toThrow("cleanup is unconfirmed");
     expect(native.configure).toHaveBeenLastCalledWith(false);
+    // The unconfirmed disable is still saved, so the next launch starts off.
+    expect(native.write).toHaveBeenLastCalledWith("/private/fixture", { enabled: false, shortcut: "accelerator" });
+  });
+
+  it.each([
+    { forgotten: true, message: "Snapshots has been disabled." },
+    { forgotten: false, message: "may turn back on at the next launch" },
+  ])("forgets the saved preference when a disable cannot be saved (forgotten: $forgotten)", async ({ forgotten, message }) => {
+    const { handler } = await fixture();
+    await handler({}, { type: "configure", enabled: true, shortcut: "accelerator" });
+    native.write.mockRejectedValue(new Error("rename failed"));
+    if (!forgotten) native.clear.mockRejectedValueOnce(new Error("unlink failed"));
+    await expect(handler({}, { type: "configure", enabled: false, shortcut: "accelerator" })).rejects.toThrow(message);
+    expect(native.clear).toHaveBeenCalledWith("/private/fixture");
+    expect((await handler({}, { type: "state" })).enabled).toBe(false);
   });
 
   it.each(["save-failure", "native-failure"])("preserves the correct delivery policy on %s", async (cause) => {

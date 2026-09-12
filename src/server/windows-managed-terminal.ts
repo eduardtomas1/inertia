@@ -79,14 +79,13 @@ export function spawnWindowsManagedTerminal(options: {
   if (windowsTerminalArguments([authority.path]).length + launcherArgs.length + 2 > 32767) {
     throw new Error("The managed terminal command exceeds the Windows command-line limit.");
   }
-  const earliest = Date.now();
   // Journal publication completes before the watcher can open the payload gate.
   const owned = options.spawnOwned(() => options.spawnTerminal(authority.path, launcherArgs));
   let watcher: WindowsTerminalWatch;
   try {
     watcher = observeWindowsTerminalWatch((options.spawnWatcher ?? spawnChild)(authority.path, [
       "terminal-watch", token, String(owned.process.pid), String(process.pid),
-      String(earliest), String(Date.now()), authority.sha256,
+      authority.sha256,
     ], {
       windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       env: {

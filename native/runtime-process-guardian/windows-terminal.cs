@@ -26,12 +26,29 @@ public static partial class InertiaRuntimeJob {
       && String.Equals(token.ToString("D"), value, StringComparison.Ordinal);
   }
 
-  private static string TerminalJobName(string token) {
-    return "Local\\Inertia.Terminal.Job." + token;
+  private static string TerminalIdentity(string token, UInt32 processId, UInt64 creationTicks) {
+    return token + "." + processId.ToString(CultureInfo.InvariantCulture)
+      + "." + creationTicks.ToString("x16", CultureInfo.InvariantCulture);
   }
 
-  private static string TerminalAdmissionName(string token) {
-    return "Local\\Inertia.Terminal.Admit." + token;
+  private static bool TerminalCreation(IntPtr process, out UInt64 ticks, out int error) {
+    FILETIME creation, exit, kernel, user;
+    ticks = 0;
+    error = 0;
+    if (!GetProcessTimes(process, out creation, out exit, out kernel, out user)) {
+      error = Marshal.GetLastWin32Error();
+      return false;
+    }
+    ticks = ((UInt64)creation.dwHighDateTime << 32) | creation.dwLowDateTime;
+    return ticks >= WINDOWS_TO_UNIX_EPOCH_TICKS;
+  }
+
+  private static string TerminalJobName(string identity) {
+    return "Local\\Inertia.Terminal.Job." + identity;
+  }
+
+  private static string TerminalAdmissionName(string identity) {
+    return "Local\\Inertia.Terminal.Admit." + identity;
   }
 
   // The launch process belongs to the Job before it can start the shell. The
@@ -43,13 +60,20 @@ public static partial class InertiaRuntimeJob {
       || executable.Length > 32767 || arguments.Length > 32767) return 24;
     IntPtr job = IntPtr.Zero;
     try {
+      UInt64 creation;
+      int creationError;
+      string identity;
+      using (var self = Process.GetCurrentProcess()) {
+        if (!TerminalCreation(self.Handle, out creation, out creationError)) return Failure("terminal-launch-times", 50, creationError);
+        identity = TerminalIdentity(token, (UInt32)self.Id, creation);
+      }
       bool fresh;
       using (var admission = new EventWaitHandle(
-        false, EventResetMode.ManualReset, TerminalAdmissionName(token), out fresh
+        false, EventResetMode.ManualReset, TerminalAdmissionName(identity), out fresh
       )) {
         if (!fresh) return Failure("terminal-admission-exists", 50, 0);
-        job = CreateJobObject(IntPtr.Zero, TerminalJobName(token));
-        int creationError = Marshal.GetLastWin32Error();
+        job = CreateJobObject(IntPtr.Zero, TerminalJobName(identity));
+        creationError = Marshal.GetLastWin32Error();
         if (job == IntPtr.Zero || creationError == 183) {
           return Failure("terminal-job-create", 50, creationError);
         }
@@ -127,13 +151,9 @@ public static partial class InertiaRuntimeJob {
 
   private static int TerminalWatch(string[] arguments) {
     UInt32 processId, parentId;
-    double earliest, latest;
     if (!TerminalToken(arguments[1])
       || !UInt32.TryParse(arguments[2], out processId) || processId <= 1 || processId > Int32.MaxValue
-      || !UInt32.TryParse(arguments[3], out parentId) || parentId <= 1 || parentId > Int32.MaxValue
-      || !Double.TryParse(arguments[4], NumberStyles.None, CultureInfo.InvariantCulture, out earliest)
-      || !Double.TryParse(arguments[5], NumberStyles.None, CultureInfo.InvariantCulture, out latest)
-      || earliest <= 0 || latest < earliest || latest - earliest > 30000) return 24;
+      || !UInt32.TryParse(arguments[3], out parentId) || parentId <= 1 || parentId > Int32.MaxValue) return 24;
     IntPtr job = IntPtr.Zero;
     var gate = new object();
     bool stopRequested = false;
@@ -153,20 +173,17 @@ public static partial class InertiaRuntimeJob {
     try {
       using (var guardian = Process.GetProcessById((Int32)processId)) {
         IntPtr root = guardian.Handle;
-        UInt64 bits;
-        double created;
-        int identityError;
+        UInt64 creation;
+        int creationError;
         var image = new StringBuilder(32768);
         UInt32 imageLength = (UInt32)image.Capacity;
-        if (!ProcessIdentity(root, out bits, out created, out identityError)) {
-          return Failure("terminal-watch-times", 51, identityError);
+        if (!TerminalCreation(root, out creation, out creationError)) {
+          return Failure("terminal-watch-times", 51, creationError);
         }
-        if (created < earliest || created >= latest + 1) {
-          WriteProtocolLine(Console.OpenStandardError(),
-            "INERTIA_TERMINAL_CLOCK before_us=" + ((Int32)Math.Min(1000000, Math.Max(0, (earliest - created) * 1000))).ToString(CultureInfo.InvariantCulture)
-            + " after_us=" + ((Int32)Math.Min(1000000, Math.Max(0, (created - latest) * 1000))).ToString(CultureInfo.InvariantCulture));
-          return Failure(created < earliest ? "terminal-watch-birth-before" : "terminal-watch-birth-after", 51, 0);
-        }
+        // Both sides derive the namespace from raw native FILETIME on their
+        // exact handle. A replacement PID cannot name the original Job/event;
+        // Node's independently calibrated wall clock is not process identity.
+        string identity = TerminalIdentity(arguments[1], processId, creation);
         if (!ExpectedParent(processId, parentId)) return Failure("terminal-watch-root-parent", 51, 0);
         if (!ExpectedParent((UInt32)Process.GetCurrentProcess().Id, parentId)) return Failure("terminal-watch-watcher-parent", 51, 0);
         if (!QueryFullProcessImageName(root, 0, image, ref imageLength)
@@ -176,7 +193,7 @@ public static partial class InertiaRuntimeJob {
         bool member = false;
         while (admissionTime.ElapsedMilliseconds < TERMINAL_ADMISSION_MS) {
           if (job == IntPtr.Zero) job = OpenJobObject(
-            JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, TerminalJobName(arguments[1])
+            JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, TerminalJobName(identity)
           );
           if (job != IntPtr.Zero) {
             if (!IsProcessInJob(root, job, out member)) return 51;
@@ -187,7 +204,7 @@ public static partial class InertiaRuntimeJob {
         }
         if (job == IntPtr.Zero || !member) return Failure("terminal-watch-membership", 51, 0);
         WriteProtocolLine(Console.OpenStandardOutput(), "INERTIA_TERMINAL_JOB_READY");
-        using (var admission = EventWaitHandle.OpenExisting(TerminalAdmissionName(arguments[1]))) {
+        using (var admission = EventWaitHandle.OpenExisting(TerminalAdmissionName(identity))) {
           while (true) {
             lock (gate) {
               if (stopRequested || WaitForSingleObject(root, 0) != WAIT_TIMEOUT) break;
@@ -216,8 +233,9 @@ public static partial class InertiaRuntimeJob {
             // Job accounting can reach zero before the exact root handle is
             // signalled. Spend only the remainder of this same stop budget.
             remaining = Math.Max(0, TERMINAL_DRAIN_MS - (Int32)stopTime.ElapsedMilliseconds);
-            if (WaitForSingleObject(root, (UInt32)remaining) != WAIT_OBJECT_0) {
-              return Failure("terminal-watch-root-wait", 52, Marshal.GetLastWin32Error());
+            UInt32 rootWait = WaitForSingleObject(root, (UInt32)remaining);
+            if (rootWait != WAIT_OBJECT_0) {
+              return Failure("terminal-watch-root-wait", 52, rootWait == UInt32.MaxValue ? Marshal.GetLastWin32Error() : 0);
             }
             WriteProtocolLine(Console.OpenStandardOutput(), TERMINAL_STOPPED);
             return 0;

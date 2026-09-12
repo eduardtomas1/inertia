@@ -2456,7 +2456,7 @@ try {
           : Failure("terminal-launch-arguments", 24, 0);
       }
       if (String.Equals(arguments[0], "terminal-watch", StringComparison.Ordinal)) {
-        return arguments.Length == 7 ? TerminalWatch(arguments) : 24;
+        return arguments.Length == 5 ? TerminalWatch(arguments) : 24;
       }
       if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
         return arguments.Length == 3 ? Recover(arguments[1]) : 24;

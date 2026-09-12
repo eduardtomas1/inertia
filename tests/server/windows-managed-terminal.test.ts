@@ -26,6 +26,7 @@ function ownedFixture() {
   const released = vi.fn();
   const spawnTerminal = vi.fn((_command: string, _args: string) => process);
   const order: string[] = [];
+  const watcherArguments: string[][] = [];
   const owned = spawnWindowsManagedTerminal({
     authority: { path: "C:\\trusted\\guardian.exe", sha256: "a".repeat(64) },
     command: "C:\\Windows\\cmd.exe", args: [], spawnTerminal,
@@ -35,9 +36,11 @@ function ownedFixture() {
       return { process, confirmStopped: retired, releaseIfGroupExited: released,
         requestGuardianStop: () => false, waitForGuardianStop: async () => false };
     },
-    spawnWatcher: (() => { order.push("watcher-spawned"); return child; }) as typeof spawn,
+    spawnWatcher: ((_command: string, args: string[]) => {
+      watcherArguments.push(args); order.push("watcher-spawned"); return child;
+    }) as typeof spawn,
   });
-  return { child, owned, retired, released, spawnTerminal, order };
+  return { child, owned, retired, released, spawnTerminal, order, watcherArguments };
 }
 
 function receipt(child: ChildProcess, code = 0, output = "INERTIA_TERMINAL_JOB_READY\nINERTIA_TERMINAL_JOB_STOPPED\n") {
@@ -50,6 +53,16 @@ describe("managed Windows terminal Job ownership", () => {
     const fixture = ownedFixture();
     expect(fixture.order).toEqual(["journal-claimed", "watcher-spawned"]);
     expect(fixture.spawnTerminal.mock.calls[0]?.[0]).toBe("C:\\trusted\\guardian.exe");
+  });
+
+  it("passes only native identity inputs even when the JavaScript wall clock is offset", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(-1);
+    try {
+      const fixture = ownedFixture();
+      const args = fixture.watcherArguments[0]!;
+      expect(args).toEqual(["terminal-watch", expect.any(String), "42", String(process.pid), "a".repeat(64)]);
+      expect(clock).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); }
   });
 
   it("does not retire on root exit or an absent receipt", async () => {

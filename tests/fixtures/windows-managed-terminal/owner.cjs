@@ -5,14 +5,13 @@ const { randomUUID } = require('node:crypto');
 const pty = require('node-pty');
 const [authority, digest] = process.argv.slice(2);
 const token = randomUUID();
-const before = Date.now();
 const script = "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'}); process.stdout.write('DESCENDANT='+c.pid+'\\n'); setInterval(()=>{},1000);";
 const quote = (arg) => '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
 const terminal = pty.spawn(authority, [
   'terminal-launch', token, process.execPath, ['-e', script].map(quote).join(' '), digest,
 ].map(quote).join(' '), { name: 'xterm-256color', cols: 100, rows: 24, cwd: process.cwd(), env: process.env });
 const watcher = spawn(authority, [
-  'terminal-watch', token, String(terminal.pid), String(process.pid), String(before), String(Date.now()), digest,
+  'terminal-watch', token, String(terminal.pid), String(process.pid), digest,
 ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 let watchOutput = '';
 watcher.stdout.on('data', (data) => {

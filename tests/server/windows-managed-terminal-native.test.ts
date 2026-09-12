@@ -83,7 +83,7 @@ function launched(script: string, mutateWatcher?: (args: string[]) => void, comm
     watcherStopped: watcherOutput === "INERTIA_TERMINAL_JOB_READY\nINERTIA_TERMINAL_JOB_STOPPED\n",
     watcherOutputBytes: Buffer.byteLength(watcherOutput),
     nativeStages: [output, watcherError].flatMap((text) => [...text.matchAll(
-      /INERTIA_JOB_ERROR stage=(terminal-(?:launch-arguments|launch|job-create|job-assign|admission-exists|console-handles|console-attribute-size|console-attributes|console-inheritance|console-create|watch-identity|watch-times|watch-birth-before|watch-birth-after|watch-root-parent|watch-watcher-parent|watch-image|watch-membership|watch-terminate|watch-drain|watch-root-wait|watch)) win32=(\d+)/gu,
+      /INERTIA_JOB_ERROR stage=(terminal-(?:launch-arguments|launch-times|launch|job-create|job-assign|admission-exists|console-handles|console-attribute-size|console-attributes|console-inheritance|console-create|watch-identity|watch-times|watch-birth-before|watch-birth-after|watch-root-parent|watch-watcher-parent|watch-image|watch-membership|watch-terminate|watch-drain|watch-root-wait|watch)) win32=(\d+)/gu,
     )].map((match) => ({ stage: match[1], win32: Number(match[2]) }))),
   }));
   pending.push(async () => {
@@ -126,6 +126,24 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     expect(await action.owned.waitForGuardianStop()).toBe(true);
     await expect.poll(() => action.exit() !== null, { timeout: 3000 }).toBe(true);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("distinguishes one native birth tick for the same PID in its exact namespace", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-terminal-identity-"));
+    directories.push(directory);
+    const executable = join(directory, "identity-proof.exe");
+    const compiler = ["Framework64", "Framework"].map((framework) => join(
+      process.env.SystemRoot ?? process.env.SYSTEMROOT!, "Microsoft.NET", framework, "v4.0.30319", "csc.exe",
+    )).find((path) => existsSync(path));
+    expect(compiler).toBeDefined();
+    const compilation = launched("", undefined, compiler!, ["/nologo", "/target:exe", "/platform:anycpu",
+      `/out:${executable}`, resolve("tests/fixtures/windows-managed-terminal/identity.cs")]);
+    await expect.poll(compilation.exit, { timeout: 10000 }).toBe(0);
+    expect(await compilation.owned.waitForGuardianStop()).toBe(true);
+    const proof = launched("", undefined, executable, [testWindowsTerminalAuthority()!.path]);
+    await expect.poll(proof.output, { timeout: 4000 }).toContain("NATIVE_IDENTITY_DISTINCT");
+    await expect.poll(proof.exit, { timeout: 4000 }).toBe(7);
+    expect(await proof.owned.waitForGuardianStop()).toBe(true);
   });
 
   it("contains reparented grandchildren after their transient parent has exited", async () => {
@@ -196,12 +214,16 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     expect(await sibling.owned.waitForGuardianStop()).toBe(true);
   });
 
-  it("rejects a mismatched creation identity before any user action can execute", async () => {
+  it("rejects a replacement root's native namespace without admitting payload or touching its sibling", async () => {
+    const sibling = launched(leaf);
+    await expect.poll(sibling.output, { timeout: 4000 }).toContain("ACTION_READY");
     const directory = mkdtempSync(join(tmpdir(), "inertia-terminal-admission-"));
     directories.push(directory);
     const marker = join(directory, "payload-started");
     const action = launched(`require('node:fs').writeFileSync(${JSON.stringify(marker)},'started');`, (args) => {
-      args[4] = "1"; args[5] = "2";
+      // A real same-image, same-parent root has a different native tuple. Its
+      // retained handle must not open this new action's Job or admission event.
+      args[2] = String(sibling.owned.process.pid);
     });
     expect(await action.owned.waitForGuardianStop()).toBe(false);
     // Native admission is bounded to 3s. ConPTY separately buffers its final
@@ -210,6 +232,10 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     await expect.poll(() => alive(action.owned.process.pid), { timeout: 4000 }).toBe(false);
     expect(existsSync(marker)).toBe(false);
     expect(action.owned.confirmStopped()).toBe(false);
+    expect(alive(sibling.owned.process.pid)).toBe(true);
+    expect(sibling.exit()).toBeNull();
+    sibling.owned.requestGuardianStop();
+    expect(await sibling.owned.waitForGuardianStop()).toBe(true);
   });
 
   it("keeps a missing-watcher's gate closed until its bounded self-cleanup", async () => {

@@ -208,7 +208,7 @@ jobs:
       - name: Install Linux guardian toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -443,7 +443,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies

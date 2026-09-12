@@ -77,6 +77,16 @@ it.each([["ci.yml", "test"], ["release-platforms.yml", "build"]])(
   },
 );
 
+it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "test"], ["release-platforms.yml", "build"]])(
+  "%s %s provides real private Secret Service prerequisites before Linux desktop tests", (file, id) => {
+    const steps = parse(source(`.github/workflows/${file}`)).jobs[id].steps as Array<{ run?: string }>;
+    const install = steps.findIndex((step) => step.run?.includes("apt-get install") && step.run.includes("gnome-keyring"));
+    expect(install).toBeGreaterThanOrEqual(0);
+    expect(steps[install]!.run).toContain("dbus-daemon dbus-bin gnome-keyring");
+    expect(install).toBeLessThan(steps.findIndex((step) => step.run?.includes("playwright test")));
+  },
+);
+
 it("isolates native and verifier dependency changes without suppressing security updates or protocol review", () => {
   const config = parse(source(".github/dependabot.yml"));
   const npm = config.updates.find((entry: { "package-ecosystem": string }) => entry["package-ecosystem"] === "npm");

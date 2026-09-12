@@ -34,6 +34,65 @@ CI for the consolidated v0.0.55 candidate. An intermediate full run during
 teardown dependency integration also encountered contended Git timeouts; it is
 **not** final-source validation and is not counted as a passed gate here.
 
+## Linux ARM64 fixture correction (2026-09-13)
+
+The [consolidated candidate's Linux ARM job](https://github.com/eduardtomas1/inertia/actions/runs/34720475590/job/103625398279)
+failed at the first hub-row assertion. Its error context says the management key
+could not be saved in secure storage, before the runtime hub-save command.
+The headless job had no Secret Service setup. In addition, Playwright 1.63.0's
+Electron loader explicitly appends `--password-store=basic`, even when ordinary
+launch arguments select another backend. Inertia correctly refuses that backend;
+[Electron documents its lack of OS protection](https://www.electronjs.org/docs/latest/api/safe-storage).
+
+The correction is confined to test infrastructure:
+
+- The Limits fixture starts its own foreground D-Bus and GNOME keyring daemons,
+  with private HOME/XDG directories and a random nonempty password sent only on
+  stdin. It waits for the private default login collection and keeps it alive
+  across the app restart.
+- A temporary Electron entrypoint selects `gnome-libsecret` after Playwright's
+  loader, preserves the normal application path, and imports the unchanged built
+  app. The scenario asserts the real backend and asynchronous encryption
+  availability before saving the hub credential.
+- Linux interaction, full-platform CI and release jobs install `dbus-daemon`,
+  `dbus-bin` and `gnome-keyring`. A workflow contract checks all three paths.
+- Teardown stops only the two owned foreground children, with bounded TERM/KILL
+  handling, then removes their temporary store. Setup failure also cleans up.
+  Production vault behavior, encryption, `basic_text` refusal, preload and
+  packaged application code are unchanged.
+
+Local proof used Ubuntu 24.04.4 ARM64, Node 22.23.2 and the locked dependency graph
+in container `inertia-limits-linux-proof` (`380c63205fdc`), from image
+`inertia-local-arm64-buildbase:31301b7` (`sha256:9a1eda1250c8d2ee48425d7013644cddbd3cf17433ba045dc7a19187dd7d2887`).
+The application was built with `npm run build:packaged` from
+`817fbeacc1fcc7f944b3f69d771c050495cf6f71`; both runs used that same bundle.
+Only the corrected test files changed between runs.
+
+- **Before:** the unchanged Limits scenario failed at line 77 with the same
+  missing hub row and secure-storage error as hosted CI.
+- **After:** `xvfb-run --auto-servernum npm exec -- playwright test
+  tests/e2e/usage-limits.spec.ts --project=display-sensitive --workers=1` passed
+  **1 test in 8.8 seconds** on final fixture source. The storage evidence records
+  `{"backend":"gnome_libsecret","available":true}`. Hub setup, verified account
+  pooling, restart persistence, removal, keyboard interaction and layouts passed.
+- Linux focused vault/workflow validation passed **2 files / 32 tests**, including
+  insecure-backend refusal. `npm run check:quality` passed on macOS ARM64.
+- A Linux setup-failure probe removed `gnome-keyring-daemon` from the helper's
+  private executable search path. Setup rejected and removed its private store
+  and D-Bus child. After the final E2E, launcher PID 2345, `/tmp/ie-Lu5jJA`, private
+  keyring directories and credential daemons were confirmed absent.
+- The proof container was removed. The unrelated `inertia-issue220-linux`
+  container remained running and was not modified.
+
+Local logs are `/tmp/inertia-limits-linux-{before,final,build,unit,cleanup,quality}.log`.
+Screenshots, storage evidence and fixture ownership remain under
+`/Users/eduardtomasvelez/.codex/tmp/inertia-limits-linux-proof/test-results/limits-linux-final/`.
+This proves the targeted Linux fixture against the feature source, not the final
+combined release. The release coordinator owns the consolidated full
+`npm run check` and hosted platform matrix. No Windows or macOS desktop rerun was
+performed for this Linux-only correction. The earlier verification manifest and
+screenshots above remain the original feature snapshot.
+
 ## Screenshots
 
 All four native screenshots were visually reviewed. The wide captures are

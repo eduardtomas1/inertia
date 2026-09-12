@@ -5,6 +5,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 
 const nativeSource = `
 if (process.argv[2] === "--help") { process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n"); process.exit(0); }
@@ -20,7 +21,14 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
 });
 `;
 let app: AppFixture | undefined; let hub: Server | undefined;
-test.afterEach(async () => { await app?.close(); if (hub) await new Promise<void>((resolve) => hub!.close(() => resolve())); });
+let secretService: LinuxSecretService | undefined;
+test.afterEach(async () => {
+  try { await app?.close(); }
+  finally {
+    try { await secretService?.close(); }
+    finally { if (hub) await new Promise<void>((resolve) => hub!.close(() => resolve())); }
+  }
+});
 
 test("inspects pooled accounts, private details and composer limits in light, dark and narrow layouts", async ({ browserName: _browserName }, testInfo) => {
   test.setTimeout(120000);
@@ -46,8 +54,10 @@ test("inspects pooled accounts, private details and composer limits in light, da
   });
   await new Promise<void>((resolve) => hub!.listen(0, "127.0.0.1", resolve));
   const address = hub.address(); if (!address || typeof address === "string") throw new Error("Hub fixture address missing");
-  const environment: Record<string, string> = { CODEX_ACCESS_TOKEN: "", CODEX_API_KEY: "", OPENAI_API_KEY: "" };
+  secretService = await createLinuxSecretService();
+  const environment: Record<string, string> = { ...secretService?.environment, CODEX_ACCESS_TOKEN: "", CODEX_API_KEY: "", OPENAI_API_KEY: "" };
   app = await createAppFixture({ name: "usage-limits", initialState: "conversation", windowDisplay: "primary", codexAppServerSource: nativeSource,
+    electronMainEntry: secretService?.electronMainEntry,
     claudeAuthSource: "process.exit(1);", additionalEnvironment: environment,
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const codexHome = join(testDirectory, "fixture-codex-home"); await mkdir(codexHome);
@@ -55,6 +65,15 @@ test("inspects pooled accounts, private details and composer limits in light, da
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false }); store.updateSettings({ theme: "light" }); store.close();
     } });
   await writeFile(testInfo.outputPath("fixture-ownership.json"), JSON.stringify({ testDirectory: app.testDirectory, launcherPid: app.electronApp.process().pid, workspace: app.workspaceDirectory }, null, 2));
+  if (secretService) {
+    const storage = await app.electronApp.evaluate(async ({ safeStorage }) => ({
+      backend: safeStorage.getSelectedStorageBackend(), available: await safeStorage.isAsyncEncryptionAvailable(),
+    }));
+    expect(storage).toEqual({ backend: "gnome_libsecret", available: true });
+    const path = testInfo.outputPath("secure-storage.json");
+    await writeFile(path, JSON.stringify(storage));
+    await testInfo.attach("secure-storage", { path, contentType: "application/json" });
+  }
   const page = app.page; await app.resizeWindow(1280, 820);
   await page.locator(".usage-popover-trigger").click();
   await page.getByRole("button", { name: "All provider limits", exact: true }).click();

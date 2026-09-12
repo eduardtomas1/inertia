@@ -74,6 +74,7 @@ interface AppFixtureOptions {
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
   codexAppServerSource?: string;
+  electronMainEntry?: string;
   codexResumeSource?: string;
   claudeAuthSource?: string; attachmentImportDelayMs?: number; attachmentCommitDelayMs?: number;
   githubCliSources?: {
@@ -786,7 +787,7 @@ export async function createAppFixture(
   });
   const rendererErrors: string[] = []; const startupDiagnostics: string[] = [];
   const launchOptions = {
-    args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
+    args: [options.electronMainEntry ?? ".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
     env: {
       ...process.env,
       NODE_ENV: "test",

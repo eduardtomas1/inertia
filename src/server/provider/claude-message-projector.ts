@@ -126,6 +126,8 @@ export class ClaudeMessageProjector {
         if (this.options.usesNativeAnthropic) {
           const rateLimit = parseClaudeRateLimitEvent(message);
           if (rateLimit) {
+            // Negotiated capability: the coordinator cancels a turn on unannounced metadata.
+            this.options.emitter.capability("rate-limits", true);
             this.options.emitter.rich({
               type: "metadata",
               metadata: { rateLimits: [rateLimit] },

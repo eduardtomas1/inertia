@@ -14,6 +14,8 @@ const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("permission"), permission: z.enum(["accessibility", "screen"]) }).strict(),
 ]);
 
+const UNCONFIRMED_DISABLE = "Snapshot cleanup is unconfirmed, and the disabled setting could not be saved. Snapshots may turn back on at the next launch.";
+
 export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
   registry(): AttachmentRegistry;
@@ -138,7 +140,7 @@ export function registerSnapshotIpc(options: {
           // A disable that cannot be fully confirmed must still not come back
           // on at the next launch from a stale saved preference.
           if (!request.enabled && (configured.state === null || cancellation.some(({ status }) => status === "rejected"))) {
-            await persistDisabled(request.shortcut);
+            if (!await persistDisabled(request.shortcut)) throw new SnapshotError(UNCONFIRMED_DISABLE);
           }
           if (configured.state === null) throw configured.error;
           requireRevoked(cancellation);
@@ -152,6 +154,9 @@ export function registerSnapshotIpc(options: {
             ]);
             // This session is off now; keep the saved preference from turning it back on.
             const persisted = await persistDisabled(request.shortcut);
+            if (!persisted && (stopped || cancellation.some(({ status }) => status === "rejected"))) {
+              throw new SnapshotError(UNCONFIRMED_DISABLE);
+            }
             if (stopped) throw stopped;
             requireRevoked(cancellation);
             throw new Error(persisted

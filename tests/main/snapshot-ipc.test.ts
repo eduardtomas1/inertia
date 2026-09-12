@@ -197,6 +197,28 @@ describe("snapshot destination and preference boundaries", () => {
     }
   });
 
+  it.each([
+    { enabling: false, failure: "shortcut" },
+    { enabling: false, failure: "capture" },
+    { enabling: true, failure: "shortcut" },
+    { enabling: true, failure: "capture" },
+  ])("warns about restart when saving and $failure cleanup both fail (enabling: $enabling)", async ({ enabling, failure }) => {
+    const { handler } = await fixture();
+    native.write.mockRejectedValue(new Error("write failed"));
+    native.clear.mockRejectedValueOnce(new Error("unlink failed"));
+    if (failure === "shortcut") {
+      if (enabling) native.configure.mockImplementationOnce(() => undefined);
+      native.configure.mockImplementationOnce(() => { throw new SnapshotError("Snapshot shortcut cleanup is unconfirmed."); });
+    } else {
+      native.revoke.mockRejectedValueOnce(new SnapshotError("Snapshot worker cleanup is unconfirmed."));
+    }
+    await expect(handler({}, { type: "configure", enabled: enabling, shortcut: "accelerator" })).rejects.toThrow(
+      /cleanup is unconfirmed.*may turn back on at the next launch/u,
+    );
+    expect(native.clear).toHaveBeenCalledWith("/private/fixture");
+    expect((await handler({}, { type: "state" })).enabled).toBe(false);
+  });
+
   it("disables capture if saving the enabled preference fails", async () => {
     const { handler } = await fixture(); native.write.mockRejectedValueOnce(new Error("write failed"));
     await expect(handler({}, { type: "configure", enabled: true, shortcut: "accelerator" })).rejects.toThrow("Snapshots has been disabled");

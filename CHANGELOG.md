@@ -80,6 +80,8 @@ The useful changes in each Inertia release, in plain language.
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication
   check settle its process cleanup while keeping cancellation final.
+  Completed checks retain their result while confirmed cleanup finishes,
+  instead of being incorrectly marked as timed out.
 - Cancelling a read-only Git inspection on Windows gives it a bounded chance
   to close normally, avoiding a termination race that could block new chats.
   Hung inspections still require confirmed process-tree cleanup.

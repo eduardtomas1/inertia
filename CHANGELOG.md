@@ -26,6 +26,12 @@ The useful changes in each Inertia release, in plain language.
 - Up and Down move through wrapped and multiline drafts normally. At the text
   boundaries, repeated presses recall older or newer prompts while preserving
   the unsent draft and edits.
+- Scratch prompts saved before this update can be copied from their own
+  recovery section. Original saved text and each chat's current draft stay
+  intact; keyboard selection waits for that section to load.
+- Cancelling a saved-message jump prevents its queued chat switch. Selecting
+  the current chat again while another switch is underway restores that choice
+  after the pending command finishes.
 
 ### Git and the desktop mascot
 
@@ -51,6 +57,16 @@ The useful changes in each Inertia release, in plain language.
 
 ### Providers and everyday controls
 
+- Usage now includes Limits, with reported quota windows, reset times, account
+  details and freshness. The composer opens the same cached view. Unsupported
+  or unverified information stays explicit instead of appearing as zero usage.
+- Optional CLIProxyAPI hubs show additional accounts without changing agent
+  routing. Equivalent verified accounts can be compared together, while
+  accounts with unknown identities stay separate. Management keys remain in
+  secure storage.
+- Supported Codex connections can use an existing reset credit after explicit
+  account confirmation. Uncertain results retain the original request for
+  retry; ambiguous local credential sources cannot redeem credits.
 - Claude turns tolerate large image pastes and supported tool results; raw
   output is bounded before parsing. Rate-limit updates no longer cancel a turn,
   and provider usage can refresh without restarting Inertia.
@@ -82,6 +98,9 @@ The useful changes in each Inertia release, in plain language.
   check settle its process cleanup while keeping cancellation final.
   Completed checks retain their result while confirmed cleanup finishes,
   instead of being incorrectly marked as timed out.
+- Successful Claude metadata reads let the SDK finish normally before proving
+  process cleanup. This prevents a completed background check from stopping
+  the local service; cancellation still remains final.
 - Cancelling a read-only Git inspection on Windows gives it a bounded chance
   to close normally, avoiding a termination race that could block new chats.
   Hung inspections still require confirmed process-tree cleanup.

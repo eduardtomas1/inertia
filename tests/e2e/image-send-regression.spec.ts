@@ -124,6 +124,10 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
 });
 
 test("native clipboard, dropped, and selected screenshots survive send and restart", async () => {
+  // Three native import/preview/send cycles plus a full restart consumed
+  // 44.6s on hosted Intel macOS before persisted previews were checked.
+  // Match comparable multi-stage scenarios; keep individual checks bounded.
+  test.setTimeout(75_000);
   const app = activeApp = await createAppFixture({
     name: "native-attachment-lifecycle",
     initialState: "conversation",

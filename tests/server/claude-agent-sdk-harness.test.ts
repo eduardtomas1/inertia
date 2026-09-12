@@ -581,8 +581,12 @@ describe("Claude Agent SDK harness", () => {
     let promptWasRead = false;
     let discoveryOptions: ClaudeOptions | undefined;
     const child = fakeClaudeChild();
+    child.stdin.once("finish", () => {
+      Object.assign(child, { exitCode: 0 });
+      child.emit("exit", 0, null); child.emit("close", 0, null);
+    });
     const spawnProcess = vi.fn(() => child) as unknown as typeof import("node:child_process").spawn;
-    const terminateProcessTree = vi.fn(async () => true);
+    const cleanupExitCodes: Array<number | null> = []; const terminateProcessTree = vi.fn(async () => { cleanupExitCodes.push(child.exitCode); return true; });
     const models = await readClaudeAgentSdkModels("/fake/claude", {}, "/workspace", 1_000, ({ prompt, options }) => {
       discoveryOptions = options;
       options?.spawnClaudeCodeProcess?.({
@@ -608,7 +612,7 @@ describe("Claude Agent SDK harness", () => {
           supportsFastMode: true,
         }],
         interrupt: async () => undefined,
-        close: () => undefined,
+        close: () => { child.stdin.end(); },
       }) as unknown as Query;
     }, { spawnProcess, terminateProcessTree });
 
@@ -628,7 +632,7 @@ describe("Claude Agent SDK harness", () => {
       }),
     );
     expect(terminateProcessTree).toHaveBeenCalledOnce();
-    expect(terminateProcessTree).toHaveBeenCalledWith(child, true);
+    expect(cleanupExitCodes).toEqual([0]);
     expect(models).toEqual([expect.objectContaining({
       id: "sonnet",
       label: "Sonnet",

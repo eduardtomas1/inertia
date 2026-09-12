@@ -137,6 +137,7 @@ export async function readClaudeAgentSdkMetadata(
   }
   let query: Query | undefined;
   let metadata: Awaited<ReturnType<typeof readClaudeAgentSdkMetadata>> = {};
+  let completed = false;
   let timer: NodeJS.Timeout | undefined;
   let rejectCancelled!: (error: Error) => void;
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -183,9 +184,18 @@ export async function readClaudeAgentSdkMetadata(
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
+    completed = modelsResult.status === "fulfilled" && limitsResult.status === "fulfilled";
   } finally {
-    signal?.removeEventListener("abort", cancel);
     if (timer) clearTimeout(timer);
+    if (completed && !abortController.signal.aborted && !ownedProcess.transportError()) {
+      // A successful metadata query has no prompt to cancel. Let the SDK
+      // send EOF and the provider finish before asking its guardian to stop.
+      // Match the pinned SDK's bounded two-second normal-close window.
+      release();
+      try { query?.close(); } catch { /* The final owned barrier still proves cleanup. */ }
+      await ownedProcess.waitForNaturalClose(2_000, signal);
+    }
+    signal?.removeEventListener("abort", cancel);
     ownedProcess.requestTermination(true);
     release();
     abortController.abort();

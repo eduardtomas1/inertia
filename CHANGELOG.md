@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.55 — 2026-09-09
+## 0.0.55 — 2026-09-12
 
 ### Find and share context
 
@@ -17,6 +17,9 @@ The useful changes in each Inertia release, in plain language.
   X11; Wayland capture is unavailable.
 - Disabling Snapshots cancels pending capture and attachment import. A revoked
   capture cannot attach or bring a window forward after re-enabling.
+- Same-named attachments with different contents are preserved, attachment
+  limits have visible feedback, and PDF charts remain available alongside
+  selectable text.
 - Successful context compaction leaves a saved timeline receipt, with token
   counts when the provider reports them. Codex compaction tolerates a brief delay
   before its completed turn appears in durable history.
@@ -38,14 +41,35 @@ The useful changes in each Inertia release, in plain language.
   rejected before a fetch can overwrite another remote's tracking refs.
 - Fetch respects configured branch exclusions, including patterns that span
   reference namespaces.
+- Push keeps the selected branch's commit even when a terminal changes the
+  checkout concurrently. Manual branch refresh reports failures visibly.
 - The mascot has pickup, suspended and landing poses, preserves the grab point,
   and supports repeated dragging and cancellation. Reduced motion remains
   supported; Wayland placement is controlled by the compositor.
+
+### Providers and everyday controls
+
+- Claude turns tolerate large image pastes and supported tool results; raw
+  output is bounded before parsing. Rate-limit updates no longer cancel a turn,
+  and provider usage can refresh without restarting Inertia.
+- Projects can set agent defaults and limits for delegated work. Cross-chat
+  context has stricter size and content checks before it reaches a provider.
+- Thread context menus expose common actions, and project menus stay open
+  through background discovery. Model selection offers runnable providers with
+  clearer choices and placement in short windows.
+- Choose independent light and dark palettes. Shared theme colors keep controls
+  and status indicators readable across the built-in themes.
+- Sidebar updates show progress, release notes and restart confirmation. Recent
+  attachments open previews, and offline Diagnostics offers actionable failure
+  details when the local service is unavailable.
 
 ### Reliability and maintenance
 
 - Linux startup retires completed discovery probes correctly. Repeated runtime
   recovery failures stop instead of restarting indefinitely.
+- macOS recovery can offer consent after a crash interrupts an ownership-journal
+  write, while malformed committed records remain blocked. Windows terminals
+  retain the latest requested size while their native session starts.
 - Each provider's completed model catalog appears independently. Settings
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication
@@ -55,6 +79,8 @@ The useful changes in each Inertia release, in plain language.
   Hung inspections still require confirmed process-tree cleanup.
 - Lifecycle certification rejects missing test suites, and cross-platform test
   fixtures publish their ownership receipts atomically.
+- Search handles empty saved messages, Snapshot disable failures report when a
+  setting may return after restart, and an already-selected Kimi Plan mode works.
 - Update Lucide React to 1.41.0, Claude Agent SDK to 0.3.261, OpenCode SDK to
   1.18.29, Anthropic SDK to 0.124.0, and Playwright to 1.63.0.
 - Patch the transitive Hono and js-yaml dependencies to 4.13.5 and 4.3.2,

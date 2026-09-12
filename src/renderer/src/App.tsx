@@ -861,14 +861,14 @@ export default function App(): React.JSX.Element {
   }, [settingsTarget, view]);
 
   const visibleError = actionError ?? connection.error;
-  useDiagnosticNavigation({
-    conversations: connection.snapshot?.conversations,
-    online: connection.status === "online",
+  useDiagnosticNavigation(
+    connection.snapshot?.conversations,
+    connection.status === "online",
     selectConversation,
-    showWorkspace: () => { setView("workspace"); setSidebarOpen(false); },
-    openSettings: (target) => { setSettingsTarget(target); navigateToView("settings"); },
+    () => { setView("workspace"); setSidebarOpen(false); },
+    (target) => { setSettingsTarget(target); navigateToView("settings"); },
     setActionError,
-  });
+  );
   const visibleConversationDetailState = conversationDetailState?.conversationId === conversation?.id
     ? conversationDetailState
     : null;

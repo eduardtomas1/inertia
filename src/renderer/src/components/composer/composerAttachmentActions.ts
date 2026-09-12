@@ -68,41 +68,27 @@ export function composerAttachmentActions({
   );
   const addAttachments = (
     incoming: readonly ChatAttachment[],
-    releaseRejected = true,
-    pendingPrivilegedCommit = false,
   ): string[] => {
     const permitted = running
       ? incoming.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
       : incoming;
-    const blockedAttachments = permitted.length === incoming.length
-      ? []
-      : incoming.filter(({ mimeType }) => chatAttachmentKind(mimeType) !== "image");
     const current = attachmentsRef.current;
-    const currentIds = new Set(current.map(({ id }) => id));
     const merged = mergeComposerAttachments(current, permitted);
     const acceptedIds = new Set(merged.attachments.map(({ id }) => id));
     if (merged.rejected.some(({ id }) => !acceptedIds.has(id))) reportAttachmentLimit();
-    const changed = merged.attachments.length !== current.length
-      || merged.attachments.some(
-        ({ id }, index) => id !== current[index]?.id,
-      );
+    // Merging preserves the current prefix and only appends accepted imports.
     const adoptedIds = merged.attachments
-      .filter(({ id }) => !currentIds.has(id))
+      .slice(current.length)
       .map(({ id }) => id);
-    if (pendingPrivilegedCommit && adoptedIds.length > 0) {
+    if (adoptedIds.length > 0) {
       const pending = new Set(pendingAttachmentIdsRef.current);
       for (const id of adoptedIds) pending.add(id);
       pendingAttachmentIdsRef.current = pending;
       setPendingAttachmentIds(pending);
+      markEditorChanged();
     }
-    if (changed) markEditorChanged();
     attachmentsRef.current = merged.attachments;
     setAttachments(() => merged.attachments);
-    if (releaseRejected) {
-      for (const attachment of [...blockedAttachments, ...merged.rejected]) {
-        void releaseAttachmentRef.current(attachment.id);
-      }
-    }
     return adoptedIds;
   };
 
@@ -152,7 +138,7 @@ export function composerAttachmentActions({
       await cancelPrivilegedLease(lease);
       return "cancelled";
     }
-    const adoptedIds = addAttachments(lease.attachments, false, true);
+    const adoptedIds = addAttachments(lease.attachments);
     if (adoptedIds.length === 0) {
       await cancelPrivilegedLease(lease);
       return selectionRemainsAuthorized(authority) ? "rejected" : "cancelled";

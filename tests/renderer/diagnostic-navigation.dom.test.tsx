@@ -45,12 +45,12 @@ function setup({ palette = false, detached = false, online = true, available = t
       setSuppressedMainConversationIds: vi.fn(), setSecondaryPaneFirst: vi.fn(),
       selectConversationCommand: select, updateSplitConversationId: vi.fn(), request: select, setActionError: error,
     });
-    useDiagnosticNavigation({
-      conversations: snapshot.conversations, online, selectConversation: navigation.selectConversation,
-      showWorkspace: () => { setView("workspace"); setSidebarOpen(false); },
-      openSettings: (target) => { setSection(target.section); projectNavigation.navigateToView("settings"); },
-      setActionError: error,
-    });
+    useDiagnosticNavigation(
+      snapshot.conversations, online, navigation.selectConversation,
+      () => { setView("workspace"); setSidebarOpen(false); },
+      (target) => { setSection(target.section); projectNavigation.navigateToView("settings"); },
+      error,
+    );
     return <>
       <output aria-label="Current view">{view}</output><output aria-label="Settings section">{section}</output>
       {sidebarOpen && <aside aria-label="Sidebar" />}

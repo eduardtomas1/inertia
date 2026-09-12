@@ -51,6 +51,19 @@ describe("model chooser placement evidence", () => {
     expect(modelChooserPlacementChecks(sample).anchored).toBe(false);
   });
 
+  it("judges the fit side in the visual viewport that production measures", () => {
+    // The layout viewport (innerHeight) is 15px taller than the visual one, so
+    // the frame would fit below by layout height but production must open it above.
+    const above = { ...geometry("above"), workspace: { top: 67, bottom: 2_000 } };
+    expect(modelChooserPlacementChecks({ ...above, viewportHeight: 905 }))
+      .toEqual({ correctSide: true, anchored: true, insideWorkspace: true });
+    expect(modelChooserPlacementChecks({ ...above, viewportHeight: 920 }).correctSide).toBe(false);
+    // An offset visual viewport moves the space below by the same distance.
+    const below = { ...geometry("below"), workspace: { top: 67, bottom: 2_000 } };
+    expect(modelChooserPlacementChecks({ ...below, viewportTop: 20, viewportHeight: 905 }))
+      .toEqual({ correctSide: true, anchored: true, insideWorkspace: true });
+  });
+
   it("still rejects a frame crossing its workspace boundary", () => {
     const sample = geometry("above");
     sample.frame.top = sample.workspace.top;

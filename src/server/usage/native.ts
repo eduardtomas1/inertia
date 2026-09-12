@@ -62,7 +62,7 @@ export class NativeUsageReader {
     }
     const context = await this.providers.codexControlContext(this.cwd);
     const identityBefore = await codexAccountIdentity(context.environment);
-    return await withCodexControlClient({ ...context, signal: this.signal }, async (client) => {
+    return await withCodexControlClient<UsageAccount>({ ...context, signal: this.signal }, async (client) => {
       const account = accountSchema.parse((await client.request("account/read", { refreshToken: false })).account);
       base.email = account?.email ?? null; base.plan = account?.planType ?? null;
       if (account?.type !== "chatgpt") return { ...base, windows: [], status: "unsupported", detail: "Subscription limits require a ChatGPT account; this authentication route does not expose them." };
@@ -80,7 +80,7 @@ export class NativeUsageReader {
       base.canReset = base.identityKey !== null && (base.credits?.availableCount ?? 0) > 0;
       return { ...base, status: base.windows.length ? "ready" : "unavailable", updatedAt: base.checkedAt,
         detail: !base.identityKey ? "Account identity could not be verified from the active credential store. Quota stays separate and reset redemption is unavailable." : base.windows.length ? null : "No quota windows were reported." };
-    });
+    }).finally(() => { context.installationUse.abandonBeforeSpawn(); });
   }
   async consume(confirmation: UsageResetConfirmation, expected: UsageAccount): Promise<UsageResetOutcome> {
     const context = await this.providers.codexControlContext(this.cwd);
@@ -92,6 +92,6 @@ export class NativeUsageReader {
       return usageResetOutcomeSchema.parse((await client.request("account/rateLimitResetCredit/consume", {
         idempotencyKey: confirmation.id, ...(confirmation.creditId ? { creditId: confirmation.creditId } : {}),
       })).outcome);
-    });
+    }).finally(() => { context.installationUse.abandonBeforeSpawn(); });
   }
 }

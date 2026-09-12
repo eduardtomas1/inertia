@@ -39,7 +39,7 @@ const budgets = {
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
-  deferredUsageLimitsJavaScript: 14 * kibibyte,
+  deferredUsageLimitsJavaScript: 15.5 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -84,8 +84,8 @@ const budgets = {
   // New optional editor/menu bytes have their own narrow caps above.
   // Update-state wiring and interactive recent attachments bring shared core
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
-  // Limits adds 2.4 KiB of eagerly validated IPC contracts and entry wiring;
-  // its 13.1 KiB optional UI has a separate ceiling, and first-load caps stay fixed.
+  // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
+  // Its complete optional closure is separately capped; first-load caps stay fixed.
   coreJavaScript: 2_003.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,

@@ -46,7 +46,7 @@ test("inspects pooled accounts, private details and composer limits in light, da
   });
   await new Promise<void>((resolve) => hub!.listen(0, "127.0.0.1", resolve));
   const address = hub.address(); if (!address || typeof address === "string") throw new Error("Hub fixture address missing");
-  const environment: Record<string, string> = {};
+  const environment: Record<string, string> = { CODEX_ACCESS_TOKEN: "", CODEX_API_KEY: "", OPENAI_API_KEY: "" };
   app = await createAppFixture({ name: "usage-limits", initialState: "conversation", windowDisplay: "primary", codexAppServerSource: nativeSource,
     claudeAuthSource: "process.exit(1);", additionalEnvironment: environment,
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
@@ -54,12 +54,18 @@ test("inspects pooled accounts, private details and composer limits in light, da
       await writeFile(join(codexHome, "auth.json"), JSON.stringify({ tokens: { account_id: "fixture-native-account" } })); environment.CODEX_HOME = codexHome;
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false }); store.updateSettings({ theme: "light" }); store.close();
     } });
+  await writeFile(testInfo.outputPath("fixture-ownership.json"), JSON.stringify({ testDirectory: app.testDirectory, launcherPid: app.electronApp.process().pid, workspace: app.workspaceDirectory }, null, 2));
   const page = app.page; await app.resizeWindow(1280, 820);
   await page.locator(".usage-popover-trigger").click();
   await page.getByRole("button", { name: "All provider limits", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Provider usage limits", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Provider usage limits", exact: true })).toHaveCount(0);
+  await page.locator(".usage-popover-trigger").click();
+  await page.getByRole("button", { name: "All provider limits", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Close provider limits", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".usage-popover-trigger")).toBeFocused();
   await page.getByRole("button", { name: "Usage", exact: true }).click();
   await page.getByRole("button", { name: "Limits", exact: true }).click();
   await expect(page.getByRole("button", { name: "Refresh limits", exact: true })).toBeEnabled();
@@ -72,6 +78,8 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await expect(page.getByRole("region", { name: "Codex limits", exact: true }).locator("h3")).toContainText("2 accounts");
   await page.locator(".limits-sources summary").click();
   const capture = async (name: string): Promise<void> => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path, animations: "disabled" }); await testInfo.attach(name, { path, contentType: "image/png" }); };
+  for (const button of await page.getByRole("button", { name: /^Dismiss .* quota notice$/ }).all()) await button.click();
+  await page.locator(".usage-view").evaluate((element) => element.scrollTo(0, 0));
   await app.expectNoViewportOverflow(); await capture("limits-light");
   await page.getByRole("button", { name: "Change theme (current: light)" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark"); await capture("limits-dark");
@@ -79,17 +87,23 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await codex.locator(".limits-account-trigger").first().focus(); await page.keyboard.press("Enter");
   await expect(page.getByText("Email hidden", { exact: false })).toBeVisible();
   await expect(page.getByText("work@example.test", { exact: true })).toHaveCount(0);
+  await codex.locator(".limits-account-trigger").first().evaluate((element) => element.scrollIntoView({ block: "start" }));
   await capture("limits-account-details");
   await page.getByRole("button", { name: "Use reset", exact: true }).click();
   await expect(page.getByRole("button", { name: "Confirm reset", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await app.resizeWindow(720, 900);
-  const navigation = page.getByRole("button", { name: "Toggle project navigation" }); if (await navigation.getAttribute("aria-pressed") === "true") await navigation.click();
+  const closeNavigation = page.getByRole("button", { name: "Close navigation", exact: true }).last();
+  if (await closeNavigation.isVisible()) await closeNavigation.click();
+  await page.locator(".usage-view").evaluate((element) => element.scrollTo(0, 0));
   await app.expectNoViewportOverflow(); await capture("limits-narrow");
   await app.resizeWindow(1280, 820);
   await page.getByRole("button", { name: /Change theme \(current: dark\)/ }).click();
   await app.restart();
   await app.page.getByRole("button", { name: "Usage", exact: true }).click(); await app.page.getByRole("button", { name: "Limits", exact: true }).click();
   await expect(app.page.getByRole("region", { name: "Codex limits", exact: true }).locator("h3")).toContainText("2 accounts");
+  await app.page.locator(".limits-sources summary").click(); await app.page.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(app.page.locator(".limits-source-row")).toHaveCount(0);
+  await expect(app.page.getByRole("region", { name: "Codex limits", exact: true }).locator("h3")).toContainText("1 account");
   expect(app.rendererErrors).toEqual([]);
 });

@@ -1,3 +1,6 @@
+import { backendSecretReferenceForProfile } from "../../node/backend-secret-reference";
+import { ProviderRuntimeError } from "../provider/contracts";
+import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../shared/provider-usage-limits";
 import { createHash, randomUUID } from "node:crypto";
 import type { ProviderInfo } from "../../shared/contracts";
 import { usageSourceInputSchema, usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation, type UsageResetOutcome, type UsageSource } from "../../shared/provider-usage-limits";
@@ -30,11 +33,15 @@ export class UsageLimitsService {
     const now = Date.now();
     return { checkedAt: this.checkedAt,
       sources: this.dependencies.repository.sources().map((source) => ({ ...source, error: this.sourceErrors.get(source.id) ?? null })),
-      accounts: this.accounts.map((account) => ({ ...account,
-        pendingReset: account.identityKey !== null && this.dependencies.repository.pending(account.identityKey) !== null,
+      accounts: this.accounts.map((account) => {
+        const pending = account.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
+        const incompatible = pending && pending.confirmation.creditId === null && account.id !== "native:codex";
+        return { ...account,
+        pendingReset: Boolean(pending && !incompatible),
+        ...(incompatible ? { canReset: false, detail: "A server-selected reset is pending on this computer. Check it through the original native Codex connection." } : {}),
         ...(account.status === "ready" && (now - Date.parse(account.updatedAt ?? "") > 180000 || account.windows.some((window) => window.resetsAt && Date.parse(window.resetsAt) <= now))
           ? { status: "stale" as const, canReset: false } : {}),
-      })),
+      }; }),
     };
   }
   private serial<T>(run: () => Promise<T>): Promise<T> {
@@ -56,7 +63,7 @@ export class UsageLimitsService {
       const existing = this.dependencies.repository.sources().find(({ id }) => id === source.id);
       // An address change must use a new vault slot, so it cannot forward an existing key to a new host.
       if (existing && existing.url !== source.url) throw new Error("Remove this hub and add its new address with a new management key.");
-      if (source.enabled && !(await this.dependencies.credentials?.status(`secret:${usageSourceProfileId(source.id)}`, this.dependencies.signal))?.hasSecret) throw new Error("Save a management key in secure storage first.");
+      if (source.enabled && !(await this.dependencies.credentials?.status(backendSecretReferenceForProfile(usageSourceProfileId(source.id)), this.dependencies.signal))?.hasSecret) throw new Error("Save a management key in secure storage first.");
       this.dependencies.repository.saveSource(source);
       this.accounts = this.accounts.filter((account) => !account.id.startsWith(`hub:${source.id}:`));
       this.checkedAt = null;
@@ -69,7 +76,7 @@ export class UsageLimitsService {
       this.accounts = this.accounts.filter((account) => !account.id.startsWith(`hub:${id}:`));
       for (const [key, route] of this.routes) if (route.source.id === id) this.routes.delete(key);
       this.sourceErrors.delete(id);
-      await this.dependencies.credentials?.forget(`secret:${usageSourceProfileId(id)}`, this.dependencies.signal);
+      await this.dependencies.credentials?.forget(backendSecretReferenceForProfile(usageSourceProfileId(id)), this.dependencies.signal);
       return this.snapshot();
     });
   }
@@ -98,7 +105,7 @@ export class UsageLimitsService {
     for (const source of this.dependencies.repository.sources()) {
       if (!source.enabled) continue;
       try {
-        const key = await this.dependencies.credentials?.resolve(`secret:${usageSourceProfileId(source.id)}`, signal);
+        const key = await this.dependencies.credentials?.resolve(backendSecretReferenceForProfile(usageSourceProfileId(source.id)), signal);
         if (!key) throw new Error();
         const auths = await this.hub.accounts(source, key, signal);
         for (let offset = 0; offset < auths.length; offset += 4) {
@@ -127,7 +134,7 @@ export class UsageLimitsService {
     const pending = account?.identityKey ? this.dependencies.repository.pending(account.identityKey) : null;
     if (!account?.identityKey || (!pending && !account.canReset)) throw new Error("Refresh this account's limits before using a reset.");
     if (pending && pending.confirmation.accountId !== accountId && account.status !== "ready") throw new Error("Refresh the new account route before checking the original reset.");
-    const creditId = pending?.confirmation.creditId ?? account.credits?.nextCreditId ?? null;
+    const creditId = pending ? pending.confirmation.creditId : account.credits?.nextCreditId ?? null;
     if (accountId.startsWith("hub:") && !creditId) throw new Error("This hub did not report a redeemable credit ID.");
     const creditKey = createHash("sha256").update(JSON.stringify([account.identityKey, creditId, account.windows, account.credits?.availableCount])).digest("hex");
     return this.dependencies.repository.prepare(creditKey, {
@@ -142,7 +149,7 @@ export class UsageLimitsService {
       if (!attempt) throw new Error("Confirm the account before using a reset.");
       if (attempt.outcome) return attempt.outcome;
       const confirmation = attempt.confirmation;
-      if (Date.parse(confirmation.expiresAt) < Date.now()) throw new Error("This confirmation expired. Select the account and confirm again.");
+      if (Date.parse(confirmation.expiresAt) <= Date.now()) throw new ProviderRuntimeError("invalid_input", USAGE_RESET_CONFIRMATION_EXPIRED);
       const account = this.accounts.find(({ id: accountId }) => accountId === confirmation.accountId);
       if (!account || account.identityKey !== confirmation.accountKey) throw new Error("The account changed. Refresh Limits before confirming again.");
       const route = this.routes.get(account.id);
@@ -154,7 +161,7 @@ export class UsageLimitsService {
           const source = this.dependencies.repository.sources().find(({ id: sourceId }) => sourceId === route.source.id);
           if (!source?.enabled) throw new Error();
           const signal = AbortSignal.any([this.dependencies.signal, AbortSignal.timeout(15000)]);
-          const key = await this.dependencies.credentials?.resolve(`secret:${usageSourceProfileId(source.id)}`, signal);
+          const key = await this.dependencies.credentials?.resolve(backendSecretReferenceForProfile(usageSourceProfileId(source.id)), signal);
           if (!key) throw new Error();
           const auth = (await this.hub.accounts(source, key, signal)).find((auth) => auth.id === route.auth.id);
           if (!auth || auth.disabled || auth.provider !== "codex" || !auth.id_token?.chatgpt_account_id || opaqueUsageIdentity("codex", auth.id_token.chatgpt_account_id) !== confirmation.accountKey) throw new Error();

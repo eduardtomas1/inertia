@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import type { ServerEvent } from "@shared/contracts";
-import { usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation } from "@shared/provider-usage-limits";
+import { USAGE_RESET_CONFIRMATION_EXPIRED, usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation } from "@shared/provider-usage-limits";
 import { deduplicateUsageAccounts, usagePools } from "@shared/usage-limits-projection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
@@ -32,29 +32,52 @@ function AccountDetails({ account, number, now, selected, onSelect, request, onR
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
+  const [renewRequired, setRenewRequired] = useState(false);
+  const expired = Boolean(confirmation && (renewRequired || Date.parse(confirmation.expiresAt) <= now));
   const id = useId();
+  const resetTrigger = useRef<HTMLButtonElement>(null);
+  const accountTrigger = useRef<HTMLButtonElement>(null);
+  const confirmationButton = useRef<HTMLButtonElement>(null);
+  const confirmationSection = useRef<HTMLElement>(null);
+  const focusAfterTransition = useRef<"confirmation" | "account" | null>(null);
+  useLayoutEffect(() => {
+    const target = focusAfterTransition.current;
+    if (target) (target === "confirmation" ? confirmationButton : accountTrigger).current?.focus();
+    focusAfterTransition.current = null;
+  }, [confirmation]);
+  const dismissConfirmation = (): void => {
+    if (confirmationSection.current?.contains(document.activeElement)) focusAfterTransition.current = "account";
+    setConfirmation(null); setUncertain(false);
+  };
   const prepare = async (): Promise<void> => {
+    if (busy) return;
     setBusy(true); setMessage(null);
     try {
       const result = resultEvent(await request({ type: "usage.reset.prepare", payload: { accountId: account.id } })).result;
       if (result.kind !== "usage.reset.confirmation") throw new Error();
-      setConfirmation(result.confirmation); setUncertain(account.pendingReset === true);
-    } catch { setMessage("Reset confirmation could not be prepared. Refresh this account and try again."); }
+      if (document.activeElement === resetTrigger.current || document.activeElement === confirmationButton.current) focusAfterTransition.current = "confirmation";
+      setConfirmation(result.confirmation); setUncertain(uncertain || account.pendingReset === true); setRenewRequired(false);
+    } catch { setMessage("Confirmation unavailable. Refresh this account and try again."); }
     finally { setBusy(false); }
   };
   const consume = async (): Promise<void> => {
-    if (!confirmation) return;
+    if (!confirmation || busy) return;
+    if (Date.parse(confirmation.expiresAt) <= Date.now()) { setRenewRequired(true); setMessage(USAGE_RESET_CONFIRMATION_EXPIRED); return; }
     setBusy(true); setMessage(null);
     try {
       const result = resultEvent(await request({ type: "usage.reset.confirm", payload: { confirmationId: confirmation.id, confirmed: true } })).result;
       if (result.kind !== "usage.reset.outcome") throw new Error();
       setMessage({ reset: "One reset was applied. Refreshing quota…", alreadyRedeemed: "This reset was already applied. Refreshing quota…", nothingToReset: "No eligible window needed a reset. No credit was used.", noCredit: "The provider reported no available reset credit." }[result.outcome]);
-      setConfirmation(null); setUncertain(false); onRefresh();
-    } catch { setUncertain(true); setMessage("The result is uncertain. Retry the same attempt to check it safely. Do not start another reset."); }
+      dismissConfirmation(); onRefresh();
+    } catch (error) {
+      if (error instanceof Error && error.message === USAGE_RESET_CONFIRMATION_EXPIRED) {
+        setRenewRequired(true); setMessage(USAGE_RESET_CONFIRMATION_EXPIRED);
+      } else { setUncertain(true); setMessage("The result is uncertain. Retry this attempt; do not start another reset."); }
+    }
     finally { setBusy(false); }
   };
   return <div className="limits-account">
-    <button type="button" className="limits-account-trigger" aria-expanded={selected} aria-controls={id} onClick={onSelect}>
+    <button ref={accountTrigger} type="button" className="limits-account-trigger" aria-expanded={selected} aria-controls={id} onClick={onSelect}>
       <span className="limits-account-number">{number}</span><strong>{account.label}</strong><span>{account.plan ?? "Plan not reported"}</span><span className={`limits-state is-${account.status}`}>{account.status}</span>
       <span>{account.credits ? `${account.credits.availableCount} reset${account.credits.availableCount === 1 ? "" : "s"}` : ""}</span>
     </button>
@@ -63,18 +86,19 @@ function AccountDetails({ account, number, now, selected, onSelect, request, onR
         <div><dt>Plan</dt><dd>{account.plan ?? "Not reported"}</dd></div><div><dt>Seen via</dt><dd>{account.sources.join(" · ")}</dd></div>
         <div><dt>Updated</dt><dd>{dateLabel(account.updatedAt)}</dd></div>
         <div><dt>Last checked</dt><dd>{dateLabel(account.checkedAt)}</dd></div></dl>
-      {!account.identityKey && <p>Account identity is unverified. This account is excluded from pooled averages to avoid counting it twice.</p>}
+      {!account.identityKey && <p>Identity unverified; this account stays separate to avoid double counting.</p>}
       {account.detail && <p>{account.detail}</p>}
       {account.windows.map((window) => <div className="limits-detail-window" key={window.id}><strong>{window.label}</strong><span>{percent(window.remainingPercent)} remaining</span><span>{resetCountdown(window.resetsAt, now)}</span><time>{dateLabel(window.resetsAt)}</time></div>)}
       {account.credits ? <div className="limits-credits"><span><strong>{account.credits.availableCount} banked reset{account.credits.availableCount === 1 ? "" : "s"}</strong><small>{account.credits.expiresAt ? `Next expires ${dateLabel(account.credits.expiresAt)}` : "Expiry not reported"}</small></span>
         {!account.canReset && account.credits.availableCount > 0 && <small>Refresh to verify this account and its reset capability.</small>}
-      </div> : <p>Reset credits are not reported by this connection.</p>}
-      {(account.canReset || account.pendingReset) && !confirmation && <button type="button" disabled={busy || !online} onClick={() => void prepare()}>{account.pendingReset ? "Check pending reset" : "Use reset"}</button>}
-      {confirmation && <section className="limits-reset-confirmation" aria-label="Confirm account reset">
+      </div> : <p>Reset credits not reported.</p>}
+      {(account.canReset || account.pendingReset) && !confirmation && <button ref={resetTrigger} type="button" disabled={!online} aria-disabled={busy || !online} onClick={() => void prepare()}>{account.pendingReset ? "Check pending reset" : "Use reset"}</button>}
+      {confirmation && <section ref={confirmationSection} className="limits-reset-confirmation" aria-label="Confirm account reset">
         <strong>{uncertain ? "Check the original reset attempt?" : "Use one banked Codex reset?"}</strong><p>{confirmation.email ?? confirmation.accountLabel} · {confirmation.plan ?? "Plan not reported"} · {account.sources.join(" · ")}</p>
-        <p>{uncertain ? "This retries the original account-bound request with the same idempotency key. It does not start a new reset attempt." : "This asks Codex to reset eligible quota windows for this account. It can consume one credit."}</p>
-        <button type="button" disabled={busy || !online} onClick={() => void consume()}>{busy ? "Checking…" : uncertain ? "Retry same reset" : "Confirm reset"}</button>
-        <button type="button" disabled={busy} onClick={() => { setConfirmation(null); setUncertain(false); }}>Cancel</button>
+        <p>{uncertain ? "This checks the original request for this account. It will not select a new credit." : "This asks Codex to reset eligible quota windows for this account. It can consume one credit."}</p>
+        {expired && <p>Confirmation expired. Renew it to check the account again.</p>}
+        <button ref={confirmationButton} type="button" disabled={!online} aria-disabled={busy || !online} onClick={() => void (expired ? prepare() : consume())}>{busy ? "Checking…" : expired ? "Renew confirmation" : uncertain ? "Retry same reset" : "Confirm reset"}</button>
+        <button type="button" disabled={busy} onClick={dismissConfirmation}>Cancel</button>
       </section>}
       {message && <p role="status">{message}</p>}
     </div>}
@@ -108,8 +132,8 @@ function UsageSources({ snapshot, request, onChange, online }: { snapshot: Usage
     catch { setError("Hub removal could not be confirmed. Refresh to check."); }
     finally { setBusy(false); }
   };
-  return <details className="limits-sources"><summary>Usage sources <span>{snapshot?.sources.length ?? 0} hubs</span></summary>
-    <p>Optional CLIProxyAPI hubs add account usage. They do not change where agents run. Management keys stay in secure credential storage.</p>
+  return <details className="limits-sources"><summary>Usage sources <span>{snapshot?.sources.length ?? 0} hub{snapshot?.sources.length === 1 ? "" : "s"}</span></summary>
+    <p>CLIProxyAPI hubs add usage without changing agent routing. Keys stay in secure storage.</p>
     {snapshot?.sources.map((source) => <div className="limits-source-row" key={source.id}><span><strong>{source.label}</strong><small>{source.url} · {source.enabled ? "Enabled" : "Disabled"}</small>{source.error && <small role="status">{source.error}</small>}</span><button type="button" disabled={busy || !online} onClick={() => void remove(source.id)}>Remove</button></div>)}
     <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <label>Hub name<input value={label} maxLength={200} onChange={(event) => setLabel(event.target.value)} placeholder="Home hub" /></label>
@@ -133,7 +157,7 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
       const result = resultEvent(await request({ type: "usage.limits.get", payload: { refresh, force } })).result;
       if (result.kind !== "usage.limits") throw new Error();
       if (alive.current) { setSnapshot(result.snapshot); publish?.(result.snapshot); setNow(Date.now()); }
-    } catch { if (alive.current) setError("Limits could not be refreshed. Previously reported values may be out of date."); }
+    } catch { if (alive.current) setError("Refresh failed. Previously reported limits may be stale."); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }, [request, status, publish]);
   useEffect(() => {
@@ -159,7 +183,7 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
     <p className="limits-explanation">Remaining percentages describe provider quota. Account averages give each equivalent account equal weight; they do not estimate tokens or combined plan capacity.</p>
     {status !== "online" && <p role="status">The local service is offline. Displayed limits may be stale.</p>}
     {error && <p role="alert">{error}</p>}
-    {accounts.length === 0 && <p className="limits-empty">{busy ? "Reading provider accounts…" : "No account limits loaded. Refresh to check configured providers or connect a usage hub."}</p>}
+    {accounts.length === 0 && <p className="limits-empty">{busy ? "Reading provider accounts…" : "No limits loaded. Refresh configured providers or connect a usage hub."}</p>}
     {providerIds.map((providerId) => {
       const providerAccounts = accounts.filter((account) => account.providerId === providerId);
       return <section className="limits-provider" key={providerId} aria-label={`${providerAccounts[0]!.providerLabel} limits`}>
@@ -177,19 +201,19 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
         <div className="limits-accounts">{providerAccounts.map((account, index) => <AccountDetails key={account.id} account={account} number={index + 1} now={now} selected={selected === account.id} onSelect={() => setSelected(selected === account.id ? null : account.id)} request={request} onRefresh={() => void load(true, true)} online={status === "online"} />)}</div>
       </section>;
     })}
-    <footer className="limits-footer">Last refresh {dateLabel(snapshot?.checkedAt ?? null)}. Passed reset times remain due until the provider confirms new quota.</footer>
+    <footer className="limits-footer">Last refresh {dateLabel(snapshot?.checkedAt ?? null)}. Reset times stay due until the provider reports new quota.</footer>
     <UsageSources snapshot={snapshot} request={request} online={status === "online"} onChange={() => void load(true, true)} />
   </section>;
 }
 
-export function UsageLimitsDialog({ onClose }: { onClose(): void }): React.JSX.Element | null {
+export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void; returnFocusTo?: HTMLElement | null }): React.JSX.Element | null {
   const context = useUsageLimitsContext(); const dialog = useRef<HTMLElement>(null);
   useNativePreviewSuspension(true);
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previous = returnFocusTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     dialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };
-  }, []);
+  }, [returnFocusTo]);
   if (!context) return null;
   return <div className="dialog-backdrop limits-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-label="Provider usage limits" className="limits-dialog" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } else trapModalFocus(event, event.currentTarget); }}>

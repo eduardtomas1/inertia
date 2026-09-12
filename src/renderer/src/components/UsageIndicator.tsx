@@ -358,7 +358,7 @@ export function UsageIndicator({
           </header>
 
           <div className="usage-popover-content">
-            {limitsContext && <button type="button" className="usage-limits-shortcut" onClick={() => { closePopover(true); limitsContext.open(); }}>All provider limits</button>}
+            {limitsContext && <button type="button" className="usage-limits-shortcut" onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}>All provider limits</button>}
             <section className="usage-popover-section" aria-labelledby={`${reactId}-context-heading`}>
               <div className="usage-popover-section-heading">
                 <strong id={`${reactId}-context-heading`}>Context</strong>

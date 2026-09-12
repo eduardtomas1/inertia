@@ -6,8 +6,8 @@ import { parseCodexRateLimits } from "../codex-metadata";
 import { parseClaudeRateLimits } from "../provider/claude-agent-sdk-metadata";
 
 const text = z.string().min(1).max(256);
-const authSchema = z.object({ id: text, auth_index: text, provider: text, email: text.optional(), disabled: z.boolean().optional(),
-  id_token: z.object({ chatgpt_account_id: text.optional(), chatgpt_plan_type: text.optional() }).optional() });
+const authSchema = z.object({ id: text, auth_index: text, provider: z.string().min(1).max(200), email: text.optional(), disabled: z.boolean().optional(),
+  id_token: z.object({ chatgpt_account_id: text.optional(), chatgpt_plan_type: z.string().min(1).max(200).optional() }).optional() });
 type HubAuth = z.infer<typeof authSchema>;
 export const opaqueUsageIdentity = (provider: string, id: string): string => createHash("sha256").update(`${provider}\0${id}`).digest("hex");
 const CODEX_BASE = "https://chatgpt.com/backend-api/wham";
@@ -90,7 +90,7 @@ export class CliproxyUsageClient {
         base.windows = usageWindows(parseClaudeRateLimits({ rate_limits_available: true, rate_limits: { ...body, model_scoped } }));
       } else {
         const window = z.object({ used_percent: z.number().min(0).max(100), reset_at: z.number().nullable().optional(), limit_window_seconds: z.number().positive().max(31536000).optional() }).nullable().optional();
-        const body = z.object({ plan_type: text.optional(), rate_limit: z.object({ primary_window: window, secondary_window: window }).nullable() }).parse(await this.api(source, key, auth, `${CODEX_BASE}/usage`, signal));
+        const body = z.object({ plan_type: z.string().min(1).max(200).optional(), rate_limit: z.object({ primary_window: window, secondary_window: window }).nullable() }).parse(await this.api(source, key, auth, `${CODEX_BASE}/usage`, signal));
         const convert = (value: z.infer<typeof window>) => value ? { usedPercent: value.used_percent, resetsAt: value.reset_at, windowDurationMins: value.limit_window_seconds === undefined ? undefined : value.limit_window_seconds / 60 } : null;
         base.plan = body.plan_type ?? base.plan;
         base.windows = usageWindows(parseCodexRateLimits({ rateLimits: { limitId: "codex", primary: convert(body.rate_limit?.primary_window), secondary: convert(body.rate_limit?.secondary_window) } }));

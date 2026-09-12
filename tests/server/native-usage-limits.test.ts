@@ -11,19 +11,25 @@ import type { UsageResetConfirmation } from "../../src/shared/provider-usage-lim
 import { usageAccount } from "../helpers/usage-limits";
 
 const protocol = vi.hoisted(() => ({ store: "file" as string | null, request: vi.fn<(method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>>() }));
-vi.mock("../../src/server/codex/control-client", () => ({ CODEX_CONTROL_MAX_FRAME_BYTES: 4194304, CODEX_CONTROL_MAX_PROTOCOL_BYTES: 16777216, withCodexControlClient: async (_options: unknown, callback: (client: { request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> }) => unknown) => callback({ request: (method, params) => method === "config/read" ? Promise.resolve({ config: { cli_auth_credentials_store: protocol.store } }) : protocol.request(method, params) }) }));
+vi.mock("../../src/server/codex/control-client", () => ({ CODEX_CONTROL_MAX_FRAME_BYTES: 4194304, CODEX_CONTROL_MAX_PROTOCOL_BYTES: 16777216, withCodexControlClient: async (options: { signal?: AbortSignal }, callback: (client: { request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> }) => unknown) => { options.signal?.throwIfAborted(); return callback({ request: (method, params) => method === "config/read" ? Promise.resolve({ config: { cli_auth_credentials_store: protocol.store } }) : protocol.request(method, params) }); } }));
 const dirs: string[] = [];
 afterEach(async () => { vi.clearAllMocks(); protocol.store = "file"; for (const path of dirs.splice(0)) await rm(path, { recursive: true, force: true }); });
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "inertia-native-usage-")); dirs.push(directory);
   await writeFile(join(directory, "auth.json"), JSON.stringify({ tokens: { account_id: "synthetic-account" } }));
-  const providers = { codexControlContext: async () => ({ executable: "/fixture/codex", environment: { CODEX_HOME: directory }, cwd: directory }) } as unknown as ProviderManager;
+  const controller = new AbortController(); const abandonBeforeSpawn = vi.fn(() => true);
+  const providers = { codexControlContext: async () => ({ executable: "/fixture/codex", environment: { CODEX_HOME: directory }, cwd: directory, installationUse: { abandonBeforeSpawn } }) } as unknown as ProviderManager;
   protocol.request.mockImplementation(async (method) => method === "account/read" ? { account: { type: "chatgpt", email: "fixture@example.test", planType: "pro" } }
     : method === "account/rateLimitResetCredit/consume" ? { outcome: "reset" }
       : { rateLimits: { primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2000000000 } }, rateLimitResetCredits: { availableCount: 2, credits: null } });
-  return { directory, reader: new NativeUsageReader(providers, directory, new AbortController().signal), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
+  return { directory, controller, abandonBeforeSpawn, reader: new NativeUsageReader(providers, directory, controller.signal), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
 }
 describe("native Codex limits and reset protocol", () => {
+  it("abandons the exact unaccepted installation transfer when cancellation precedes spawn", async () => {
+    const f = await fixture(); f.controller.abort();
+    await expect(f.reader.read(f.info)).rejects.toThrow();
+    expect(f.abandonBeforeSpawn).toHaveBeenCalledOnce(); expect(protocol.request).not.toHaveBeenCalled();
+  });
   it("reads native counts without consuming and supports account-bound server credit selection", async () => {
     const f = await fixture(); const account = await f.reader.read(f.info);
     expect(account).toMatchObject({ status: "ready", credits: { availableCount: 2, nextCreditId: null }, canReset: true, identityKey: opaqueUsageIdentity("codex", "synthetic-account") });

@@ -67,7 +67,8 @@ managed by the hub.
 ## Deliberate reset redemption
 
 Choose **Use reset** in an account's details, check the displayed account and
-plan, then choose **Confirm reset**. Inspection, refresh, chat sends and startup
+plan, then choose **Confirm reset**. Expired confirmations offer **Renew
+confirmation** before another attempt. Inspection, refresh, chat sends and startup
 never redeem credits automatically.
 
 Native Codex can select a credit server-side when it reports only an available
@@ -80,7 +81,9 @@ If the result is uncertain, **Retry same reset** checks the original attempt.
 The attempt survives a renderer reconnect and runtime restart. **Check pending
 reset** remains available even when a fresh read reports zero credits. Removing
 and reconnecting a hub can rebind the attempt only to a freshly verified copy of
-the same provider account; it retains the original credit and retry key. A switched account
+the same provider account; it retains the original credit and retry key. A
+server-selected native attempt stays on its compatible native connection even
+when a hub reports that account with a credit ID. A switched account
 is rejected before redemption. `nothingToReset` and `noCredit` are shown plainly;
 only the provider's `reset` or `alreadyRedeemed` response establishes success.
 Quota is refreshed after an outcome instead of assuming windows were refilled.

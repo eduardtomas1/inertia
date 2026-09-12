@@ -1,4 +1,5 @@
 import { z } from "zod";
+export const USAGE_RESET_CONFIRMATION_EXPIRED = "This reset confirmation expired. Renew the confirmation before retrying.";
 
 const label = z.string().min(1).max(200);
 const identity = z.string().min(1).max(256);

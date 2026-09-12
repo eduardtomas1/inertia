@@ -7,7 +7,9 @@ export function deduplicateUsageAccounts(accounts: UsageAccount[]): UsageAccount
     const key = account.identityKey ? `${account.providerId}:${account.identityKey}` : account.id;
     const prior = result.get(key);
     if (!prior) { result.set(key, account); continue; }
-    const preferred = account.status === "ready" && prior.status !== "ready"
+    const preferred = account.pendingReset !== prior.pendingReset && (account.pendingReset || prior.pendingReset)
+      ? account.pendingReset ? account : prior
+      : account.status === "ready" && prior.status !== "ready"
       || account.status === prior.status && Date.parse(account.updatedAt ?? "") > Date.parse(prior.updatedAt ?? "")
       ? account : prior;
     result.set(key, { ...preferred, sources: [...new Set([...prior.sources, ...account.sources])] });

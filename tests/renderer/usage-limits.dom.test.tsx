@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
@@ -47,6 +47,17 @@ describe("Limits interface", () => {
     await user.click(await screen.findByRole("button", { name: "Retry same reset" }));
     const sent = f.request.mock.calls.filter(([command]) => command.type === "usage.reset.confirm");
     expect(sent).toHaveLength(2); expect(sent[0]).toEqual(sent[1]);
+  });
+  it("does not steal focus when the user moves during reset preparation", async () => {
+    const f = fixture(); render(<UsageLimitsPanel status="online" request={f.request} />);
+    fireEvent.click(await screen.findByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
+    const prepared = await f.request.getMockImplementation()!({ type: "usage.reset.prepare", payload: { accountId: f.account.id } });
+    let resolve!: (event: ServerEvent) => void; const pending = new Promise<ServerEvent>((done) => { resolve = done; });
+    f.request.mockImplementationOnce(async () => pending);
+    const launch = screen.getByRole("button", { name: "Use reset" }); launch.focus(); fireEvent.click(launch);
+    const moved = screen.getByRole("button", { name: "Reveal" }); moved.focus();
+    await act(async () => { resolve(prepared); await pending; });
+    expect(screen.getByRole("button", { name: "Confirm reset" })).toBeVisible(); expect(moved).toHaveFocus();
   });
   it("does not refresh from the composer until explicitly requested", async () => {
     const f = fixture(); render(<UsageLimitsPanel status="online" request={f.request} compact />);

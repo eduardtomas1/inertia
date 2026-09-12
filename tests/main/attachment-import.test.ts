@@ -484,7 +484,7 @@ describe("privileged attachment import validation", () => {
     }
   });
 
-  it("rejects an image whose decoded canvas exceeds the safe dimension bound", () => {
+  it("reports a well-formed image beyond the safe dimension bound as too large", () => {
     const oversizedGif = Buffer.from(gif);
     oversizedGif.writeUInt16LE(8_193, 6);
 
@@ -492,7 +492,7 @@ describe("privileged attachment import validation", () => {
       name: "oversized.gif",
       mimeType: "image/gif",
       data: oversizedGif,
-    })).toThrow(/content does not match/u);
+    })).toThrow("This image is too large (8193×1 pixels, 0.1 MP).");
   });
 
   it("rejects PDFs with deceptive cross-references, trailers, or page trees", () => {

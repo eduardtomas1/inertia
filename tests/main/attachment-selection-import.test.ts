@@ -22,6 +22,8 @@ import {
   AttachmentRegistry,
   type AttachmentImportWriter,
 } from "../../src/main/attachment-registry";
+import { imageAttachmentTooLargeMessage } from "../../src/main/attachment-image-validation";
+import { AttachmentImportValidationError } from "../../src/main/attachment-import-file";
 import type { ChatAttachment } from "../../src/shared/contracts";
 import { validXlsxFixture } from "../fixtures/attachments/malicious-structures";
 
@@ -258,5 +260,27 @@ describe("native attachment selection streaming", () => {
 
     expect(sanitized.message).toBe("Attachments could not be added safely.");
     expect(sanitized.message).not.toContain(privatePath);
+  });
+
+  it("passes the exact image-too-large message and nothing resembling it", () => {
+    const message = imageAttachmentTooLargeMessage(8_000, 5_001);
+    expect(privacySafeAttachmentImportError(
+      new AttachmentImportValidationError("image-too-large", {
+        width: 8_000,
+        height: 5_001,
+      }),
+    ).message).toBe(message);
+    expect(privacySafeAttachmentImportError(new Error(message)).message)
+      .toBe(message);
+
+    for (const spoofed of [
+      `${message} /Users/person/secret.png`,
+      message.replace("8000", "/Users/person/secret.png"),
+      message.replace("8000×5001", "8000x5001"),
+      `Error: ${message}`,
+    ]) {
+      expect(privacySafeAttachmentImportError(new Error(spoofed)).message)
+        .toBe("Attachments could not be added safely.");
+    }
   });
 });

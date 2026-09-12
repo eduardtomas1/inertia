@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import type { UtilityProcess } from "electron";
 import { describe, expect, it, vi } from "vitest";
 
+import { imageAttachmentTooLargeMessage } from "../../src/main/attachment-image-validation";
 import type {
   AttachmentImportFileOperation,
   AttachmentImportValidationReceipt,
@@ -107,6 +108,53 @@ describe("supervised attachment import utility", () => {
       "Attachment content does not match its safe file type.",
     );
     await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("surfaces an image-too-large rejection with its exact message", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "attachment-import.result",
+      operationId: operationId(child),
+      ok: false,
+      code: "image-too-large",
+      width: 8_000,
+      height: 5_001,
+    });
+    child.emit("exit", 1);
+
+    await expect(running.result).rejects.toMatchObject({
+      code: "image-too-large",
+      message: imageAttachmentTooLargeMessage(8_000, 5_001),
+    });
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("kills a producer that reports unbounded image dimensions", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "attachment-import.result",
+      operationId: operationId(child),
+      ok: false,
+      code: "image-too-large",
+      width: 2 ** 40,
+      height: 5_001,
+    });
+    expect(child.kill).toHaveBeenCalled();
+    child.emit("exit", 1);
+
+    await expect(running.result).rejects.toThrow(
+      "Attachment validation returned an invalid result.",
+    );
   });
 
   it("kills malformed and duplicate result producers", async () => {

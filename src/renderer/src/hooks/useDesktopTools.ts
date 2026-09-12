@@ -62,6 +62,19 @@ export function preflightComposerAttachmentFiles(
   }
 }
 
+// Electron rethrows main-process IPC errors as
+// "Error invoking remote method '<channel>': Error: <message>".
+const ELECTRON_IPC_ERROR_PREFIX =
+  /^Error invoking remote method '[^']+': (?:[A-Za-z]*Error: )?/u;
+
+/** Shows an attachment import failure without Electron's IPC wrapper text. */
+export function attachmentImportErrorMessage(error: unknown): string {
+  const message = error instanceof Error
+    ? error.message.replace(ELECTRON_IPC_ERROR_PREFIX, "").trim()
+    : "";
+  return message || "Attachments could not be added.";
+}
+
 export interface ComposerAttachmentImportBatch {
   begin(): Promise<string>;
   importOne(
@@ -188,11 +201,7 @@ export function useDesktopTools({
           );
           settled = true;
         } catch (error) {
-          setActionError(
-            error instanceof Error
-              ? error.message
-              : "Attachments could not be added.",
-          );
+          setActionError(attachmentImportErrorMessage(error));
           throw error;
         }
       },
@@ -217,11 +226,7 @@ export function useDesktopTools({
         const prepared = await window.inertia.selectAttachments(mode);
         return prepared ? composerAttachmentLease(prepared) : null;
       } catch (error) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "Attachments could not be added.",
-        );
+        setActionError(attachmentImportErrorMessage(error));
         return null;
       }
     },
@@ -243,11 +248,7 @@ export function useDesktopTools({
         );
         return composerAttachmentLease(prepared);
       } catch (error) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "Attachments could not be added.",
-        );
+        setActionError(attachmentImportErrorMessage(error));
         return null;
       }
     },

@@ -302,6 +302,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   const terminals = new TerminalManager({
+    windowsTerminalAuthority: options.windowsTerminalAuthority,
     onOwnedProcessCleanupUnconfirmed:
       options.onOwnedProcessCleanupUnconfirmed,
   });

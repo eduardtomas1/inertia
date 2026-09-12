@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
-public static class InertiaRuntimeJob {
+public static partial class InertiaRuntimeJob {
   [StructLayout(LayoutKind.Sequential)]
   private struct STARTUPINFO {
     public Int32 cb;
@@ -2451,6 +2451,12 @@ try {
     ) return Failure("self-integrity", 23, 0);
     using (var executable = OpenVerifiedExecutable(arguments[arguments.Length - 1])) {
       if (executable == null) return Failure("self-integrity", 23, 0);
+      if (String.Equals(arguments[0], "terminal-launch", StringComparison.Ordinal)) {
+        return arguments.Length == 5 ? TerminalLaunch(arguments[1], arguments[2], arguments[3]) : 24;
+      }
+      if (String.Equals(arguments[0], "terminal-watch", StringComparison.Ordinal)) {
+        return arguments.Length == 7 ? TerminalWatch(arguments) : 24;
+      }
       if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
         return arguments.Length == 3 ? Recover(arguments[1]) : 24;
       }

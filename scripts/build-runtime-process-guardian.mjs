@@ -127,6 +127,7 @@ async function buildWindowsGuardian(runCompiler, runBootstrapLeaf) {
     "/reference:System.dll",
     "/reference:System.Core.dll",
     sourcePath,
+    join(root, "native", "runtime-process-guardian", "windows-terminal.cs"),
   ];
   const environment = {
     PATH: win32.dirname(compiler),

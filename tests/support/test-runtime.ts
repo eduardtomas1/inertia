@@ -1,3 +1,4 @@
+import { testWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { chmodSync, mkdirSync } from "node:fs";
 
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
@@ -22,7 +23,7 @@ export async function startTestRuntime(options: RuntimeOptions): Promise<Running
   ) {
     throw new Error("The test runtime generation lease could not be published.");
   }
-  const runtime = await startRuntime(options);
+  const runtime = await startRuntime({ windowsTerminalAuthority: testWindowsTerminalAuthority(), ...options });
   await runtime.startPostReadyWork();
   return runtime;
 }

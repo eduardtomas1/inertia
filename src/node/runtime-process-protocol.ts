@@ -1,3 +1,5 @@
+import type { RuntimeWorkerOptions } from "./runtime-worker-options";
+import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
@@ -49,7 +51,6 @@ import {
   parseRuntimeRecoveryWorkerEvent,
   parseRuntimeRecoveryWorkerOptions,
   type RuntimeRecoveryWorkerEvent,
-  type RuntimeRecoveryWorkerOptions,
 } from "./runtime-recovery-process-protocol.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
 import { parseRuntimeStartupFailureEvent, type RuntimeStartupFailureEvent } from "../shared/runtime-startup-diagnostics";
@@ -64,36 +65,7 @@ export type { RuntimeShutdownUnconfirmedReason } from "./runtime-shutdown-protoc
 export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
-export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
-  dataDirectory: string;
-  defaultWorkspacePath: string;
-  enableProviders: boolean;
-  runtimeGenerationId: string;
-  systemBootId: string;
-  confirmedTerminatedRuntimeGenerationIds?: readonly string[];
-  /** Optional trusted desktop override; never accepted from the renderer. */
-  codexBinaryPath?: string;
-  /** Main-owned import root used to revalidate brokered attachment capabilities. */
-  attachmentRoot?: string;
-  /** Safe configuration only; credential values remain in the main-process vault. */
-  kimiClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
-  /** Test-only packaged-runtime proof that the native PDF stack can execute. */
-  packageSmokePdf?: {
-    inputPath: string;
-    resultPath: string;
-  };
-  /** Test-only packaged proof for fuse-safe durable image retention. */
-  packageSmokeImage?: {
-    inputPath: string;
-    resultPath: string;
-  };
-  /** Privileged deterministic fault injection used by lifecycle tests only. */
-  recoveryImportFault?: {
-    phase: "after-staging-publish" | "during-message-import";
-    markerPath: string;
-    stallMs: number;
-  };
-}
+export type { RuntimeWorkerOptions } from "./runtime-worker-options";
 export interface RuntimePrivateConnectPromptPreparation {
   preparationId: string;
 }
@@ -545,6 +517,8 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   if (value.type !== "runtime.start" || Object.keys(value).length !== 2 || !plainObject(value.options)) return null;
   const options = value.options;
   const optionKeys = Object.keys(options);
+  const hasWindowsTerminalAuthority = Object.hasOwn(options, "windowsTerminalAuthority");
+  const windowsTerminalAuthority = parseWindowsTerminalAuthority(options.windowsTerminalAuthority);
   const hasKimiProfiles = Object.hasOwn(options, "kimiClaudeProfiles");
   const hasCodexBinaryPath = Object.hasOwn(options, "codexBinaryPath");
   const hasAttachmentRoot = Object.hasOwn(options, "attachmentRoot");
@@ -571,6 +545,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     || !hasSystemBootId
     || recoveryOptions === null
     || optionKeys.length !== 5
+      + Number(hasWindowsTerminalAuthority)
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
       + Number(hasAttachmentRoot)
@@ -579,6 +554,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasRecoveryImportFault)
       + Number(hasConfirmedGenerations)
       + (recoveryOptions?.keyCount ?? 0)
+    || (hasWindowsTerminalAuthority && !windowsTerminalAuthority)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
@@ -662,6 +638,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
               [...options.confirmedTerminatedRuntimeGenerationIds as string[]],
           }
         : {}),
+      ...(windowsTerminalAuthority ? { windowsTerminalAuthority } : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
       ...(hasKimiProfiles ? { kimiClaudeProfiles } : {}),

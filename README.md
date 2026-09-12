@@ -10,7 +10,7 @@
 
 [Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
 
-![Inertia — project sidebar and floating composer in dark mode](docs/screenshots/inertia-dark.png)
+![Inertia 0.0.55 — project sidebar, conversation, and floating composer in dark mode](docs/screenshots/inertia-dark.png)
 
 Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode**.
 
@@ -20,7 +20,11 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
 3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly. Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
+Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly.
+
+![Search saved messages and agent answers across projects](docs/screenshots/inertia-message-search.png)
+
+Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
@@ -33,7 +37,11 @@ Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type a
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
 - **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
-![Two conversations with independent composers in a split workspace](docs/screenshots/inertia-split-workspace.png)
+![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
+
+Review changed files on the current branch, mark completed hunks, and commit only the paths you choose.
+
+![Branch context, changed files, and hunk review in the Changes panel](docs/screenshots/inertia-git-workflow.png)
 
 ## Local by default
 
@@ -43,7 +51,7 @@ History and preferences stay on your computer. Providers retain their own authen
 
 Optional [Private Connect](docs/PRIVATE_CONNECT.md) provides scoped access from another device over Tailscale while the desktop stays online. Read the [security model](docs/PRIVATE_CONNECT_SECURITY.md) for its boundaries.
 
-![Inertia in light mode](docs/screenshots/inertia-light.png)
+![The same workspace in Inertia’s light theme](docs/screenshots/inertia-light.png)
 
 ## Run from source
 

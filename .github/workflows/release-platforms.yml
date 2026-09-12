@@ -117,7 +117,7 @@ jobs:
             platform: windows-arm64
             arch: arm64
             package_script: package:release:win:arm64
-            timeout_minutes: 75
+            timeout_minutes: 100
             app_path: release/win-arm64-unpacked/Inertia.exe
             windows_asset_suffix: .arm64
           - label: Linux x64

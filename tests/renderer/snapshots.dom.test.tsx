@@ -27,7 +27,7 @@ it("suspends the native preview for snapshot settings and capture errors, restor
   expect(nativePreviewSuspended()).toBe(false);
   expect(trigger).toHaveFocus();
 
-  act(() => window.dispatchEvent(new CustomEvent("inertia:snapshot-error", {
+  await act(() => window.dispatchEvent(new CustomEvent("inertia:snapshot-error", {
     detail: { conversationId: "preview-chat", message: "The capture could not be attached." },
   })));
   expect(screen.getByRole("alert")).toHaveTextContent("The capture could not be attached.");

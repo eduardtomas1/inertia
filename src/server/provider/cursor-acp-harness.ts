@@ -51,7 +51,7 @@ import {
 import { acpHostMcpServers } from "./host-tool-mcp-config";
 import { redactHostToolPayload } from "./host-tool-redaction";
 import {
-  cursorPriorFailureDetail,
+  cursorCleanupResult,
   cursorRuntimeFailure,
 } from "./cursor-acp-failures";
 import {
@@ -139,6 +139,8 @@ interface CursorContextUsage { usedTokens: number | null; maxTokens: number | nu
 export interface CursorAcpHarnessOptions {
   /** Test seam for the owned ACP process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Test seam for the run-owned host-tool server lifecycle. */
+  createHostMcpSession?: typeof createProviderHostToolMcpSession;
   /** Test seam for the bounded post-load command advertisement wait. */
   commandAdvertisementTimeoutMs?: number;
   /** Test seam for initialize, auth, session, and configuration RPC deadlines. */
@@ -159,6 +161,7 @@ export function createCursorAcpHarness(
         options.terminateProcessTree,
         options.commandAdvertisementTimeoutMs,
         options.controlRpcTimeoutMs,
+        options.createHostMcpSession,
       ),
   };
 }
@@ -168,6 +171,7 @@ function startCursorRun(
   terminateProcessTree?: ProcessTreeTerminator,
   commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
+  createHostMcpSession: typeof createProviderHostToolMcpSession = createProviderHostToolMcpSession,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -219,7 +223,7 @@ function startCursorRun(
       })
     : undefined;
   const hostMcpSession = hostToolRuntime
-    ? createProviderHostToolMcpSession(hostToolRuntime)
+    ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
   const redactHostMcpPayload = <T>(value: T): T => hostMcpConnection
@@ -658,38 +662,25 @@ function startCursorRun(
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     cancelPending();
     hostToolRuntime?.settle();
+    let hostToolsCleanupFailed = false;
     try {
       await hostMcpSession?.close();
     } catch {
-      const error = "Cursor Inertia chat tools could not be cleaned up.";
-      emitter.status("failed", error);
-      return { ...outcome, status: "failed", error, cleanupConfirmed: false };
+      hostToolsCleanupFailed = true;
     }
     try {
       // ACP has already produced its terminal response, so no graceful wait
       // window remains useful. Reuse any earlier cancellation request.
       await terminateOwnedProcessTree(true);
     } catch {
-      const error = "Cursor ACP process tree could not be confirmed stopped.";
-      const priorFailure = outcome.failure
-        ? cursorPriorFailureDetail(outcome.failure, options.input.cwd)
-        : undefined;
-      emitter.status("failed", error);
-      return {
-        ...outcome,
-        status: "failed",
-        exitCode: child.exitCode,
-        signal: child.signalCode,
-        error,
-        failure: {
-          reason: "provider-error",
-          message: error,
-          phase: "cleanup",
-          terminalEvent: "process-tree/cleanup",
-          ...(priorFailure ? { technicalDetail: priorFailure } : {}),
-        },
-        cleanupConfirmed: false,
-      };
+      const failed = cursorCleanupResult(outcome, child, options.input.cwd, "process-tree");
+      emitter.status("failed", failed.error);
+      return failed;
+    }
+    if (hostToolsCleanupFailed) {
+      const failed = cursorCleanupResult(outcome, child, options.input.cwd, "host-tools");
+      emitter.status("failed", failed.error);
+      return failed;
     }
     emitter.status(outcome.status, outcome.error);
     return {

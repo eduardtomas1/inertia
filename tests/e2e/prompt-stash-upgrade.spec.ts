@@ -17,14 +17,16 @@ test("recovers a v54 scratch prompt through an explicit copy without changing th
   await app.page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key, raw });
   const draft = "Leave this current draft intact.";
   await app.page.getByRole("textbox", { name: "Message", exact: true }).fill(draft);
-  await app.page.getByRole("button", { name: "Scratch prompts", exact: true }).click();
+  const trigger = app.page.getByRole("button", { name: "Scratch prompts", exact: true });
+  await trigger.focus();
+  await trigger.press("ArrowUp");
   const recovery = app.page.getByRole("group", { name: "Prompts saved before this update" });
   await expect(recovery).toBeVisible();
   const screenshot = info.outputPath("legacy-scratch-prompts.png");
   await app.page.screenshot({ path: screenshot, animations: "disabled" });
   await info.attach("Existing saved prompt after upgrade", { path: screenshot, contentType: "image/png" });
   const copy = recovery.getByRole("menuitem", { name: /Review the release checklist/ });
-  await copy.focus();
+  await expect(copy).toBeFocused();
   await copy.press("Enter");
   await expect(recovery.getByRole("status")).toContainText("Copied.");
   expect(await app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(content);

@@ -41,6 +41,11 @@ function launched(script: string, mutateWatcher?: (args: string[]) => void, comm
   let watcherSignal: string | null = null;
   let watcherOutput = "";
   let watcherError = "";
+  const startedAt = performance.now();
+  let readyAtMs: number | null = null;
+  let exitAtMs: number | null = null;
+  let watcherClosedAtMs: number | null = null;
+  let stopAtMs: number | null = null;
   const owned = spawnWindowsManagedTerminal({
     authority: testWindowsTerminalAuthority(), command, args,
     spawnOwned: (create) => ({ process: create(), confirmStopped: () => true,
@@ -52,21 +57,33 @@ function launched(script: string, mutateWatcher?: (args: string[]) => void, comm
     spawnWatcher: ((command: string, args: string[], options: object) => {
       mutateWatcher?.(args);
       watcher = spawnChild(command, args, options);
-      watcher.stdout?.on("data", (data: Buffer) => { watcherOutput = (watcherOutput + data.toString()).slice(0, 1024); });
+      watcher.stdout?.on("data", (data: Buffer) => { watcherOutput = (watcherOutput + data.toString()).slice(0, 1024);
+        if (readyAtMs === null && watcherOutput.startsWith("INERTIA_TERMINAL_JOB_READY\n")) readyAtMs = Math.round(performance.now() - startedAt); });
       watcher.stderr?.on("data", (data: Buffer) => { watcherError = (watcherError + data.toString()).slice(0, 1024); });
-      watcher.on("close", (code, signal) => { watcherCode = code; watcherSignal = signal; });
+      watcher.on("close", (code, signal) => { watcherCode = code; watcherSignal = signal; watcherClosedAtMs = Math.round(performance.now() - startedAt); });
       return watcher;
     }) as typeof spawnChild,
   });
+  const requestStop = owned.requestGuardianStop;
+  owned.requestGuardianStop = () => {
+    stopAtMs ??= Math.round(performance.now() - startedAt);
+    return requestStop();
+  };
   owned.process.onData((data) => { output = (output + data).slice(-8192); });
-  owned.process.onExit(({ exitCode }) => { exit = exitCode; });
+  owned.process.onExit(({ exitCode }) => { exit = exitCode; exitAtMs = Math.round(performance.now() - startedAt); });
   observations.push(() => ({
     guardianExitCode: exit, watcherCode, watcherSignal,
+    readyAtMs, exitAtMs, watcherClosedAtMs, stopAtMs,
+    // This exact no-profile, secret-free fixture contains only a constant script.
+    fallbackFixtureOutput: command === "powershell.exe"
+      ? output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/gu, "").slice(0, 2048) : undefined,
+    clock: [...watcherError.matchAll(/INERTIA_TERMINAL_CLOCK before_us=(\d+) after_us=(\d+)/gu)]
+      .map((match) => ({ beforeUs: Number(match[1]), afterUs: Number(match[2]) })),
     watcherReady: watcherOutput.startsWith("INERTIA_TERMINAL_JOB_READY\n"),
     watcherStopped: watcherOutput === "INERTIA_TERMINAL_JOB_READY\nINERTIA_TERMINAL_JOB_STOPPED\n",
     watcherOutputBytes: Buffer.byteLength(watcherOutput),
     nativeStages: [output, watcherError].flatMap((text) => [...text.matchAll(
-      /INERTIA_JOB_ERROR stage=(terminal-(?:launch-arguments|launch|job-create|job-assign|admission-exists|console-handles|console-attribute-size|console-attributes|console-inheritance|console-create|watch-identity|watch-membership|watch)) win32=(\d+)/gu,
+      /INERTIA_JOB_ERROR stage=(terminal-(?:launch-arguments|launch|job-create|job-assign|admission-exists|console-handles|console-attribute-size|console-attributes|console-inheritance|console-create|watch-identity|watch-times|watch-birth-before|watch-birth-after|watch-root-parent|watch-watcher-parent|watch-image|watch-membership|watch-terminate|watch-drain|watch-root-wait|watch)) win32=(\d+)/gu,
     )].map((match) => ({ stage: match[1], win32: Number(match[2]) }))),
   }));
   pending.push(async () => {

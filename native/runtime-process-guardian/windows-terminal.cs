@@ -158,13 +158,20 @@ public static partial class InertiaRuntimeJob {
         int identityError;
         var image = new StringBuilder(32768);
         UInt32 imageLength = (UInt32)image.Capacity;
-        if (!ProcessIdentity(root, out bits, out created, out identityError)
-          || created < earliest || created >= latest + 1
-          || !ExpectedParent(processId, parentId)
-          || !ExpectedParent((UInt32)Process.GetCurrentProcess().Id, parentId)
-          || !QueryFullProcessImageName(root, 0, image, ref imageLength)
+        if (!ProcessIdentity(root, out bits, out created, out identityError)) {
+          return Failure("terminal-watch-times", 51, identityError);
+        }
+        if (created < earliest || created >= latest + 1) {
+          WriteProtocolLine(Console.OpenStandardError(),
+            "INERTIA_TERMINAL_CLOCK before_us=" + ((Int32)Math.Min(1000000, Math.Max(0, (earliest - created) * 1000))).ToString(CultureInfo.InvariantCulture)
+            + " after_us=" + ((Int32)Math.Min(1000000, Math.Max(0, (created - latest) * 1000))).ToString(CultureInfo.InvariantCulture));
+          return Failure(created < earliest ? "terminal-watch-birth-before" : "terminal-watch-birth-after", 51, 0);
+        }
+        if (!ExpectedParent(processId, parentId)) return Failure("terminal-watch-root-parent", 51, 0);
+        if (!ExpectedParent((UInt32)Process.GetCurrentProcess().Id, parentId)) return Failure("terminal-watch-watcher-parent", 51, 0);
+        if (!QueryFullProcessImageName(root, 0, image, ref imageLength)
           || !String.Equals(image.ToString(), System.Reflection.Assembly.GetExecutingAssembly().Location,
-            StringComparison.OrdinalIgnoreCase)) return Failure("terminal-watch-identity", 51, 0);
+            StringComparison.OrdinalIgnoreCase)) return Failure("terminal-watch-image", 51, 0);
         var admissionTime = Stopwatch.StartNew();
         bool member = false;
         while (admissionTime.ElapsedMilliseconds < TERMINAL_ADMISSION_MS) {
@@ -197,11 +204,13 @@ public static partial class InertiaRuntimeJob {
           if (stopping || rootState != WAIT_TIMEOUT) {
             // Natural shell exit also drains background descendants. Only this
             // exact retained Job is signalled, never a PID or a process snapshot.
-            if (!TerminateJobObject(job, 130)) return 52;
+            if (!TerminateJobObject(job, 130)) return Failure("terminal-watch-terminate", 52, Marshal.GetLastWin32Error());
             string stage;
             int error;
-            if (DrainTerminatedJob(job, TERMINAL_DRAIN_MS, 52, out stage, out error) != 0
-              || WaitForSingleObject(root, 0) != WAIT_OBJECT_0) return 52;
+            if (DrainTerminatedJob(job, TERMINAL_DRAIN_MS, 52, out stage, out error) != 0) {
+              return Failure("terminal-watch-drain", 52, error);
+            }
+            if (WaitForSingleObject(root, 0) != WAIT_OBJECT_0) return Failure("terminal-watch-root-wait", 52, 0);
             WriteProtocolLine(Console.OpenStandardOutput(), TERMINAL_STOPPED);
             return 0;
           }

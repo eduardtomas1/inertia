@@ -75,7 +75,8 @@ The useful changes in each Inertia release, in plain language.
 - Thread context menus expose common actions, and project menus stay open
   through background discovery. Model selection offers runnable providers with
   clearer choices and placement in short windows. Open menus follow the composer
-  when loading finishes and the new-chat layout settles.
+  when loading finishes and the new-chat layout settles. Usage details also
+  remain inside short chat panes, with scrolling for the remaining content.
 - Choose independent light and dark palettes. Shared theme colors keep controls
   and status indicators readable across the built-in themes.
 - Sidebar updates show progress, release notes and restart confirmation. Recent
@@ -112,8 +113,8 @@ The useful changes in each Inertia release, in plain language.
   cleanup when its chat-tool server fails to close.
 - Quitting cancels active reviews and context compaction before waiting for
   their commands to finish, while retaining cleanup and storage safeguards.
-- Private Connect startup failures clear the stopped gateway and error state
-  correctly, allowing update preparation and a fresh retry.
+- Private Connect startup failures report the error and clear the stopped
+  gateway, allowing update preparation and a fresh retry.
 - Terminal output no longer disconnects a window while a valid conversation
   history backlog is draining. Stalled or oversized connections remain bounded.
 - Cancelling a read-only Git inspection on Windows gives it a bounded chance

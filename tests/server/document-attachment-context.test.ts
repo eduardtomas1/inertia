@@ -234,7 +234,8 @@ describe("document attachment execution context", () => {
   it.skipIf(hostedWindowsCi)("preserves a chart on a PDF page with a selectable heading", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-chart-pdf-"));
     temporaryDirectories.push(directory);
-    const bytes = pdfWithText("Quarterly sales chart for fiscal year - Packaged PDF extraction works", "1 0 0 rg 72 150 60 200 re f 0 0 1 rg 180 150 60 350 re f");
+    const drawing = "1 0 0 rg 72 150 60 200 re f 0 0 1 rg 180 150 60 350 re f";
+    const bytes = pdfWithText("Quarterly sales chart for fiscal year", drawing);
     const pdf = attachment({ size: bytes.byteLength });
     const store = await generatedStore(directory);
     const prepared = await prepareDocumentAttachments([{ attachment: pdf, bytes }], { generatedAttachmentStore: store });
@@ -258,7 +259,7 @@ describe("document attachment execution context", () => {
     await store.release(prepared.generatedImagePaths);
     const inputPath = join(directory, "chart.pdf");
     const resultPath = join(directory, "chart-result.json");
-    await writeFile(inputPath, bytes);
+    await writeFile(inputPath, pdfWithText("Packaged PDF extraction works", drawing));
     await runPackagedPdfSmoke(inputPath, resultPath);
     expect(JSON.parse(await readFile(resultPath, "utf8"))).toMatchObject({ ok: true });
   }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);

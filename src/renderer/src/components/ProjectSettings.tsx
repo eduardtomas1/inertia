@@ -1,8 +1,8 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import { defaultProjectPreferences, PROJECT_ICON_NAMES, type ProjectPreferences } from "../../../shared/project-preferences";
+import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
@@ -27,6 +27,24 @@ interface Props {
 
 function Row({ title, description, children }: { title: string; description: string; children: ReactNode }): React.JSX.Element {
   return <div className="project-setting-row"><div><h3>{title}</h3><p>{description}</p></div><div className="project-setting-control">{children}</div></div>;
+}
+
+/** Empty means no limit; otherwise the same bounds the saved schema enforces. */
+function ClaudeSpendLimit({ value, disabled, onSave }: { value: number | null; disabled: boolean; onSave: (value: number | null) => void }): React.JSX.Element {
+  const [draft, setDraft] = useState(value === null ? "" : String(value));
+  const errorId = useId();
+  const text = draft.trim();
+  const amount = text === "" ? null : /^\d+(?:\.\d{1,2})?$/u.test(text) ? Number(text) : Number.NaN;
+  const valid = amount === null || isValidClaudeTurnBudgetUsd(amount);
+  const changed = valid && amount !== value;
+  return <>
+    <form className="project-budget-form" onSubmit={(event) => { event.preventDefault(); if (changed) onSave(amount); }}>
+      <input aria-label="Claude spend limit per turn (USD)" inputMode="decimal" autoComplete="off" placeholder="No limit" value={draft} disabled={disabled}
+        aria-invalid={!valid} aria-describedby={valid ? undefined : errorId} onChange={(event) => setDraft(event.target.value)} />
+      {changed && <button type="submit" aria-label="Save spend limit" disabled={disabled}>Save</button>}
+    </form>
+    {!valid && <p id={errorId} className="project-setting-field-error">Enter an amount from 0.01 to 10,000 with at most two decimals, or leave empty for no limit.</p>}
+  </>;
 }
 
 function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
@@ -103,6 +121,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         <select aria-label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={blocked} onChange={(event) => setPreference("browserAccess", event.target.value === "inherit" ? null : event.target.value === "true")}>
           <option value="inherit">Inherit (on)</option><option value="true">On</option><option value="false">Off</option>
         </select>
+      </Row>
+      <Row title="Claude spend limit per turn" description="Stops a Claude turn once its estimated API cost reaches this amount; subagents count toward it. Applies to Claude on Anthropic only. Leave empty for no limit.">
+        <ClaudeSpendLimit value={preferences.claudeMaxBudgetUsd} disabled={blocked} onSave={(value) => setPreference("claudeMaxBudgetUsd", value)} />
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>

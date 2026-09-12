@@ -59,4 +59,32 @@ describe("project settings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("changed in another window");
     expect(screen.getByRole("combobox", { name: "Agent browser access" })).toBeEnabled();
   });
+  it("saves an optional Claude spend limit, rejects amounts the schema rejects, and clears back to no limit", async () => {
+    const view = setup();
+    const field = screen.getByRole("textbox", { name: "Claude spend limit per turn (USD)" });
+    expect(field).toHaveValue("");
+    expect(field).toHaveAttribute("placeholder", "No limit");
+    expect(screen.getByText(/subagents count toward it/u)).toBeInTheDocument();
+    for (const value of ["0", "-1", "10000.01", "1.234", "abc"]) {
+      fireEvent.change(field, { target: { value } });
+      expect(field).toHaveAttribute("aria-invalid", "true");
+      expect(field).toHaveAccessibleDescription(/0\.01 to 10,000/u);
+      expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
+    }
+    fireEvent.change(field, { target: { value: "2.50" } });
+    expect(field).toHaveAttribute("aria-invalid", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } } }));
+    await waitFor(() => expect(field).toBeEnabled());
+    view.request.mockClear();
+    const saved = { ...project, updatedAt: "2026-09-09T08:01:00.000Z", preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: 2.5 } };
+    view.rerender(<ProjectSettings {...view.props} projects={[saved, view.props.projects[1]!]} />);
+    expect(screen.queryByRole("button", { name: "Save spend limit" })).not.toBeInTheDocument();
+    fireEvent.change(field, { target: { value: "" } });
+    expect(field).toHaveAttribute("aria-invalid", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      expectedUpdatedAt: saved.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } } }));
+  });
 });

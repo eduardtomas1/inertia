@@ -11,6 +11,7 @@ import {
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
+import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
 import type {
@@ -274,6 +275,15 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
+  // The project's optional spend limit maps to the Claude Agent SDK's
+  // maxBudgetUsd, so it is forwarded only on the native Anthropic route.
+  // Other providers and Claude-compatible backends have no such control.
+  const maxBudgetUsd = route.providerId === "claude"
+    && route.harnessId === "claude-agent-sdk"
+    && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+    ? dependencies.store.project(conversation.projectId).preferences
+      ?.claudeMaxBudgetUsd ?? null
+    : null;
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -315,6 +325,7 @@ export function resolveTurnRequest(
     skills: request.skills,
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
+    ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {

@@ -9,6 +9,7 @@ import {
   providerNativeBackendProfile,
   type ModelBackendProfile,
 } from "../../shared/model-routing";
+import { MAX_CLAUDE_TURN_BUDGET_USD } from "../../shared/project-preferences";
 import {
   PROVIDER_IDS,
   ProviderRuntimeError,
@@ -612,6 +613,20 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The goal continuation hint is invalid.",
+    );
+  }
+  if (
+    input.maxBudgetUsd !== undefined
+    && (
+      typeof input.maxBudgetUsd !== "number"
+      || !Number.isFinite(input.maxBudgetUsd)
+      || input.maxBudgetUsd <= 0
+      || input.maxBudgetUsd > MAX_CLAUDE_TURN_BUDGET_USD
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The spend limit is invalid.",
     );
   }
   if (input.goalStart) {

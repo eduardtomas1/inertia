@@ -70,6 +70,58 @@ describe("provider discovery completion during cancellation", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each([200, 400])("keeps a completed auth result while ownership proof takes %ims past close", async (proofDelayMs) => {
+    const terminate = vi.fn(async () => true);
+    const { auth, result } = await startProbe(terminate);
+    let confirm!: (value: boolean) => void;
+    fixture.confirmed.mockImplementation(() => new Promise<boolean>((resolve) => { confirm = resolve; }));
+    let settled = false;
+    void result.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(900);
+    auth.stdout.emit("data", authOutput);
+    auth.emit("close", 0, null);
+    // Close precedes the 1s probe deadline. Durable retirement can complete
+    // after that deadline and even after its cancellation-drain interval.
+    await vi.advanceTimersByTimeAsync(proofDelayMs);
+    expect(settled).toBe(false);
+    expect(terminate).not.toHaveBeenCalled();
+    confirm(true);
+    await expect(result).resolves.toMatchObject({ canRun: true, cleanupConfirmed: true, authState: "authenticated" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("refuses an abort after close while awaiting exact ownership proof without a late stop", async () => {
+    const terminate = vi.fn(async () => true);
+    const { auth, controller, result } = await startProbe(terminate);
+    let confirm!: (value: boolean) => void;
+    fixture.confirmed.mockImplementation(() => new Promise<boolean>((resolve) => { confirm = resolve; }));
+    let settled = false;
+    void result.then(() => { settled = true; });
+    auth.stdout.emit("data", authOutput);
+    auth.emit("close", 0, null);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(settled).toBe(false);
+    expect(terminate).not.toHaveBeenCalled();
+    confirm(true);
+    await expect(result).resolves.toMatchObject({ message: "Provider discovery was cancelled." });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails closed when retirement proof remains unconfirmed after a timely close", async () => {
+    const terminate = vi.fn(async () => true);
+    const { auth, result } = await startProbe(terminate);
+    let confirm!: (value: boolean) => void;
+    fixture.confirmed.mockImplementation(() => new Promise<boolean>((resolve) => { confirm = resolve; }));
+    auth.stdout.emit("data", authOutput);
+    auth.emit("close", 0, null);
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(terminate).not.toHaveBeenCalled();
+    confirm(false);
+    await expect(result).resolves.toMatchObject({ canRun: false, cleanupConfirmed: false, protocolVerified: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("awaits ownership proof after close without sending a late stop", async () => {
     const terminate = vi.fn(async () => true);
     const { auth, controller, result } = await startProbe(terminate);

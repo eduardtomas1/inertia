@@ -250,6 +250,11 @@ async function probeProcess(
       else finish(null);
     });
     child.once("close", (code) => {
+      // Execution has completed; join the claim's bounded retirement without
+      // timing out or signalling the closed child. Discovery checks caller
+      // cancellation again before accepting the confirmed result.
+      deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
       if (completionDrainTimer) clearTimeout(completionDrainTimer);
       void awaitRuntimeOwnedProcessStopped(child).then(
         (confirmed) => finish(code, confirmed),

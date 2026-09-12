@@ -1,31 +1,11 @@
-import WebSocket from "ws";
-
+import type WebSocket from "ws";
 import type { ServerEvent } from "../shared/contracts";
+import { sendRuntimeEvent } from "./runtime-protocol";
 
-const MAX_BUFFERED_OUTPUT = 1024 * 1024;
-
-function stopSlowSocket(socket: WebSocket): void {
-  try {
-    socket.terminate();
-  } catch {
-    // A concurrent close may already have released the transport.
-  }
-}
-
-export function sendTerminalSocketEvent(
-  socket: WebSocket,
-  event: ServerEvent,
-): boolean {
-  if (socket.readyState !== WebSocket.OPEN) return false;
-  if (socket.bufferedAmount > MAX_BUFFERED_OUTPUT) {
-    stopSlowSocket(socket);
-    return false;
-  }
-  try {
-    socket.send(JSON.stringify(event));
-    return true;
-  } catch {
-    stopSlowSocket(socket);
-    return false;
-  }
+export function sendTerminalSocketEvent(socket: WebSocket, event: ServerEvent): boolean {
+  // Preserve immediate rejection for terminal ownership/replay. Later write
+  // failures close the shared transport through the same runtime policy.
+  let admitted = true;
+  sendRuntimeEvent(socket, event, (sent) => { admitted = sent; });
+  return admitted;
 }

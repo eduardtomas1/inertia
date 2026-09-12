@@ -585,7 +585,7 @@ describe("TerminalManager", () => {
     ]);
   });
 
-  it("terminates a slow WebSocket and drops its remaining terminal burst", () => {
+  it("terminates an oversized WebSocket queue and drops its remaining terminal burst", () => {
     const terminal = fakeTerminal();
     const frames: string[] = [];
     let bufferedAmount = 0;
@@ -598,7 +598,7 @@ describe("TerminalManager", () => {
       get bufferedAmount() { return bufferedAmount; },
       send: (payload: string) => {
         frames.push(payload);
-        bufferedAmount = 2 * 1_024 * 1_024;
+        bufferedAmount = 64 * 1_024 * 1_024;
       },
       terminate,
     } as unknown as WebSocket;

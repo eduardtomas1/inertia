@@ -29,27 +29,26 @@ function Row({ title, description, children }: { title: string; description: str
   return <div className="project-setting-row"><div><h3>{title}</h3><p>{description}</p></div><div className="project-setting-control">{children}</div></div>;
 }
 
-/** Empty means no limit; otherwise the same bounds the saved schema enforces. */
-function ClaudeSpendLimit({ value, disabled, onSave }: { value: number | null; disabled: boolean; onSave: (value: number | null) => void }): React.JSX.Element {
-  const [draft, setDraft] = useState(value === null ? "" : String(value));
-  const errorId = useId();
-  const text = draft.trim();
-  const amount = text === "" ? null : /^\d+(?:\.\d{1,2})?$/u.test(text) ? Number(text) : Number.NaN;
-  const valid = amount === null || isValidClaudeTurnBudgetUsd(amount);
-  const changed = valid && amount !== value;
-  return <>
-    <form className="project-budget-form" onSubmit={(event) => { event.preventDefault(); if (changed) onSave(amount); }}>
-      <input aria-label="Claude spend limit per turn (USD)" inputMode="decimal" autoComplete="off" placeholder="No limit" value={draft} disabled={disabled}
-        aria-invalid={!valid} aria-describedby={valid ? undefined : errorId} onChange={(event) => setDraft(event.target.value)} />
-      {changed && <button type="submit" aria-label="Save spend limit" disabled={disabled}>Save</button>}
-    </form>
-    {!valid && <p id={errorId} className="project-setting-field-error">Enter an amount from 0.01 to 10,000 with at most two decimals, or leave empty for no limit.</p>}
-  </>;
+const workspaceOptions = { local: "Current checkout", worktree: "Isolated worktree" };
+
+function ProjectSelect({ label, value, disabled, options, onChange }: {
+  label: string; value: string; disabled: boolean; options: Record<string, string>; onChange: (value: string) => void;
+}): React.JSX.Element {
+  return <select aria-label={label} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+    {Object.entries(options).map(([key, text]) => <option key={key} value={key}>{text}</option>)}
+  </select>;
 }
 
 function ProjectEditor({ project, conversations, providers, backendDefaults, backendProfiles, settings, disabled, request, onRemoved }: Omit<Props, "projects" | "initialProjectId" | "onUpdateSettings"> & { project: Project; onRemoved: () => void }): React.JSX.Element {
   const preferences = project.preferences ?? defaultProjectPreferences();
+  const [budget, setBudget] = useState(String(preferences.claudeMaxBudgetUsd ?? ""));
+  const budgetErrorId = useId();
+  const budgetText = budget.trim();
+  const amount = budgetText === "" ? null : /^\d+(?:\.\d{1,2})?$/u.test(budgetText) ? Number(budgetText) : Number.NaN;
+  const validBudget = amount === null || isValidClaudeTurnBudgetUsd(amount);
+  const budgetChanged = validBudget && amount !== preferences.claudeMaxBudgetUsd;
   const [name, setName] = useState(project.name);
+  const trimmedName = name.trim();
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +85,9 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     {error && <p className="project-settings-error" role="alert">{error}</p>}
     <section className="project-settings-card" aria-label="Project defaults">
       <Row title="Name" description="The name shown in the sidebar and thread lists.">
-        <form className="project-name-form" onSubmit={(event) => { event.preventDefault(); if (name.trim()) void save({ name: name.trim() }); }}>
+        <form className="project-name-form" onSubmit={(event) => { event.preventDefault(); if (trimmedName) void save({ name: trimmedName }); }}>
           <input aria-label="Project name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} disabled={blocked} />
-          {name.trim() !== project.name && <button type="submit" disabled={blocked || !name.trim()}>Save</button>}
+          {trimmedName !== project.name && <button type="submit" disabled={blocked || !trimmedName}>Save</button>}
         </form>
       </Row>
       <Row title="Project icon" description="Choose a symbol or a small image stored only on this device.">
@@ -110,28 +109,33 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           backendProfiles={backendProfiles} settings={settings} disabled={blocked} onChange={setModel} />
       </Row>
       <Row title="Workspace" description="Choose where new threads work. Existing checkouts are never moved.">
-        <select aria-label="Project default workspace" value={preferences.workspace ?? ""} disabled={blocked} onChange={(event) => setPreference("workspace", event.target.value as ProjectPreferences["workspace"] || null)}>
-          <option value="">Inherit ({settings.newThreadMode === "local" ? "current checkout" : "isolated worktree"})</option><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option>
-        </select>
+        <ProjectSelect label="Project default workspace" value={preferences.workspace ?? ""} disabled={blocked}
+          options={{ "": `Inherit (${workspaceOptions[settings.newThreadMode].toLowerCase()})`, ...workspaceOptions }}
+          onChange={(value) => setPreference("workspace", value as ProjectPreferences["workspace"] || null)} />
       </Row>
       <Row title="Automatically pull" description="Keep the default branch current only when its checkout is idle, clean and has no local commits. Off by default.">
         <Switch label="Automatically pull" checked={preferences.autoPull} disabled={blocked || !project.repositoryRoot} onChange={(value) => setPreference("autoPull", value)} />
       </Row>
       <Row title="Agent browser access" description="Allow agents to use Inertia's preview browser. Turning this off blocks new browser tool calls, not external CLI tools.">
-        <select aria-label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={blocked} onChange={(event) => setPreference("browserAccess", event.target.value === "inherit" ? null : event.target.value === "true")}>
-          <option value="inherit">Inherit (on)</option><option value="true">On</option><option value="false">Off</option>
-        </select>
+        <ProjectSelect label="Agent browser access" value={preferences.browserAccess === null ? "inherit" : String(preferences.browserAccess)} disabled={blocked}
+          options={{ inherit: "Inherit (on)", true: "On", false: "Off" }}
+          onChange={(value) => setPreference("browserAccess", value === "inherit" ? null : value === "true")} />
       </Row>
-      <Row title="Claude spend limit per turn" description="Stops a Claude turn once its estimated API cost reaches this amount; subagents count toward it. Applies to Claude on Anthropic only. Leave empty for no limit.">
-        <ClaudeSpendLimit value={preferences.claudeMaxBudgetUsd} disabled={blocked} onSave={(value) => setPreference("claudeMaxBudgetUsd", value)} />
+      <Row title="Claude spend limit per turn" description="Caps estimated API cost for Claude on Anthropic; subagents count toward it.">
+        <form className="project-budget-form" onSubmit={(event) => { event.preventDefault(); if (budgetChanged) setPreference("claudeMaxBudgetUsd", amount); }}>
+          <input aria-label="Claude spend limit per turn (USD)" inputMode="decimal" autoComplete="off" placeholder="No limit" value={budget} disabled={blocked}
+            aria-invalid={!validBudget} aria-describedby={validBudget ? undefined : budgetErrorId} onChange={(event) => setBudget(event.target.value)} />
+          {budgetChanged && <button type="submit" aria-label="Save spend limit" disabled={blocked}>Save</button>}
+        </form>
+        {!validBudget && <p id={budgetErrorId} className="project-setting-field-error">Use 0.01 to 10,000 with up to two decimals, or empty for no limit.</p>}
       </Row>
     </section>
     <h2 className="project-settings-group-title">Checkout</h2>
     <section className="project-settings-card" aria-label="Checkout settings">
       <Row title="Project grouping" description="How this checkout joins project groups in navigation.">
-        <select aria-label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked} onChange={(event) => void save({ groupingMode: event.target.value as Project["groupingMode"] || null })}>
-          <option value="">Use global ({settings.projectGrouping})</option><option value="repository">Group by repository</option><option value="repository-path">Group by repository and folder</option><option value="separate">Keep separate</option>
-        </select>
+        <ProjectSelect label="Project grouping" value={project.groupingMode ?? ""} disabled={blocked}
+          options={{ "": `Use global (${settings.projectGrouping})`, repository: "Group by repository", "repository-path": "Group by repository and folder", separate: "Keep separate" }}
+          onChange={(value) => void save({ groupingMode: value as Project["groupingMode"] || null })} />
       </Row>
       <Row title="Actions" description="Named commands for this checkout. Run explicitly from the workspace; saving never executes them.">
         <button type="button" disabled={blocked || preferences.actions.length >= 20} aria-expanded={actionOpen} onClick={() => setActionOpen(!actionOpen)}><Plus size={14} />Add action</button>
@@ -172,7 +176,8 @@ export function ProjectSettings(props: Props): React.JSX.Element {
     {chooserOpen && <ProjectSearchDialog projects={props.projects} selectedId={selectedId} includeAll label="Choose project" trigger={chooser.current} onClose={() => setChooserOpen(false)} onSelect={setSelectedId} />}
     {selectedId && !selected && <p role="status">This project is no longer available. Choose another project.</p>}
     {!selected ? <section className="project-settings-card"><Row title="Workspace default" description="Projects inherit this setting unless they override it.">
-      <select aria-label="Default workspace for all projects" value={props.settings.newThreadMode} disabled={props.disabled} onChange={(event) => void props.onUpdateSettings({ newThreadMode: event.target.value as AppSettings["newThreadMode"] })}><option value="local">Current checkout</option><option value="worktree">Isolated worktree</option></select>
+      <ProjectSelect label="Default workspace for all projects" value={props.settings.newThreadMode} disabled={props.disabled} options={workspaceOptions}
+        onChange={(value) => props.onUpdateSettings({ newThreadMode: value as AppSettings["newThreadMode"] })} />
     </Row><p className="project-actions-empty">Choose a project to configure its name, icon, model, source control and actions. Global model defaults are in Providers.</p></section>
       : <ProjectEditor key={selected.id} {...props} project={selected} onRemoved={() => setSelectedId(null)} />}
   </div>;

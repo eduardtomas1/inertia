@@ -144,6 +144,11 @@ export function useDesktopTools({
   const previewConnectionRef = useRef<PreviewConnection | null>(null);
   const authorityRef = useRef({ previewOwnerId, previewContextId });
   authorityRef.current = { previewOwnerId, previewContextId };
+  const previewIsCurrent = useCallback(() => {
+    const authority = authorityRef.current;
+    return authority.previewOwnerId === previewOwnerId
+      && authority.previewContextId === previewContextId;
+  }, [previewOwnerId, previewContextId]);
   const [ownedPreview, setOwnedPreview] = useState<OwnedPreviewState>({
     contextId: previewContextId,
     url: "",
@@ -283,11 +288,7 @@ export function useDesktopTools({
       url,
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({
           contextId,
           url: state.url,
@@ -296,11 +297,7 @@ export function useDesktopTools({
         onSettled?.();
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
@@ -315,7 +312,7 @@ export function useDesktopTools({
         }));
         onSettled?.();
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewCommand = useCallback((
     action: "back" | "forward" | "reload",
@@ -328,11 +325,7 @@ export function useDesktopTools({
       action,
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({
           contextId,
           url: state.url,
@@ -340,18 +333,14 @@ export function useDesktopTools({
         });
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
             : "The preview command failed.",
         );
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewTab = useCallback((
     action: "open" | "activate" | "close",
@@ -366,26 +355,18 @@ export function useDesktopTools({
       ...(tabId ? { tabId } : {}),
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({ contextId, url: state.url, navigation: state });
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
             : "The Browser tab action failed.",
         );
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => {
     const connection = previewConnectionRef.current;
@@ -407,15 +388,11 @@ export function useDesktopTools({
         contextId,
         evidenceId,
       });
-      const authority = authorityRef.current;
-      return authority.previewOwnerId === previewOwnerId
-        && authority.previewContextId === contextId
-        ? opened
-        : false;
+      return previewIsCurrent() && opened;
     } catch {
       return false;
     }
-  }, [previewContextId, previewOwnerId]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent]);
 
   const visiblePreview = ownedPreview.contextId === previewContextId
     ? ownedPreview

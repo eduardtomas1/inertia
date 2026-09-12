@@ -128,11 +128,7 @@ export interface EnvironmentSummarySnapshot {
     SubagentTrace,
     "id" | "providerName" | "providerRole" | "status"
   >>;
-  attachments: Array<{
-    id: string;
-    name: string;
-    mimeType: ChatMessage["attachments"][number]["mimeType"];
-  }>;
+  attachments: Array<Pick<ChatMessage["attachments"][number], "id" | "name" | "mimeType" | "size">>;
 }
 
 interface EnvironmentSummaryInput {
@@ -342,11 +338,9 @@ function recentAttachments(
       const attachment = message.attachments[attachmentIndex]!;
       if (seen.has(attachment.id)) continue;
       seen.add(attachment.id);
-      attachments.push({
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-      });
+      // The secure preview resolves this ID in main. Paths and snapshot context
+      // remain excluded from the environment summary.
+      attachments.push({ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size });
       if (attachments.length === 3) return attachments;
     }
   }

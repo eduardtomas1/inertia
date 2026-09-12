@@ -2,6 +2,7 @@ import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
 import {
+  PROVIDER_CAPABILITY_IDS,
   providerCapabilityManifest,
   type ProviderCapabilityId,
 } from "./capability-manifest";
@@ -78,6 +79,8 @@ export interface ProviderRunCoordinatorOptions {
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
   processEnvironment(): NodeJS.ProcessEnv | undefined;
+  /** True while this provider's capability evidence is untrusted (#336). */
+  evidenceUncertain?(providerId: ProviderId): boolean;
   capabilityAvailable(
     input: ProviderRunInput,
     capabilityId: ProviderCapabilityId,
@@ -255,9 +258,47 @@ export class ProviderRunCoordinator {
       this.rememberCleanupReceipt(expectedIdentity);
       throw new ProviderRuntimeError(
         "invalid_input",
-        `The exact provider installation does not attest '${unavailable}'.`,
+        this.options.evidenceUncertain?.(providerId)
+          ? `${PROVIDER_INFO[providerId].name} is paused because Inertia could not confirm that an earlier ${PROVIDER_INFO[providerId].name} process was cleaned up. Restart Inertia to continue.`
+          : `The exact provider installation does not attest '${unavailable}'.`,
       );
     }
+    // Capability evidence is scoped to this exact run (#336). What was attested
+    // when the run was admitted stays attested for its lifetime, so a later
+    // cleanup doubt from another operation cannot turn this healthy run's
+    // native events into protocol violations. Negotiated capabilities still
+    // require this run's own negotiation.
+    const admittedCapabilities = new Map<
+      ProviderCapabilityId,
+      "available" | "negotiable"
+    >();
+    for (const capabilityId of PROVIDER_CAPABILITY_IDS) {
+      const configured = capabilityId === "host-tool-bridge"
+        ? [capabilityId]
+        : [];
+      if (this.options.capabilityAvailable(input, capabilityId, configured, [])) {
+        admittedCapabilities.set(capabilityId, "available");
+      } else if (
+        this.options.capabilityAdmissible(input, capabilityId, configured)
+      ) {
+        admittedCapabilities.set(capabilityId, "negotiable");
+      }
+    }
+    const runCapabilityAvailable = (
+      capabilityId: ProviderCapabilityId,
+      negotiated: readonly ProviderCapabilityId[],
+      configured: readonly ProviderCapabilityId[] = [],
+    ): boolean => {
+      const admitted = admittedCapabilities.get(capabilityId);
+      return admitted === "available"
+        || (admitted === "negotiable" && negotiated.includes(capabilityId))
+        || this.options.capabilityAvailable(
+          input,
+          capabilityId,
+          configured,
+          negotiated,
+        );
+    };
     const executable = this.options.commandFor(providerId);
     const nativeProfile = providerNativeBackendProfile(providerId);
     const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
@@ -301,22 +342,15 @@ export class ProviderRunCoordinator {
         accept: (event) => {
           const negotiated = [...active.negotiatedCapabilities];
           return capabilitiesForEvent(event).every((capabilityId) =>
-            this.options.capabilityAvailable(
-              input,
-              capabilityId,
-              [],
-              negotiated,
-            ));
+            runCapabilityAvailable(capabilityId, negotiated));
         },
         reject: (event) => {
+          // Provider metadata (model lists, quota windows) is advisory. An
+          // unattested field is dropped instead of failing a healthy turn.
+          if (event.type === "metadata") return;
           const negotiated = [...active.negotiatedCapabilities];
           const capabilityId = capabilitiesForEvent(event).find((candidate) =>
-            !this.options.capabilityAvailable(
-              input,
-              candidate,
-              [],
-              negotiated,
-            ));
+            !runCapabilityAvailable(candidate, negotiated));
           if (!capabilityId) return;
           protocolViolation ??= new ProviderRuntimeError(
             "invalid_input",
@@ -445,6 +479,8 @@ export class ProviderRunCoordinator {
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
           environment: { ...launchOptions.environment },
+          installationVersion:
+            this.options.metadataCache.nativeScope(providerId).version ?? null,
           providerNativeToolsAvailable: input.toolRestriction !== "none" && this.options.capabilityAvailable(
             input,
             "provider-native-tools",
@@ -464,10 +500,8 @@ export class ProviderRunCoordinator {
               }
               const candidate = new Set(active.negotiatedCapabilities);
               candidate.add(observation.capabilityId);
-              if (!this.options.capabilityAvailable(
-                input,
+              if (!runCapabilityAvailable(
                 observation.capabilityId,
-                [],
                 [...candidate],
               )) {
                 protocolViolation ??= new ProviderRuntimeError(
@@ -585,11 +619,10 @@ export class ProviderRunCoordinator {
         if (value.status === "completed") {
           const negotiated = [...active.negotiatedCapabilities];
           const missingRequiredObservation = requiredCapabilities.find(
-            (capabilityId) => !this.options.capabilityAvailable(
-              input,
+            (capabilityId) => !runCapabilityAvailable(
               capabilityId,
-              capabilityId === "host-tool-bridge" ? [capabilityId] : [],
               negotiated,
+              capabilityId === "host-tool-bridge" ? [capabilityId] : [],
             ),
           );
           if (missingRequiredObservation) {

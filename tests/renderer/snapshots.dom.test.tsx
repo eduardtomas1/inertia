@@ -6,10 +6,42 @@ import { useComposerSnapshots } from "../../src/renderer/src/components/composer
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import { ContextCompactionRow } from "../../src/renderer/src/components/response-timeline/ContextCompactionRow";
 import { SnapshotControl } from "../../src/renderer/src/components/composer/SnapshotControl";
+import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 
 const original = window.inertia;
 afterEach(() => { window.inertia = original; vi.restoreAllMocks(); });
+
+it("suspends the native preview for snapshot settings and capture errors, restoring it on close or unmount", async () => {
+  window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
+  const view = render(<SnapshotControl conversationId="preview-chat" />);
+  const trigger = screen.getByRole("button", { name: "Snapshots" });
+  trigger.focus();
+  expect(nativePreviewSuspended()).toBe(false);
+
+  fireEvent.click(trigger);
+  expect(nativePreviewSuspended()).toBe(true);
+  expect(screen.getByRole("button", { name: "Close Snapshots" })).toHaveFocus();
+  await screen.findByRole("combobox", { name: "Capture shortcut" });
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Snapshots" }), { key: "Escape" });
+  expect(nativePreviewSuspended()).toBe(false);
+  expect(trigger).toHaveFocus();
+
+  await act(() => window.dispatchEvent(new CustomEvent("inertia:snapshot-error", {
+    detail: { conversationId: "preview-chat", message: "The capture could not be attached." },
+  })));
+  expect(screen.getByRole("alert")).toHaveTextContent("The capture could not be attached.");
+  expect(nativePreviewSuspended()).toBe(true);
+  await act(async () => undefined);
+  fireEvent.click(screen.getByRole("button", { name: "Close Snapshots" }));
+  expect(nativePreviewSuspended()).toBe(false);
+  expect(trigger).toHaveFocus();
+
+  fireEvent.click(trigger);
+  expect(nativePreviewSuspended()).toBe(true);
+  view.unmount();
+  expect(nativePreviewSuspended()).toBe(false);
+});
 
 it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);

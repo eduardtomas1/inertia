@@ -1,39 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AppUpdateStatus } from "@shared/desktop";
 
-const DISMISSED_APP_UPDATE_KEY = "inertia:app-update-dismissed:v1";
 const INITIAL_CHECK_DELAY_MS = 2_500;
-const RELEASE_VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
-
-function readDismissedVersion(): string | null {
-  try {
-    const value = window.localStorage.getItem(DISMISSED_APP_UPDATE_KEY);
-    return value && RELEASE_VERSION_PATTERN.test(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeDismissedVersion(version: string): void {
-  try {
-    window.localStorage.setItem(DISMISSED_APP_UPDATE_KEY, version);
-  } catch {
-    // The notice may return after restart if storage is unavailable, but the
-    // renderer must remain usable in privacy-restricted environments.
-  }
-}
 
 export interface AppUpdateController {
   status: AppUpdateStatus | null;
   checking: boolean;
-  visible: boolean;
   error: string | null;
   check: (force?: boolean) => Promise<void>;
   download: () => Promise<void>;
   cancelDownload: () => Promise<void>;
   install: () => Promise<void>;
-  dismiss: () => void;
   dismissError: () => void;
   openRelease: () => Promise<void>;
 }
@@ -42,26 +20,33 @@ export function useAppUpdate(): AppUpdateController {
   const [status, setStatus] = useState<AppUpdateStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dismissedVersion, setDismissedVersion] = useState<string | null>(
-    readDismissedVersion,
-  );
+  const latestRevision = useRef(-1);
 
-  const acceptStatus = useCallback((next: AppUpdateStatus): void => {
-    setStatus((current) => !current || next.revision >= current.revision ? next : current);
+  const acceptStatus = useCallback((next: AppUpdateStatus): boolean => {
+    if (next.revision < latestRevision.current) return false;
+    latestRevision.current = next.revision;
+    setStatus(next);
+    return true;
   }, []);
+  const acceptResult = useCallback((next: AppUpdateStatus): void => {
+    if (!acceptStatus(next)) return;
+    if (next.state === "failed" || next.state === "unavailable" || next.installBlocker) setError(next.message);
+  }, [acceptStatus]);
 
   const check = useCallback(async (force = false): Promise<void> => {
     setChecking(true);
     setError(null);
     try {
-      acceptStatus(await window.inertia.checkAppUpdate(force));
+      const result = await window.inertia.checkAppUpdate(force);
+      // Background checks remain quiet; an explicitly requested check reports failure.
+      if (force) acceptResult(result); else acceptStatus(result);
     } catch (cause) {
       setError("The update check could not be completed.");
       throw cause;
     } finally {
       setChecking(false);
     }
-  }, [acceptStatus]);
+  }, [acceptResult, acceptStatus]);
 
   useEffect(() => {
     const subscribe = window.inertia?.onAppUpdateStatus;
@@ -77,64 +62,53 @@ export function useAppUpdate(): AppUpdateController {
     };
   }, [acceptStatus, check]);
 
-  const visible = useMemo(
-    () => Boolean(status && (
-      status.state === "available"
-        ? status.latestVersion !== dismissedVersion
-        : ["downloading", "cancelled", "downloaded", "installing", "failed"].includes(
-            status.state,
-          )
-    )),
-    [dismissedVersion, status],
-  );
-  const dismiss = useCallback(() => {
-    if (status?.state !== "available" || !status.latestVersion) return;
-    storeDismissedVersion(status.latestVersion);
-    setDismissedVersion(status.latestVersion);
-  }, [status]);
   const openRelease = useCallback(async (): Promise<void> => {
     if (!status?.releaseUrl) return;
-    await window.inertia.openExternal(status.releaseUrl);
+    setError(null);
+    try {
+      await window.inertia.openExternal(status.releaseUrl);
+    } catch (cause) {
+      setError("The release page could not be opened. Try again or check your default browser.");
+      throw cause;
+    }
   }, [status]);
   const download = useCallback(async (): Promise<void> => {
     setError(null);
     try {
-      acceptStatus(await window.inertia.downloadAppUpdate());
+      acceptResult(await window.inertia.downloadAppUpdate());
     } catch (cause) {
       setError("The update download could not be started.");
       throw cause;
     }
-  }, [acceptStatus]);
+  }, [acceptResult]);
   const cancelDownload = useCallback(async (): Promise<void> => {
     setError(null);
     try {
-      acceptStatus(await window.inertia.cancelAppUpdateDownload());
+      acceptResult(await window.inertia.cancelAppUpdateDownload());
     } catch (cause) {
       setError("The update download could not be cancelled.");
       throw cause;
     }
-  }, [acceptStatus]);
+  }, [acceptResult]);
   const install = useCallback(async (): Promise<void> => {
     setError(null);
     try {
-      acceptStatus(await window.inertia.installAppUpdate());
+      acceptResult(await window.inertia.installAppUpdate());
     } catch (cause) {
       setError("The update restart could not be started safely.");
       throw cause;
     }
-  }, [acceptStatus]);
+  }, [acceptResult]);
   const dismissError = useCallback(() => setError(null), []);
 
   return {
     status,
     checking,
-    visible,
     error,
     check,
     download,
     cancelDownload,
     install,
-    dismiss,
     dismissError,
     openRelease,
   };

@@ -406,7 +406,8 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("button", { name: "General", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Application updates" })).toBeVisible();
   await page.getByRole("button", { name: "Check now" }).click();
-  await expect(page.getByText("Inertia is up to date.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Settings", exact: true })
+    .getByText("Inertia is up to date.", { exact: true })).toBeVisible();
   await expect(page.getByText("Install", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);

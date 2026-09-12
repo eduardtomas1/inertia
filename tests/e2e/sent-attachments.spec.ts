@@ -89,7 +89,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", {
     name: "Attach images, documents, or spreadsheets",
   }).click();
-  const importStatus = page.getByRole("status");
+  const importStatus = page.locator(".composer").getByRole("status");
   await expect(importStatus).toBeVisible();
   await expect(importStatus).toHaveText("Adding attachments…");
   const mainHeartbeatStarted = Date.now();
@@ -218,7 +218,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     .toBeEnabled({ timeout: 5_000 });
   await expect.poll(async () =>
     stat(selectedTempPath).then(() => true, () => false)).toBe(false);
-  const sentAttachments = page.locator(".sent-attachments").filter({
+  const sentAttachments = page.getByRole("list", {
+    name: "Message attachments", exact: true,
+  }).filter({
     has: page.getByRole("button", {
       name: "Preview attachment preview.png",
     }),
@@ -414,7 +416,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
 
   ({ electronApp, page } = await app.restart());
   await resizeWindow(1440, 920);
-  const restartedAttachments = page.locator(".sent-attachments").filter({
+  const restartedAttachments = page.getByRole("list", {
+    name: "Message attachments", exact: true,
+  }).filter({
     has: page.getByRole("button", {
       name: "Preview attachment preview.png",
     }),

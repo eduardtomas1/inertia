@@ -94,6 +94,19 @@ export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
   }).slice(0, 12);
 }
 
+/**
+ * Distinguishes "Claude answered and reported no limits for this account"
+ * from a failed or malformed read (#344). Only explicit false can replace
+ * cached quota windows with confirmed unavailability.
+ */
+export function claudeRateLimitReadResult(
+  value: unknown,
+): { rateLimits: ProviderRateLimit[]; rateLimitsUnavailable?: true } {
+  return objectValue(value)?.rate_limits_available === false
+    ? { rateLimits: [], rateLimitsUnavailable: true }
+    : { rateLimits: parseClaudeRateLimits(value) };
+}
+
 export async function readClaudeAgentSdkMetadata(
   executable: string,
   environment: NodeJS.ProcessEnv,
@@ -103,7 +116,11 @@ export async function readClaudeAgentSdkMetadata(
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
   lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
   signal?: AbortSignal,
-): Promise<{ models?: ProviderModel[]; rateLimits?: ProviderRateLimit[] }> {
+): Promise<{
+  models?: ProviderModel[];
+  rateLimits?: ProviderRateLimit[];
+  rateLimitsUnavailable?: boolean;
+}> {
   if (signal?.aborted) {
     throw new Error("Claude metadata discovery was cancelled.");
   }
@@ -119,6 +136,7 @@ export async function readClaudeAgentSdkMetadata(
     yield* [] as SDKUserMessage[];
   }
   let query: Query | undefined;
+  let metadata: Awaited<ReturnType<typeof readClaudeAgentSdkMetadata>> = {};
   let timer: NodeJS.Timeout | undefined;
   let rejectCancelled!: (error: Error) => void;
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -161,9 +179,9 @@ export async function readClaudeAgentSdkMetadata(
       timeout,
       cancelled,
     ]);
-    return {
+    metadata = {
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
-      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: parseClaudeRateLimits(limitsResult.value) } : {}),
+      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
   } finally {
     signal?.removeEventListener("abort", cancel);
@@ -174,6 +192,8 @@ export async function readClaudeAgentSdkMetadata(
     try { query?.close(); } catch { /* The metadata subprocess may already have exited. */ }
     await ownedProcess.terminate(true);
   }
+  if (ownedProcess.transportError()) throw ownedProcess.transportError();
+  return metadata;
 }
 
 export async function readClaudeAgentSdkModels(

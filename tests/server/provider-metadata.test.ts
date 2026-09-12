@@ -2,11 +2,13 @@
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderModel, ProviderRateLimit } from "../../src/shared/contracts";
 import { ProviderManager } from "../../src/server/providers";
 import { parseCodexModels } from "../../src/server/codex-metadata";
+import { readClaudeAgentSdkMetadata } from "../../src/server/provider/claude-agent-sdk-metadata";
+import { fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
 import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import {
   ProviderMetadataCache,
@@ -51,6 +53,43 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it.each([
+    { label: "null", response: null },
+    { label: "absent availability", response: {} },
+    { label: "string availability", response: { rate_limits_available: "false" } },
+    { label: "numeric availability", response: { rate_limits_available: 0 } },
+    { label: "null availability", response: { rate_limits_available: null } },
+    { label: "malformed available limits", response: { rate_limits_available: true, rate_limits: null } },
+  ])("retains stale Claude quota after a fulfilled $label usage response", async ({ response }) => {
+    let now = Date.parse("2026-09-12T10:00:00.000Z");
+    let answer: unknown = {
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 40, resets_at: null } },
+    };
+    const close = vi.fn();
+    const cache = new ProviderMetadataCache({
+      now: () => now,
+      read: async () => await readClaudeAgentSdkMetadata(
+        claudeExecutable, {}, workspacePath, 1_000,
+        () => fixtureClaudeQuery((async function* () {})(), {
+          usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => answer as never,
+          close,
+        }),
+        ["rateLimits"],
+      ),
+    });
+    const refresh = () => cache.metadata("claude", claudeExecutable, {}, workspacePath, { fields: ["rateLimits"], force: true });
+    const previous = await refresh();
+    expect(previous.rateLimits).toEqual([expect.objectContaining({ id: "claude:five_hour", usedPercent: 40 })]);
+    expect(previous.metadataState.rateLimits.freshness).toBe("fresh");
+    now += 1_000;
+    answer = response;
+    const current = await refresh();
+    expect(current.rateLimits).toEqual(previous.rateLimits);
+    expect(current.metadataState.rateLimits).toMatchObject({ freshness: "stale", updatedAt: previous.metadataState.rateLimits.updatedAt });
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+
   it("constructs Gemini catalog scopes through the current provider maps", () => {
     const scope = providerNativeMetadataScope("gemini", {
       executable: "/opt/bin/gemini",

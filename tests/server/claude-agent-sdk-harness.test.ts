@@ -2146,7 +2146,7 @@ describe("Claude Agent SDK harness", () => {
       },
     );
     expect(spawnedProcess?.stdin).toBe(child.stdin);
-    expect(spawnedProcess?.stdout).toBe(child.stdout);
+    expect(spawnedProcess?.stdout).not.toBe(child.stdout);
     expect(terminateProcessTree).toHaveBeenCalledOnce();
     expect(terminateProcessTree).toHaveBeenCalledWith(child, true);
     expect(terminationStartedBeforeQueryClose).toBe(true);

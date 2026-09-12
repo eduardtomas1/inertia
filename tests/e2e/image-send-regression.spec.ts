@@ -124,6 +124,10 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
 });
 
 test("native clipboard, dropped, and selected screenshots survive send and restart", async () => {
+  // Three native import/preview/send cycles plus a full restart consumed
+  // 44.6s on hosted Intel macOS before persisted previews were checked.
+  // Match comparable multi-stage scenarios; keep individual checks bounded.
+  test.setTimeout(75_000);
   const app = activeApp = await createAppFixture({
     name: "native-attachment-lifecycle",
     initialState: "conversation",
@@ -238,9 +242,17 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
         attachment.id, `${attachment.id}.png`);
       expect(createHash("sha256").update(await readFile(path)).digest("hex"))
         .toBe(attachment.digest);
-      await app.page.locator(".sent-attachments").getByRole("button", {
-        name: `Preview attachment ${attachment.name}`,
-      }).click();
+      // The same retained file is also offered in Recent attachments. Verify
+      // both surfaces exist, then exercise the original message's preview.
+      const previewName = `Preview attachment ${attachment.name}`;
+      const messagePreview = app.page.getByRole("list", {
+        name: "Request attachments", exact: true,
+      }).getByRole("button", { name: previewName, exact: true });
+      await expect(messagePreview).toHaveCount(1);
+      await expect(app.page.getByRole("list", {
+        name: "Recent attachments", exact: true,
+      }).getByRole("button", { name: previewName, exact: true })).toHaveCount(1);
+      await messagePreview.click();
       const dialog = app.page.getByRole("dialog", {
         name: attachment.name, exact: true,
       });

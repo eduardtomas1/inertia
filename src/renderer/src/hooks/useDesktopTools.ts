@@ -62,6 +62,19 @@ export function preflightComposerAttachmentFiles(
   }
 }
 
+// Electron rethrows main-process IPC errors as
+// "Error invoking remote method '<channel>': Error: <message>".
+const ELECTRON_IPC_ERROR_PREFIX =
+  /^Error invoking remote method '[^']+': (?:[A-Za-z]*Error: )?/u;
+
+/** Shows an attachment import failure without Electron's IPC wrapper text. */
+export function attachmentImportErrorMessage(error: unknown): string {
+  const message = error instanceof Error
+    ? error.message.replace(ELECTRON_IPC_ERROR_PREFIX, "").trim()
+    : "";
+  return message || "Attachments could not be added.";
+}
+
 export interface ComposerAttachmentImportBatch {
   begin(): Promise<string>;
   importOne(
@@ -131,6 +144,11 @@ export function useDesktopTools({
   const previewConnectionRef = useRef<PreviewConnection | null>(null);
   const authorityRef = useRef({ previewOwnerId, previewContextId });
   authorityRef.current = { previewOwnerId, previewContextId };
+  const previewIsCurrent = useCallback(() => {
+    const authority = authorityRef.current;
+    return authority.previewOwnerId === previewOwnerId
+      && authority.previewContextId === previewContextId;
+  }, [previewOwnerId, previewContextId]);
   const [ownedPreview, setOwnedPreview] = useState<OwnedPreviewState>({
     contextId: previewContextId,
     url: "",
@@ -188,11 +206,7 @@ export function useDesktopTools({
           );
           settled = true;
         } catch (error) {
-          setActionError(
-            error instanceof Error
-              ? error.message
-              : "Attachments could not be added.",
-          );
+          setActionError(attachmentImportErrorMessage(error));
           throw error;
         }
       },
@@ -217,11 +231,7 @@ export function useDesktopTools({
         const prepared = await window.inertia.selectAttachments(mode);
         return prepared ? composerAttachmentLease(prepared) : null;
       } catch (error) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "Attachments could not be added.",
-        );
+        setActionError(attachmentImportErrorMessage(error));
         return null;
       }
     },
@@ -243,11 +253,7 @@ export function useDesktopTools({
         );
         return composerAttachmentLease(prepared);
       } catch (error) {
-        setActionError(
-          error instanceof Error
-            ? error.message
-            : "Attachments could not be added.",
-        );
+        setActionError(attachmentImportErrorMessage(error));
         return null;
       }
     },
@@ -282,11 +288,7 @@ export function useDesktopTools({
       url,
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({
           contextId,
           url: state.url,
@@ -295,11 +297,7 @@ export function useDesktopTools({
         onSettled?.();
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
@@ -314,7 +312,7 @@ export function useDesktopTools({
         }));
         onSettled?.();
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewCommand = useCallback((
     action: "back" | "forward" | "reload",
@@ -327,11 +325,7 @@ export function useDesktopTools({
       action,
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({
           contextId,
           url: state.url,
@@ -339,18 +333,14 @@ export function useDesktopTools({
         });
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
             : "The preview command failed.",
         );
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewTab = useCallback((
     action: "open" | "activate" | "close",
@@ -365,26 +355,18 @@ export function useDesktopTools({
       ...(tabId ? { tabId } : {}),
     })
       .then((state) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setOwnedPreview({ contextId, url: state.url, navigation: state });
       })
       .catch((error) => {
-        const authority = authorityRef.current;
-        if (
-          authority.previewOwnerId !== previewOwnerId
-          || authority.previewContextId !== contextId
-        ) return;
+        if (!previewIsCurrent()) return;
         setActionError(
           error instanceof Error
             ? error.message
             : "The Browser tab action failed.",
         );
       });
-  }, [previewContextId, previewOwnerId, setActionError]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => {
     const connection = previewConnectionRef.current;
@@ -406,15 +388,11 @@ export function useDesktopTools({
         contextId,
         evidenceId,
       });
-      const authority = authorityRef.current;
-      return authority.previewOwnerId === previewOwnerId
-        && authority.previewContextId === contextId
-        ? opened
-        : false;
+      return previewIsCurrent() && opened;
     } catch {
       return false;
     }
-  }, [previewContextId, previewOwnerId]);
+  }, [previewContextId, previewOwnerId, previewIsCurrent]);
 
   const visiblePreview = ownedPreview.contextId === previewContextId
     ? ownedPreview

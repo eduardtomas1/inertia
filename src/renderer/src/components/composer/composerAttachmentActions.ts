@@ -3,10 +3,11 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { ChatAttachment } from "@shared/contracts";
 import {
   MAX_CHAT_ATTACHMENTS,
+  MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
   chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
-import { mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
+import { formatAttachmentSize, mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
@@ -29,6 +30,7 @@ interface ComposerAttachmentActionOptions {
   running: boolean;
   setAttachments: Dispatch<SetStateAction<ChatAttachment[]>>;
   setAttachmentImporting: Dispatch<SetStateAction<boolean>>;
+  setAttachmentError: Dispatch<SetStateAction<string | null>>;
   setPendingAttachmentIds: Dispatch<SetStateAction<ReadonlySet<string>>>;
   submittingRef: MutableRefObject<boolean>;
 }
@@ -57,44 +59,36 @@ export function composerAttachmentActions({
   running,
   setAttachments,
   setAttachmentImporting,
+  setAttachmentError,
   setPendingAttachmentIds,
   submittingRef,
 }: ComposerAttachmentActionOptions): ComposerAttachmentActions {
+  const reportAttachmentLimit = (): void => setAttachmentError(
+    `Some files were not attached. A message supports up to ${MAX_CHAT_ATTACHMENTS} attachments totaling ${formatAttachmentSize(MAX_CHAT_ATTACHMENT_TOTAL_BYTES)}.`,
+  );
   const addAttachments = (
     incoming: readonly ChatAttachment[],
-    releaseRejected = true,
-    pendingPrivilegedCommit = false,
   ): string[] => {
     const permitted = running
       ? incoming.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
       : incoming;
-    const blockedAttachments = permitted.length === incoming.length
-      ? []
-      : incoming.filter(({ mimeType }) => chatAttachmentKind(mimeType) !== "image");
     const current = attachmentsRef.current;
-    const currentIds = new Set(current.map(({ id }) => id));
     const merged = mergeComposerAttachments(current, permitted);
-    const changed = merged.attachments.length !== current.length
-      || merged.attachments.some(
-        ({ id }, index) => id !== current[index]?.id,
-      );
+    const acceptedIds = new Set(merged.attachments.map(({ id }) => id));
+    if (merged.rejected.some(({ id }) => !acceptedIds.has(id))) reportAttachmentLimit();
+    // Merging preserves the current prefix and only appends accepted imports.
     const adoptedIds = merged.attachments
-      .filter(({ id }) => !currentIds.has(id))
+      .slice(current.length)
       .map(({ id }) => id);
-    if (pendingPrivilegedCommit && adoptedIds.length > 0) {
+    if (adoptedIds.length > 0) {
       const pending = new Set(pendingAttachmentIdsRef.current);
       for (const id of adoptedIds) pending.add(id);
       pendingAttachmentIdsRef.current = pending;
       setPendingAttachmentIds(pending);
+      markEditorChanged();
     }
-    if (changed) markEditorChanged();
     attachmentsRef.current = merged.attachments;
     setAttachments(() => merged.attachments);
-    if (releaseRejected) {
-      for (const attachment of [...blockedAttachments, ...merged.rejected]) {
-        void releaseAttachmentRef.current(attachment.id);
-      }
-    }
     return adoptedIds;
   };
 
@@ -121,6 +115,7 @@ export function composerAttachmentActions({
     || attachmentImportingRef.current
     || blocked;
   const beginImport = (): number => {
+    setAttachmentError(null);
     const sequence = attachmentImportSequenceRef.current + 1;
     attachmentImportSequenceRef.current = sequence;
     attachmentImportingRef.current = true;
@@ -143,7 +138,7 @@ export function composerAttachmentActions({
       await cancelPrivilegedLease(lease);
       return "cancelled";
     }
-    const adoptedIds = addAttachments(lease.attachments, false, true);
+    const adoptedIds = addAttachments(lease.attachments);
     if (adoptedIds.length === 0) {
       await cancelPrivilegedLease(lease);
       return selectionRemainsAuthorized(authority) ? "rejected" : "cancelled";
@@ -200,14 +195,19 @@ export function composerAttachmentActions({
         0,
         MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length,
       );
-      const candidates = (running
+      const eligible = running
         ? files.filter((file) => {
             const mimeType = chatAttachmentMimeTypeForName(file.name);
             return mimeType !== null && chatAttachmentKind(mimeType) === "image";
           })
-        : files).slice(0, remaining);
-      if (candidates.length === 0) return;
+        : files;
+      const candidates = eligible.slice(0, remaining);
+      if (candidates.length === 0) {
+        if (eligible.length > remaining) reportAttachmentLimit();
+        return;
+      }
       const importSequence = beginImport();
+      if (eligible.length > remaining) reportAttachmentLimit();
       try {
         const lease = await onImportAttachments(candidates);
         if (!lease) return;
@@ -220,6 +220,7 @@ export function composerAttachmentActions({
       if (attachmentImportingRef.current) return;
       if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;
       markEditorChanged();
+      setAttachmentError(null);
       const next = attachmentsRef.current.filter(({ id }) => id !== attachment.id);
       attachmentsRef.current = next;
       setAttachments(() => next);

@@ -168,6 +168,17 @@ export async function pushCurrentBranch(
       "Check out a local branch before pushing.",
     );
   }
+  const branch = await validateBranch(root, status.branch);
+  // A terminal or provider can switch HEAD while the network request is pending.
+  // Resolve the selected local branch once and push that immutable commit.
+  const source = await runGitInspection(root, ["rev-parse", "--verify", "--end-of-options", `refs/heads/${branch}^{commit}`], {
+    maxOutputBytes: 256,
+    failureMessage: "Unable to resolve the branch commit to push.",
+  });
+  const commit = source.stdout.toString("utf8").trim();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commit)) {
+    throw new GitError("invalid-input", "The selected branch has no valid commit to push.");
+  }
   const configuredRemote = status.pullRequest.remoteName;
   const selectedRemote = remoteName ?? configuredRemote;
   if (!selectedRemote) {
@@ -188,12 +199,20 @@ export async function pushCurrentBranch(
   }
   await runGit(
     root,
-    ["push", "--set-upstream", remote, `HEAD:refs/heads/${status.branch}`],
+    ["push", remote, `${commit}:refs/heads/${branch}`],
     {
       timeoutMs: NETWORK_TIMEOUT_MS,
       failureMessage: "Unable to push the current branch.",
     },
   );
+  // An OID refspec cannot set upstream automatically. Name the intended local
+  // branch explicitly even if a different branch is now checked out.
+  await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.remote`, remote], {
+    failureMessage: "The commit was pushed, but its upstream remote could not be saved.",
+  });
+  await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.merge`, `refs/heads/${branch}`], {
+    failureMessage: "The commit was pushed, but its upstream branch could not be saved.",
+  });
   return { status: await getRepositoryStatus(root) };
 }
 

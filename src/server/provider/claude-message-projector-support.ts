@@ -1,5 +1,8 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 
+import type { AgentHarnessEmitter } from "./agent-harness";
+import { parseClaudeRateLimitEvent } from "./claude-usage";
+
 export const MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS = 1024 * 1024;
 export const MAX_CLAUDE_TRACKED_MESSAGE_IDS = 4_096;
 export const MAX_CLAUDE_TRACKED_TEXT_ALIASES =
@@ -298,6 +301,37 @@ export function safeClaudeStreamIndex(value: unknown): number | null {
     && value <= MAX_CLAUDE_STREAM_BLOCK_INDEX
     ? value
     : null;
+}
+
+/**
+ * Emits live quota metadata from a native `rate_limit_event`. `rate-limits` is
+ * negotiated for this harness, and the run coordinator only accepts quota
+ * metadata from a run that negotiated it (#343), so it is announced before
+ * each report; re-announcing is idempotent for the coordinator.
+ */
+export function projectClaudeRateLimitEvent(
+  emitter: AgentHarnessEmitter,
+  message: unknown,
+): void {
+  const rateLimit = parseClaudeRateLimitEvent(message);
+  if (!rateLimit) return;
+  emitter.capability("rate-limits", true);
+  emitter.rich({
+    type: "metadata",
+    metadata: { rateLimits: [rateLimit] },
+    source: "session",
+    complete: false,
+  });
+}
+
+/**
+ * Only tool calls open tool activities. Text and thinking content blocks have
+ * no tool name or identity and stream through their own channels.
+ */
+export function isClaudeToolUseBlock(type: unknown): boolean {
+  return type === "tool_use"
+    || type === "server_tool_use"
+    || type === "mcp_tool_use";
 }
 
 export function isChildOwnedClaudeMessage(parentToolUseId: unknown): boolean {

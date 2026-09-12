@@ -13,10 +13,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 
 import { createCanvas } from "@napi-rs/canvas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { imageAttachmentTooLargeMessage } from "../../src/main/attachment-image-validation";
 import {
   AttachmentImportValidationError,
   validateAttachmentImportFile,
@@ -152,6 +154,20 @@ describe("private staged attachment validation", () => {
     await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({
       code: "content",
     } satisfies Partial<AttachmentImportValidationError>);
+  });
+
+  it("reports a well-formed oversized image with its bounded dimensions", async () => {
+    const png = Buffer.from(createCanvas(1, 1).encodeSync("png"));
+    png.writeUInt32BE(8_000, 16);
+    png.writeUInt32BE(5_001, 20);
+    png.writeUInt32BE(crc32(png.subarray(12, 29)), 29);
+    const { operation } = await stage("screenshot.png", "image/png", png);
+
+    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({
+      code: "image-too-large",
+      image: { width: 8_000, height: 5_001 },
+      message: imageAttachmentTooLargeMessage(8_000, 5_001),
+    });
   });
 
   it("rejects a symlink substituted for the staged capability", async () => {

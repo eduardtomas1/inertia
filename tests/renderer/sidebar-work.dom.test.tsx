@@ -300,7 +300,6 @@ describe("compact Work sidebar", () => {
       "Daily work",
       "Usage",
       "Settings",
-      "",
     ]);
     const dailyWork = screen.getByRole("button", { name: "Daily work" });
     const mark = dailyWork.querySelector(".daily-work-mark");
@@ -406,6 +405,7 @@ describe("compact Work sidebar", () => {
 
     fireEvent.click(recentRow);
     expect(view.onSelectConversation).toHaveBeenCalledWith(recent);
+    expect(view.onViewChange).toHaveBeenCalledBefore(view.onSelectConversation);
   });
 
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {

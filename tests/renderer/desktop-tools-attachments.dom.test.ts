@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   type ComposerAttachmentImportBatch,
+  attachmentImportErrorMessage,
   importComposerAttachmentFilesSequentially,
   mergePreviewStateUpdate,
   preflightComposerAttachmentFiles,
@@ -34,6 +35,31 @@ function importBatch(
     cancel: vi.fn(async () => undefined),
   };
 }
+
+describe("attachment import error display", () => {
+  const tooLarge = "This image is too large (8000×5001 pixels, 40.1 MP). "
+    + "Images up to 40 megapixels and 8192 pixels per side are supported. "
+    + "Resize it and try again.";
+
+  it("strips Electron's IPC wrapper from main-process errors", () => {
+    expect(attachmentImportErrorMessage(new Error(
+      `Error invoking remote method 'inertia:import-attachments': Error: ${tooLarge}`,
+    ))).toBe(tooLarge);
+    expect(attachmentImportErrorMessage(new Error(
+      "Error invoking remote method 'inertia:select-attachments': "
+        + "Error: Attachment content does not match its safe file type.",
+    ))).toBe("Attachment content does not match its safe file type.");
+  });
+
+  it("keeps renderer-side messages and falls back for empty or unknown errors", () => {
+    expect(attachmentImportErrorMessage(new Error("Attachments exceed the 20 MB turn limit.")))
+      .toBe("Attachments exceed the 20 MB turn limit.");
+    expect(attachmentImportErrorMessage("boom")).toBe("Attachments could not be added.");
+    expect(attachmentImportErrorMessage(new Error(
+      "Error invoking remote method 'inertia:import-attachments': Error: ",
+    ))).toBe("Attachments could not be added.");
+  });
+});
 
 describe("desktop attachment preflight", () => {
   it("rejects an oversized file before reading any renderer bytes", async () => {

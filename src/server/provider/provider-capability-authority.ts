@@ -40,7 +40,8 @@ export interface ProviderCapabilityAuthorityOptions {
     backendProfile: ModelBackendProfile,
     modelId: string,
   ): readonly ModelCapability[];
-  evidenceTrusted(): boolean;
+  /** Evidence trust is scoped per provider (#336). */
+  evidenceTrusted(providerId: ProviderId): boolean;
 }
 
 /**
@@ -242,7 +243,7 @@ export class ProviderCapabilityAuthority {
       installation,
       installationFingerprint,
       protocolEvidence: this.protocolVerifiedInstallations.get(providerId),
-      evidenceTrusted: this.options.evidenceTrusted(),
+      evidenceTrusted: this.options.evidenceTrusted(providerId),
       additionalConfigured,
       additionalNegotiated,
       customProbeCapabilities: backendProfile.source === "custom" && modelId

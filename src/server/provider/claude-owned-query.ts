@@ -16,17 +16,21 @@ import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
+import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
 
 export interface ClaudeOwnedQueryDependencies {
   /** Test seam for the SDK-owned child process creation. */
   spawnProcess?: typeof spawn;
   /** Test seam for the owned Claude process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
+  /** Small deterministic wire budgets for synthetic transport tests. */
+  transportLimits?: ClaudeTransportLimits;
 }
 
 export interface ClaudeOwnedQueryProcess {
   readonly spawnClaudeCodeProcess: (options: SpawnOptions) => SpawnedProcess;
   readonly child: () => ChildProcessWithoutNullStreams | undefined;
+  readonly transportError: () => Error | undefined;
   readonly requestTermination: (force: boolean) => void;
   readonly terminate: (force: boolean) => Promise<void>;
 }
@@ -37,7 +41,8 @@ export interface ClaudeOwnedQueryProcess {
  * The SDK receives its final command, arguments, cwd, environment, and abort
  * signal unchanged. Inertia supplies only the shell-free detached-process
  * policy and one memoized whole-tree shutdown barrier shared by SDK close,
- * cancellation, and the public operation result.
+ * cancellation, and the public operation result. Raw stdout passes through
+ * a bounded streaming boundary before the SDK can assemble complete lines.
  */
 export function createClaudeOwnedQueryProcess(
   subject: string,
@@ -46,6 +51,7 @@ export function createClaudeOwnedQueryProcess(
   const spawnProcess = dependencies.spawnProcess ?? spawn;
   let child: ChildProcessWithoutNullStreams | undefined;
   let shutdownRequested = false;
+  let transportError: Error | undefined;
   let terminateOwnedProcessTree: ReturnType<
     typeof createOwnedProcessTreeTermination
   > | undefined;
@@ -92,6 +98,16 @@ export function createClaudeOwnedQueryProcess(
       subject,
       dependencies.terminateProcessTree,
     );
+    const stdout = new BoundedClaudeTransport(dependencies.transportLimits);
+    stdout.on("error", (error) => {
+      transportError ??= error;
+      ownedChild.stdout.unpipe(stdout);
+      // Retain no further output while the same owned shutdown barrier settles.
+      ownedChild.stdout.resume();
+      requestTermination(true);
+    });
+    ownedChild.stdout.on("error", (error) => stdout.destroy(error));
+    ownedChild.stdout.pipe(stdout);
 
     const forwardedAbort = (): void => requestTermination(true);
     const removeForwardedAbort = (): void => {
@@ -108,7 +124,7 @@ export function createClaudeOwnedQueryProcess(
 
     return {
       stdin: ownedChild.stdin,
-      stdout: ownedChild.stdout,
+      stdout,
       get killed() { return ownedChild.killed; },
       get exitCode() { return ownedChild.exitCode; },
       get signalCode() { return ownedChild.signalCode; },
@@ -127,6 +143,7 @@ export function createClaudeOwnedQueryProcess(
   return {
     spawnClaudeCodeProcess,
     child: () => child,
+    transportError: () => transportError,
     requestTermination,
     terminate: async (force) => {
       shutdownRequested = true;

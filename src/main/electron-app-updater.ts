@@ -58,7 +58,7 @@ export type AppUpdaterInstallResult =
   | "native-outcome-uncertain";
 
 export interface AppUpdaterAdapter {
-  check(): Promise<{ available: boolean; version: string } | null>;
+  check(): Promise<{ available: boolean; version: string; releaseNotes?: unknown } | null>;
   download(callbacks: {
     onProgress(progress: AppUpdaterDownloadProgress): void;
     onCancelled(): void;
@@ -244,12 +244,13 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       },
   ) {}
 
-  async check(): Promise<{ available: boolean; version: string } | null> {
+  async check(): Promise<{ available: boolean; version: string; releaseNotes?: unknown } | null> {
     const result: UpdateCheckResult | null = await this.updater.checkForUpdates();
     if (!result) return null;
     return {
       available: result.isUpdateAvailable,
       version: result.updateInfo.version,
+      releaseNotes: result.updateInfo.releaseNotes,
     };
   }
 

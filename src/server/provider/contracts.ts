@@ -127,6 +127,14 @@ interface ProviderRunRequest {
   /** Saved evidence used only to keep a resumed Codex run alive long enough
    * for an active goal's provider-authored continuation to start. */
   goalContinuationExpected?: boolean;
+  /**
+   * Optional user-configured spend ceiling for this run, in USD (finite,
+   * > 0, <= 10,000). Only the native Claude Agent SDK route on the built-in
+   * Anthropic backend honors it, as the SDK `maxBudgetUsd` query option, and
+   * subagent usage counts toward it. Every other harness ignores it. Absent
+   * means no limit.
+   */
+  maxBudgetUsd?: number;
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";

@@ -2,11 +2,20 @@ import { Image } from "@napi-rs/canvas";
 
 import type { ImageAttachmentMimeType } from "../shared/attachments.js";
 
+// The per-side cap stays just above the 8000 px per-side image limit that
+// model providers enforce, so a larger image would only fail later in a turn.
 const MAX_IMAGE_WIDTH = 8_192;
 const MAX_IMAGE_HEIGHT = 8_192;
-const MAX_IMAGE_PIXELS = 6_000_000;
+// Ordinary high-resolution screenshots must fit: 4K (8.3 MP), 5K (14.7 MP),
+// 6K (20.4 MP), 8K UHD (33.2 MP), and side-by-side dual-4K desktops
+// (7680x2160, 16.6 MP). The 10 MB file cap does not bound pixels, because a
+// flat PNG compresses by roughly 1000:1, so this remains the decompression-bomb
+// guard: one RGBA decode is at most 40 MP x 4 B = 160 MB, inside the
+// short-lived validation utility.
+export const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_FRAMES = 256;
-const MAX_IMAGE_DECODED_PIXELS = 12_000_000;
+// All frames of an animation share the budget of one maximum-size still image.
+const MAX_IMAGE_DECODED_PIXELS = MAX_IMAGE_PIXELS;
 const MAX_STRUCTURE_RECORDS = 4_096;
 const MAX_JPEG_MARKER_FILL_BYTES = 32;
 const MAX_GIF_SUB_BLOCKS = 48_000;
@@ -106,6 +115,36 @@ function uint24LittleEndian(bytes: Uint8Array, offset: number): number {
     | (bytes[offset + 2]! << 16);
 }
 
+/**
+ * Thrown for a well-formed image whose dimensions exceed the decode budget,
+ * so the user can be told to resize it instead of seeing a content mismatch.
+ */
+export class ImageAttachmentTooLargeError extends Error {
+  readonly code = "image-too-large";
+
+  constructor(readonly width: number, readonly height: number) {
+    super(imageAttachmentTooLargeMessage(width, height));
+    this.name = "ImageAttachmentTooLargeError";
+  }
+}
+
+export function imageAttachmentTooLargeMessage(
+  width: number,
+  height: number,
+): string {
+  // Round up so an image just over the cap never reads as within it.
+  const megapixels = (Math.ceil((width * height) / 100_000) / 10).toFixed(1);
+  return `This image is too large (${width}×${height} pixels, ${megapixels} MP). `
+    + `Images up to ${MAX_IMAGE_PIXELS / 1_000_000} megapixels and `
+    + `${MAX_IMAGE_WIDTH} pixels per side are supported. `
+    + "Resize it and try again.";
+}
+
+/**
+ * Rejects structurally impossible metadata while the container is inspected.
+ * Size budgets are applied only once the whole structure has been verified,
+ * so an oversized image is never confused with a malformed one.
+ */
 function validateMetadata(metadata: ImageMetadata): ImageMetadata {
   const { width, height, frames } = metadata;
   if (
@@ -115,12 +154,8 @@ function validateMetadata(metadata: ImageMetadata): ImageMetadata {
     || width <= 0
     || height <= 0
     || frames <= 0
-    || width > MAX_IMAGE_WIDTH
-    || height > MAX_IMAGE_HEIGHT
     || frames > MAX_IMAGE_FRAMES
-    || width * height > MAX_IMAGE_PIXELS
-    || width * height * frames > MAX_IMAGE_DECODED_PIXELS
-  ) throw new Error("The image has unsafe decoded dimensions or frames.");
+  ) throw new Error("The image has invalid dimensions or too many frames.");
   return metadata;
 }
 
@@ -159,6 +194,9 @@ function inspectPng(bytes: Buffer): ImageMetadata {
       }
       width = data.readUInt32BE(0);
       height = data.readUInt32BE(4);
+      if (width > 0x7fff_ffff || height > 0x7fff_ffff) {
+        throw new Error("The PNG image header exceeds the format's 2^31 - 1 limit.");
+      }
       validateMetadata({ width, height, frames: 1 });
     } else if (kind === "IHDR") {
       throw new Error("The PNG has duplicate image headers.");
@@ -561,20 +599,43 @@ function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): boolean {
   }
 }
 
-export function hasSafeImageAttachment(
+export type ImageAttachmentInspection =
+  | { readonly status: "safe" }
+  | { readonly status: "unsafe" }
+  | {
+      readonly status: "too-large";
+      readonly width: number;
+      readonly height: number;
+    };
+
+export function inspectImageAttachment(
   bytes: Buffer,
   mimeType: ImageAttachmentMimeType,
-): boolean {
+): ImageAttachmentInspection {
+  let metadata: ImageMetadata;
   try {
-    const metadata = mimeType === "image/png"
+    metadata = mimeType === "image/png"
       ? inspectPng(bytes)
       : mimeType === "image/jpeg"
         ? inspectJpeg(bytes)
         : mimeType === "image/gif"
           ? inspectGif(bytes)
           : inspectWebp(bytes);
-    return decodedImageMatches(bytes, metadata);
   } catch {
-    return false;
+    return { status: "unsafe" };
   }
+  const { width, height, frames } = metadata;
+  // Structurally valid but beyond the decode budget: report it distinctly and
+  // never hand it to the decoder.
+  if (
+    width > MAX_IMAGE_WIDTH
+    || height > MAX_IMAGE_HEIGHT
+    || width * height > MAX_IMAGE_PIXELS
+  ) return { status: "too-large", width, height };
+  if (width * height * frames > MAX_IMAGE_DECODED_PIXELS) {
+    return { status: "unsafe" };
+  }
+  return decodedImageMatches(bytes, metadata)
+    ? { status: "safe" }
+    : { status: "unsafe" };
 }

@@ -188,7 +188,10 @@ export function useDraftConversation({
         "The local service returned an unexpected project response.",
       );
     }
-    start(event.result.projectId);
+    // Project import is an explicit navigation boundary. Keep the new-chat
+    // draft alive while the project snapshot catches up, including when the
+    // imported path resolves to an already-known project.
+    start(event.result.projectId, true);
     return true;
   };
 

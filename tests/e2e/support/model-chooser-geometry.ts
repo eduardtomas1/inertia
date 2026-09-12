@@ -22,8 +22,12 @@ export async function expectModelChooserPlacement(
           frame: { top: frame.top, bottom: frame.bottom, height: frame.height },
           anchor: { top: anchor.top, bottom: anchor.bottom },
           workspace: { top: workspace.top, bottom: workspace.bottom },
-          viewportHeight: innerHeight,
-          visualViewportHeight: visualViewport?.height,
+          // Production places the chooser within the visual viewport, which
+          // can be shorter or offset relative to innerHeight. Measure the
+          // same space; the layout height is kept only as failure evidence.
+          viewportTop: visualViewport?.offsetTop ?? 0,
+          viewportHeight: visualViewport?.height ?? innerHeight,
+          layoutViewportHeight: innerHeight,
           vertical: element.getAttribute("data-popover-vertical"),
           scrollHeight: element.scrollHeight,
           clientHeight: element.clientHeight,

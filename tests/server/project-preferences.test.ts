@@ -93,4 +93,32 @@ describe("durable project and thread organization", () => {
     expect(parseProjectPreferences("{broken")).toEqual(defaults);
     expect(parseProjectPreferences("x".repeat(200_000))).toEqual(defaults);
   });
+
+  it("keeps preferences saved before the Claude spend limit existed, which defaults to no limit", () => {
+    const { store, project, path, root } = fixture();
+    // Exact shape written by builds that predate claudeMaxBudgetUsd.
+    const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
+      actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
+    expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null });
+    store.close(); stores.splice(stores.indexOf(store), 1);
+    const database = new Database(path);
+    try { database.prepare("UPDATE projects SET preferences_json = ? WHERE id = ?").run(JSON.stringify(legacy), project.id); } finally { database.close(); }
+    const reopened = new RuntimeStore(path, root); stores.push(reopened);
+    expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null });
+    reopened.updateProject(project.id, { preferences: { ...reopened.project(project.id).preferences!, claudeMaxBudgetUsd: 2.5 } });
+    expect(reopened.project(project.id).preferences).toMatchObject({ autoPull: true, claudeMaxBudgetUsd: 2.5 });
+  });
+
+  it("bounds the Claude spend limit to positive cents up to 10,000 USD", () => {
+    const defaults = defaultProjectPreferences();
+    expect(defaults.claudeMaxBudgetUsd).toBeNull();
+    for (const value of [null, 0.01, 0.29, 2.5, 10, 9_999.99, 10_000]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, claudeMaxBudgetUsd: value })).toMatchObject({ success: true, data: { claudeMaxBudgetUsd: value } });
+    }
+    for (const value of [0, -1, 0.001, 1.234, 10_000.01, Number.NaN, Number.POSITIVE_INFINITY, "5"]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, claudeMaxBudgetUsd: value }).success).toBe(false);
+    }
+    // A corrupt limit falls back to defaults, like any other corrupt preference.
+    expect(parseProjectPreferences(JSON.stringify({ ...defaults, autoPull: true, claudeMaxBudgetUsd: -5 }))).toEqual(defaults);
+  });
 });

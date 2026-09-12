@@ -484,7 +484,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
     const failureDiagnostics = failedTurn.locator("[data-turn-failure-diagnostics]");
-    await verifyFailureDiagnostics(failureDiagnostics, captureElementScenario);
+    await verifyFailureDiagnostics(failureDiagnostics, captureElementScenario, {
+      electronApp, turnId: failed.turn.id, runId: failed.turn.runId,
+    });
     const exceptionalGeometry = await Promise.all(
       [warningTurn, failedTurn].map((exceptionalTurn) =>
         exceptionalTurn.evaluate((element) => {

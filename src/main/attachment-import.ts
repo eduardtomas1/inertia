@@ -19,8 +19,14 @@ import {
   type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
 import type { AttachmentPickerMode } from "../shared/desktop.js";
-import { hasSafeImageAttachment } from "./attachment-image-validation.js";
+import {
+  ImageAttachmentTooLargeError,
+  inspectImageAttachment,
+} from "./attachment-image-validation.js";
 import { hasSafePdfAttachment } from "./attachment-pdf-validation.js";
+
+const UNSAFE_ATTACHMENT_CONTENT =
+  "Attachment content does not match its safe file type.";
 
 const IMAGE_ATTACHMENT_EXTENSIONS = [
   "png", "jpg", "jpeg", "webp", "gif",
@@ -617,19 +623,26 @@ function bytesFromUnknown(value: unknown): Buffer | null {
   return null;
 }
 
+/**
+ * @throws ImageAttachmentTooLargeError for a well-formed image beyond the
+ * decode budget; any other rejection uses the generic content-mismatch error.
+ */
 export function validateAttachmentImport(value: unknown): ValidatedAttachmentImport {
   const prepared = prepareAttachmentImport(value);
-  const validSignature = prepared.mimeType.startsWith("image/")
-    ? hasSafeImageAttachment(
-        prepared.bytes,
-        prepared.mimeType as ImageAttachmentMimeType,
-      )
-    : hasExpectedDocumentSignature(
-        prepared.bytes,
-        prepared.mimeType as DocumentAttachmentMimeType,
-      );
-  if (!validSignature) {
-    throw new Error("Attachment content does not match its safe file type.");
+  if (prepared.mimeType.startsWith("image/")) {
+    const image = inspectImageAttachment(
+      prepared.bytes,
+      prepared.mimeType as ImageAttachmentMimeType,
+    );
+    if (image.status === "too-large") {
+      throw new ImageAttachmentTooLargeError(image.width, image.height);
+    }
+    if (image.status !== "safe") throw new Error(UNSAFE_ATTACHMENT_CONTENT);
+  } else if (!hasExpectedDocumentSignature(
+    prepared.bytes,
+    prepared.mimeType as DocumentAttachmentMimeType,
+  )) {
+    throw new Error(UNSAFE_ATTACHMENT_CONTENT);
   }
 
   return {

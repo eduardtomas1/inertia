@@ -2,7 +2,11 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { imageAttachmentTooLargeMessage } from "../../src/main/attachment-image-validation";
+import { AttachmentImportValidationError } from "../../src/main/attachment-import-file";
 import {
+  attachmentImportFailureError,
+  attachmentImportFailureEvent,
   parseAttachmentImportWorkerEvent,
   parseAttachmentImportWorkerRequest,
 } from "../../src/main/attachment-import-worker-protocol";
@@ -109,5 +113,72 @@ describe("one-shot utility result acknowledgement protocols", () => {
       receipt,
       extra: true,
     })).toBeNull();
+  });
+
+  it("carries only bounded integer dimensions for an image-too-large failure", () => {
+    const tooLarge = {
+      type: "attachment-import.result",
+      operationId,
+      ok: false,
+      code: "image-too-large",
+      width: 8_000,
+      height: 5_001,
+    } as const;
+    expect(parseAttachmentImportWorkerEvent(tooLarge)).toEqual(tooLarge);
+
+    for (const malformed of [
+      { ...tooLarge, width: 3_840.5 },
+      { ...tooLarge, width: "3840" },
+      { ...tooLarge, width: 0 },
+      { ...tooLarge, height: -1 },
+      { ...tooLarge, width: 2 ** 31 },
+      { ...tooLarge, height: Number.MAX_SAFE_INTEGER + 2 },
+      { ...tooLarge, width: Number.POSITIVE_INFINITY },
+      { ...tooLarge, extra: true },
+      { type: tooLarge.type, operationId, ok: false, code: tooLarge.code, width: 8_000 },
+      { type: tooLarge.type, operationId, ok: false, code: "content", width: 8_000 },
+      { ...tooLarge, code: "image-too-big" },
+    ]) {
+      expect(parseAttachmentImportWorkerEvent(malformed), JSON.stringify(malformed))
+        .toBeNull();
+    }
+  });
+
+  it("maps worker failures to privacy-safe events and back", () => {
+    const tooLarge = new AttachmentImportValidationError("image-too-large", {
+      width: 8_000,
+      height: 5_001,
+    });
+    const event = attachmentImportFailureEvent(operationId, tooLarge);
+    expect(event).toEqual({
+      type: "attachment-import.result",
+      operationId,
+      ok: false,
+      code: "image-too-large",
+      width: 8_000,
+      height: 5_001,
+    });
+    expect(parseAttachmentImportWorkerEvent(event)).toEqual(event);
+    const rebuilt = attachmentImportFailureError(event);
+    expect(rebuilt).toBeInstanceOf(AttachmentImportValidationError);
+    expect(rebuilt).toMatchObject({
+      code: "image-too-large",
+      image: { width: 8_000, height: 5_001 },
+      message: imageAttachmentTooLargeMessage(8_000, 5_001),
+    });
+
+    expect(attachmentImportFailureEvent(
+      operationId,
+      new AttachmentImportValidationError("content"),
+    )).toMatchObject({ code: "content" });
+    expect(attachmentImportFailureEvent(
+      operationId,
+      new Error("EACCES: /Users/person/secret.png"),
+    )).toEqual({
+      type: "attachment-import.result",
+      operationId,
+      ok: false,
+      code: "unsafe",
+    });
   });
 });

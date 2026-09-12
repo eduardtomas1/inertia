@@ -59,6 +59,8 @@ export const PROVIDER_METADATA_CATALOG_MODEL_ID = "provider-catalog";
 export interface ProviderMetadataReadResult {
   models?: ProviderModel[];
   rateLimits?: ProviderRateLimit[];
+  /** The provider answered and reported that no rate limits apply (#344). */
+  rateLimitsUnavailable?: boolean;
 }
 
 export interface PersistedProviderMetadata {
@@ -473,7 +475,8 @@ export class ProviderMetadataCache {
   private readonly now: () => number;
   private readonly modelTtlMs: number;
   private readonly rateLimitTtlMs: number;
-  private cleanupUnconfirmed = false;
+  /** Scoped per provider and cleared by its next successful read (#336). */
+  private readonly cleanupUnconfirmedProviders = new Set<ProviderId>();
 
   constructor(options: ProviderMetadataCacheOptions = {}) {
     this.persistence = options.persistence;
@@ -493,8 +496,10 @@ export class ProviderMetadataCache {
     return this.currentScoped(this.nativeScope(providerId));
   }
 
-  processCleanupConfirmed(): boolean {
-    return !this.cleanupUnconfirmed;
+  processCleanupConfirmed(providerId?: ProviderId): boolean {
+    return providerId === undefined
+      ? this.cleanupUnconfirmedProviders.size === 0
+      : !this.cleanupUnconfirmedProviders.has(providerId);
   }
 
   currentScoped(scopeInput: ProviderMetadataScope): ProviderMetadata {
@@ -746,7 +751,9 @@ export class ProviderMetadataCache {
         signal,
       );
     } catch (error) {
-      this.cleanupUnconfirmed ||= isProcessTreeTerminationUnconfirmed(error);
+      if (isProcessTreeTerminationUnconfirmed(error)) {
+        this.cleanupUnconfirmedProviders.add(scope.providerId);
+      }
       if (signal?.aborted) return;
       if (entry.revision !== revision) return;
       for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
@@ -754,12 +761,27 @@ export class ProviderMetadataCache {
       this.persist(entry);
       return;
     }
+    // The reader settled its owned process tree, so earlier doubt is lifted.
+    this.cleanupUnconfirmedProviders.delete(scope.providerId);
 
     if (entry.revision !== revision) return;
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
 
     for (const field of fields) {
       const values = field === "models" ? validateProviderModels(result.models) : validateProviderRateLimits(result.rateLimits);
+      if (
+        values.length === 0
+        && field === "rateLimits"
+        && result.rateLimitsUnavailable === true
+      ) {
+        // The provider answered that no limits apply. Show that instead of
+        // keeping old values on screen as stale.
+        entry.rateLimits.values = [];
+        entry.rateLimits.updatedAt = attemptedAt;
+        entry.rateLimits.provenance = "provider";
+        entry.rateLimits.stale = false;
+        continue;
+      }
       if (values.length === 0) {
         if (entry[field].values.length > 0) entry[field].stale = true;
         continue;

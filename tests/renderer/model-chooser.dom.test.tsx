@@ -115,6 +115,89 @@ function currentRoute(): ComposerModelRoute {
 }
 
 describe("model chooser active route", () => {
+  it("repositions an open chooser after empty-thread centering without a resize and cleans up", async () => {
+    const pendingFrames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      pendingFrames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+      pendingFrames.delete(id);
+    });
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1440);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(920);
+    const resizeDisconnect = vi.spyOn(ResizeObserver.prototype, "disconnect");
+    const mutationDisconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+    const originalBounds = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const workspace = this.closest(".chat-workspace");
+      const triggerTop = workspace?.classList.contains("is-empty-thread") ? 453.53125 : 831;
+      if (this.classList.contains("chat-workspace")) return new DOMRect(100, 67, 1000, 844);
+      if (this.classList.contains("selected-model-chip")) return new DOMRect(400, triggerTop, 160, 30);
+      if (this.classList.contains("model-chooser-palette")) {
+        const [x = 0, y = 0] = this.style.translate.match(/-?\d+(?:\.\d+)?/gu)?.map(Number) ?? [];
+        return new DOMRect(400 + x, triggerTop - 9 - 242.625 + y, 320, 242.625);
+      }
+      return originalBounds.call(this);
+    });
+    const route = currentRoute();
+    const view = render(<div className="chat-workspace"><div className="composer">
+      <ModelChooser routes={[route]} selectedRoute={route} onSelect={vi.fn()} />
+    </div></div>);
+    try {
+      const workspace = view.container.querySelector(".chat-workspace")!;
+      fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+      const chooser = screen.getByRole("dialog", { name: "Choose model" });
+      Object.defineProperties(chooser, {
+        clientHeight: { configurable: true, value: 241 },
+        scrollHeight: { configurable: true, value: 241 },
+      });
+      await waitFor(() => expect(chooser).toHaveAttribute("data-popover-vertical", "above"));
+      expect(chooser.style.maxHeight).toBe("748px");
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+
+      // Every observed box keeps its size. Only the workspace class changes,
+      // as when detailLoading clears and the empty thread centers the composer.
+      workspace.classList.add("is-empty-thread");
+      await waitFor(() => expect(pendingFrames.size).toBe(1));
+      const scheduledFrame = [...pendingFrames.keys()];
+      window.dispatchEvent(new Event("resize"));
+      expect([...pendingFrames.keys()]).toEqual(scheduledFrame);
+      for (const [id, callback] of pendingFrames) {
+        pendingFrames.delete(id);
+        callback(16);
+      }
+      expect(chooser).toHaveAttribute("data-popover-vertical", "below");
+      expect(chooser.style.maxHeight).toBe("411.46875px");
+      expect(chooser.getBoundingClientRect().top).toBe(491.53125);
+      expect(screen.getByRole("searchbox")).toHaveFocus();
+      expect(pendingFrames.size).toBe(0);
+
+      workspace.classList.remove("is-empty-thread");
+      await waitFor(() => expect(pendingFrames.size).toBe(1));
+      const placementFrame = [...pendingFrames.keys()][0]!;
+      fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+      expect(pendingFrames.has(placementFrame)).toBe(false);
+      // Closing intentionally queues trigger-focus restoration separately.
+      for (const [id, callback] of pendingFrames) {
+        pendingFrames.delete(id);
+        callback(32);
+      }
+      expect(pendingFrames.size).toBe(0);
+      expect(resizeDisconnect).toHaveBeenCalled();
+      expect(mutationDisconnect).toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /Choose model/u })).toHaveFocus();
+      workspace.classList.add("is-empty-thread");
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(pendingFrames.size).toBe(0);
+    } finally {
+      view.unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("shows only sources with usable models and responds to availability changes", async () => {
     const current = currentRoute();
     const unavailable: ComposerModelRoute = {

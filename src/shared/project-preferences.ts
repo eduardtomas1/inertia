@@ -11,6 +11,15 @@ function boundedPng(value: string): boolean {
       && [integer(16), integer(20)].every((size) => size > 0 && size <= PROJECT_ICON_SIZE);
   } catch { return false; }
 }
+/** Upper bound for the optional per-turn Claude spend limit, in USD. */
+export const MAX_CLAUDE_TURN_BUDGET_USD = 10_000;
+/** A positive USD amount up to the bound, with at most two decimal places. */
+export function isValidClaudeTurnBudgetUsd(value: unknown): value is number {
+  // Every in-range number prints in plain decimal notation, so the pattern
+  // checks the exact value the user entered rather than a float product.
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    && value <= MAX_CLAUDE_TURN_BUDGET_USD && /^\d+(?:\.\d{1,2})?$/u.test(String(value));
+}
 export const projectPreferencesSchema = z.strictObject({
   workspace: z.enum(["local", "worktree"]).nullable(),
   autoPull: z.boolean(),
@@ -25,13 +34,18 @@ export const projectPreferencesSchema = z.strictObject({
     executable: z.string().trim().min(1).max(4096).refine((value) => !/[\0\r\n]/u.test(value)),
     args: z.array(z.string().max(4096).refine((value) => !value.includes("\0"))).max(64),
   })).max(20),
+  // Optional per-turn spend limit for native Claude turns. Null means no limit,
+  // and it is the default on purpose: a default dollar cap would stop long
+  // turns unexpectedly for subscription users. Preferences saved before this
+  // key existed omit it, so it defaults instead of failing the strict parse.
+  claudeMaxBudgetUsd: z.number().refine(isValidClaudeTurnBudgetUsd, "Use an amount from 0.01 to 10,000 USD with at most two decimals.").nullable().default(null),
 }).refine((value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 192 * 1024, "Project settings exceed the local command size limit.")
   .refine((value) => new Set(value.actions.map(({ id }) => id)).size === value.actions.length, "Project actions must have distinct identities.");
 
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [] };
+  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null };
 }
 
 /** Corrupt or older preferences must never block opening a project. */

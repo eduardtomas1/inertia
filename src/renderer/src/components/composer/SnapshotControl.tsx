@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Camera, X } from "lucide-react";
 import type { SnapshotRequest, SnapshotState } from "@shared/snapshots";
+import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { IconButton } from "../ui";
 import "./SnapshotControl.css";
 
 export function SnapshotControl({ conversationId }: { conversationId: string }): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
+  useNativePreviewSuspension(open);
   const [state, setState] = useState<SnapshotState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

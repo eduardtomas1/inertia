@@ -55,12 +55,22 @@ export interface ProviderManagerInstallationOptions {
 }
 
 export class ProviderManagerInstallationAuthority {
-  private authorityUncertain = false;
+  private readonly uncertainProviders = new Set<ProviderId>();
 
   constructor(private readonly options: ProviderManagerInstallationOptions) {}
 
+  /** True while any provider's installation authority is uncertain. */
   get uncertain(): boolean {
-    return this.authorityUncertain;
+    return this.uncertainProviders.size > 0;
+  }
+
+  /**
+   * Doubt is scoped per provider (#336): one provider's cleanup mismatch must
+   * not disable the others, and the provider's next confirmed-clean detection
+   * lifts it without an app restart.
+   */
+  uncertainFor(providerId: ProviderId): boolean {
+    return this.uncertainProviders.has(providerId);
   }
 
   identity(
@@ -143,7 +153,7 @@ export class ProviderManagerInstallationAuthority {
     if (!admission) return true;
     const released = admission.lease.release({ cleanupConfirmed: true });
     if (!released) {
-      this.authorityUncertain = true;
+      this.uncertainProviders.add(admission.identity.providerId);
       this.options.invalidateEvidence(admission.identity.providerId);
       this.options.leases?.quarantineObservation(
         admission.identity,
@@ -160,7 +170,7 @@ export class ProviderManagerInstallationAuthority {
     observedIdentity?: ProviderInstallationIdentity,
   ): void {
     if (!admission) return;
-    this.authorityUncertain = true;
+    this.uncertainProviders.add(admission.identity.providerId);
     this.options.invalidateEvidence(admission.identity.providerId);
     admission.lease.quarantine(reason);
     if (
@@ -239,6 +249,9 @@ export class ProviderManagerInstallationAuthority {
           "Provider discovery could not release exact installation authority.",
         );
       }
+      // A confirmed, identity-matching detection proves this installation
+      // is healthy again, so it lifts the provider's earlier doubt.
+      this.uncertainProviders.delete(admission.identity.providerId);
       return;
     }
     if (!verificationAuthority && !allowUnboundInitialResolution) {
@@ -266,7 +279,7 @@ export class ProviderManagerInstallationAuthority {
       };
     } catch (error) {
       this.release(admission);
-      this.authorityUncertain = true;
+      this.uncertainProviders.add(admission.identity.providerId);
       this.options.leases?.quarantineObservation(
         observedIdentity,
         admission.owner,
@@ -282,5 +295,6 @@ export class ProviderManagerInstallationAuthority {
         "Provider discovery could not transfer exact installation authority.",
       );
     }
+    this.uncertainProviders.delete(admission.identity.providerId);
   }
 }

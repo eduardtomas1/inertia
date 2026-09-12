@@ -4,7 +4,7 @@ import type { AttachmentRegistry } from "./attachment-registry.js";
 import { attachmentImportDocumentFromEvent, type AttachmentImportDocument, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import { SnapshotError, SnapshotService } from "./snapshot-service.js";
 import { privacySafeAttachmentImportError } from "./attachment-selection-import.js";
-import { readSnapshotPreferences, writeSnapshotPreferences } from "./snapshot-preferences.js";
+import { clearSnapshotPreferences, readSnapshotPreferences, writeSnapshotPreferences, type SnapshotPreferences } from "./snapshot-preferences.js";
 
 const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("state") }).strict(),
@@ -13,6 +13,8 @@ const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unbind") }).strict(),
   z.object({ type: z.literal("permission"), permission: z.enum(["accessibility", "screen"]) }).strict(),
 ]);
+
+const UNCONFIRMED_DISABLE = "Snapshot cleanup is unconfirmed, and the disabled setting could not be saved. Snapshots may turn back on at the next launch.";
 
 export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
@@ -108,6 +110,13 @@ export function registerSnapshotIpc(options: {
   const requireRevoked = (results: PromiseSettledResult<void>[]): void => {
     if (results.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot cleanup is unconfirmed.");
   };
+  // Make the next launch start with Snapshots off: save the disabled state,
+  // or else forget the saved preference. False when neither is possible.
+  const persistDisabled = async (shortcut: SnapshotPreferences["shortcut"]): Promise<boolean> => {
+    const directory = app.getPath("userData");
+    try { await writeSnapshotPreferences(directory, { enabled: false, shortcut }); return true; }
+    catch { return await clearSnapshotPreferences(directory).then(() => true, () => false); }
+  };
   configuration = readSnapshotPreferences(app.getPath("userData")).then(async (saved) => {
     if (saved && generation === 0) {
       const state = await service.configure(saved.enabled, saved.shortcut);
@@ -128,6 +137,11 @@ export function registerSnapshotIpc(options: {
               (state) => ({ state, error: null }), (error: unknown) => ({ state: null, error })),
             revoked,
           ]);
+          // A disable that cannot be fully confirmed must still not come back
+          // on at the next launch from a stale saved preference.
+          if (!request.enabled && (configured.state === null || cancellation.some(({ status }) => status === "rejected"))) {
+            if (!await persistDisabled(request.shortcut)) throw new SnapshotError(UNCONFIRMED_DISABLE);
+          }
           if (configured.state === null) throw configured.error;
           requireRevoked(cancellation);
           const state = configured.state;
@@ -138,9 +152,16 @@ export function registerSnapshotIpc(options: {
             const [stopped, cancellation] = await Promise.all([
               service.configure(false, request.shortcut).then(() => null, (error: unknown) => error), revoked,
             ]);
+            // This session is off now; keep the saved preference from turning it back on.
+            const persisted = await persistDisabled(request.shortcut);
+            if (!persisted && (stopped || cancellation.some(({ status }) => status === "rejected"))) {
+              throw new SnapshotError(UNCONFIRMED_DISABLE);
+            }
             if (stopped) throw stopped;
             requireRevoked(cancellation);
-            throw new Error("Snapshot settings could not be saved. Snapshots has been disabled.");
+            throw new Error(persisted
+              ? "Snapshot settings could not be saved. Snapshots has been disabled."
+              : "Snapshot settings could not be saved. Snapshots has been disabled for now, but may turn back on at the next launch.");
           }
           return state;
         });

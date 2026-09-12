@@ -167,7 +167,7 @@ export class ProviderManager {
   private readonly capabilityAuthority: ProviderCapabilityAuthority;
   private readonly runCoordinator: ProviderRunCoordinator;
   private processEnvironment: NodeJS.ProcessEnv | undefined;
-  private auxiliaryCleanupUnconfirmed = false;
+  private readonly auxiliaryCleanupUnconfirmed = new Set<ProviderId>();
 
   static createProduction(
     options: ProductionProviderManagerOptions,
@@ -263,9 +263,7 @@ export class ProviderManager {
           this.capabilityAuthority.installationFingerprint(providerId),
         );
       },
-      evidenceTrusted: () => !this.installationAuthority.uncertain
-        && !this.auxiliaryCleanupUnconfirmed
-        && this.metadataCache.processCleanupConfirmed(),
+      evidenceTrusted: (providerId) => this.providerEvidenceTrusted(providerId),
     });
     this.ownedLifetimeAbort = options.lifetimeSignal
       ? undefined
@@ -284,6 +282,8 @@ export class ProviderManager {
         this.resolvedCommands.set(providerId, executable);
       },
       processEnvironment: () => this.processEnvironment,
+      evidenceUncertain: (providerId) => Boolean(this.installationLeases)
+        && !this.providerEvidenceTrusted(providerId),
       capabilityAvailable: (input, capabilityId, configured, negotiated) =>
         this.installationLeases
           ? this.capabilityAuthority.available(
@@ -673,7 +673,7 @@ export class ProviderManager {
       } else {
         this.installationAuthority.release(admission);
       }
-      this.auxiliaryCleanupUnconfirmed ||= cleanupUnconfirmed;
+      if (cleanupUnconfirmed) this.auxiliaryCleanupUnconfirmed.add(providerId);
       this.invalidateInstallationEvidence(providerId);
       throw error;
     }
@@ -692,7 +692,7 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
+    this.observeAuxiliaryCleanup(providerId, detection.cleanupConfirmed);
     if (detection.executable && detection.cleanupConfirmed) {
       this.resolvedCommands.set(providerId, detection.executable);
     } else {
@@ -759,7 +759,7 @@ export class ProviderManager {
       } else {
         this.installationAuthority.release(admission);
       }
-      this.auxiliaryCleanupUnconfirmed ||= cleanupUnconfirmed;
+      if (cleanupUnconfirmed) this.auxiliaryCleanupUnconfirmed.add(providerId);
       throw error;
     }
     this.installationAuthority.settleDetection(
@@ -771,8 +771,27 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
+    this.observeAuxiliaryCleanup(providerId, detection.cleanupConfirmed);
     return detection;
+  }
+
+  /**
+   * Capability evidence trust is scoped per provider (#336): one provider's
+   * unconfirmed cleanup must not disable every other provider, and each doubt
+   * clears on that provider's next confirmed-clean operation.
+   */
+  private providerEvidenceTrusted(providerId: ProviderId): boolean {
+    return !this.installationAuthority.uncertainFor(providerId)
+      && !this.auxiliaryCleanupUnconfirmed.has(providerId)
+      && this.metadataCache.processCleanupConfirmed(providerId);
+  }
+
+  private observeAuxiliaryCleanup(
+    providerId: ProviderId,
+    cleanupConfirmed: boolean,
+  ): void {
+    if (cleanupConfirmed) this.auxiliaryCleanupUnconfirmed.delete(providerId);
+    else this.auxiliaryCleanupUnconfirmed.add(providerId);
   }
 
   setCommand(providerId: ProviderId, command?: string): void {
@@ -970,7 +989,7 @@ export class ProviderManager {
       );
       throw error;
     }
-    if (!this.metadataCache.processCleanupConfirmed()) {
+    if (!this.metadataCache.processCleanupConfirmed(providerId)) {
       this.installationAuthority.quarantine(
         admission,
         "provider-metadata-cleanup-unconfirmed",
@@ -1177,7 +1196,7 @@ export class ProviderManager {
     const runCleanupConfirmed = await this.runCoordinator.disposeAll();
     if (
       !runCleanupConfirmed
-      || this.auxiliaryCleanupUnconfirmed
+      || this.auxiliaryCleanupUnconfirmed.size > 0
       || this.installationAuthority.uncertain
       || !this.metadataCache.processCleanupConfirmed()
     ) {

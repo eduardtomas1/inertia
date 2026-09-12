@@ -2,11 +2,32 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const inspectionRace = vi.hoisted(() => ({
+  before: (_args: readonly string[]) => {},
+  after: (_args: readonly string[]) => {},
+}));
+vi.mock("../../src/server/git/runner", async (original) => {
+  const actual = await original<typeof import("../../src/server/git/runner")>();
+  return {
+    ...actual,
+    runGitInspection: async (...args: Parameters<typeof actual.runGitInspection>) => {
+      inspectionRace.before(args[1]);
+      const result = await actual.runGitInspection(...args);
+      inspectionRace.after(args[1]);
+      return result;
+    },
+  };
+});
 import { automaticPull, automaticPullCandidate } from "../../src/server/git/automatic-pull";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  inspectionRace.before = () => {};
+  inspectionRace.after = () => {};
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 }).trim();
 }
@@ -87,5 +108,48 @@ describe("opt-in automatic pull", () => {
     const controller = new AbortController(); controller.abort();
     await expect(automaticPullCandidate(f.local, { signal: controller.signal })).rejects.toThrow();
     expect(readFileSync(join(f.local, "new.txt"), "utf8")).toBe("preserve\n");
+  });
+
+  it.each(["eligibility", "last-status"])("preserves another branch selected during %s inspection", async (phase) => {
+    const f = fixture();
+    git(f.local, "branch", "--track", "feature", "company/trunk");
+    let defaultReads = 0;
+    let armed = false;
+    let switched = false;
+    const switchCheckout = (): void => {
+      git(f.local, "switch", "feature");
+      switched = true;
+      armed = false;
+    };
+    inspectionRace.after = (args) => {
+      if (args[0] !== "symbolic-ref" || args[2] !== "refs/remotes/company/HEAD" || ++defaultReads !== 2) return;
+      if (phase === "eligibility") switchCheckout();
+      else armed = true;
+    };
+    inspectionRace.before = (args) => {
+      if (armed && args[0] === "status") switchCheckout();
+    };
+    expect(await automaticPull(f.local, f.tracking, {}, async () => true)).toBe(false);
+    expect(switched).toBe(true);
+    expect(git(f.local, "branch", "--show-current")).toBe("feature");
+    expect(git(f.local, "rev-parse", "refs/heads/trunk")).toBe(f.before);
+    expect(git(f.local, "rev-parse", "refs/heads/feature")).toBe(f.before);
+    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe("first\n");
+    expect(git(f.local, "stash", "list")).toBe("");
+  });
+
+  it("preserves the checkout if its upstream changes during eligibility inspection", async () => {
+    const f = fixture();
+    let defaultReads = 0;
+    inspectionRace.after = (args) => {
+      if (args[0] !== "symbolic-ref" || args[2] !== "refs/remotes/company/HEAD" || ++defaultReads !== 2) return;
+      git(f.local, "update-ref", "refs/remotes/company/alternate", git(f.local, "rev-parse", f.tracking));
+      git(f.local, "branch", "--set-upstream-to", "company/alternate", "trunk");
+    };
+    expect(await automaticPull(f.local, f.tracking, {}, async () => true)).toBe(false);
+    expect(defaultReads).toBe(2);
+    expect(git(f.local, "rev-parse", "HEAD")).toBe(f.before);
+    expect(git(f.local, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("company/alternate");
+    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe("first\n");
   });
 });

@@ -73,8 +73,8 @@ export function AppNavigationOverlays({
               setWorkspaceView();
             }}
             onSelectConversation={(conversation) => {
-              selectConversation(conversation);
               setWorkspaceView();
+              selectConversation(conversation);
             }}
             onNewThread={createConversation}
             onAddProject={() => void importProject()}

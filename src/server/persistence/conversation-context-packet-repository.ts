@@ -21,6 +21,7 @@ import {
 } from "../../shared/contracts";
 import { normalizeIdentityPath } from "../project-identity";
 import { boundedSubagentText } from "../provider/subagent-trace";
+import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import type { ConversationRow, MessageRow, ProjectRow } from "./rows";
 import { MESSAGE_PROJECTION_COLUMNS } from "./stream-text-storage";
 import type { CreateMessageOptions } from "./types";
@@ -151,8 +152,10 @@ function scrubAndBoundExcerpt(
 ): ConversationContextExcerpt {
   const scrubbed = boundedSubagentText(row.content, row.content.length)
     ?? "[Empty message omitted]";
+  // Redact, then neutralize instruction-shaped text another model may have
+  // written, then bound: neutralizing grows the text, so the cap comes last.
   const bounded = truncateUtf8(
-    scrubbed.replace(/\r\n?/gu, "\n"),
+    neutralizeUntrustedAgentText(scrubbed.replace(/\r\n?/gu, "\n")),
     Math.min(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, remainingBytes),
   );
   return {
@@ -299,11 +302,13 @@ function workspaceLabel(conversation: ConversationRow): string {
     : "Project checkout";
 }
 
+// Titles and branch-derived labels can be authored by another agent run.
+// Neutralize after collapsing whitespace, which could otherwise form a tag.
 function scrubMetadata(value: string, fallback: string, maxLength: number): string {
-  return (boundedSubagentText(value, value.length) ?? fallback)
+  const collapsed = (boundedSubagentText(value, value.length) ?? fallback)
     .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, maxLength) || fallback;
+    .trim();
+  return neutralizeUntrustedAgentText(collapsed).slice(0, maxLength) || fallback;
 }
 
 function uniquePacketIds(ids: readonly string[]): string[] {

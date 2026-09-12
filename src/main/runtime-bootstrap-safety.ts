@@ -407,7 +407,7 @@ export async function prepareModernDarwinBootstrapRecovery(
     const allLeases = leases.all();
     const prior = allLeases.filter((lease) => (
       lease.systemBootId !== "unavailable"
-      || owned.records(lease.runtimeGenerationId) !== null
+      || owned.sessionExact(lease.runtimeGenerationId) !== null
     ));
     const initialOwnedLeaves = listDirectRuntimeJournalLeaves(
       pinDirectRuntimeJournalRoot(dataDirectory),
@@ -421,7 +421,6 @@ export async function prepareModernDarwinBootstrapRecovery(
     // not proof that every descendant stopped and must never auto-authorize
     // provider admission.
     for (const lease of prior) {
-      if (owned.records(lease.runtimeGenerationId) === null) continue;
       const recovery = recoverRuntimeOwnedProcesses(
         dataDirectory,
         lease.runtimeGenerationId,

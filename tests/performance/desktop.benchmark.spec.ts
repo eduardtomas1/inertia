@@ -27,6 +27,15 @@ import {
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
+import {
+  BENCHMARK_LOGIN_MARKER,
+  benchmarkLoginFixtureSource,
+  benchmarkReadinessBlockers,
+  projectBenchmarkComposerAdmission,
+  readBenchmarkComposerAdmission,
+  readBenchmarkLoginMarker,
+  readBenchmarkRuntimeReadiness,
+} from "../helpers/desktop-benchmark-readiness-diagnostic";
 import { attachRuntimeLifecycleFailureDiagnostic } from "../e2e/support/runtime-lifecycle-diagnostics";
 import { collectGuardianFailureCodes, type GuardianFailureCode } from "../helpers/guardian-failure-codes";
 import {
@@ -308,19 +317,12 @@ async function initializeWorkspace(workspace: string): Promise<void> {
     writeFile(join(workspace, "app-server"), streamingAppServer, "utf8"),
     writeFile(
       join(workspace, "login"),
-      [
-        'if (process.argv[2] === "status") {',
-        '  process.stdout.write("Logged in using ChatGPT\\n");',
-        "  process.exit(0);",
-        "}",
-        'process.stdout.write("Sign-in complete\\n");',
-        "",
-      ].join("\n"),
+      benchmarkLoginFixtureSource,
       "utf8",
     ),
     writeFile(
       join(workspace, ".git", "info", "exclude"),
-      "app-server\nlogin\n.inertia-stream-completion-*\n",
+      `app-server\nlogin\n.inertia-stream-completion-*\n${BENCHMARK_LOGIN_MARKER}\n`,
       { encoding: "utf8", flag: "a" },
     ),
   ]);
@@ -477,6 +479,7 @@ async function launchApp(
 ): Promise<AppRun> {
   const acquisition = cleanupContext.applications.beginAcquisition();
   const startedAt = performance.now();
+  const launchedAt = Date.now();
   try {
     const electronApp = await electron.launch({
       args: [".", `--user-data-dir=${profile}`],
@@ -491,6 +494,7 @@ async function launchApp(
       },
     });
     const resource: BenchmarkAppResource = { electronApp, runtimePid: null };
+    benchmarkReadinessPhases.set(electronApp, { phase: "before-streaming", sampleNumber: null, launchedAt });
     const cleanup = acquisition.adopt(resource);
     try {
       const page = await electronApp.firstWindow();
@@ -531,6 +535,11 @@ async function launchApp(
 // the independent runtime. Neither the URL nor terminal output is attached.
 const diagnosticRuntimeUrls = new WeakMap<ElectronApplication, string>();
 const guardianFailureCodes = new WeakMap<ElectronApplication, readonly GuardianFailureCode[]>();
+const benchmarkReadinessPhases = new WeakMap<ElectronApplication, {
+  phase: "before-streaming" | "admission" | "streaming" | "settled";
+  sampleNumber: number | null;
+  launchedAt: number;
+}>();
 
 async function runtimeSnapshot(electronApp: ElectronApplication): Promise<RuntimeSnapshot> {
   const snapshot = await electronApp.evaluate(() => {
@@ -1074,9 +1083,12 @@ async function streamingResponsivenessSample(
   );
 
   const composer = page.getByRole("region", { name: "Message composer" });
+  const phase = benchmarkReadinessPhases.get(electronApp);
+  if (phase) Object.assign(phase, { phase: "admission", sampleNumber });
   await composer.getByRole("textbox", { name: "Message" })
     .fill(`Run deterministic streaming responsiveness sample ${sampleNumber}.`);
   await composer.getByRole("button", { name: "Send message" }).click();
+  if (phase) phase.phase = "streaming";
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
   });
@@ -1851,6 +1863,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         workspace,
         sampleNumber,
       ));
+      const phase = benchmarkReadinessPhases.get(cold.electronApp);
+      if (phase) phase.phase = "settled";
     }
     const streamingResponsiveness = summarizeStreamingResponsiveness(
       streamingSamples,
@@ -2292,6 +2306,27 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       contentType: "application/json",
     }).catch(() => undefined);
     for (const app of launchedApps) {
+      const phase = benchmarkReadinessPhases.get(app) ?? null;
+      // Independent bounded reads preserve runtime evidence if the renderer
+      // itself is unresponsive. No request changes provider admission.
+      const [runtime, renderer, login] = await Promise.all([
+        readBenchmarkRuntimeReadiness(diagnosticRuntimeUrls.get(app) ?? null, FAILURE_DIAGNOSTIC_TIMEOUT_MS)
+          .catch(() => ({ outcome: "unavailable" as const })),
+        captureBoundedFailureDiagnostic(async () => {
+          const page = app.windows()[0];
+          return page && !page.isClosed()
+            ? projectBenchmarkComposerAdmission(await page.evaluate(readBenchmarkComposerAdmission)) : null;
+        }, FAILURE_DIAGNOSTIC_TIMEOUT_MS),
+        captureBoundedFailureDiagnostic(async () => phase && app === launchedApps.at(-1)
+          ? await readBenchmarkLoginMarker(workspace, phase.launchedAt) : null,
+        FAILURE_DIAGNOSTIC_TIMEOUT_MS),
+      ]);
+      const diagnostic = { phase, runtime, renderer, login,
+        observedBlockers: benchmarkReadinessBlockers(runtime.outcome === "captured" ? runtime.value : null,
+          renderer.outcome === "captured" ? renderer.value : null) };
+      await test.info().attach("benchmark-readiness-diagnostic", {
+        body: JSON.stringify(diagnostic), contentType: "application/json",
+      }).catch(() => undefined);
       await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
         diagnosticRuntimeUrls.get(app) ?? null).catch(() => undefined);
     }

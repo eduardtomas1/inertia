@@ -35,8 +35,8 @@ describe("composer attachment previews", () => {
   it("deduplicates current attachments and keeps the eight-item boundary", () => {
     const current = [attachment("one")];
     const incoming = [
-      attachment("same-path", { path: current[0]!.path, name: "other.png" }),
-      attachment("same-metadata", { path: "/private/tmp/other.png" }),
+      { ...current[0]! },
+      { ...current[0]! },
       ...Array.from({ length: 9 }, (_, index) =>
         attachment(`new-${index}`, {
           name: `new-${index}.png`,
@@ -50,6 +50,14 @@ describe("composer attachment previews", () => {
     expect(result.attachments).toHaveLength(8);
     expect(result.rejected).toHaveLength(4);
     expect(new Set(result.attachments.map(({ id }) => id)).size).toBe(8);
+  });
+
+  it("preserves distinct native IDs with identical names, types and sizes", () => {
+    const first = attachment("profit", { name: "report.txt", mimeType: "text/plain", size: 12 });
+    const second = attachment("loss", { name: "report.txt", mimeType: "text/plain", size: 12 });
+    expect(mergeComposerAttachments([first], [second])).toEqual({
+      attachments: [first, second], rejected: [],
+    });
   });
 
   it("enforces the total byte budget across separate import batches", () => {

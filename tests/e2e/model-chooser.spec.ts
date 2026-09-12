@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 
 import { RuntimeStore } from "../../src/server/database";
 import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
@@ -15,12 +14,10 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
-import { seedLargeModelCatalog } from "./support/model-catalog-fixture";
+import type { AppFixture } from "./support/app-fixture";
+import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { expectModelChooserPlacement, expectModelChooserVerticalFallback } from "./support/model-chooser-geometry";
+import { modelChooserContentGeometry } from "../support/model-chooser-placement";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,14 +31,7 @@ let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({
-    name: "model-chooser",
-    initialState: "conversation",
-    windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-      seedLargeModelCatalog(testDirectory, workspaceDirectory);
-    },
-  });
+  app = await createModelChooserFixture("model-chooser");
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
@@ -49,33 +39,10 @@ test.beforeAll(async () => {
   rendererErrors = app.rendererErrors;
   runtimeSnapshot = app.runtimeSnapshot;
   resizeWindow = app.resizeWindow;
-  // This fixture disables provider execution. Supply discovery readiness at
-  // the renderer transport boundary, without enabling real CLIs or bypassing
-  // the runtime's route/continuation checks below. Other providers stay absent.
-  const readySnapshot = (snapshot: AppSnapshot): AppSnapshot => ({
-    ...snapshot,
-    providers: snapshot.providers.map((provider) =>
-      provider.id === "codex" || provider.id === "claude"
-        ? { ...provider, available: true, installState: "installed", authState: "authenticated", canRun: true }
-        : provider),
-  });
-  await page.routeWebSocket(/.*/u, (route) => {
-    route.connectToServer().onMessage((data) => {
-      const event = JSON.parse(data.toString()) as ServerEvent;
-      if (event.type === "server.welcome" || event.type === "snapshot.updated") {
-        event.snapshot = readySnapshot(event.snapshot);
-      } else if (event.type === "runtime.event" && event.event.type === "snapshot.updated") {
-        event.event.snapshot = readySnapshot(event.event.snapshot);
-      }
-      route.send(JSON.stringify(event));
-    });
-  });
-  await page.reload();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 });
 
 test.afterAll(async () => {
-  await app.close();
+  await app?.close();
 });
 
 test("uses the anchored model chooser and enforces authoritative route boundaries", async ({ browserName: _browserName }, testInfo) => {
@@ -762,22 +729,21 @@ test("keeps branded model sources and rows legible across themes and narrow wind
       await capture(`model-chooser-${id}-${theme.toLowerCase()}`);
       // Without a viewport constraint, the frame ends with its content rather
       // than reserving a fixed-height blank area below these few model rows.
-      const frame = await chooser.boundingBox();
-      const list = await chooser.getByRole("list", { name: "Model results" }).boundingBox();
-      expect(Math.abs((frame!.y + frame!.height) - (list!.y + list!.height))).toBeLessThanOrEqual(2);
+      const content = await chooser.evaluate(modelChooserContentGeometry);
+      expect(content.bottomGap).toBeLessThanOrEqual(2);
       if (id === "codex") {
         await search.fill("Codex Beta");
         await expect(chooser.locator(".model-chooser-row-option")).toHaveCount(1);
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeLessThan(frame!.height);
+          .toBeLessThan(content.frameHeight);
         await capture(`model-chooser-filtered-${theme.toLowerCase()}`);
         await search.fill("route-that-does-not-exist");
         await expect(chooser.getByText("No matching models", { exact: true })).toBeVisible();
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeLessThan(frame!.height);
+          .toBeLessThan(content.frameHeight);
         await search.fill("");
         await expect.poll(async () => (await chooser.boundingBox())!.height)
-          .toBeCloseTo(frame!.height, 0);
+          .toBeCloseTo(content.frameHeight, 0);
       }
     }
     await expectModelChooserVerticalFallback(app, chooser);

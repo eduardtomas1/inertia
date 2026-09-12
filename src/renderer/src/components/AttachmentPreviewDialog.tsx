@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 
-import type { ChatAttachment } from "@shared/contracts";
+import type { AttachmentPreviewSource } from "../utils/composerAttachments";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 
 const DeferredAttachmentPreviewDialog = lazy(async () => ({
   default: (await import("./DocumentAttachmentPreview"))
@@ -8,13 +9,15 @@ const DeferredAttachmentPreviewDialog = lazy(async () => ({
 }));
 
 type AttachmentPreviewDialogProps = {
-  attachment: ChatAttachment;
+  attachment: AttachmentPreviewSource;
   onClose: () => void;
 };
 
 export function AttachmentPreviewDialog(
   props: AttachmentPreviewDialogProps,
 ): React.JSX.Element {
+  // Reserve the trusted overlay before the deferred document viewer arrives.
+  useNativePreviewSuspension(true);
   return (
     <Suspense fallback={null}>
       <DeferredAttachmentPreviewDialog {...props} />

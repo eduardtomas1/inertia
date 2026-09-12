@@ -517,10 +517,23 @@ function startClaudeRun(
         options: {
           abortController,
           cwd: options.input.cwd,
-          env: options.environment,
+          env: claudeRunEnvironment(options.environment),
           pathToClaudeCodeExecutable: options.executable,
           spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
           includePartialMessages: true,
+          ...(options.input.maxBudgetUsd !== undefined
+            ? { maxBudgetUsd: options.input.maxBudgetUsd }
+            : {}),
+          // Claude Code omits thinking content by default, and in multi-step
+          // turns Claude often narrates between tools inside thinking. With
+          // it omitted, Inertia had nothing to show until the final answer.
+          // Summaries stream through the reasoning channel. Only the display
+          // flag is set, so each model keeps its own thinking mode, and only
+          // on Claude Code versions verified to accept it.
+          ...(usesNativeAnthropic
+            && claudeSupportsThinkingDisplay(options.installationVersion)
+            ? { extraArgs: { "thinking-display": "summarized" } }
+            : {}),
           // Inertia owns the approval boundary. Loading filesystem settings
           // here would let a repository's .claude/settings.json install hooks
           // or allow rules that execute before canUseTool can ask the user.
@@ -573,15 +586,24 @@ function startClaudeRun(
       emitter.status("running");
       messageIterator = query[Symbol.asyncIterator]();
       let drainTerminalSubagents = false;
+      let announcedShortenedEvent = false;
       while (true) {
         const next = await nextClaudeMessage(
           messageIterator,
           drainTerminalSubagents ? terminalSubagentDrainTimeoutMs : null,
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
-        const message = next.value;
         drainTerminalSubagents = false;
-        eventBudget.observe(message);
+        // One legitimately large update is shortened for Inertia's view
+        // instead of failing the turn (#338). Claude keeps the full content.
+        const observed = eventBudget.observe(next.value);
+        const message = observed.value as SDKMessage;
+        if (observed.shortened && !announcedShortenedEvent) {
+          announcedShortenedEvent = true;
+          emitter.activity("system", "info", "Shortened a large Claude update", {
+            detail: "An update was larger than Inertia's 1 MB event limit, so its longest fields are shortened here. Claude still has the full content and the turn continues.",
+          });
+        }
         const record = message as unknown as Record<string, unknown>;
         const childOwned = record.parent_tool_use_id !== null
           && record.parent_tool_use_id !== undefined;
@@ -705,6 +727,7 @@ function startClaudeRun(
           continue;
         }
       }
+      if (ownedProcess.transportError()) throw ownedProcess.transportError();
       if (!selectedSkillsVerified) {
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
@@ -794,7 +817,9 @@ function startClaudeRun(
       );
     } catch (error) {
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
-      const rawError = safeError(error, "Claude Agent SDK stopped unexpectedly.");
+      const rawError = claudeReadableRuntimeError(
+        safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
+      );
       const message = routeFailure(rawError);
       return finishResult(
         "failed",
@@ -845,6 +870,12 @@ function startClaudeRun(
       // The SDK has delivered its terminal protocol result and the finally
       // block above has closed its streams. No useful graceful window remains.
       await ownedProcess.terminate(true);
+      const wireError = ownedProcess.transportError();
+      if (wireError && outcome.status !== "cancelled") {
+        const error = routeFailure(wireError.message);
+        terminal = { ...outcome, status: "failed", error,
+          failure: claudeRuntimeFailure(wireError.message, error) };
+      }
     } catch {
       terminal = {
         ...outcome,
@@ -1079,7 +1110,7 @@ function claudeRuntimeFailure(
   rawError: string,
   message: string,
 ): ProviderRunFailure {
-  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event rate/iu.test(rawError)
+  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event (?:rate|budget)/iu.test(rawError)
     ? "protocol-overflow"
     : /unserializable|malformed|non-canonical/iu.test(rawError)
       ? "malformed-protocol"
@@ -1094,6 +1125,45 @@ function claudeRuntimeFailure(
 
 function bounded(value: string): string {
   return value.slice(0, MAX_EVENT_TEXT_CHARS);
+}
+
+function claudeReadableRuntimeError(rawError: string): string {
+  // Keeps the "oversized" wording that classifies protocol overflow.
+  return rawError === "Claude sent an oversized event."
+    ? "Claude sent an oversized event that stayed above Inertia's 1 MB per-update limit even after its longest fields were shortened."
+    : rawError;
+}
+
+/**
+ * Deliberate subagent fan-out ceilings (#339). They match the SDK defaults
+ * but are pinned so an SDK default change cannot silently widen them. An
+ * explicit value in the provider environment still wins.
+ */
+const CLAUDE_SUBAGENT_LIMITS = {
+  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "3",
+  CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "20",
+} as const;
+
+/** Oldest Claude Code version verified to accept `--thinking-display`. */
+const CLAUDE_THINKING_DISPLAY_MIN_VERSION = [2, 1, 269] as const;
+
+export function claudeSupportsThinkingDisplay(
+  version: string | null | undefined,
+): boolean {
+  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/u);
+  if (!match) return false;
+  const parts = match.slice(1, 4).map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const minimum = CLAUDE_THINKING_DISPLAY_MIN_VERSION[index]!;
+    if (parts[index] !== minimum) return parts[index]! > minimum;
+  }
+  return true;
+}
+
+function claudeRunEnvironment(
+  environment: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv {
+  return { ...CLAUDE_SUBAGENT_LIMITS, ...(environment ?? process.env) };
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

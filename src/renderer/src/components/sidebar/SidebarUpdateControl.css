@@ -1,0 +1,62 @@
+.sidebar-update-control { position: relative; margin-left: auto; flex: 0 0 32px; }
+.update-status-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sidebar .sidebar-update-button { position: relative; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+.sidebar-update-button[data-update-state="available"],
+.sidebar-update-button[data-update-state="downloading"],
+.sidebar-update-button[data-update-state="downloaded"] { color: var(--text); background: var(--surface-hover); }
+.sidebar-update-button[data-update-state="attention"] { color: var(--warning); }
+.sidebar-update-button[aria-disabled="true"] { cursor: default; }
+.update-status-icon { position: relative; display: grid; width: 16px; height: 16px; place-items: center; }
+.update-status-icon.is-downloading { width: 32px; height: 32px; }
+.update-available-dot { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--surface-hover); }
+.update-ready-badge { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 50%; color: var(--surface); background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
+.update-progress-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
+.update-progress-ring circle { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.update-progress-track { opacity: 0.22; }
+.update-progress-value { stroke-linecap: round; transition: stroke-dashoffset 300ms ease-out; }
+@keyframes sidebar-update-check { to { transform: rotate(360deg); } }
+.update-status-icon.is-checking { animation: sidebar-update-check 1s linear infinite; }
+.app-shell[data-document-visible="false"] .update-status-icon.is-checking { animation-play-state: paused; }
+.sidebar-update-details {
+  position: fixed; inset: auto; margin: 0; padding: 16px; box-sizing: border-box;
+  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 14px;
+  color: var(--text); background: var(--surface-strong); box-shadow: var(--shadow);
+  font: inherit; font-size: var(--ui-font-secondary);
+}
+.sidebar-update-details header { display: flex; align-items: flex-start; gap: 12px; }
+.sidebar-update-details header > div { flex: 1; min-width: 0; }
+.sidebar-update-details strong { display: block; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.sidebar-update-details small { display: block; color: var(--text-muted); font-size: var(--ui-font-micro); margin-top: 4px; }
+.sidebar-update-details header .icon-button { flex: 0 0 24px; width: 24px; height: 24px; margin: -4px -4px 0 0; }
+.update-detail-message, .update-detail-muted { margin: 12px 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.update-detail-muted { color: var(--text-muted); font-size: var(--ui-font-micro); }
+.update-detail-progress { height: 3px; margin-top: 12px; border-radius: 3px; background: var(--surface-hover); overflow: hidden; }
+.update-detail-progress > span { display: block; height: 100%; background: var(--accent-strong); }
+.update-release-notes { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
+.update-release-notes h3 { margin: 0 0 8px; font-size: inherit; font-weight: 650; }
+.update-release-body { max-height: min(280px, 36vh); overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; line-height: 1.6; }
+.update-release-body :is(p, ul, ol, pre, blockquote) { margin: 0 0 10px; }
+.update-release-body :is(ul, ol) { padding-left: 18px; }
+.update-release-body ul { list-style: disc; }
+.update-release-body ol { list-style: decimal; }
+.update-release-body li + li { margin-top: 6px; }
+.update-release-body :is(h1, h2, h3, h4, h5, h6) { margin: 12px 0 8px; font-size: inherit; font-weight: 650; }
+.update-release-body pre, .update-release-plain { white-space: pre-wrap; }
+.update-release-body blockquote { border-left: 2px solid var(--border); padding-left: 10px; color: var(--text-muted); }
+.update-release-body > :last-child { margin-bottom: 0; }
+.update-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.update-detail-actions > button { min-height: 30px; margin: 0; font-size: var(--ui-font-micro); }
+.update-detail-actions .text-button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.update-restart-dialog { position: fixed; inset: 0; margin: auto; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: var(--surface-strong); box-shadow: var(--shadow); }
+.update-restart-dialog::backdrop { background: var(--backdrop, rgb(0 0 0 / 45%)); }
+.update-restart-dialog h2 { margin: 0; font-size: 17px; font-weight: 650; line-height: 1.4; text-wrap: balance; }
+.update-restart-dialog p { margin: 12px 0 0; color: var(--text-muted); font-size: var(--ui-font-secondary); line-height: 1.6; }
+.update-restart-dialog .update-detail-actions { justify-content: flex-end; margin-top: 24px; }
+@media (prefers-reduced-motion: reduce) {
+  .update-status-icon.is-checking { animation: none; }
+  .update-progress-value { transition: none; }
+}
+@media (forced-colors: active) {
+  .update-available-dot, .update-ready-badge { background: ButtonText; color: ButtonFace; }
+  .sidebar-update-details, .update-restart-dialog { border-color: ButtonText; }
+}

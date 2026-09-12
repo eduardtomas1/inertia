@@ -295,6 +295,11 @@ export interface AgentHarnessStartOptions {
    * can expose or execute a native tool.
    */
   providerNativeToolsAvailable: boolean;
+  /**
+   * Version reported by the detected native installation, when known. Lets a
+   * harness enable launch flags only on versions verified to accept them.
+   */
+  installationVersion?: string | null;
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
   hostTools?: ProviderHostToolBridge;

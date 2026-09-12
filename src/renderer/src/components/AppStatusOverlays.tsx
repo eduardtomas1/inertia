@@ -13,9 +13,6 @@ import { diagnosticErrorReference, navigateDiagnosticContext } from "../utils/di
 const ProviderAuthDialog = lazy(async () => ({
   default: (await loadProviderAuthDialog()).ProviderAuthDialog,
 }));
-const AppUpdateNotice = lazy(async () => ({
-  default: (await import("./AppUpdateNotice")).AppUpdateNotice,
-}));
 const DatabaseRecoveryNotice = lazy(async () => ({
   default: (await import("./DatabaseRecoveryNotice")).DatabaseRecoveryNotice,
 }));
@@ -50,7 +47,6 @@ export function AppStatusOverlays({
   useNativePreviewSuspension(Boolean(
     providerAuth.provider
       || databaseRecoveryNotice
-      || appUpdate.visible
       || appUpdate.error
       || providerQuotaNotices.notices.length > 0
       || error,
@@ -86,28 +82,8 @@ export function AppStatusOverlays({
           />
         </Suspense>
       )}
-      {(appUpdate.visible || appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
+      {(appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
         <div className="status-overlay-stack">
-          {appUpdate.visible && appUpdate.status && (
-            <Suspense fallback={null}>
-              <AppUpdateNotice
-                status={appUpdate.status}
-                onDismiss={appUpdate.dismiss}
-                onOpenRelease={() => {
-                  void appUpdate.openRelease().catch(() => undefined);
-                }}
-                onDownload={() => {
-                  void appUpdate.download().catch(() => undefined);
-                }}
-                onCancelDownload={() => {
-                  void appUpdate.cancelDownload().catch(() => undefined);
-                }}
-                onInstall={() => {
-                  void appUpdate.install().catch(() => undefined);
-                }}
-              />
-            </Suspense>
-          )}
           <ProviderQuotaNotices
             notices={providerQuotaNotices.notices}
             stacked

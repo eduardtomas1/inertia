@@ -134,6 +134,8 @@ export interface AppUpdateStatus {
   currentVersion: string;
   latestVersion: string | null;
   releaseUrl: string | null;
+  /** Bounded plain text from the exact release; absent in older desktop snapshots. */
+  releaseNotes?: string | null;
   checkedAt: string | null;
   lastAttemptedAt: string | null;
   message: string;

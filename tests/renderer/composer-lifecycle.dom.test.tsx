@@ -20,6 +20,7 @@ import type {
   PromptPreset,
   ServerEvent,
 } from "../../src/shared/contracts";
+import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from "../../src/shared/attachments";
 import {
   versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
@@ -1791,10 +1792,7 @@ describe("composer asynchronous ownership", () => {
   it("commits only the privileged attachment subset synchronously adopted by Composer", async () => {
     const existing = attachment("existing-import");
     const accepted = attachment("accepted-import");
-    const duplicate = {
-      ...existing,
-      id: "rejected-duplicate-import",
-    };
+    const duplicate = { ...existing };
     const acknowledgement = deferred<void>();
     const commit = vi.fn(async () => await acknowledgement.promise);
     const cancel = vi.fn(async () => undefined);
@@ -1838,6 +1836,63 @@ describe("composer asynchronous ownership", () => {
     expect(cancel).not.toHaveBeenCalled();
     expect(screen.getByText(accepted.name)).toBeInTheDocument();
     expect(screen.getAllByText(existing.name)).toHaveLength(1);
+  });
+
+  it.each(["picker", "drop"] as const)("keeps distinct same-metadata reports in a %s adoption and send", async (source) => {
+    const reports = ["profit", "loss"].map((id) => ({
+      ...attachment(id), name: "report.txt", mimeType: "text/plain" as const, size: 12,
+    }));
+    const commit = vi.fn(async () => undefined);
+    const lease = attachmentLease(reports, commit);
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(conversation(`reports-${source}`), {
+      onChooseAttachments: async () => lease,
+      onImportAttachments: async () => lease,
+      onSend,
+    })} />);
+    if (source === "picker") {
+      fireEvent.click(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }));
+    } else {
+      fireEvent.drop(screen.getByLabelText("Message composer"), { dataTransfer: {
+        files: ["Profit: +100", "Profit: -100"].map((content) => new File([content], "report.txt", { type: "text/plain" })),
+        types: ["Files"],
+      } });
+    }
+    await waitFor(() => expect(commit).toHaveBeenCalledExactlyOnceWith(["profit", "loss"]));
+    expect(screen.getAllByRole("button", { name: "Preview attachment report.txt" })).toHaveLength(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Compare both reports." } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Compare both reports.", reports, undefined));
+  });
+
+  it("reports count-limited drops and byte-limited picker adoption", async () => {
+    const full = ["first", "second"].map((id) => ({
+      ...attachment(id), size: MAX_CHAT_ATTACHMENT_TOTAL_BYTES / 2,
+    }));
+    const commit = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
+    const choose = vi.fn().mockResolvedValueOnce(attachmentLease(full))
+      .mockResolvedValueOnce(attachmentLease([attachment("too-large")], commit, cancel));
+    const importFiles = vi.fn(async () => attachmentLease([]));
+    render(<Composer {...composerProps(conversation("attachment-limits"), {
+      onChooseAttachments: choose, onImportAttachments: importFiles,
+    })} />);
+    const picker = screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" });
+    fireEvent.click(picker);
+    await screen.findByText("second.png");
+    await waitFor(() => expect(picker).toBeEnabled());
+    fireEvent.click(picker);
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(commit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("up to 8 attachments totaling 20.0 MB");
+    expect(screen.queryByText("too-large.png")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove attachment first.png" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const files = Array.from({ length: 8 }, (_, index) => new File(["image"], `${index}.png`, { type: "image/png" }));
+    fireEvent.drop(screen.getByLabelText("Message composer"), { dataTransfer: { files, types: ["Files"] } });
+    await waitFor(() => expect(importFiles).toHaveBeenCalledWith(files.slice(0, 7)));
+    expect(screen.getByRole("alert")).toHaveTextContent("Some files were not attached.");
   });
 
   it.each([

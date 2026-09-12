@@ -15,14 +15,15 @@ import {
   prepareDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
+import { runPackagedPdfSmoke } from "../../src/server/runtime/attachments/package-smoke-pdf";
 import { assembleTurnRequest } from "../../src/server/runtime/turns/request-context";
 import {
   DocumentExtractionCancelledError,
   DocumentExtractionInitializationError,
 } from "../../src/server/runtime/attachments/document-extraction-scheduler";
 
-function pdfWithText(text: string): Uint8Array {
-  const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET`;
+function pdfWithText(text: string, drawing = ""): Uint8Array {
+  const stream = `BT /F1 22 Tf 72 720 Td (${text}) Tj ET\n${drawing}`;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -229,6 +230,39 @@ describe("document attachment execution context", () => {
     },
     PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000,
   );
+
+  it.skipIf(hostedWindowsCi)("preserves a chart on a PDF page with a selectable heading", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-chart-pdf-"));
+    temporaryDirectories.push(directory);
+    const drawing = "1 0 0 rg 72 150 60 200 re f 0 0 1 rg 180 150 60 350 re f";
+    const bytes = pdfWithText("Quarterly sales chart for fiscal year", drawing);
+    const pdf = attachment({ size: bytes.byteLength });
+    const store = await generatedStore(directory);
+    const prepared = await prepareDocumentAttachments([{ attachment: pdf, bytes }], { generatedAttachmentStore: store });
+    expect(prepared.generatedImagePaths).toHaveLength(1);
+    expect(prepared.imagePaths).toEqual(prepared.generatedImagePaths);
+    expect(prepared.contexts[0]).toMatchObject({
+      content: expect.stringMatching(/page 1 as provider image 1[\s\S]*Quarterly sales chart for fiscal year/u),
+      truncated: false,
+    });
+    expect(JSON.stringify(prepared.contexts)).not.toContain(directory);
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const page = await loadImage(prepared.imagePaths[0]!);
+    const canvas = createCanvas(page.width, page.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(page, 0, 0);
+    // Interior of the first vector bar; proves the pixels survived extraction.
+    const [red, green, blue] = context.getImageData(Math.floor(page.width * 100 / 612), Math.floor(page.height * 542 / 792), 1, 1).data;
+    expect(red).toBeGreaterThan(200);
+    expect(green).toBeLessThan(40);
+    expect(blue).toBeLessThan(40);
+    await store.release(prepared.generatedImagePaths);
+    const inputPath = join(directory, "chart.pdf");
+    const resultPath = join(directory, "chart-result.json");
+    await writeFile(inputPath, pdfWithText("Packaged PDF extraction works", drawing));
+    await runPackagedPdfSmoke(inputPath, resultPath);
+    expect(JSON.parse(await readFile(resultPath, "utf8"))).toMatchObject({ ok: true });
+  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
 
   it("bounds a cold PDF module wait without poisoning the shared cache", async () => {
     vi.useFakeTimers();
@@ -648,6 +682,7 @@ describe("document attachment execution context", () => {
     });
     let rejectSecondRender!: (error: Error) => void;
     const pdfModule = {
+      OPS: {},
       getDocument() {
         const isRaster = rasterLoad;
         rasterLoad = true;

@@ -128,6 +128,7 @@ async function queryClaudeSkills(
   } finally {
     await cleanupOwnedResources();
   }
+  if (ownedProcess.transportError()) throw ownedProcess.transportError();
   if (operationError) throw operationError;
   const names = new Set((supported ?? []).map(({ name }) => name));
   return unambiguous.filter(({ name }) =>

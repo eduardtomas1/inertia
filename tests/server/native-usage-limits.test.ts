@@ -9,6 +9,7 @@ import { opaqueUsageIdentity } from "../../src/server/usage/cliproxy";
 import type { ProviderManager } from "../../src/server/providers";
 import type { UsageResetConfirmation } from "../../src/shared/provider-usage-limits";
 import { usageAccount } from "../helpers/usage-limits";
+import { deduplicateUsageAccounts } from "../../src/shared/usage-limits-projection";
 
 const protocol = vi.hoisted(() => ({ store: "file" as string | null, request: vi.fn<(method: string, params?: Record<string, unknown>) => Promise<Record<string, unknown>>>() }));
 vi.mock("../../src/server/codex/control-client", () => ({ CODEX_CONTROL_MAX_FRAME_BYTES: 4194304, CODEX_CONTROL_MAX_PROTOCOL_BYTES: 16777216, withCodexControlClient: async (options: { signal?: AbortSignal }, callback: (client: { request(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>> }) => unknown) => { options.signal?.throwIfAborted(); return callback({ request: (method, params) => method === "config/read" ? Promise.resolve({ config: { cli_auth_credentials_store: protocol.store } }) : protocol.request(method, params) }); } }));
@@ -18,13 +19,46 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "inertia-native-usage-")); dirs.push(directory);
   await writeFile(join(directory, "auth.json"), JSON.stringify({ tokens: { account_id: "synthetic-account" } }));
   const controller = new AbortController(); const abandonBeforeSpawn = vi.fn(() => true);
-  const providers = { codexControlContext: async () => ({ executable: "/fixture/codex", environment: { CODEX_HOME: directory }, cwd: directory, installationUse: { abandonBeforeSpawn } }) } as unknown as ProviderManager;
+  const detect = vi.fn(async () => ({ canRun: true, authState: "authenticated" }));
+  const providers = { detect, codexControlContext: async () => ({ executable: "/fixture/codex", environment: { CODEX_HOME: directory }, cwd: directory, installationUse: { abandonBeforeSpawn } }) } as unknown as ProviderManager;
   protocol.request.mockImplementation(async (method) => method === "account/read" ? { account: { type: "chatgpt", email: "fixture@example.test", planType: "pro" } }
     : method === "account/rateLimitResetCredit/consume" ? { outcome: "reset" }
       : { rateLimits: { primary: { usedPercent: 30, windowDurationMins: 300, resetsAt: 2000000000 } }, rateLimitResetCredits: { availableCount: 2, credits: null } });
-  return { directory, controller, abandonBeforeSpawn, reader: new NativeUsageReader(providers, directory, controller.signal), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
+  return { directory, controller, detect, abandonBeforeSpawn, reader: new NativeUsageReader(providers, directory, controller.signal), info: { ...initialProviderSnapshots(false)[0]!, canRun: true } };
 }
 describe("native Codex limits and reset protocol", () => {
+  it("verifies a native account when Limits opens before startup detection, retaining two exact account identities", async () => {
+    const f = await fixture();
+    let ready!: (value: { canRun: boolean; authState: string }) => void;
+    const detection = new Promise<{ canRun: boolean; authState: string }>((resolve) => { ready = resolve; });
+    f.detect.mockReturnValueOnce(detection);
+    const reading = f.reader.read({ ...f.info, canRun: false, installState: "checking", authState: "checking" });
+    expect(protocol.request).not.toHaveBeenCalled();
+    ready({ canRun: true, authState: "authenticated" });
+    const native = await reading;
+    const identityKey = opaqueUsageIdentity("codex", "synthetic-account");
+    const otherIdentity = opaqueUsageIdentity("codex", "different-account-same-email");
+    const pooled = deduplicateUsageAccounts([native,
+      usageAccount({ id: "hub:copy", identityKey, email: native.email }),
+      usageAccount({ id: "hub:other", identityKey: otherIdentity, email: native.email }),
+    ]);
+    expect(pooled.map((account) => account.identityKey).sort()).toEqual([identityKey, otherIdentity].sort());
+    expect(native).toMatchObject({ status: "ready", identityKey, canReset: true });
+    expect(f.detect).toHaveBeenCalledWith("codex", { cwd: f.directory, timeoutMs: 4000, signal: f.controller.signal });
+  });
+  it("keeps an account unavailable when the pending startup check finds it signed out", async () => {
+    const f = await fixture(); f.detect.mockResolvedValueOnce({ canRun: false, authState: "unauthenticated" });
+    const account = await f.reader.read({ ...f.info, canRun: false, authState: "checking" });
+    expect(account).toMatchObject({ status: "unavailable", identityKey: null, canReset: false, detail: "Codex is not signed in." });
+    expect(f.detect).toHaveBeenCalledOnce();
+    expect(protocol.request).not.toHaveBeenCalled();
+  });
+  it("does not retry a settled signed-out provider or infer identity from its cached quota", async () => {
+    const f = await fixture();
+    const account = await f.reader.read({ ...f.info, canRun: false, installState: "installed", authState: "unauthenticated" });
+    expect(account).toMatchObject({ status: "unavailable", identityKey: null, canReset: false });
+    expect(f.detect).not.toHaveBeenCalled(); expect(protocol.request).not.toHaveBeenCalled();
+  });
   it("abandons the exact unaccepted installation transfer when cancellation precedes spawn", async () => {
     const f = await fixture(); f.controller.abort();
     await expect(f.reader.read(f.info)).rejects.toThrow();

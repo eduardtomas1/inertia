@@ -93,6 +93,52 @@ combined release. The release coordinator owns the consolidated full
 performed for this Linux-only correction. The earlier verification manifest and
 screenshots above remain the original feature snapshot.
 
+## Native restart readiness correction (2026-09-13)
+
+The [consolidated candidate's macOS x64 job](https://github.com/eduardtomas1/inertia/actions/runs/34720475590/job/103625398264)
+reported `Codex3 accounts` after restart where the fixture requires two verified
+accounts. The shell can become ready before provider detection completes. Limits
+previously treated the initial `canRun: false` / `checking` snapshot as a settled
+unavailable account, cached its null identity for 60 seconds, and displayed it
+separately from the two verified hub accounts. The open panel's normal periodic
+refresh did not repair this within the assertion window.
+
+`NativeUsageReader` now performs the existing bounded provider detection when an
+explicit Limits read reaches Codex or Claude while readiness is still checking.
+It then applies the existing availability and account-verification rules. This
+can add one normal detection during startup; it uses the existing privileged
+process ownership, deadline and cancellation handling. Settled signed-out
+providers remain unavailable without another probe. File-store verification,
+provider-owned IDs, reset checks and deduplication are unchanged. No renderer
+code, cache interval, command schema or bundle ceiling changed.
+
+Verification used macOS ARM64 and Node 22.23.2, based on `31586db7` with the
+correction applied:
+
+- A unit regression with delayed detection failed before the fix with three
+  pooled identities, including the extra null native identity. After the fix it
+  retains exactly the two provider-owned IDs, even when both accounts have the
+  same email. Additional cases cover a pending check finding a signed-out
+  provider and an already settled signed-out provider.
+- The existing native E2E now gives the fixture's login-status response a bounded
+  2.5-second delay on restart. Against the previous application bundle, the same
+  exact account-count assertion failed with `Codex3 accounts`. After rebuilding,
+  the unchanged scenario passed **1 test in 13.0 seconds**, including the exact
+  two-account count, persisted hub removal and final one-account count.
+- Focused native reader, service, projection and installation-ownership tests
+  passed **4 files / 35 tests**. `npm run check:quality` and `npm run build:bundle`
+  passed. Renderer source and bundle budgets are untouched.
+- Native launcher PID 89528 and its private `ie-IMna0z` workspace were confirmed
+  removed after the passing run. The shared GUI lane was released.
+
+Before/after logs are `/tmp/inertia-limits-readiness-before.log`,
+`/tmp/inertia-limits-readiness-after.log`, and
+`/tmp/inertia-limits-readiness-e2e-{before,after}.log`; native artifacts are in
+`test-results/limits-readiness-{before,after}`. The unit regression is included in
+the portable suite. The coordinator owns the final consolidated full check,
+portable gate and hosted platform matrix; native x64, Windows and Linux were not
+rerun locally for this correction.
+
 ## Screenshots
 
 All four native screenshots were visually reviewed. The wide captures are

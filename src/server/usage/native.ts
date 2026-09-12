@@ -48,6 +48,14 @@ export class NativeUsageReader {
     const base: UsageAccount = { id: `native:${info.id}`, providerId: info.id, providerLabel: info.label, label: `${info.label} account`,
       email: null, plan: null, identityKey: null, sources: ["This computer"], status: "unavailable", detail: null,
       windows: usageWindows(info.rateLimits), updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(), credits: null, canReset: false };
+    // Shell readiness precedes provider discovery. An explicit Limits read must
+    // finish the normal bounded check before caching an unverified placeholder.
+    if (!info.canRun && (info.id === "codex" || info.id === "claude")
+      && (info.installState === "checking" || info.authState === "checking")) {
+      this.signal.throwIfAborted();
+      const detection = await this.providers.detect(info.id, { cwd: this.cwd, timeoutMs: 4000, signal: this.signal });
+      info = { ...info, canRun: detection.canRun, authState: detection.authState };
+    }
     if (!info.canRun) return { ...base, detail: `${info.label} is ${info.authState === "unauthenticated" ? "not signed in" : "not ready"}.` };
     if (info.id !== "codex" && info.id !== "claude") return { ...base, windows: [], status: "unsupported", detail: "This provider does not expose a supported subscription quota API." };
     if (info.id === "claude") {

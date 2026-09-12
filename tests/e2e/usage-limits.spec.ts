@@ -118,6 +118,10 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await app.expectNoViewportOverflow(); await capture("limits-narrow");
   await app.resizeWindow(1280, 820);
   await page.getByRole("button", { name: /Change theme \(current: dark\)/ }).click();
+  // Reproduce opening Limits during restart discovery on a slower machine.
+  // This stays below the normal provider detection deadline and must not turn
+  // the native account plus its hub copy into two unverified accounts.
+  await writeFile(join(app.workspaceDirectory, "login"), 'setTimeout(() => process.stdout.write("Logged in using ChatGPT\\n"), 2500);');
   await app.restart();
   await app.page.getByRole("button", { name: "Usage", exact: true }).click(); await app.page.getByRole("button", { name: "Limits", exact: true }).click();
   await expect(app.page.getByRole("region", { name: "Codex limits", exact: true }).locator("h3")).toContainText("2 accounts");

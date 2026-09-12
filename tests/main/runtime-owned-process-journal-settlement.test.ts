@@ -489,17 +489,27 @@ describe("runtime-owned journal settlement", () => {
     expect(journal.records(runtimeGenerationId)).toEqual([]);
   });
 
-  it("settles an exact claim transition before retrying release", async () => {
+  it.each(["linux", "darwin"] as const)("retries an exact %s claim release while respecting writer fencing", async (platform) => {
     const directory = temporaryDirectory();
-    const journal = portableClaim(directory, "darwin");
+    const journal = portableClaim(directory, platform === "linux" ? "win32" : "darwin");
+    if (platform === "linux") rewritePortableClaimAsLinux(directory, journal);
+    const capability = journal.sessionCapability(runtimeGenerationId, systemBootId);
+    expect(capability).not.toBeNull();
     const originalRelease = RuntimeOwnedProcessJournal.prototype.release;
     const waitForProcessGroupDrain = vi.fn(async () => undefined);
-    vi.spyOn(RuntimeOwnedProcessJournal.prototype, "release")
+    const release = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "release")
       .mockImplementationOnce(function (
         this: RuntimeOwnedProcessJournal,
         ownershipId: string,
       ) {
-        expect(this.retire(ownershipId)).toBe(true);
+        // Linux can observe a concurrent claim transition. Darwin has already
+        // fenced the crashed writer, so its old capability cannot publish one.
+        expect(this.sessionCapabilityCurrent(capability!)).toBe(platform === "linux");
+        expect(this.retire(ownershipId, capability!)).toBe(platform === "linux");
+        expect(this.records(runtimeGenerationId)).toMatchObject([{
+          ownershipId,
+          state: platform === "linux" ? "retiring" : "owned",
+        }]);
         return false;
       })
       .mockImplementation(function (
@@ -514,12 +524,13 @@ describe("runtime-owned journal settlement", () => {
       runtimeGenerationId,
       "test:10000000-0000-4000-8000-000000000099",
       {
-        platform: "darwin",
+        platform,
         deadlineAt: Date.now() + 2_000,
         waitForProcessGroupDrain,
       },
     )).resolves.toBe(true);
 
+    expect(release).toHaveBeenCalledTimes(2);
     expect(waitForProcessGroupDrain).toHaveBeenCalledWith(10);
     expect(journal.records(runtimeGenerationId)).toEqual([]);
   });

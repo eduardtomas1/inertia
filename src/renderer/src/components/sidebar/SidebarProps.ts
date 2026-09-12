@@ -8,6 +8,7 @@ import type {
 
 import type { AppView } from "../../appView";
 import type { ConnectionStatus } from "../../hooks/useInertiaConnection";
+import type { AppUpdateController } from "../../hooks/useAppUpdate";
 
 export interface SidebarProps {
   snapshot: AppSnapshot | null;
@@ -15,7 +16,7 @@ export interface SidebarProps {
   view: AppView;
   open: boolean;
   busy: boolean;
-  updateAvailable?: boolean;
+  appUpdate?: AppUpdateController;
   layoutWidth: number;
   onClose: () => void;
   onViewChange: (view: AppView) => void;

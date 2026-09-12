@@ -19,6 +19,7 @@ import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHead
 import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
 import type { Conversation, Project } from "../../src/shared/contracts";
+import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 
 type EnvironmentRun = EnvironmentSummarySnapshot["checks"][number];
 
@@ -169,11 +170,12 @@ const summary: EnvironmentSummarySnapshot = {
     status: "running",
   }],
   attachments: [
-    { id: "attachment-1", name: "reference.png", mimeType: "image/png" },
-    { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf" },
+    { id: "attachment-1", name: "reference.png", mimeType: "image/png", size: 1024 },
+    { id: "attachment-2", name: "requirements.pdf", mimeType: "application/pdf", size: 2048 },
     {
       id: "attachment-3",
       name: "forecast.xlsx",
+      size: 4096,
       mimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     },
@@ -303,6 +305,33 @@ describe("Environment panel", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  it("opens real recent-attachment previews by ID, shows thumbnail availability and closes on context change", async () => {
+    const view = render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...panelActions()} />);
+    const list = screen.getByRole("list", { name: "Recent attachments" });
+    const imageButton = within(list).getByRole("button", { name: "Preview attachment reference.png" });
+    const thumbnail = imageButton.querySelector("img")!;
+    expect(thumbnail).toHaveAttribute("src", "inertia://bundle/attachment-preview/attachment-1");
+    expect(imageButton).toHaveTextContent("PNG image · 1.0 KB");
+    fireEvent.load(thumbnail);
+    expect(thumbnail.parentElement).toHaveAttribute("data-thumbnail-state", "ready");
+    await userEvent.click(imageButton);
+    expect(nativePreviewSuspended()).toBe(true);
+    const preview = await screen.findByRole("dialog", { name: "reference.png" });
+    const fullImage = within(preview).getByRole("img", { name: "reference.png" });
+    expect(fullImage).toHaveAttribute("src", thumbnail.getAttribute("src"));
+    fireEvent.error(fullImage);
+    expect(within(preview).getByRole("alert")).toHaveTextContent("Preview unavailable");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(nativePreviewSuspended()).toBe(false);
+    await userEvent.click(imageButton);
+    await screen.findByRole("dialog", { name: "reference.png" });
+    view.rerender(<EnvironmentPanel summary={{ ...summary, attachments: [] }} workspaceToolsAvailable {...panelActions()} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("list", { name: "Recent attachments" })).toBeNull();
+    expect(nativePreviewSuspended()).toBe(false);
   });
 
   it("renders the compact truthful hierarchy and repository-scoped actions", () => {

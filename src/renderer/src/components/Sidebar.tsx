@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   memo,
   useEffect,
   useLayoutEffect,
@@ -20,7 +22,7 @@ import {
   CircleX,
   FolderOpen,
   FolderGit2,
-  Download,
+  RefreshCw,
   GitBranch,
   Layers3,
   MessageCircleQuestion,
@@ -77,6 +79,9 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
+const SidebarUpdateControl = lazy(async () => ({
+  default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
+}));
 const WORK_DONE_PAGE_SIZE = 10;
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
@@ -170,7 +175,7 @@ function SidebarView({
   onSetProjectGrouping,
   onSetProjectGitRepositoryLimit,
   onRemoveProject,
-  updateAvailable = false,
+  appUpdate,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [projectScopeId, setProjectScopeId] = useState<string | null>(null);
@@ -1003,7 +1008,9 @@ function SidebarView({
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
-          <IconButton label={updateAvailable ? "Update available — open settings" : "Application updates"} className={clsx("sidebar-update-button", updateAvailable && "has-update")} onClick={() => navigate("settings")}><Download size={18} /></IconButton>
+          {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
+            <SidebarUpdateControl controller={appUpdate} />
+          </Suspense>}
         </div>
       </aside>
     </>

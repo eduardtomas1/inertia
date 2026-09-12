@@ -286,7 +286,7 @@ describe("trusted overlay native preview suspension", () => {
     view.rerender(
       <AppStatusOverlays
         providerAuth={{ ...providerAuth, provider: null }}
-        appUpdate={{ ...appUpdate, visible: true }}
+        appUpdate={{ ...appUpdate, error: "The update check could not be completed." }}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
         onDismissError={vi.fn()}

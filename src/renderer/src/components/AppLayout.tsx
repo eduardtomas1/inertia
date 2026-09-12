@@ -289,7 +289,6 @@ export function AppLayout({
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
-      || Boolean(appUpdate.visible && appUpdate.status)
       || commitDialogOpen
       || dailyWorkOpen
       || pullRequestDialogOpen
@@ -490,7 +489,7 @@ export function AppLayout({
             view={view}
             open={sidebarOpen}
             busy={busyAction === "project.create"}
-            updateAvailable={appUpdate.visible}
+            appUpdate={appUpdate}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}

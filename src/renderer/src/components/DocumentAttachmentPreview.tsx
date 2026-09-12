@@ -27,7 +27,6 @@ import {
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
 } from "@shared/attachments";
-import type { ChatAttachment } from "@shared/contracts";
 import {
   SPREADSHEET_PREVIEW_LIMITS,
   readSpreadsheetWorkbook,
@@ -39,6 +38,7 @@ import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
   formatAttachmentSize,
+  type AttachmentPreviewSource,
 } from "../utils/composerAttachments";
 import {
   focusModalOnAnimationFrame,
@@ -320,7 +320,7 @@ export function DocumentAttachmentPreview({
 }
 
 type AttachmentPreviewDialogProps = {
-  attachment: ChatAttachment;
+  attachment: AttachmentPreviewSource;
   onClose: () => void;
 };
 

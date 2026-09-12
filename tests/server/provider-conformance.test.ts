@@ -1010,6 +1010,72 @@ describe("production provider lifecycle conformance", () => {
     await expect(running).resolves.toMatchObject({ status: "completed" });
   });
 
+  it.each([true, false])("admits Claude rate-limit metadata only after negotiation (announced: %s)", async (announced) => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "claude-agent-sdk",
+    )!;
+    const controlled = controlledManager(route, route.providerId, true);
+    const input = inputFor(route);
+    const rateLimits: string[] = [];
+    await controlled.manager.detect(route.providerId);
+    const running = controlled.manager.run(input, {
+      onMetadata: (event) => rateLimits.push(
+        ...(event.metadata.rateLimits ?? []).map(({ id }) => id),
+      ),
+    });
+    const base = {
+      providerId: "claude" as const,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      turnId: input.turnId,
+    };
+    if (announced) {
+      controlled.emit({
+        ...base,
+        type: "capability-observation",
+        capabilityId: "rate-limits",
+        available: true,
+      });
+    }
+    controlled.emit({
+      ...base,
+      type: "extension",
+      extension: "claude-agent-sdk",
+      event: {
+        type: "metadata",
+        metadata: {
+          rateLimits: [{
+            id: "claude:five_hour",
+            label: "Claude · 5-hour window",
+            usedPercent: 30,
+            remainingPercent: 70,
+            windowMinutes: 300,
+            resetsAt: null,
+          }],
+        },
+        source: "session",
+        complete: false,
+      },
+    });
+    controlled.resolve({
+      ...providerRunTerminal(input, "completed"),
+      text: "",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+
+    if (announced) {
+      await expect(running).resolves.toMatchObject({ status: "completed" });
+      expect(rateLimits).toEqual(["claude:five_hour"]);
+    } else {
+      // Unannounced metadata is the #343 failure: the turn is cancelled.
+      await expect(running).rejects.toThrow("'rate-limits' is not attested");
+      expect(rateLimits).toEqual([]);
+    }
+  });
+
   it("does not admit negotiated evidence from a different run", async () => {
     const route = PRODUCTION_HARNESSES.find(
       ({ harnessId }) => harnessId === "cursor-acp",

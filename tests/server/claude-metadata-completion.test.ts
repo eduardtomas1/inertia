@@ -19,3 +19,12 @@ it("rejects cancellation while successful metadata is waiting for normal process
   await assertion;
   expect(terminateProcessTree).toHaveBeenCalledExactlyOnceWith(child, true);
 });
+
+it("retries SDK close only when its first attempt throws", async () => {
+  const close = vi.fn().mockImplementationOnce(() => { throw new Error("SDK close interrupted"); });
+  await expect(readClaudeAgentSdkMetadata("/fixture/claude", {}, "/fixture", 5_000,
+    () => ({ supportedModels: async () => [], close }) as unknown as Query,
+    ["models"],
+  )).resolves.toMatchObject({ models: [] });
+  expect(close).toHaveBeenCalledTimes(2);
+});

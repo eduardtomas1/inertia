@@ -198,7 +198,7 @@ export async function readClaudeAgentSdkMetadata(
       // send EOF and the provider finish before asking its guardian to stop.
       // Match the pinned SDK's bounded two-second normal-close window.
       release();
-      try { query?.close(); } catch { /* The final owned barrier still proves cleanup. */ }
+      try { query?.close(); query = undefined; } catch { /* Final cleanup retries a failed SDK close. */ }
       await ownedProcess.waitForNaturalClose(2_000, signal);
     }
     signal?.removeEventListener("abort", cancel);

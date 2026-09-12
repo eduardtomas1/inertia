@@ -59,6 +59,11 @@ const MAX_RECOVERY_JOURNAL_BYTES = 2 * 1_024 * 1_024;
 const MAX_DATABASE_CLONE_BYTES = 256 * 1_024 * 1_024;
 const DATABASE_NAME = "inertia.sqlite";
 const RESULT_ACK_TIMEOUT_MS = 2_000;
+// A live runtime may finish an already-admitted ownership journal rename while
+// the candidate performs its read-only validation. Retry only that explicit
+// transient classification; malformed or otherwise invalid recovery state
+// remains fail-closed after the bounded window.
+const RECOVERY_VALIDATION_RETRY_DELAYS_MS = [0, 25, 100, 250] as const;
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
@@ -612,6 +617,28 @@ export function validateAppUpdateCandidateViability(
   validateDatabase(request.dataDirectory);
 }
 
+async function validateWithTransientRecoveryRetry(
+  request: AppUpdateCandidateViabilityRequest,
+): Promise<void> {
+  let lastError: unknown;
+  for (const delayMs of RECOVERY_VALIDATION_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+    try {
+      validateAppUpdateCandidateViability(request);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (
+        !(error instanceof CandidateViabilityError)
+        || error.code !== "recovery-storage-invalid"
+      ) throw error;
+    }
+  }
+  throw lastError;
+}
+
 function safeFailureCode(error: unknown): AppUpdateCandidateViabilityCode {
   return error instanceof CandidateViabilityError
     ? error.code
@@ -625,6 +652,7 @@ if (parentPort) {
     readonly exitCode: number;
     readonly timeout: NodeJS.Timeout;
   } | null = null;
+  let validating = false;
   const publish = (
     operationId: string,
     status: "validated" | "rejected",
@@ -654,6 +682,7 @@ if (parentPort) {
       clearTimeout(pending.timeout);
       process.exit(pending.exitCode);
     }
+    if (validating) process.exit(1);
     const request = parseAppUpdateCandidateViabilityRequest(value);
     if (!request) {
       publish(
@@ -663,11 +692,16 @@ if (parentPort) {
       );
       return;
     }
-    try {
-      validateAppUpdateCandidateViability(request);
-      publish(request.operationId, "validated");
-    } catch (error) {
-      publish(request.operationId, "rejected", safeFailureCode(error));
-    }
+    validating = true;
+    void validateWithTransientRecoveryRetry(request).then(
+      () => publish(request.operationId, "validated"),
+      (error: unknown) => publish(
+        request.operationId,
+        "rejected",
+        safeFailureCode(error),
+      ),
+    ).finally(() => {
+      validating = false;
+    });
   });
 }

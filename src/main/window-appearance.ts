@@ -4,8 +4,8 @@ export type WindowThemePreference = "system" | "light" | "dark";
 
 export const WINDOW_APPEARANCE_FILENAME = "window-appearance.json";
 export const WINDOW_BACKGROUND = {
-  light: "#f1f1f3",
-  dark: "#101013",
+  light: "#ebebee",
+  dark: "#050507",
 } as const;
 
 export function isWindowThemePreference(value: unknown): value is WindowThemePreference {

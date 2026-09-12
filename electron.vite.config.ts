@@ -157,6 +157,13 @@ export default defineConfig({
         input: { index: resolve("src/renderer/index.html"), mascot: resolve("src/renderer/mascot.html") },
         output: {
           onlyExplicitManualChunks: true,
+          // Like JS utility chunks, CSS filenames need no verbose labels in
+          // repeated preload metadata. Retain the one label used by the gate.
+          assetFileNames({ names }) {
+            const name = names[0];
+            return name?.endsWith(".css") && name !== "DetachedChatApp.css"
+              ? "assets/[hash][extname]" : "assets/[name]-[hash][extname]";
+          },
           chunkFileNames({ name }) {
             const compactNames: Record<string, string> = {
               attentionVisibility: "chat",
@@ -175,7 +182,7 @@ export default defineConfig({
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
-              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics",
+              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

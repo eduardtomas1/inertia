@@ -167,10 +167,9 @@ export function positionComposerPopover(
 ): ComposerPopoverPlacement {
   const surface = popoverSurface(popover);
   popover.style.translate = "none";
-  surface.style.removeProperty("max-width");
-  surface.style.removeProperty("min-width");
-  surface.style.removeProperty("max-height");
-  surface.style.removeProperty("overflow-y");
+  for (const property of ["max-width", "min-width", "max-height", "overflow-y"]) {
+    surface.style.removeProperty(property);
+  }
 
   const boundary = composerPopoverBoundary(trigger);
   const initialBounds = surface.getBoundingClientRect();
@@ -260,18 +259,24 @@ export function observeComposerPopover(
     onPlacement(submenuSide);
   };
   const schedule = (): void => {
-    if (frame !== null) window.cancelAnimationFrame(frame);
-    frame = window.requestAnimationFrame(update);
+    if (frame === null) frame = window.requestAnimationFrame(update);
   };
   update();
   const observer = typeof ResizeObserver === "undefined"
     ? null
     : new ResizeObserver(schedule);
+  const workspace = trigger.closest<HTMLElement>(".chat-workspace");
+  // Empty-thread centering changes the composer's position without resizing
+  // any observed box when conversation detail finishes loading.
+  const layoutObserver = workspace ? new MutationObserver(schedule) : null;
+  if (workspace) {
+    layoutObserver?.observe(workspace, { attributeFilter: ["class"] });
+  }
   for (const element of [
     trigger,
     popoverSurface(popover),
     trigger.closest<HTMLElement>(".composer"),
-    trigger.closest<HTMLElement>(".chat-workspace"),
+    workspace,
     trigger.closest<HTMLElement>(".conversation-split-pane"),
   ]) {
     if (element) observer?.observe(element);
@@ -282,6 +287,7 @@ export function observeComposerPopover(
   return () => {
     if (frame !== null) window.cancelAnimationFrame(frame);
     observer?.disconnect();
+    layoutObserver?.disconnect();
     window.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("scroll", schedule);

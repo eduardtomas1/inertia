@@ -278,6 +278,8 @@ async function readRuntimeOwnedProcessRecordsAfterSettle(
  * matches. Reused roots stay fail-closed and are never signalled. Windows uses
  * its named Job Object. Linux uses the exact claimed process group. macOS asks
  * the exact guardian to drain its private process session, including PTY groups.
+ * Callers must select an exited/prior generation before entering recovery;
+ * fencing its writer is not itself evidence that an active runtime exited.
  */
 export function recoverRuntimeOwnedProcesses(
   dataDirectory: string,
@@ -374,8 +376,13 @@ export function recoverRuntimeOwnedProcesses(
       }
     })();
   }
-  let records = journal.records(runtimeGenerationId);
   const session = journal.sessionExact(runtimeGenerationId);
+  // A crash can interrupt a child temporary before its payload is complete.
+  // Fence this exact exited/prior Darwin writer before reading claims, so the
+  // existing journal settlement can discard only uncommitted temporaries.
+  // Canonical malformed claims remain unreadable and cannot be retired here.
+  if (platform === "darwin" && session && !journal.fenceSessionExact(session)) return false;
+  let records = journal.records(runtimeGenerationId);
   if (!records && session === null) return null;
   if (records?.length === 0) return true;
   return (async () => {

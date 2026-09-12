@@ -722,12 +722,15 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       audit: [],
       migrationNoticeShown: false,
     };
-    const gateway = this.createGateway();
-    this.gateway = gateway;
-    await this.persist();
-    const address = await gateway.start();
-    this.diagnostics.gatewayPort = address.port;
+    let gateway: PrivateConnectGatewayServer | null = null;
+    let gatewayPort: number | null = null;
     try {
+      gateway = this.createGateway();
+      this.gateway = gateway;
+      await this.persist();
+      const address = await gateway.start();
+      gatewayPort = address.port;
+      this.diagnostics.gatewayPort = address.port;
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) {
         await gateway.stop().catch(() => undefined);
         return;
@@ -748,11 +751,13 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       this.audit("enabled", null, "Private Connect enabled through private Tailscale HTTPS.");
       await this.persist();
     } catch (error) {
-      const cleanupFailure = await this.tailscale
-        .disableOwnedServe(address.port)
+      const cleanupFailure = gatewayPort === null ? null : await this.tailscale
+        .disableOwnedServe(gatewayPort)
         .then(() => null, (failure: unknown) => failure);
-      await gateway.stop().catch(() => undefined);
+      if (gateway) await gateway.stop().catch(() => undefined);
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) return;
+      this.externalUrl = null;
+      this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
       if (
         cleanupFailure instanceof PrivateConnectTailscaleError
         && cleanupFailure.classification === "mapping-ownership-lost"

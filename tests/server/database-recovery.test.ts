@@ -850,15 +850,15 @@ describe("database backup and startup recovery", () => {
       symlinkSync(outside, `${databasePath}-wal`);
 
       expect(() => recoverDatabaseOnStartup(databasePath)).toThrow(
-        "database recovery source is not a local file",
+        "The database could not be validated and was left unchanged.",
       );
       expect(readFileSync(databasePath, "utf8"))
         .toBe("corrupt primary evidence");
       expect(readFileSync(outside, "utf8"))
         .toBe("outside must remain unchanged");
       expect(lstatSync(`${databasePath}-wal`).isSymbolicLink()).toBe(true);
-      expect(readdirSync(databaseRecoveryPaths(databasePath).corruptDirectory))
-        .toEqual([]);
+      expect(existsSync(databaseRecoveryPaths(databasePath).corruptDirectory))
+        .toBe(false);
     },
   );
 
@@ -970,9 +970,72 @@ describe("database backup and startup recovery", () => {
     });
     expect(recovered.conversationDetail(conversationId)?.messages
       .map(({ content }) => content)).toEqual(["older-valid"]);
-    expect(existsSync(join(backupsDirectory, newer.filename))).toBe(false);
+    expect(readFileSync(join(backupsDirectory, newer.filename), "utf8"))
+      .toBe("invalid backup");
     recovered.close();
   });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
+    .each(["missing", "corrupt"] as const)(
+      "preserves an unreadable valid backup and the %s primary until validation succeeds",
+      async (primary) => {
+        const directory = temporaryDirectory();
+        const databasePath = join(directory, "inertia.sqlite");
+        const { conversationId, store } = seed(databasePath, "unreadable backup");
+        const backup = await store.createBackup();
+        store.close();
+        const paths = databaseRecoveryPaths(databasePath);
+        const backupPath = join(paths.backupsDirectory, backup.filename);
+        const backupBytes = readFileSync(backupPath);
+        if (primary === "missing") rmSync(databasePath);
+        else writeFileSync(databasePath, "invalid primary");
+        chmodSync(backupPath, 0o000);
+        try {
+          expect(() => readFileSync(backupPath)).toThrow();
+          expect(() => recoverDatabaseOnStartup(databasePath)).toThrow();
+          expect(existsSync(backupPath)).toBe(true);
+          expect(existsSync(paths.corruptDirectory)).toBe(false);
+          if (primary === "missing") expect(existsSync(databasePath)).toBe(false);
+          else expect(readFileSync(databasePath, "utf8")).toBe("invalid primary");
+        } finally {
+          if (existsSync(backupPath)) chmodSync(backupPath, 0o600);
+        }
+        expect(readFileSync(backupPath)).toEqual(backupBytes);
+        const recovered = new RuntimeStore(databasePath, directory, {
+          recoverInterruptedRuns: false,
+        });
+        try {
+          expect(recovered.databaseRecoveryReport().outcome).toBe("restored");
+          expect(recovered.conversationDetail(conversationId)?.messages
+            .map(({ content }) => content)).toEqual(["unreadable backup"]);
+        } finally {
+          recovered.close();
+        }
+      },
+    );
+
+  it.each(["SQLITE_BUSY", "SQLITE_IOERR", "SQLITE_CANTOPEN"])(
+    "does not quarantine or replace the primary after a %s validation failure",
+    (code) => {
+      const directory = temporaryDirectory();
+      const databasePath = join(directory, "inertia.sqlite");
+      const { store } = seed(databasePath);
+      store.close();
+      const original = readFileSync(databasePath);
+      const failure = Object.assign(new Error("injected validation failure"), { code });
+      const prepare = vi.spyOn(Database.prototype, "prepare")
+        .mockImplementationOnce(() => { throw failure; });
+      try {
+        expect(() => recoverDatabaseOnStartup(databasePath)).toThrow();
+        expect(readFileSync(databasePath)).toEqual(original);
+        expect(existsSync(databaseRecoveryPaths(databasePath).corruptDirectory))
+          .toBe(false);
+      } finally {
+        prepare.mockRestore();
+      }
+      expect(recoverDatabaseOnStartup(databasePath).outcome).toBe("healthy");
+    },
+  );
 
   it.skipIf(process.platform === "win32")(
     "never follows a pre-planted restore-partial symlink",

@@ -204,13 +204,21 @@ public static partial class InertiaRuntimeJob {
           if (stopping || rootState != WAIT_TIMEOUT) {
             // Natural shell exit also drains background descendants. Only this
             // exact retained Job is signalled, never a PID or a process snapshot.
+            var stopTime = Stopwatch.StartNew();
             if (!TerminateJobObject(job, 130)) return Failure("terminal-watch-terminate", 52, Marshal.GetLastWin32Error());
             string stage;
             int error;
-            if (DrainTerminatedJob(job, TERMINAL_DRAIN_MS, 52, out stage, out error) != 0) {
+            int remaining = TERMINAL_DRAIN_MS - (Int32)stopTime.ElapsedMilliseconds;
+            if (remaining <= 0) return Failure("terminal-watch-drain", 52, 0);
+            if (DrainTerminatedJob(job, remaining, 52, out stage, out error) != 0) {
               return Failure("terminal-watch-drain", 52, error);
             }
-            if (WaitForSingleObject(root, 0) != WAIT_OBJECT_0) return Failure("terminal-watch-root-wait", 52, 0);
+            // Job accounting can reach zero before the exact root handle is
+            // signalled. Spend only the remainder of this same stop budget.
+            remaining = Math.Max(0, TERMINAL_DRAIN_MS - (Int32)stopTime.ElapsedMilliseconds);
+            if (WaitForSingleObject(root, (UInt32)remaining) != WAIT_OBJECT_0) {
+              return Failure("terminal-watch-root-wait", 52, Marshal.GetLastWin32Error());
+            }
             WriteProtocolLine(Console.OpenStandardOutput(), TERMINAL_STOPPED);
             return 0;
           }

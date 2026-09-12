@@ -204,7 +204,10 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
       args[4] = "1"; args[5] = "2";
     });
     expect(await action.owned.waitForGuardianStop()).toBe(false);
-    await expect.poll(() => action.exit() !== null, { timeout: 4000 }).toBe(true);
+    // Native admission is bounded to 3s. ConPTY separately buffers its final
+    // output for about 1s before node-pty delivers onExit; prove process death
+    // within the original bound, then let afterEach drain the callback.
+    await expect.poll(() => alive(action.owned.process.pid), { timeout: 4000 }).toBe(false);
     expect(existsSync(marker)).toBe(false);
     expect(action.owned.confirmStopped()).toBe(false);
   });
@@ -220,8 +223,9 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     let exited = false;
     terminal.onExit(() => { exited = true; });
     terminal.onData(() => undefined);
-    await expect.poll(() => exited, { timeout: 4000 }).toBe(true);
+    await expect.poll(() => alive(terminal.pid), { timeout: 4000 }).toBe(false);
     expect(alive(terminal.pid)).toBe(false);
     expect(existsSync(marker)).toBe(false);
+    await expect.poll(() => exited, { timeout: 2000 }).toBe(true);
   });
 });

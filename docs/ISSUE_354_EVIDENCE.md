@@ -20,7 +20,7 @@ Fixed-vocabulary diagnostic instrumentation established:
   parent identity check was false by drain time. It emitted `drain-fork-taint`.
 - The runtime correctly retained its safety lock for unconfirmed process cleanup.
 
-Successful metadata now closes the SDK query through stdin EOF and waits at most
+Settled metadata, including partial results from ordinary control errors, now closes the SDK query through stdin EOF and waits at most
 2 seconds for ordinary child close and exact ownership retirement, matching the
 pinned SDK's normal-close window. The existing owned termination barrier remains
 mandatory afterward. Cancellation, timeout, transport errors, unavailable normal
@@ -42,3 +42,5 @@ records and diagnostic-only copies are retained in the independent audit artifac
 Diagnostic instrumentation is absent from production source and the verified
 fixed build. All test launchers were closed by their own bounded fixture cleanup;
 no recovery attestation was accepted and no unrelated process was signalled.
+
+The native usage-control-error variant also fails before the partial-result correction and passes afterward without discarding the successful model result. A focused cancellation regression prevents publishing metadata if its parent is aborted during the normal-close wait; cleanup uncertainty still takes precedence.

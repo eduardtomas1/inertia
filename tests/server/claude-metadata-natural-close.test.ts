@@ -28,7 +28,7 @@ describe.runIf(process.platform === "darwin")("Claude metadata natural process c
     expect(stopped).toBe(true);
   });
 
-  async function fixture(stall = false) {
+  async function fixture(stall = false, usageError = false) {
     directory = await mkdtemp(join(tmpdir(), "inertia-claude-metadata-"));
     await chmod(directory, 0o700);
     const receipt = join(directory, "receipt.txt");
@@ -52,6 +52,10 @@ input.on("line", async (line) => {
     send({ type: "control_response", response: { subtype: "success", request_id: message.request_id,
       response: { commands: [], models: [{ value: "fixture-sonnet", displayName: "Fixture Sonnet" }], account: {} } } });
   } else if (message.request.subtype === "get_usage") {
+    if (process.env.CLAUDE_FIXTURE_USAGE_ERROR === "1") {
+      send({ type: "control_response", response: { subtype: "error", request_id: message.request_id, error: "Usage not supported" } });
+      return;
+    }
     send({ type: "control_response", response: { subtype: "success", request_id: message.request_id,
       response: { rate_limits_available: false } } });
   }
@@ -70,15 +74,19 @@ input.on("close", () => { record("eof"); });
     }) as typeof spawn;
     const read = (timeoutMs = 6_000, signal?: AbortSignal) => readClaudeAgentSdkMetadata(executable,
       { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: directory,
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_FIXTURE_STALL: stall ? "1" : "0" },
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_FIXTURE_STALL: stall ? "1" : "0", CLAUDE_FIXTURE_USAGE_ERROR: usageError ? "1" : "0" },
       directory, timeoutMs, undefined, ["models", "rateLimits"], { spawnProcess }, signal);
     return { read, receipt, taints };
   }
 
-  it("finishes a forked metadata child through EOF and retains confirmed runtime ownership", async () => {
-    const { read, receipt, taints } = await fixture();
+  it.each([false, true])("finishes a forked metadata child through EOF, including partial results (usage error: %s)", async (usageError) => {
+    const { read, receipt, taints } = await fixture(false, usageError);
     const result = await read();
-    expect(result).toMatchObject({ models: [{ id: "fixture-sonnet" }], rateLimits: [], rateLimitsUnavailable: true });
+    expect(result.models).toMatchObject([{ id: "fixture-sonnet" }]);
+    if (usageError) {
+      expect(result.rateLimits).toBeUndefined();
+      expect(result.rateLimitsUnavailable).toBeUndefined();
+    } else expect(result).toMatchObject({ rateLimits: [], rateLimitsUnavailable: true });
     expect(await readFile(receipt, "utf8")).toBe("fork-completed\neof\n");
     expect(child?.exitCode).toBe(0);
     expect(child?.signalCode).toBeNull();

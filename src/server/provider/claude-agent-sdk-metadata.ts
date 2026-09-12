@@ -184,7 +184,9 @@ export async function readClaudeAgentSdkMetadata(
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
-    completed = modelsResult.status === "fulfilled" && limitsResult.status === "fulfilled";
+    // Ordinary SDK control errors may yield partial metadata. Every request
+    // has settled here, so these also finish through EOF instead of a stop.
+    completed = true;
   } finally {
     if (timer) clearTimeout(timer);
     if (completed && !abortController.signal.aborted && !ownedProcess.transportError()) {

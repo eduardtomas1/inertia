@@ -77,7 +77,9 @@ const budgets = {
   // The independently capped deferred center/catalog are subtracted below.
   // Shared thread organization and project/appearance contracts add <6 KiB.
   // New optional editor/menu bytes have their own narrow caps above.
-  coreJavaScript: 2_000.5 * kibibyte,
+  // Update-state wiring and interactive recent attachments bring shared core
+  // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
+  coreJavaScript: 2_000.75 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

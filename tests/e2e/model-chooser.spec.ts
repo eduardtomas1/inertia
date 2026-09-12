@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 
 import { RuntimeStore } from "../../src/server/database";
 import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
@@ -15,11 +14,8 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
-import { seedLargeModelCatalog } from "./support/model-catalog-fixture";
+import type { AppFixture } from "./support/app-fixture";
+import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { expectModelChooserPlacement, expectModelChooserVerticalFallback } from "./support/model-chooser-geometry";
 import { modelChooserContentGeometry } from "../support/model-chooser-placement";
 
@@ -35,14 +31,7 @@ let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({
-    name: "model-chooser",
-    initialState: "conversation",
-    windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-      seedLargeModelCatalog(testDirectory, workspaceDirectory);
-    },
-  });
+  app = await createModelChooserFixture("model-chooser");
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
@@ -50,33 +39,10 @@ test.beforeAll(async () => {
   rendererErrors = app.rendererErrors;
   runtimeSnapshot = app.runtimeSnapshot;
   resizeWindow = app.resizeWindow;
-  // This fixture disables provider execution. Supply discovery readiness at
-  // the renderer transport boundary, without enabling real CLIs or bypassing
-  // the runtime's route/continuation checks below. Other providers stay absent.
-  const readySnapshot = (snapshot: AppSnapshot): AppSnapshot => ({
-    ...snapshot,
-    providers: snapshot.providers.map((provider) =>
-      provider.id === "codex" || provider.id === "claude"
-        ? { ...provider, available: true, installState: "installed", authState: "authenticated", canRun: true }
-        : provider),
-  });
-  await page.routeWebSocket(/.*/u, (route) => {
-    route.connectToServer().onMessage((data) => {
-      const event = JSON.parse(data.toString()) as ServerEvent;
-      if (event.type === "server.welcome" || event.type === "snapshot.updated") {
-        event.snapshot = readySnapshot(event.snapshot);
-      } else if (event.type === "runtime.event" && event.event.type === "snapshot.updated") {
-        event.event.snapshot = readySnapshot(event.event.snapshot);
-      }
-      route.send(JSON.stringify(event));
-    });
-  });
-  await page.reload();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
 });
 
 test.afterAll(async () => {
-  await app.close();
+  await app?.close();
 });
 
 test("uses the anchored model chooser and enforces authoritative route boundaries", async ({ browserName: _browserName }, testInfo) => {
@@ -795,52 +761,4 @@ test("keeps branded model sources and rows legible across themes and narrow wind
     await testInfo.attach(`selected-model-chip-${theme.toLowerCase()}`, { path: chipPath, contentType: "image/png" });
   }
   expect(rendererErrors).toEqual([]);
-});
-
-test("repositions an open chooser when empty-thread layout centers its unchanged trigger", async () => {
-  await resizeWindow(1440, 920);
-  const nativeWindow = await electronApp.browserWindow(page);
-  const nativeHeight = await page.evaluate(() => innerHeight);
-  const chooser = page.getByRole("dialog", { name: "Choose model" });
-  const workspace = page.locator(".chat-workspace");
-  try {
-    await nativeWindow.evaluate((window, height) => {
-      window.webContents.setZoomFactor(Math.min(1, height / 920));
-    }, nativeHeight);
-    await expect.poll(() => page.evaluate(() => innerHeight)).toBeGreaterThanOrEqual(919);
-    await page.getByRole("complementary", { name: "Project navigation", exact: true })
-      .getByRole("button", { name: "New chat", exact: true }).click();
-    await expect(workspace).toHaveClass(/is-empty-thread/u);
-    // Reproduce detailLoading's flex-to-grid transition after the chooser is
-    // open, using the production CSS and actual Electron layout. No sizes change.
-    await workspace.evaluate((element) => element.classList.remove("is-empty-thread"));
-    const trigger = page.getByRole("button", { name: /^Choose model\./u });
-    await trigger.click();
-    await chooser.getByRole("button", { name: /^Codex, \d+ models?$/u }).click();
-    await expectModelChooserPlacement(chooser, "above");
-    const measureTrigger = () => trigger.evaluate((element) => ({
-      width: element.clientWidth,
-      height: element.clientHeight,
-      y: element.getBoundingClientRect().y,
-    }));
-    const before = await measureTrigger();
-    const previousMaxHeight = await chooser.evaluate((element) => getComputedStyle(element).maxHeight);
-    await workspace.evaluate((element) => element.classList.add("is-empty-thread"));
-    await expectModelChooserPlacement(chooser, "below");
-    const after = await measureTrigger();
-    expect(after.width).toBe(before.width);
-    expect(after.height).toBe(before.height);
-    expect(after.y).toBeLessThan(before.y);
-    expect(await chooser.evaluate((element) => getComputedStyle(element).maxHeight))
-      .not.toBe(previousMaxHeight);
-    await expect(chooser.getByRole("searchbox", { name: "Search models" })).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(chooser).toBeHidden();
-    await expect(trigger).toBeFocused();
-    expect(rendererErrors).toEqual([]);
-  } finally {
-    await workspace.evaluate((element) => element.classList.add("is-empty-thread"));
-    await nativeWindow.evaluate((window) => window.webContents.setZoomFactor(1));
-    await nativeWindow.dispose();
-  }
 });

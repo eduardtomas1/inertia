@@ -18,6 +18,7 @@ import { seedViewedConversationContext } from "./support/viewed-conversation-con
 import { selectWorkspaceTool } from "./support/workspace-tools";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
+import { capturePageWebSockets, holdMessageSendAcknowledgement } from "./support/browser-websocket-fixture";
 
 const execFileAsync = promisify(execFile);
 
@@ -217,6 +218,7 @@ test("starts without a demo and adds the first real project", async () => {
 });
 
 test("keeps Send and Stop clear across submission, cancellation, theme, and scale states", async ({ browserName: _browserName }, testInfo) => {
+  const scenarioStartedAt = Date.now();
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const initialStore = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
@@ -251,9 +253,11 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await page.screenshot({ animations: "disabled", path });
     await testInfo.attach(label, { path, contentType: "image/png" });
   };
+  let submissionGate: Awaited<ReturnType<typeof holdMessageSendAcknowledgement>> | undefined;
 
   try {
     await resizeWindow(1440, 920);
+    await capturePageWebSockets(page);
     await page.reload();
     const composer = page.getByRole("region", { name: "Message composer" });
     const textbox = composer.getByRole("textbox", { name: "Message" });
@@ -313,7 +317,10 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     await expect(textbox).toBeFocused();
     await capture("composer-send-ready-light-compact-1440x920");
 
+    submissionGate = await holdMessageSendAcknowledgement(page, conversationId,
+      Math.max(1, testInfo.timeout - (Date.now() - scenarioStartedAt)));
     await textbox.press("Enter");
+    await submissionGate.waitUntilHeld();
     const submitting = composer.getByRole("button", {
       name: "Sending message",
     });
@@ -332,7 +339,6 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(await composer.locator(".usage-context-ring").evaluateAll((rings) =>
       rings.reduce((count, ring) =>
         count + ring.getAnimations({ subtree: true }).length, 0))).toBe(0);
-    await page.waitForTimeout(350);
     await expect(submitting).toBeVisible();
     await expect(composer.getByRole("button", { name: "Send message" }))
       .toHaveCount(0);
@@ -340,8 +346,17 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       page.getByLabel("Thread transcript").getByText(/First line\s+Second line/u),
     ).toBeVisible();
     await capture("composer-send-submitting-light-compact-1440x920");
+    await submissionGate.waitUntilHeld();
+    await submissionGate.release();
     await expect(composer.getByRole("button", { name: "Send message" }))
       .toBeVisible({ timeout: 5_000 });
+    const submitted = new Database(databasePath, { readonly: true });
+    try {
+      expect(submitted.prepare(`
+        SELECT COUNT(*) AS count FROM messages
+        WHERE conversation_id = ? AND role = 'user' AND content = ?
+      `).get(conversationId, "First line\nSecond line")).toEqual({ count: 1 });
+    } finally { submitted.close(); }
 
     const darkIdleStore = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
@@ -441,6 +456,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     }
     expect(stopCommand.payload.conversationId).toBe(stopConversationId);
   } finally {
+    await submissionGate?.release().catch(() => undefined);
     collectStopFrames = false;
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,

@@ -503,6 +503,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot,
     {
       defaultTimeoutMs: options.reviewSummaryTimeoutMs ?? DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
+      lifetimeSignal: runtimeLifetimeAbort.signal,
     },
   );
   startProjectAutoPull({
@@ -738,7 +739,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot,
         send,
       }),
-      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, providerInfo: () => providerInfo, broadcast, send }),
+      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
         store,
         workspaceRuns,

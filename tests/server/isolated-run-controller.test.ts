@@ -1024,4 +1024,18 @@ describe("IsolatedRunController", () => {
     });
     reopened.close();
   });
+
+  it("closes isolated admission when constructed after the runtime lifetime ended", async () => {
+    const lifetime = new AbortController();
+    lifetime.abort();
+    const provider = new FakeProvider();
+    const fileSystem = fakeFileSystem();
+    const controller = new IsolatedRunController(new FakeStore(), provider, "/data", vi.fn(), {
+      lifetimeSignal: lifetime.signal, fileSystem,
+    });
+    await expect(controller.run(request({}))).rejects.toMatchObject({ reason: "runtime-shutdown" });
+    expect(provider.inputs).toEqual([]);
+    expect(fileSystem.create).not.toHaveBeenCalled();
+    await expect(controller.dispose()).resolves.toBeUndefined();
+  });
 });

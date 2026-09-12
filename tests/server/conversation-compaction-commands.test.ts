@@ -246,6 +246,109 @@ function fixture(options: {
 }
 
 describe("conversation compaction command", () => {
+  it("refuses compaction when the runtime lifetime already ended", async () => {
+    const { dependencies, compact, release } = fixture();
+    const lifetime = new AbortController();
+    lifetime.abort(new Error("The runtime is shutting down."));
+    dependencies.lifetimeSignal = lifetime.signal;
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).rejects.toThrow("The runtime is shutting down.");
+    expect(compact).not.toHaveBeenCalled();
+    expect(dependencies.providerTerminalResumes.acquire).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("does not launch after runtime shutdown interrupts readiness", async () => {
+    const { dependencies, compact, release } = fixture();
+    const lifetime = new AbortController();
+    dependencies.lifetimeSignal = lifetime.signal;
+    vi.mocked(dependencies.backendProfileController.readiness).mockImplementationOnce(async () => {
+      lifetime.abort(new Error("The runtime is shutting down."));
+      return null;
+    });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).rejects.toThrow("The runtime is shutting down.");
+    expect(compact).not.toHaveBeenCalled();
+    expect(dependencies.providerTerminalResumes.acquire).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it.each(["settled", "force-detached"] as const)(
+    "joins the exact compaction stop on lifetime abort with %s cleanup",
+    async (stopResult) => {
+      const { dependencies, release, send } = fixture();
+      const lifetime = new AbortController();
+      dependencies.lifetimeSignal = lifetime.signal;
+      let resolveCompact!: (result: Awaited<ReturnType<ProviderManager["compact"]>>) => void;
+      const providerResult = new Promise<Awaited<ReturnType<ProviderManager["compact"]>>>((resolve) => {
+        resolveCompact = resolve;
+      });
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const compact = vi.spyOn(dependencies.providers, "compact").mockImplementation(() => {
+        markStarted();
+        return providerResult;
+      });
+      let releaseStop!: () => void;
+      const stopGate = new Promise<void>((resolve) => { releaseStop = resolve; });
+      const stopOwned = vi.spyOn(dependencies.providers, "stopOwned").mockImplementation(async () => {
+        await stopGate;
+        return stopResult;
+      });
+      const command = createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+        type: "conversation.compact", requestId, payload: { conversationId },
+      });
+      let settled = false;
+      const failure = command.then(() => { settled = true; return null; }, (error: unknown) => {
+        settled = true;
+        return error;
+      });
+      try {
+        await started;
+        const input = compact.mock.calls[0]![0];
+        lifetime.abort(new Error("The runtime is shutting down."));
+        resolveCompact({ ...providerRunTerminal(input, "cancelled"), instructionForwarded: false,
+          message: "Stopped", cleanupConfirmed: false });
+        for (let step = 0; step < 8; step += 1) await Promise.resolve();
+        expect(stopOwned).toHaveBeenCalledExactlyOnceWith(conversationId, {
+          runId: input.runId, turnId: input.turnId,
+        });
+        expect(settled).toBe(false);
+        expect(release).not.toHaveBeenCalled();
+        releaseStop();
+        await expect(failure).resolves.toMatchObject({ message: stopResult === "settled"
+          ? "The runtime is shutting down."
+          : "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely." });
+        if (stopResult === "settled") expect(release).toHaveBeenCalledExactlyOnceWith(conversationId);
+        else expect(release).not.toHaveBeenCalled();
+        expect(dependencies.store.createMessage).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalledWith(expect.anything(),
+          expect.objectContaining({ type: "request.result" }));
+      } finally {
+        releaseStop();
+        await failure;
+      }
+    },
+  );
+
+  it("releases an unused checkout reservation when lifetime abort precedes provider launch", async () => {
+    const { dependencies, compact, release } = fixture();
+    const lifetime = new AbortController();
+    dependencies.lifetimeSignal = lifetime.signal;
+    vi.mocked(dependencies.store.usageForConversation).mockImplementationOnce(() => {
+      lifetime.abort(new Error("The runtime is shutting down."));
+      return null;
+    });
+    await expect(createConversationCompactionCommandHandler(dependencies)({} as WebSocket, {
+      type: "conversation.compact", requestId, payload: { conversationId },
+    })).rejects.toThrow("The runtime is shutting down.");
+    expect(compact).not.toHaveBeenCalled();
+    expect(dependencies.providers.stopOwned).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledExactlyOnceWith(conversationId);
+  });
+
   it.each(["SQLITE_FULL", "SQLITE_READONLY"])("preserves completed compaction when receipt storage fails with %s", async (code) => {
     const { dependencies, compact, send, broadcast, release } = fixture();
     vi.mocked(dependencies.store.createMessage).mockImplementation(() => { throw new Error(`${code} /private/fixture.db`); });

@@ -23,6 +23,7 @@ import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
+import { createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
 import {
@@ -592,6 +593,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     if (conversation.projectId !== projectId) throw new RequestError("The thread does not belong to this project.");
     return ensureDirectory(store.conversationPath(conversationId));
   };
+  const providerUsage: ProviderUsageRefreshDependencies<ProviderMetadata> = {
+    enabled: enableProviders,
+    signal: runtimeLifetimeAbort.signal,
+    isClosed: () => closed,
+    cachedState: (providerId) => providers.cachedMetadata(providerId).metadataState,
+    read: (providerId, fields) => providers.metadata(providerId, options.defaultWorkspacePath, { fields, force: true, signal: runtimeLifetimeAbort.signal }),
+    apply: applyProviderMetadata,
+    broadcastSnapshot,
+    isExternalTurn: (turnId) => backendProfileController.isExternalSelection(store.agentTurn(turnId).modelSelection),
+    canRun: (providerId) => providerInfo.some(({ id, canRun }) => id === providerId && canRun),
+    activeProviderIds: () => new Set(turns.activeConversationIds().flatMap((conversationId) => {
+      try { return [store.conversation(conversationId).providerId]; } catch { return []; }
+    })),
+    track: trackRuntimeOperation,
+  };
   turns = new TurnController(
     store,
     providers,
@@ -628,32 +644,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       releaseGeneratedAttachments: (paths) => generatedAttachments.release(paths),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
-      refreshProviderMetadata: async ({ providerId, turnId, runStartedAt, status }) => {
-        if (!enableProviders || status !== "completed") return;
-        const turn = store.agentTurn(turnId);
-        if (backendProfileController.isExternalSelection(turn.modelSelection)) return;
-        const current = providers.cachedMetadata(providerId);
-        const fields: Array<"models" | "rateLimits"> = [];
-        if (current.metadataState.models.freshness !== "fresh" && providerId !== "cursor") {
-          fields.push("models");
-        }
-        const rateLimitsUpdatedAt = current.metadataState.rateLimits.updatedAt
-          ? Date.parse(current.metadataState.rateLimits.updatedAt)
-          : Number.NaN;
-        if (
-          (providerId === "codex" || providerId === "claude")
-          && !(rateLimitsUpdatedAt >= runStartedAt)
-        ) {
-          fields.push("rateLimits");
-        }
-        if (fields.length === 0) return;
-        const metadata = await providers.metadata(
-          providerId,
-          options.defaultWorkspacePath,
-          { fields, force: true, signal: runtimeLifetimeAbort.signal },
-        );
-        applyProviderMetadata(providerId, metadata);
-      },
+      refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
       onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
@@ -955,6 +946,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         }));
         broadcastSnapshot();
       });
+      startIdleRateLimitRefresh(providerUsage);
     }
     return postReadyWork;
   };

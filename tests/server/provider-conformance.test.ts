@@ -1066,14 +1066,10 @@ describe("production provider lifecycle conformance", () => {
       cleanupConfirmed: true,
     });
 
-    if (announced) {
-      await expect(running).resolves.toMatchObject({ status: "completed" });
-      expect(rateLimits).toEqual(["claude:five_hour"]);
-    } else {
-      // Unannounced metadata is the #343 failure: the turn is cancelled.
-      await expect(running).rejects.toThrow("'rate-limits' is not attested");
-      expect(rateLimits).toEqual([]);
-    }
+    // Unannounced quota is advisory metadata: it is dropped, and the turn
+    // is not cancelled over a usage indicator (#343).
+    await expect(running).resolves.toMatchObject({ status: "completed" });
+    expect(rateLimits).toEqual(announced ? ["claude:five_hour"] : []);
   });
 
   it("does not admit negotiated evidence from a different run", async () => {

@@ -276,10 +276,14 @@ describe("Claude Agent SDK large event boundary", () => {
     }) as unknown as { tool_use_result: { file: { base64: string } } };
     mismatched.tool_use_result.file.base64 = mismatchedCopy;
     expect(projectClaudeSdkEventMedia(mismatched).mediaBytes).toBe(0);
-    expect(() => claudeEventBudget().observe(mismatched))
-      .toThrow("Claude sent an oversized event.");
+    // Non-media data never earns the media exception. Oversized fields are
+    // shortened to the ordinary per-event bound instead of failing the turn.
+    const shortenedMismatch = claudeEventBudget().observe(mismatched);
+    expect(shortenedMismatch.shortened).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(shortenedMismatch.value)))
+      .toBeLessThanOrEqual(1024 * 1024);
 
-    expect(() => claudeEventBudget().observe({
+    expect(claudeEventBudget().observe({
       type: "user",
       message: {
         role: "user",
@@ -289,10 +293,15 @@ describe("Claude Agent SDK large event boundary", () => {
         }],
       },
       tool_use_result: { type: "custom", base64: "a".repeat(1024 * 1024) },
-    })).toThrow("Claude sent an oversized event.");
-    expect(() => claudeEventBudget().observe({
+    })).toMatchObject({ shortened: true });
+    expect(claudeEventBudget().observe({
       type: "status",
       message: "é".repeat(600 * 1024),
+    })).toMatchObject({ shortened: true });
+    // Structure that cannot be shortened keeps the strict bound.
+    expect(() => claudeEventBudget().observe({
+      type: "status",
+      parts: Array.from({ length: 40_000 }, () => "x".repeat(40)),
     })).toThrow("Claude sent an oversized event.");
   });
 
@@ -316,7 +325,7 @@ describe("Claude Agent SDK large event boundary", () => {
     });
     expect(() => budget.observe({
       ...event as unknown as Record<string, unknown>,
-      unrelated: "x".repeat(1024 * 1024),
+      unrelated: Array.from({ length: 40_000 }, () => "x".repeat(40)),
     })).toThrow("Claude sent an oversized event.");
     for (let index = 0; index < 3; index += 1) budget.observe(event);
     const remainingBytes = MAX_CLAUDE_MEDIA_BURST_BYTES - 3 * bytes;
@@ -492,7 +501,8 @@ describe("Claude Agent SDK large event boundary", () => {
               try {
                 yield {
                   type: "status",
-                  payload: "x".repeat(1024 * 1024 + 1),
+                  // Many short fields cannot be shortened below the bound.
+                  payload: Array.from({ length: 40_000 }, () => "x".repeat(40)),
                 } as unknown as SDKMessage;
               } finally {
                 iteratorReturns += 1;
@@ -542,7 +552,7 @@ describe("Claude Agent SDK large event boundary", () => {
       skills,
     })).resolves.toMatchObject({
       status: "failed",
-      error: "Claude sent an oversized event.",
+      error: expect.stringMatching(/^Claude sent an oversized event that stayed above/u),
       failure: { reason: "protocol-overflow" },
     });
     await expect(pendingPermission).resolves.toMatchObject({

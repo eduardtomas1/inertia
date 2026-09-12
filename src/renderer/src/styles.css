@@ -5499,6 +5499,10 @@ button.environment-row:focus-visible,
   display: none;
 }
 
+.usage-popover:not([data-composer-popover-positioned]) {
+  visibility: hidden;
+}
+
 .usage-popover-heading {
   position: sticky;
   z-index: 1;

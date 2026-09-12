@@ -75,12 +75,9 @@ function dateLabel(
 }
 
 function quotaStateLabel(state: ProviderMetadataFieldState): string {
-  if (state.refreshing && state.freshness === "stale") return "Refreshing · stale";
-  if (state.refreshing) return "Refreshing";
-  if (state.freshness === "fresh") return "Fresh";
-  if (state.freshness === "stale" && state.provenance === "persistent-cache") return "Cached · stale";
-  if (state.freshness === "stale") return "Stale";
-  return "Unavailable";
+  if (state.refreshing) return state.freshness === "stale" ? "Refreshing · stale" : "Refreshing";
+  if (state.freshness === "stale") return state.provenance === "persistent-cache" ? "Cached · stale" : "Stale";
+  return state.freshness === "fresh" ? "Fresh" : "Unavailable";
 }
 
 function quotaStateDetail(state: ProviderMetadataFieldState): string {
@@ -99,15 +96,17 @@ function quotaStateDetail(state: ProviderMetadataFieldState): string {
   return "Provider quota unavailable";
 }
 
+function validTokenCount(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function processedUsage(
   usage: ThreadUsageSnapshot | null,
 ): { scope: NonNullable<ThreadUsageSnapshot["totalProcessedScope"]>; value: number } | null {
   const value = usage?.totalProcessedTokens;
   const scope = usage?.totalProcessedScope;
   if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value < 0
+    !validTokenCount(value)
     || !scope
     || !processedScopes.has(scope)
   ) return null;
@@ -132,9 +131,7 @@ function usageBreakdownRows(
     ["reasoning", "Reasoning", usage.reasoningOutputTokens],
   ];
   return entries.flatMap(([id, label, value]) => (
-    typeof value === "number"
-      && Number.isSafeInteger(value)
-      && value >= 0
+    validTokenCount(value)
       ? [{ id, label, value }]
       : []
   ));
@@ -159,13 +156,9 @@ function contextDetail(usage: ThreadUsageSnapshot | null): string | null {
   if (!usage) return null;
   const usedTokens = usage.usedTokens;
   const maxTokens = usage.maxTokens;
-  const validUsed = typeof usedTokens === "number"
-    && Number.isSafeInteger(usedTokens)
-    && usedTokens >= 0
+  const validUsed = validTokenCount(usedTokens)
     && (maxTokens === null || usedTokens <= maxTokens);
-  const validMax = typeof maxTokens === "number"
-    && Number.isSafeInteger(maxTokens)
-    && maxTokens > 0;
+  const validMax = validTokenCount(maxTokens) && maxTokens > 0;
   if (validUsed) {
     return `${compactNumber(usedTokens)} used${validMax ? ` of ${compactNumber(maxTokens)}` : ""}`;
   }
@@ -276,6 +269,12 @@ export function UsageIndicator({
 
   useEffect(() => {
     if (!open) return;
+    const popover = document.getElementById(detailsId)!;
+    let active = true;
+    let stop: (() => void) | undefined;
+    void import("../utils/composerPopoverPlacement").then(({ observeComposerPopover }) => {
+      if (active) stop = observeComposerPopover(triggerRef.current!, popover, () => undefined);
+    });
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target;
       if (target instanceof Node && !anchorRef.current?.contains(target)) {
@@ -291,10 +290,13 @@ export function UsageIndicator({
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
+      active = false;
+      stop?.();
+      popover.removeAttribute("data-composer-popover-positioned");
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [closePopover, open]);
+  }, [closePopover, detailsId, open]);
 
   if (behavior.surface === "hidden") return null;
 

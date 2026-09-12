@@ -45,3 +45,10 @@ export async function writeSnapshotPreferences(directory: string, input: Snapsho
     await rename(temporary, path);
   } finally { await unlink(temporary).catch(() => undefined); }
 }
+
+/** Forget saved preferences so the next launch starts with Snapshots off. */
+export async function clearSnapshotPreferences(directory: string): Promise<void> {
+  await unlink(join(await realpath(directory), fileName)).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  });
+}

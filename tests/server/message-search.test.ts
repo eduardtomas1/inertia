@@ -162,4 +162,18 @@ describe("persisted message search", () => {
       expect(store.project(project.id).id).toBe(project.id);
     } finally { reopened.close(); }
   });
+
+  it("scans past an eligible empty message instead of failing the search", async () => {
+    const { store, database, databasePath, conversation } = await fixture();
+    const older = store.createMessage(conversation.id, "old needle", "user", [], null, "2026-01-01T00:00:00.000Z");
+    const writer = new Database(databasePath);
+    try {
+      // Recovery imports accept an empty user message, which stays searchable.
+      writer.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, 'user', '', '[]', '2026-09-08T00:00:00.000Z')")
+        .run("empty-user-message", conversation.id);
+    } finally { writer.close(); }
+    expect(searchMessages(database, "needle")).toMatchObject({
+      hits: [expect.objectContaining({ messageId: older.id })], incomplete: false,
+    });
+  });
 });

@@ -1,5 +1,4 @@
 // @inertia-test-suite portable
-// @inertia-harness cursor-acp
 import { ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";

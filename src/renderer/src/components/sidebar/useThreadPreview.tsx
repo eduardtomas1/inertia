@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { FolderGit2, GitBranch } from "lucide-react";
 import type { Conversation, Project } from "@shared/contracts";
+import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import { ProjectIcon } from "../ProjectIcon";
 
@@ -9,6 +10,7 @@ function ThreadPreview({ conversation, project, anchor, onEnter, onLeave }: {
   conversation: Conversation; project?: Project; anchor: HTMLElement;
   onEnter: () => void; onLeave: () => void;
 }): React.JSX.Element {
+  useNativePreviewSuspension(true);
   const surface = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = surface.current;

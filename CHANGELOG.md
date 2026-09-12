@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.55 — 2026-09-12
+## 0.0.55 — 2026-09-13
 
 ### Find and share context
 
@@ -101,6 +101,21 @@ The useful changes in each Inertia release, in plain language.
 - Successful Claude metadata reads let the SDK finish normally before proving
   process cleanup. This prevents a completed background check from stopping
   the local service; cancellation still remains final.
+- Startup recovery preserves unreadable and rejected database backup originals.
+  Temporary access, locking or I/O errors stop validation before moving the
+  current database; a failed check cannot erase the only recoverable copy.
+- Failed Git worktree creation keeps its recovery record when a branch or
+  checkout artifact remains, and leaves pre-existing branches untouched.
+- Persistence errors while handling a provider result or saving cancellation
+  still start exact provider cleanup. A chat remains locked if cleanup or
+  terminal persistence cannot be confirmed. Cursor also waits for process
+  cleanup when its chat-tool server fails to close.
+- Quitting cancels active reviews and context compaction before waiting for
+  their commands to finish, while retaining cleanup and storage safeguards.
+- Private Connect startup failures clear the stopped gateway and error state
+  correctly, allowing update preparation and a fresh retry.
+- Terminal output no longer disconnects a window while a valid conversation
+  history backlog is draining. Stalled or oversized connections remain bounded.
 - Cancelling a read-only Git inspection on Windows gives it a bounded chance
   to close normally, avoiding a termination race that could block new chats.
   Hung inspections still require confirmed process-tree cleanup.

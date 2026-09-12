@@ -203,6 +203,7 @@ export async function readClaudeAgentSdkMetadata(
     await ownedProcess.terminate(true);
   }
   if (ownedProcess.transportError()) throw ownedProcess.transportError();
+  if (signal?.aborted) throw new Error("Claude metadata discovery was cancelled.");
   return metadata;
 }
 

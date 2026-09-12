@@ -30,7 +30,7 @@ function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full"
     attachmentsRef: { current: existing }, pendingAttachmentIdsRef: { current: new Set<string>() },
     blocked: mode === "blocked", conversationId: "chat-a", markEditorChanged: vi.fn(), mountedRef: { current: true },
     onChooseAttachments: async () => null, onImportAttachments: async () => null, releaseAttachmentRef: { current: release },
-    running: false, setAttachments: vi.fn(), setAttachmentImporting: vi.fn(), setPendingAttachmentIds: vi.fn(),
+    running: false, setAttachments: vi.fn(), setAttachmentImporting: vi.fn(), setAttachmentError: vi.fn(), setPendingAttachmentIds: vi.fn(),
     submittingRef: { current: mode === "submitting" },
   };
   if (mode === "commit-rejected") commit.mockRejectedValueOnce(new Error("commit denied /private/fixture.png"));

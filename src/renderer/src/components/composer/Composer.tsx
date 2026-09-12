@@ -168,6 +168,7 @@ export const Composer = memo(function Composer({
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
@@ -338,6 +339,7 @@ export const Composer = memo(function Composer({
     conversationUpdateSequenceRef.current += 1;
     setConversationUpdatePending(false);
     setConversationUpdateError(null);
+    setAttachmentError(null);
     dismissMenu("context-change");
   }, [
     conversation.id,
@@ -566,6 +568,7 @@ export const Composer = memo(function Composer({
         promptHistoryController.reset(""); draftValueRef.current = "";
         setMessage("");
         setAttachments([]);
+        setAttachmentError(null);
         setFileReferences([]);
         selectedPreviewUrlRef.current = null;
         setPreviewContextSelected(false);
@@ -632,6 +635,7 @@ export const Composer = memo(function Composer({
       running,
       setAttachments,
       setAttachmentImporting, setPendingAttachmentIds,
+      setAttachmentError,
       submittingRef,
     });
 
@@ -720,6 +724,7 @@ export const Composer = memo(function Composer({
         queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
       )) return;
     attachmentsRef.current = []; setAttachments([]);
+    setAttachmentError(null);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
     flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
     markEditorChanged(); promptHistoryController.reset(""); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
@@ -1037,6 +1042,7 @@ export const Composer = memo(function Composer({
           </Suspense>
         )}
         {conversationContextHandoffEnabled && <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />}
+        {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}

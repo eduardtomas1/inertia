@@ -21,38 +21,28 @@ export interface ComposerAttachmentImportLease {
 
 export type ComposerAttachmentAdoptionResult = "adopted" | "rejected" | "cancelled";
 
-function duplicateKey(attachment: ChatAttachment): string {
-  return [
-    attachment.name.normalize("NFKC").trim().toLocaleLowerCase("en-US"),
-    attachment.mimeType,
-    attachment.size,
-  ].join("\0");
-}
-
 export function mergeComposerAttachments(
   current: readonly ChatAttachment[],
   incoming: readonly ChatAttachment[],
 ): AttachmentMergeResult {
   const attachments = [...current];
   const rejected: ChatAttachment[] = [];
-  const paths = new Set(current.map(({ path }) => path));
-  const metadata = new Set(current.map(duplicateKey));
+  // Native imports own content verification and digest deduplication. Equal
+  // display metadata does not make two distinct capabilities the same file.
+  const ids = new Set(current.map(({ id }) => id));
   let totalBytes = current.reduce((total, { size }) => total + size, 0);
 
   for (const attachment of incoming) {
-    const key = duplicateKey(attachment);
     if (
       attachments.length >= MAX_CHAT_ATTACHMENTS
       || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
-      || paths.has(attachment.path)
-      || metadata.has(key)
+      || ids.has(attachment.id)
     ) {
       rejected.push(attachment);
       continue;
     }
     attachments.push(attachment);
-    paths.add(attachment.path);
-    metadata.add(key);
+    ids.add(attachment.id);
     totalBytes += attachment.size;
   }
   return { attachments, rejected };

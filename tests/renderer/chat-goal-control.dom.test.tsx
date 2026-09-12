@@ -346,7 +346,7 @@ describe("ChatGoalControl", () => {
       />,
     );
 
-    expect(screen.getByText(/Local token target: 5,000/u))
+    expect(screen.getByText(`Local token target: ${(5_000).toLocaleString()}`, { exact: false }))
       .toHaveTextContent("does not measure or enforce provider usage");
   });
 

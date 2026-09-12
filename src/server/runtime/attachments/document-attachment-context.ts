@@ -47,7 +47,7 @@ const sharedExtractionScheduler = new DocumentExtractionScheduler();
 
 type PdfTextModule = Pick<
   typeof import("pdfjs-dist/legacy/build/pdf.mjs"),
-  "getDocument"
+  "getDocument" | "OPS"
 >;
 type PdfModuleLoader = () => Promise<PdfTextModule>;
 
@@ -285,12 +285,10 @@ function scannedPdfNote(
     - analysis.generatedPages.length;
   const uninspected = Math.max(0, analysis.totalPages - MAX_PDF_PAGES);
   return [
-    analysis.selectableText
-      ? "Some PDF pages did not contain enough reliable selectable text."
-      : "This PDF did not contain enough reliable selectable text.",
+    "PDF pages containing graphics or sparse text are included as images.",
     `Inertia rasterized ${mappings.join(", ")} from ${analysis.attachment.name}.`,
     omittedScanned > 0
-      ? `${omittedScanned} scanned page${omittedScanned === 1 ? " was" : "s were"} omitted by the bounded image-input limits.`
+      ? `${omittedScanned} visual page${omittedScanned === 1 ? " was" : "s were"} omitted by the bounded image-input limits.`
       : "Inspect those provider images directly.",
     uninspected > 0
       ? `${uninspected} page${uninspected === 1 ? " was" : "s were"} beyond the bounded PDF inspection limit.`
@@ -457,10 +455,14 @@ async function extractPdfAnalysis(
     const rasterPageNumbers: number[] = [];
     let hasSelectableText = false;
     let textTruncated = false;
+    const visualOperators = new Set(Object.entries(pdfModule.OPS).filter(([name]) =>
+      /^(?:paint|shadingFill|constructPath|rawFillPath|stroke|closeStroke|fill|eoFill|closeFillStroke|closeEOFillStroke|beginAnnotation)/u.test(name),
+    ).map(([, value]) => value));
     for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
       checkExtractionPending(signal, deadlineAt, now);
       const page = await document.getPage(pageNumber);
       const pageAccumulator = boundedTextAccumulator(MAX_DOCUMENT_CONTEXT_BYTES);
+      let hasGraphics = false;
       try {
         const reader = page.streamTextContent().getReader();
         let streamDone = false;
@@ -498,6 +500,14 @@ async function extractPdfAnalysis(
           if (!streamDone) void reader.cancel().catch(() => undefined);
           reader.releaseLock();
         }
+        // A heading or OCR layer says nothing about charts, screenshots or paths.
+        // Inspect drawing operations before deciding that text alone is complete.
+        if (hasMeaningfulPdfText(pageAccumulator.content())) {
+          checkExtractionPending(signal, deadlineAt, now);
+          const operators = await page.getOperatorList();
+          checkExtractionPending(signal, deadlineAt, now);
+          hasGraphics = operators.fnArray.some((operator) => visualOperators.has(operator));
+        }
       } finally {
         page.cleanup();
       }
@@ -506,6 +516,7 @@ async function extractPdfAnalysis(
         rasterPageNumbers.push(pageNumber);
         continue;
       }
+      if (hasGraphics) rasterPageNumbers.push(pageNumber);
       const prefixed = `${hasSelectableText ? "\n\n" : ""}[Page ${pageNumber}]\n${pageText}`;
       if (!accumulator.append(prefixed)) textTruncated = true;
       hasSelectableText = true;
@@ -547,7 +558,7 @@ function contextForPdf(
   const combined = [
     rasterNote,
     analysis.selectableText
-      ? `${rasterNote ? "Selectable text from the other pages:\n" : ""}${analysis.selectableText}`
+      ? `${rasterNote ? "Selectable text:\n" : ""}${analysis.selectableText}`
       : "",
   ].filter(Boolean).join("\n\n");
   const bounded = boundedUtf8(combined, maximumJsonBytes);

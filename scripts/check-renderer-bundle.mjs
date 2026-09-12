@@ -38,6 +38,8 @@ const budgets = {
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
+  // Account quotas, source setup and deliberate reset confirmation load on demand.
+  deferredUsageLimitsJavaScript: 14 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -82,7 +84,9 @@ const budgets = {
   // New optional editor/menu bytes have their own narrow caps above.
   // Update-state wiring and interactive recent attachments bring shared core
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
-  coreJavaScript: 2_000.75 * kibibyte,
+  // Limits adds 2.4 KiB of eagerly validated IPC contracts and entry wiring;
+  // its 13.1 KiB optional UI has a separate ceiling, and first-load caps stay fixed.
+  coreJavaScript: 2_003.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -516,9 +520,16 @@ if (mainWorkbenchJavaScriptClosure.has(legacyPromptStashEntry) || detachedChatJa
   throw new Error("Legacy prompt recovery must stay off the initial workbench");
 }
 const deferredLegacyPromptStashJavaScriptBytes = await assetBytes(`assets/${legacyPromptStashEntry}`);
+const usageLimitsEntry = assetNames.find((name) => /^UsageLimitsPanel-.*\.js$/u.test(name));
+if (!usageLimitsEntry) throw new Error("Missing deferred provider Limits surface");
+if (mainWorkbenchJavaScriptClosure.has(usageLimitsEntry) || detachedChatJavaScriptClosure.has(usageLimitsEntry)) {
+  throw new Error("Provider Limits must remain deferred from the initial workbench");
+}
+const deferredUsageLimitsJavaScriptBytes = await closureBytes(await javaScriptClosure(usageLimitsEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
+  - deferredUsageLimitsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
@@ -549,6 +560,7 @@ const coreJavaScriptBytes =
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
+  deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,

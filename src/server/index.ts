@@ -1,3 +1,4 @@
+import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
@@ -676,6 +677,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,

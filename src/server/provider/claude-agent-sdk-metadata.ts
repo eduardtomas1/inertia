@@ -116,7 +116,9 @@ export async function readClaudeAgentSdkMetadata(
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
   lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
   signal?: AbortSignal,
+  includeAccount = false,
 ): Promise<{
+  account?: { email?: string; organization?: string; subscriptionType?: string; apiProvider?: string };
   models?: ProviderModel[];
   rateLimits?: ProviderRateLimit[];
   rateLimitsUnavailable?: boolean;
@@ -170,17 +172,19 @@ export async function readClaudeAgentSdkMetadata(
       }, timeoutMs);
       timer.unref();
     });
-    const [modelsResult, limitsResult] = await Promise.race([
+    const [modelsResult, limitsResult, accountResult] = await Promise.race([
       Promise.allSettled([
         fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
         fields.includes("rateLimits") && typeof usageReader === "function"
           ? usageReader.call(query)
           : Promise.resolve(undefined),
+        includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
       ]),
       timeout,
       cancelled,
     ]);
     metadata = {
+      ...(accountResult.status === "fulfilled" && accountResult.value ? { account: { email: accountResult.value.email, organization: accountResult.value.organization, subscriptionType: accountResult.value.subscriptionType, apiProvider: accountResult.value.apiProvider } } : {}),
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };

@@ -1,3 +1,4 @@
+import { useUsageLimitsContext } from "./usage-limits-state";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Clock3, EyeOff, X } from "lucide-react";
 
@@ -235,6 +236,7 @@ export function UsageIndicator({
   contextQuality = usage ? "current" : "unavailable",
   onModeChange,
 }: UsageIndicatorProps): React.JSX.Element | null {
+  const limitsContext = useUsageLimitsContext();
   const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -356,6 +358,7 @@ export function UsageIndicator({
           </header>
 
           <div className="usage-popover-content">
+            {limitsContext && <button type="button" className="usage-limits-shortcut" onClick={() => { closePopover(true); limitsContext.open(); }}>All provider limits</button>}
             <section className="usage-popover-section" aria-labelledby={`${reactId}-context-heading`}>
               <div className="usage-popover-section-heading">
                 <strong id={`${reactId}-context-heading`}>Context</strong>

@@ -1,3 +1,4 @@
+import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
@@ -9,8 +10,6 @@ import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
-import { usageDashboardSchema } from "./usage-dashboard-schema";
-import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
@@ -1109,8 +1108,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) =>
     providerMaintenanceOperation(value.operation),
-  "usage.dashboard": (value) => usageDashboardSchema(value.dashboard),
-  "daily.work": (value) => dailyWorkDashboardSchema(value.dashboard),
+  ...usageResultValidators,
   "conversation.created": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),

@@ -308,6 +308,68 @@ export function projectClaudeSdkEventMedia(value: unknown): ClaudeMediaProjectio
   };
 }
 
+const MIN_SHORTENED_EVENT_STRING_CHARS = 256;
+const MAX_SHORTENED_EVENT_DEPTH = 64;
+
+function serializedEventBytes(value: unknown): number | null {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined
+      ? null
+      : Buffer.byteLength(serialized, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function shortenEventStrings(
+  value: unknown,
+  maxChars: number,
+  depth: number,
+): unknown {
+  if (typeof value === "string") {
+    if (value.length <= maxChars) return value;
+    const last = value.charCodeAt(maxChars - 1);
+    const end = last >= 0xd800 && last <= 0xdbff ? maxChars - 1 : maxChars;
+    return `${value.slice(0, end)}\n[Inertia omitted ${value.length - end} characters of an oversized Claude update]`;
+  }
+  if (depth >= MAX_SHORTENED_EVENT_DEPTH) return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => shortenEventStrings(entry, maxChars, depth + 1));
+  }
+  const record = objectValue(value);
+  if (!record) return value;
+  return Object.fromEntries(Object.entries(record).map(([key, entry]) => [
+    key,
+    shortenEventStrings(entry, maxChars, depth + 1),
+  ]));
+}
+
+/**
+ * Legitimate tool output (verbose build logs, large file reads or writes) can
+ * exceed the per-event cap (#338). Keep the event's structure, types and
+ * identities, and shorten only its longest strings until it fits. Returns null
+ * when the event already fits or cannot be shortened enough; the ordinary
+ * budget then decides.
+ */
+export function shortenOversizedClaudeEvent(
+  value: unknown,
+  maxBytes: number,
+): unknown | null {
+  const size = serializedEventBytes(value);
+  if (size === null || size <= maxBytes) return null;
+  for (
+    let maxChars = Math.floor(maxBytes / 4);
+    maxChars >= MIN_SHORTENED_EVENT_STRING_CHARS;
+    maxChars = Math.floor(maxChars / 2)
+  ) {
+    const candidate = shortenEventStrings(value, maxChars, 0);
+    const candidateSize = serializedEventBytes(candidate);
+    if (candidateSize !== null && candidateSize <= maxBytes) return candidate;
+  }
+  return null;
+}
+
 export class ClaudeRunEventBudget {
   private availableMediaBytes = MAX_CLAUDE_MEDIA_BURST_BYTES;
   private availableMediaEncodedBytes = MAX_CLAUDE_MEDIA_BURST_ENCODED_BYTES;
@@ -347,7 +409,11 @@ export class ClaudeRunEventBudget {
     this.lastRefillAt = this.now();
   }
 
-  observe(value: unknown): void {
+  /**
+   * Accounts one SDK event and returns the value to project. An oversized
+   * event comes back shortened instead of failing the whole run.
+   */
+  observe(value: unknown): { value: unknown; shortened: boolean } {
     const projected = projectClaudeSdkEventMedia(value);
     if (projected.mediaBytes > this.maxRunMediaBytes - this.mediaBytes) {
       throw new Error("Claude exceeded the bounded media event budget for this run.");
@@ -370,11 +436,18 @@ export class ClaudeRunEventBudget {
     ) {
       throw new Error("Claude exceeded the bounded encoded-media event rate for this run.");
     }
-    this.events.observe(projected.value);
+    const shortened = shortenOversizedClaudeEvent(
+      projected.value,
+      this.events.eventByteLimit,
+    );
+    this.events.observe(shortened ?? projected.value);
     this.mediaBytes += projected.mediaBytes;
     this.mediaEncodedBytes += projected.mediaEncodedBytes;
     this.availableMediaBytes -= projected.mediaBytes;
     this.availableMediaEncodedBytes -= projected.mediaEncodedBytes;
+    return shortened === null
+      ? { value, shortened: false }
+      : { value: shortened, shortened: true };
   }
 
   private refill(): void {

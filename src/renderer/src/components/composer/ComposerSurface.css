@@ -50,7 +50,9 @@
   align-items: center;
   gap: 6px;
 }
-.composer-shell .composer-input-actions .icon-button {
+/* Secondary icons only: the primary send/stop action keeps its own on-accent
+   and danger colors. :where() leaves this rule's specificity unchanged. */
+.composer-shell .composer-input-actions .icon-button:where(:not(.send-button)) {
   width: 28px;
   height: 32px;
   min-height: 32px;

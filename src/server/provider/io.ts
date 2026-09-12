@@ -144,6 +144,11 @@ export class ProviderRunEventBudget {
     this.lastRefillAt = this.now();
   }
 
+  /** Largest serialized UTF-8 size accepted for one event. */
+  get eventByteLimit(): number {
+    return this.maxEventBytes;
+  }
+
   observe(value: unknown): void {
     let serialized: string | undefined;
     try {

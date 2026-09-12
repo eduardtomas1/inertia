@@ -1,8 +1,9 @@
 import {
+  AttachmentImportValidationError,
+  isReportedImageSide,
   parseAttachmentImportFileOperation,
   parseAttachmentImportValidationReceipt,
   type AttachmentImportFileOperation,
-  type AttachmentImportValidationFailure,
   type AttachmentImportValidationReceipt,
 } from "./attachment-import-file.js";
 
@@ -26,8 +27,56 @@ export type AttachmentImportWorkerEvent = {
   readonly type: "attachment-import.result";
   readonly operationId: string;
   readonly ok: false;
-  readonly code: AttachmentImportValidationFailure;
+  readonly code: "content" | "unsafe";
+} | {
+  readonly type: "attachment-import.result";
+  readonly operationId: string;
+  readonly ok: false;
+  readonly code: "image-too-large";
+  readonly width: number;
+  readonly height: number;
 };
+
+export type AttachmentImportWorkerFailureEvent = Extract<
+  AttachmentImportWorkerEvent,
+  { readonly ok: false }
+>;
+
+/** Maps a worker-side failure to its privacy-safe wire event. */
+export function attachmentImportFailureEvent(
+  operationId: string,
+  error: unknown,
+): AttachmentImportWorkerFailureEvent {
+  const base = {
+    type: "attachment-import.result",
+    operationId,
+    ok: false,
+  } as const;
+  if (!(error instanceof AttachmentImportValidationError)) {
+    return { ...base, code: "unsafe" };
+  }
+  if (error.code !== "image-too-large") return { ...base, code: error.code };
+  return error.image
+    ? {
+        ...base,
+        code: "image-too-large",
+        width: error.image.width,
+        height: error.image.height,
+      }
+    : { ...base, code: "content" };
+}
+
+/** Rebuilds the main-process error for a parsed worker failure. */
+export function attachmentImportFailureError(
+  event: AttachmentImportWorkerFailureEvent,
+): AttachmentImportValidationError {
+  return event.code === "image-too-large"
+    ? new AttachmentImportValidationError("image-too-large", {
+        width: event.width,
+        height: event.height,
+      })
+    : new AttachmentImportValidationError(event.code);
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -68,13 +117,28 @@ export function parseAttachmentImportWorkerEvent(
     || typeof value.ok !== "boolean"
   ) return null;
   if (value.ok === false) {
-    return Object.keys(value).length === 4
-      && (value.code === "content" || value.code === "unsafe")
+    const keys = Object.keys(value).length;
+    if (value.code === "content" || value.code === "unsafe") {
+      return keys === 4
+        ? {
+            type: value.type,
+            operationId: value.operationId,
+            ok: false,
+            code: value.code,
+          }
+        : null;
+    }
+    return value.code === "image-too-large"
+      && keys === 6
+      && isReportedImageSide(value.width)
+      && isReportedImageSide(value.height)
       ? {
           type: value.type,
           operationId: value.operationId,
           ok: false,
-          code: value.code,
+          code: "image-too-large",
+          width: value.width,
+          height: value.height,
         }
       : null;
   }

@@ -10,6 +10,10 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   type ChatAttachmentMimeType,
 } from "../shared/attachments.js";
+import {
+  ImageAttachmentTooLargeError,
+  imageAttachmentTooLargeMessage,
+} from "./attachment-image-validation.js";
 import { validateAttachmentImport } from "./attachment-import.js";
 
 const OWNED_STAGED_ATTACHMENT =
@@ -50,13 +54,52 @@ export interface AttachmentImportValidationRunner {
   shutdown?(): Promise<boolean>;
 }
 
-export type AttachmentImportValidationFailure = "content" | "unsafe";
+export type AttachmentImportValidationFailure =
+  | "content"
+  | "image-too-large"
+  | "unsafe";
+
+export interface AttachmentImportImageSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+// No supported image format can declare a side beyond 2^31 - 1 pixels.
+const MAX_REPORTED_IMAGE_SIDE = 0x7fff_ffff;
+
+export function isReportedImageSide(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 1
+    && value <= MAX_REPORTED_IMAGE_SIDE;
+}
+
+function validationFailureMessage(
+  code: AttachmentImportValidationFailure,
+  image: AttachmentImportImageSize | null,
+): string {
+  if (code === "image-too-large" && image) {
+    return imageAttachmentTooLargeMessage(image.width, image.height);
+  }
+  return code === "unsafe"
+    ? "Temporary attachment storage could not be verified safely."
+    : "Attachment content does not match its safe file type.";
+}
 
 export class AttachmentImportValidationError extends Error {
-  constructor(readonly code: AttachmentImportValidationFailure) {
-    super(code === "content"
-      ? "Attachment content does not match its safe file type."
-      : "Temporary attachment storage could not be verified safely.");
+  readonly image: AttachmentImportImageSize | null;
+
+  constructor(code: "content" | "unsafe");
+  constructor(code: "image-too-large", image: AttachmentImportImageSize);
+  constructor(
+    readonly code: AttachmentImportValidationFailure,
+    image?: AttachmentImportImageSize,
+  ) {
+    const size = code === "image-too-large" && image
+      ? { width: image.width, height: image.height }
+      : null;
+    super(validationFailureMessage(code, size));
+    this.image = size;
   }
 }
 
@@ -279,7 +322,17 @@ export async function validateAttachmentImportFile(
         mimeType: operation.mimeType,
         data: bytes,
       });
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof ImageAttachmentTooLargeError
+        && isReportedImageSide(error.width)
+        && isReportedImageSide(error.height)
+      ) {
+        throw new AttachmentImportValidationError("image-too-large", {
+          width: error.width,
+          height: error.height,
+        });
+      }
       throw new AttachmentImportValidationError("content");
     }
     if (

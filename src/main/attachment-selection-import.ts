@@ -61,11 +61,19 @@ const SAFE_ATTACHMENT_ERRORS = new Set([
   "The selected attachment is not a safe regular file.",
 ]);
 const SAFE_ATTACHMENT_COUNT_ERROR = /^Select at most \d+ attachments\.$/u;
+// Mirrors imageAttachmentTooLargeMessage: only digits vary, never names or paths.
+const SAFE_ATTACHMENT_IMAGE_TOO_LARGE_ERROR = new RegExp(
+  "^This image is too large \\(\\d{1,10}×\\d{1,10} pixels, \\d{1,13}\\.\\d MP\\)\\. "
+    + "Images up to \\d{1,4} megapixels and \\d{1,6} pixels per side are supported\\. "
+    + "Resize it and try again\\.$",
+  "u",
+);
 
 export function privacySafeAttachmentImportError(error: unknown): Error {
   const message = error instanceof Error ? error.message : "";
   return SAFE_ATTACHMENT_ERRORS.has(message)
     || SAFE_ATTACHMENT_COUNT_ERROR.test(message)
+    || SAFE_ATTACHMENT_IMAGE_TOO_LARGE_ERROR.test(message)
     ? new Error(message)
     : new Error("Attachments could not be added safely.");
 }

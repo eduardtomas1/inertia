@@ -176,12 +176,14 @@ describe("ProviderManager harness backend routing", () => {
     expect(manager.providerCapabilityContract("claude").installationVerified)
       .toBe(false);
 
+    // A later confirmed-clean detection of the same installation lifts the
+    // provider's doubt without an app restart (#336).
     cleanupConfirmed = true;
     await manager.detect("claude");
     expect(manager.resolveModelRoute(selected).continuationIdentity
       .providerCompatibilityToken).toBeUndefined();
     expect(manager.providerCapabilityContract("claude").installationVerified)
-      .toBe(false);
+      .toBe(true);
   });
 
   it.each([

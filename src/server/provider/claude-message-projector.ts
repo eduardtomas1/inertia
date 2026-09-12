@@ -4,7 +4,7 @@ import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
 import { CappedProviderBuffer } from "./io";
-import { parseClaudeRateLimitEvent, parseClaudeUsage } from "./claude-usage";
+import { parseClaudeUsage } from "./claude-usage";
 import {
   boundedClaudeEventText as bounded,
   boundedClaudeIdentifier as boundedIdentifier,
@@ -20,6 +20,8 @@ import {
   claudeTextItemId,
   ClaudeProjectedTextLedger,
   isChildOwnedClaudeMessage as isChildOwned,
+  isClaudeToolUseBlock as isToolUseBlock,
+  projectClaudeRateLimitEvent,
   MAX_CLAUDE_TRACKED_MESSAGE_IDS as MAX_TRACKED_MESSAGE_IDS,
   MAX_CLAUDE_TRACKED_TEXT_ALIASES,
   safeClaudeNonNegativeNumber as safeNonNegativeNumber,
@@ -124,17 +126,7 @@ export class ClaudeMessageProjector {
         return;
       case "rate_limit_event":
         if (this.options.usesNativeAnthropic) {
-          const rateLimit = parseClaudeRateLimitEvent(message);
-          if (rateLimit) {
-            // Negotiated capability: the coordinator cancels a turn on unannounced metadata.
-            this.options.emitter.capability("rate-limits", true);
-            this.options.emitter.rich({
-              type: "metadata",
-              metadata: { rateLimits: [rateLimit] },
-              source: "session",
-              complete: false,
-            });
-          }
+          projectClaudeRateLimitEvent(this.options.emitter, message);
         }
         return;
       case "tool_progress":
@@ -233,7 +225,7 @@ export class ClaudeMessageProjector {
         return;
       case "content_block_start": {
         const block = objectValue(event.content_block);
-        if (block) this.observeToolStart(block);
+        if (block && isToolUseBlock(block.type)) this.observeToolStart(block);
         return;
       }
       case "content_block_delta": {
@@ -382,7 +374,7 @@ export class ClaudeMessageProjector {
           item.thinking,
           streamed?.thinking ?? "",
         );
-      } else if (item.type === "tool_use" || item.type === "server_tool_use") {
+      } else if (isToolUseBlock(item.type)) {
         this.observeToolStart(item);
       } else if (
         typeof item.type === "string"

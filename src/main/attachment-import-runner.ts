@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import type { UtilityProcess } from "electron";
 
-import {
-  AttachmentImportValidationError,
-  type AttachmentImportFileOperation,
-  type AttachmentImportValidationExecution,
-  type AttachmentImportValidationReceipt,
-  type AttachmentImportValidationRunner,
+import type {
+  AttachmentImportFileOperation,
+  AttachmentImportValidationExecution,
+  AttachmentImportValidationReceipt,
+  AttachmentImportValidationRunner,
 } from "./attachment-import-file.js";
 import {
+  attachmentImportFailureError,
   parseAttachmentImportWorkerEvent,
   type AttachmentImportWorkerRequest,
 } from "./attachment-import-worker-protocol.js";
@@ -149,7 +149,7 @@ export function createAttachmentImportUtilityRunner(
           return;
         }
         if (!reported.ok) {
-          rejectImport(new AttachmentImportValidationError(reported.code));
+          rejectImport(attachmentImportFailureError(reported));
           return;
         }
         resolveImport(reported.receipt);

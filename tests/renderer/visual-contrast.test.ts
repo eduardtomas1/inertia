@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { Window } from "happy-dom";
+import { afterAll, describe, expect, it } from "vitest";
 
 import {
   COLOR_THEME_IDS,
@@ -459,4 +460,242 @@ describe("visual contrast system", () => {
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer-input-zone::after\s*\{[^}]*animation:\s*none;/u,
     );
   });
+});
+
+// Stylesheets that can style the composer primary action, in bundle order.
+const composerCascadeCss = [
+  "../../src/renderer/src/styles.css",
+  "../../src/renderer/src/components/composer/ComposerSurface.css",
+  "../../src/renderer/src/components/composer/ComposerSendActions.css",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+  .join("\n")
+  .replace(/\r\n?/gu, "\n");
+
+type StyleRule = { selectors: string[]; body: string; order: number };
+
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "(" || character === "[") depth += 1;
+    else if (character === ")" || character === "]") depth -= 1;
+    else if (character === "," && depth === 0) {
+      parts.push(text.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+// Top-level style rules only; at-rule blocks (media, container, keyframes) are skipped.
+function topLevelStyleRules(source: string): StyleRule[] {
+  const text = source.replace(/\/\*[\s\S]*?\*\//gu, "");
+  const rules: StyleRule[] = [];
+  let depth = 0;
+  let start = 0;
+  let prelude = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "{") {
+      if (depth === 0) {
+        prelude = text.slice(start, index).trim();
+        start = index + 1;
+      }
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        if (!prelude.startsWith("@")) {
+          rules.push({
+            selectors: splitTopLevel(prelude),
+            body: text.slice(start, index),
+            order: rules.length,
+          });
+        }
+        start = index + 1;
+      }
+    } else if (character === ";" && depth === 0) {
+      start = index + 1;
+    }
+  }
+  return rules;
+}
+
+function withoutWhere(selector: string): string {
+  let output = "";
+  let index = 0;
+  while (index < selector.length) {
+    if (!selector.startsWith(":where(", index)) {
+      output += selector[index];
+      index += 1;
+      continue;
+    }
+    let depth = 0;
+    for (index += ":where".length; index < selector.length; index += 1) {
+      if (selector[index] === "(") depth += 1;
+      else if (selector[index] === ")" && (depth -= 1) === 0) {
+        index += 1;
+        break;
+      }
+    }
+  }
+  return output;
+}
+
+function specificity(selector: string): number {
+  const counted = withoutWhere(selector)
+    .replace(/:(?:not|is|has)\(/gu, " ")
+    .replace(/\)/gu, " ");
+  const ids = counted.match(/#[\w-]+/gu)?.length ?? 0;
+  const classes = counted.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/gu)?.length ?? 0;
+  const types = counted
+    .replace(/#[\w-]+|\.[\w-]+|\[[^\]]*\]|:[\w-]+/gu, " ")
+    .match(/[a-z][\w-]*/giu)?.length ?? 0;
+  return ids * 10_000 + classes * 100 + types;
+}
+
+function declaredValue(body: string, names: readonly string[]): string | undefined {
+  let value: string | undefined;
+  for (const declaration of body.split(";")) {
+    const separator = declaration.indexOf(":");
+    if (separator < 0) continue;
+    if (names.includes(declaration.slice(0, separator).trim())) {
+      value = declaration.slice(separator + 1).trim();
+    }
+  }
+  return value;
+}
+
+const composerRules = topLevelStyleRules(composerCascadeCss);
+
+// Resolves which declaration wins for an element: importance, then
+// specificity, then source order. Hover is simulated by dropping `:hover`.
+function cascadedValue(
+  element: { matches(selector: string): boolean },
+  names: readonly string[],
+  hover: boolean,
+): string | undefined {
+  let winner: { value: string; rank: readonly [number, number, number] } | undefined;
+  for (const rule of composerRules) {
+    const declared = declaredValue(rule.body, names);
+    if (!declared) continue;
+    const important = declared.endsWith("!important");
+    const value = declared.replace(/\s*!important$/u, "");
+    for (const selector of rule.selectors) {
+      if (selector.includes("::")) continue;
+      if (/:(?:active|focus|focus-visible|focus-within)\b/u.test(selector)) continue;
+      if (!hover && selector.includes(":hover")) continue;
+      let matches = false;
+      try {
+        matches = element.matches(selector.replaceAll(":hover", ""));
+      } catch {
+        matches = false;
+      }
+      if (!matches) continue;
+      const rank = [important ? 1 : 0, specificity(selector), rule.order] as const;
+      const wins = !winner
+        || rank[0] > winner.rank[0]
+        || (rank[0] === winner.rank[0] && rank[1] > winner.rank[1])
+        || (rank[0] === winner.rank[0] && rank[1] === winner.rank[1] && rank[2] >= winner.rank[2]);
+      if (wins) winner = { value, rank };
+    }
+  }
+  return winner?.value;
+}
+
+function resolveColor(value: string, tokens: Map<string, string>): string | undefined {
+  if (/^#[\da-f]{6}$/iu.test(value)) return value;
+  const token = /^var\(--(?<name>[\w-]+)\)$/u.exec(value)?.groups?.name;
+  if (token) return tokens.get(token);
+  const mix = /^color-mix\(in srgb,\s*(?<first>var\(--[\w-]+\))\s+(?<weight>\d+(?:\.\d+)?)%,\s*(?<second>var\(--[\w-]+\))\)$/u
+    .exec(value)?.groups;
+  if (!mix) return undefined;
+  const first = resolveColor(mix.first!, tokens);
+  const second = resolveColor(mix.second!, tokens);
+  return first && second
+    ? blend(first, second, Number.parseFloat(mix.weight!) / 100)
+    : undefined;
+}
+
+// Icons are non-text UI graphics, so WCAG 1.4.11 asks for 3:1. The inactive
+// (empty draft) Send state is exempt, but its glyph must stay perceptible.
+const primaryActionStates = [
+  { name: "send ready", classes: [], disabled: false, hover: false, minimumContrast: 3 },
+  { name: "send hover", classes: [], disabled: false, hover: true, minimumContrast: 3 },
+  { name: "send disabled", classes: [], disabled: true, hover: false, minimumContrast: 2 },
+  { name: "sending", classes: ["send-button-loading"], disabled: true, hover: false, minimumContrast: 3 },
+  { name: "stop ready", classes: ["stop-button"], disabled: false, hover: false, minimumContrast: 3 },
+  { name: "stop hover", classes: ["stop-button"], disabled: false, hover: true, minimumContrast: 3 },
+  { name: "stopping", classes: ["stop-button"], disabled: true, hover: false, minimumContrast: 3 },
+] as const;
+
+describe("composer primary action contrast", () => {
+  const cascadeWindow = new Window();
+  afterAll(async () => {
+    await cascadeWindow.happyDOM.close();
+  });
+  const { document } = cascadeWindow;
+  // Mirrors ComposerToolbar: the attach button and the primary send/stop
+  // action share `.icon-button` inside `.composer-input-actions`.
+  document.body.innerHTML = [
+    '<div class="composer-shell"><div class="composer"><div class="composer-toolbar">',
+    '<div class="composer-input-actions" role="group">',
+    '<button type="button" class="icon-button" data-role="attach"></button>',
+    '<button type="button" class="icon-button send-button" data-role="primary"></button>',
+    "</div></div></div></div>",
+  ].join("");
+  const attach = document.querySelector('[data-role="attach"]')!;
+  const primary = document.querySelector('[data-role="primary"]')!;
+
+  const cascades = primaryActionStates.map((state) => {
+    primary.className = ["icon-button", "send-button", ...state.classes].join(" ");
+    primary.toggleAttribute("disabled", state.disabled);
+    return {
+      state,
+      color: cascadedValue(primary, ["color"], state.hover),
+      background: cascadedValue(primary, ["background", "background-color"], state.hover),
+      opacity: cascadedValue(primary, ["opacity"], state.hover),
+    };
+  });
+  const rootDeclarations = tokenDeclarations(cssBlock(":root"));
+
+  it("keeps the muted composer icon color off the primary send and stop action", () => {
+    expect(cascadedValue(attach, ["color"], false)).toBe("var(--text-muted)");
+    for (const { state, color } of cascades.filter(({ state }) => !state.disabled)) {
+      expect(color, `${state.name} icon color`).not.toBe("var(--text-muted)");
+    }
+    expect(cascades.find(({ state }) => state.name === "send ready")?.color)
+      .toBe("var(--accent-text)");
+    expect(cascades.find(({ state }) => state.name === "stop ready")?.color)
+      .toBe("var(--danger)");
+  });
+
+  it.each(themeCases)(
+    "keeps the %s %s send and stop icons visible in every state",
+    (colorTheme, theme) => {
+      const tokens = themeTokens(theme, colorTheme);
+      const composerSurface = tokens.get("composer-surface");
+      expect(composerSurface, "missing --composer-surface").toBeDefined();
+      for (const { state, color, background, opacity } of cascades) {
+        const label = `${colorTheme} ${theme} ${state.name}: ${color} on ${background}`;
+        const foreground = color ? resolveColor(color, tokens) : undefined;
+        const fill = background ? resolveColor(background, tokens) : undefined;
+        expect(foreground, `${label} (icon color)`).toBeDefined();
+        expect(fill, `${label} (button fill)`).toBeDefined();
+        const opacityToken = opacity
+          ? /^var\(--(?<name>[\w-]+)\)$/u.exec(opacity)?.groups?.name
+          : undefined;
+        const alpha = Number.parseFloat(
+          (opacityToken ? rootDeclarations.get(opacityToken) : opacity) ?? "1",
+        );
+        expect(contrast(
+          blend(foreground!, composerSurface!, alpha),
+          blend(fill!, composerSurface!, alpha),
+        ), label).toBeGreaterThanOrEqual(state.minimumContrast);
+      }
+    },
+  );
 });

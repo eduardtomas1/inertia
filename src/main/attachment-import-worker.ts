@@ -1,8 +1,6 @@
+import { validateAttachmentImportFile } from "./attachment-import-file.js";
 import {
-  AttachmentImportValidationError,
-  validateAttachmentImportFile,
-} from "./attachment-import-file.js";
-import {
+  attachmentImportFailureEvent,
   parseAttachmentImportWorkerRequest,
   type AttachmentImportWorkerEvent,
 } from "./attachment-import-worker-protocol.js";
@@ -40,14 +38,7 @@ if (parentPort) {
         } satisfies AttachmentImportWorkerEvent, 0);
       },
       (error: unknown) => {
-        finish({
-          type: "attachment-import.result",
-          operationId: request.operationId,
-          ok: false,
-          code: error instanceof AttachmentImportValidationError
-            ? error.code
-            : "unsafe",
-        } satisfies AttachmentImportWorkerEvent, 1);
+        finish(attachmentImportFailureEvent(request.operationId, error), 1);
       },
     );
   });

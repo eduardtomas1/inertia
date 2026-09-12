@@ -16,7 +16,8 @@
 .project-setting-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 0; }
 .project-setting-control select, .project-setting-control input, .project-action-form input, .project-action-form textarea { width: 100%; min-width: 0; min-height: 32px; padding: 6px 9px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12px; }
 .project-setting-control > select { max-width: 290px; }
-.project-name-form { display: flex; gap: 6px; width: 100%; max-width: 290px; }
+.project-name-form, .project-budget-form { display: flex; gap: 6px; width: 100%; max-width: 290px; }
+.project-setting-field-error { max-width: 290px; margin: 0; color: var(--danger); font-size: 11px; }
 .project-icon-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .project-icon-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; }
 .project-model-controls { display: flex; flex-wrap: wrap; gap: 7px; width: 100%; max-width: 290px; }

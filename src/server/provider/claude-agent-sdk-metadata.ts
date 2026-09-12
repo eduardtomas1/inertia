@@ -94,6 +94,19 @@ export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
   }).slice(0, 12);
 }
 
+/**
+ * Distinguishes "Claude answered and reported no limits for this account"
+ * from a failed read (#344), so usage views can say so instead of keeping old
+ * values on screen as stale.
+ */
+export function claudeRateLimitReadResult(
+  value: unknown,
+): { rateLimits: ProviderRateLimit[]; rateLimitsUnavailable?: true } {
+  return objectValue(value)?.rate_limits_available === true
+    ? { rateLimits: parseClaudeRateLimits(value) }
+    : { rateLimits: [], rateLimitsUnavailable: true };
+}
+
 export async function readClaudeAgentSdkMetadata(
   executable: string,
   environment: NodeJS.ProcessEnv,
@@ -103,7 +116,11 @@ export async function readClaudeAgentSdkMetadata(
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
   lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
   signal?: AbortSignal,
-): Promise<{ models?: ProviderModel[]; rateLimits?: ProviderRateLimit[] }> {
+): Promise<{
+  models?: ProviderModel[];
+  rateLimits?: ProviderRateLimit[];
+  rateLimitsUnavailable?: boolean;
+}> {
   if (signal?.aborted) {
     throw new Error("Claude metadata discovery was cancelled.");
   }
@@ -163,7 +180,7 @@ export async function readClaudeAgentSdkMetadata(
     ]);
     return {
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
-      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: parseClaudeRateLimits(limitsResult.value) } : {}),
+      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
   } finally {
     signal?.removeEventListener("abort", cancel);

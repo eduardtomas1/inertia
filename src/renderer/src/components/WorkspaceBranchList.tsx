@@ -49,7 +49,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
     }} /></label>
     <div className="git-branch-load-status">
       <span role="status">{loading ? "Refreshing branches…" : error ?? `${branches.length} branches`}</span>
-      {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={onRefresh}><RefreshCw size={13} /></button>}
+      {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={13} /></button>}
     </div>
     <div className="git-branch-results" aria-busy={loading} onBlur={() => { queued.current = null; }}>
       {[false, true].map((remote) => {

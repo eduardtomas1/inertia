@@ -36,6 +36,8 @@ describe("branch picker", () => {
     expect(screen.getByRole("menuitemradio", { name: "feature/local" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Refresh branches" }));
     expect(onRefresh).toHaveBeenCalledOnce();
+    // The click event must not reach loadBranches as its `passive` flag.
+    expect(onRefresh).toHaveBeenCalledWith();
   });
 
   it("explains empty search and submits branch creation only when idle", () => {

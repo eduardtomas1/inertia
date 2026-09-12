@@ -43,6 +43,8 @@ The useful changes in each Inertia release, in plain language.
   reference namespaces.
 - Push keeps the selected branch's commit even when a terminal changes the
   checkout concurrently. Manual branch refresh reports failures visibly.
+- Optional automatic pull rechecks the branch and upstream before fast-forwarding;
+  a checkout change observed during its inspections cancels the update.
 - The mascot has pickup, suspended and landing poses, preserves the grab point,
   and supports repeated dragging and cancellation. Reduced motion remains
   supported; Wayland placement is controlled by the compositor.
@@ -62,6 +64,9 @@ The useful changes in each Inertia release, in plain language.
 - Sidebar updates show progress, release notes and restart confirmation. Recent
   attachments open previews, and offline Diagnostics offers actionable failure
   details when the local service is unavailable.
+- Diagnostics opens the affected chat, and sidebar and command-palette navigation
+  recover when a detached chat window has closed. Native browser previews stay
+  behind Snapshot settings and thread hover cards.
 
 ### Reliability and maintenance
 

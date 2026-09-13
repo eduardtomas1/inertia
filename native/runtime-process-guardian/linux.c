@@ -878,8 +878,23 @@ static int watch_mode(int argc, char **argv, int handoff) {
     }
   }
   int gate[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, gate)) return 70;
+  // Block before fork: the child must never run a guardian handler in the
+  // interval before restoring payload dispositions.
+  sigset_t guarded_signals, previous_signals;
+  sigemptyset(&guarded_signals);
+  const int payload_signals[] = { SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2 };
+  for (size_t i = 0; i < sizeof(payload_signals) / sizeof(payload_signals[0]); i++) {
+    sigaddset(&guarded_signals, payload_signals[i]);
+  }
+  if (sigprocmask(SIG_BLOCK, &guarded_signals, &previous_signals)) return 70;
   pid_t payload = fork(); if (payload < 0) return 70;
   if (payload == 0) {
+    struct sigaction payload_action = {0}; payload_action.sa_handler = SIG_DFL;
+    sigemptyset(&payload_action.sa_mask);
+    for (size_t i = 0; i < sizeof(payload_signals) / sizeof(payload_signals[0]); i++) {
+      if (sigaction(payload_signals[i], &payload_action, NULL)) _exit(126);
+    }
+    if (sigprocmask(SIG_SETMASK, &previous_signals, NULL)) _exit(126);
     if (handoff) close(5);
     close(gate[1]); char byte = 0; ssize_t size;
     do { size = read(gate[0], &byte, 1); } while (size < 0 && errno == EINTR);
@@ -891,7 +906,11 @@ static int watch_mode(int argc, char **argv, int handoff) {
       _exit(125);
 #endif
     }
-    execvp(argv[payload_argument], &argv[payload_argument]); _exit(127);
+    execvp(argv[payload_argument], &argv[payload_argument]);
+    _exit(errno == ENOENT ? 127 : 126);
+  }
+  if (sigprocmask(SIG_SETMASK, &previous_signals, NULL)) {
+    close(gate[0]); close(gate[1]); (void)waitpid(payload, NULL, 0); return 70;
   }
   struct child preflight_children[MAX_CHILDREN]; int preflight_count = 0;
   if (census(preflight_children, &preflight_count) != 1
@@ -962,7 +981,9 @@ static int watch_mode(int argc, char **argv, int handoff) {
   }
   if (!same_process(parent, parent_start)) { close(gate[1]); return terminal_state(drain(), 137); }
   if (prctl(PR_SET_NAME, "inertia-owned", 0, 0, 0)) { close(gate[1]); return terminal_state(0, 127); }
-  if (write(gate[1], "A", 1) != 1) { close(gate[1]); return terminal_state(0, 127); }
+  if (send(gate[1], "A", 1, MSG_NOSIGNAL) != 1) {
+    close(gate[1]); return terminal_state(drain(), 127);
+  }
   close(gate[1]); int status = 0;
   for (;;) {
     // A subreaper also owns orphaned descendants. Collect their exit status

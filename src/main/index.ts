@@ -1,4 +1,5 @@
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
+import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
@@ -622,11 +623,7 @@ function registerIpcHandlers(): void {
     }
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
-    if (request.action === "reveal") {
-      shell.showItemInFolder(path);
-      return "";
-    }
-    return await shell.openPath(path);
+    return openAuthorizedProjectPath(path, request.action, shell);
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {

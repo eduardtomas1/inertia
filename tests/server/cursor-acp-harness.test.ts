@@ -1742,7 +1742,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       method?: string;
     }>;
-    expect(messages.some(({ method }) => method === "session/cancel")).toBe(true);
+    expect(messages.some(({ method }) => method === "session/cancel")).toBe(false);
     expect(messages.some(({ method }) => method === "session/prompt")).toBe(false);
   });
 

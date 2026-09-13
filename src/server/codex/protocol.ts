@@ -21,23 +21,7 @@ export function rpcId(value: unknown): RpcId | undefined {
   return typeof value === "string" || typeof value === "number" ? value : undefined;
 }
 
-export class CappedTextBuffer {
-  private value = "";
-  truncated = false;
-
-  constructor(private readonly maxChars: number) {}
-
-  append(text: string): void {
-    if (!text || this.truncated) return;
-    const remaining = this.maxChars - this.value.length;
-    this.value += text.slice(0, Math.max(0, remaining));
-    if (text.length > remaining) this.truncated = true;
-  }
-
-  toString(): string {
-    return this.value;
-  }
-}
+export { CappedTextBuffer } from "../capped-text-buffer";
 
 export type JsonLineDecoderFailure =
   | "line-overflow"

@@ -65,27 +65,7 @@ export class ProviderNdjsonDecoder {
   }
 }
 
-export class CappedProviderBuffer {
-  private value = "";
-  truncated = false;
-
-  constructor(private readonly maxChars: number) {}
-
-  append(text: string): void {
-    if (!text || this.truncated) return;
-    const remaining = this.maxChars - this.value.length;
-    if (text.length <= remaining) {
-      this.value += text;
-      return;
-    }
-    this.value += text.slice(0, Math.max(0, remaining));
-    this.truncated = true;
-  }
-
-  toString(): string {
-    return this.value;
-  }
-}
+export { CappedTextBuffer as CappedProviderBuffer } from "../capped-text-buffer";
 
 export const PROVIDER_EVENT_BUDGET_WINDOW_MS = 60_000;
 export const PROVIDER_RUN_BUDGET_BURSTS = 16;

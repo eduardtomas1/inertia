@@ -246,7 +246,6 @@ function startKimiRun(
   let activeContext: acp.ClientContext | undefined;
   let availableCommandNames: Set<string> | null = null;
   let acceptsCommandAdvertisement = false;
-  let suppressSessionProjection = false;
   let activeFailurePhase = "initialize";
   let activeTerminalEvent = "initialize";
   let processError: Error | undefined;
@@ -344,8 +343,7 @@ function startKimiRun(
           resolveCommandAdvertisement();
         }
         if (
-          suppressSessionProjection
-          || !sessionReady
+          !sessionReady
           || !promptInFlight
         ) return;
         handleKimiUpdate(
@@ -499,21 +497,16 @@ function startKimiRun(
         } else if (initialized.agentCapabilities?.loadSession === true) {
           activeFailurePhase = "session";
           activeTerminalEvent = "session/load";
-          suppressSessionProjection = true;
-          try {
-            const loaded = await requestControl(
-              context.request(acp.methods.agent.session.load, {
-                sessionId: options.input.sessionId,
-                cwd: options.input.cwd,
-                mcpServers: hostMcpServers,
-              }),
-              "session/load",
-            );
-            modes = loaded.modes;
-            configOptions = loaded.configOptions;
-          } finally {
-            suppressSessionProjection = false;
-          }
+          const loaded = await requestControl(
+            context.request(acp.methods.agent.session.load, {
+              sessionId: options.input.sessionId,
+              cwd: options.input.cwd,
+              mcpServers: hostMcpServers,
+            }),
+            "session/load",
+          );
+          modes = loaded.modes;
+          configOptions = loaded.configOptions;
         } else {
           throw new Error(
             "This Kimi ACP server does not advertise session resume support.",
@@ -752,7 +745,7 @@ function startKimiRun(
     void hostMcpSession?.close().catch(() => requestProcessTermination(true));
     emitter.status("cancelling");
     cancelPending();
-    if (!force && sessionId && activeContext) {
+    if (!force && promptInFlight && sessionId && activeContext) {
       void activeContext.notify(acp.methods.agent.session.cancel, { sessionId })
         .catch(() => requestProcessTermination(true));
       return;
@@ -822,7 +815,7 @@ async function kimiPermission(
       if (!pending || pending.settled) return;
       pending.settled = true;
       approvals.delete(requestId);
-      emit({ type: "approval-resolved", requestId, decision: "cancelled" });
+      emit({ type: "approval-resolved", requestId, decision: "cancel" });
       resolve("cancel");
     }, { once: true });
     emit({
@@ -1093,6 +1086,13 @@ function handleKimiUpdate(
     case "usage_update":
       contextUsage.usedTokens = tokenCount(update.used);
       contextUsage.maxTokens = tokenCount(update.size);
+      if (
+        contextUsage.usedTokens === null
+        || contextUsage.maxTokens === null
+        || contextUsage.usedTokens > contextUsage.maxTokens
+      ) {
+        throw new Error("Kimi Code ACP sent a malformed usage update.");
+      }
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",

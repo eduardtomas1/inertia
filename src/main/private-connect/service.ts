@@ -92,6 +92,13 @@ type AuthorityReductionMarker = NonNullable<
 
 const AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS = 30_000;
 
+class PrivateConnectRequestError extends Error {
+  constructor(
+    readonly code: Extract<PrivateConnectResponse, { ok: false }>["code"],
+    message: string,
+  ) { super(message); }
+}
+
 export class PrivateConnectService implements PrivateConnectGatewayHost {
   private data: PersistedPrivateConnect | null;
   private readonly now: () => Date;
@@ -641,8 +648,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       const response = await this.options.runtime.privateConnectRequest(runtimeSubject, runtimeRequest as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>);
       return adaptPrivateConnectRuntimeResponse(response, device);
     } catch (error) {
-      const message = error instanceof Error ? sanitizeError(error.message) : "The request was rejected.";
-      return failure(request.requestId, /uncertain/iu.test(message) ? "uncertain" : "forbidden", message);
+      return error instanceof PrivateConnectRequestError
+        ? failure(request.requestId, error.code, error.message)
+        : failure(request.requestId, "unavailable", "Private Connect could not complete the request. Try again when the desktop is available.");
     }
   }
 
@@ -897,7 +905,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     } catch {
       this.audit("prompt.uncertain", device.id, "A remote prompt lost its runtime acknowledgement after delivery began.");
       await this.persist().catch(() => undefined);
-      throw new Error("Prompt delivery is uncertain. Check the desktop conversation before sending it again.");
+      return failure(request.requestId, "uncertain", "Prompt delivery is uncertain. Check the desktop conversation before sending it again.");
     }
     if (!response.ok) {
       try {
@@ -1003,9 +1011,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private requireCurrentSession(session: PrivateConnectSession): void {
-    if (this.updatePreparation || this.privacyLocked || this.data?.pendingAuthorityReduction || this.sessions.get(session.id) !== session || !this.data?.enabled) throw new Error("The Private Connect session is no longer active.");
+    if (this.updatePreparation || this.privacyLocked || this.data?.pendingAuthorityReduction || this.sessions.get(session.id) !== session || !this.data?.enabled) throw new PrivateConnectRequestError("forbidden", "The Private Connect session is no longer active.");
     const device = this.requireDevice(session.deviceId);
-    if (!this.deviceCurrent(device)) throw new Error("The device grant has expired or was revoked.");
+    if (!this.deviceCurrent(device)) throw new PrivateConnectRequestError("forbidden", "The device grant has expired or was revoked.");
   }
 
   private requireReady(): void {
@@ -1015,7 +1023,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
 
   private requireDevice(deviceId: string): PrivateConnectDevice {
     const device = this.data?.devices.find((candidate) => candidate.id === deviceId);
-    if (!device) throw new Error("That Private Connect device was not found.");
+    if (!device) throw new PrivateConnectRequestError("forbidden", "That Private Connect device was not found.");
     return device;
   }
 

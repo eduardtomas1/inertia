@@ -51,6 +51,7 @@ export { runtimeRestartDelayMs } from "./runtime-supervisor-values.js";
 type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest,
   { type: "prompt.send" }>;
 export class RuntimeSupervisor {
+  private readonly platform: NodeJS.Platform;
   private readonly spawnProcess: RuntimeSupervisorOptions["spawn"];
   private readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
   private readonly systemBootId: string;
@@ -107,7 +108,8 @@ export class RuntimeSupervisor {
   private resolveStop: ((confirmed: boolean) => void) | null = null;
   private readonly testRecycle = new RuntimeSupervisorRecycle();
   constructor(options: RuntimeSupervisorOptions) {
-    this.stopAttempt = runtimeStopAttemptState((options.platform ?? process.platform) === "linux");
+    this.platform = options.platform ?? process.platform;
+    this.stopAttempt = runtimeStopAttemptState(this.platform === "linux");
     this.spawnProcess = options.spawn;
     const { manualModernDarwinRecovery, ...workerOptions } =
       options.workerOptions;
@@ -135,7 +137,7 @@ export class RuntimeSupervisor {
     this.shutdownGraceMs = boundedDuration(options.shutdownGraceMs, runtimeSupervisorDefaults.shutdownGraceMs);
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, runtimeSupervisorDefaults.forceKillWaitMs);
     this.recoveryWaitMs = runtimeSupervisorRecoveryWaitMs(
-      process.platform,
+      this.platform,
       this.forceKillWaitMs,
     );
     this.setTimer = options.setTimer ?? setTimeout;
@@ -1194,7 +1196,7 @@ export class RuntimeSupervisor {
     return runtimeRecordAcceptsBrokerRequests(record, this.current, this.desiredRunning, this.phase);
   }
   private requiresExplicitModernDarwinRecovery(): boolean {
-    return process.platform === "darwin"
+    return this.platform === "darwin"
       && Boolean(this.workerOptions.runtimeProcessGuardianPath);
   }
   private settleStopped(record: RuntimeProcessRecord): void {

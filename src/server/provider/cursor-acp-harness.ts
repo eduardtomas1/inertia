@@ -724,7 +724,7 @@ function startCursorRun(
     void hostMcpSession?.close().catch(() => requestProcessTermination(true));
     emitter.status("cancelling");
     cancelPending();
-    if (!force && sessionId && activeContext) {
+    if (!force && promptInFlight && sessionId && activeContext) {
       void activeContext.notify(
         acp.methods.agent.session.cancel,
         { sessionId },
@@ -800,7 +800,7 @@ async function cursorPermission(
       if (!pending || pending.settled) return;
       pending.settled = true;
       approvals.delete(requestId);
-      emit({ type: "approval-resolved", requestId, decision: "cancelled" });
+      emit({ type: "approval-resolved", requestId, decision: "cancel" });
       resolve("cancel");
     }, { once: true });
     emit({
@@ -1001,6 +1001,13 @@ function handleCursorUpdate(
     case "usage_update":
       contextUsage.usedTokens = tokenCount(update.used);
       contextUsage.maxTokens = tokenCount(update.size);
+      if (
+        contextUsage.usedTokens === null
+        || contextUsage.maxTokens === null
+        || contextUsage.usedTokens > contextUsage.maxTokens
+      ) {
+        throw new Error("Cursor ACP sent a malformed usage update.");
+      }
       emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
@@ -1229,7 +1236,7 @@ function imageMediaType(path: string): string | undefined {
 function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
 function boundedToolStateText(value: string): string { return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS); }
 function boundedToolActivityId(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
     throw new Error("Cursor ACP sent an invalid tool call identity.");
   }
   return value;

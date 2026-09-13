@@ -144,6 +144,16 @@ async function pairCollaboratingBrowser(service: PrivateConnectService) {
 }
 
 describe("Private Connect service lifecycle", () => {
+  it.each(["The runtime is unavailable.", "The runtime has uncertain availability."])("reports runtime read failures independently of wording: %s", async (message) => {
+    const service = await createServiceWith(testStore(), testTailscale(), {
+      privateConnectRequest: async () => { throw new Error(`${message} internal-sentinel`); },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    const response = await service.handleRequest(session, { protocolVersion: 1, type: "state.get", requestId: "55555555-5555-4555-8555-555555555555" });
+    expect(response).toMatchObject({ ok: false, code: "unavailable" });
+    expect(JSON.stringify(response)).not.toContain("internal-sentinel");
+  });
+
   it("holds update admission atomically and rolls it back when pairing is active", async () => {
     const service = await createService();
     await service.setEnabled(true);

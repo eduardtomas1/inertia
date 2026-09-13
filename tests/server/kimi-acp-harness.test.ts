@@ -1633,7 +1633,7 @@ setInterval(() => {}, 1000);
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       method?: string;
     }>;
-    expect(captured.some(({ method }) => method === "session/cancel")).toBe(true);
+    expect(captured.some(({ method }) => method === "session/cancel")).toBe(false);
     expect(captured.some(({ method }) => method === "session/prompt")).toBe(false);
   });
 });

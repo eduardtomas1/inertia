@@ -12081,6 +12081,94 @@ button.sent-attachment-open:focus-visible {
   padding: 2px 4px;
 }
 
+.turn-work-log > details.turn-thinking > summary {
+  width: 100%;
+  gap: 7px;
+}
+
+.turn-work-log > details.turn-thinking > summary svg.turn-thinking-icon {
+  flex: 0 0 auto;
+  color: var(--active-work-accent, var(--accent-strong));
+}
+
+.turn-thinking-label {
+  flex: 0 0 auto;
+  color: var(--text-soft);
+  font-weight: 620;
+}
+
+.turn-thinking[data-thinking-state="folded"] .turn-thinking-label {
+  animation: turn-thinking-settle 180ms ease-out both;
+}
+
+.turn-thinking-line {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.turn-thinking-line > span {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-thinking-line > .is-entering {
+  animation: turn-thinking-line-in 150ms ease-out both;
+}
+
+.turn-thinking-line > .is-leaving {
+  animation: turn-thinking-line-out 150ms ease-in forwards;
+}
+
+.turn-thinking > summary .agent-pixel-loader {
+  flex: 0 0 auto;
+  color: var(--active-work-accent, var(--text-soft));
+}
+
+.turn-work-log > details.turn-thinking > summary small.turn-thinking-elapsed {
+  margin-left: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-work-log > details.turn-thinking[data-thinking-state="folded"] > summary {
+  width: fit-content;
+}
+
+@keyframes turn-thinking-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+
+@keyframes turn-thinking-line-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes turn-thinking-settle {
+  from {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-thinking-line > span,
+  .turn-thinking[data-thinking-state="folded"] .turn-thinking-label {
+    animation: none;
+  }
+
+  .turn-thinking-line > .is-leaving {
+    visibility: hidden;
+  }
+}
+
+
 .turn-work-log details > summary {
   display: flex;
   min-height: 29px;

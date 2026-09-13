@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
@@ -237,7 +237,7 @@ describe("agent loading and trace DOM", () => {
     const trace = container.querySelector("[data-agent-trace=reasoning] > summary");
     expect(trace).not.toBeNull();
     if (!trace) throw new Error("Expected a reasoning trace disclosure.");
-    expect(trace).toHaveTextContent("Reasoningreasoning summary");
+    expect(trace).toHaveTextContent("Thoughtreasoning summary");
     expect(trace).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Inspecting state ownership")).not
       .toBeInTheDocument();
@@ -261,9 +261,69 @@ describe("agent loading and trace DOM", () => {
       .toBeInTheDocument();
     expect(container.querySelector(".agent-pixel-loader"))
       .toHaveAttribute("data-phase", "thinking");
-    expect(container.querySelectorAll(".agent-pixel-loader > span")).toHaveLength(9);
+    expect(container.querySelectorAll(".turn-working-status .agent-pixel-loader > span"))
+      .toHaveLength(9);
     expect(container.querySelector("[data-agent-trace=thinking] > summary"))
-      .toHaveTextContent("Thinkingreasoning summary");
+      .toHaveTextContent(/^ThinkingLive provider summary/u);
+  });
+
+  it("streams the latest reasoning sentence in a throttled brain strip, then folds to its duration", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
+    try {
+      const first = "**Tracing ownership**\nReading the pane reducer.";
+      const { container, onStop, rerender } = renderState({
+        streamingReasoning: first,
+        streamingChannel: "reasoning",
+      });
+      const summary = container.querySelector<HTMLElement>(
+        '[data-thinking-state="live"] > summary',
+      );
+      if (!summary) throw new Error("Expected a live thinking strip.");
+      const entering = (): Element | null =>
+        summary.querySelector(".turn-thinking-line > .is-entering");
+      expect(summary.querySelector(".lucide-brain")).toBeInTheDocument();
+      expect(summary.querySelector(".turn-thinking-label")).toHaveTextContent("Thinking");
+      expect(summary.querySelector(".turn-thinking-line")).toHaveAttribute("aria-hidden", "true");
+      expect(summary.querySelector(".agent-pixel-loader"))
+        .toHaveAttribute("data-phase", "thinking");
+      expect(entering()).toHaveTextContent("Reading the pane reducer.");
+
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: `${first} Checking the drop plans.`,
+        streamingChannel: "reasoning",
+      }, onStop)} />);
+      expect(entering()).toHaveTextContent("Reading the pane reducer.");
+      act(() => {
+        vi.advanceTimersByTime(399);
+      });
+      expect(entering()).toHaveTextContent("Reading the pane reducer.");
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(entering()).toHaveTextContent("Checking the drop plans.");
+      expect(summary.querySelector(".turn-thinking-line > .is-leaving"))
+        .toHaveTextContent("Reading the pane reducer.");
+
+      act(() => {
+        vi.advanceTimersByTime(11_600);
+      });
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: `${first} Checking the drop plans.`,
+        streamingChannel: null,
+      }, onStop)} />);
+      const folded = container.querySelector<HTMLElement>(
+        '[data-thinking-state="folded"] > summary',
+      );
+      expect(folded).toBe(summary);
+      expect(folded).toHaveTextContent(/^Thought for 12s/u);
+      expect(folded?.querySelector(".agent-pixel-loader")).toBeNull();
+      expect(screen.queryByText("Tracing ownership")).not.toBeInTheDocument();
+      fireEvent.click(summary);
+      expect(screen.getByText("Tracing ownership")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("presents retained reconnect text as historical until text owns the channel", () => {

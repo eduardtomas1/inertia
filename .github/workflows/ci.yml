@@ -557,7 +557,24 @@ jobs:
 
       - name: Package Linux AppImage and unpacked app
         if: runner.os == 'Linux'
-        run: npm run "${{ matrix.package_script }}"
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
+        run: npm run "${{ matrix.release_package_script }}"
+
+      # Exercise the release validator against the actual packaged archive and
+      # updater metadata. This only stages local files; it cannot publish a release.
+      - name: Validate native release asset staging
+        shell: bash
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          RELEASE_PLATFORM: ${{ matrix.release_platform }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-ci-release-stage
+        run: |
+          set -euo pipefail
+          export RELEASE_TAG="v$(node -p "require('./package.json').version")"
+          node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"
 
       - name: Download checksummed packaged Windows N-1 installer
         if: runner.os == 'Windows'

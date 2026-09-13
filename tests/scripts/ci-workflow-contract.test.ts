@@ -1,10 +1,43 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { parse } from "yaml";
-import { createEvidencePlan, EVIDENCE_JOBS, outputsForEvidencePlan } from "../../scripts/ci/evidence-plan.mjs";
+import { createEvidencePlan, EVIDENCE_JOBS, outputsForEvidencePlan, PLATFORMS } from "../../scripts/ci/evidence-plan.mjs";
 
 const source = (file: string) => readFileSync(file, "utf8");
 const workflow = parse(source(".github/workflows/ci.yml"));
+
+it.each(PLATFORMS.filter(({ artifact }) => artifact.startsWith("linux-")))(
+  "certifies the release configuration and updater metadata for $artifact",
+  (platform) => {
+    expect(platform.release_platform).toBe(platform.artifact);
+    const scripts = JSON.parse(source("package.json")).scripts as Record<string, string>;
+    expect(scripts[platform.release_package_script!]).toContain("--config scripts/electron-builder.release.cjs");
+    expect(scripts[platform.release_package_script!]).toContain(`--${platform.arch}`);
+    const step = workflow.jobs.test.steps.find((entry: { name: string }) => entry.name === "Package Linux AppImage and unpacked app");
+    expect(step.run).toBe('npm run "${{ matrix.release_package_script }}"');
+    expect(step.env).toMatchObject({
+      INERTIA_RELEASE_CHANNEL: "stable",
+      INERTIA_RELEASE_PLATFORM: "${{ matrix.release_platform }}",
+    });
+  },
+);
+
+it("stages the actual native artifacts before desktop tests without publishing them", () => {
+  const steps = workflow.jobs.test.steps as Array<{ name: string; run?: string; env?: Record<string, string>; "continue-on-error"?: boolean }>;
+  const stageIndex = steps.findIndex(({ name }) => name === "Validate native release asset staging");
+  expect(stageIndex).toBeGreaterThan(steps.findIndex(({ name }) => name === "Package Linux AppImage and unpacked app"));
+  expect(stageIndex).toBeLessThan(steps.findIndex(({ run }) => run?.includes("playwright test")));
+  const stage = steps[stageIndex]!;
+  expect(stage.run).toContain('node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"');
+  expect(stage.run).not.toMatch(/gh release|publish/u);
+  expect(stage.env).toMatchObject({
+    RELEASE_PLATFORM: "${{ matrix.release_platform }}",
+    RELEASE_SOURCE_SHA: "${{ github.sha }}",
+    INERTIA_RELEASE_CHANNEL: "stable",
+    INERTIA_RELEASE_STAGE_DIR: "${{ runner.temp }}/inertia-ci-release-stage",
+  });
+  expect(stage["continue-on-error"]).not.toBe(true);
+});
 
 it("runs ready-for-review, later heads and merge groups, cancelling only obsolete validation", () => {
   expect(workflow.on.pull_request.types).toEqual([

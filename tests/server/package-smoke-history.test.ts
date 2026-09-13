@@ -352,7 +352,7 @@ it("waits for exact public runtime admission idle after terminal persistence", a
   }, turn)).toBe(false);
 });
 
-it("bounds a terminal turn whose public runtime ownership never becomes idle", async () => {
+it.each([false, true])("bounds a terminal turn whose public runtime ownership never becomes idle (malformed state: %s)", async (malformedState) => {
   const { runPackagedHistorySmoke } = await modules();
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   const projectId = randomUUID();
@@ -376,7 +376,18 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
     server.on("connection", (socket) => {
       socket.send(JSON.stringify({
         type: "server.welcome",
-        snapshot: { projects: [], conversations: [], runs: [], settings: {} },
+        snapshot: {
+          projects: [], settings: {},
+          conversations: [{ id: conversationId, status: malformedState ? "PRIVATE status" : "completed",
+            latestTurn: { id: "turn-terminal-not-idle", status: "completed" },
+            title: "PRIVATE conversation text" }],
+          runs: [{ id: "run-terminal-not-idle", status: malformedState ? "PRIVATE run status" : "running",
+            canStop: malformedState ? "PRIVATE stop" : true,
+            providerOutput: "PRIVATE provider output" }],
+          lifecycleDiagnostics: { ownedResources: {
+            providerRuns: 1, turns: 1, workspaceRuns: 0, interactions: 0,
+            privatePath: "/PRIVATE/profile" } },
+        },
       }));
       socket.on("message", (bytes) => {
         const command = JSON.parse(bytes.toString("utf8")) as {
@@ -472,13 +483,63 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No fixture port.");
     const startedAt = Date.now();
-    await expect(runPackagedHistorySmoke({
+    const error = await runPackagedHistorySmoke({
       websocketUrl: `ws://127.0.0.1:${address.port}`,
       workspaceDirectory: tmpdir(),
       deadlineAt: startedAt + 250,
-    })).rejects.toThrow("exceeded its deadline");
+    }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain("exceeded its deadline");
+    const diagnostic = JSON.parse(message.split(" Proof state: ")[1]!);
+    expect(diagnostic).toMatchObject({
+      phase: "admission-idle", turnNumber: 1, completedTurns: 0,
+      initialBudgetMs: expect.any(Number), elapsedMs: expect.any(Number), phaseElapsedMs: expect.any(Number),
+      pendingCommands: [], turnStatus: "completed", conversationStatus: malformedState ? "unknown" : "completed",
+      latestTurnMatches: true, runStatus: malformedState ? "unknown" : "running", runCanStop: malformedState ? null : true,
+      ownedResources: { providerRuns: 1, turns: 1, workspaceRuns: 0, interactions: 0 },
+    });
+    expect(message).not.toMatch(/PRIVATE|ws:\/\/|turn-terminal-not-idle|run-terminal-not-idle/u);
+    expect(message).not.toContain(conversationId);
     expect(messageActivations).toEqual([false]);
     expect(Date.now() - startedAt).toBeLessThan(1_500);
+  } finally {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  }
+});
+
+it("reports the pending proof phase without exposing malformed snapshot state", async () => {
+  const { runPackagedHistorySmoke } = await modules();
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  try {
+    await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
+    server.on("connection", (socket) => {
+      socket.send(JSON.stringify({ type: "server.welcome", snapshot: {
+        conversations: [null, { status: "PRIVATE status", id: "PRIVATE id" }],
+        runs: "PRIVATE run data", providerOutput: "PRIVATE output",
+        lifecycleDiagnostics: { ownedResources: {
+          providerRuns: "PRIVATE count", turns: -1, workspaceRuns: 1.5, interactions: 1_000_001,
+        } },
+      } }));
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port.");
+    const error = await runPackagedHistorySmoke({
+      websocketUrl: `ws://127.0.0.1:${address.port}`, workspaceDirectory: tmpdir(),
+      deadlineAt: Date.now() + 200,
+    }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    const diagnostic = JSON.parse(message.split(" Proof state: ")[1]!);
+    expect(diagnostic).toMatchObject({
+      phase: "provider-refresh", turnNumber: 0, completedTurns: 0,
+      pendingCommands: ["provider.refresh"], turnStatus: "unknown", conversationStatus: "unknown",
+      latestTurnMatches: false, runStatus: "unknown", runCanStop: null,
+      ownedResources: { providerRuns: null, turns: null, workspaceRuns: null, interactions: null },
+    });
+    expect(message).not.toMatch(/PRIVATE|ws:\/\//u);
+    expect(Buffer.byteLength(message)).toBeLessThan(1_024);
   } finally {
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));

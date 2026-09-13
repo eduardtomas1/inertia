@@ -20,7 +20,8 @@ function fixture(selectable: number, aliases: number): string {
   git(root, "config", "user.email", "git@example.invalid");
   git(root, "commit", "--allow-empty", "-m", "Initial");
   const head = git(root, "rev-parse", "HEAD");
-  execFileSync("git", ["update-ref", "--stdin"], {
+  // The fixture tests enumeration, not durability of these thousand seed refs.
+  execFileSync("git", ["-c", "core.fsync=none", "update-ref", "--stdin"], {
     cwd: root, timeout: 10_000, maxBuffer: 1024 * 1024,
     input: Array.from({ length: selectable - 1 }, (_, index) =>
       `create refs/remotes/origin/topic-${String(index).padStart(4, "0")} ${head}\n`).join(""),

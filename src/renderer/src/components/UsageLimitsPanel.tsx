@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import type { ServerEvent } from "@shared/contracts";
@@ -19,7 +20,7 @@ export function resetCountdown(value: string | null, now: number): string {
   if (minutes < 1440) return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   return `in ${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h`;
 }
-const dateLabel = (value: string | null): string => value ? new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Not reported";
+const dateLabel = (value: string | null): string => value ? new Date(value).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Not reported";
 const percent = (value: number | null): string => value === null ? "Unavailable" : `${Math.round(value)}%`;
 type Props = { request(command: CommandWithoutId): Promise<ServerEvent>; status: ConnectionStatus; compact?: boolean };
 

@@ -98,7 +98,9 @@ jobs:
             --output "$archive"
           printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --strict
           tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
-          "$binary" -color
+          # Upstream #657: the pinned linter does not recognize GitHub's queue key.
+          # check:quality validates its exact values and cancellation constraint.
+          "$binary" -color -ignore '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -879,7 +881,7 @@ jobs:
               per_page: 100,
             });
             const existing = issues.find((issue) =>
-              !issue.pull_request && (issue.title === title || issue.body?.includes(marker))
+              !issue.pull_request && issue.user?.login === "github-actions[bot]" && issue.body?.includes(marker)
             );
             const priorComments = existing
               ? await github.paginate(github.rest.issues.listComments, {

@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { PRIVATE_CONNECT_LIMITS } from "./limits";
+export { PRIVATE_CONNECT_LIMITS } from "./limits";
 
 import {
-  privateConnectConversationGrantsSchema,
   privateConnectConversationGrantSchema,
   type PrivateConnectConversationGrant,
 } from "./grants";
@@ -17,34 +18,10 @@ import {
 } from "./scopes";
 
 export const PRIVATE_CONNECT_PROTOCOL_VERSION = 1 as const;
-export const PRIVATE_CONNECT_PROTOCOL_RANGE = Object.freeze({
-  minimum: PRIVATE_CONNECT_PROTOCOL_VERSION,
-  maximum: PRIVATE_CONNECT_PROTOCOL_VERSION,
-});
-
 export const PRIVATE_CONNECT_SOCKET_CLOSE = Object.freeze({
   accessRevoked: 1008,
   hostUnavailable: 1012,
   authorityChanged: 4001,
-});
-
-export const PRIVATE_CONNECT_LIMITS = Object.freeze({
-  bodyBytes: 128 * 1024,
-  websocketFrameBytes: 128 * 1024,
-  promptCharacters: 8_000,
-  deviceLabelCharacters: 80,
-  projectIds: 64,
-  sessions: 8,
-  requestsPerMinute: 120,
-  inFlightRequestsPerSession: 8,
-  pairingAttemptsPerMinute: 10,
-  pairingTtlMs: 5 * 60 * 1_000,
-  pairingCollectionMs: 60 * 1_000,
-  sessionTtlMs: 30 * 24 * 60 * 60 * 1_000,
-  websocketTicketTtlMs: 45_000,
-  websocketTickets: 64,
-  deliveryReceipts: 512,
-  auditEvents: 1_000,
 });
 
 const PRIVATE_CONNECT_UUID_PATTERN =
@@ -209,19 +186,6 @@ export const privateConnectConversationDetailSchema = z.object({
 }).strict();
 export type PrivateConnectConversationDetail = z.infer<
   typeof privateConnectConversationDetailSchema
->;
-
-export const privateConnectAuthorizationSchema = z.object({
-  deviceId: uuid,
-  sessionId: uuid,
-  scopes: z.array(privateConnectScopeSchema).min(1).max(4),
-  projectIds: z.array(entityId).min(1).max(PRIVATE_CONNECT_LIMITS.projectIds),
-  grants: privateConnectConversationGrantsSchema,
-  grantVersion: z.number().int().positive(),
-  expiresAt: timestamp,
-}).strict();
-export type PrivateConnectAuthorization = z.infer<
-  typeof privateConnectAuthorizationSchema
 >;
 
 export interface PrivateConnectDeviceView {

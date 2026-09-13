@@ -91,16 +91,25 @@ async function beforeDeadline(
 /**
  * Drains independent owned resources alongside the ordered isolated-run ->
  * turn/provider teardown, then preserves the strict artifact -> clients ->
- * server -> store dependency order. A deadline while an operation is still
- * active fails closed so later phases never race it.
+ * server -> store dependency order. Command quiescence gets an initial bounded
+ * wait before cancellation drains start; artifact/store work still requires
+ * both commands and owned-resource drains to finish.
  */
 export async function runRuntimeShutdownPhases(
   phases: RuntimeShutdownPhases,
   timeoutMs = RUNTIME_SHUTDOWN_DEADLINE_MS,
 ): Promise<void> {
-  const deadlineAt = Date.now() + Math.max(1, Math.trunc(timeoutMs));
+  const startedAt = Date.now();
+  const budgetMs = Math.max(1, Math.trunc(timeoutMs));
+  const deadlineAt = startedAt + budgetMs;
   const context: RuntimeShutdownContext = { deadlineAt };
   let shutdownError: unknown;
+  let hasShutdownError = false;
+  const recordError = (error: unknown): void => {
+    if (hasShutdownError) return;
+    hasShutdownError = true;
+    shutdownError = error;
+  };
   let ownedResourceCleanupConfirmed = true;
   const attempt = async (
     operation: ShutdownOperation,
@@ -110,7 +119,7 @@ export async function runRuntimeShutdownPhases(
       await operation(context);
     } catch (error) {
       if (ownsRuntimeResource) ownedResourceCleanupConfirmed = false;
-      shutdownError ??= error;
+      recordError(error);
     }
   };
   const drainAgents = async (): Promise<void> => {
@@ -118,14 +127,26 @@ export async function runRuntimeShutdownPhases(
     await attempt(phases.disposeTurnsAndProviders, true);
   };
 
-  try {
-    if (phases.quiesceRuntimeWork) {
+  const quiescence = phases.quiesceRuntimeWork
+    ? Promise.resolve().then(() => phases.quiesceRuntimeWork!(context))
+    : Promise.resolve();
+  if (phases.quiesceRuntimeWork) {
+    try {
+      // Preserve the established 2.5-second command allowance on desktop
+      // platforms, leaving time for cancellation within the same total budget.
       await beforeDeadline(
-        Promise.resolve().then(() => phases.quiesceRuntimeWork!(context)),
-        deadlineAt,
+        quiescence,
+        startedAt + Math.min(2_500, Math.max(1, Math.trunc(budgetMs / 3))),
         "runtime command cleanup",
       );
+    } catch (error) {
+      // Expiring this initial wait starts cancellation, not an unconfirmed
+      // final outcome. The complete command promise is checked again below
+      // against the original deadline; a real rejection remains a failure.
+      if (!(error instanceof RuntimeShutdownDeadlineError)) recordError(error);
     }
+  }
+  try {
     await beforeDeadline(
       Promise.all([
         ...phases.independentDrains.map((operation) => attempt(operation, true)),
@@ -134,6 +155,9 @@ export async function runRuntimeShutdownPhases(
       deadlineAt,
       "owned-resource cleanup",
     );
+    // Cancellation may release the admitted command. A timeout/rejection still
+    // retains its database and artifact authority; never close underneath it.
+    await beforeDeadline(quiescence, deadlineAt, "runtime command cleanup");
     await beforeDeadline(
       attempt(phases.settleArtifacts, true),
       deadlineAt,
@@ -149,7 +173,7 @@ export async function runRuntimeShutdownPhases(
       await beforeDeadline(attempt(phases.closeStore), deadlineAt, "database cleanup");
     }
   } catch (error) {
-    shutdownError ??= error;
+    recordError(error);
   }
-  if (shutdownError !== undefined) throw shutdownError;
+  if (hasShutdownError) throw shutdownError;
 }

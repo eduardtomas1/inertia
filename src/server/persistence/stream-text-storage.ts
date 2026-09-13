@@ -185,6 +185,7 @@ export function replaceMessageContent(
 export function compactMessageContentForTurn(
   database: Database.Database,
   turnId: string,
+  conversationId: string,
 ): void {
   database.prepare(`
     UPDATE messages
@@ -197,19 +198,19 @@ export function compactMessageContentForTurn(
         ORDER BY sequence ASC
       ) AS ordered_chunks
     ), '')
-    WHERE turn_id = ?
+    WHERE conversation_id = ? AND turn_id = ?
       AND EXISTS (
         SELECT 1
         FROM message_content_chunks
         WHERE message_id = messages.id
       )
-  `).run(turnId);
+  `).run(conversationId, turnId);
   database.prepare(`
     DELETE FROM message_content_chunks
     WHERE message_id IN (
-      SELECT id FROM messages WHERE turn_id = ?
+      SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
     )
-  `).run(turnId);
+  `).run(conversationId, turnId);
 }
 
 export function replaceReasoningContent(
@@ -235,6 +236,7 @@ export function replaceReasoningContent(
 export function compactReasoningContentForTurn(
   database: Database.Database,
   turnId: string,
+  conversationId: string,
 ): void {
   database.prepare(`
     UPDATE agent_reasonings
@@ -247,17 +249,17 @@ export function compactReasoningContentForTurn(
         ORDER BY sequence ASC
       ) AS ordered_chunks
     ), '')
-    WHERE turn_id = ?
+    WHERE conversation_id = ? AND turn_id = ?
       AND EXISTS (
         SELECT 1
         FROM reasoning_content_chunks
         WHERE reasoning_id = agent_reasonings.id
       )
-  `).run(turnId);
+  `).run(conversationId, turnId);
   database.prepare(`
     DELETE FROM reasoning_content_chunks
     WHERE reasoning_id IN (
-      SELECT id FROM agent_reasonings WHERE turn_id = ?
+      SELECT id FROM agent_reasonings WHERE conversation_id = ? AND turn_id = ?
     )
-  `).run(turnId);
+  `).run(conversationId, turnId);
 }

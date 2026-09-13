@@ -1,3 +1,4 @@
+import { layoutStorage } from "../utils/layoutStorage";
 import {
   useRef,
   useState,
@@ -17,7 +18,7 @@ const MAX_SPLIT_PERCENT = 70;
 
 function initialSplitPercent(): number {
   const parsed = Number.parseFloat(
-    window.localStorage.getItem(SPLIT_PERCENT_STORAGE_KEY) ?? "",
+    layoutStorage.getItem(SPLIT_PERCENT_STORAGE_KEY) ?? "",
   );
   return Number.isFinite(parsed)
     ? Math.min(MAX_SPLIT_PERCENT, Math.max(MIN_SPLIT_PERCENT, parsed))
@@ -183,7 +184,7 @@ export function ConversationSplitView({
         defaultValue={50}
         onChange={setSplitPercent}
         onCommit={(value) => {
-          window.localStorage.setItem(
+          layoutStorage.setItem(
             SPLIT_PERCENT_STORAGE_KEY,
             String(value),
           );

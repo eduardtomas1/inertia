@@ -110,6 +110,12 @@ function CompatibilityDisclosure({
               <div className="agent-activity" key={checkpoint.id}>
                 <RotateCcw size={14} aria-hidden="true" />
                 <span><strong>Recovered checkpoint</strong><small>{checkpoint.label}</small></span>
+                <button
+                  type="button"
+                  className="message-revert"
+                  disabled={props.checkpointRestoreDisabled}
+                  onClick={() => props.onRevertCheckpoint(checkpoint)}
+                >Restore checkpoint</button>
               </div>
             ))}
           </>

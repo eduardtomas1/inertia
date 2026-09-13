@@ -61,8 +61,17 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(secondTerminalTab).toBeVisible();
   await expect(secondTerminalTab).toHaveAttribute("aria-selected", "true");
   await expect(secondTerminalTab).toHaveJSProperty("tagName", "BUTTON");
-  await page.getByRole("button", { name: "Close Terminal 2" }).click();
+  const firstTerminalTab = page.getByRole("tab", { name: "Terminal 1", exact: true });
+  await secondTerminalTab.focus();
+  await secondTerminalTab.press("Home");
+  await expect(firstTerminalTab).toBeFocused();
+  await expect(firstTerminalTab).toHaveAttribute("tabindex", "0");
+  await firstTerminalTab.press("ArrowRight");
+  await expect(secondTerminalTab).toBeFocused();
+  await expect(firstTerminalTab).toHaveAttribute("tabindex", "-1");
+  await secondTerminalTab.press("Delete");
   await expect(secondTerminalTab).toHaveCount(0);
+  await expect(firstTerminalTab).toBeFocused();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Terminal 1", exact: true })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("button", { name: "New terminal" }).click();

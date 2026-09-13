@@ -414,9 +414,9 @@ export function providerEnvironment(refresh = false): Promise<ProviderEnvironmen
   return environmentPromise;
 }
 
-async function executableFile(path: string): Promise<string | null> {
+async function executableFile(path: string, platform: NodeJS.Platform): Promise<string | null> {
   try {
-    if (process.platform !== "win32") await access(path, fsConstants.X_OK);
+    if (platform !== "win32") await access(path, fsConstants.X_OK);
     const [details, canonical] = await Promise.all([stat(path), realpath(path).catch(() => path)]);
     return details.isFile() ? canonical : null;
   } catch {
@@ -424,28 +424,29 @@ async function executableFile(path: string): Promise<string | null> {
   }
 }
 
-function commandNames(command: string, env: NodeJS.ProcessEnv): string[] {
-  if (process.platform !== "win32") return [command];
+function commandNames(command: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
+  if (platform !== "win32") return [command];
   if (/\.[A-Za-z0-9]+$/u.test(command)) return [command];
   const extensions = (environmentValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
     .split(";")
     .map((extension) => extension.trim())
     .filter(Boolean);
-  return unique([command, ...extensions.map((extension) => `${command}${extension}`)]);
+  return unique(extensions.map((extension) => `${command}${extension}`), platform);
 }
 
 export async function executableCandidates(
   command: string,
   environment: ProviderEnvironment,
   cwd = process.cwd(),
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string[]> {
   const trimmed = command.trim();
   if (!trimmed || trimmed.includes("\0")) return [];
 
   const candidates = (isAbsolute(trimmed) || trimmed.includes("/") || trimmed.includes("\\"))
     ? [isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed)]
-    : environment.pathEntries.flatMap((directory) => commandNames(trimmed, environment.env).map((name) => join(directory, name)));
+    : environment.pathEntries.flatMap((directory) => commandNames(trimmed, environment.env, platform).map((name) => join(directory, name)));
 
-  const resolved = await Promise.all(unique(candidates).map(executableFile));
-  return unique(resolved.filter((value): value is string => value !== null));
+  const resolved = await Promise.all(unique(candidates, platform).map((candidate) => executableFile(candidate, platform)));
+  return unique(resolved.filter((value): value is string => value !== null), platform);
 }

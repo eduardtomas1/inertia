@@ -17,8 +17,11 @@ import {
   CheckpointError,
   createCheckpoint,
   deleteCheckpoints,
+  deleteCheckpoint,
   restoreCheckpoint,
 } from "../../src/server/checkpoints";
+import type { CheckpointSummary } from "../../src/shared/contracts";
+import { restoreConversationCheckpoint } from "../../src/server/runtime/checkpoint-restoration";
 import { getPullRequestCreateUrl } from "../../src/server/git";
 
 function git(cwd: string, ...args: string[]): string {
@@ -68,6 +71,89 @@ describe("Git checkpoints", () => {
     git(root, "commit", "-m", "base");
     return root;
   }
+
+  it.each(["restore", "delete"] as const)("%s rejects foreign and malformed refs without changing bytes", async (operation) => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    writeFileSync(join(root, "tracked.txt"), "valuable edits\n");
+    const beforeIndex = readFileSync(join(root, ".git", "index"));
+    for (const ref of [
+      "refs/heads/main",
+      captured.ref.replace(conversationId, randomUUID()),
+      captured.ref.replace(conversationId, ".."),
+      captured.ref.toUpperCase(),
+      `${captured.ref}/x`,
+    ]) {
+      const run = operation === "restore" ? restoreCheckpoint : deleteCheckpoint;
+      await expect(run(root, ref, conversationId)).rejects.toBeInstanceOf(CheckpointError);
+      expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("valuable edits\n");
+      expect(readFileSync(join(root, ".git", "index"))).toEqual(beforeIndex);
+      expect(git(root, "rev-parse", "--verify", captured.ref)).toMatch(/^[0-9a-f]+$/u);
+      expect(git(root, "rev-parse", "--verify", "refs/heads/main")).toMatch(/^[0-9a-f]+$/u);
+    }
+  });
+
+  it("persists recovery before restoring and recovers unstaged and newly staged bytes", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    const checkpoint: CheckpointSummary = {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+    writeFileSync(join(root, "tracked.txt"), "later unstaged edits\n");
+    writeFileSync(join(root, "staged.txt"), "staged bytes\n");
+    git(root, "add", "staged.txt");
+    writeFileSync(join(root, "staged.txt"), "later unstaged bytes of staged file\n");
+    const index = readFileSync(join(root, ".git", "index"));
+    const saved: CheckpointSummary[] = [];
+    const store = {
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (input: Parameters<import("../../src/server/database").RuntimeStore["addCheckpoint"]>[0]) => {
+        expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("later unstaged edits\n");
+        const summary = { ...input, id: randomUUID(), turnId: null, createdAt: new Date().toISOString() };
+        saved.push(summary);
+        return summary;
+      },
+    };
+    await restoreConversationCheckpoint(store, checkpoint, () => expect(saved).toHaveLength(1));
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("base\n");
+    expect(existsSync(join(root, "staged.txt"))).toBe(false);
+    expect(readFileSync(join(root, ".git", "index"))).toEqual(index);
+    await restoreCheckpoint(root, saved[0]!.ref, conversationId);
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("later unstaged edits\n");
+    expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("later unstaged bytes of staged file\n");
+    expect(readFileSync(join(root, ".git", "index"))).toEqual(index);
+    await expect(restoreConversationCheckpoint({
+      ...store,
+      addCheckpoint: () => { throw new Error("persistence unavailable"); },
+    }, checkpoint, () => { throw new Error("must not publish"); })).rejects.toThrow("persistence unavailable");
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("later unstaged edits\n");
+    expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("later unstaged bytes of staged file\n");
+  });
+
+  it("refuses to overwrite ignored files that cannot be recovered", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "rm", "--cached", "tracked.txt");
+    writeFileSync(join(root, ".gitignore"), "tracked.txt\n");
+    writeFileSync(join(root, "tracked.txt"), "private ignored bytes\n");
+    const checkpoint = {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+    await expect(restoreConversationCheckpoint({
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: () => { throw new Error("must not persist"); },
+    }, checkpoint, () => { throw new Error("must not publish"); })).rejects.toThrow("Move ignored files");
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("private ignored bytes\n");
+  });
 
   it("stops checkpoint preparation at an aggregate deadline", async () => {
     const root = repository();

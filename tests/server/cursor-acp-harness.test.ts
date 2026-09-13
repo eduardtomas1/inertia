@@ -880,7 +880,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       conversationId: "cursor-rich",
       cwd: root,
       prompt: "Build this",
-      interactionMode: "plan",
+      interactionMode: "build",
       access: "supervised",
       model: "model-a",
       reasoningEffort: "high",

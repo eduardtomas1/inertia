@@ -56,6 +56,7 @@ describe("global shortcuts", () => {
     const dispose = installGlobalShortcuts(
       target as unknown as Parameters<typeof installGlobalShortcuts>[0],
       current,
+      "darwin",
     );
 
     target.dispatchEvent(new ShortcutEvent("keydown", "n", { metaKey: true }));
@@ -128,9 +129,9 @@ describe("global shortcuts", () => {
       target as unknown as Parameters<typeof installGlobalShortcuts>[0],
       current,
     );
-    const replacedDefault = new ShortcutEvent("keydown", "k", { metaKey: true });
+    const replacedDefault = new ShortcutEvent("keydown", "k", { ctrlKey: true });
     target.dispatchEvent(replacedDefault);
-    target.dispatchEvent(new ShortcutEvent("keydown", "u", { metaKey: true }));
+    target.dispatchEvent(new ShortcutEvent("keydown", "u", { ctrlKey: true }));
 
     expect(replacedDefault.defaultPrevented).toBe(false);
     expect(current.current.setPaletteOpen).toHaveBeenCalledWith(true);
@@ -145,7 +146,7 @@ describe("global shortcuts", () => {
       current,
     );
     const shifted = new ShortcutEvent("keydown", "k", {
-      metaKey: true,
+      ctrlKey: true,
       shiftKey: true,
     });
     target.dispatchEvent(shifted);

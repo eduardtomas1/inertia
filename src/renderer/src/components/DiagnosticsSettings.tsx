@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowUpRight, Check, ChevronDown, Copy, Download, RefreshCw, Search, ShieldCheck, TriangleAlert } from "lucide-react";
 import {
@@ -20,7 +21,7 @@ const outcomeNames: Record<DiagnosticRecord["outcome"], string> = {
   "not-started": "Not started", failed: "Historical failure", unknown: "Outcome unknown",
   observing: "Observing", recovered: "Recovered", ended: "Observation ended",
 };
-const dateTime = (at: string): string => new Date(at).toLocaleString(undefined, {
+const dateTime = (at: string): string => new Date(at).toLocaleString(INTERFACE_LOCALE, {
   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
 });
 

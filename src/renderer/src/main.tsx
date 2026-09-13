@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import { WindowErrorBoundary } from "./components/WindowErrorBoundary";
 
 const root = document.getElementById("root");
 
@@ -17,7 +18,7 @@ async function renderApplication(): Promise<void> {
       ))
     : import("./App").then(({ default: App }) => <App />);
   createRoot(applicationRoot).render(
-    <StrictMode>{await application}</StrictMode>,
+    <StrictMode><WindowErrorBoundary>{await application}</WindowErrorBoundary></StrictMode>,
   );
 }
 

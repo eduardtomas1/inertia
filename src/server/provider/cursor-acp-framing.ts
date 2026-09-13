@@ -97,7 +97,8 @@ export class BoundedJsonLineTransform extends Transform {
     this.decoder = new TextDecoder("utf-8", { fatal: true });
     this.decodedParts = [];
     this.pendingBytes = 0;
-    if (lineBytes === 0) return;
+    this.eventBudget.observeBytes(lineBytes);
+    if (line.trim().length === 0) return;
     const parsed: unknown = JSON.parse(line);
     if (!validAcpJsonRpcEnvelope(parsed)) {
       throw new Error("Cursor ACP sent a malformed JSON-RPC frame.");
@@ -106,7 +107,6 @@ export class BoundedJsonLineTransform extends Transform {
       parseAcpSessionNotification((parsed as { params?: unknown }).params);
     }
     this.validateFrame?.(parsed);
-    this.eventBudget.observeBytes(lineBytes);
     this.push(`${line}\n`);
   }
 }

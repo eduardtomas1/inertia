@@ -564,10 +564,11 @@ export const Composer = memo(function Composer({
         clearPersistedComposerDraft(submittedConversationId, submittedDraft);
       }
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
+      const acceptedIds = new Set(submittedAttachments.map(({ id }) => id));
+      setAttachments((current) => current.filter(({ id }) => !acceptedIds.has(id)));
       if (editorUnchanged) {
         promptHistoryController.reset(""); draftValueRef.current = "";
         setMessage("");
-        setAttachments([]);
         setAttachmentError(null);
         setFileReferences([]);
         selectedPreviewUrlRef.current = null;
@@ -1054,7 +1055,7 @@ export const Composer = memo(function Composer({
           previewContextSelected={previewContextSelected}
           onTogglePreviewContext={togglePreviewContext}
           onDismissPreviewContext={dismissPreviewContext}
-          attachments={attachments} attachmentsDisabled={attachmentImporting} pendingAttachmentIds={pendingAttachmentIds}
+          attachments={attachments} attachmentsDisabled={attachmentImporting || submitting} pendingAttachmentIds={pendingAttachmentIds}
           onRemoveAttachment={removeAttachment}
           pendingRoute={pendingRoute}
           creatingRouteConversation={creatingRouteConversation}

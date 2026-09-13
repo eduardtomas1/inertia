@@ -215,7 +215,7 @@ export class TranscriptRepository {
       throw new Error("A non-empty assistant snapshot requires a message.");
     }
     this.context.database.transaction(() => {
-      this.context.requireAgentTurn(turnId);
+      const turn = this.context.requireAgentTurn(turnId);
       if (retainedMessageId) {
         const retained = this.context.database.prepare(`
           SELECT id, turn_id, role
@@ -244,10 +244,10 @@ export class TranscriptRepository {
       }
       this.context.database.prepare(`
         DELETE FROM messages
-        WHERE turn_id = ?
+        WHERE conversation_id = ? AND turn_id = ?
           AND role = 'assistant'
           AND (? IS NULL OR id <> ?)
-      `).run(turnId, retainedMessageId, retainedMessageId);
+      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId);
     })();
   }
 

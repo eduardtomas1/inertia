@@ -19,7 +19,7 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-  chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentStorageExtension,
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";

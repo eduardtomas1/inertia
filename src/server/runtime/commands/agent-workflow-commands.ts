@@ -70,7 +70,6 @@ export function createAgentWorkflowCommandHandler(
       case "agent.workflow.saved.load": {
         const workflow = dependencies.workflows.state(
           command.payload.conversationId,
-          false,
         );
         dependencies.send(socket, {
           type: "request.result",

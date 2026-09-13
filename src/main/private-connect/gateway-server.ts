@@ -19,6 +19,7 @@ import { sanitizePrivateConnectLabel } from "../../shared/private-connect/saniti
 const SESSION_COOKIE = "__Host-inertia-private-connect";
 const CSRF_HEADER = "x-inertia-private-connect-csrf";
 const MAX_CONNECTIONS = 8;
+const MAX_DEVICE_CONNECTIONS = 2;
 const MAX_HTTP_CONNECTIONS = 128;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
@@ -380,7 +381,9 @@ export class PrivateConnectGatewayServer {
       return;
     }
     const session = this.host.consumeWebSocketTicket(ticket);
-    if (!session) {
+    if (!session || [...this.socketSessions.values()].filter(
+      (existing) => existing.deviceId === session.deviceId,
+    ).length >= MAX_DEVICE_CONNECTIONS) {
       socket.destroy();
       return;
     }
@@ -393,7 +396,6 @@ export class PrivateConnectGatewayServer {
     this.sockets.add(socket);
     this.socketSessions.set(socket, session);
     void Promise.resolve(this.host.openSession?.(session)).catch(() => undefined);
-    const requestTimes: number[] = [];
     let lastActivity = this.now().getTime();
     const heartbeat = setInterval(() => {
       if (this.now().getTime() - lastActivity > 15 * 60_000) socket.terminate();
@@ -403,13 +405,10 @@ export class PrivateConnectGatewayServer {
     socket.on("pong", () => { lastActivity = this.now().getTime(); });
     socket.on("message", (raw, isBinary) => {
       lastActivity = this.now().getTime();
-      const cutoff = lastActivity - RATE_WINDOW_MS;
-      while (requestTimes[0] !== undefined && requestTimes[0] <= cutoff) requestTimes.shift();
-      if (requestTimes.length >= PRIVATE_CONNECT_LIMITS.requestsPerMinute) {
+      if (!this.admit(`request:${session.deviceId}`, PRIVATE_CONNECT_LIMITS.requestsPerMinute)) {
         socket.send(JSON.stringify({ type: "response", requestId: requestIdFromRaw(raw), ok: false, code: "rate-limited", message: "Private Connect requests are temporarily limited." } satisfies PrivateConnectResponse));
         return;
       }
-      requestTimes.push(lastActivity);
       if (isBinary || Buffer.byteLength(raw.toString("utf8"), "utf8") > PRIVATE_CONNECT_LIMITS.websocketFrameBytes) {
         socket.close(1009, "Message too large");
         return;

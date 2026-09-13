@@ -1018,16 +1018,19 @@ public static partial class InertiaRuntimeJob {
         CultureInfo.InvariantCulture,
         out earliestCreationTimeMs)
       || earliestCreationTimeMs <= 0
-      || !ExpectedParent(processId, expectedParent)
     ) return Failure("owned-process-identity", 30, 0);
     Process process = null;
     try {
       process = Process.GetProcessById((Int32)processId);
+      IntPtr pinnedHandle = process.Handle;
+      if (!ExpectedParent(processId, expectedParent)) {
+        return Failure("owned-process-identity", 30, 0);
+      }
       UInt64 creationBits;
       double creationTimeMs;
       int identityError;
       if (!ProcessIdentity(
-        process.Handle,
+        pinnedHandle,
         out creationBits,
         out creationTimeMs,
         out identityError
@@ -2116,6 +2119,7 @@ try {
       launchStage = "update-launch-ready";
       string readyLine = null;
       Exception readFailure = null;
+      bool readyObserved = false;
       using (var ready = new ManualResetEvent(false)) {
         var reader = new Thread(delegate() {
           try {
@@ -2129,15 +2133,14 @@ try {
         });
         reader.IsBackground = true;
         reader.Start();
-        var admission = Stopwatch.StartNew();
-        while (
-          !ready.WaitOne(10)
-          && !child.HasExited
-          && admission.ElapsedMilliseconds < timeoutMilliseconds
-        ) { }
+        // EOF also releases the waiter. Joining the reader's publication
+        // handles READY followed by immediate exit and provides the memory
+        // barrier before its fields are inspected.
+        readyObserved = ready.WaitOne(timeoutMilliseconds);
       }
       if (
-        readFailure == null
+        readyObserved
+        && readFailure == null
         && String.Equals(readyLine, "READY", StringComparison.Ordinal)
         && readyLine.Length <= MAX_UPDATE_READY_BYTES
       ) {

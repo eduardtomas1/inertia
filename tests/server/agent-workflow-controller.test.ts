@@ -382,17 +382,15 @@ describe("AgentWorkflowController", () => {
     )).toMatchObject({ tokenBudget: null });
   });
 
-  it("drops a persisted native goal when the conversation session rotates", () => {
+  it("hides a stale native goal without deleting durable state during a read", () => {
     const runtime = harness({
       current: conversation({ providerSessionId: "thread-2" }),
       goals: [nativeGoal()],
     });
 
     expect(runtime.controller.state("conversation-1").goals).toEqual([]);
-    expect(runtime.clear).toHaveBeenCalledWith(
-      "conversation-1",
-      "codex-native",
-    );
+    expect(runtime.clear).not.toHaveBeenCalled();
+    expect(runtime.goals).toEqual([nativeGoal()]);
   });
 
   it("advertises native goals before Codex establishes its provider thread", () => {

@@ -270,13 +270,13 @@ export function FilesPanel({
   const searchGeneration = useRef(0);
   const previousSelectedPathRef = useRef(selectedPath);
   const mounted = useRef(true);
-  const previewEditable = preview !== null
+  const previewEditable = useMemo(() => preview !== null
     && !preview.truncated
     && canSaveFile?.(
       preview.path,
       preview.content,
       preview.contentDigest,
-    ) === true;
+    ) === true, [preview, canSaveFile]);
   const previewLanguage = useMemo(
     () => preview
       ? sourceLanguageForFile(preview.path, preview.content)

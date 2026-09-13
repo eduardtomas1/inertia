@@ -14,6 +14,9 @@ import type {
 } from "../node/conversation-attachment-store-child.js";
 import { RuntimeConversationAttachmentStoreCoordinator } from "./runtime-conversation-attachment-store-coordinator.js";
 import { RuntimeAgentBrowserCoordinator } from "./runtime-agent-browser-coordinator.js";
+import type { DocumentPreparationRunner } from "../node/document-preparation";
+import type { RuntimeDocumentPreparationEvent } from "../node/runtime-document-preparation-protocol";
+import { RuntimeDocumentPreparationCoordinator } from "./runtime-document-preparation-coordinator";
 
 type SecureFileRequestEvent = Extract<
   RuntimeWorkerEvent,
@@ -32,6 +35,19 @@ type AgentBrowserEvent = Extract<
   { type: "runtime.agent-browser-request" | "runtime.agent-browser-cancel" }
 >;
 
+type RuntimeSecureFileBrokerEvent = SecureFileRequestEvent | ConversationAttachmentStoreEvent
+  | AgentBrowserEvent | RuntimeDocumentPreparationEvent;
+
+export function isRuntimeSecureFileBrokerEvent(event: RuntimeWorkerEvent): event is RuntimeSecureFileBrokerEvent {
+  return event.type === "runtime.secure-file-request"
+    || event.type === "runtime.agent-browser-request"
+    || event.type === "runtime.agent-browser-cancel"
+    || event.type === "runtime.conversation-attachment-store-request"
+    || event.type === "runtime.conversation-attachment-store-cancel"
+    || event.type === "runtime.document-preparation-request"
+    || event.type === "runtime.document-preparation-cancel";
+}
+
 interface PendingSecureFileRequest {
   readonly record: RuntimeProcessRecord;
   readonly controller: AbortController;
@@ -43,6 +59,7 @@ interface RuntimeSecureFileCoordinatorOptions {
   readonly conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   readonly agentBrowserBroker?: RuntimeAgentBrowserBroker;
+  readonly documentPreparationRunner?: DocumentPreparationRunner;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
   readonly post: (
     record: RuntimeProcessRecord,
@@ -58,11 +75,16 @@ export class RuntimeSecureFileCoordinator {
   private readonly conversationAttachmentStore:
     RuntimeConversationAttachmentStoreCoordinator;
   private readonly agentBrowser: RuntimeAgentBrowserCoordinator;
+  private readonly documents: RuntimeDocumentPreparationCoordinator;
 
   constructor(options: RuntimeSecureFileCoordinatorOptions) {
     this.broker = options.broker;
     this.accepts = options.accepts;
     this.post = options.post;
+    this.documents = new RuntimeDocumentPreparationCoordinator({
+      runner: options.documentPreparationRunner, retryUnconfirmedShutdown: options.retryUnconfirmedShutdown,
+      accepts: options.accepts, post: options.post,
+    });
     this.conversationAttachmentStore =
       new RuntimeConversationAttachmentStoreCoordinator({
         retryUnconfirmedShutdown: options.retryUnconfirmedShutdown,
@@ -80,8 +102,12 @@ export class RuntimeSecureFileCoordinator {
 
   handle(
     record: RuntimeProcessRecord,
-    event: SecureFileRequestEvent | ConversationAttachmentStoreEvent | AgentBrowserEvent,
+    event: RuntimeSecureFileBrokerEvent,
   ): void {
+    if (event.type === "runtime.document-preparation-request" || event.type === "runtime.document-preparation-cancel") {
+      this.documents.handle(record, event);
+      return;
+    }
     if (
       event.type === "runtime.agent-browser-request"
       || event.type === "runtime.agent-browser-cancel"
@@ -141,6 +167,7 @@ export class RuntimeSecureFileCoordinator {
   clear(record: RuntimeProcessRecord | null): void {
     this.agentBrowser.clear(record);
     this.conversationAttachmentStore.clear(record);
+    this.documents.clear(record);
     if (!record) return;
     for (const [requestId, pending] of this.pending) {
       if (pending.record !== record) continue;
@@ -149,23 +176,28 @@ export class RuntimeSecureFileCoordinator {
     }
   }
 
-  hasConversationAttachmentOperations(record: RuntimeProcessRecord | null): boolean {
-    return this.conversationAttachmentStore.hasOperations(record);
+  hasUtilityOperations(record: RuntimeProcessRecord | null): boolean {
+    return this.conversationAttachmentStore.hasOperations(record) || this.documents.hasOperations(record);
   }
 
-  drain(
+  async drain(
     record: RuntimeProcessRecord | null,
     suppressReplies = false,
   ): Promise<boolean> {
-    return this.conversationAttachmentStore.drain(record, suppressReplies);
+    const results = await Promise.all([
+      this.conversationAttachmentStore.drain(record, suppressReplies),
+      this.documents.drain(record, suppressReplies),
+    ]);
+    return results.every(Boolean);
   }
 
   async shutdown(): Promise<boolean> {
-    const [secureFiles, conversationAttachments] = await Promise.all([
+    const [secureFiles, conversationAttachments, documents] = await Promise.all([
       this.broker?.shutdown?.() ?? Promise.resolve(true),
       this.conversationAttachmentStore.shutdown(),
+      this.documents.shutdown(),
     ]);
-    return secureFiles && conversationAttachments;
+    return secureFiles && conversationAttachments && documents;
   }
 
   private reply(

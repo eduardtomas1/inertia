@@ -473,6 +473,17 @@ describe("app update handoff journal", () => {
     ]);
   });
 
+  it.each([
+    ["1.2.3-Beta", "1.2.3-alpha", true],
+    ["1.2.3-alpha", "1.2.3-Beta", false],
+    ["1.2.3-9", "1.2.3-10", true],
+    ["1.2.3-alpha.9", "1.2.3-alpha.10", true],
+  ])("orders handoff %s to %s by ASCII SemVer", (oldVersion, newVersion, accepted) => {
+    const journal = new AppUpdateHandoffJournal(directory());
+    const result = journal.prepare(preparation("linux", { oldVersion, newVersion }));
+    expect(result !== null).toBe(accepted);
+  });
+
   it("enforces bounded identities, versions, digests, boots, and deadlines", () => {
     const invalid: readonly Record<string, unknown>[] = [
       { operationId: "11111111-1111-4111-8111-11111111111A" },

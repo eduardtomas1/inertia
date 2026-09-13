@@ -1,0 +1,78 @@
+{
+  "fixture": {
+    "compressedPdfBytes": 306377,
+    "expandedContentBytes": 314572800,
+    "construction": "PDF 1.4 with a FlateDecode content stream: BT /F1 12 Tf 72 720 Td ( followed by 300 MiB of ASCII a and ) Tj ET. Compressed incrementally at zlib level 9 inside the constrained container; no expanded fixture written on host."
+  },
+  "container": {
+    "image": "inertia-local-arm64-buildbase:31301b7",
+    "platform": "linux/arm64",
+    "node": "22.23.2",
+    "memoryBytes": 805306368,
+    "swap": false,
+    "network": "none",
+    "pidLimit": 64,
+    "capabilities": [],
+    "coreDumps": false,
+    "outerTimeoutSeconds": 60
+  },
+  "directPreparerControl": {
+    "exitCode": 137,
+    "OOMKilled": true,
+    "elapsedSeconds": 1.71,
+    "limitation": "Runs the unchanged direct prepareDocumentAttachments function in a Node process, not an entire packaged runtime."
+  },
+  "isolatedRunner": {
+    "failure": "The document decoder stopped unexpectedly.",
+    "confirmed": true,
+    "heartbeats": 100,
+    "exits": [
+      {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      {
+        "code": 0,
+        "signal": null
+      }
+    ],
+    "retry": true,
+    "memoryEvents": "low 0\nhigh 0\nmax 39\noom 1\noom_kill 1\noom_group_kill 0\n",
+    "decoderStderr": ""
+  },
+  "isolationTransport": "Actual createDocumentPreparationRunner bundled from source and actual built document-preparation-worker.js. Node child-process advanced IPC and an EventEmitter adapter substitute only for Electron utilityProcess transport in the Linux container.",
+  "nativeElectronMacOS": {
+    "earlyExitAndRetainedDraftRetry": {
+      "passed": true,
+      "seconds": 3.5,
+      "runtimePidAndGenerationUnchanged": true,
+      "decoderPidsDistinctFromRuntime": true,
+      "emptyChildEnvironment": true,
+      "heapArgument": "--max-old-space-size=256",
+      "resultlessExitCodeZeroRejected": true
+    },
+    "existingSentAttachmentsAndRecovery": {
+      "passed": true,
+      "seconds": 23.1
+    },
+    "admittedDecoderExitBeforeRecycle": {
+      "passed": true
+    },
+    "combinedIsolationScenarios": {
+      "passed": 2,
+      "seconds": 6.5
+    }
+  },
+  "remainingLimits": [
+    "V8 old-space does not cap ArrayBuffer/native canvas RSS.",
+    "Host-wide OOM victim selection is not controlled by this implementation.",
+    "Linux Electron, Windows, and packaged decoder wiring were not exercised by these local runs."
+  ],
+  "verification": {
+    "fullTestsPassed": 8856,
+    "fullTestsSkipped": 139,
+    "portableTestsPassed": 1363,
+    "portableTestsSkipped": 9,
+    "qualityAndBundleGates": "passed"
+  }
+}

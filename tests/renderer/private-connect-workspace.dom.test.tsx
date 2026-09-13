@@ -163,7 +163,7 @@ describe("Private Connect packaged workspace", () => {
     fireEvent.change(composer, { target: { value: "x".repeat(8_001) } });
     fireEvent.submit(composer.closest("form")!);
 
-    await waitFor(() => expect(screen.getByText(`Prompts are limited to ${(8_000).toLocaleString()} characters.`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Prompts are limited to 8,000 characters.")).toBeInTheDocument());
     expect(sent.some((request) => request.type === "prompt.send")).toBe(false);
   });
 

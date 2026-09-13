@@ -22,7 +22,7 @@ import { detachedRuntimeConnection, runtimeConnection,
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { reconcileStoppedRuntimeQuarantine, runtimeStopAttemptState, trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
-import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
@@ -188,6 +188,7 @@ export class RuntimeSupervisor {
       retryUnconfirmedShutdown: this.stopAttempt.retryEnabled, broker: options.secureFileBroker,
       conversationAttachmentStoreRunner:
         options.conversationAttachmentStoreRunner,
+      documentPreparationRunner: options.documentPreparationRunner,
       conversationAttachmentStoreAuthority:
         options.conversationAttachmentStoreAuthority,
       agentBrowserBroker: options.agentBrowserBroker,
@@ -660,13 +661,7 @@ export class RuntimeSupervisor {
     if (event.type === "runtime.credential-request") {
       this.credentials.handle(record, event); return;
     }
-    if (
-      event.type === "runtime.secure-file-request"
-      || event.type === "runtime.agent-browser-request"
-      || event.type === "runtime.agent-browser-cancel"
-      || event.type === "runtime.conversation-attachment-store-request"
-      || event.type === "runtime.conversation-attachment-store-cancel"
-    ) {
+    if (isRuntimeSecureFileBrokerEvent(event)) {
       this.secureFiles.handle(record, event);
       return;
     }
@@ -875,7 +870,7 @@ export class RuntimeSupervisor {
     this.rejectPrivateConnectRuntimeRequests(record, "The local service stopped before the Private Connect request completed.");
     this.credentials.clear(record);
     this.secureFiles.clear(record);
-    if (!this.secureFiles.hasConversationAttachmentOperations(record)) {
+    if (!this.secureFiles.hasUtilityOperations(record)) {
       this.handleDrainedExit(record, code, true);
       return;
     }

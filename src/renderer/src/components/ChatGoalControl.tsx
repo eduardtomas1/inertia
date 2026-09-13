@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   useEffect,
   useId,
@@ -318,7 +319,7 @@ export function ChatGoalControl({
                     ? "Owned by and shared with this Codex thread."
                     : goal.tokenBudget === null
                       ? "Saved in Inertia only; it is not shared with the provider."
-                      : `Local token target: ${goal.tokenBudget.toLocaleString()}. Inertia does not measure or enforce provider usage.`}
+                      : `Local token target: ${goal.tokenBudget.toLocaleString(INTERFACE_LOCALE)}. Inertia does not measure or enforce provider usage.`}
                 </small>
                 {goal.source === "codex-native"
                   && goal.status === "active"
@@ -350,7 +351,7 @@ export function ChatGoalControl({
                       value={recoveryBudget}
                       placeholder={recoveryBudgetFloor === 0
                         ? "Higher limit"
-                        : `More than ${recoveryBudgetFloor.toLocaleString()}`}
+                        : `More than ${recoveryBudgetFloor.toLocaleString(INTERFACE_LOCALE)}`}
                       disabled={controlsBusy || submitting}
                       aria-invalid={parsedRecoveryBudget === undefined
                         || (typeof parsedRecoveryBudget === "number"

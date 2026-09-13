@@ -42,18 +42,29 @@ type CurrentActions = { current: GlobalShortcutActions };
 export function installGlobalShortcuts(
   target: ShortcutTarget,
   actions: CurrentActions,
+  platform = "linux",
 ): () => void {
   // xterm refocuses itself on non-modifier keyup. Own the matching release as
   // well as the shortcut press so an overlay opened from the terminal keeps
   // focus, even when the user releases the modifier first.
   const ownedKeyUps = new Set<string>();
+  const physicalKey = (event: KeyboardEvent): string =>
+    /^Key[A-Z]$/u.test(event.code ?? "") ? event.code.slice(3).toLowerCase() : event.key.toLowerCase();
   const handleKeyDown = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
-    if (!(event.metaKey || event.ctrlKey)) {
+    const key = physicalKey(event);
+    const primaryModifier = platform === "darwin"
+      ? event.metaKey && !event.ctrlKey
+      : event.ctrlKey && !event.metaKey;
+    if (!primaryModifier) {
       ownedKeyUps.delete(key);
       return;
     }
-    if (event.altKey || event.shiftKey) return;
+    if (event.altKey || event.shiftKey || event.isComposing) return;
+    // Readline and tmux own Control chords in terminal input. macOS Command
+    // chords remain available because they do not encode terminal controls.
+    const terminalTarget = typeof Element !== "undefined"
+      && event.target instanceof Element && event.target.closest(".xterm");
+    if (event.ctrlKey && terminalTarget) return;
     const shortcut = (Object.keys(actions.current.keybindings) as AppShortcutAction[])
       .find((action) => actions.current.keybindings[action] === key);
     const ownerDocument = typeof Node !== "undefined" && event.target instanceof Node
@@ -96,7 +107,7 @@ export function installGlobalShortcuts(
     }
   };
   const handleKeyUp = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
+    const key = physicalKey(event);
     if (!ownedKeyUps.delete(key)) return;
     event.preventDefault();
     event.stopPropagation();

@@ -17,6 +17,7 @@ const MAX_GENERATED_BYTES = 512 * 1024 * 1024;
 const GENERATED_JPEG_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jpg$/iu;
 const TRANSIENT_UNLINK_CODES = new Set(["EACCES", "EBUSY", "EPERM", "ETXTBSY"]);
+const OS_METADATA_NAMES = new Set([".ds_store", "desktop.ini", "thumbs.db"]);
 
 export interface PrivateGeneratedAttachmentStoreLimits {
   readonly maxBytes?: number;
@@ -117,6 +118,10 @@ export class PrivateGeneratedAttachmentStore {
     const directory = await secureGeneratedDirectory(resolve(dataDirectory));
     const records = new Map<string, number>();
     for (const name of await readdir(directory)) {
+      if (OS_METADATA_NAMES.has(name.toLowerCase())) {
+        const metadata = await lstat(join(directory, name));
+        if (metadata.isFile() && !metadata.isSymbolicLink()) continue;
+      }
       if (!GENERATED_JPEG_NAME.test(name)) {
         throw new Error("Generated attachment storage contains an unexpected entry.");
       }

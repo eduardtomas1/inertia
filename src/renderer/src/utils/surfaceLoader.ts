@@ -9,10 +9,16 @@ export function createSurfaceLoader<T>(
   let promise: Promise<T> | null = null;
   let loaded: T | null = null;
   const loadOnce = (() => {
-    promise ??= load().then((value) => {
+    promise ??= Promise.resolve().then(load).then((value) => {
       loaded = value;
       return value;
+    }, (error: unknown) => {
+      promise = null;
+      throw error;
     });
+    // Hover/idle prefetch may have no caller awaiting the result. Mark the
+    // rejection handled while preserving it for callers that do await it.
+    void promise.catch(() => undefined);
     return promise;
   }) as SurfaceLoader<T>;
   loadOnce.peek = () => loaded;

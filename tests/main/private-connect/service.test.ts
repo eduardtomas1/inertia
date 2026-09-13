@@ -130,6 +130,18 @@ async function createServiceWith(
 
 async function createService(): Promise<PrivateConnectService> { return await createServiceWith(); }
 
+async function pairCollaboratingBrowser(service: PrivateConnectService) {
+  await service.setEnabled(true);
+  const invitation = await service.createInvitation();
+  const started = await service.pairStart({
+    invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!, deviceId, deviceLabel: "Browser",
+  }, "example");
+  await service.approvePairing(started.requestId, "collaborate", [projectId]);
+  const approved = await service.pairStatus(started.requestId);
+  if (approved.status !== "approved") throw new Error("pairing did not approve");
+  return service.session(approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "")!;
+}
+
 describe("Private Connect service lifecycle", () => {
   it("holds update admission atomically and rolls it back when pairing is active", async () => {
     const service = await createService();
@@ -549,7 +561,7 @@ describe("Private Connect service lifecycle", () => {
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     await first.shutdown();
-    expect(firstCalls.disable).toHaveLength(0);
+    expect(firstCalls.disable).toHaveLength(1);
     const secondCalls = { ensure: [] as unknown[][], disable: [] as number[] };
     const second = await createServiceWith(memory, testTailscale(secondCalls));
     await second.startIfEnabled();
@@ -714,6 +726,7 @@ describe("Private Connect service lifecycle", () => {
     ).finally(() => { updateFinished = true; });
     await expect.poll(() => service.session(cookie)).toBeNull();
     expect(updateFinished).toBe(false);
+    await expect(service.setEnabled(true)).rejects.toThrow("authority cleanup is pending");
     await expect(service.revokeDevice(deviceId)).rejects.toThrow(
       "authority change is already in progress",
     );
@@ -764,12 +777,150 @@ describe("Private Connect service lifecycle", () => {
     const request = { protocolVersion: 1 as const, type: "prompt.send" as const, requestId: "77777777-7777-4777-8777-777777777777", deliveryId: "88888888-8888-4888-8888-888888888888", conversationId: "44444444-4444-4444-8444-444444444444", content: "hello" };
     await expect(first.handleRequest(session!, request)).resolves.toMatchObject({ ok: true, result: { kind: "prompt.accepted" } });
     expect(commits).toBe(1);
+    expect(memory.saved()?.audit.filter(({ type }) => type === "prompt.accepted")).toEqual([
+      expect.objectContaining({ deviceId, detail: "A remote prompt was accepted." }),
+    ]);
+    expect(JSON.stringify(memory.saved()?.audit)).not.toContain("hello");
     await first.shutdown();
     const second = await createServiceWith(memory, testTailscale(), runtime);
     await second.startIfEnabled();
     const replay = await second.handleRequest(second.session(cookie)!, { ...request, requestId: "99999999-9999-4999-8999-999999999999" });
     expect(replay).toMatchObject({ ok: true, requestId: "99999999-9999-4999-8999-999999999999", result: { kind: "prompt.accepted" } });
     expect(commits).toBe(1);
+    expect(memory.saved()?.audit.filter(({ type }) => type === "prompt.accepted")).toHaveLength(1);
+  });
+
+  it.each(["input.respond", "run.stop"] as const)("persists content-free device audit for %s", async (type) => {
+    const memory = testStore();
+    const service = await createServiceWith(memory, testTailscale(), {
+      privateConnectRequest: async (_subject, request) => {
+        if (request.type === "input.respond") return {
+          type: "response", requestId: request.requestId, ok: true,
+          result: { kind: "input.accepted", conversationId: request.conversationId, inputRequestId: request.inputRequestId },
+        };
+        if (request.type !== "run.stop") throw new Error("unexpected request");
+        return { type: "response", requestId: request.requestId, ok: true,
+          result: { kind: "run.stopped", conversationId: request.conversationId, runId: request.runId, alreadyStopped: false } };
+      },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    const identity = { protocolVersion: 1 as const, requestId: "77777777-7777-4777-8777-777777777777", conversationId: "44444444-4444-4444-8444-444444444444" };
+    const request = type === "input.respond"
+      ? { ...identity, type, inputRequestId: "66666666-6666-4666-8666-666666666666", answers: { question: ["private answer bytes"] } }
+      : { ...identity, type, runId: "88888888-8888-4888-8888-888888888888" };
+    await expect(service.handleRequest(session, request)).resolves.toMatchObject({ ok: true });
+    const audit = memory.saved()!.audit;
+    expect(audit).toContainEqual(expect.objectContaining({ type: type === "input.respond" ? "input.accepted" : "run.stop-accepted", deviceId }));
+    expect(JSON.stringify(audit)).not.toContain("private answer bytes");
+  });
+
+  it("does not send a remote lifecycle action when its audit intent cannot be saved", async () => {
+    const memory = testStore();
+    let calls = 0;
+    const service = await createServiceWith(memory, testTailscale(), {
+      privateConnectRequest: async (_subject, request) => {
+        calls += 1;
+        if (request.type !== "run.stop") throw new Error("unexpected request");
+        return { type: "response", requestId: request.requestId, ok: true, result: {
+          kind: "run.stopped", conversationId: request.conversationId, runId: request.runId, alreadyStopped: false,
+        } };
+      },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    memory.failNextSave();
+    await expect(service.handleRequest(session, { protocolVersion: 1, type: "run.stop", requestId: "77777777-7777-4777-8777-777777777777", conversationId: "44444444-4444-4444-8444-444444444444", runId: "88888888-8888-4888-8888-888888888888" })).resolves.toMatchObject({ ok: false });
+    expect(calls).toBe(0);
+  });
+
+  it("reports uncertainty when the lifecycle effect succeeds but audit acknowledgement cannot persist", async () => {
+    const memory = testStore();
+    const service = await createServiceWith(memory, testTailscale(), {
+      privateConnectRequest: async (_subject, request) => {
+        memory.failNextSave();
+        if (request.type !== "run.stop") throw new Error("unexpected request");
+        return { type: "response", requestId: request.requestId, ok: true, result: {
+          kind: "run.stopped", conversationId: request.conversationId, runId: request.runId, alreadyStopped: false,
+        } };
+      },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    await expect(service.handleRequest(session, { protocolVersion: 1, type: "run.stop", requestId: "77777777-7777-4777-8777-777777777777", conversationId: "44444444-4444-4444-8444-444444444444", runId: "88888888-8888-4888-8888-888888888888" })).resolves.toMatchObject({ ok: false, code: "uncertain" });
+    expect(memory.saved()?.audit).toContainEqual(expect.objectContaining({ type: "request.started", deviceId }));
+  });
+
+  it("keeps security history visible and durable through connection churn", async () => {
+    const memory = testStore();
+    const service = await createServiceWith(memory);
+    const session = await pairCollaboratingBrowser(service);
+    const accepted = memory.saved()!.audit.find(({ type }) => type === "pairing.accepted")!;
+    for (let index = 0; index < 600; index += 1) {
+      await service.openSession(session);
+      await service.closeSession(session);
+    }
+    expect(service.state().audit).toContainEqual(accepted);
+    await service.setEnabled(false);
+    expect(memory.saved()!.audit).toContainEqual(accepted);
+    expect(memory.saved()!.audit.filter(({ type }) => type.startsWith("session."))).toHaveLength(100);
+    expect(memory.saved()!.audit.length).toBeLessThanOrEqual(PRIVATE_CONNECT_LIMITS.auditEvents);
+  });
+
+  it("preserves a concurrent prompt intent when another delivery acknowledgement save fails", async () => {
+    const memory = testStore();
+    let failSave!: () => void;
+    let markSaveStarted!: () => void;
+    let markSecondCommit!: () => void;
+    let loseSecondAcknowledgement!: () => void;
+    const saveStarted = new Promise<void>((resolve) => { markSaveStarted = resolve; });
+    const failedSave = new Promise<void>((resolve) => { failSave = resolve; });
+    const secondCommit = new Promise<void>((resolve) => { markSecondCommit = resolve; });
+    const lostAcknowledgement = new Promise<void>((resolve) => { loseSecondAcknowledgement = resolve; });
+    const firstId = "88888888-8888-4888-8888-888888888888";
+    const secondId = "99999999-9999-4999-8999-999999999999";
+    let held = false;
+    const store = {
+      available: () => true,
+      load: () => memory.store.load(),
+      save: async (next: PersistedPrivateConnect) => {
+        if (!held && next.deliveryReceipts.some((receipt) => receipt.deliveryId === firstId && "response" in receipt)) {
+          held = true;
+          markSaveStarted();
+          await failedSave;
+          throw new Error("acknowledgement persistence failed");
+        }
+        await memory.store.save(next);
+      },
+    } as PrivateConnectStore;
+    const service = await createServiceWith({ ...memory, store }, testTailscale(), {
+      preparePrivateConnectPrompt: async () => ({ preparationId: "66666666-6666-4666-8666-666666666666" }),
+      commitPrivateConnectPrompt: async (_subject, request) => {
+        if (request.deliveryId === secondId) {
+          markSecondCommit();
+          await lostAcknowledgement;
+          throw new Error("runtime acknowledgement lost");
+        }
+        return { type: "response", requestId: request.requestId, ok: true,
+          result: { kind: "prompt.accepted", deliveryId: request.deliveryId, turnId: "turn-1" } };
+      },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    const request = { protocolVersion: 1 as const, type: "prompt.send" as const,
+      requestId: "77777777-7777-4777-8777-777777777777", conversationId: "44444444-4444-4444-8444-444444444444", content: "private prompt bytes" };
+    const first = service.handleRequest(session, { ...request, deliveryId: firstId });
+    await saveStarted;
+    const second = service.handleRequest(session, { ...request, requestId: secondId, deliveryId: secondId });
+    // Let the second preparation reach its durable-intent operation.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    failSave();
+    try {
+      await secondCommit;
+      await expect(first).resolves.toMatchObject({ ok: false, code: "uncertain" });
+      expect(memory.saved()?.deliveryReceipts).toContainEqual(expect.objectContaining({ deliveryId: secondId, uncertainAt: expect.any(String) }));
+    } finally {
+      loseSecondAcknowledgement();
+      await second;
+    }
+    expect(memory.saved()?.deliveryReceipts).toContainEqual(expect.objectContaining({ deliveryId: secondId, uncertainAt: expect.any(String) }));
+    expect(JSON.stringify(memory.saved()?.audit)).not.toContain("private prompt bytes");
   });
 
   it("persists uncertain prompt intent before queueing so restart retries cannot duplicate a turn", async () => {

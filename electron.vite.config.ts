@@ -110,6 +110,9 @@ export default defineConfig({
           "attachment-import-worker": resolve(
             "src/main/attachment-import-worker.ts",
           ),
+          "document-preparation-worker": resolve(
+            "src/server/runtime/attachments/document-preparation-worker.ts",
+          ),
         },
       },
     },
@@ -182,7 +185,7 @@ export default defineConfig({
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
-              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel",
+              "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

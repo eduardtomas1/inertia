@@ -1,3 +1,5 @@
+import { GeminiAcpSecretRedactor as AcpSecretRedactor } from "./gemini-acp-redaction";
+import { acpPermissionDetail } from "./acp-permission-detail";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
@@ -185,6 +187,7 @@ function startCursorRun(
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
+  const secretRedactor = new AcpSecretRedactor(options.environment);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   let sessionId = options.input.sessionId;
@@ -226,12 +229,12 @@ function startCursorRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
-  const redactHostMcpPayload = <T>(value: T): T => hostMcpConnection
+  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(hostMcpConnection
     ? redactHostToolPayload(value, [
         hostMcpConnection.bearerToken,
         hostMcpConnection.url,
       ])
-    : value;
+    : value);
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
   let activeFailurePhase = "initialize";
@@ -478,7 +481,8 @@ function startCursorRun(
     return failedCursorRun(options.input, safeError(error, "Cursor ACP could not be started."), emitter);
   }
   child.once("error", (error) => stderr.append(safeError(error, "Cursor ACP could not be started.")));
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => stderr.append(secretRedactor.stderrChunk(chunk)));
   child.stdin.on("error", () => { /* Connection failure is surfaced by the ACP SDK. */ });
   const wireGuard = new BoundedJsonLineTransform(
     MAX_WIRE_LINE_BYTES,
@@ -645,16 +649,17 @@ function startCursorRun(
     requestProcessTermination(true);
     if (cancelRequested) return finish("cancelled");
     const redactHostMcp = (value: string): string => redactHostMcpPayload(value);
-    const diagnostic = redactHostMcp(stderr.toString().trim());
-    const message = redactHostMcp(safeError(
+    const diagnostic = secretRedactor.payload(redactHostMcp(
+      (stderr.toString() + secretRedactor.finishStderr()).trim(),
+    ));
+    const message = secretRedactor.payload(redactHostMcp(safeError(
       providerEventError ?? error,
       diagnostic ? `Cursor ACP stopped: ${diagnostic}` : "Cursor ACP stopped unexpectedly.",
-    ));
-    return finish(
-      "failed",
-      message,
-      cursorRuntimeFailure(message, child, activeFailurePhase, activeTerminalEvent),
+    )));
+    const failure = cursorRuntimeFailure(
+      message, child, activeFailurePhase, activeTerminalEvent, options.input.cwd, diagnostic,
     );
+    return finish("failed", failure.message, failure);
   }).then((outcome) => ({
     ...outcome,
     ...providerRunTerminal(options.input, outcome.status, outcome.failure),
@@ -770,6 +775,9 @@ async function cursorPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
 ): Promise<RequestPermissionResponse> {
+  if (options.input.interactionMode === "plan") {
+    return { outcome: { outcome: "cancelled" } };
+  }
   const allow = cursorOneShotPermissionOption(params.options, true);
   const fileMutation = isCursorFileMutationKind(params.toolCall.kind);
   if (
@@ -807,7 +815,7 @@ async function cursorPermission(
         title: bounded(
           displayParams.toolCall.title || "Cursor requested permission",
         ),
-        detail: bounded(jsonSummary(displayParams.toolCall.rawInput)),
+        detail: bounded(acpPermissionDetail(displayParams, "Cursor requested permission.")),
         cwd: options.input.cwd,
         permissionRoots: [],
         availableDecisions: ["approve", "deny", "cancel"],
@@ -1232,4 +1240,3 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 function safeError(error: unknown, fallback: string): string { return error instanceof Error && error.message ? bounded(error.message) : fallback; }
-function jsonSummary(value: unknown): string { try { return value === undefined ? "Cursor requested permission." : JSON.stringify(value); } catch { return "Cursor requested permission."; } }

@@ -1,4 +1,5 @@
 import type { RuntimeWorkerOptions } from "./runtime-worker-options";
+import { parseRuntimeDocumentPreparationEvent, parseRuntimeDocumentPreparationResult, type RuntimeDocumentPreparationEvent, type RuntimeDocumentPreparationResult } from "./runtime-document-preparation-protocol";
 import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
@@ -136,6 +137,7 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentReleaseResult
   | RuntimeAttachmentRelinquishResult
   | RuntimeConversationAttachmentStoreResult
+  | RuntimeDocumentPreparationResult
   | RuntimeSecureFileResult | RuntimeAgentBrowserResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
@@ -301,6 +303,7 @@ export type RuntimeWorkerEvent =
       attachmentId: string;
     }
   | RuntimeConversationAttachmentStoreEvent
+  | RuntimeDocumentPreparationEvent
   | {
       type: "runtime.credential-request";
       requestId: string;
@@ -374,6 +377,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   if (value.type === "runtime.conversation-attachment-store-result") {
     return parseRuntimeConversationAttachmentStoreResult(value);
   }
+  if (value.type === "runtime.document-preparation-result") return parseRuntimeDocumentPreparationResult(value);
   const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
   if (
     value.type === "runtime.secure-file-result"
@@ -781,6 +785,9 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     value.type === "runtime.conversation-attachment-store-request"
     || value.type === "runtime.conversation-attachment-store-cancel"
   ) return parseRuntimeConversationAttachmentStoreEvent(value);
+  if (value.type === "runtime.document-preparation-request" || value.type === "runtime.document-preparation-cancel") {
+    return parseRuntimeDocumentPreparationEvent(value);
+  }
   if (
     (
       value.type === "runtime.attachment-release-request"

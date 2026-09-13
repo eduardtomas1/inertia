@@ -160,7 +160,17 @@ export async function describeStableWorkspaceEntries(
     if (!(await stableDirectoryIdentity(parentAbsolute, parentIdentity))) {
       return null;
     }
-    const info = await lstat(absolute);
+    let info: Stats;
+    try {
+      info = await lstat(absolute);
+    } catch (error) {
+      // Editors and build tools routinely remove temporary entries after
+      // enumeration. Only disappearance is skippable; I/O and access failures
+      // still fail the request, and the parent identity is rechecked below.
+      if (error && typeof error === "object" && "code" in error
+        && (error.code === "ENOENT" || error.code === "ENOTDIR")) return null;
+      throw error;
+    }
     const kind = entryKind(info);
     if (
       (observedKind !== "other" && kind !== observedKind)

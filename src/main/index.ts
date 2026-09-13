@@ -1,4 +1,5 @@
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
+import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
@@ -53,6 +54,7 @@ import {
 } from "./attachment-registry.js";
 import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
 import { conversationAttachmentStoreRunner } from "./conversation-attachment-store-desktop-runner.js";
+import { documentPreparationRunner } from "./document-preparation-desktop-runner.js";
 import {
   closeConversationAttachmentAccess,
   conversationAttachmentStoreAuthority,
@@ -622,11 +624,7 @@ function registerIpcHandlers(): void {
     }
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
-    if (request.action === "reveal") {
-      shell.showItemInFolder(path);
-      return "";
-    }
-    return await shell.openPath(path);
+    return openAuthorizedProjectPath(path, request.action, shell);
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
@@ -1047,6 +1045,7 @@ async function bootstrap(): Promise<void> {
       suspendDelivery.result(id, generation, recorded),
     runtimeRecoveryBlocked,
     conversationAttachmentStoreRunner,
+    documentPreparationRunner,
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {

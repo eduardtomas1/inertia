@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { memo, useEffect, useRef, useState } from "react";
 import type {
   BrowserEvidenceEntry,
@@ -98,7 +99,7 @@ export function BrowserEvidenceTimeline({
       ) : (
         <ol className="browser-evidence-list" aria-label="Browser evidence timeline">
           {entries.map((entry) => {
-            const time = new Date(entry.occurredAt).toLocaleTimeString();
+            const time = new Date(entry.occurredAt).toLocaleTimeString(INTERFACE_LOCALE);
             const kindLabel = evidenceKindLabel(entry.kind);
             const inspection = inspections[entry.id];
             return (

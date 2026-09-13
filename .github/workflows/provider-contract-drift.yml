@@ -42,7 +42,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
           cache-dependency-path: package-lock.json
 
       - name: Install Linux guardian toolchain
@@ -239,7 +238,7 @@ jobs:
             });
             const existing = issues.find((issue) =>
               !issue.pull_request &&
-              (issue.title === title || issue.body?.includes(marker))
+              issue.user?.login === "github-actions[bot]" && issue.body?.includes(marker)
             );
             if (!existing) {
               await github.rest.issues.create({ ...context.repo, title, body });

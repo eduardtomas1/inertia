@@ -74,7 +74,7 @@ export class BoundedGeminiJsonLineTransform extends Transform {
     this.decodedParts = [];
     this.pendingBytes = 0;
     this.eventBudget.observeBytes(lineBytes);
-    if (lineBytes === 0) return;
+    if (line.trim().length === 0) return;
     const parsed: unknown = JSON.parse(line);
     if (!validAcpJsonRpcEnvelope(parsed)) {
       throw new Error("Gemini ACP sent a malformed JSON-RPC frame.");

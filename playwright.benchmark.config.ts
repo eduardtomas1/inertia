@@ -8,6 +8,7 @@ const STREAMING_SAMPLE_COUNT = process.env.CI ? 3 : 5;
 const BASE_BENCHMARK_TIMEOUT_MS = 180_000;
 
 export default defineConfig({
+  forbidOnly: Boolean(process.env.CI),
   testDir: "tests/performance",
   testMatch: "desktop.benchmark.spec.ts",
   // Playwright clears this directory before each run. Keep earlier lifecycle

@@ -294,8 +294,8 @@ export function useSplitWorkspaceScene({
     const text = [...projection.messages]
       .reverse()
       .find((message) => message.role === "assistant")?.content
-      ?? projection.streamingText;
-    return planFromText(text, splitConversation.status);
+      ?? "";
+    return planFromText(text, splitConversation.status, projection.streamingText);
   }, [
     projection.messages,
     projection.plans,

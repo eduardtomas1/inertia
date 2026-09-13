@@ -1,4 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { appendPrivateConnectAudit, recentPrivateConnectAudit, runAuditedPrivateConnectMutation } from "./audit";
+import { adaptPrivateConnectRuntimeResponse } from "./runtime-response";
 
 import {
   PRIVATE_CONNECT_LIMITS,
@@ -34,7 +36,6 @@ import type {
   PrivateConnectRuntimeAuthorization,
   PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse,
-  PrivateConnectRuntimeConversation,
 } from "../../shared/private-connect/runtime-contract";
 import type { RuntimeSupervisor } from "../runtime-supervisor";
 import {
@@ -112,6 +113,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private resumeAfterUnlock = false;
   private enableOperation = 0;
   private lifecycle: Promise<void> = Promise.resolve();
+  private persistence: Promise<void> = Promise.resolve();
+  private deliveryPersistence: Promise<void> = Promise.resolve();
   private diagnostics: PrivateConnectStateView["diagnostics"] = {
     tailscale: "unknown",
     magicDns: "unknown",
@@ -164,7 +167,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         buildVersion: this.options.buildVersion,
         protocolVersion: 1,
       },
-      audit: (data?.audit ?? []).slice(-50).map((event) => ({ ...event })),
+      audit: recentPrivateConnectAudit(data?.audit ?? []).map((event) => ({ ...event })),
     };
   }
 
@@ -544,16 +547,21 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       if (!hasPrivateConnectScope(device.scopes, requiredScope(parsed.data.type))) return failure(request.requestId, "forbidden", "This device does not have permission for that action.");
       if (parsed.data.type === "input.respond" || parsed.data.type === "run.stop") {
         const lifecycleRequest = parsed.data;
-        return await this.trackMutation(async () => {
-          const runtimeRequest: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }> = lifecycleRequest.type === "input.respond"
-            ? { type: "input.respond", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, inputRequestId: lifecycleRequest.inputRequestId, answers: lifecycleRequest.answers }
-            : { type: "run.stop", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, runId: lifecycleRequest.runId };
-          const response = await this.options.runtime.privateConnectRequest(
-            this.runtimeAuthorization(session, device),
-            runtimeRequest,
-          );
-          return adaptPrivateConnectRuntimeResponse(response, device);
-        });
+        const response = await this.trackMutation(() => runAuditedPrivateConnectMutation(lifecycleRequest, {
+          record: (type, detail) => this.audit(type, device.id, detail),
+          persist: () => this.persist(),
+          dispatch: async () => {
+            this.requireCurrentSession(session);
+            const runtimeRequest: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }> = lifecycleRequest.type === "input.respond"
+              ? { type: "input.respond", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, inputRequestId: lifecycleRequest.inputRequestId, answers: lifecycleRequest.answers }
+              : { type: "run.stop", requestId: lifecycleRequest.requestId, conversationId: lifecycleRequest.conversationId, runId: lifecycleRequest.runId };
+            return adaptPrivateConnectRuntimeResponse(await this.options.runtime.privateConnectRequest(
+              this.runtimeAuthorization(session, device), runtimeRequest,
+            ), device);
+          },
+        }));
+        this.emit();
+        return response;
       }
       if (parsed.data.type === "prompt.send") {
         const promptRequest = parsed.data;
@@ -585,7 +593,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
               response: response as PrivateConnectAcceptedDeliveryReceipt["response"],
             };
             try {
+              this.audit("prompt.accepted", device.id, "A remote prompt was accepted.");
               await this.rememberDelivery(receipt);
+              this.emit();
             } catch {
               this.audit("prompt.uncertain", device.id, "A queued prompt acknowledgement could not be persisted.");
               await this.persist().catch(() => undefined);
@@ -666,9 +676,19 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         await this.enqueueLifecycle(async () => {
           this.pending.clear();
           this.tickets.clear();
-          this.externalUrl = null;
-          this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
-          await this.gateway.stop().catch(() => undefined);
+          const port = this.diagnostics.gatewayPort;
+          const proof = this.data?.servePort && this.data.serveTarget
+            ? { port: this.data.servePort, target: this.data.serveTarget }
+            : null;
+          try {
+            if (port !== null || proof) {
+              await withDeadline(this.tailscale.disableOwnedServe(port, proof), AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS);
+            }
+          } finally {
+            this.externalUrl = null;
+            this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
+            await this.gateway.stop();
+          }
         });
       }
     })();
@@ -702,6 +722,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async enable(): Promise<void> {
+    if (this.data?.pendingAuthorityReduction) {
+      throw new Error("Private Connect authority cleanup is pending. Restart Inertia before reconnecting.");
+    }
     if (this.privacyLocked) throw new Error("Private Connect is paused while the desktop is locked.");
     if (this.data?.enabled && this.status === "ready") return;
     if (!this.options.store.available()) throw new Error("Secure platform storage is unavailable; Private Connect remains disabled.");
@@ -725,6 +748,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     let gateway: PrivateConnectGatewayServer | null = null;
     let gatewayPort: number | null = null;
     try {
+      if (this.gateway.address()) await this.gateway.stop();
       gateway = this.createGateway();
       this.gateway = gateway;
       await this.persist();
@@ -879,40 +903,50 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async rememberDelivery(receipt: PrivateConnectDeliveryReceipt): Promise<void> {
-    if (!this.data) throw new Error("Private Connect storage is unavailable.");
-    const previousDeliveries = new Map(this.deliveries);
-    const previousReceipts = this.data.deliveryReceipts;
-    this.deliveries.set(receipt.deliveryId, receipt);
-    while (this.deliveries.size > PRIVATE_CONNECT_LIMITS.deliveryReceipts) {
-      this.deliveries.delete(this.deliveries.keys().next().value!);
-    }
-    this.data.deliveryReceipts = [...this.deliveries.values()];
-    try {
-      await this.persist();
-    } catch (error) {
-      this.deliveries.clear();
-      for (const [deliveryId, previous] of previousDeliveries) {
-        this.deliveries.set(deliveryId, previous);
+    await this.enqueueDeliveryPersistence(async () => {
+      if (!this.data) throw new Error("Private Connect storage is unavailable.");
+      const previousDeliveries = new Map(this.deliveries);
+      const previousReceipts = this.data.deliveryReceipts;
+      this.deliveries.set(receipt.deliveryId, receipt);
+      while (this.deliveries.size > PRIVATE_CONNECT_LIMITS.deliveryReceipts) {
+        this.deliveries.delete(this.deliveries.keys().next().value!);
       }
-      this.data.deliveryReceipts = previousReceipts;
-      throw error;
-    }
+      this.data.deliveryReceipts = [...this.deliveries.values()];
+      try {
+        await this.persist();
+      } catch (error) {
+        this.deliveries.clear();
+        for (const [deliveryId, previous] of previousDeliveries) {
+          this.deliveries.set(deliveryId, previous);
+        }
+        this.data.deliveryReceipts = previousReceipts;
+        throw error;
+      }
+    });
   }
 
   private async forgetDelivery(deliveryId: string): Promise<void> {
-    if (!this.data) return;
-    const previous = this.deliveries.get(deliveryId);
-    if (!previous) return;
-    const previousReceipts = this.data.deliveryReceipts;
-    this.deliveries.delete(deliveryId);
-    this.data.deliveryReceipts = [...this.deliveries.values()];
-    try {
-      await this.persist();
-    } catch (error) {
-      this.deliveries.set(deliveryId, previous);
-      this.data.deliveryReceipts = previousReceipts;
-      throw error;
-    }
+    await this.enqueueDeliveryPersistence(async () => {
+      if (!this.data) return;
+      const previous = this.deliveries.get(deliveryId);
+      if (!previous) return;
+      const previousReceipts = this.data.deliveryReceipts;
+      this.deliveries.delete(deliveryId);
+      this.data.deliveryReceipts = [...this.deliveries.values()];
+      try {
+        await this.persist();
+      } catch (error) {
+        this.deliveries.set(deliveryId, previous);
+        this.data.deliveryReceipts = previousReceipts;
+        throw error;
+      }
+    });
+  }
+
+  private async enqueueDeliveryPersistence(operation: () => Promise<void>): Promise<void> {
+    const next = this.deliveryPersistence.then(operation, operation);
+    this.deliveryPersistence = next.catch(() => undefined);
+    await next;
   }
 
   private runtimeAuthorization(session: PrivateConnectSession, device: PrivateConnectDevice): PrivateConnectRuntimeAuthorization {
@@ -986,8 +1020,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
 
   private audit(type: PrivateConnectAuditEvent["type"], deviceId: string | null, detail: string): void {
     if (!this.data) return;
-    this.data.audit.push({ id: randomUUID(), type, deviceId, detail: sanitizeError(detail), createdAt: this.now().toISOString() });
-    if (this.data.audit.length > PRIVATE_CONNECT_LIMITS.auditEvents) this.data.audit.splice(0, this.data.audit.length - PRIVATE_CONNECT_LIMITS.auditEvents);
+    appendPrivateConnectAudit(this.data, { type, deviceId, detail: sanitizeError(detail), createdAt: this.now().toISOString() });
   }
 
   private async beginAuthorityReduction(): Promise<AuthorityReductionMarker> {
@@ -1107,7 +1140,12 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async persist(): Promise<void> {
-    if (this.data) await this.options.store.save(this.data);
+    if (!this.data) return;
+    const snapshot = structuredClone(this.data);
+    const save = () => this.options.store.save(snapshot);
+    const next = this.persistence.then(save, save);
+    this.persistence = next.catch(() => undefined);
+    await next;
   }
 
   private emit(): void { this.options.onStateChange?.(this.state()); }
@@ -1134,76 +1172,6 @@ function requiredScope(type: PrivateConnectRequest["type"]): PrivateConnectScope
   if (type === "prompt.send") return "private:prompt";
   if (type === "input.respond") return "private:input";
   return "private:stop";
-}
-
-function adaptPrivateConnectRuntimeResponse(
-  response: PrivateConnectRuntimeResponse,
-  device: PrivateConnectDevice,
-): PrivateConnectResponse {
-  if (!response.ok) return response;
-  const capabilities = {
-    scopes: [...device.scopes],
-    preset: presetForScopes(device.scopes),
-    expiresAt: device.expiresAt,
-  };
-  if (response.result.kind === "state") {
-    return {
-      ...response,
-      result: {
-        kind: "state",
-        ...(response.result.validator === undefined
-          ? {}
-          : { validator: response.result.validator }),
-        state: {
-          generatedAt: response.result.state.generatedAt,
-          projects: response.result.state.projects,
-          conversations: response.result.state.conversations.map((conversation) => publicConversation(conversation)),
-          capabilities,
-        },
-      },
-    };
-  }
-  if (response.result.kind === "conversation") {
-    const detail = response.result.detail;
-    return {
-      ...response,
-      result: {
-        kind: "conversation",
-        ...(response.result.validator === undefined
-          ? {}
-          : { validator: response.result.validator }),
-        detail: {
-          generatedAt: detail.generatedAt,
-          conversation: publicConversation(detail.conversation, detail.waitingForLocalAction),
-          messages: detail.messages,
-          activities: detail.activities,
-          subagents: detail.subagents,
-          plan: detail.plan ?? null,
-          questions: detail.questions ?? [],
-          inputRequestId: detail.inputRequestId ?? null,
-          waitingForLocalAction: detail.waitingForLocalAction,
-        },
-      },
-    };
-  }
-  return response;
-}
-
-function publicConversation(
-  conversation: PrivateConnectRuntimeConversation,
-  pendingLocalAction = false,
-): Pick<PrivateConnectRuntimeConversation, "id" | "projectId" | "title" | "providerLabel" | "runId" | "status" | "pendingLocalApproval" | "updatedAt"> & { pendingLocalAction: boolean } {
-  return {
-    id: conversation.id,
-    projectId: conversation.projectId,
-    title: conversation.title,
-    providerLabel: conversation.providerLabel,
-    runId: conversation.runId,
-    status: conversation.status,
-    pendingLocalApproval: conversation.pendingLocalApproval,
-    pendingLocalAction: pendingLocalAction || conversation.pendingLocalApproval || conversation.status === "needs-input",
-    updatedAt: conversation.updatedAt,
-  };
 }
 
 function success(requestId: string, result: unknown): PrivateConnectResponse { return { type: "response", requestId, ok: true, result }; }

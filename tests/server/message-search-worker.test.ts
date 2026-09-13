@@ -11,6 +11,9 @@ let directory: string;
 let databasePath: string;
 let run: typeof RunWorker;
 
+// This hook builds workers, migrates the database and writes ~50 MB. Hosted
+// Intel setup has taken 16 seconds; this allowance does not change the worker's
+// two-second search budget or the individual test deadlines.
 beforeAll(async () => {
   // Keep external native dependencies resolvable from the emitted worker.
   directory = await mkdtemp(resolve("node_modules/.message-search-test-"));
@@ -31,14 +34,22 @@ beforeAll(async () => {
   const db = new Database(databasePath);
   try {
     db.pragma("journal_mode = WAL");
-    const insert = db.prepare("INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at) VALUES (?, ?, NULL, 'user', ?, '[]', '2026-09-07T00:00:00.000Z')");
-    db.transaction(() => {
-      for (let index = 0; index < 100_000; index += 1) {
-        insert.run(`message-${String(index).padStart(6, "0")}`, conversationId, index === 99_999 ? "The rare needle" : "a".repeat(500));
-      }
-    })();
+    // Populate the same 100,000-message, ~50 MB history in one atomic statement.
+    // Avoid 100,000 JavaScript-to-SQLite calls before exercising the real worker.
+    db.prepare(`
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 0 UNION ALL SELECT value + 1 FROM sequence WHERE value < 99999
+      )
+      INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at)
+      SELECT printf('message-%06d', value), ?, NULL, 'user',
+        CASE WHEN value = 99999 THEN 'The rare needle' ELSE ? END,
+        '[]', '2026-09-07T00:00:00.000Z'
+      FROM sequence
+    `).run(conversationId, "a".repeat(500));
+    expect(db.prepare("SELECT count(*) AS count, sum(length(content)) AS characters FROM messages").get())
+      .toEqual({ count: 100_000, characters: 49_999_515 });
   } finally { db.close(); }
-});
+}, 30_000);
 
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 

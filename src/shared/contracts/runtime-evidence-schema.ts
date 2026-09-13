@@ -13,6 +13,7 @@ const PROVIDER_HARNESS_IDS = {
   gemini: "gemini-acp",
   kimi: "kimi-acp",
   opencode: "opencode-sdk",
+  antigravity: "antigravity-cli",
 } as const;
 
 const CAPABILITY_CONTRACT_KEYS = [

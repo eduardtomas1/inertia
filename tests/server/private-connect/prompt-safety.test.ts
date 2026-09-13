@@ -22,6 +22,14 @@ describe("Private Connect prompt safety", () => {
     expect(privateConnectPromptSafetyIsUsable(
       privateConnectPromptSafetyForHarness("gemini-acp"),
     )).toBe(false);
+    expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("antigravity-cli");
+    expect(privateConnectPromptSafetyForHarness("antigravity-cli")).toMatchObject({
+      supported: false,
+      permissionModel: "provider-controlled",
+    });
+    expect(privateConnectPromptSafetyIsUsable(
+      privateConnectPromptSafetyForHarness("antigravity-cli"),
+    )).toBe(false);
     expect(privateConnectPromptSafetyForHarness("unknown-harness" as never)).toBe(UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY);
     expect(privateConnectPromptSafetyForHarness(null)).toBe(UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY);
   });

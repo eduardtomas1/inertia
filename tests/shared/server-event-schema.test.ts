@@ -1192,6 +1192,7 @@ describe("server event provider identity boundary", () => {
     gemini: "gemini-acp",
     kimi: "kimi-acp",
     opencode: "opencode-sdk",
+    antigravity: "antigravity-cli",
   } as const;
   const provider = {
     id: "codex",
@@ -1245,7 +1246,7 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
-  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode"])(
+  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"])(
     "accepts the canonical %s provider identity",
     (id) => {
       const expectedFastMode = id === "codex"

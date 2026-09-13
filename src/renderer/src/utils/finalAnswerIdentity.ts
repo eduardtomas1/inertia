@@ -19,6 +19,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "kimi-acp": "Kimi Code",
   "opencode-sdk": "OpenCode",
   "opencode-cli": "OpenCode",
+  "antigravity-cli": "Antigravity",
 };
 
 const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
@@ -28,6 +29,7 @@ const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
   "builtin:kimi-code": "Kimi",
   "builtin:cursor": "Cursor",
   "builtin:gemini": "Google Gemini",
+  "builtin:antigravity": "Google Antigravity",
   "builtin:kimi": "Kimi Code",
   "builtin:opencode": "OpenCode",
 };

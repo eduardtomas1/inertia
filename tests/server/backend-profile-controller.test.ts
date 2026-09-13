@@ -306,6 +306,39 @@ describe("model backend profile controller", () => {
     runtimeStore.close();
   });
 
+  it("publishes and validates the built-in Antigravity backend without a stored row", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const antigravity: ProviderInfo = {
+      ...nativeProvider(),
+      id: "antigravity",
+      label: "Antigravity",
+      command: "agy",
+      executable: "/opt/bin/agy",
+      authState: "unknown",
+      models: [],
+    };
+
+    expect(controller.profiles([antigravity])).toContainEqual(expect.objectContaining({
+      id: "builtin:antigravity",
+      displayName: "Google Antigravity",
+      harnessId: "antigravity-cli",
+      protocol: "antigravity-managed",
+    }));
+    expect(controller.detail("builtin:antigravity")).toMatchObject({
+      id: "builtin:antigravity",
+      harnessId: "antigravity-cli",
+    });
+    expect(controller.validateSelection(
+      providerNativeModelSelection({ providerId: "antigravity" }),
+      { allowUnavailableNativeCatalog: true },
+    )).toMatchObject({
+      harnessId: "antigravity-cli",
+      backendProfileId: "builtin:antigravity",
+    });
+    runtimeStore.close();
+  });
+
   it("classifies every canonical provider backend as native", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
@@ -316,6 +349,7 @@ describe("model backend profile controller", () => {
       "gemini",
       "kimi",
       "opencode",
+      "antigravity",
     ];
 
     for (const providerId of providers) {

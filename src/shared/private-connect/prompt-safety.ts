@@ -96,6 +96,13 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
         + "guarantee local approval for every write or command, Private Connect prompts "
         + "are refused for Gemini conversations.",
     },
+    "antigravity-cli": {
+      ...UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
+      explanation:
+        "Antigravity's headless mode applies its own approval policy and cannot "
+        + "deliver approval requests to Inertia, so Private Connect prompts are "
+        + "refused for Antigravity conversations.",
+    },
     "kimi-acp": {
       ...APPROVAL_ROUTED,
       headline: "Provider-controlled reads · Local approval required for reported actions",

@@ -146,6 +146,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     const antigravity = page.getByRole("button", { name: "Configure Antigravity" });
     await expect(antigravity).toContainText("Antigravity checks your sign-in when a turn starts", { timeout: 20_000 });
     await antigravity.click();
+    await expect(page.locator(".provider-settings-shell")).not.toContainText(/\bvv\d/u);
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });
     await expect(executable).not.toHaveValue("");
     expect(realpathSync(await executable.inputValue())).toBe(realpathSync(fakeAgy));
@@ -159,6 +160,9 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await expect(composer.getByRole("button", {
       name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
     })).toBeEnabled();
+    await expect(composer.getByRole("button", { name: "Antigravity can't read images in Inertia." }))
+      .toBeDisabled();
+    await expect(composer.getByRole("button", { name: "Snapshots", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: /^Choose model\./u }).click();
     const chooser = page.getByRole("dialog", { name: "Choose model" });
     const source = chooser.getByRole("button", { name: /^Antigravity, \d+ models?$/u });

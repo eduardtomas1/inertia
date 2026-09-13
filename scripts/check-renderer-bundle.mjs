@@ -25,14 +25,18 @@ const budgets = {
   // larger settings UI/catalog stay deferred and have separate ceilings below.
   // Project preference validation, independent appearance and chat-owned stash
   // state add ~2 KiB here; the project editor and thread menus stay deferred.
-  // Recovery actions, accepted-attachment ownership, layout-safe shortcuts and
-  // the root loading fallback measure 745.1 / 569.3 KiB on macOS ARM64.
-  // The review-note editor is deferred and independently capped below.
-  mainWorkbenchFirstLoadJavaScript: 745.3 * kibibyte,
+  // Against released main 8f75cc4f with identical dependencies, review fixes
+  // add 1,706 bytes here and 1,195 bytes to detached first load. The new eager
+  // modules are the window error boundary and guarded optional layout storage;
+  // no third-party module or deferred editor enters either initial closure.
+  // Chooser semantics, mention coalescing and Duo admission measure 745.9 /
+  // 569.9 KiB combined. Keep <0.25 KiB headroom on either first-load route.
+  // Full comparison: docs/pr-evidence/issue-356-358-renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 746.1 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 569.5 * kibibyte,
+  detachedChatFirstLoadJavaScript: 570.1 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -92,9 +96,10 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  // Preserve the published Work status cue budget while measuring the combined
-  // review corrections on the reconciled build.
-  coreJavaScript: 2_005.5 * kibibyte,
+  // The reconciled review adds 2,475 bytes over released main 8f75cc4f and
+  // measures 2,007.2 KiB. No rendered modules are duplicated; note editing and
+  // terminal changes remain separately capped. Retain <0.6 KiB headroom.
+  coreJavaScript: 2_007.75 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

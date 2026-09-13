@@ -72,6 +72,7 @@ describe("Cursor MCP and process cleanup join", () => {
     { cancelDuringPreparation: false, terminationConfirmed: true },
     { cancelDuringPreparation: true, terminationConfirmed: true },
     { cancelDuringPreparation: false, terminationConfirmed: false },
+    { cancelDuringPreparation: true, terminationConfirmed: false },
   ])(
     "joins MCP failure and termination (early cancel: $cancelDuringPreparation, confirmed: $terminationConfirmed)",
     async ({ cancelDuringPreparation, terminationConfirmed }) => {
@@ -82,7 +83,7 @@ describe("Cursor MCP and process cleanup join", () => {
       let markTerminationStarted!: () => void;
       const terminationStarted = new Promise<void>((resolve) => { markTerminationStarted = resolve; });
       let terminationCompleted = false;
-      const terminate = vi.fn(async () => {
+      const terminate = vi.fn(async (_child: ChildProcess, _force: boolean) => {
         markTerminationStarted();
         await terminationGate;
         terminationCompleted = true;
@@ -120,7 +121,9 @@ describe("Cursor MCP and process cleanup join", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         expect(close).toHaveBeenCalled();
-        expect(terminate).toHaveBeenCalledExactlyOnceWith(fixture.child, true);
+        // Early cancellation starts a graceful tree stop immediately. A later
+        // MCP failure joins that stop instead of racing a second termination.
+        expect(terminate).toHaveBeenCalledExactlyOnceWith(fixture.child, !cancelDuringPreparation);
         expect(terminationCompleted).toBe(false);
         expect(settled).toBe(false);
         expect(statuses).not.toContain("failed");
@@ -137,6 +140,11 @@ describe("Cursor MCP and process cleanup join", () => {
         });
         expect(terminationCompleted).toBe(true);
         expect(statuses.at(-1)).toBe("failed");
+        expect(terminate.mock.calls.map(([, force]) => force)).toEqual(
+          cancelDuringPreparation
+            ? terminationConfirmed ? [false] : [false, true]
+            : [true],
+        );
       } finally {
         releaseTermination();
         await run?.result;

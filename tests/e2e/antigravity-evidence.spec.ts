@@ -208,8 +208,9 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
 
   const entries = wire().filter(({ kind }) => kind === "launch");
   expect(entries.length).toBeGreaterThan(0);
+  const fakeEntryPoints = [fakeAgy, join(dirname(fakeAgy), "agy-fixture.cjs")].map((path) => realpathSync(path));
   for (const entry of entries) {
-    expect(realpathSync(entry.executable)).toBe(realpathSync(fakeAgy));
+    expect(fakeEntryPoints).toContain(realpathSync(entry.executable));
     expect(entry.args.some((arg) => arg === "-p" || arg === "--print" || arg === "--prompt")).toBe(false);
   }
   const turns = entries.filter(({ args }) => args[0] === "--input-format");

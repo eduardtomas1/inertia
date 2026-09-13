@@ -452,7 +452,7 @@ function startAntigravityRun(
         cancelRequested = true;
         emitter.status("cancelling");
       }
-      requestProcessTermination(force);
+      requestProcessTermination(force || process.platform === "win32");
     },
     extension: RUN_EXTENSION,
   };

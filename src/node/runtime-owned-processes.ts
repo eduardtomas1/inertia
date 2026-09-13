@@ -1,3 +1,4 @@
+import { observeKimiGuardianFailure } from "./kimi-guardian-diagnostic.js";
 import { stopExactLinuxGuardian } from "./runtime-owned-process-linux-stop.js";
 import { guardianCloseDiagnostic, guardianSignalName, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
@@ -866,6 +867,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     return child;
   }
   if (registry.platform === "darwin") {
+    observeKimiGuardianFailure(child, probe, claim);
     registry.claims.set(child, claim);
     child.once("close", (code, signal) => {
       // Guardian-level signals are the fail-closed containment marker.

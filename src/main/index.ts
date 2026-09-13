@@ -1,3 +1,4 @@
+import { consumeKimiGuardianDiagnostics, emitKimiGuardianDiagnostic, KIMI_GUARDIAN_DIAGNOSTIC_PREFIX } from "../node/kimi-guardian-diagnostic.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { MascotMain } from "./mascot-main.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -1111,19 +1112,26 @@ async function bootstrap(): Promise<void> {
         ),
       ],
     },
-    spawn: () => utilityProcess.fork(
-      fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
-      [],
-      {
-        cwd: app.getPath("home"), env: runtimeBootstrap.runtimeProcessEnvironment(),
-        stdio: "ignore",
-        serviceName: "Inertia Runtime",
-      },
-    ),
+    spawn: () => {
+      const child = utilityProcess.fork(
+        fileURLToPath(new URL("./runtime-worker.js", import.meta.url)), [], {
+          cwd: app.getPath("home"), env: { ...runtimeBootstrap.runtimeProcessEnvironment(),
+            ...(process.env.INERTIA_DIAG_KIMI_GUARDIAN === "1" ? { INERTIA_DIAG_KIMI_GUARDIAN: "1" } : {}),
+          },
+          stdio: process.env.INERTIA_DIAG_KIMI_GUARDIAN === "1" ? "pipe" : "ignore", serviceName: "Inertia Runtime",
+        },
+      );
+      child.stdout?.resume();
+      child.stderr?.on("data", consumeKimiGuardianDiagnostics((record) => {
+        console.error(KIMI_GUARDIAN_DIAGNOSTIC_PREFIX + JSON.stringify(record));
+      }));
+      return child;
+    },
     onMascotStatus: (status) => mascotMain?.observe(status),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {
+      emitKimiGuardianDiagnostic({ event: "runtime-state", at: Date.now(), phase: snapshot.phase, generation: snapshot.generation, restartAttempt: snapshot.restartAttempt });
       mascotMain?.runtimePhase(snapshot.phase);
       appUpdateRuntimeReadiness.observe(snapshot);
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);

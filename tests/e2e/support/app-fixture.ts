@@ -1,3 +1,4 @@
+import { consumeKimiGuardianDiagnostics, KIMI_GUARDIAN_DIAGNOSTIC_PREFIX, type KimiGuardianDiagnostic } from "../../../src/node/kimi-guardian-diagnostic";
 import { _electron as electron, test, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
@@ -809,7 +810,14 @@ export async function createAppFixture(
       ...fixtureTemporaryEnvironment(processTemporaryDirectory),
     },
   };
+  const guardianDiagnostics: KimiGuardianDiagnostic[] = [];
+  const captureGuardianDiagnostic = consumeKimiGuardianDiagnostics((record) => {
+    guardianDiagnostics.push(record);
+    if (guardianDiagnostics.length > 128) guardianDiagnostics.shift();
+    process.stdout.write(KIMI_GUARDIAN_DIAGNOSTIC_PREFIX + JSON.stringify(record) + "\n");
+  });
   const appendDiagnostic = (source: string, chunk: Buffer | string): void => {
+    if (source === "stderr") captureGuardianDiagnostic(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
     if (startupDiagnostics.length > 40) startupDiagnostics.shift();
   };
@@ -832,6 +840,9 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
+    await test.info().attach("kimi-guardian-startup-diagnostic", {
+      body: Buffer.from(JSON.stringify(guardianDiagnostics, null, 2)), contentType: "application/json",
+    }).catch(() => undefined);
     try {
       if (electronApp) {
         await closeElectronAppBounded(electronApp).catch(() => undefined);
@@ -969,6 +980,7 @@ export async function createAppFixture(
     close: async () => {
       const activeApp = electronApp;
       electronApp = null;
+      try {
       await closeElectronFixtureBounded({
         current: activeApp,
         readRuntimePid: async () => activeApp ? (await runtimeSnapshot(activeApp)).pid : null,
@@ -985,6 +997,11 @@ export async function createAppFixture(
         await attachElectronFixtureCloseFailure(() => test.info(), error);
         throw error;
       });
+      } finally {
+        await test.info().attach("kimi-guardian-lifecycle-diagnostic", {
+          body: Buffer.from(JSON.stringify(guardianDiagnostics, null, 2)), contentType: "application/json",
+        }).catch(() => undefined);
+      }
     },
   };
 }

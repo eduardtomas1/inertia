@@ -37,7 +37,7 @@ export async function probeKimiAuthentication(
     cwd, env: environment, shell: false, detached: process.platform !== "win32",
     windowsHide: true, windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     stdio: ["pipe", "pipe", "pipe"],
-  }));
+  }), "provider-auth");
   const terminate = createOwnedProcessTreeTermination(
     child, "Kimi authentication discovery process tree", dependencies.terminateProcessTree,
   );

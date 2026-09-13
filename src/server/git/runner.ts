@@ -1,3 +1,4 @@
+import { noteKimiGuardianGitOperation } from "../../node/kimi-guardian-diagnostic.js";
 import { spawn } from "node:child_process";
 import {
   awaitRuntimeOwnedProcessStopped,
@@ -318,6 +319,8 @@ function runGitProcess(
       stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
       env: gitProcessEnvironment(process.env, options.environment),
     }), "git");
+    noteKimiGuardianGitOperation(child, command === "/usr/bin/xcrun"
+      && args.length === 2 && args[0] === "--find" && args[1] === "git");
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;

@@ -1199,7 +1199,7 @@ async function bootstrap(): Promise<void> {
         },
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
-        agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
+        agentBrowser: (id: Parameters<PreviewBroker["perform"]>[0], command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
           cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
         quit: () => {

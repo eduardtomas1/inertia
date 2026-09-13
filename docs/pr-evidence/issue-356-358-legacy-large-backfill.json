@@ -1,0 +1,25 @@
+{
+  "baseline": "8037d8f61893ccbd7480c63fe854a70aa8a5b297",
+  "node": "22.23.2",
+  "fixture": "In-memory schema 17 with one synthetic user request and 150,000 completed activities for one run",
+  "result": "Unresolved: released migration 18 throws RangeError and transaction preserves schema/data",
+  "sourceSchema": 17,
+  "activityCount": {
+    "n": 150000
+  },
+  "remainingSchema": {
+    "n": 17
+  },
+  "remainingTurns": {
+    "n": 0
+  },
+  "error": {
+    "name": "DatabaseMigrationError",
+    "message": "Database migration 18 (BackfillLegacyAgentTurns) failed; all pending schema and data changes were rolled back (migration-step-failed)",
+    "cause": {
+      "name": "RangeError",
+      "message": "Maximum call stack size exceeded"
+    }
+  },
+  "foreignKeyErrors": []
+}

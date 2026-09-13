@@ -63,8 +63,13 @@ import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvai
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import {
   persistSplitConversationId,
+  persistSplitOrientation,
   readSplitConversationId,
+  readSplitOrientation,
   resolvedSplitConversation,
+  splitDropArrangement,
+  type SplitDropZone,
+  type SplitOrientation,
 } from "./utils/splitConversation";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
@@ -133,6 +138,11 @@ export default function App(): React.JSX.Element {
   const [suppressedMainConversationIds, setSuppressedMainConversationIds] =
     useState<Set<string>>(() => new Set());
   const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
+  const [splitOrientation, setSplitOrientation] = useState(() => readSplitOrientation(window.localStorage));
+  const updateSplitOrientation = useCallback((orientation: SplitOrientation) => {
+    setSplitOrientation(orientation);
+    persistSplitOrientation(window.localStorage, orientation);
+  }, []);
   const splitSelectionTransitionsRef = useRef(0);
   const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
@@ -654,6 +664,17 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
+  const dropConversationInSplit = (conversationId: string, zone: SplitDropZone): void => {
+    const dropped = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
+    if (!conversation || !dropped || (dropped.id === conversation.id && !splitConversation)) return;
+    if (dropped.id !== conversation.id && dropped.id !== splitConversation?.id) {
+      if (dropped.archivedAt !== null || detachedChats.conversationIds.has(dropped.id)) return;
+      openConversationInSplit(dropped);
+    }
+    const arrangement = splitDropArrangement(zone, dropped.id === conversation.id);
+    updateSplitOrientation(arrangement.orientation);
+    setSecondaryPaneFirst(arrangement.secondaryFirst);
+  };
   const activatePrimaryRunContext = (
     activity: PreviewWorkspaceRun,
     tool: "preview",
@@ -1048,7 +1069,11 @@ export default function App(): React.JSX.Element {
     const splitScene = splitWorkspace.scene;
     if (!splitScene) return null;
     const secondaryTools = splitScene?.secondary.tools;
-    const detachedActions = {
+    const paneDetails = {
+      primaryConversationId: conversation?.id,
+      secondaryConversationId: splitConversation?.id,
+      orientation: splitOrientation,
+      onToggleOrientation: () => updateSplitOrientation(splitOrientation === "rows" ? "columns" : "rows"),
       onOpenPrimaryInWindow: conversation
         ? () => openConversationInWindow(conversation)
         : undefined,
@@ -1056,10 +1081,10 @@ export default function App(): React.JSX.Element {
         ? () => openConversationInWindow(splitConversation)
         : undefined,
     };
-    if (!secondaryTools) return { ...splitScene, ...detachedActions };
+    if (!secondaryTools) return { ...splitScene, ...paneDetails };
     return {
       ...splitScene,
-      ...detachedActions,
+      ...paneDetails,
       secondary: {
         ...splitScene.secondary,
         tools: {
@@ -1077,7 +1102,9 @@ export default function App(): React.JSX.Element {
     openWorkspaceRunPreview,
     splitConversation,
     splitConversationDetached,
+    splitOrientation,
     splitWorkspace.scene,
+    updateSplitOrientation,
   ]);
   const primaryConversationSuppressed = Boolean(
     conversation && (
@@ -1187,6 +1214,7 @@ export default function App(): React.JSX.Element {
         openConversationInSplit,
         openConversationInWindow,
         closeConversationSplit: () => updateSplitConversationId(null),
+        dropConversationInSplit,
         openProviderSetup,
         openBackendSetup,
         openConnectionsSettings,

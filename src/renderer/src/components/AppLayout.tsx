@@ -25,6 +25,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { SplitDropZone } from "../utils/splitConversation";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { MessageSearchHit } from "@shared/message-search";
@@ -32,6 +33,7 @@ import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
@@ -88,6 +90,7 @@ interface AppLayoutActions {
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: () => void;
+  dropConversationInSplit?: (conversationId: string, zone: SplitDropZone) => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openConnectionsSettings: () => void;
@@ -655,6 +658,14 @@ export function AppLayout({
               <WorkspaceScene {...scene} />
             )}
           </div>
+          {view === "workspace" && (
+            <SplitDropLayer
+              surfaceRef={workspaceBodyRef}
+              activeConversationId={conversation?.id ?? null}
+              splitConversationId={splitConversationId}
+              onDrop={conversation ? actions.dropConversationInSplit ?? null : null}
+            />
+          )}
         </div>
       </section>
 

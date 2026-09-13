@@ -54,6 +54,11 @@ describe("sidebar index presentation contracts", () => {
     expect(arrivalRule).not.toContain("infinite");
   });
 
+  it("centers every status glyph on its label and keeps provider marks unframed", () => {
+    expect(css).toMatch(/\.activity-thread-status-label > \[data-work-status\]\s*\{[^}]*display:\s*inline-flex;/u);
+    expect(css).not.toMatch(/\.provider-brand-icon\[data-provider-brand="anthropic"\]\s*\{[^}]*background/u);
+  });
+
   it("exposes selected, focus, and status boundaries in forced colors", () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active[\s\S]*?border-color:\s*Highlight;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active \.activity-thread-select,[\s\S]*?color:\s*HighlightText;/u);

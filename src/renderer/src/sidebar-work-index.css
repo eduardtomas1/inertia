@@ -104,6 +104,10 @@
   white-space: nowrap;
 }
 
+.activity-thread-status-label > [data-work-status] {
+  display: inline-flex;
+}
+
 .activity-thread.status-working .activity-thread-status-label { color: var(--status-working); }
 .activity-thread.status-approval .activity-thread-status-label { color: var(--status-approval); }
 .activity-thread.status-input .activity-thread-status-label { color: var(--status-input); }

@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { RefreshCw, X } from "lucide-react";
 import type { ServerEvent } from "@shared/contracts";
 import { USAGE_RESET_CONFIRMATION_EXPIRED, usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation } from "@shared/provider-usage-limits";
@@ -9,6 +9,7 @@ import { resultEvent } from "../lib/runtimeCommands";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { trapModalFocus } from "../utils/modalFocus";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { useUsageLimitsContext } from "./usage-limits-state";
 import "./UsageLimitsPanel.css";
 
@@ -22,6 +23,18 @@ export function resetCountdown(value: string | null, now: number): string {
 }
 const dateLabel = (value: string | null): string => value ? new Date(value).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Not reported";
 const percent = (value: number | null): string => value === null ? "Unavailable" : `${Math.round(value)}%`;
+export type LimitTone = "ok" | "low" | "critical" | "stale" | "unknown";
+export function limitTone(remaining: number | null, stale: boolean): LimitTone {
+  if (stale) return "stale";
+  if (remaining === null) return "unknown";
+  return remaining < 20 ? "critical" : remaining < 50 ? "low" : "ok";
+}
+function LimitRing({ value, tone }: { value: number | null; tone: LimitTone }): React.JSX.Element {
+  return <span className="limits-ring" data-tone={tone} style={{ "--limit": `${value ?? 0}%` } as CSSProperties} aria-hidden="true"><span>{value === null ? "–" : Math.round(value)}</span></span>;
+}
+function ProviderLogo({ providerId, small = false }: { providerId: string; small?: boolean }): React.JSX.Element {
+  return <span className={`limits-logo${small ? " is-small" : ""}`} aria-hidden="true"><ProviderBrandIcon providerId={providerId} decorative size={small ? 14 : 20} /></span>;
+}
 type Props = { request(command: CommandWithoutId): Promise<ServerEvent>; status: ConnectionStatus; compact?: boolean };
 
 function AccountDetails({ account, number, now, selected, onSelect, request, onRefresh, online }: {
@@ -79,7 +92,7 @@ function AccountDetails({ account, number, now, selected, onSelect, request, onR
   };
   return <div className="limits-account">
     <button ref={accountTrigger} type="button" className="limits-account-trigger" aria-expanded={selected} aria-controls={id} onClick={onSelect}>
-      <span className="limits-account-number">{number}</span><strong>{account.label}</strong><span>{account.plan ?? "Plan not reported"}</span><span className={`limits-state is-${account.status}`}>{account.status}</span>
+      <ProviderLogo providerId={account.providerId} small /><span className="limits-account-number">{number}</span><strong>{account.label}</strong><span>{account.plan ?? "Plan not reported"}</span><span className={`limits-state is-${account.status}`}>{account.status}</span>
       <span>{account.credits ? `${account.credits.availableCount} reset${account.credits.availableCount === 1 ? "" : "s"}` : ""}</span>
     </button>
     {selected && <div className="limits-account-detail" id={id}>
@@ -185,15 +198,32 @@ export function UsageLimitsPanel({ request, status, compact = false }: Props): R
     {status !== "online" && <p role="status">The local service is offline. Displayed limits may be stale.</p>}
     {error && <p role="alert">{error}</p>}
     {accounts.length === 0 && <p className="limits-empty">{busy ? "Reading provider accounts…" : "No limits loaded. Refresh configured providers or connect a usage hub."}</p>}
+    {providerIds.length > 0 && <ul className="limits-overview" aria-label="Limits overview">{providerIds.map((providerId) => {
+      const providerAccounts = accounts.filter((account) => account.providerId === providerId);
+      const pools = usagePools(providerAccounts);
+      const lowest = pools.reduce<(typeof pools)[number] | null>((current, pool) => pool.averageRemaining !== null
+        && (current?.averageRemaining == null || pool.averageRemaining < current.averageRemaining) ? pool : current, null);
+      const remaining = lowest?.averageRemaining ?? null;
+      const tone = limitTone(remaining, providerAccounts.some(({ status }) => status === "stale"));
+      const resets = providerAccounts.flatMap(({ windows }) => windows.map(({ resetsAt }) => Date.parse(resetsAt ?? ""))).filter((time) => time > now);
+      const nextReset = resets.length > 0 ? resetCountdown(new Date(Math.min(...resets)).toISOString(), now) : null;
+      const label = providerAccounts[0]!.providerLabel;
+      const count = `${providerAccounts.length} account${providerAccounts.length === 1 ? "" : "s"}`;
+      return <li className="limits-overview-card" key={providerId} data-tone={tone} aria-label={`${label}: ${lowest && remaining !== null ? `${Math.round(remaining)}% left in ${lowest.label}` : "quota not reported"}. ${count}.${nextReset ? ` Next reset ${nextReset}.` : ""}`}>
+        <ProviderLogo providerId={providerId} />
+        <span className="limits-overview-text"><strong>{label}</strong><small>{count}{lowest ? ` · ${lowest.label}` : ""}</small><small>{nextReset ? `Next reset ${nextReset}` : "Reset time unavailable"}</small></span>
+        <LimitRing value={remaining} tone={tone} />
+      </li>;
+    })}</ul>}
     {providerIds.map((providerId) => {
       const providerAccounts = accounts.filter((account) => account.providerId === providerId);
       return <section className="limits-provider" key={providerId} aria-label={`${providerAccounts[0]!.providerLabel} limits`}>
-        <h3>{providerAccounts[0]!.providerLabel}<span>{providerAccounts.length} account{providerAccounts.length === 1 ? "" : "s"}</span></h3>
+        <h3><ProviderLogo providerId={providerId} small />{providerAccounts[0]!.providerLabel}<span>{providerAccounts.length} account{providerAccounts.length === 1 ? "" : "s"}</span></h3>
         {usagePools(providerAccounts).map((pool) => <div className="limits-window" key={pool.key}>
-          <div className="limits-window-summary"><span>{pool.label}{pool.entries.length > 1 && pool.plan ? ` · ${pool.plan}` : ""}</span><strong>{percent(pool.averageRemaining)} <small>left</small></strong><small>{pool.entries.length > 1 ? `Account average${pool.entries.some(({ account }) => account.status === "stale") ? " · stale" : ""}` : pool.entries[0]?.account.status === "stale" ? "Stale observation" : "Reported quota"}</small></div>
+          <div className="limits-window-summary" data-tone={limitTone(pool.averageRemaining, pool.entries.some(({ account }) => account.status === "stale"))}><span>{pool.label}{pool.entries.length > 1 && pool.plan ? ` · ${pool.plan}` : ""}</span><strong>{percent(pool.averageRemaining)} <small>left</small></strong><small>{pool.entries.length > 1 ? `Account average${pool.entries.some(({ account }) => account.status === "stale") ? " · stale" : ""}` : pool.entries[0]?.account.status === "stale" ? "Stale observation" : "Reported quota"}</small></div>
           <div className="limits-segments">{pool.entries.map(({ account, window }) => {
             const number = providerAccounts.findIndex(({ id }) => id === account.id) + 1;
-            return <button type="button" className={`limits-segment${account.status === "stale" ? " is-stale" : ""}`} key={account.id} onClick={() => setSelected(account.id)} aria-label={`Account ${number}, ${window.label}, ${percent(window.remainingPercent)} remaining. Show account details.`}>
+            return <button type="button" className={`limits-segment${account.status === "stale" ? " is-stale" : ""}`} data-tone={limitTone(window.remainingPercent, account.status === "stale")} key={account.id} onClick={() => setSelected(account.id)} aria-label={`Account ${number}, ${window.label}, ${percent(window.remainingPercent)} remaining. Show account details.`}>
               <span><b>{number}</b><strong>{percent(window.remainingPercent)}</strong><small>{resetCountdown(window.resetsAt, now)}</small></span>
               {window.remainingPercent === null ? <span className="limits-meter-unavailable">Quota not reported</span> : <span className="limits-meter" aria-hidden="true"><i style={{ width: `${window.remainingPercent}%` }} /></span>}
             </button>;

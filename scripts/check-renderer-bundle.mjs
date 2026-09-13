@@ -45,7 +45,7 @@ const budgets = {
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
-  deferredUsageLimitsJavaScript: 15.5 * kibibyte,
+  deferredUsageLimitsJavaScript: 17.5 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,

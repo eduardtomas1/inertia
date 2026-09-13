@@ -143,6 +143,52 @@ describe("privileged usage limits", () => {
     await f.service.saveSource(source); expect(status.mock.calls[0]?.[0]).toBe(expected);
     await f.service.removeSource(source.id); expect(forget).toHaveBeenCalledWith(expected, f.deps.signal);
   });
+  it("retains a hub and its accounts until vault removal succeeds, including an uncertain retry", async () => {
+    const f = setup();
+    const source = { id: crypto.randomUUID(), label: "Hub", url: "https://hub.example.test", enabled: true };
+    const accountId = `hub:${source.id}:account`;
+    const hub = new CliproxyUsageClient();
+    vi.spyOn(hub, "accounts").mockResolvedValue([{ id: "account", auth_index: "index", provider: "codex" }]);
+    vi.spyOn(hub, "read").mockResolvedValue(usageAccount({ id: accountId }));
+    let rejectForget!: (error: Error) => void;
+    const forget = vi.fn(() => new Promise<boolean>((_resolve, reject) => { rejectForget = reject; }));
+    f.deps.hub = hub;
+    f.deps.credentials = { resolve: async () => "synthetic-key", status: async () => ({ hasSecret: true, credentialGeneration: "fixture" }), forget };
+    const service = new UsageLimitsService(f.deps);
+    await service.saveSource(source); await service.refresh();
+    const before = service.snapshot();
+    const removal = service.removeSource(source.id).catch((error: unknown) => error);
+    await Promise.resolve();
+    try {
+      expect(f.repository.sources()).toEqual([source]);
+      expect(service.snapshot()).toEqual(before);
+    } finally {
+      rejectForget(new Error("Secure storage request timed out"));
+      expect(await removal).toEqual(new Error("Secure storage request timed out"));
+    }
+    expect(service.snapshot()).toEqual(before);
+    // The first request may have erased the key despite losing its acknowledgement.
+    forget.mockResolvedValue(false);
+    expect((await service.removeSource(source.id)).sources).toEqual([]);
+    expect(service.snapshot().accounts.some(({ id }) => id === accountId)).toBe(false);
+    expect(() => service.prepareReset(accountId)).toThrow("Refresh");
+  });
+  it("keeps hub removal retryable if database deletion fails after forgetting the key", async () => {
+    const f = setup();
+    const source = { id: crypto.randomUUID(), label: "Hub", url: "https://hub.example.test", enabled: false };
+    const forget = vi.fn(async () => true);
+    f.deps.credentials = { resolve: async () => null, status: async () => ({ hasSecret: false, credentialGeneration: null }), forget };
+    await f.service.saveSource(source);
+    vi.spyOn(f.repository, "removeSource").mockImplementationOnce(() => {
+      expect(forget).toHaveBeenCalledOnce();
+      throw new Error("Database write failed");
+    });
+    await expect(f.service.removeSource(source.id)).rejects.toThrow("Database write failed");
+    expect(f.repository.sources()).toEqual([source]);
+    forget.mockResolvedValue(false);
+    expect((await f.service.removeSource(source.id)).sources).toEqual([]);
+    expect(forget).toHaveBeenCalledTimes(2);
+  });
   it("rejects expired confirmations before marking attempted and renews the original ID", async () => {
     const f = setup(); await f.service.refresh(); const first = f.service.prepareReset("native:codex");
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse(first.expiresAt) + 1);

@@ -21,7 +21,7 @@ it("keeps keyboard focus inside Limits after the shortcut's next animation frame
   await act(async () => { fireEvent.click(shortcut); await vi.dynamicImportSettled(); });
   const dialog = await screen.findByRole("dialog", { name: "Provider usage limits" });
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
-  
+
   await act(async () => { for (const frame of frames.splice(0)) frame(performance.now()); });
   expect(dialog).toContainElement(document.activeElement as HTMLElement);
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });

@@ -63,7 +63,8 @@ The useful changes in each Inertia release, in plain language.
 - Optional CLIProxyAPI hubs show additional accounts without changing agent
   routing. Equivalent verified accounts can be compared together, while
   accounts with unknown identities stay separate. Management keys remain in
-  secure storage.
+  secure storage. Removing a hub keeps its entry available for retry until
+  secure key removal succeeds.
 - Supported Codex connections can use an existing reset credit after explicit
   account confirmation. Uncertain results retain the original request for
   retry; ambiguous local credential sources cannot redeem credits.

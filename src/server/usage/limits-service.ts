@@ -72,11 +72,12 @@ export class UsageLimitsService {
   }
   async removeSource(id: string): Promise<UsageLimitsSnapshot> {
     return this.serial(async () => {
+      // Retain the visible retry entry until secure storage confirms completion.
+      await this.dependencies.credentials?.forget(backendSecretReferenceForProfile(usageSourceProfileId(id)), this.dependencies.signal);
       this.dependencies.repository.removeSource(id);
       this.accounts = this.accounts.filter((account) => !account.id.startsWith(`hub:${id}:`));
       for (const [key, route] of this.routes) if (route.source.id === id) this.routes.delete(key);
       this.sourceErrors.delete(id);
-      await this.dependencies.credentials?.forget(backendSecretReferenceForProfile(usageSourceProfileId(id)), this.dependencies.signal);
       return this.snapshot();
     });
   }

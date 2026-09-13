@@ -10,6 +10,7 @@ import { parseDocument } from "yaml";
 import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { packageSmokePath } from "./package-smoke-path.mjs";
 import { verifyPackagedLegalResources } from "./package-smoke-legal-resources.mjs";
+import { verifyMacosDeploymentTarget } from "./native-binary-architecture.mjs";
 
 import {
   packageSmokeProcessesExited,
@@ -408,6 +409,11 @@ async function requirePackagedAssets(executable, expectedVersion) {
       throw new Error(
         `The packaged ${process.platform} runtime process guardian is missing or invalid.`,
       );
+    }
+    if (process.platform === "darwin") {
+      const minimum = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+        .build.mac.minimumSystemVersion;
+      verifyMacosDeploymentTarget(runtimeGuardian, minimum);
     }
     if (process.platform === "linux") {
       const guardianSelftest = spawnSync(runtimeGuardian, ["seccomp-selftest"], {

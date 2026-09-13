@@ -40,6 +40,7 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 17.5 * kibibyte,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -528,10 +529,17 @@ if (mainWorkbenchJavaScriptClosure.has(usageLimitsEntry) || detachedChatJavaScri
   throw new Error("Provider Limits must remain deferred from the initial workbench");
 }
 const deferredUsageLimitsJavaScriptBytes = await closureBytes(await javaScriptClosure(usageLimitsEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
+const welcomeGuideEntry = assetNames.find((name) => /^WelcomeGuide-.*\.js$/u.test(name));
+if (!welcomeGuideEntry) throw new Error("Missing deferred welcome guide");
+if (mainWorkbenchJavaScriptClosure.has(welcomeGuideEntry) || detachedChatJavaScriptClosure.has(welcomeGuideEntry)) {
+  throw new Error("The welcome guide must remain deferred from the initial workbench");
+}
+const deferredWelcomeGuideJavaScriptBytes = await closureBytes(await javaScriptClosure(welcomeGuideEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
   - deferredUsageLimitsJavaScriptBytes
+  - deferredWelcomeGuideJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
@@ -563,6 +571,7 @@ const coreJavaScriptBytes =
 const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
+  deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,

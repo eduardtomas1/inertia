@@ -88,7 +88,7 @@ const budgets = {
   // Its complete optional closure is separately capped; first-load caps stay fixed.
   // The Work status cue (pixel glyph, elapsed time, arrival cue) adds ~1.1 KiB:
   // shared core measures 2,004.6 KiB on macOS ARM64; keep <2 KiB headroom.
-  coreJavaScript: 2_017.5 * kibibyte,
+  coreJavaScript: 2_018.0 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -73,6 +73,16 @@ export function useDismissibleMenu<Menu extends string>(): {
     const focusWhenReady = (): void => {
       if (generation !== focusGeneration.current) return;
       const trigger = triggers.current.get(name);
+      const focused = document.activeElement;
+      if (
+        focused
+        && focused !== document.body
+        && focused !== trigger
+        && !popovers.current.get(name)?.contains(focused)
+      ) {
+        finish();
+        return;
+      }
       if (trigger?.isConnected && !trigger.disabled) {
         finish();
         trigger.focus();

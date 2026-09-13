@@ -95,6 +95,39 @@ describe("app update candidate viability worker", () => {
     )).not.toThrow();
   });
 
+  it("accepts a current-schema profile above 256 MiB without losing its WAL snapshot or migration guard", async () => {
+    const dataDirectory = await dataRoot();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const database = new Database(databasePath);
+    try {
+      database.pragma("journal_mode = WAL");
+      database.pragma("wal_autocheckpoint = 0");
+      database.pragma("cache_size = -2048");
+      migrateRuntimeDatabase(database);
+      // SQLite generates the payload without allocating the whole profile in JS.
+      database.exec(`
+        CREATE TABLE app_update_large_profile (payload BLOB NOT NULL);
+        WITH RECURSIVE rows(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 257
+        ) INSERT INTO app_update_large_profile SELECT zeroblob(1048576) FROM rows;
+      `);
+      const lineage = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
+      const names = await readdir(dataDirectory);
+      expect((await stat(`${databasePath}-wal`)).size).toBeGreaterThan(256 * 1024 * 1024);
+      const request = appUpdateCandidateViabilityRequest({ operationId, dataDirectory });
+      expect(() => validateAppUpdateCandidateViability(request)).not.toThrow();
+      expect(database.prepare("SELECT COUNT(*) FROM app_update_large_profile").pluck().get()).toBe(257);
+      expect(database.prepare("SELECT * FROM schema_migrations ORDER BY version").all()).toEqual(lineage);
+      expect(await readdir(dataDirectory)).toEqual(names);
+
+      // A complete known lineage is required to bypass the migration copy.
+      database.exec("DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)");
+      expect(() => validateAppUpdateCandidateViability(request)).toThrow("database-incompatible");
+    } finally {
+      database.close();
+    }
+  });
+
   it("migrates an actual N-1 WAL snapshot without changing the live profile", async () => {
     const dataDirectory = await dataRoot();
     const databasePath = join(dataDirectory, "inertia.sqlite");

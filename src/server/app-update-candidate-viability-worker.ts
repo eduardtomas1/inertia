@@ -447,7 +447,7 @@ function databaseIntegrityIsValid(database: Database.Database): boolean {
     && Object.values(quickCheck[0] ?? {})[0] === "ok";
 }
 
-function migrationVersionsAreKnown(database: Database.Database): boolean {
+function knownAppliedMigrationCount(database: Database.Database): number | null {
   const catalog = runtimeMigrationCatalog();
   const known = new Set(catalog.map(({ version }) => version));
   const table = database.prepare(
@@ -456,16 +456,17 @@ function migrationVersionsAreKnown(database: Database.Database): boolean {
   const applicationTables = database.prepare(
     "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
   ).get() as { readonly count: number };
-  if (!table) return applicationTables.count === 0;
+  if (!table) return applicationTables.count === 0 ? 0 : null;
   const versions = database.prepare(
-    "SELECT version FROM schema_migrations ORDER BY version ASC",
-  ).all() as Array<{ readonly version: unknown }>;
-  return versions.every(({ version }, index) => (
+    "SELECT version FROM schema_migrations ORDER BY version ASC LIMIT ?",
+  ).all(catalog.length + 1) as Array<{ readonly version: unknown }>;
+  const valid = versions.every(({ version }, index) => (
     typeof version === "number"
     && Number.isSafeInteger(version)
     && version === index + 1
     && known.has(version)
   ));
+  return valid ? versions.length : null;
 }
 
 function safeIntegerPragma(
@@ -589,12 +590,20 @@ function validateDatabase(dataDirectory: string): void {
     database.pragma("query_only = ON");
     database.pragma("busy_timeout = 5000");
     database.exec("BEGIN");
+    const appliedMigrations = knownAppliedMigrationCount(database);
     if (
       !databaseIntegrityIsValid(database)
-      || !migrationVersionsAreKnown(database)
+      || appliedMigrations === null
       || (database.pragma("foreign_key_check") as unknown[]).length > 0
     ) throw new CandidateViabilityError("database-incompatible");
-    validateMigrationsOnClone(isolatedDatabaseClone(database));
+    // A current profile has no data migration to rehearse. Its integrity and
+    // lineage were checked on this coherent, read-only WAL snapshot; exercise
+    // the candidate's complete catalog on a fresh private database instead of
+    // copying an arbitrarily large profile. Pending migrations still require
+    // the bounded data clone and are not covered by this fast path.
+    validateMigrationsOnClone(appliedMigrations === runtimeMigrationCatalog().length
+      ? new Database(":memory:")
+      : isolatedDatabaseClone(database));
     const confirmed = ownedRegularFile(databasePath);
     if (!sameFile(named, confirmed)) {
       throw new CandidateViabilityError("database-incompatible");

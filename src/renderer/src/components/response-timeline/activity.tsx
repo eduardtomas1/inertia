@@ -11,6 +11,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
+  Brain,
   BrainCircuit,
   Check,
   CheckCircle2,
@@ -48,7 +49,11 @@ import {
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
-import { parseReasoningSummary } from "../../utils/reasoningSummary";
+import {
+  latestReasoningLine,
+  parseReasoningSummary,
+  type ReasoningLine,
+} from "../../utils/reasoningSummary";
 
 const FailureDiagnostics = lazy(() => import("./failurePanel"));
 
@@ -577,6 +582,107 @@ export function shouldCollapseSuccessfulWorkOnSettlement(input: {
     && input.status === "completed";
 }
 
+export const THINKING_LINE_INTERVAL_MS = 400;
+
+interface ThinkingLine {
+  current: ReasoningLine;
+  previous: ReasoningLine | null;
+  at: number;
+}
+
+export function useThrottledReasoningLine(line: ReasoningLine): ThinkingLine {
+  const [shown, setShown] = useState<ThinkingLine>(() => ({
+    current: line,
+    previous: null,
+    at: Date.now(),
+  }));
+  useEffect(() => {
+    if (line.id === shown.current.id && line.text === shown.current.text) return;
+    const timer = window.setTimeout(() => {
+      setShown((state) => ({
+        current: line,
+        previous: line.id === state.current.id ? state.previous : state.current,
+        at: Date.now(),
+      }));
+    }, Math.max(0, shown.at + THINKING_LINE_INTERVAL_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [line, shown]);
+  return shown;
+}
+
+interface ReasoningSpan {
+  startedAt: string;
+  durationMs: number | null;
+}
+
+export function useReasoningSpan(active: boolean): ReasoningSpan {
+  const [span, setSpan] = useState(() => ({
+    active,
+    since: active ? Date.now() : 0,
+    spentMs: 0,
+  }));
+  let current = span;
+  if (span.active !== active) {
+    const now = Date.now();
+    current = active
+      ? { active, since: now, spentMs: span.spentMs }
+      : { active, since: 0, spentMs: span.spentMs + now - span.since };
+    setSpan(current);
+  }
+  return {
+    startedAt: new Date((current.active ? current.since : Date.now()) - current.spentMs)
+      .toISOString(),
+    durationMs: !current.active && current.spentMs > 0 ? current.spentMs : null,
+  };
+}
+
+function ThinkingSummary({
+  live,
+  line,
+  span,
+  count,
+}: {
+  live: boolean;
+  line: ThinkingLine;
+  span: ReasoningSpan;
+  count: string;
+}): React.JSX.Element {
+  return (
+    <>
+      <span className="turn-thinking-pulse">
+        <Brain size={13} className="turn-thinking-icon" aria-hidden="true" />
+        <span className="turn-thinking-label" key={live ? "live" : "folded"}>
+          {live
+            ? "Thinking"
+            : span.durationMs === null
+              ? "Thought"
+              : `Thought for ${formatElapsed(Math.max(1_000, span.durationMs))}`}
+        </span>
+        {live && (
+          <small className="turn-thinking-elapsed">
+            <span className="turn-thinking-separator" aria-hidden="true">·</span>
+            <LiveElapsed startedAt={span.startedAt} />
+          </small>
+        )}
+      </span>
+      {live
+        ? (
+            <span className="turn-thinking-line" aria-hidden="true">
+              {line.previous && (
+                <span className="is-leaving" key={`previous:${line.previous.id}`}>
+                  {line.previous.text}
+                </span>
+              )}
+              <span className="is-entering" key={`current:${line.current.id}`}>
+                {line.current.text}
+              </span>
+            </span>
+          )
+        : <small>{count}</small>}
+    </>
+  );
+}
+
 export function SettledWorkDetails({
   id,
   entries,
@@ -719,11 +825,12 @@ export function WorkLog({
     0,
   );
   const activeReasoning = includesReasoning && reasoningStreaming;
-  const activeTraceLabel = activeReasoning
-    ? "Thinking"
-    : includesReasoning
-      ? "Reasoning"
-      : "Plan";
+  const reasoningLine = useMemo(
+    () => latestReasoningLine(reasoningContent),
+    [reasoningContent],
+  );
+  const thinkingLine = useThrottledReasoningLine(reasoningLine);
+  const reasoningSpan = useReasoningSpan(activeReasoning);
   const activeTraceCount = [
     includesReasoning ? "reasoning summary" : null,
     planStepCount > 0
@@ -746,6 +853,10 @@ export function WorkLog({
         />
         {supplementalCount > 0 && (
           <details
+            className={includesReasoning ? "turn-thinking" : undefined}
+            data-thinking-state={includesReasoning
+              ? activeReasoning ? "live" : "folded"
+              : undefined}
             data-agent-trace={activeReasoning
               ? "thinking"
               : includesReasoning
@@ -759,8 +870,21 @@ export function WorkLog({
               aria-controls={detailsId}
               {...anchorToggleHandlers}
             >
-              <span>{activeTraceLabel}</span>
-              <small>{activeTraceCount}</small>
+              {includesReasoning
+                ? (
+                    <ThinkingSummary
+                      live={activeReasoning}
+                      line={thinkingLine}
+                      span={reasoningSpan}
+                      count={activeTraceCount}
+                    />
+                  )
+                : (
+                    <>
+                      <span>Plan</span>
+                      <small>{activeTraceCount}</small>
+                    </>
+                  )}
               <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
             </summary>
             <div className="turn-work-details" id={detailsId} hidden={!expanded}>

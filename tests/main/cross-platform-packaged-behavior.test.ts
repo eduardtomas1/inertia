@@ -259,7 +259,7 @@ describe("cross-platform packaged behavior contract", () => {
       ["Windows x64", "windows-2025", "windows-x64", "x64", 55],
       ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", 70],
       ["macOS arm64", "macos-15", "macos-arm64", "arm64", 40],
-      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 70],
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 85],
     ] as const) {
       const entry = PLATFORMS.find((target: { label: string }) => target.label === label);
       expect(entry).toMatchObject({ runner, artifact, arch: architecture, timeout_minutes: timeout });

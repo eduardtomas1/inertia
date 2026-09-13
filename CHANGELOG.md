@@ -92,6 +92,7 @@ The useful changes in each Inertia release, in plain language.
 
 ### Reliability and maintenance
 
+- Windows avoids unnecessary font fallback work when streaming the first emoji.
 - Linux startup retires completed discovery probes correctly. Repeated runtime
   recovery failures stop instead of restarting indefinitely.
 - macOS recovery can offer consent after a crash interrupts an ownership-journal

@@ -99,19 +99,29 @@ describe("split layout", () => {
   });
 
   it("plans drops as insert, move, swap or replace", () => {
-    expect(planSplitDrop(PRIMARY_SPLIT_LAYOUT, null, "primary", "right", "secondary"))
+    expect(planSplitDrop(PRIMARY_SPLIT_LAYOUT, null, "primary", ["right"], "secondary"))
       .toEqual({ kind: "insert", owner: "secondary", target: "primary", zone: "right" });
-    expect(planSplitDrop(pair, null, "secondary", "bottom", "tertiary"))
+    expect(planSplitDrop(pair, null, "secondary", ["bottom"], "tertiary"))
       .toEqual({ kind: "insert", owner: "tertiary", target: "secondary", zone: "bottom" });
-    expect(planSplitDrop(pair, null, "secondary", "right", "tertiary"))
+    expect(planSplitDrop(pair, null, "secondary", ["right"], "tertiary"))
       .toEqual({ kind: "replace", target: "secondary" });
-    expect(planSplitDrop(grid, null, "tertiary", "bottom", null))
+    expect(planSplitDrop(grid, null, "tertiary", ["bottom"], null))
       .toEqual({ kind: "replace", target: "tertiary" });
-    expect(planSplitDrop(pair, "secondary", "primary", "top", null))
+    expect(planSplitDrop(pair, "secondary", "primary", ["top"], null))
       .toEqual({ kind: "move", owner: "secondary", target: "primary", zone: "top" });
-    expect(planSplitDrop(grid, "tertiary", "primary", "left", null))
+    expect(planSplitDrop(grid, "tertiary", "primary", ["left"], null))
       .toEqual({ kind: "swap", owner: "tertiary", target: "primary" });
-    expect(planSplitDrop(pair, "secondary", "secondary", "left", null)).toBeNull();
+    expect(planSplitDrop(pair, "secondary", "secondary", ["left"], null)).toBeNull();
+  });
+
+  it("falls back to the other axis before replacing or swapping", () => {
+    expect(planSplitDrop(pair, null, "secondary", ["right", "bottom"], "tertiary"))
+      .toEqual({ kind: "insert", owner: "tertiary", target: "secondary", zone: "bottom" });
+    expect(planSplitDrop(pair, null, "primary", ["left", "top"], "tertiary"))
+      .toEqual({ kind: "insert", owner: "tertiary", target: "primary", zone: "top" });
+    expect(planSplitDrop(grid, "tertiary", "primary", ["left", "bottom"], null))
+      .toEqual({ kind: "swap", owner: "tertiary", target: "primary" });
+    expect(planSplitDrop(pair, null, "primary", [], "tertiary")).toBeNull();
   });
 
   it("applies each plan to the layout", () => {

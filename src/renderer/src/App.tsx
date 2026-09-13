@@ -625,8 +625,8 @@ export default function App(): React.JSX.Element {
     setView("workspace");
     setSidebarOpen(false);
   };
-  const planConversationDrop = (conversationId: string, target: SplitPaneOwner, zone: SplitDropZone): SplitDropPlan | null =>
-    planSplitDrop(split.layout, splitOwnerOf(conversationId), target, zone, split.freeOwner);
+  const planConversationDrop = (conversationId: string, target: SplitPaneOwner, zones: readonly SplitDropZone[]): SplitDropPlan | null =>
+    planSplitDrop(split.layout, splitOwnerOf(conversationId), target, zones, split.freeOwner);
   const dropConversationInSplit = (conversationId: string, plan: SplitDropPlan): void => {
     const dropped = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
     if (!conversation || !dropped) return;

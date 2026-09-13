@@ -10,7 +10,7 @@ import {
 } from "../utils/chatDrag";
 import {
   splitDropRect,
-  splitDropZone,
+  splitDropZones,
   type SplitDropZone,
 } from "../utils/splitConversation";
 import {
@@ -27,7 +27,7 @@ interface SplitDropLayerProps {
     | ((
         conversationId: string,
         target: SplitPaneOwner,
-        zone: SplitDropZone,
+        zones: readonly SplitDropZone[],
       ) => SplitDropPlan | null)
     | null;
   onDrop: (conversationId: string, plan: SplitDropPlan) => void;
@@ -58,14 +58,15 @@ export function SplitDropLayer({
           return null;
         }
         const rect = (pane ?? surface).getBoundingClientRect();
-        const zone = splitDropZone(rect, x, y, stackedOnly);
-        const plan = zone
-          ? planDrop(conversationId, owner as SplitPaneOwner, zone)
-          : null;
-        if (!zone || !plan) return null;
+        const plan = planDrop(
+          conversationId,
+          owner as SplitPaneOwner,
+          splitDropZones(rect, x, y, stackedOnly),
+        );
+        if (!plan) return null;
         return plan.kind === "swap" || plan.kind === "replace"
           ? { plan, left: rect.left, top: rect.top, width: rect.width, height: rect.height }
-          : { plan, ...splitDropRect(rect, zone) };
+          : { plan, ...splitDropRect(rect, plan.zone) };
       },
       drop: (conversationId, target) => onDrop(conversationId, target.plan),
     });

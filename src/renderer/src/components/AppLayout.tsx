@@ -94,7 +94,7 @@ interface AppLayoutActions {
   planConversationDrop?: (
     conversationId: string,
     target: SplitPaneOwner,
-    zone: SplitDropZone,
+    zones: readonly SplitDropZone[],
   ) => SplitDropPlan | null;
   dropConversationInSplit?: (conversationId: string, plan: SplitDropPlan) => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   splitDropRect,
   splitDropZone,
+  splitDropZones,
 } from "../../src/renderer/src/utils/splitConversation";
 
 const workspace = { left: 100, top: 50, width: 800, height: 400 };
@@ -27,6 +28,14 @@ describe("split drop zones", () => {
     expect(splitDropZone(workspace, 500, 451, false)).toBeNull();
     expect(splitDropZone({ left: 0, top: 0, width: 0, height: 0 }, 0, 0, false))
       .toBeNull();
+  });
+
+  it("offers the nearest edge first and the nearest edge across it second", () => {
+    expect(splitDropZones(workspace, 120, 250, false)).toEqual(["left", "bottom"]);
+    expect(splitDropZones(workspace, 120, 200, false)).toEqual(["left", "top"]);
+    expect(splitDropZones(workspace, 800, 60, false)).toEqual(["top", "right"]);
+    expect(splitDropZones(workspace, 120, 100, true)).toEqual(["top"]);
+    expect(splitDropZones(workspace, 99, 250, false)).toEqual([]);
   });
 
   it("highlights the half of the workspace the chat will take", () => {

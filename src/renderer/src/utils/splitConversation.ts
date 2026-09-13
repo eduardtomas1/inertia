@@ -34,6 +34,20 @@ export function splitDropZone(
   return relativeY < 0.5 ? "top" : "bottom";
 }
 
+export function splitDropZones(
+  rect: SplitDropRect,
+  x: number,
+  y: number,
+  stackedOnly: boolean,
+): SplitDropZone[] {
+  const zone = splitDropZone(rect, x, y, stackedOnly);
+  if (!zone || stackedOnly) return zone ? [zone] : [];
+  const across: SplitDropZone = zone === "top" || zone === "bottom"
+    ? (x - rect.left) / rect.width < 0.5 ? "left" : "right"
+    : (y - rect.top) / rect.height < 0.5 ? "top" : "bottom";
+  return [zone, across];
+}
+
 export function splitDropRect(
   rect: SplitDropRect,
   zone: SplitDropZone,

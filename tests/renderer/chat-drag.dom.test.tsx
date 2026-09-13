@@ -236,7 +236,7 @@ describe("SplitDropLayer", () => {
     press(screen.getByRole("button", { name: "Chat B" }));
     moveTo(880, 250);
 
-    expect(planDrop).toHaveBeenLastCalledWith("chat-b", "primary", "right");
+    expect(planDrop).toHaveBeenLastCalledWith("chat-b", "primary", ["right", "bottom"]);
     const highlight = document.querySelector<HTMLElement>(".split-drop-highlight");
     expect(highlight).toHaveAttribute("data-split-drop-zone", "right");
     expect(highlight).toHaveAttribute("data-split-drop-action", "insert");
@@ -287,7 +287,7 @@ describe("SplitDropLayer", () => {
     press(screen.getByRole("button", { name: "Chat B" }));
     moveTo(880, 250);
 
-    expect(planDrop).toHaveBeenLastCalledWith("chat-b", "secondary", "right");
+    expect(planDrop).toHaveBeenLastCalledWith("chat-b", "secondary", ["right", "bottom"]);
     const highlight = document.querySelector<HTMLElement>(".split-drop-highlight");
     expect(highlight).toHaveAttribute("data-split-drop-action", "replace");
     expect(highlight).not.toHaveAttribute("data-split-drop-zone");

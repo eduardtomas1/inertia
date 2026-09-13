@@ -234,16 +234,20 @@ export function planSplitDrop(
   layout: SplitLayout,
   dragged: SplitPaneOwner | null,
   target: SplitPaneOwner,
-  zone: SplitDropZone,
+  zones: readonly SplitDropZone[],
   freeOwner: SplitPaneOwner | null,
 ): SplitDropPlan | null {
-  if (dragged === target) return null;
+  if (dragged === target || zones.length === 0) return null;
   if (dragged) {
-    return moveSplitPane(layout, dragged, target, zone)
+    const zone = zones.find((candidate) => moveSplitPane(layout, dragged, target, candidate));
+    return zone
       ? { kind: "move", owner: dragged, target, zone }
       : { kind: "swap", owner: dragged, target };
   }
-  return freeOwner && insertSplitPane(layout, target, zone, freeOwner)
+  const zone = freeOwner
+    ? zones.find((candidate) => insertSplitPane(layout, target, candidate, freeOwner))
+    : undefined;
+  return zone && freeOwner
     ? { kind: "insert", owner: freeOwner, target, zone }
     : { kind: "replace", target };
 }

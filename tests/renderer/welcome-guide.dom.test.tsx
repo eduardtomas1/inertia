@@ -97,6 +97,11 @@ describe("WelcomeGuide", () => {
     const progress = screen.getByRole("progressbar", { name: "Guide progress" });
 
     expect(within(dialog).getByRole("heading", { name: "Welcome to Inertia" })).toBeVisible();
+    expect(within(dialog).getAllByRole("listitem").map((tile) => tile.querySelector("strong")?.textContent))
+      .toEqual(["Follow every agent", "Work side by side", "Review, then ship"]);
+    expect(dialog.querySelectorAll('.welcome-demo[aria-hidden="true"]')).toHaveLength(3);
+    expect([...dialog.querySelectorAll(".welcome-demo.is-compact > .d-stage")].map((stage) => stage.className))
+      .toEqual(["d-stage is-work", "d-stage is-split", "d-stage is-ship"]);
     expect(screen.getByRole("button", { name: "Take the tour" })).toHaveFocus();
     expect(progress).toHaveAttribute("aria-valuetext", "Step 1 of 4: Welcome");
 
@@ -118,6 +123,23 @@ describe("WelcomeGuide", () => {
     expect(guide.onClose).toHaveBeenCalledOnce();
   });
 
+  it("crossfades steps so the body is never empty", async () => {
+    renderGuide();
+    const dialog = screen.getByRole("dialog", { name: "Welcome guide" });
+    fireEvent.click(screen.getByRole("button", { name: "Take the tour" }));
+
+    const steps = [...dialog.querySelectorAll(".welcome-guide-body > .welcome-guide-step")];
+    expect(steps.map((step) => [step.getAttribute("data-step"), step.classList.contains("is-leaving")]))
+      .toEqual([["welcome", true], ["tour", false]]);
+    expect(steps[0]).toHaveAttribute("aria-hidden", "true");
+    expect(steps[0]).toHaveAttribute("inert");
+    expect(document.getElementById(dialog.getAttribute("aria-describedby")!)).toHaveTextContent("How it works");
+    expect(dialog.querySelectorAll(`[id="${dialog.getAttribute("aria-describedby")}"]`)).toHaveLength(1);
+
+    await waitFor(() => expect(dialog.querySelectorAll(".welcome-guide-step")).toHaveLength(1));
+    expect(dialog.querySelector(".welcome-guide-step")).toHaveAttribute("data-step", "tour");
+  });
+
   it("moves with the arrow keys, advances on Enter and closes on Escape", () => {
     const guide = renderGuide();
     fireEvent.keyDown(screen.getByRole("button", { name: "Take the tour" }), { key: "ArrowRight" });
@@ -135,27 +157,36 @@ describe("WelcomeGuide", () => {
     expect(guide.onClose).toHaveBeenCalledOnce();
   });
 
-  it("switches tour topics with up and down without leaving the step", () => {
+  it("switches tour demos with up and down without leaving the step", () => {
     renderGuide();
     fireEvent.click(screen.getByRole("button", { name: "Take the tour" }));
-    const first = screen.getByRole("tab", { name: "Chat with context" });
+    const first = screen.getByRole("tab", { name: "Split view" });
     expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Drag a chat onto the workspace to split it");
+    const box = screen.getByRole("tabpanel").querySelector('.welcome-demo[aria-hidden="true"]');
+    expect(box?.querySelector(".d-stage.is-split")).not.toBeNull();
 
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowDown" });
-    const split = screen.getByRole("tab", { name: "Work side by side" });
-    expect(split).toHaveAttribute("aria-selected", "true");
-    expect(split).toHaveFocus();
-    expect(screen.getByRole("tabpanel")).toHaveTextContent("Open two chats in split view");
+    const work = screen.getByRole("tab", { name: "Work tab" });
+    expect(work).toHaveAttribute("aria-selected", "true");
+    expect(work).toHaveFocus();
+    expect(screen.getByRole("tabpanel").querySelector(".welcome-demo")).toBe(box);
+    expect([...box!.children].map((stage) => stage.className))
+      .toEqual(["d-stage is-split is-leaving", "d-stage is-work"]);
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("Running chats show live progress");
+    expect(screen.getByRole("tabpanel").querySelector(".agent-pixel-loader")).not.toBeNull();
 
-    fireEvent.keyDown(split, { key: "ArrowRight" });
+    fireEvent.keyDown(work, { key: "ArrowRight" });
     expect(screen.getByRole("heading", { name: "How it works" })).toBeVisible();
 
-    fireEvent.keyDown(split, { key: "ArrowUp" });
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Chat with context" }), { key: "ArrowUp" });
-    expect(screen.getByRole("tab", { name: "Usage and limits" })).toHaveAttribute("aria-selected", "true");
-    expect(within(screen.getByRole("list", { name: "Keyboard shortcuts" })).getByText("⌘K"))
-      .toBeVisible();
+    fireEvent.keyDown(work, { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Split view" }), { key: "ArrowUp" });
+    expect(screen.getByRole("tab", { name: "Shortcuts" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel"))
+      .toHaveTextContent("Press ⌘K to search everything and ⌘N for a new chat.");
+    expect([...screen.getByRole("tabpanel").querySelectorAll(".d-key kbd")].map((key) => key.textContent))
+      .toEqual(["⌘K", "⌘N"]);
   });
 
   it("shows each agent's readiness and routes setup to its provider", () => {

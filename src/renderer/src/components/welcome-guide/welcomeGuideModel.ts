@@ -1,5 +1,7 @@
 import type { ProviderInfo } from "@shared/contracts";
 
+import type { WelcomeShortcut } from "../../utils/welcomeGuide";
+
 export const WELCOME_STEPS = [
   { id: "welcome", title: "Welcome", primary: "Take the tour" },
   { id: "tour", title: "How it works", primary: "Connect an agent" },
@@ -7,7 +9,7 @@ export const WELCOME_STEPS = [
   { id: "start", title: "Start", primary: "Start using Inertia" },
 ] as const;
 
-export type WelcomeTopicId = "chat" | "split" | "duo" | "review" | "limits";
+export type WelcomeTopicId = "split" | "work" | "duo" | "ship" | "limits" | "keys";
 
 export const WELCOME_TOPICS: ReadonlyArray<{
   id: WelcomeTopicId;
@@ -15,31 +17,57 @@ export const WELCOME_TOPICS: ReadonlyArray<{
   detail: string;
 }> = [
   {
-    id: "chat",
-    title: "Chat with context",
-    detail: "Attach images and documents, mention files, and choose the model and access mode. Queue follow-ups while an agent works.",
+    id: "split",
+    title: "Split view",
+    detail: "Drag a chat onto the workspace to split it, up to four chats at once.",
   },
   {
-    id: "split",
-    title: "Work side by side",
-    detail: "Open two chats in split view or move one into its own window. Each keeps its own project, files, terminal and draft.",
+    id: "work",
+    title: "Work tab",
+    detail: "Running chats show live progress in the Work tab and check off when they finish.",
   },
   {
     id: "duo",
     title: "Duo",
-    detail: "Send one brief to two agents, then ask a third model to compare what they did.",
+    detail: "Send one brief to two agents, then let a third model judge the results.",
   },
   {
-    id: "review",
+    id: "ship",
     title: "Review and ship",
-    detail: "Inspect diffs, mark reviewed hunks, commit only the files you choose and open a pull request.",
+    detail: "Mark reviewed hunks, commit the files you choose and open a pull request.",
   },
   {
     id: "limits",
-    title: "Usage and limits",
-    detail: "Follow recorded usage and each account's remaining quota and reset time.",
+    title: "Limits",
+    detail: "See each account's remaining quota and next reset at a glance.",
+  },
+  {
+    id: "keys",
+    title: "Shortcuts",
+    detail: "Press {search} to search everything and {newChat} for a new chat.",
   },
 ];
+
+export const WELCOME_TILES: ReadonlyArray<{
+  demo: WelcomeTopicId;
+  title: string;
+  detail: string;
+}> = [
+  { demo: "work", title: "Follow every agent", detail: "Live progress for each running chat." },
+  { demo: "split", title: "Work side by side", detail: "Drag a chat onto the workspace to split it." },
+  { demo: "ship", title: "Review, then ship", detail: "Mark hunks, commit and open a pull request." },
+];
+
+export function topicDetail(
+  detail: string,
+  shortcuts: readonly WelcomeShortcut[],
+): string {
+  const keys = (label: string, fallback: string): string =>
+    shortcuts.find((shortcut) => shortcut.label === label)?.keys ?? fallback;
+  return detail
+    .replace("{search}", keys("Search", "⌘K"))
+    .replace("{newChat}", keys("New chat", "⌘N"));
+}
 
 export type ProviderReadiness = "ready" | "sign-in" | "install" | "checking" | "attention";
 

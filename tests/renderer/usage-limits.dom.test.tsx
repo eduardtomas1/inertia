@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
+import { limitTone, UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
 import type { ServerEvent } from "../../src/shared/contracts";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { usageAccount } from "../helpers/usage-limits";
@@ -16,6 +16,62 @@ function fixture() {
   });
   return { account, request };
 }
+describe("Limits overview", () => {
+  it("summarizes each provider with its logo, tightest window and health tone", async () => {
+    const soon = new Date(Date.now() + 90 * 60000).toISOString();
+    const later = new Date(Date.now() + 2 * 86400000).toISOString();
+    const codex = usageAccount({
+      windows: [
+        { id: "codex:primary", label: "5-hour window", remainingPercent: 64, windowMinutes: 300, resetsAt: soon },
+        { id: "codex:weekly", label: "Weekly", remainingPercent: 12, windowMinutes: 10080, resetsAt: later },
+      ],
+    });
+    const claude = usageAccount({
+      id: "native:claude",
+      providerId: "claude",
+      providerLabel: "Claude",
+      label: "Claude account",
+      identityKey: "account-b",
+      windows: [{ id: "claude:five", label: "Claude · 5 hour", remainingPercent: 35, windowMinutes: 300, resetsAt: soon }],
+      credits: null,
+      canReset: false,
+    });
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: crypto.randomUUID(),
+      result: { kind: "usage.limits", snapshot: { accounts: [codex, claude], sources: [], checkedAt: new Date().toISOString() } },
+    }));
+    render(<UsageLimitsPanel status="online" request={request} />);
+
+    const overview = await screen.findByRole("list", { name: "Limits overview" });
+    const cards = within(overview).getAllByRole("listitem");
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+      "Codex: 12% left in Weekly. 1 account. Next reset in 1h 30m.",
+      "Claude: 35% left in Claude · 5 hour. 1 account. Next reset in 1h 30m.",
+    ]);
+    expect(cards.map((card) => card.dataset.tone)).toEqual(["critical", "low"]);
+    expect(cards[0]!.querySelector('[data-provider-id="codex"]')).not.toBeNull();
+    expect(cards[1]!.querySelector('[data-provider-id="claude"]')).not.toBeNull();
+    expect(cards[0]!.querySelector(".limits-ring")).toHaveTextContent("12");
+
+    const codexRegion = screen.getByRole("region", { name: "Codex limits" });
+    expect(within(codexRegion).getByRole("heading", { level: 3 })).toHaveTextContent("Codex1 account");
+    expect(within(codexRegion).getByRole("button", { name: /Weekly, 12% remaining/ }))
+      .toHaveAttribute("data-tone", "critical");
+    expect(within(codexRegion).getByRole("button", { name: /5-hour window, 64% remaining/ }))
+      .toHaveAttribute("data-tone", "ok");
+    expect(screen.getByRole("button", { name: /1 Codex account pro ready 2 resets/ })).toBeVisible();
+  });
+
+  it("marks stale accounts without a health colour", () => {
+    expect(limitTone(80, true)).toBe("stale");
+    expect(limitTone(null, false)).toBe("unknown");
+    expect(limitTone(50, false)).toBe("ok");
+    expect(limitTone(49, false)).toBe("low");
+    expect(limitTone(19, false)).toBe("critical");
+  });
+});
+
 describe("Limits interface", () => {
   it("keeps identity hidden, opens details by keyboard and requires explicit confirmation", async () => {
     const f = fixture(); const user = userEvent.setup();

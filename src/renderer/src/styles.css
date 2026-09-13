@@ -4812,7 +4812,7 @@ button.environment-row:focus-visible,
   display: grid;
   width: fit-content;
   max-width: 100%;
-  grid-template-columns: 13px minmax(0, 1fr) 12px;
+  grid-template-columns: 13px minmax(0, 1fr) auto 12px;
   align-items: center;
   gap: 7px;
   padding: 5px 7px;
@@ -12168,6 +12168,42 @@ button.sent-attachment-open:focus-visible {
   }
 }
 
+.subagent-squares {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 96px;
+  align-items: center;
+  gap: 2px;
+}
+
+.subagent-squares > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: color-mix(in srgb, var(--text-muted) 50%, transparent);
+}
+
+.subagent-squares > i[data-live="true"] {
+  background: var(--accent);
+}
+
+.subagent-squares > i[data-status="completed"] {
+  background: var(--success-state);
+}
+
+.subagent-squares > i:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) {
+  background: var(--danger);
+}
+
+.subagent-squares > i[data-status="unknown"] {
+  background: var(--warning);
+}
+
+@media (forced-colors: active) {
+  .subagent-squares > i {
+    background: CanvasText;
+  }
+}
 
 .turn-work-log details > summary {
   display: flex;

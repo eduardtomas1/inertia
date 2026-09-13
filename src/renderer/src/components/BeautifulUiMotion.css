@@ -226,16 +226,34 @@
 /* Visual task grammar for live agent actions and delegated work. */
 .agent-activity > .agent-activity-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .subagent-disclosure[data-active="true"] > summary > svg:first-child { color: var(--accent-strong); }
-.subagent-disclosure ol { gap: 6px; margin-top: 6px; }
+.subagent-disclosure ol { gap: 0; margin-top: 3px; }
 .subagent-disclosure li {
-  grid-template-columns: 24px minmax(0, 1fr) auto; padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: 13px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
-  transition: border-radius 300ms cubic-bezier(0.23, 1, 0.32, 1), border-color 150ms ease, background-color 150ms ease;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; min-height: 28px; padding: 3px 6px;
+  border: 0; border-radius: 7px; background: transparent; box-shadow: none;
+  transition: background-color 150ms ease;
 }
-.subagent-disclosure li[data-expanded="true"] { border-radius: 10px; }
-.subagent-disclosure li:hover { border-color: color-mix(in srgb, var(--border-strong) 82%, transparent); background: color-mix(in srgb, var(--surface-muted) 70%, var(--surface)); }
+.subagent-disclosure li[data-expanded="true"] { background: color-mix(in srgb, var(--surface-muted) 52%, transparent); }
+.subagent-disclosure li:is(:hover, :focus-within) { background: color-mix(in srgb, var(--surface-hover) 62%, transparent); }
+.subagent-disclosure li::before { top: -2px; left: -9px; width: 8px; }
+.subagent-disclosure .subagent-status-mark { width: 16px; height: 16px; flex-basis: 16px; }
+.subagent-disclosure .subagent-status-mark::before { width: 9px; height: 9px; }
+.subagent-disclosure .subagent-copy { min-height: 0; }
+.subagent-disclosure .subagent-copy-heading { gap: 7px; align-items: baseline; }
+.subagent-disclosure .subagent-copy-heading strong { flex: 0 1 auto; max-width: 42%; }
+.subagent-disclosure .subagent-copy-heading > small {
+  display: block; flex: 1 1 auto; min-width: 0; padding: 0; border: 0; overflow: hidden;
+  color: var(--text-muted); line-height: inherit; text-overflow: ellipsis; white-space: nowrap;
+}
+.subagent-disclosure .subagent-copy-heading > .subagent-relationship { flex: 0 0 auto; }
+.subagent-lane-state { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.subagent-lane-state .subagent-route { color: var(--text-muted); font-size: var(--ui-font-micro); }
+.subagent-disclosure .subagent-state-pill { min-height: 0; padding: 0; background: transparent; }
+.subagent-disclosure .subagent-row-actions { opacity: 0; transition: opacity 120ms ease; }
+.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }
+.subagent-disclosure .subagent-row-actions button { height: 20px; padding: 0 6px; }
+@media (hover: none) {
+  .subagent-disclosure .subagent-row-actions { opacity: 1; }
+}
 .subagent-status-mark {
   position: relative; display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center;
   border-radius: 50%; color: var(--text-muted); background: color-mix(in srgb, var(--surface-muted) 86%, transparent);

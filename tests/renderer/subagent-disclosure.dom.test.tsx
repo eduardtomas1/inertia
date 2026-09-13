@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -245,6 +246,77 @@ describe("delegated-agent timeline disclosure", () => {
     acknowledgeStop();
     expect(screen.queryByRole("button", { name: /retry/iu }))
       .not.toBeInTheDocument();
+  });
+
+  it("summarises agents as status squares and lays each one out as a calm lane", async () => {
+    const user = userEvent.setup();
+    const parent = trace();
+    const child = trace({
+      id: "trace-child",
+      providerTaskId: "task-child",
+      providerAgentId: "agent-child",
+      parentTraceId: parent.id,
+      parentProviderAgentId: parent.providerAgentId,
+      providerToolUseId: "tool-child",
+      providerName: "Policy reader",
+      providerStatus: "completed",
+      status: "completed",
+      isLive: false,
+      result: "Confirmed the policy.",
+      sequence: 2,
+    });
+    const failed = trace({
+      id: "trace-failed",
+      providerTaskId: "task-failed",
+      providerAgentId: "agent-failed",
+      providerToolUseId: "tool-failed",
+      providerName: "Build verifier",
+      providerStatus: "failed",
+      status: "failed",
+      isLive: false,
+      sequence: 3,
+    });
+    render(
+      <SubagentDisclosure
+        {...DISCLOSURE_OWNER}
+        subagents={[parent, child, failed]}
+        turns={[turn()]}
+        onStopSubagent={async () => undefined}
+        now={NOW}
+      />,
+    );
+
+    const squares = document.querySelector(".subagent-squares");
+    expect(squares).toHaveAttribute("aria-hidden", "true");
+    expect([...squares!.children].map((square) => square.getAttribute("data-status")))
+      .toEqual(["running", "completed", "failed"]);
+    expect(squares!.children[0]).toHaveAttribute("data-live", "true");
+
+    await user.click(screen.getByText(
+      "3 delegated tasks · 1 working · 1 needs review · 1 settled",
+    ).closest("summary")!);
+    const childRow = screen.getByRole("listitem", { name: /Policy reader/u });
+    expect(childRow).toHaveAttribute("data-depth", "1");
+    expect(childRow).toHaveAttribute("title", "Confirmed the policy.");
+    expect(within(childRow).getByText("Child of Evidence scout"))
+      .toHaveClass("visually-hidden");
+    expect(childRow.querySelector(".subagent-lane-state")).toHaveTextContent("Completed");
+    expect(childRow.querySelector(".subagent-lane-state .subagent-route"))
+      .toHaveTextContent("Claude · Agent SDK · 5s");
+
+    const parentRow = screen.getByRole("listitem", { name: /Evidence scout/u });
+    const stop = within(parentRow).getByRole("button", { name: "Stop Evidence scout" });
+    stop.focus();
+    expect(parentRow.querySelector(".subagent-row-actions")).toContainElement(stop);
+
+    const motion = readFileSync("src/renderer/src/components/BeautifulUiMotion.css", "utf8");
+    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+    expect(motion).toContain(
+      '.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }',
+    );
+    expect(motion).toContain("min-height: 28px");
+    expect(styles).toMatch(/\.subagent-disclosure li::before \{[^}]*border-bottom-left-radius/u);
+    expect(styles).toContain('.subagent-disclosure li[data-depth="0"]::before');
   });
 
   it("keeps completed history collapsed until the keyboard-accessible summary opens it", async () => {

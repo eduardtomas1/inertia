@@ -41,7 +41,8 @@ The useful changes in each Inertia release, in plain language.
   pushed while unrelated edits remain.
 - Branch search and arrow-key navigation stay usable during a background
   refresh. Selections wait for fresh results; changing the query or moving
-  focus cancels a waiting selection.
+  focus cancels a waiting selection. Branch-name drafts stay editable and
+  focused during refresh, while creation waits for the refreshed list.
 - Git actions keep errors and retry controls near the operation. Branches used
   by other worktrees are identified, and ambiguous remote destinations are
   rejected before a fetch can overwrite another remote's tracking refs.

@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  persistSplitOrientation,
-  readSplitOrientation,
-  SPLIT_ORIENTATION_STORAGE_KEY,
-  splitDropArrangement,
   splitDropRect,
   splitDropZone,
 } from "../../src/renderer/src/utils/splitConversation";
@@ -42,37 +38,5 @@ describe("split drop zones", () => {
       .toEqual({ left: 100, top: 50, width: 800, height: 200 });
     expect(splitDropRect(workspace, "bottom"))
       .toEqual({ left: 100, top: 250, width: 800, height: 200 });
-  });
-
-  it("places the dropped chat on the chosen side", () => {
-    expect(splitDropArrangement("left", false))
-      .toEqual({ orientation: "columns", secondaryFirst: true });
-    expect(splitDropArrangement("right", false))
-      .toEqual({ orientation: "columns", secondaryFirst: false });
-    expect(splitDropArrangement("top", false))
-      .toEqual({ orientation: "rows", secondaryFirst: true });
-    expect(splitDropArrangement("bottom", false))
-      .toEqual({ orientation: "rows", secondaryFirst: false });
-    expect(splitDropArrangement("left", true))
-      .toEqual({ orientation: "columns", secondaryFirst: false });
-    expect(splitDropArrangement("bottom", true))
-      .toEqual({ orientation: "rows", secondaryFirst: true });
-  });
-
-  it("persists the orientation and falls back to side by side", () => {
-    const stored = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => stored.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        stored.set(key, value);
-      },
-    };
-
-    expect(readSplitOrientation(storage)).toBe("columns");
-    persistSplitOrientation(storage, "rows");
-    expect(stored.get(SPLIT_ORIENTATION_STORAGE_KEY)).toBe("rows");
-    expect(readSplitOrientation(storage)).toBe("rows");
-    stored.set(SPLIT_ORIENTATION_STORAGE_KEY, "diagonal");
-    expect(readSplitOrientation(storage)).toBe("columns");
   });
 });

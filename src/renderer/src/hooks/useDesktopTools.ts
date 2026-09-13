@@ -7,10 +7,11 @@ import {
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
 } from "@shared/attachments";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
+import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 
 interface DesktopToolsOptions {
   setActionError: (message: string | null) => void;
-  previewOwnerId?: "primary" | "secondary";
+  previewOwnerId?: WorkspacePreviewOwner;
   previewContextId?: string | null;
 }
 
@@ -21,7 +22,7 @@ interface OwnedPreviewState {
 }
 
 interface PreviewConnection {
-  ownerId: "primary" | "secondary";
+  ownerId: WorkspacePreviewOwner;
   contextId: string;
   connectionId: string;
 }

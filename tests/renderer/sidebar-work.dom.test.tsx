@@ -141,7 +141,7 @@ function renderSidebar(
     onOpenHome,
     onImportProject: vi.fn(),
     onSelectConversation,
-    splitConversationId: options.splitConversationId ?? null,
+    splitConversationIds: new Set(options.splitConversationId ? [options.splitConversationId] : []),
     detachedConversationIds: options.detachedConversationIds,
     onOpenConversationInSplit: vi.fn(),
     onCloseConversationSplit: vi.fn(),

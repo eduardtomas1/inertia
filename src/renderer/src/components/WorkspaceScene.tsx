@@ -24,7 +24,7 @@ import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
 import type { EnvironmentPanelProps } from "./EnvironmentPanel";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
-import type { SplitOrientation } from "../utils/splitConversation";
+import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadFilesPanel,
@@ -101,6 +101,17 @@ export interface ConversationPaneScene {
   tools: WorkspaceToolScene | null;
 }
 
+export interface SplitPaneDetails {
+  owner: SplitPaneOwner;
+  conversationId: string;
+  title: string;
+  projectName: string;
+  toolsOpen: boolean;
+  onToggleTools: () => void;
+  onOpenInWindow?: () => void;
+  scene: ConversationPaneScene | null;
+}
+
 export interface WorkspaceSceneProps {
   view: "workspace" | "settings";
   settings: SettingsViewProps;
@@ -108,24 +119,10 @@ export interface WorkspaceSceneProps {
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
   splitScene?: {
-    secondary: ConversationPaneScene;
-    primaryTitle: string;
-    secondaryTitle: string;
-    primaryProjectName: string;
-    secondaryProjectName: string;
-    primaryToolsOpen: boolean;
-    secondaryToolsOpen: boolean;
-    secondaryFirst: boolean;
-    orientation?: SplitOrientation;
-    primaryConversationId?: string;
-    secondaryConversationId?: string;
-    onTogglePrimaryTools: () => void;
-    onToggleSecondaryTools: () => void;
-    onSwapPanes: () => void;
-    onCloseSecondary: () => void;
-    onToggleOrientation?: () => void;
-    onOpenPrimaryInWindow?: () => void;
-    onOpenSecondaryInWindow?: () => void;
+    layout: SplitLayout;
+    panes: SplitPaneDetails[];
+    onLayoutChange: (layout: SplitLayout) => void;
+    onClosePane: (owner: SplitPaneOwner) => void;
   } | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
@@ -247,38 +244,27 @@ function WorkspaceSceneView({
           : <LoadingMark label="Loading settings" />
       ) : splitScene ? (
         <ConversationSplitView
-          primary={(
-            <ConversationPane
-              owner="primary"
-              detachedChat={detachedChat}
-              detailState={detailState}
-              chat={chat}
-              resizeHandle={resizeHandle}
-              tools={tools}
-            />
-          )}
-          secondary={(
-            <ConversationPane owner="secondary" {...splitScene.secondary} />
-          )}
-          primaryTitle={splitScene.primaryTitle}
-          secondaryTitle={splitScene.secondaryTitle}
-          primaryProjectName={splitScene.primaryProjectName}
-          secondaryProjectName={splitScene.secondaryProjectName}
-          primaryToolsOpen={splitScene.primaryToolsOpen}
-          secondaryToolsOpen={splitScene.secondaryToolsOpen}
-          secondaryFirst={splitScene.secondaryFirst}
-          orientation={splitScene.orientation}
-          primaryConversationId={splitScene.primaryConversationId}
-          secondaryConversationId={splitScene.secondaryConversationId}
-          onTogglePrimaryTools={splitScene.onTogglePrimaryTools}
-          onToggleSecondaryTools={splitScene.onToggleSecondaryTools}
-          onSwapPanes={splitScene.onSwapPanes}
-          onCloseSecondary={splitScene.onCloseSecondary}
-          onToggleOrientation={splitScene.onToggleOrientation}
-          onOpenPrimaryInWindow={detachedChat?.windowOpen
-            ? undefined
-            : splitScene.onOpenPrimaryInWindow}
-          onOpenSecondaryInWindow={splitScene.onOpenSecondaryInWindow}
+          layout={splitScene.layout}
+          onLayoutChange={splitScene.onLayoutChange}
+          onClosePane={splitScene.onClosePane}
+          panes={splitScene.panes.map((pane) => ({
+            ...pane,
+            onOpenInWindow: pane.owner === "primary" && detachedChat?.windowOpen
+              ? undefined
+              : pane.onOpenInWindow,
+            content: pane.scene ? (
+              <ConversationPane owner={pane.owner} {...pane.scene} />
+            ) : (
+              <ConversationPane
+                owner="primary"
+                detachedChat={detachedChat}
+                detailState={detailState}
+                chat={chat}
+                resizeHandle={resizeHandle}
+                tools={tools}
+              />
+            ),
+          }))}
         />
       ) : detachedChat ? (
         <DetachedConversationPlaceholder {...detachedChat} />

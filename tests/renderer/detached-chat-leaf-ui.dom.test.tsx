@@ -135,7 +135,7 @@ describe("detached chat leaf controls", () => {
         conversation={conversation}
         isDetached
         runs={[]}
-        splitConversationId={null}
+        splitConversationIds={new Set()}
         thread={{
           conversation,
           run: null,
@@ -225,21 +225,34 @@ describe("detached chat leaf controls", () => {
     const openSecondary = vi.fn();
     render(
       <ConversationSplitView
-        primary={<span>Primary transcript</span>}
-        secondary={<span>Secondary transcript</span>}
-        primaryTitle="Primary routing"
-        secondaryTitle="Secondary focus"
-        primaryProjectName="Inertia"
-        secondaryProjectName="Desktop"
-        primaryToolsOpen={false}
-        secondaryToolsOpen={false}
-        secondaryFirst={false}
-        onTogglePrimaryTools={noOp}
-        onToggleSecondaryTools={noOp}
-        onSwapPanes={noOp}
-        onCloseSecondary={noOp}
-        onOpenPrimaryInWindow={openPrimary}
-        onOpenSecondaryInWindow={openSecondary}
+        layout={{
+          axis: "columns",
+          ratio: 50,
+          first: { owner: "primary" },
+          second: { owner: "secondary" },
+        }}
+        panes={[
+          {
+            owner: "primary",
+            content: <span>Primary transcript</span>,
+            title: "Primary routing",
+            projectName: "Inertia",
+            toolsOpen: false,
+            onToggleTools: noOp,
+            onOpenInWindow: openPrimary,
+          },
+          {
+            owner: "secondary",
+            content: <span>Secondary transcript</span>,
+            title: "Secondary focus",
+            projectName: "Desktop",
+            toolsOpen: false,
+            onToggleTools: noOp,
+            onOpenInWindow: openSecondary,
+          },
+        ]}
+        onLayoutChange={noOp}
+        onClosePane={noOp}
       />,
     );
 
@@ -278,7 +291,7 @@ describe("detached chat leaf controls", () => {
         layoutWidth={276}
         detachedConversationIds={new Set([conversation.id])}
         detachedChatLimitReached={false}
-        splitConversationId={null}
+        splitConversationIds={new Set()}
         dailyWorkOpen={false}
         onClose={noOp}
         onViewChange={noOp}

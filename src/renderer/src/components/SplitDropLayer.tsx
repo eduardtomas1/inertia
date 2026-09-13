@@ -13,18 +13,29 @@ import {
   splitDropZone,
   type SplitDropZone,
 } from "../utils/splitConversation";
+import {
+  PINNED_SPLIT_OWNERS,
+  type SplitDropPlan,
+  type SplitPaneOwner,
+} from "../utils/splitLayout";
+
+const PANE_OWNERS: readonly string[] = ["primary", ...PINNED_SPLIT_OWNERS];
 
 interface SplitDropLayerProps {
   surfaceRef: RefObject<HTMLElement | null>;
-  activeConversationId: string | null;
-  splitConversationId: string | null;
-  onDrop: ((conversationId: string, zone: SplitDropZone) => void) | null;
+  planDrop:
+    | ((
+        conversationId: string,
+        target: SplitPaneOwner,
+        zone: SplitDropZone,
+      ) => SplitDropPlan | null)
+    | null;
+  onDrop: (conversationId: string, plan: SplitDropPlan) => void;
 }
 
 export function SplitDropLayer({
   surfaceRef,
-  activeConversationId,
-  splitConversationId,
+  planDrop,
   onDrop,
 }: SplitDropLayerProps): React.JSX.Element | null {
   const drag = useSyncExternalStore(subscribeChatDrag, currentChatDrag);
@@ -32,41 +43,55 @@ export function SplitDropLayer({
   useNativePreviewSuspension(drag !== null);
 
   useEffect(() => {
-    if (!onDrop) return;
+    if (!planDrop) return;
     return registerChatDropTarget({
       resolve: (conversationId, x, y) => {
         const surface = surfaceRef.current;
+        const hit = document.elementFromPoint(x, y);
+        if (!surface || !hit || !surface.contains(hit)) return null;
+        const pane = hit.closest<HTMLElement>("[data-split-pane-owner]");
+        const owner = pane?.dataset.splitPaneOwner ?? "primary";
         if (
-          !surface
-          || (conversationId === activeConversationId && !splitConversationId)
+          (!pane && surface.querySelector(".conversation-split-view"))
+          || !PANE_OWNERS.includes(owner)
         ) {
           return null;
         }
-        const hit = document.elementFromPoint(x, y);
-        if (!hit || !surface.contains(hit)) return null;
-        const rect = surface.getBoundingClientRect();
+        const rect = (pane ?? surface).getBoundingClientRect();
         const zone = splitDropZone(rect, x, y, stackedOnly);
-        return zone ? { zone, ...splitDropRect(rect, zone) } : null;
+        const plan = zone
+          ? planDrop(conversationId, owner as SplitPaneOwner, zone)
+          : null;
+        if (!zone || !plan) return null;
+        return plan.kind === "swap" || plan.kind === "replace"
+          ? { plan, left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+          : { plan, ...splitDropRect(rect, zone) };
       },
-      drop: onDrop,
+      drop: (conversationId, target) => onDrop(conversationId, target.plan),
     });
-  }, [activeConversationId, onDrop, splitConversationId, stackedOnly, surfaceRef]);
+  }, [onDrop, planDrop, stackedOnly, surfaceRef]);
 
   if (!drag) return null;
+  const target = drag.target;
   return createPortal(
     <>
-      {drag.target && (
+      {target && (
         <div
           className="split-drop-highlight"
-          data-split-drop-zone={drag.target.zone}
+          data-split-drop-action={target.plan.kind}
+          data-split-drop-zone={"zone" in target.plan ? target.plan.zone : undefined}
           aria-hidden="true"
           style={{
-            left: drag.target.left,
-            top: drag.target.top,
-            width: drag.target.width,
-            height: drag.target.height,
+            left: target.left,
+            top: target.top,
+            width: target.width,
+            height: target.height,
           }}
-        />
+        >
+          {target.plan.kind === "replace"
+            ? "Replace chat"
+            : target.plan.kind === "swap" ? "Swap chats" : null}
+        </div>
       )}
       <div
         className="chat-drag-chip"

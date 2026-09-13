@@ -82,11 +82,12 @@ interface ConversationActionsMenuProps {
   detachedChatLimitReached?: boolean;
   isDetached?: boolean;
   runs: readonly WorkspaceRun[];
-  splitConversationId: string | null;
+  splitConversationIds: ReadonlySet<string>;
+  splitViewFull?: boolean;
   thread: SidebarThreadView;
   onAcknowledgeRun: (run: WorkspaceRun) => void;
   onArchiveConversation: (conversation: Conversation) => void;
-  onCloseConversationSplit: () => void;
+  onCloseConversationSplit: (conversation: Conversation) => void;
   onDeleteConversation: (conversation: Conversation) => void;
   onDismiss: (reason: DismissReason) => void;
   onDismissRun: (run: WorkspaceRun) => void;
@@ -113,7 +114,8 @@ export function ConversationActionsMenu({
   detachedChatLimitReached = false,
   isDetached = false,
   runs,
-  splitConversationId,
+  splitConversationIds,
+  splitViewFull = false,
   thread,
   onAcknowledgeRun,
   onArchiveConversation,
@@ -180,6 +182,7 @@ export function ConversationActionsMenu({
     && conversation.status !== "needs-input";
   const canOpenInSplit = Boolean(
     !isDetached
+    && !splitViewFull
     && activeConversationId
     && activeConversationId !== conversation.id,
   );
@@ -250,10 +253,10 @@ export function ConversationActionsMenu({
           {isDetached ? "Focus chat window" : "Open chat in new window"}
         </ConversationMenuItem>
       )}
-      {splitConversationId === conversation.id ? (
+      {splitConversationIds.has(conversation.id) ? (
         <ConversationMenuItem
           {...itemProps}
-          onActivate={onCloseConversationSplit}
+          onActivate={() => onCloseConversationSplit(conversation)}
         >
           <Columns2 size={13} />Remove from split view
         </ConversationMenuItem>
@@ -265,7 +268,9 @@ export function ConversationActionsMenu({
             ? undefined
             : isDetached
               ? "This chat is already open in its own window."
-              : "Choose another chat first."}
+              : splitViewFull
+                ? "Split view already shows four chats."
+                : "Choose another chat first."}
           onActivate={() => onOpenConversationInSplit(conversation)}
         >
           <Columns2 size={13} />Add this chat to split view

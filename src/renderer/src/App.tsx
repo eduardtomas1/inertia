@@ -38,7 +38,8 @@ import { useStableActions, useStableController } from "./hooks/useStableControll
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
-import { useSplitWorkspaceScene } from "./hooks/useSplitWorkspaceScene";
+import { useSplitPanes } from "./hooks/useSplitPanes";
+import { useSplitPaneScenes } from "./hooks/useSplitPaneScenes";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
@@ -47,7 +48,7 @@ import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
-import { focusWorkspacePreviewAddress, routeWorkspaceRunPreview } from "./utils/workspacePreviewFocus";
+import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
   cacheColorTheme,
@@ -61,16 +62,8 @@ import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { planFromText } from "./utils/planFromText";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
-import {
-  persistSplitConversationId,
-  persistSplitOrientation,
-  readSplitConversationId,
-  readSplitOrientation,
-  resolvedSplitConversation,
-  splitDropArrangement,
-  type SplitDropZone,
-  type SplitOrientation,
-} from "./utils/splitConversation";
+import type { SplitDropZone } from "./utils/splitConversation";
+import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
 import { requestComposerPrefill } from "./utils/composerPrefill";
@@ -132,18 +125,25 @@ export default function App(): React.JSX.Element {
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
-  const [splitConversationId, setSplitConversationId] = useState<string | null>(
-    () => readSplitConversationId(window.localStorage),
-  );
   const [suppressedMainConversationIds, setSuppressedMainConversationIds] =
     useState<Set<string>>(() => new Set());
-  const [secondaryPaneFirst, setSecondaryPaneFirst] = useState(false);
-  const [splitOrientation, setSplitOrientation] = useState(() => readSplitOrientation(window.localStorage));
-  const updateSplitOrientation = useCallback((orientation: SplitOrientation) => {
-    setSplitOrientation(orientation);
-    persistSplitOrientation(window.localStorage, orientation);
-  }, []);
-  const splitSelectionTransitionsRef = useRef(0);
+  const split = useSplitPanes({
+    snapshot: connection.snapshot,
+    detachedConversationIds: detachedChats.conversationIds,
+    detachedReady: detachedChats.ready,
+  });
+  const {
+    splitConversationId,
+    splitConversation,
+    splitSelectionTransitionsRef,
+    setSecondaryPaneFirst,
+    updateSplitConversationId,
+    ownerOf: splitOwnerOf,
+    setPaneConversation: setSplitPaneConversation,
+    commitLayout: commitSplitLayout,
+    closePane: closeSplitPane,
+  } = split;
+  const splitActive = split.visibleOwners.length > 0;
   const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
   const legacyWorkspaceStartupMigrationRef = useRef(false);
@@ -213,50 +213,6 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
     [connection.snapshot],
   );
-  const splitConversation = useMemo(
-    () => resolvedSplitConversation(
-      connection.snapshot,
-      splitConversationId,
-    ),
-    [connection.snapshot, splitConversationId],
-  );
-  const updateSplitConversationId = useCallback(
-    (conversationId: string | null) => {
-      setSplitConversationId(conversationId);
-      setSecondaryPaneFirst(false);
-      persistSplitConversationId(window.localStorage, conversationId);
-    },
-    [],
-  );
-  useEffect(() => {
-    if (
-      splitSelectionTransitionsRef.current > 0
-      || !connection.snapshot
-      || !splitConversationId
-      || splitConversation
-    ) {
-      return;
-    }
-    updateSplitConversationId(null);
-  }, [
-    connection.snapshot,
-    splitConversation,
-    splitConversationId,
-    updateSplitConversationId,
-  ]);
-  const splitConversationDetached = Boolean(
-    splitConversation
-    && detachedChats.conversationIds.has(splitConversation.id),
-  );
-  useEffect(() => {
-    if (detachedChats.ready && splitConversationDetached) {
-      updateSplitConversationId(null);
-    }
-  }, [
-    detachedChats.ready,
-    splitConversationDetached,
-    updateSplitConversationId,
-  ]);
   const effectiveWorkspaceStartupSurface = legacyWorkspaceStartup?.surface
     ?? settings.workspaceStartupSurface;
   const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
@@ -278,15 +234,12 @@ export default function App(): React.JSX.Element {
   const primaryPaneLayout = useConversationPaneLayout(
     connection.snapshot?.activeConversationId ?? null,
   );
-  const secondaryPaneLayout = useConversationPaneLayout(
-    splitConversation?.id ?? null,
-  );
-  const primarySceneLayout = splitConversation
+  const primarySceneLayout = splitActive
     ? primaryPaneLayout
     : workspaceLayout;
   const sceneActiveTool = primarySceneLayout.activeTool;
   const sceneSetActiveTool = primarySceneLayout.setActiveTool;
-  const sceneToggleWorkspaceTools = splitConversation
+  const sceneToggleWorkspaceTools = splitActive
     ? primaryPaneLayout.toggleWorkspaceTools
     : toggleWorkspaceTools;
   const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
@@ -588,6 +541,7 @@ export default function App(): React.JSX.Element {
     conversationSelectionGenerationRef, splitSelectionTransitionsRef,
     setSuppressedMainConversationIds, setSecondaryPaneFirst,
     selectConversationCommand, updateSplitConversationId, request, setActionError,
+    extraSplitPanes: split.extraPanes,
   });
   const openConversationInWindow = useCallback((
     nextConversation: Conversation,
@@ -605,14 +559,15 @@ export default function App(): React.JSX.Element {
     const wasSuppressed = suppressedMainConversationIds.has(
       nextConversation.id,
     );
-    const wasSplit = splitConversationId === nextConversation.id;
+    const splitOwner = splitOwnerOf(nextConversation.id);
+    const pinnedOwner = splitOwner === "primary" ? null : splitOwner;
     setSuppressedMainConversationIds((current) => {
       if (current.has(nextConversation.id)) return current;
       const next = new Set(current);
       next.add(nextConversation.id);
       return next;
     });
-    if (wasSplit) updateSplitConversationId(null);
+    if (pinnedOwner) setSplitPaneConversation(pinnedOwner, null);
 
     // Let React unmount the current composer before the second renderer owns it.
     void new Promise<void>((resolve) => window.requestAnimationFrame(() => {
@@ -629,7 +584,7 @@ export default function App(): React.JSX.Element {
           return next;
         });
       }
-      if (wasSplit) updateSplitConversationId(nextConversation.id);
+      if (pinnedOwner) setSplitPaneConversation(pinnedOwner, nextConversation.id);
       setActionError(error instanceof Error
         ? error.message
         : "The chat window could not be opened.");
@@ -637,10 +592,18 @@ export default function App(): React.JSX.Element {
   }, [
     detachedChats,
     selectConversation,
-    splitConversationId,
+    setSplitPaneConversation,
+    splitOwnerOf,
     suppressedMainConversationIds,
-    updateSplitConversationId,
   ]);
+  const showConversationInMain = (conversationId: string): void => {
+    setSuppressedMainConversationIds((current) => {
+      if (!current.has(conversationId)) return current;
+      const next = new Set(current);
+      next.delete(conversationId);
+      return next;
+    });
+  };
   const openConversationInSplit = (nextConversation: Conversation): void => {
     if (
       !conversation
@@ -653,27 +616,34 @@ export default function App(): React.JSX.Element {
       selectConversation(nextConversation);
       return;
     }
+    const owner = split.freeOwner;
+    if (!owner || splitOwnerOf(nextConversation.id)) return;
     exitGlobalChat();
-    setSuppressedMainConversationIds((current) => {
-      if (!current.has(nextConversation.id)) return current;
-      const next = new Set(current);
-      next.delete(nextConversation.id);
-      return next;
-    });
-    updateSplitConversationId(nextConversation.id);
+    showConversationInMain(nextConversation.id);
+    if (owner === "secondary") updateSplitConversationId(nextConversation.id);
+    else setSplitPaneConversation(owner, nextConversation.id);
     setView("workspace");
     setSidebarOpen(false);
   };
-  const dropConversationInSplit = (conversationId: string, zone: SplitDropZone): void => {
+  const planConversationDrop = (conversationId: string, target: SplitPaneOwner, zone: SplitDropZone): SplitDropPlan | null =>
+    planSplitDrop(split.layout, splitOwnerOf(conversationId), target, zone, split.freeOwner);
+  const dropConversationInSplit = (conversationId: string, plan: SplitDropPlan): void => {
     const dropped = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
-    if (!conversation || !dropped || (dropped.id === conversation.id && !splitConversation)) return;
-    if (dropped.id !== conversation.id && dropped.id !== splitConversation?.id) {
-      if (dropped.archivedAt !== null || detachedChats.conversationIds.has(dropped.id)) return;
-      openConversationInSplit(dropped);
+    if (!conversation || !dropped) return;
+    if (plan.kind === "move" || plan.kind === "swap") {
+      commitSplitLayout(applySplitDrop(split.layout, plan));
+      return;
     }
-    const arrangement = splitDropArrangement(zone, dropped.id === conversation.id);
-    updateSplitOrientation(arrangement.orientation);
-    setSecondaryPaneFirst(arrangement.secondaryFirst);
+    if (dropped.archivedAt !== null || detachedChats.conversationIds.has(dropped.id) || splitOwnerOf(dropped.id)) return;
+    if (plan.kind === "replace" && plan.target === "primary") {
+      selectConversation(dropped, { keepPaneOrder: true });
+      return;
+    }
+    exitGlobalChat();
+    showConversationInMain(dropped.id);
+    const owner = plan.kind === "insert" ? plan.owner : plan.target;
+    if (owner !== "primary") setSplitPaneConversation(owner, dropped.id);
+    if (plan.kind === "insert") commitSplitLayout(applySplitDrop(split.layout, plan));
   };
   const activatePrimaryRunContext = (
     activity: PreviewWorkspaceRun,
@@ -1009,103 +979,48 @@ export default function App(): React.JSX.Element {
     workspaceTools,
     workspaceToolsUnavailable,
   ]);
-  const splitWorkspace = useSplitWorkspaceScene({
+  const splitPanes = useSplitPaneScenes({
+    split,
+    shared: {
+      snapshotProjects: connection.snapshot?.projects ?? [],
+      settings,
+      connection,
+      providerMaintenance,
+      backendProfileActions,
+      appUpdate,
+      busyAction,
+      setBusyAction,
+      setActionError,
+      gitRefreshVersion,
+      request,
+      actions: {
+        importProject,
+        createConversation,
+        respondToApproval,
+        respondToInput,
+        updateSettings,
+        chooseCodexBinary,
+        refreshProvider,
+        connectProvider,
+        openProviderSetup,
+        openBackendSetup,
+        openSettings: () => navigateToView("settings"),
+        openProjectPath,
+        sendMessageToConversation,
+        compactConversation: compactConversationById,
+        updateConversationById,
+      },
+      sendingConversationIds,
+      onTerminal: () => setGitRefreshVersion((version) => version + 1),
+    },
+    visible: browserWorkspaceVisible,
     conversation,
     project,
-    splitConversation,
-    visible: browserWorkspaceVisible && !splitConversationDetached,
-    layout: secondaryPaneLayout,
-    snapshotProjects: connection.snapshot?.projects ?? [],
-    settings,
-    connection,
-    providerMaintenance,
-    backendProfileActions,
-    appUpdate,
-    busyAction,
-    setBusyAction,
-    setActionError,
-    gitRefreshVersion,
-    request,
-    actions: {
-      importProject,
-      createConversation,
-      respondToApproval,
-      respondToInput,
-      updateSettings,
-      chooseCodexBinary,
-      refreshProvider,
-      connectProvider,
-      openProviderSetup,
-      openBackendSetup,
-      openSettings: () => navigateToView("settings"),
-      openProjectPath,
-      sendMessageToConversation,
-      compactConversation: compactConversationById,
-      updateConversationById,
-    },
-    sendingConversationIds,
-    secondaryPaneFirst,
-    primaryToolsOpen: primaryPaneLayout.activeTool !== null,
-    onTogglePrimaryTools: primaryPaneLayout.toggleWorkspaceTools,
-    onSwapPanes: () => setSecondaryPaneFirst((current) => !current),
-    onCloseSecondary: () => updateSplitConversationId(null),
-    onSecondaryConversationCreated: updateSplitConversationId,
-    onTerminal: () => setGitRefreshVersion((version) => version + 1),
-  });
-  const openWorkspaceRunPreview = useCallback((run: PreviewWorkspaceRun) => {
-    routeWorkspaceRunPreview(
-      run,
-      splitConversation?.id ?? null,
-      openPrimaryWorkspaceRunPreview,
-      splitWorkspace.openWorkspaceRunPreview,
-    );
-  }, [
-    openPrimaryWorkspaceRunPreview,
-    splitConversation?.id,
-    splitWorkspace,
-  ]);
-  const visibleSplitScene = useMemo(() => {
-    if (splitConversationDetached) return null;
-    const splitScene = splitWorkspace.scene;
-    if (!splitScene) return null;
-    const secondaryTools = splitScene?.secondary.tools;
-    const paneDetails = {
-      primaryConversationId: conversation?.id,
-      secondaryConversationId: splitConversation?.id,
-      orientation: splitOrientation,
-      onToggleOrientation: () => updateSplitOrientation(splitOrientation === "rows" ? "columns" : "rows"),
-      onOpenPrimaryInWindow: conversation
-        ? () => openConversationInWindow(conversation)
-        : undefined,
-      onOpenSecondaryInWindow: splitConversation
-        ? () => openConversationInWindow(splitConversation)
-        : undefined,
-    };
-    if (!secondaryTools) return { ...splitScene, ...paneDetails };
-    return {
-      ...splitScene,
-      ...paneDetails,
-      secondary: {
-        ...splitScene.secondary,
-        tools: {
-          ...secondaryTools,
-          environment: {
-            ...secondaryTools.environment,
-            onOpenRunPreview: openWorkspaceRunPreview,
-          },
-        },
-      },
-    };
-  }, [
-    conversation,
+    primaryLayout: primaryPaneLayout,
     openConversationInWindow,
-    openWorkspaceRunPreview,
-    splitConversation,
-    splitConversationDetached,
-    splitOrientation,
-    splitWorkspace.scene,
-    updateSplitOrientation,
-  ]);
+    openPrimaryWorkspaceRunPreview,
+  });
+  const openWorkspaceRunPreview = splitPanes.openWorkspaceRunPreview;
   const primaryConversationSuppressed = Boolean(
     conversation && (
       suppressedMainConversationIds.has(conversation.id)
@@ -1132,7 +1047,7 @@ export default function App(): React.JSX.Element {
       windowOpen: detachedChats.conversationIds.has(conversation.id),
       onActivate: () => selectConversation(conversation),
     } : null,
-    splitScene: visibleSplitScene,
+    splitScene: splitPanes.splitScene,
   }), [
     conversation,
     detachedChats.conversationIds,
@@ -1140,7 +1055,7 @@ export default function App(): React.JSX.Element {
     primaryConversationSuppressed,
     selectConversation,
     sendingConversationIds,
-    visibleSplitScene,
+    splitPanes.splitScene,
     workspaceScene,
   ]);
 
@@ -1178,7 +1093,8 @@ export default function App(): React.JSX.Element {
       project={composerProject}
       conversation={conversation}
       headerConversation={draftConversation.conversation ?? conversation}
-      splitConversationId={splitConversation?.id ?? null}
+      splitConversationIds={split.splitConversationIds}
+      splitViewFull={!split.freeOwner}
       detachedConversationIds={detachedChats.conversationIds}
       detachedChatLimitReached={detachedChats.atLimit}
       conversationSuppressedInMain={primaryConversationSuppressed}
@@ -1213,7 +1129,11 @@ export default function App(): React.JSX.Element {
         selectMessage: (hit, signal) => selectMessage(hit, () => setView("workspace"), signal),
         openConversationInSplit,
         openConversationInWindow,
-        closeConversationSplit: () => updateSplitConversationId(null),
+        closeConversationSplit: (target) => {
+          const owner = splitOwnerOf(target.id);
+          if (owner) closeSplitPane(owner);
+        },
+        planConversationDrop,
         dropConversationInSplit,
         openProviderSetup,
         openBackendSetup,

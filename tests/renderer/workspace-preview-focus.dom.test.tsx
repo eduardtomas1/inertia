@@ -28,21 +28,22 @@ describe("workspace preview focus", () => {
     const primary = { id: "primary-run", conversationId: "primary-chat" };
     const sibling = { id: "sibling-run", conversationId: "secondary-chat" };
 
-    routeWorkspaceRunPreview(
-      primary,
-      "secondary-chat",
-      openPrimary,
-      openSecondary,
-    );
-    routeWorkspaceRunPreview(
-      sibling,
-      "secondary-chat",
-      openPrimary,
-      openSecondary,
-    );
+    const openFourth = vi.fn();
+    const fourth = { id: "fourth-run", conversationId: "fourth-chat" };
+    const panes = [
+      ["secondary-chat", openSecondary],
+      [null, openFourth],
+      ["fourth-chat", openFourth],
+    ] as const;
+
+    routeWorkspaceRunPreview(primary, panes, openPrimary);
+    routeWorkspaceRunPreview(sibling, panes, openPrimary);
+    routeWorkspaceRunPreview(fourth, panes, openPrimary);
 
     expect(openPrimary).toHaveBeenCalledWith(primary);
     expect(openSecondary).toHaveBeenCalledWith(sibling);
+    expect(openFourth).toHaveBeenCalledOnce();
+    expect(openFourth).toHaveBeenCalledWith(fourth);
   });
 
   it("focuses the standalone primary preview address", () => {

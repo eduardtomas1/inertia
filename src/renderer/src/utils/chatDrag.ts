@@ -1,6 +1,7 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import type { SplitDropRect, SplitDropZone } from "./splitConversation";
+import type { SplitDropRect } from "./splitConversation";
+import type { SplitDropPlan } from "./splitLayout";
 
 export interface ChatDragSource {
   conversationId: string;
@@ -8,7 +9,7 @@ export interface ChatDragSource {
 }
 
 export interface ChatDragTarget extends SplitDropRect {
-  zone: SplitDropZone;
+  plan: SplitDropPlan;
 }
 
 export interface ChatDrag extends ChatDragSource {
@@ -19,7 +20,7 @@ export interface ChatDrag extends ChatDragSource {
 
 export interface ChatDropTarget {
   resolve: (conversationId: string, x: number, y: number) => ChatDragTarget | null;
-  drop: (conversationId: string, zone: SplitDropZone) => void;
+  drop: (conversationId: string, target: ChatDragTarget) => void;
 }
 
 const DRAG_THRESHOLD_PX = 6;
@@ -127,7 +128,7 @@ export function startChatDrag(
     window.setTimeout(() => {
       window.removeEventListener("click", swallowClick, true);
     }, 0);
-    if (drop && drag?.target) dropTarget?.drop(drag.conversationId, drag.target.zone);
+    if (drop && drag?.target) dropTarget?.drop(drag.conversationId, drag.target);
   }
 
   document.addEventListener("pointermove", move, true);

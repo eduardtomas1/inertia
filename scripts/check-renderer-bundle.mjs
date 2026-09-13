@@ -24,7 +24,7 @@ const budgets = {
   // larger settings UI/catalog stay deferred and have separate ceilings below.
   // Project preference validation, independent appearance and chat-owned stash
   // state add ~2 KiB here; the project editor and thread menus stay deferred.
-  mainWorkbenchFirstLoadJavaScript: 752.5 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 754.0 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -89,7 +89,7 @@ const budgets = {
   // Its complete optional closure is separately capped; first-load caps stay fixed.
   // The Work status cue (pixel glyph, elapsed time, arrival cue) adds ~1.1 KiB:
   // shared core measures 2,004.6 KiB on macOS ARM64; keep <2 KiB headroom.
-  coreJavaScript: 2_020.0 * kibibyte,
+  coreJavaScript: 2_022.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

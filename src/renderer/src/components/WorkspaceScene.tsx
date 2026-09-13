@@ -24,6 +24,7 @@ import { LoadingMark } from "./ui";
 import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
 import type { EnvironmentPanelProps } from "./EnvironmentPanel";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import type { SplitOrientation } from "../utils/splitConversation";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadFilesPanel,
@@ -115,10 +116,14 @@ export interface WorkspaceSceneProps {
     primaryToolsOpen: boolean;
     secondaryToolsOpen: boolean;
     secondaryFirst: boolean;
+    orientation?: SplitOrientation;
+    primaryConversationId?: string;
+    secondaryConversationId?: string;
     onTogglePrimaryTools: () => void;
     onToggleSecondaryTools: () => void;
     onSwapPanes: () => void;
     onCloseSecondary: () => void;
+    onToggleOrientation?: () => void;
     onOpenPrimaryInWindow?: () => void;
     onOpenSecondaryInWindow?: () => void;
   } | null;
@@ -262,10 +267,14 @@ function WorkspaceSceneView({
           primaryToolsOpen={splitScene.primaryToolsOpen}
           secondaryToolsOpen={splitScene.secondaryToolsOpen}
           secondaryFirst={splitScene.secondaryFirst}
+          orientation={splitScene.orientation}
+          primaryConversationId={splitScene.primaryConversationId}
+          secondaryConversationId={splitScene.secondaryConversationId}
           onTogglePrimaryTools={splitScene.onTogglePrimaryTools}
           onToggleSecondaryTools={splitScene.onToggleSecondaryTools}
           onSwapPanes={splitScene.onSwapPanes}
           onCloseSecondary={splitScene.onCloseSecondary}
+          onToggleOrientation={splitScene.onToggleOrientation}
           onOpenPrimaryInWindow={detachedChat?.windowOpen
             ? undefined
             : splitScene.onOpenPrimaryInWindow}

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConversationSplitView,
 } from "../../src/renderer/src/components/ConversationSplitView";
+import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
 
 function matchMedia(matches: boolean): typeof window.matchMedia {
   return vi.fn(() => ({
@@ -299,5 +300,119 @@ describe("ConversationSplitView", () => {
     expect(screen.getByRole("main", {
       name: "Split conversation workspace",
     })).toHaveClass("is-stacked");
+  });
+
+  it("follows the chosen orientation and offers a keyboard toggle", () => {
+    const toggle = vi.fn();
+    const props = {
+      primary: <span>One</span>,
+      secondary: <span>Two</span>,
+      primaryTitle: "One",
+      secondaryTitle: "Two",
+      primaryProjectName: "Alpha",
+      secondaryProjectName: "Beta",
+      primaryToolsOpen: false,
+      secondaryToolsOpen: false,
+      secondaryFirst: false,
+      onTogglePrimaryTools: () => undefined,
+      onToggleSecondaryTools: () => undefined,
+      onSwapPanes: () => undefined,
+      onCloseSecondary: () => undefined,
+      onToggleOrientation: toggle,
+    };
+    const view = render(<ConversationSplitView {...props} orientation="rows" />);
+
+    expect(screen.getByRole("main", {
+      name: "Split conversation workspace",
+    })).toHaveClass("is-stacked");
+    expect(screen.getByRole("separator", {
+      name: "Resize split chats",
+    })).toHaveAttribute("aria-orientation", "horizontal");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Place split chats side by side",
+    }));
+    expect(toggle).toHaveBeenCalledOnce();
+
+    view.rerender(<ConversationSplitView {...props} orientation="columns" />);
+
+    expect(screen.getByRole("main", {
+      name: "Split conversation workspace",
+    })).not.toHaveClass("is-stacked");
+    expect(screen.getByRole("button", { name: "Stack split chats" }))
+      .toBeVisible();
+  });
+
+  it("hides the orientation toggle while narrow layouts force stacking", () => {
+    vi.stubGlobal("matchMedia", matchMedia(true));
+
+    render(
+      <ConversationSplitView
+        primary={<span>One</span>}
+        secondary={<span>Two</span>}
+        primaryTitle="One"
+        secondaryTitle="Two"
+        primaryProjectName="Alpha"
+        secondaryProjectName="Beta"
+        primaryToolsOpen={false}
+        secondaryToolsOpen={false}
+        secondaryFirst={false}
+        orientation="columns"
+        onTogglePrimaryTools={() => undefined}
+        onToggleSecondaryTools={() => undefined}
+        onSwapPanes={() => undefined}
+        onCloseSecondary={() => undefined}
+        onToggleOrientation={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Stack split chats" }))
+      .toBeNull();
+    expect(screen.queryByRole("button", {
+      name: "Place split chats side by side",
+    })).toBeNull();
+  });
+
+  it("drags a pane by its header but never from its buttons", () => {
+    render(
+      <ConversationSplitView
+        primary={<span>One</span>}
+        secondary={<span>Two</span>}
+        primaryTitle="Provider routing"
+        secondaryTitle="Windows focus"
+        primaryProjectName="Inertia"
+        secondaryProjectName="Windows app"
+        primaryToolsOpen={false}
+        secondaryToolsOpen={false}
+        secondaryFirst={false}
+        primaryConversationId="primary-chat"
+        secondaryConversationId="secondary-chat"
+        onTogglePrimaryTools={() => undefined}
+        onToggleSecondaryTools={() => undefined}
+        onSwapPanes={() => undefined}
+        onCloseSecondary={() => undefined}
+      />,
+    );
+    const pointer = { pointerId: 1, buttons: 1 };
+
+    fireEvent.pointerDown(screen.getByRole("button", {
+      name: "Close split chat Windows focus",
+    }), { ...pointer, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(document, { ...pointer, clientX: 60, clientY: 10 });
+    expect(currentChatDrag()).toBeNull();
+    fireEvent.pointerUp(document, { pointerId: 1, buttons: 0 });
+
+    fireEvent.pointerDown(screen.getByTitle("Windows focus"), {
+      ...pointer,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(document, { ...pointer, clientX: 60, clientY: 10 });
+    expect(currentChatDrag()).toMatchObject({
+      conversationId: "secondary-chat",
+      title: "Windows focus",
+    });
+    fireEvent.pointerUp(document, { pointerId: 1, buttons: 0 });
+    expect(currentChatDrag()).toBeNull();
   });
 });

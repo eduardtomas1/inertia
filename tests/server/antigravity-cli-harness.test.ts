@@ -1,6 +1,6 @@
 // @inertia-test-suite portable
 // @inertia-harness antigravity-cli
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -23,12 +23,15 @@ import type {
   ProviderStatusEvent,
   ProviderUsageEvent,
 } from "../../src/server/provider/contracts";
+import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   portableFixtureRoot,
   removePortableFixture,
+  waitFor,
   writeNodeFlagExecutable,
 } from "../helpers/portable-provider-fixture";
+import { activatePreparedRuntimeOwnedProcessRegistry } from "../helpers/prepared-runtime-owned-process-registry";
 import { executableProcessExists } from "../helpers/executable-process";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
@@ -58,9 +61,37 @@ function terminalStatuses(): { statuses: string[]; onStatus: (event: ProviderSta
   };
 }
 
+const registryDeactivators: Array<() => void> = [];
+
 afterEach(async () => {
+  while (registryDeactivators.length > 0) registryDeactivators.pop()?.();
   await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
 });
+
+function ownedProcessRegistry(root: string, label: string): {
+  journal: RuntimeOwnedProcessJournal;
+  runtimeGenerationId: string;
+} {
+  const registryRoot = join(root, "runtime-owned");
+  mkdirSync(registryRoot, { recursive: true });
+  chmodSync(registryRoot, 0o700);
+  const runtimeGenerationId = `62000000-0000-4000-8000-${label}:1`;
+  const deactivate = activatePreparedRuntimeOwnedProcessRegistry(
+    registryRoot,
+    runtimeGenerationId,
+    `test:62000000-0000-4000-8000-${label}`,
+    process.platform === "darwin" || process.platform === "linux"
+      ? {
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
+        }
+      : {},
+  );
+  if (deactivate) registryDeactivators.push(deactivate);
+  return { journal: new RuntimeOwnedProcessJournal(registryRoot), runtimeGenerationId };
+}
 
 function fixtureRoot(label: string): string {
   const root = portableFixtureRoot(label);
@@ -581,6 +612,48 @@ hang();
       },
     });
     expect(result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+  });
+
+  it("retires the runtime guardian's claim when agy exits on its own after a result", async () => {
+    const root = fixtureRoot("antigravity owned natural exit");
+    const { journal, runtimeGenerationId } = ownedProcessRegistry(root, "000000000062");
+    const { command } = fakeAgy(root, `
+emit({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    const recorder = terminalStatuses();
+    await expect(managerFor(command).run(antigravityInput(root, {
+      conversationId: "antigravity-owned-natural-exit",
+    }), { onStatus: recorder.onStatus })).resolves.toMatchObject({
+      status: "completed",
+      text: "Done",
+      cleanupConfirmed: true,
+    });
+    expect(recorder.statuses).toEqual(["completed"]);
+    await waitFor(
+      "the Antigravity runtime-owned process claim to retire",
+      () => journal.records(runtimeGenerationId)?.length === 0,
+    );
+  });
+
+  it("retires the runtime guardian's claim when a running turn is cancelled", async () => {
+    const root = fixtureRoot("antigravity owned cancel");
+    const { journal, runtimeGenerationId } = ownedProcessRegistry(root, "000000000063");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Working" } });
+hang();
+`);
+    const manager = managerFor(command);
+    const input = antigravityInput(root, { conversationId: "antigravity-owned-cancel" });
+    await expect(manager.run(input, {
+      onText: () => {
+        manager.cancel(input.conversationId);
+      },
+    })).resolves.toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    await waitFor(
+      "the cancelled Antigravity runtime-owned process claim to retire",
+      () => journal.records(runtimeGenerationId)?.length === 0,
+    );
   });
 
   it("rejects images and compaction without starting Antigravity", async () => {

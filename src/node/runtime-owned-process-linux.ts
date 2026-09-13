@@ -10,6 +10,12 @@ export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS =
   5 * LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
 const LINUX_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 
+/**
+ * Identity of the packaged reporting/signalling helper executable. These fields
+ * do not attest /proc/<target>/exe: the target is nondumpable. Target authority
+ * comes from privileged spawn admission or validated recorded PID/start identity.
+ * Keep the serialized field names compatible with existing ownership journals.
+ */
 export interface LinuxGuardianExecutableIdentity {
   readonly guardianExecutableDevice: string;
   readonly guardianExecutableInode: string;

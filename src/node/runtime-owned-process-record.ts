@@ -13,6 +13,7 @@ export interface LinuxProcessIdentity {
   readonly parentPid: number;
   readonly processGroupId: number;
   readonly startTimeTicks: string;
+  // Reporting/helper executable identity, not a target /proc/<pid>/exe attestation.
   readonly guardianExecutableDevice?: string;
   readonly guardianExecutableInode?: string;
 }

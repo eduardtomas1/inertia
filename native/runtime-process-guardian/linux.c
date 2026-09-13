@@ -561,6 +561,10 @@ static int terminal_state(int clean, int status) {
 static int identity_mode(const char *raw) {
   pid_t pid, parent = 0; unsigned long long start = 0; if (!parse_pid(raw, &pid)) return 64;
   if (!read_identity(pid, &parent, &start)) return kill(pid, 0) && errno == ESRCH ? 3 : 2;
+  // The last two fields pin this reporting helper, not the target executable.
+  // Nondumpable guardians deny unprivileged /proc/<pid>/exe access. Callers must
+  // obtain the target PID/start from privileged spawn or validated ownership;
+  // process names and this helper identity alone are not target attestation.
   struct stat executable; if (stat("/proc/self/exe", &executable)) return 2;
   printf("%d|%d|%d|%llu|%llu|%llu\n", pid, (int)parent, (int)getpgid(pid), start,
     (unsigned long long)executable.st_dev, (unsigned long long)executable.st_ino);
@@ -619,9 +623,11 @@ static int recover_terminal_mode(int argc, char **argv) {
   if (!parse_pid(argv[2], &pid) || !parse_u64(argv[3], &start)
     || !parse_u64(argv[4], &prior_device) || !parse_u64(argv[5], &prior_inode)
     || !parse_u64(argv[6], &helper_device) || !parse_u64(argv[7], &helper_inode)) return 64;
-  // The prior executable identity is durable evidence that this was an
-  // admitted guardian. It need not match the current packaged helper after an
-  // update, but it must remain present and well-formed in the recovery claim.
+  // The validated ownership claim carries the prior reporting-helper identity.
+  // These fields alone do not prove target admission or target executable identity.
+  // They need not match the current helper after an update, but must remain
+  // present and well-formed. Recovery authority also requires the exact recorded
+  // PID/start and hardened child-free terminal state below.
   (void)prior_device;
   (void)prior_inode;
   struct stat helper;

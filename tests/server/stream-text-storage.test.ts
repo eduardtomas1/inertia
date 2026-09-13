@@ -7,11 +7,13 @@ import { join } from "node:path";
 
 import Database from "better-sqlite3";
 import { removeProjectSettingsFromLegacyFixture } from "../support/legacy-project-settings-schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import {
+  compactMessageContentForTurn,
+  compactReasoningContentForTurn,
   normalizeStreamText,
   splitStreamTextChunks,
   STREAM_TEXT_CHUNK_MAX_CHARACTERS,
@@ -43,6 +45,30 @@ afterEach(() => {
 });
 
 describe("append-oriented stream text persistence", () => {
+  it.each([
+    ["messages", compactMessageContentForTurn],
+    ["agent_reasonings", compactReasoningContentForTurn],
+  ] as const)("settles %s through the existing conversation/turn index", (table, compact) => {
+    const current = runtime();
+    current.store.close();
+    const database = new Database(current.databasePath);
+    const prepare = database.prepare.bind(database);
+    const observed = vi.spyOn(database, "prepare");
+    try {
+      compact(database, "absent-turn", "absent-conversation");
+      const queries = observed.mock.calls.map(([sql]) => sql);
+      expect(queries).toHaveLength(2);
+      for (const sql of queries) {
+        const plan = prepare(`EXPLAIN QUERY PLAN ${sql}`).all("absent-conversation", "absent-turn") as { detail: string }[];
+        expect(plan.some(({ detail }) => detail.includes(`SEARCH ${table} USING`)
+          && detail.includes("conversation_id=? AND turn_id=?"))).toBe(true);
+        expect(plan.some(({ detail }) => detail.startsWith(`SCAN ${table}`))).toBe(false);
+      }
+    } finally {
+      observed.mockRestore();
+      database.close();
+    }
+  });
   it("counts UTF-8 boundaries after explicitly normalizing lone surrogates", () => {
     const value = "\0A\u007f\u0080\u07ff\u0800\ud800😀";
     const normalized = "\0A\u007f\u0080\u07ff\u0800\ufffd😀";

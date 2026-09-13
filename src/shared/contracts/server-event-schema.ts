@@ -1,3 +1,4 @@
+import { authoritativeRunState } from "./run-state-schema";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -62,9 +63,6 @@ function oneOf(value: UnknownRecord, key: string, options: readonly string[]): b
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, PROVIDER_IDS);
 }
-function authoritativeRunState(value: unknown, status: AgentTurnStatus): boolean {
-  if (!record(value)) return value === undefined; const { state, providerState, revision } = value as UnknownRecord & { revision: number };
-  return (state === status || status === "running" && /^(delegated|retrying|cancelling)$/.test(state as string)) && (providerState === null || typeof providerState === "string" && !!providerState && !providerState[200]) && revision === ~~revision && revision >= 0; }
 function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownRecord {
   return record(value) && keys.every((key) => stringField(value, key));
 }

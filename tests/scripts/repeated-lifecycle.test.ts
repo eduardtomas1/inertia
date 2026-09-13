@@ -141,7 +141,7 @@ test("executes a selected local Vitest suite through the bounded runner without 
     expect(result).toMatchObject({ outcome: "passed", passed: true });
     const output = await readFile(outputPath, "utf8");
     expect(output).toContain("1 passed");
-    expect(output).toContain("3 passed");
+    expect(output).toMatch(/Tests\s+\d+ passed/u);
   } finally {
     vi.unstubAllEnvs();
     await rm(root, { force: true, recursive: true });

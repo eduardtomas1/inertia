@@ -270,7 +270,6 @@ export class AgentWorkflowController {
 
   state(
     conversationId: string,
-    reconcileStaleNativeGoal = true,
   ): AgentWorkflowState {
     const conversation = this.store.conversation(conversationId);
     this.pruneSkills();
@@ -298,9 +297,6 @@ export class AgentWorkflowController {
         conversation.providerSessionId
         && goal.providerSessionId === conversation.providerSessionId
       ) return true;
-      if (reconcileStaleNativeGoal) {
-        this.store.clearAgentGoal(conversationId, "codex-native");
-      }
       return false;
     });
     return {

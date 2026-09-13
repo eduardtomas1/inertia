@@ -139,7 +139,7 @@ export function sourceLanguageFromAlias(
   alias: string | null | undefined,
 ): SourceLanguage | null {
   const normalized = alias?.trim().toLocaleLowerCase("en-US") ?? "";
-  return normalized ? LANGUAGE_BY_ALIAS[normalized] ?? null : null;
+  return Object.hasOwn(LANGUAGE_BY_ALIAS, normalized) ? LANGUAGE_BY_ALIAS[normalized]! : null;
 }
 
 export function sourceLanguageForFile(
@@ -147,11 +147,11 @@ export function sourceLanguageForFile(
   content?: string,
 ): SourceLanguage {
   const name = normalizedFileName(path);
-  const named = LANGUAGE_BY_NAME[name];
+  const named = Object.hasOwn(LANGUAGE_BY_NAME, name) ? LANGUAGE_BY_NAME[name] : null;
   if (named) return named;
   const extensionIndex = name.lastIndexOf(".");
   const extension = extensionIndex >= 0 ? name.slice(extensionIndex + 1) : "";
-  const byExtension = extension ? LANGUAGE_BY_EXTENSION[extension] : null;
+  const byExtension = Object.hasOwn(LANGUAGE_BY_EXTENSION, extension) ? LANGUAGE_BY_EXTENSION[extension] : null;
   if (byExtension) return byExtension;
   if (content !== undefined) {
     return languageFromShebang(content) ?? GENERIC_TEXT;

@@ -22,8 +22,12 @@ For this run, chunk persistence reduced visible WAL amplification by 89.7% and
 stream wall time by 88.3%. Bounded PDF scheduling reduced peak RSS growth by
 54.6% while reducing elapsed time. The implementation caps each turn at
 eight documents, 20 MiB aggregate input, 96 KiB extracted output, and a shared
-12-second deadline; the process-wide scheduler admits at most two PDFs and
-12 MiB of input at once, rejects a single over-budget extraction, propagates
+12-second deadline. The benchmark above measured the earlier 12 MiB input
+budget. The current process-wide scheduler admits at most two operations with
+a 96 MiB estimated working-memory budget; raster jobs reserve enough of that
+budget to run one at a time. These reservations do not impose a hard bound on
+PDF.js content-stream expansion or native canvas allocations. The scheduler
+rejects a single over-budget reservation, propagates
 cancellation, aborts sibling work after the first substantive document failure,
 unlinks cancelled queued buffers immediately, and rotates fairly between turns.
 

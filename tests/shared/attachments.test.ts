@@ -3,13 +3,19 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_CHAT_ATTACHMENTS,
   chatAttachmentKind,
-  chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentTypeLabel,
   clientCommandSchema,
   isPotentialChatAttachment,
 } from "../../src/shared/contracts";
 
 describe("chat attachment contract", () => {
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])(
+    "rejects inherited MIME lookup key %s", (key) => {
+      expect(chatAttachmentMimeTypeForName(`file.${key}`)).toBeNull();
+      expect(isPotentialChatAttachment(`file.${key}`, "application/octet-stream")).toBe(false);
+    },
+  );
   it("classifies only the bounded image and safe-document allowlist", () => {
     expect(chatAttachmentMimeTypeForName("photo.JPEG")).toBe("image/jpeg");
     expect(chatAttachmentMimeTypeForName("readme.markdown")).toBe("text/markdown");

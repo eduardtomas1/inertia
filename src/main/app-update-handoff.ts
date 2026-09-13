@@ -260,7 +260,7 @@ function parseSemver(value: unknown): ParsedSemver | null {
 }
 
 function compareNumericIdentifier(left: string, right: string): number {
-  return left.length - right.length || left.localeCompare(right);
+  return left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
 }
 
 function compareSemver(leftValue: string, rightValue: string): number {
@@ -286,7 +286,7 @@ function compareSemver(leftValue: string, rightValue: string): number {
       return compareNumericIdentifier(leftIdentifier, rightIdentifier);
     }
     if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-    return leftIdentifier.localeCompare(rightIdentifier);
+    return leftIdentifier < rightIdentifier ? -1 : 1;
   }
   return 0;
 }

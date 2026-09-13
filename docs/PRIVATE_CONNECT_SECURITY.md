@@ -27,12 +27,21 @@ cookie named `__Host-inertia-private-connect`. The cookie is Secure, HttpOnly,
 SameSite Strict, host-only, and carries no Domain attribute. Mutations require
 both a same-origin request and the session's CSRF header. WebSocket upgrades
 require an HTTPS same-origin request and a short-lived single-use ticket, not a
-cookie alone.
+cookie alone. Local loopback development origins are also accepted.
+
+Cookies are scoped by hostname, not port. Other HTTPS services on the same
+MagicDNS hostname receive this cookie when visited from the paired browser.
+Use a dedicated trusted host for Private Connect; do not expose untrusted
+services on other ports of that hostname. Host separation requires external
+Tailscale configuration and is not provided by the cookie prefix.
 
 The gateway applies strict JSON schemas, body and frame limits, connection and
 per-session in-flight limits, request timeouts, security headers, static-file
-containment, and single-use delivery receipts. A locked or suspended desktop
-stops the gateway, closes live sockets, and clears connection tickets. The
+containment, and single-use delivery receipts. A reported lock or suspend stops the gateway, closes live sockets, and clears
+connection tickets. Electron does not report screen-lock events on Linux;
+Linux users must disable Private Connect before leaving the desktop unattended.
+Resume rechecks the idle state and restores access only when it reports active
+or idle. Unknown state remains fail closed. The
 encrypted digest of a non-expired session remains local so that the same
 approved browser can reconnect after unlock; while locked, session lookup and
 every request fail closed.
@@ -67,10 +76,11 @@ The browser may retry an uncertain prompt only with the same delivery identity,
 allowing the desktop receipt to return the authoritative prior result without
 executing it twice.
 
-Transcript text is sanitized, strips credentials and unsafe markup, omits code
-and HTML blocks, and is byte-bounded before projection. Credentials remain in
-the privileged vault and are never persisted in the Private Connect store,
-sent to the browser, or written to diagnostics.
+Transcript text uses best-effort redaction for known credential formats and
+unsafe markup, omits code and HTML blocks, and is bounded before projection.
+Unrecognized secrets in ordinary project prose can remain. Vault credentials
+remain in the privileged vault; they are not deliberately projected to browsers,
+stored in the Private Connect store, or written to diagnostics.
 
 A Collaborate prompt can cause the supervised provider to read project files,
 and a sanitized answer can still contain project-derived prose. Secret

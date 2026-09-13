@@ -580,9 +580,10 @@ function runPreparedGitRefTransaction(
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env: gitProcessEnvironment(process.env),
-    }));
+    }), "git");
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let stderrBytes = 0;
     let outputBytes = 0;
     let settled = false;
     let prepared = false;
@@ -748,8 +749,12 @@ function runPreparedGitRefTransaction(
       if (/(?:^|\r?\n)abort: ok\r?\n/u.test(text)) aborted = true;
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      const remaining = STDERR_BYTES - Buffer.concat(stderr).length;
-      if (remaining > 0) stderr.push(chunk.subarray(0, remaining));
+      const remaining = STDERR_BYTES - stderrBytes;
+      if (remaining > 0) {
+        const retained = chunk.subarray(0, remaining);
+        stderr.push(retained);
+        stderrBytes += retained.length;
+      }
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (termination) return;

@@ -9,7 +9,7 @@ import {
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
   MAX_TEXT_ATTACHMENT_BYTES,
-  chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentKind,
   chatAttachmentStorageExtension,
   isPotentialChatAttachment,

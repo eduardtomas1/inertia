@@ -828,12 +828,10 @@ export function createTurnInteractionCommandHandler(
               sourceAttachments.map(({ id }) => id),
             );
           }
-          if (
-            conversation.title === "New chat"
-            || conversation.title === "New thread"
-          ) {
+          const currentTitle = dependencies.store.conversation(conversation.id).title;
+          if (currentTitle === "New chat" || currentTitle === "New thread") {
             dependencies.store.updateConversation(conversation.id, {
-              title: command.payload.content.slice(0, 64),
+              title: Array.from(command.payload.content.slice(0, 128)).slice(0, 64).join(""),
             });
           }
           dependencies.send(socket, queued

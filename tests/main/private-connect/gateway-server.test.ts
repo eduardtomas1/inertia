@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import WebSocket from "ws";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { connect } from "node:net";
@@ -70,17 +72,52 @@ function host(): PrivateConnectGatewayHost {
   };
 }
 
-async function startServer(): Promise<{ server: PrivateConnectGatewayServer; address: { port: number; host: string } }> {
+async function startServer(gatewayHost: PrivateConnectGatewayHost = host()): Promise<{ server: PrivateConnectGatewayServer; address: { port: number; host: string } }> {
   const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-"));
   writeFileSync(join(root, "index.html"), "<html>ok</html>");
   writeFileSync(join(root, "manifest.webmanifest"), "{}");
   writeFileSync(join(root, "service-worker.js"), "self.addEventListener('fetch', () => undefined);");
-  const server = new PrivateConnectGatewayServer({ host: host(), staticRoot: root, buildVersion: "0.0.24" });
+  const server = new PrivateConnectGatewayServer({ host: gatewayHost, staticRoot: root, buildVersion: "0.0.24" });
   servers.push(server);
   return { server, address: await server.start() };
 }
 
 describe("Private Connect loopback gateway", () => {
+  it("caps sockets per device and shares the request quota across its sockets", async () => {
+    const gatewayHost = host();
+    gatewayHost.consumeWebSocketTicket = (ticket) => ticket === "other"
+      ? { ...session, id: "44444444-4444-4444-8444-444444444444", deviceId: "55555555-5555-4555-8555-555555555555" }
+      : session;
+    const { address } = await startServer(gatewayHost);
+    const sockets: WebSocket[] = [];
+    const connectSocket = async (ticket: string): Promise<WebSocket> => {
+      const socket = new WebSocket(`ws://${hostHeader(address)}/api/ws?ticket=${ticket}`, {
+        origin: `https://${hostHeader(address)}`,
+      });
+      sockets.push(socket);
+      await once(socket, "open");
+      return socket;
+    };
+    const ping = async (socket: WebSocket): Promise<PrivateConnectResponse> => {
+      const response = once(socket, "message");
+      socket.send(JSON.stringify({ protocolVersion: 1, type: "client.ping", requestId: "33333333-3333-4333-8333-333333333333" }));
+      const [data] = await response;
+      return JSON.parse(String(data)) as PrivateConnectResponse;
+    };
+    try {
+      const first = await connectSocket("first");
+      const second = await connectSocket("second");
+      await expect(connectSocket("third")).rejects.toThrow();
+      const other = await connectSocket("other");
+      for (let count = 0; count < PRIVATE_CONNECT_LIMITS.requestsPerMinute; count += 1) {
+        expect((await ping(count % 2 ? first : second)).ok).toBe(true);
+      }
+      expect(await ping(second)).toMatchObject({ ok: false, code: "rate-limited" });
+      expect((await ping(other)).ok).toBe(true);
+    } finally {
+      for (const socket of sockets) socket.terminate();
+    }
+  });
   it("serves discovery with defensive headers and rejects invalid hosts", async () => {
     const { address } = await startServer();
     const response = await fetch(`http://${hostHeader(address)}/.well-known/inertia/private-connect`);

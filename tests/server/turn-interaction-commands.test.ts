@@ -555,6 +555,43 @@ describe("new-turn admission recovery", () => {
 });
 
 describe("attachment send handoff", () => {
+  it("preserves a manual title entered during attachment preparation", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(() => null),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders: false,
+    });
+    const original = runtime.store.conversation(conversationId);
+    let title = "New chat";
+    vi.mocked(runtime.store.conversation).mockImplementation(() => ({ ...original, title }));
+    vi.mocked(runtime.attachmentResolver!.resolvePayloads).mockImplementation(async () => {
+      title = "My manually chosen title";
+      return [{ attachment: trustedAttachment, bytes: new Uint8Array(8) }];
+    });
+    await expect(createTurnInteractionCommandHandler(runtime)(
+      {} as never, messageCommand(),
+    )).resolves.toBe("handled");
+    expect(runtime.store.updateConversation).not.toHaveBeenCalled();
+  });
+
+  it("keeps complete Unicode characters in an automatically generated title", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(() => null),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders: false,
+    });
+    const original = runtime.store.conversation(conversationId);
+    vi.mocked(runtime.store.conversation).mockReturnValue({ ...original, title: "New chat" });
+    const command = messageCommand();
+    command.payload.content = "a".repeat(63) + "🌍" + "tail";
+    await expect(createTurnInteractionCommandHandler(runtime)(
+      {} as never, command,
+    )).resolves.toBe("handled");
+    expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
+      title: "a".repeat(63) + "🌍",
+    });
+  });
+
   it("binds runtime attachment resolution to the message request identity", async () => {
     const runtime = dependencies({
       queue: vi.fn(() => null),

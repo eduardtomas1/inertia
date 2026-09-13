@@ -8,7 +8,8 @@ import {
   stat,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { gzipSync, gunzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gzip, gunzip } from "node:zlib";
 
 import type {
   AgentTurn,
@@ -61,6 +62,9 @@ export class TurnGitArtifactError extends Error {
     this.name = "TurnGitArtifactError";
   }
 }
+
+const compressPatch = promisify(gzip);
+const decompressPatch = promisify(gunzip);
 
 function safeFailure(error: unknown, phase: "pre-turn" | "post-turn"): string {
   const timeoutMessage = phase === "pre-turn"
@@ -578,7 +582,7 @@ export class TurnGitArtifactManager {
       throw new TurnGitArtifactError("The historical patch exceeded its storage limit.");
     }
     const digest = createHash("sha256").update(content).digest("hex");
-    const compressed = gzipSync(content, { level: 9 });
+    const compressed = await compressPatch(content, { level: 9 });
     if (compressed.length > MAX_COMPRESSED_BYTES) {
       throw new TurnGitArtifactError("The compressed historical patch exceeded its storage limit.");
     }
@@ -616,7 +620,7 @@ export class TurnGitArtifactManager {
     }
     let content: Buffer;
     try {
-      content = gunzipSync(compressed, { maxOutputLength: MAX_PATCH_BYTES + 1 });
+      content = await decompressPatch(compressed, { maxOutputLength: MAX_PATCH_BYTES + 1 });
     } catch {
       throw new TurnGitArtifactError("This historical patch could not be read safely.");
     }

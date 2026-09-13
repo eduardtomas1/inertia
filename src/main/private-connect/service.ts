@@ -666,9 +666,19 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         await this.enqueueLifecycle(async () => {
           this.pending.clear();
           this.tickets.clear();
-          this.externalUrl = null;
-          this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
-          await this.gateway.stop().catch(() => undefined);
+          const port = this.diagnostics.gatewayPort;
+          const proof = this.data?.servePort && this.data.serveTarget
+            ? { port: this.data.servePort, target: this.data.serveTarget }
+            : null;
+          try {
+            if (port !== null || proof) {
+              await withDeadline(this.tailscale.disableOwnedServe(port, proof), AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS);
+            }
+          } finally {
+            this.externalUrl = null;
+            this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
+            await this.gateway.stop();
+          }
         });
       }
     })();
@@ -702,6 +712,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   }
 
   private async enable(): Promise<void> {
+    if (this.data?.pendingAuthorityReduction) {
+      throw new Error("Private Connect authority cleanup is pending. Restart Inertia before reconnecting.");
+    }
     if (this.privacyLocked) throw new Error("Private Connect is paused while the desktop is locked.");
     if (this.data?.enabled && this.status === "ready") return;
     if (!this.options.store.available()) throw new Error("Secure platform storage is unavailable; Private Connect remains disabled.");
@@ -725,6 +738,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     let gateway: PrivateConnectGatewayServer | null = null;
     let gatewayPort: number | null = null;
     try {
+      if (this.gateway.address()) await this.gateway.stop();
       gateway = this.createGateway();
       this.gateway = gateway;
       await this.persist();

@@ -549,7 +549,7 @@ describe("Private Connect service lifecycle", () => {
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     await first.shutdown();
-    expect(firstCalls.disable).toHaveLength(0);
+    expect(firstCalls.disable).toHaveLength(1);
     const secondCalls = { ensure: [] as unknown[][], disable: [] as number[] };
     const second = await createServiceWith(memory, testTailscale(secondCalls));
     await second.startIfEnabled();
@@ -714,6 +714,7 @@ describe("Private Connect service lifecycle", () => {
     ).finally(() => { updateFinished = true; });
     await expect.poll(() => service.session(cookie)).toBeNull();
     expect(updateFinished).toBe(false);
+    await expect(service.setEnabled(true)).rejects.toThrow("authority cleanup is pending");
     await expect(service.revokeDevice(deviceId)).rejects.toThrow(
       "authority change is already in progress",
     );

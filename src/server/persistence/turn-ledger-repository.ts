@@ -595,8 +595,8 @@ export class TurnLedgerRepository {
         this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(current.id, terminalMessage.id);
       }
       if (terminal) {
-        compactMessageContentForTurn(this.context.database, current.id);
-        compactReasoningContentForTurn(this.context.database, current.id);
+        compactMessageContentForTurn(this.context.database, current.id, current.conversationId);
+        compactReasoningContentForTurn(this.context.database, current.id, current.conversationId);
       }
     })();
     return next;

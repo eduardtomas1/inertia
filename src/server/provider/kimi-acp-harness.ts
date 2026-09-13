@@ -1,3 +1,5 @@
+import { GeminiAcpSecretRedactor as AcpSecretRedactor } from "./gemini-acp-redaction";
+import { acpPermissionDetail } from "./acp-permission-detail";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
@@ -200,6 +202,7 @@ function startKimiRun(
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
+  const secretRedactor = new AcpSecretRedactor(options.environment);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const toolActivities = new Map<string, ToolActivity>();
@@ -229,12 +232,12 @@ function startKimiRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
-  const redactHostMcpPayload = <T>(value: T): T => hostMcpConnection
+  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(hostMcpConnection
     ? redactHostToolPayload(value, [
         hostMcpConnection.bearerToken,
         hostMcpConnection.url,
       ])
-    : value;
+    : value);
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let sessionReady = false;
@@ -394,7 +397,8 @@ function startKimiRun(
     processError = error;
     stderr.append(kimiErrorDetail(error, "Kimi ACP process error."));
   });
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => stderr.append(secretRedactor.stderrChunk(chunk)));
   child.stdin.on("error", () => { /* The ACP SDK surfaces connection failures. */ });
 
   const wireGuard = new BoundedKimiJsonLineTransform(
@@ -632,7 +636,9 @@ function startKimiRun(
       return finish("cancelled");
     }
     await observeKimiProcessExit(child);
-    const diagnostic = redactHostMcpPayload(stderr.toString().trim());
+    const diagnostic = secretRedactor.payload(redactHostMcpPayload(
+      (stderr.toString() + secretRedactor.finishStderr()).trim(),
+    ));
     const safeError = redactHostMcpPayload(kimiErrorDetail(
       error,
       "Kimi ACP stopped unexpectedly.",
@@ -789,6 +795,9 @@ async function kimiPermission(
     );
   }
 
+  if (options.input.interactionMode === "plan") {
+    return { outcome: { outcome: "cancelled" } };
+  }
   const allow = oneShotPermissionOption(params.options, true);
   const fileMutation = isFileMutationKind(params.toolCall.kind);
   if (
@@ -828,7 +837,7 @@ async function kimiPermission(
         title: bounded(
           displayParams.toolCall.title || "Kimi Code requested permission",
         ),
-        detail: bounded(jsonSummary(displayParams.toolCall.rawInput)),
+        detail: bounded(acpPermissionDetail(displayParams, "Kimi Code requested permission.")),
         cwd: options.input.cwd,
         permissionRoots: [],
         availableDecisions: ["approve", "deny", "cancel"],
@@ -904,7 +913,7 @@ export function permissionDisplayIsSafe(
 ): boolean {
   return isSafeApprovalDisplayText(
     params.toolCall.title || "Kimi Code requested permission",
-  ) && isSafeApprovalDisplayText(jsonSummary(params.toolCall.rawInput), true);
+  ) && isSafeApprovalDisplayText(acpPermissionDetail(params, "Kimi Code requested permission."), true);
 }
 
 function isFileMutationKind(kind: ToolKind | null | undefined): boolean {
@@ -1166,14 +1175,4 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-}
-
-function jsonSummary(value: unknown): string {
-  try {
-    return value === undefined
-      ? "Kimi Code requested permission."
-      : JSON.stringify(value);
-  } catch {
-    return "Kimi Code requested permission.";
-  }
 }

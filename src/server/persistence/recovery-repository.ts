@@ -158,8 +158,8 @@ export class RecoveryRepository {
           markTurnActivities.run(id, turn.id);
           markTurnReasonings.run(id, turn.id);
           markInterruptedTurn.run(now, now, turn.id);
-          compactMessageContentForTurn(this.database, turn.id);
-          compactReasoningContentForTurn(this.database, turn.id);
+          compactMessageContentForTurn(this.database, turn.id, turn.conversation_id);
+          compactReasoningContentForTurn(this.database, turn.id, turn.conversation_id);
         } else {
           // Preserve recovery for databases that predate authoritative turn ownership.
           markLegacyActivities.run(id);

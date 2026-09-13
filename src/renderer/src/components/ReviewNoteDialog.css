@@ -1,0 +1,17 @@
+.review-note-dialog textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 10px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--ui-font-secondary);
+  font-weight: 450;
+}
+.review-note-dialog textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

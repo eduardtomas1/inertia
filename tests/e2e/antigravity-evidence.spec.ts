@@ -30,7 +30,8 @@ function antigravitySource(wirePath: string, gatePath: string): string {
   return `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ executable: process.argv[1], args }) + "\\n");
+const record = (event) => fs.appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ pid: process.pid, executable: process.argv[1], args, ...event }) + "\\n");
+record({ kind: "launch" });
 if (args[0] === "--version") { console.log("1.2.2"); process.exit(0); }
 const streamJson = args[0] === "--input-format" && args[1] === "stream-json"
   && args[2] === "--output-format" && args[3] === "stream-json";
@@ -51,6 +52,7 @@ process.stdin.on("end", () => {
   const release = setInterval(() => {
     if (!fs.existsSync(${JSON.stringify(gatePath)})) return;
     clearInterval(release);
+    record({ kind: "released" });
     step(1, { state: "DONE", tool_name: "grep_search" });
     step(3, { state: "DONE", text_delta: ${JSON.stringify(FINAL_TEXT)} });
     emit({ event: "result", result: {
@@ -58,13 +60,15 @@ process.stdin.on("end", () => {
       duration_seconds: 4, num_turns: 1,
       usage: { input_tokens: 1840, output_tokens: 212, thinking_tokens: 96, cache_read_tokens: 512, total_tokens: 2660 },
     } });
-    process.exit(0);
+    process.stdout.write("", () => { record({ kind: "exiting" }); process.exit(0); });
   }, 50);
 });
 `;
 }
 
 interface WireEntry {
+  kind: "launch" | "released" | "exiting";
+  pid: number;
   executable: string;
   args: string[];
 }
@@ -149,6 +153,12 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
 
   const chooseAntigravityModel = async (name: string): Promise<void> => {
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    const composer = page.getByRole("region", { name: "Message composer" });
+    await expect(composer.getByRole("textbox", { name: "Message" }))
+      .toHaveAttribute("placeholder", "Ask for follow-up changes");
+    await expect(composer.getByRole("button", {
+      name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
+    })).toBeEnabled();
     await page.getByRole("button", { name: /^Choose model\./u }).click();
     const chooser = page.getByRole("dialog", { name: "Choose model" });
     const source = chooser.getByRole("button", { name: /^Antigravity, \d+ models?$/u });
@@ -168,7 +178,15 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await expect(turn.getByText(RUNNING_TEXT)).toBeVisible();
     await capture(page, testInfo, `running-turn-${theme}`);
     writeFileSync(gatePath, "release");
-    await expect(turn.locator('[data-turn-status="completed"]')).toBeVisible();
+    try {
+      await expect(turn.locator('[data-turn-status="completed"]')).toBeVisible({ timeout: 30_000 });
+    } catch (error) {
+      await testInfo.attach("antigravity-wire", {
+        body: Buffer.from(existsSync(wirePath) ? readFileSync(wirePath, "utf8") : ""),
+        contentType: "application/x-ndjson",
+      });
+      throw error;
+    }
     await expect(turn.getByText(FINAL_TEXT)).toBeVisible();
     await capture(page, testInfo, `completed-turn-${theme}`);
   };
@@ -184,7 +202,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
   await chooseAntigravityModel("model-chooser-dark");
   await streamTurn("Confirm non-success results fail the turn.", "dark");
 
-  const entries = wire();
+  const entries = wire().filter(({ kind }) => kind === "launch");
   expect(entries.length).toBeGreaterThan(0);
   for (const entry of entries) {
     expect(realpathSync(entry.executable)).toBe(realpathSync(fakeAgy));

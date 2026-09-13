@@ -29,6 +29,8 @@ network requests, and no account, token or keyring is involved.
 - Every turn launches `agy --input-format stream-json --output-format stream-json`.
   No launch carries `-p`, `--print` or `--prompt`.
 - The second turn adds `--conversation <id>` from the first turn's result.
+- The Antigravity composer drops the images wording and offers documents and
+  spreadsheets only, because the harness declares no image input.
 - Both turns complete with the streamed text and no renderer errors.
 
 The Gemini "Open in Antigravity" failure action and its new-chat confirmation

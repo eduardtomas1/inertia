@@ -1,3 +1,4 @@
+import { DocumentAttachmentError } from "./attachment-errors";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -94,7 +95,7 @@ interface PdfAnalysis {
   totalPages: number;
 }
 
-class ScannedPdfRasterizationError extends Error {}
+class ScannedPdfRasterizationError extends DocumentAttachmentError {}
 
 async function ensurePdfNodePrimitives(): Promise<void> {
   if (
@@ -277,7 +278,7 @@ function scannedPdfNote(
   const mappings = analysis.generatedPages.map(({ pageNumber, path }) => {
     const ordinal = imageOrdinalByPath.get(path);
     if (ordinal === undefined) {
-      throw new Error("A scanned PDF page lost its provider image position.");
+      throw new DocumentAttachmentError("A scanned PDF page lost its provider image position.");
     }
     return `page ${pageNumber} as provider image ${ordinal}`;
   });
@@ -540,7 +541,7 @@ async function extractPdfAnalysis(
         || error instanceof ScannedPdfRasterizationError
       )
     ) throw error;
-    throw new Error(`${attachment.name} could not be read as a PDF.`);
+    throw new DocumentAttachmentError(`${attachment.name} could not be read as a PDF.`);
   } finally {
     signal.removeEventListener("abort", cancel);
     await loadingTask.destroy().catch(() => undefined);
@@ -582,10 +583,10 @@ function extractTextDocument(
   try {
     content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new Error(`${attachment.name} is not valid UTF-8 text.`);
+    throw new DocumentAttachmentError(`${attachment.name} is not valid UTF-8 text.`);
   }
   const bounded = boundedUtf8(content.trim(), maximumJsonBytes);
-  if (!bounded.value) throw new Error(`${attachment.name} is empty.`);
+  if (!bounded.value) throw new DocumentAttachmentError(`${attachment.name} is empty.`);
   return { content: bounded.value, truncated: bounded.truncated };
 }
 
@@ -606,14 +607,14 @@ async function extractSpreadsheetDocument(
       spreadsheetWorkbookToText(workbook).trim(),
       maximumJsonBytes,
     );
-    if (!bounded.value) throw new Error("The workbook has no readable cells.");
+    if (!bounded.value) throw new DocumentAttachmentError("The workbook has no readable cells.");
     return {
       content: bounded.value,
       truncated: bounded.truncated || workbook.contentTruncated,
     };
   } catch (error) {
     if (error instanceof DocumentExtractionCancelledError) throw error;
-    throw new Error(`${attachment.name} could not be read as a spreadsheet.`);
+    throw new DocumentAttachmentError(`${attachment.name} could not be read as a spreadsheet.`);
   }
 }
 
@@ -630,7 +631,7 @@ export async function prepareDocumentAttachments(
   if (
     existingImages.length > MAX_CHAT_ATTACHMENTS
     || existingImageBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
-  ) throw new Error("Image attachments exceed the shared turn limits.");
+  ) throw new DocumentAttachmentError("Image attachments exceed the shared turn limits.");
   const rasterBudget: PdfRasterBudget = {
     remainingBytes: MAX_CHAT_ATTACHMENT_TOTAL_BYTES - existingImageBytes,
     remainingCount: MAX_CHAT_ATTACHMENTS - existingImages.length,
@@ -651,7 +652,7 @@ export async function prepareDocumentAttachments(
     || documents.reduce((total, { bytes }) => total + bytes.byteLength, 0)
       > MAX_DOCUMENT_EXTRACTION_INPUT_BYTES
   ) {
-    throw new Error("The selected documents exceed the shared extraction budget.");
+    throw new DocumentAttachmentError("The selected documents exceed the shared extraction budget.");
   }
   if (options.signal?.aborted) {
     throw new DocumentExtractionCancelledError();
@@ -774,7 +775,7 @@ export async function prepareDocumentAttachments(
       && !(result.reason instanceof DocumentExtractionCancelledError));
     if (failed) {
       if (failed.reason instanceof DocumentExtractionDeadlineError) {
-        throw new Error("Document extraction timed out.");
+        throw new DocumentAttachmentError("Document extraction timed out.");
       }
       throw failed.reason;
     }
@@ -904,13 +905,13 @@ export async function documentAttachmentContexts(
       !options.generatedAttachmentStore
       && error instanceof ScannedPdfRasterizationError
     ) {
-      throw new Error("Scanned PDF pages require the image-aware turn pipeline.");
+      throw new DocumentAttachmentError("Scanned PDF pages require the image-aware turn pipeline.");
     }
     throw error;
   }
   try {
     if (prepared.generatedImagePaths.length > 0) {
-      throw new Error("Scanned PDF pages require the image-aware turn pipeline.");
+      throw new DocumentAttachmentError("Scanned PDF pages require the image-aware turn pipeline.");
     }
     return prepared.contexts;
   } finally {

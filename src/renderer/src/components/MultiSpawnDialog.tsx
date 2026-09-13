@@ -1,3 +1,4 @@
+import { writeClipboardText } from "../utils/clipboard";
 import {
   Brain,
   Check,
@@ -324,8 +325,7 @@ export function MultiSpawnDialog({
     commandText: string,
   ): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(commandText);
-      setCopiedRecoveryCommand(key);
+      setCopiedRecoveryCommand(await writeClipboardText(commandText) ? key : null);
     } catch {
       setCopiedRecoveryCommand(null);
     }

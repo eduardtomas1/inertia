@@ -1,3 +1,4 @@
+import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
@@ -128,7 +129,7 @@ export default function App(): React.JSX.Element {
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
   const [splitConversationId, setSplitConversationId] = useState<string | null>(
-    () => readSplitConversationId(window.localStorage),
+    () => readSplitConversationId(layoutStorage),
   );
   const [suppressedMainConversationIds, setSuppressedMainConversationIds] =
     useState<Set<string>>(() => new Set());
@@ -138,15 +139,15 @@ export default function App(): React.JSX.Element {
   const pendingSeenRunsRef = useRef(new Set<string>());
   const legacyWorkspaceStartupMigrationRef = useRef(false);
   const [legacyWorkspaceStartup] = useState(() =>
-    readLegacyWorkspaceStartup(window.localStorage));
+    readLegacyWorkspaceStartup(layoutStorage));
   const settings = useMemo(
     () => connection.snapshot?.settings ?? {
       ...defaultSettings,
-      theme: cachedThemePreference(window.localStorage) ?? defaultSettings.theme,
-      colorTheme: cachedColorTheme(window.localStorage)
+      theme: cachedThemePreference(layoutStorage) ?? defaultSettings.theme,
+      colorTheme: cachedColorTheme(layoutStorage)
         ?? defaultSettings.colorTheme,
-      lightColorTheme: cachedColorTheme(window.localStorage, "light") ?? defaultSettings.colorTheme,
-      darkColorTheme: cachedColorTheme(window.localStorage, "dark") ?? defaultSettings.colorTheme,
+      lightColorTheme: cachedColorTheme(layoutStorage, "light") ?? defaultSettings.colorTheme,
+      darkColorTheme: cachedColorTheme(layoutStorage, "dark") ?? defaultSettings.colorTheme,
     },
     [connection.snapshot?.settings],
   );
@@ -168,15 +169,15 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const preference = connection.snapshot?.settings.theme;
     if (!preference) return;
-    cacheThemePreference(window.localStorage, preference);
+    cacheThemePreference(layoutStorage, preference);
     void window.inertia.syncThemePreference(preference).catch(() => undefined);
   }, [connection.snapshot?.settings.theme]);
   useEffect(() => {
     const colorTheme = connection.snapshot?.settings.colorTheme;
     if (!colorTheme) return;
-    cacheColorTheme(window.localStorage, colorTheme);
-    cacheColorTheme(window.localStorage, connection.snapshot?.settings.lightColorTheme ?? colorTheme, "light");
-    cacheColorTheme(window.localStorage, connection.snapshot?.settings.darkColorTheme ?? colorTheme, "dark");
+    cacheColorTheme(layoutStorage, colorTheme);
+    cacheColorTheme(layoutStorage, connection.snapshot?.settings.lightColorTheme ?? colorTheme, "light");
+    cacheColorTheme(layoutStorage, connection.snapshot?.settings.darkColorTheme ?? colorTheme, "dark");
   }, [connection.snapshot?.settings.colorTheme, connection.snapshot?.settings.lightColorTheme, connection.snapshot?.settings.darkColorTheme]);
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
@@ -214,7 +215,7 @@ export default function App(): React.JSX.Element {
     (conversationId: string | null) => {
       setSplitConversationId(conversationId);
       setSecondaryPaneFirst(false);
-      persistSplitConversationId(window.localStorage, conversationId);
+      persistSplitConversationId(layoutStorage, conversationId);
     },
     [],
   );
@@ -331,8 +332,7 @@ export default function App(): React.JSX.Element {
         status: step.status === "inProgress" ? "in-progress" as const : step.status,
       }));
     }
-    const text = latestAssistantContent || streamingText;
-    return planFromText(text, conversation?.status ?? "idle");
+    return planFromText(latestAssistantContent, conversation?.status ?? "idle", streamingText);
   }, [
     conversation?.status,
     latestAssistantContent,
@@ -817,7 +817,7 @@ export default function App(): React.JSX.Element {
       },
     }).then(() => {
       finishLegacyWorkspaceStartupMigration(
-        window.localStorage,
+        layoutStorage,
         legacyWorkspaceStartup,
       );
     }).catch(() => {

@@ -74,7 +74,8 @@ const budgets = {
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
-  deferredTerminalJavaScript: 25 * kibibyte,
+  // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
+  deferredTerminalJavaScript: 25.5 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,

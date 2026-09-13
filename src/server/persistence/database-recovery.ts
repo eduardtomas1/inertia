@@ -114,6 +114,7 @@ interface ValidatedBackup {
 export type DatabaseValidation =
   | "valid-current"
   | "unsupported-future"
+  | "inconsistent"
   | "corrupt";
 
 type AutomaticBackupTrigger = "hourly" | "initial" | "retry";
@@ -171,7 +172,7 @@ function validateOpenDatabase(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     ).all() as Array<{ name: string }>).map(({ name }) => name),
   );
-  if (!tables.has("schema_migrations")) return "corrupt";
+  if (!tables.has("schema_migrations")) return "inconsistent";
   const versions = database.prepare(
     "SELECT version FROM schema_migrations ORDER BY version ASC",
   ).all() as Array<{ version: unknown }>;
@@ -181,14 +182,14 @@ function validateOpenDatabase(
       typeof version !== "number"
       || !Number.isSafeInteger(version)
       || version !== index + 1)
-  ) return "corrupt";
+  ) return "inconsistent";
   const version = versions.length;
   if (version > currentSchemaVersion) return "unsupported-future";
   for (const [introducedAt, requiredTables] of requiredTablesBySchemaVersion) {
     if (
       version >= introducedAt
       && requiredTables.some((table) => !tables.has(table))
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   const requiredColumns: Record<string, readonly string[]> = {
     projects: ["id", "name", "path"],
@@ -201,27 +202,27 @@ function validateOpenDatabase(
       (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
         .map(({ name }) => name),
     );
-    if (columns.some((column) => !existing.has(column))) return "corrupt";
+    if (columns.some((column) => !existing.has(column))) return "inconsistent";
   }
   if (version >= 42) {
-    if (!tables.has("agent_reasonings")) return "corrupt";
+    if (!tables.has("agent_reasonings")) return "inconsistent";
     const reasoningColumns = new Set(
       (database.prepare("PRAGMA table_info(agent_reasonings)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
     );
     if (["id", "conversation_id", "content"].some(
       (column) => !reasoningColumns.has(column),
-    )) return "corrupt";
+    )) return "inconsistent";
     for (const [table, columns] of [
       ["message_content_chunks", ["sequence", "message_id", "content"]],
       ["reasoning_content_chunks", ["sequence", "reasoning_id", "content"]],
     ] as const) {
-      if (!tables.has(table)) return "corrupt";
+      if (!tables.has(table)) return "inconsistent";
       const existing = new Set(
         (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
           .map(({ name }) => name),
       );
-      if (columns.some((column) => !existing.has(column))) return "corrupt";
+      if (columns.some((column) => !existing.has(column))) return "inconsistent";
     }
     const indexes = new Set(
       (database.prepare(
@@ -231,13 +232,13 @@ function validateOpenDatabase(
     if (
       !indexes.has("message_content_chunks_message_sequence_idx")
       || !indexes.has("reasoning_content_chunks_reasoning_sequence_idx")
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   if (version >= 43) {
     if (
       !tables.has("recovery_import_receipts")
       || !tables.has("recovery_import_journals")
-    ) return "corrupt";
+    ) return "inconsistent";
     const receiptColumns = new Set(
       (database.prepare("PRAGMA table_info(recovery_import_receipts)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
@@ -248,7 +249,7 @@ function validateOpenDatabase(
       "conversations",
       "messages",
       "imported_at",
-    ].some((column) => !receiptColumns.has(column))) return "corrupt";
+    ].some((column) => !receiptColumns.has(column))) return "inconsistent";
     const journalColumns = new Set(
       (database.prepare("PRAGMA table_info(recovery_import_journals)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
@@ -262,7 +263,7 @@ function validateOpenDatabase(
       "authorized_root_inode",
       "projects",
       "created_at",
-    ].some((column) => !journalColumns.has(column))) return "corrupt";
+    ].some((column) => !journalColumns.has(column))) return "inconsistent";
   }
   if (version >= 44) {
     for (const table of [
@@ -277,7 +278,7 @@ function validateOpenDatabase(
         : "";
       if (!normalized.includes(
         "check(length(cast(contentasblob))between1and4194304)",
-      )) return "corrupt";
+      )) return "inconsistent";
     }
   }
   if (version >= 47) {
@@ -294,7 +295,7 @@ function validateOpenDatabase(
         (column) => !conversationColumns.has(column),
       )
       || !stateColumns.has("desktop_notifications")
-    ) return "corrupt";
+    ) return "inconsistent";
     const indexes = new Set(
       (database.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'index'",
@@ -303,21 +304,21 @@ function validateOpenDatabase(
     if (
       !indexes.has("conversations_pinned_at_idx")
       || !indexes.has("conversations_snoozed_until_idx")
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   if (version >= 48) {
     const stateColumns = new Set(
       (database.prepare("PRAGMA table_info(app_state)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
     );
-    if (!stateColumns.has("provider_identity_labels_json")) return "corrupt";
+    if (!stateColumns.has("provider_identity_labels_json")) return "inconsistent";
   }
   if (version >= 49) {
     const stateColumns = new Set(
       (database.prepare("PRAGMA table_info(app_state)").all() as Array<{ name: string }>)
         .map(({ name }) => name),
     );
-    if (!stateColumns.has("keybindings_json")) return "corrupt";
+    if (!stateColumns.has("keybindings_json")) return "inconsistent";
   }
   if (version >= 52) {
     const ownershipColumns = new Set(
@@ -336,7 +337,7 @@ function validateOpenDatabase(
       "repository_identity",
       "filesystem_identity_json",
       "branch_head",
-    ].some((column) => !ownershipColumns.has(column))) return "corrupt";
+    ].some((column) => !ownershipColumns.has(column))) return "inconsistent";
     const ownershipTrigger = database.prepare(`
       SELECT sql FROM sqlite_master
       WHERE type = 'trigger'
@@ -349,7 +350,7 @@ function validateOpenDatabase(
       !normalizedOwnershipTrigger.includes("before delete on projects")
       || !normalizedOwnershipTrigger.includes("ownership.owns_worktree = 1")
       || !/raise\s*\(\s*abort/u.test(normalizedOwnershipTrigger)
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   if (version >= 53) {
     for (const table of [
@@ -366,7 +367,7 @@ function validateOpenDatabase(
         : "conversation_id";
       if ([subjectColumn, "path", "receipt_json"].some(
         (column) => !authorityColumns.has(column),
-      )) return "corrupt";
+      )) return "inconsistent";
     }
     const enrollmentColumns = new Set(
       (database.prepare(
@@ -375,7 +376,7 @@ function validateOpenDatabase(
     );
     if (["id", "completed"].some(
       (column) => !enrollmentColumns.has(column),
-    )) return "corrupt";
+    )) return "inconsistent";
     const enrollment = database.prepare(`
       SELECT id, completed FROM workspace_path_authority_enrollment
     `).all() as Array<{ id: number; completed: number }>;
@@ -383,7 +384,7 @@ function validateOpenDatabase(
       enrollment.length !== 1
       || enrollment[0]?.id !== 1
       || ![0, 1].includes(enrollment[0].completed)
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   if (version >= 54) {
     const promptPresetColumns = new Set(
@@ -400,12 +401,12 @@ function validateOpenDatabase(
       "revision",
       "created_at",
       "updated_at",
-    ].some((column) => !promptPresetColumns.has(column))) return "corrupt";
+    ].some((column) => !promptPresetColumns.has(column))) return "inconsistent";
     const promptPresetIndex = database.prepare(`
       SELECT 1 FROM sqlite_master
       WHERE type = 'index' AND name = 'prompt_presets_position_idx'
     `).get();
-    if (!promptPresetIndex) return "corrupt";
+    if (!promptPresetIndex) return "inconsistent";
     const promptPresetTrigger = database.prepare(`
       SELECT sql FROM sqlite_master
       WHERE type = 'trigger' AND name = 'prompt_presets_count_limit'
@@ -418,18 +419,18 @@ function validateOpenDatabase(
       !normalizedPromptPresetTrigger.includes("before insert on prompt_presets")
       || !normalizedPromptPresetTrigger.includes("count(*) from prompt_presets")
       || !/raise\s*\(\s*abort/u.test(normalizedPromptPresetTrigger)
-    ) return "corrupt";
+    ) return "inconsistent";
   }
   if (version >= 55 && !providerRunOwnershipSchemaIsValid(database)) {
-    return "corrupt";
+    return "inconsistent";
   }
   if (version >= 56 && !attachmentCapabilitiesAreValid(database)) {
-    return "corrupt";
+    return "inconsistent";
   }
-  if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
-  if (version >= 64 && !runStateSchemaIsValid(database)) return "corrupt";
-  if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "corrupt";
-  if (database.prepare("PRAGMA foreign_key_check").get()) return "corrupt";
+  if (version >= 57 && !usageDashboardIndexIsValid(database)) return "inconsistent";
+  if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
+  if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
+  if (database.prepare("PRAGMA foreign_key_check").get()) return "inconsistent";
   return "valid-current";
 }
 
@@ -558,6 +559,7 @@ function validateDatabaseOffThread(
         && (
           message.result === "valid-current"
           || message.result === "unsupported-future"
+          || message.result === "inconsistent"
           || message.result === "corrupt"
         )
       ) ? message.result : "corrupt";
@@ -776,6 +778,11 @@ export function recoverDatabaseOnStartup(
   if (primaryValidation === "unsupported-future") {
     throw new Error(
       "The database was created by a newer version of Inertia and was left unchanged.",
+    );
+  }
+  if (primaryValidation === "inconsistent") {
+    throw new Error(
+      "The database schema or stored relationships are inconsistent. The primary and backups were left unchanged; explicit recovery is required.",
     );
   }
   if (primaryValidation === "valid-current") {

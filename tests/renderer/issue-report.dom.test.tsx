@@ -129,3 +129,20 @@ it("clears a hidden editor when reloading a report retired by another client", a
   await waitFor(() => expect(screen.getByRole("button", { name: "Copy preview" })).toBeEnabled());
   expect(screen.queryByLabelText("Issue body")).toBeNull();
 });
+
+it.each([true, false])("copies report previews through the privileged bridge (success=%s)", async (copied) => {
+  const previous = Object.getOwnPropertyDescriptor(window, "inertia");
+  const copyText = vi.fn(async () => copied);
+  Object.defineProperty(window, "inertia", { configurable: true, value: { copyText } });
+  try {
+    const initial = savedReport("preview");
+    const { props } = fixture(initial);
+    render(<IssueReportSettings {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Copy preview" }));
+    await screen.findByText(copied ? "Preview copied." : "Could not copy. Select the preview text manually.");
+    expect(copyText).toHaveBeenCalledWith(`${initial.title}\n\n${initial.body}`);
+  } finally {
+    if (previous) Object.defineProperty(window, "inertia", previous);
+    else Reflect.deleteProperty(window, "inertia");
+  }
+});

@@ -505,6 +505,10 @@ export class PrivateConnectRuntimeGateway {
         "This device cannot view Private Connect.",
       );
     }
+    if ((request.type === "input.respond" || request.type === "run.stop")
+      && !subject.scopes.includes("prompt")) {
+      return failedResponse(request.requestId, "forbidden", "This device cannot change a running conversation.");
+    }
     return null;
   }
 

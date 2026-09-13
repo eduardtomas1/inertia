@@ -59,6 +59,42 @@ beforeEach(() => {
 });
 
 describe("TerminalPanel retained ownership", () => {
+  it("navigates terminal tabs with arrows, Home and End and closes with Delete", async () => {
+    const terminalIds = [firstTerminalId, "44444444-4444-4444-8444-444444444445"];
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:${firstConversationId}`,
+      JSON.stringify(terminalIds),
+    );
+    const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> =>
+      command.type === "terminal.attach"
+        ? { type: "terminal.created", requestId: command.requestId, terminalId: command.payload.terminalId }
+        : { type: "request.ok", requestId: command.requestId });
+    render(<TerminalPanel projectId={projectId} conversationId={firstConversationId}
+      projectName="Inertia" status="online" fontSize={13} theme="dark" visible
+      sendCommand={sendCommand} subscribe={() => () => undefined} onClose={() => undefined} />);
+    await waitFor(() => expect(document.querySelectorAll('[data-terminal-state="ready"]')).toHaveLength(2));
+    const [first, second] = screen.getAllByRole("tab");
+    expect(first).toHaveAttribute("tabindex", "0");
+    expect(second).toHaveAttribute("tabindex", "-1");
+    first!.focus();
+    fireEvent.keyDown(first!, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    expect(second).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(second!, { key: "ArrowRight" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first!, { key: "End" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second!, { key: "Home" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first!, { key: "Delete" });
+    await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(1));
+    expect(second).toHaveFocus();
+    expect(second).toHaveAttribute("tabindex", "0");
+    expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: "terminal.close", payload: expect.objectContaining({ terminalId: firstTerminalId }),
+    }));
+  });
+
   it("persists the live capability when Strict Mode replays initialization", async () => {
     let sequence = 0;
     const createdIds = [

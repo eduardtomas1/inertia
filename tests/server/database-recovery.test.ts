@@ -120,6 +120,19 @@ afterEach(() => {
   }
 });
 
+function expectSchemaMismatchPreserved(databasePath: string, directory: string, backupFilename: string): void {
+  const paths = databaseRecoveryPaths(databasePath);
+  const original = readFileSync(databasePath);
+  const backupPath = join(paths.backupsDirectory, backupFilename);
+  const backup = readFileSync(backupPath);
+  expect(() => new RuntimeStore(databasePath, directory, {
+    recoverInterruptedRuns: false,
+  })).toThrow("schema or stored relationships are inconsistent");
+  expect(readFileSync(databasePath)).toEqual(original);
+  expect(readFileSync(backupPath)).toEqual(backup);
+  expect(existsSync(paths.corruptDirectory)).toBe(false);
+}
+
 describe("database backup and startup recovery", () => {
   it("does not present an unverified retained file as a validated backup", async () => {
     const directory = temporaryDirectory();
@@ -1240,10 +1253,10 @@ describe("database backup and startup recovery", () => {
     database.close();
   });
 
-  it("restores a valid backup when a quick-checkable primary has no released schema", async () => {
+  it("preserves all evidence and refuses startup when a quick-checkable primary has no released schema", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
-    const { conversationId, store } = seed(databasePath, "recover me");
+    const { store } = seed(databasePath, "recover me");
     const backup = await store.createBackup();
     store.close();
     writeFileSync(databasePath, Buffer.alloc(0));
@@ -1252,17 +1265,7 @@ describe("database backup and startup recovery", () => {
     expect(schemaLess.pragma("quick_check", { simple: true })).toBe("ok");
     schemaLess.close();
 
-    const recovered = new RuntimeStore(databasePath, directory, {
-      recoverInterruptedRuns: false,
-    });
-    expect(recovered.databaseRecoveryReport()).toMatchObject({
-      outcome: "restored",
-      restoredBackup: backup.filename,
-      trigger: "primary-corrupt",
-    });
-    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
-      .toBe("recover me");
-    recovered.close();
+    expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
   });
 
   it.each([
@@ -1272,11 +1275,11 @@ describe("database backup and startup recovery", () => {
     "agent_managed_conversations",
     "agent_thread_operations",
   ] as const)(
-    "restores a valid backup when a current-schema primary lost %s",
+    "preserves all evidence and refuses startup when a current-schema primary lost %s",
     async (missingTable) => {
       const directory = temporaryDirectory();
       const databasePath = join(directory, "inertia.sqlite");
-      const { conversationId, store } = seed(databasePath, "required table backup");
+      const { store } = seed(databasePath, "required table backup");
       const backup = await store.createBackup();
       store.close();
       const incomplete = new Database(databasePath);
@@ -1285,24 +1288,14 @@ describe("database backup and startup recovery", () => {
       expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
       incomplete.close();
 
-      const recovered = new RuntimeStore(databasePath, directory, {
-        recoverInterruptedRuns: false,
-      });
-      expect(recovered.databaseRecoveryReport()).toMatchObject({
-        outcome: "restored",
-        restoredBackup: backup.filename,
-        trigger: "primary-corrupt",
-      });
-      expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
-        .toBe("required table backup");
-      recovered.close();
+      expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
     },
   );
 
-  it("restores a valid backup when the primary lost the suspend-duration check", async () => {
+  it("preserves all evidence and refuses startup when the primary lost the suspend-duration check", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
-    const { conversationId, store } = seed(
+    const { store } = seed(
       databasePath,
       "suspend constraint backup",
     );
@@ -1313,23 +1306,13 @@ describe("database backup and startup recovery", () => {
     expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
     incomplete.close();
 
-    const recovered = new RuntimeStore(databasePath, directory, {
-      recoverInterruptedRuns: false,
-    });
-    expect(recovered.databaseRecoveryReport()).toMatchObject({
-      outcome: "restored",
-      restoredBackup: backup.filename,
-      trigger: "primary-corrupt",
-    });
-    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
-      .toBe("suspend constraint backup");
-    recovered.close();
+    expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
   });
 
-  it("restores a valid backup when the primary has an unparsable suspend boundary", async () => {
+  it("preserves all evidence and refuses startup when the primary has an unparsable suspend boundary", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
-    const { conversationId, store } = seed(
+    const { store } = seed(
       databasePath,
       "suspend timestamp backup",
     );
@@ -1340,22 +1323,22 @@ describe("database backup and startup recovery", () => {
     expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
     malformed.close();
 
-    const recovered = new RuntimeStore(databasePath, directory, {
-      recoverInterruptedRuns: false,
-    });
-    expect(recovered.databaseRecoveryReport()).toMatchObject({
-      outcome: "restored",
-      restoredBackup: backup.filename,
-      trigger: "primary-corrupt",
-    });
-    expect(recovered.systemSuspends.record({
-      id: "22222222-2222-4222-8222-222222222222",
-      suspendedAt: "2026-08-26T08:00:00.000Z",
-      resumedAt: "2026-08-26T08:05:00.000Z",
-    })).toEqual([]);
-    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
-      .toBe("suspend timestamp backup");
-    recovered.close();
+    expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
+  });
+
+  it("preserves a readable primary with orphaned foreign keys", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "latest unrecoverable from older backup");
+    const backup = await store.createBackup();
+    store.close();
+    const database = new Database(databasePath);
+    database.pragma("foreign_keys = OFF");
+    database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+    expect(database.pragma("quick_check", { simple: true })).toBe("ok");
+    expect(database.prepare("PRAGMA foreign_key_check").get()).toBeDefined();
+    database.close();
+    expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
   });
 
   it("restores and upgrades a valid backup from released schema 41", async () => {

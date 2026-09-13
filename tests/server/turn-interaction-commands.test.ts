@@ -662,6 +662,23 @@ describe("message attachment ownership transfer", () => {
     }
   });
 
+  it.each([
+    new Error("ENOSPC open /Users/private-name/internal-secret.jpg"),
+    { message: "internal-secret", name: "DocumentAttachmentError" },
+  ])("does not publish internal document preparation errors", async (error) => {
+    const queue = vi.fn();
+    const relinquishAll = vi.fn(async () => undefined);
+    const handlerDependencies = dependencies({
+      queue, relinquishAll,
+      prepareDocumentAttachments: async () => { throw error; },
+    });
+    await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+      {} as never, messageCommand(),
+    )).rejects.toMatchObject({ code: "message-send/documents/unexpected" });
+    expect(queue).not.toHaveBeenCalled();
+    expect(relinquishAll).toHaveBeenCalled();
+  });
+
   it("cleans a generated page when aggregate preparation times out after the private write", async () => {
     vi.useFakeTimers();
     const directory = await mkdtemp(join(tmpdir(), "inertia-command-late-scan-"));

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { devNull } from "node:os";
 import { defineConfig } from "vitest/config";
 
 // Native Git, SQLite, and WebSocket fixtures contend heavily on hosted Windows.
@@ -33,6 +34,14 @@ export default defineConfig({
     },
   },
   test: {
+    // Fixtures must never execute a developer's global hooks/signing programs.
+    // Explicit per-test configuration may still override these defaults.
+    env: {
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_SYSTEM: devNull,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_COUNT: "0",
+    },
     // #74 established that two hosted-Windows workers contend across native
     // Git, SQLite, and WebSocket fixtures. Sharding reduces wall time without
     // reintroducing that per-runner race.

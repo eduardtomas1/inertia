@@ -38,7 +38,10 @@ beforeAll(async () => {
       }
     })();
   } finally { db.close(); }
-});
+// Seeding 50 MiB plus indexes competes with the full suite's filesystem work.
+// This bounds fixture construction only; worker search/cancellation deadlines
+// and the real 100,000-message workload below are unchanged.
+}, 30_000);
 
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 

@@ -110,15 +110,15 @@ describe("provider compatibility status", () => {
     };
     expect(providerStateLabel(outdated)).toBe("Update required");
     expect(providerSetupAction(outdated)).toBe("refresh");
-    expect(providerStateDetail({ ...ready, installState: "not-installed", statusMessage: undefined, version: undefined }))
+    expect(providerStateDetail({ ...ready, installState: "not-installed", statusMessage: null, version: null }))
       .toBe("Antigravity CLI was not found on this device.");
     expect(providerStateDetail({
       ...ready,
       id: "gemini",
       label: "Gemini CLI",
       installState: "not-installed",
-      statusMessage: undefined,
-      version: undefined,
+      statusMessage: null,
+      version: null,
     })).toBe("Gemini CLI was not found on this device.");
   });
 });

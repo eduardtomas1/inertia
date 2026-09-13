@@ -110,6 +110,9 @@ export default defineConfig({
           "attachment-import-worker": resolve(
             "src/main/attachment-import-worker.ts",
           ),
+          "document-preparation-worker": resolve(
+            "src/server/runtime/attachments/document-preparation-worker.ts",
+          ),
         },
       },
     },

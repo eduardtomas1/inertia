@@ -43,6 +43,7 @@ export interface RuntimeOptions {
   attachmentRoot?: string;
   attachments?: RuntimeAttachmentBroker;
   conversationAttachmentStoreOperations?: ConversationAttachmentStoreAnyOperationRunner;
+  prepareDocumentAttachments?: typeof import("./runtime/attachments/document-attachment-context").prepareDocumentAttachments;
   agentHarnessRegistry?: AgentHarnessRegistry;
   secureFiles?: RuntimeSecureFileBroker;
   agentBrowser?: RuntimeAgentBrowserBroker;

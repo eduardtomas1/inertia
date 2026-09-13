@@ -733,6 +733,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         enableProviders,
         attachmentResolver,
         generatedAttachments,
+        prepareDocumentAttachments: options.prepareDocumentAttachments,
         workflows: agentWorkflows,
         providerTerminalResumes,
         providerInfo: () => providerInfo,

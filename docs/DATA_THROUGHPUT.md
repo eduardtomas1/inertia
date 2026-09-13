@@ -23,7 +23,7 @@ stream wall time by 88.3%. Bounded PDF scheduling reduced peak RSS growth by
 54.6% while reducing elapsed time. The implementation caps each turn at
 eight documents, 20 MiB aggregate input, 96 KiB extracted output, and a shared
 12-second deadline. The benchmark above measured the earlier 12 MiB input
-budget. The current process-wide scheduler admits at most two operations with
+budget. The decoder's scheduler admits at most two operations with
 a 96 MiB estimated working-memory budget; raster jobs reserve enough of that
 budget to run one at a time. These reservations do not impose a hard bound on
 PDF.js content-stream expansion or native canvas allocations. The scheduler
@@ -35,12 +35,24 @@ Stream appends split a single oversized provider delta transactionally at the
 1,048,576-Unicode-code-point row invariant before insert. Ordering is unchanged
 across live projection, restart recovery, and terminal compaction.
 
-PDF.js and its native canvas polyfills are initialized through one process-wide
-promise. Cold initialization is bounded to 30 seconds, cancelled callers stop
-waiting without starting a duplicate native load, failed initialization is
-evicted for retry, and a successful load remains cached. The shared 12-second
-extraction deadline begins after that one-time module initialization; the outer
-120-second message-preparation deadline still bounds the complete operation.
+Desktop PDF preparation now runs in a separate, short-lived Electron utility.
+Main admits one decoder and two pending batches, sends only bounded bytes and
+display metadata, and passes an empty child environment. Each utility has a
+256 MiB V8 old-space limit. This is not a hard bound on RSS, content-stream
+expansion, or native canvas memory; host memory exhaustion remains a limitation.
+Ordinary text and spreadsheet batches without a PDF continue through the local
+preparer. The benchmark above predates process isolation and does not measure
+its startup or IPC cost.
+
+PDF.js and its native canvas polyfills initialize once per decoder, with a
+30-second initialization limit and a subsequent 12-second extraction deadline.
+Main bounds the whole decoder operation to 43 seconds, clamped to the caller's
+remaining preparation deadline, then allows at most three seconds to observe
+termination. A result is accepted only after a matching reply and native exit;
+the runtime adopts generated JPEG bytes into private storage afterward.
+Unconfirmed termination blocks further decoder admission and remains part of
+runtime shutdown/recycle ownership. The outer 120-second message-preparation
+deadline still bounds the complete operation.
 
 Private Connect gateway byte measurements belong to the local HTTP/WebSocket
 boundary and are covered by its bounded body and frame limits.

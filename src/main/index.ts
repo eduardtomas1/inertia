@@ -54,6 +54,7 @@ import {
 } from "./attachment-registry.js";
 import { registerAttachmentLifecycleIpc } from "./attachment-ipc.js";
 import { conversationAttachmentStoreRunner } from "./conversation-attachment-store-desktop-runner.js";
+import { documentPreparationRunner } from "./document-preparation-desktop-runner.js";
 import {
   closeConversationAttachmentAccess,
   conversationAttachmentStoreAuthority,
@@ -1044,6 +1045,7 @@ async function bootstrap(): Promise<void> {
       suspendDelivery.result(id, generation, recorded),
     runtimeRecoveryBlocked,
     conversationAttachmentStoreRunner,
+    documentPreparationRunner,
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
     attachmentBroker: {

@@ -26,9 +26,6 @@ import {
   DocumentExtractionInitializationError,
   DocumentExtractionScheduler,
 } from "./document-extraction-scheduler";
-import {
-  type PrivateGeneratedAttachmentStore,
-} from "./private-generated-attachments";
 
 const MAX_DOCUMENT_CONTEXT_BYTES = 64 * 1024;
 export const MAX_DOCUMENT_CONTEXT_TOTAL_BYTES = 96 * 1024;
@@ -59,12 +56,17 @@ export interface DocumentAttachmentContext {
   truncated: boolean;
 }
 
+export interface GeneratedDocumentAttachmentSink {
+  writeJpeg(bytes: Uint8Array): Promise<string>;
+  release(paths: readonly string[]): Promise<void>;
+}
+
 export interface DocumentAttachmentContextOptions {
   readonly deadlineAt?: number;
   readonly groupId?: string;
   readonly now?: () => number;
   readonly pdfModuleLoader?: PdfModuleLoader;
-  readonly generatedAttachmentStore?: PrivateGeneratedAttachmentStore;
+  readonly generatedAttachmentStore?: GeneratedDocumentAttachmentSink;
   readonly scheduler?: DocumentExtractionScheduler;
   readonly signal?: AbortSignal;
 }
@@ -325,7 +327,7 @@ async function rasterizePdfPages(
   analysis: PdfAnalysis,
   pageNumbers: readonly number[],
   budget: PdfRasterBudget,
-  generatedAttachments: PrivateGeneratedAttachmentStore,
+  generatedAttachments: GeneratedDocumentAttachmentSink,
   signal: AbortSignal,
   deadlineAt: number,
   now: () => number,

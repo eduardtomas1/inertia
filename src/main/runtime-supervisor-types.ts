@@ -1,4 +1,5 @@
 import type { UtilityProcess } from "electron";
+import type { DocumentPreparationRunner } from "../node/document-preparation";
 
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type { PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
@@ -187,6 +188,7 @@ export interface RuntimeSupervisorOptions {
   secureFileBroker?: RuntimeSecureFileBroker;
   agentBrowserBroker?: RuntimeAgentBrowserBroker;
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
+  documentPreparationRunner?: DocumentPreparationRunner;
   conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;

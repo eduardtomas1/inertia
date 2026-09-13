@@ -29,6 +29,7 @@ import {
   removePortableFixture,
   writeNodeFlagExecutable,
 } from "../helpers/portable-provider-fixture";
+import { executableProcessExists } from "../helpers/executable-process";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const CONVERSATION = "4f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a11";
@@ -515,24 +516,33 @@ process.stdout.write(JSON.stringify({ event: "result", result: { status: "SUCCES
       .resolves.toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
   });
 
-  it("settles instead of hanging when process-tree cleanup cannot be confirmed", async () => {
+  it("settles instead of hanging when stopping a lingering process cannot be confirmed", async () => {
     const root = fixtureRoot("antigravity unconfirmed cleanup");
+    const pidPath = join(root, "agy.pid");
     const { command } = fakeAgy(root, `
-emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
+emit({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } });
+hang();
 `);
     const startedAt = Date.now();
     const recorder = terminalStatuses();
-    const result = await managerFor(command, {
-      terminateProcessTree: () => new Promise<boolean>(() => undefined),
-      terminationConfirmMs: 200,
-    }).run(antigravityInput(root), { onStatus: recorder.onStatus });
-    expect(Date.now() - startedAt).toBeLessThan(10_000);
-    expect(result).toMatchObject({
-      status: "failed",
-      cleanupConfirmed: false,
-      error: "Antigravity's process tree could not be confirmed stopped.",
-    });
-    expect(recorder.statuses).toEqual(["failed"]);
+    try {
+      const result = await managerFor(command, {
+        resultExitGraceMs: 50,
+        terminateProcessTree: () => new Promise<boolean>(() => undefined),
+        terminationConfirmMs: 200,
+      }).run(antigravityInput(root), { onStatus: recorder.onStatus });
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      expect(result).toMatchObject({
+        status: "failed",
+        cleanupConfirmed: false,
+        error: "Antigravity's process tree could not be confirmed stopped.",
+      });
+      expect(recorder.statuses).toEqual(["failed"]);
+    } finally {
+      const pid = existsSync(pidPath) ? Number(readFileSync(pidPath, "utf8")) : 0;
+      if (pid > 0 && executableProcessExists(pid)) process.kill(pid, "SIGKILL");
+    }
   });
 
   it("reports a non-success result as a failed turn", async () => {

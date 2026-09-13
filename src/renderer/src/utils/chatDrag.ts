@@ -59,6 +59,7 @@ export function startChatDrag(
   const { pointerId, clientX: startX, clientY: startY } = event;
   const element = event.currentTarget;
   let dragging = false;
+  let dragged = false;
 
   const move = (moveEvent: PointerEvent): void => {
     if (moveEvent.pointerId !== pointerId) return;
@@ -68,12 +69,14 @@ export function startChatDrag(
     }
     if (!dragging) {
       if (
-        Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY)
-        < DRAG_THRESHOLD_PX
+        dragged
+        || Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY)
+          < DRAG_THRESHOLD_PX
       ) {
         return;
       }
       dragging = true;
+      dragged = true;
       if (element.isConnected) element.setPointerCapture?.(pointerId);
       document.documentElement.dataset.chatDrag = "active";
       onStart?.();
@@ -97,12 +100,20 @@ export function startChatDrag(
     if (keyEvent.key !== "Escape" || !dragging) return;
     keyEvent.preventDefault();
     keyEvent.stopPropagation();
-    finish(false);
+    stopDragging();
   };
   const swallowClick = (clickEvent: MouseEvent): void => {
     clickEvent.preventDefault();
     clickEvent.stopPropagation();
   };
+
+  function stopDragging(): ChatDrag | null {
+    const drag = current;
+    dragging = false;
+    delete document.documentElement.dataset.chatDrag;
+    publish(null);
+    return drag;
+  }
 
   function finish(drop: boolean): void {
     document.removeEventListener("pointermove", move, true);
@@ -110,10 +121,8 @@ export function startChatDrag(
     document.removeEventListener("pointercancel", cancel, true);
     window.removeEventListener("keydown", cancelOnEscape, true);
     window.removeEventListener("blur", cancel);
-    if (!dragging) return;
-    const drag = current;
-    delete document.documentElement.dataset.chatDrag;
-    publish(null);
+    if (!dragged) return;
+    const drag = dragging ? stopDragging() : null;
     window.addEventListener("click", swallowClick, { capture: true, once: true });
     window.setTimeout(() => {
       window.removeEventListener("click", swallowClick, true);

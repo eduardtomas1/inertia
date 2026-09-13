@@ -12124,14 +12124,33 @@ button.sent-attachment-open:focus-visible {
   animation: turn-thinking-line-out 90ms ease-in forwards;
 }
 
-.turn-thinking > summary .agent-pixel-loader {
+.turn-thinking-pulse {
+  display: inline-flex;
   flex: 0 0 auto;
-  color: var(--active-work-accent, var(--text-soft));
+  align-items: center;
+  gap: 7px;
+}
+
+.turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
+  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);
+  mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);
+  -webkit-mask-size: 300% 100%;
+  mask-size: 300% 100%;
+  animation: turn-thinking-sweep 1800ms var(--motion-ease-inout) infinite;
 }
 
 .turn-work-log > details.turn-thinking > summary small.turn-thinking-elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   margin-left: 0;
+  color: var(--text-soft);
+  font-size: inherit;
   font-variant-numeric: tabular-nums;
+}
+
+.turn-thinking-separator {
+  color: var(--execution-separator);
 }
 
 .turn-work-log > details.turn-thinking[data-thinking-state="folded"] > summary {
@@ -12157,6 +12176,17 @@ button.sent-attachment-open:focus-visible {
   }
 }
 
+@keyframes turn-thinking-sweep {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+  }
+  to {
+    -webkit-mask-position: 0 0;
+    mask-position: 0 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .turn-thinking-line > span,
   .turn-thinking[data-thinking-state="folded"] .turn-thinking-label {
@@ -12166,6 +12196,24 @@ button.sent-attachment-open:focus-visible {
   .turn-thinking-line > .is-leaving {
     visibility: hidden;
   }
+
+  .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
+    -webkit-mask-image: none;
+    mask-image: none;
+    animation: none;
+  }
+}
+
+.app-shell[data-document-visible="false"] .turn-thinking-pulse {
+  animation-play-state: paused;
 }
 
 .subagent-squares {

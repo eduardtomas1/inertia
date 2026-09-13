@@ -54,7 +54,6 @@ import {
   parseReasoningSummary,
   type ReasoningLine,
 } from "../../utils/reasoningSummary";
-import { AgentPixelGrid } from "../AgentPixelGrid";
 
 const FailureDiagnostics = lazy(() => import("./failurePanel"));
 
@@ -650,32 +649,34 @@ function ThinkingSummary({
 }): React.JSX.Element {
   return (
     <>
-      <Brain size={13} className="turn-thinking-icon" aria-hidden="true" />
-      <span className="turn-thinking-label" key={live ? "live" : "folded"}>
-        {live
-          ? "Thinking"
-          : span.durationMs === null
-            ? "Thought"
-            : `Thought for ${formatElapsed(Math.max(1_000, span.durationMs))}`}
+      <span className="turn-thinking-pulse">
+        <Brain size={13} className="turn-thinking-icon" aria-hidden="true" />
+        <span className="turn-thinking-label" key={live ? "live" : "folded"}>
+          {live
+            ? "Thinking"
+            : span.durationMs === null
+              ? "Thought"
+              : `Thought for ${formatElapsed(Math.max(1_000, span.durationMs))}`}
+        </span>
+        {live && (
+          <small className="turn-thinking-elapsed">
+            <span className="turn-thinking-separator" aria-hidden="true">·</span>
+            <LiveElapsed startedAt={span.startedAt} />
+          </small>
+        )}
       </span>
       {live
         ? (
-            <>
-              <span className="turn-thinking-line" aria-hidden="true">
-                {line.previous && (
-                  <span className="is-leaving" key={`previous:${line.previous.id}`}>
-                    {line.previous.text}
-                  </span>
-                )}
-                <span className="is-entering" key={`current:${line.current.id}`}>
-                  {line.current.text}
+            <span className="turn-thinking-line" aria-hidden="true">
+              {line.previous && (
+                <span className="is-leaving" key={`previous:${line.previous.id}`}>
+                  {line.previous.text}
                 </span>
+              )}
+              <span className="is-entering" key={`current:${line.current.id}`}>
+                {line.current.text}
               </span>
-              <AgentPixelGrid animated phase="thinking" />
-              <small className="turn-thinking-elapsed">
-                <LiveElapsed startedAt={span.startedAt} />
-              </small>
-            </>
+            </span>
           )
         : <small>{count}</small>}
     </>

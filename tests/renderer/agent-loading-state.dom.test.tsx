@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -264,7 +265,7 @@ describe("agent loading and trace DOM", () => {
     expect(container.querySelectorAll(".turn-working-status .agent-pixel-loader > span"))
       .toHaveLength(9);
     expect(container.querySelector("[data-agent-trace=thinking] > summary"))
-      .toHaveTextContent(/^ThinkingLive provider summary/u);
+      .toHaveTextContent(/^Thinking·\s*\d+\.\ds\s*Live provider summary/u);
   });
 
   it("streams the latest reasoning sentence in a throttled brain strip, then folds to its duration", () => {
@@ -285,8 +286,17 @@ describe("agent loading and trace DOM", () => {
       expect(summary.querySelector(".lucide-brain")).toBeInTheDocument();
       expect(summary.querySelector(".turn-thinking-label")).toHaveTextContent("Thinking");
       expect(summary.querySelector(".turn-thinking-line")).toHaveAttribute("aria-hidden", "true");
-      expect(summary.querySelector(".agent-pixel-loader"))
-        .toHaveAttribute("data-phase", "thinking");
+      expect(summary.querySelector(".agent-pixel-loader")).toBeNull();
+      expect(container.querySelectorAll(".agent-pixel-loader")).toHaveLength(1);
+      const pulse = summary.querySelector(".turn-thinking-pulse");
+      expect(pulse?.querySelector(".lucide-brain")).toBeInTheDocument();
+      expect(pulse?.querySelector(".turn-thinking-label")).toBeInTheDocument();
+      const elapsed = pulse?.querySelector(".turn-thinking-elapsed");
+      expect(elapsed).toHaveTextContent(/^·\s*\d+\.\ds$/u);
+      expect(
+        elapsed!.compareDocumentPosition(summary.querySelector(".turn-thinking-line")!)
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       expect(entering()).toHaveTextContent("Reading the pane reducer.");
 
       rerender(<ResponseTimeline {...stateProps({
@@ -317,7 +327,17 @@ describe("agent loading and trace DOM", () => {
       );
       expect(folded).toBe(summary);
       expect(folded).toHaveTextContent(/^Thought for 12s/u);
-      expect(folded?.querySelector(".agent-pixel-loader")).toBeNull();
+      expect(folded?.querySelector(".turn-thinking-elapsed")).toBeNull();
+      const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+      expect(styles).toMatch(
+        /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep/u,
+      );
+      expect(styles).toContain(
+        "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);",
+      );
+      expect(styles).toMatch(
+        /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,
+      );
       expect(screen.queryByText("Tracing ownership")).not.toBeInTheDocument();
       fireEvent.click(summary);
       expect(screen.getByText("Tracing ownership")).toBeInTheDocument();

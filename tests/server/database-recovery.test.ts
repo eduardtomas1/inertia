@@ -1365,6 +1365,7 @@ describe("database backup and startup recovery", () => {
       DROP TABLE reasoning_content_chunks;
       DROP TABLE provider_run_ownership;
       DROP INDEX agent_turns_provider_run_identity_idx;
+      ALTER TABLE messages DROP COLUMN private_connect_device_id;
       DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 42;
     `);
@@ -1531,6 +1532,7 @@ describe("database backup and startup recovery", () => {
       DROP TABLE agent_thread_operations;
       DROP TABLE agent_managed_conversations;
       DROP INDEX agent_turns_usage_dashboard_completed_idx;
+      ALTER TABLE messages DROP COLUMN private_connect_device_id;
       DROP INDEX messages_created_id_idx;
       DELETE FROM schema_migrations WHERE version >= 56;
     `);
@@ -1600,6 +1602,7 @@ describe("database backup and startup recovery", () => {
         DROP TABLE agent_thread_operations;
         DROP TABLE agent_managed_conversations;
         DROP INDEX agent_turns_usage_dashboard_completed_idx;
+        ALTER TABLE messages DROP COLUMN private_connect_device_id;
         DROP INDEX messages_created_id_idx;
         DELETE FROM schema_migrations WHERE version >= 57;
       `);

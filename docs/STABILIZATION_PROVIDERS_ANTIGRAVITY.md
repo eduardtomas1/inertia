@@ -1,10 +1,17 @@
 # Antigravity integration investigation — 2026-09-07
 
-Status: **investigation complete; no Antigravity provider route implemented**.
+Status: **investigation complete; ACP route not used**.
 No Gemini provider, persisted identity, session, authentication configuration,
 installer, or user application was changed by this investigation. A complete
-adapter is not claimed: the currently published ACP runtime has a confirmed
-terminal-failure ambiguity described below.
+ACP adapter is not claimed: the currently published ACP runtime has a
+confirmed terminal-failure ambiguity described below.
+
+Update, 2026-09-13: Inertia now ships Antigravity through the documented
+headless `agy` CLI (`antigravity` / `antigravity-cli` /
+`builtin:antigravity`) instead of this ACP server. Its contract, limits, and
+unverified protocol details are in
+[the harness capabilities](HARNESS_CAPABILITIES.md#antigravity-headless-contract).
+The ACP findings below remain the reason that route was not taken.
 
 ## Product and transport boundaries
 

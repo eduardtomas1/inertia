@@ -129,6 +129,75 @@ configuration, and
 Capability text therefore describes these as provider-reported permissions, and
 project trust must include the selected CLI configuration.
 
+## Antigravity headless contract
+
+Google stopped serving individual Free and Google AI Pro/Ultra accounts through
+Gemini CLI on June 18, 2026 and moved them to Antigravity
+([transition announcement](https://github.com/google-gemini/gemini-cli/discussions/28017)).
+Gemini CLI stays available for API-key and Code Assist Standard or Enterprise
+users. Existing Gemini chats, sessions, and settings are never retargeted; when
+Gemini CLI returns Google's "no longer supported for Gemini Code Assist for
+individuals" refusal, the turn fails with a clear explanation and the composer
+offers to open a new Antigravity chat.
+
+Inertia runs the user's own locally installed `agy` 1.2.2 or newer in its
+documented headless mode
+([headless contract](https://antigravity.google/docs/cli/headless/)). Every
+turn is one owned process started with
+`--input-format stream-json --output-format stream-json`. The prompt is written
+as one `user` event on stdin, and stdin is then closed. Inertia never passes
+`-p` or `--print`: without stream-json input, an unauthenticated `agy -p`
+prints a sign-in URL and waits, while stream-json input fails fast with
+"authentication required". A contract test asserts that no Antigravity
+invocation carries a prompt flag.
+
+Detection runs only `agy --version` and requires the selected executable to be
+named `agy` or `antigravity`. Inertia never probes sign-in, never runs
+`agy models`, and never reads or writes Antigravity settings, MCP
+configuration, or state under `~/.gemini/antigravity-cli/`. Sign-in belongs to
+Antigravity. When a turn reports that authentication is required, Inertia stops
+the process and shows Connect. Connect opens interactive `agy` inside
+Inertia's visible terminal, and only when the user clicks it. Inertia does not
+open a browser, read sign-in codes, or store tokens for Antigravity.
+
+| Inertia | Antigravity CLI |
+| --- | --- |
+| Supervised | Antigravity's own policy. Tools that need approval are declined in headless mode, and the timeline records that an action was declined. |
+| Auto-edit | `--mode accept-edits` |
+| Plan | `--mode plan` |
+| Full Access | `--dangerously-skip-permissions`, only when the user selects Full Access |
+| Resume | `--conversation <conversation_id>` from the previous result |
+| Model and effort | `--model` for safe identifiers, `--effort low\|medium\|high` |
+
+Structured questions, Inertia-mediated approvals, image input, Inertia host
+tools, explicit compaction, reasoning text, and model catalogs are unavailable
+in this harness and are declared that way in its capability manifest. A
+`step_update` text delta becomes assistant text, a `step_update` with a tool
+name becomes tool activity keyed by its step index, `conversation_id` becomes
+the native session, and the `result` event settles the turn. Only `SUCCESS`
+completes a turn; `ERROR`, `WAITING`, `INVALID`, `CANCELED`, and
+`INTERRUPTED` fail it, and an authentication error maps to Connect. Result
+usage is projected with session scope. After a result, a lingering process is
+stopped after a short grace period, and cancellation stops the whole process
+tree.
+
+The following could not be verified without signing in, so the parser is
+deliberately tolerant and the behavior is covered by a fake `agy` in tests:
+
+- whether `step_update` fields are nested under the event name or flat (both
+  are accepted);
+- the exact meaning of `text_delta` and `tool_name`, and whether a tool step
+  repeats while it runs;
+- the stderr wording of headless approval declines (matched conservatively);
+- whether result usage is cumulative across `--conversation` resumes;
+- that `--mode plan` never edits files;
+- how `--effort` interacts with `--model`;
+- how `agy` handles SIGINT (Inertia stops the process tree instead).
+
+The official `antigravity-acp` server was not used: it can end a turn with
+`end_turn` after an error and has no macOS Intel artifact. See
+[the investigation](STABILIZATION_PROVIDERS_ANTIGRAVITY.md).
+
 ## What the open-source review changed
 
 The August 2026 review used other projects as evidence and adversarial test

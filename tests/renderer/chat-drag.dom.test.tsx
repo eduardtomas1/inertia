@@ -146,6 +146,29 @@ describe("chat drag", () => {
     expect(drop).not.toHaveBeenCalled();
   });
 
+  it("keeps a drag cancelled with Escape from clicking the row on release", async () => {
+    const onClick = vi.fn();
+    const drop = vi.fn();
+    unregister = registerChatDropTarget({ resolve: () => target, drop });
+    render(<DragSource onClick={onClick} />);
+    const button = screen.getByRole("button", { name: "Chat B" });
+
+    press(button);
+    moveTo(60, 30);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    moveTo(70, 30);
+
+    expect(currentChatDrag()).toBeNull();
+    expect(document.documentElement.dataset.chatDrag).toBeUndefined();
+
+    release(70, 30);
+    fireEvent.click(button);
+
+    expect(drop).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it("cancels when the button was released outside the window", () => {
     const drop = vi.fn();
     unregister = registerChatDropTarget({ resolve: () => target, drop });

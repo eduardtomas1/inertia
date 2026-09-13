@@ -1650,8 +1650,7 @@ textarea {
   /* The travelling wave is the whole effect, so it is removed outright
      rather than parked at its first frame as a static ring. */
   .thread-status-dot.is-running::before,
-  .thread-status-dot.is-working::before,
-  .activity-thread.status-working .activity-thread-state-mark::before {
+  .thread-status-dot.is-working::before {
     display: none;
   }
 
@@ -11635,8 +11634,6 @@ button.sent-attachment-open:focus-visible {
   .response-turn.is-active .agent-activity.is-running svg,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-running::before,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-working::before,
-.app-shell[data-document-visible="false"]
-  .activity-thread.status-working .activity-thread-state-mark::before,
 .app-shell[data-document-visible="false"]
   .turn-reasoning-step.is-active::before {
   animation-play-state: paused;

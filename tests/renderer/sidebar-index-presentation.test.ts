@@ -32,22 +32,32 @@ describe("sidebar index presentation contracts", () => {
   });
 
   it("stops decorative motion for reduced motion and hidden documents", () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread\.status-working \.activity-thread-state-mark\s*\{[\s\S]*?animation:\s*none;/u);
-    expect(css).toMatch(/\.app-shell\[data-document-visible="false"\]\s+\.activity-thread\.status-working \.activity-thread-state-mark::before/u);
-    expect(css).toContain("animation-play-state: paused;");
-    expect(css).toContain(
-      ".activity-thread.status-working .activity-thread-state-mark::before",
-    );
-    expect(css).not.toContain(
-      ".activity-thread.status-working .activity-thread-state-mark::after",
-    );
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread-status-label \.agent-pixel-loader\[data-animated="true"\] > span\s*\{[^}]*animation:\s*none;/u);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread-status-label \[data-work-arrival\] > svg\s*\{[^}]*animation:\s*none;/u);
+    expect(css).toMatch(/\.app-shell\[data-document-visible="false"\] \.agent-pixel-loader > span\s*\{[^}]*animation-play-state:\s*paused;/u);
+    expect(css).not.toContain(".activity-thread-state-mark");
     expect(css).not.toContain("will-change:");
+  });
+
+  it("loops only the Working glyph and lets every other status arrive once", () => {
+    const orbitRule = css.match(
+      /\.agent-pixel-loader\[data-animated="true"\]\[data-rhythm="orbit"\] > span\s*\{([^}]*)\}/u,
+    )?.[1] ?? "";
+    const arrivalRule = css.match(
+      /\.activity-thread-status-label \[data-work-arrival\] > svg\s*\{([^}]*)\}/u,
+    )?.[1] ?? "";
+
+    expect(orbitRule).toContain("animation-duration: 950ms");
+    // The shorthand would reset animation-play-state and beat the hidden-document pause.
+    expect(orbitRule).not.toMatch(/(^|[\s;])animation:/u);
+    expect(arrivalRule).toContain("work-status-arrival 420ms");
+    expect(arrivalRule).not.toContain("infinite");
   });
 
   it("exposes selected, focus, and status boundaries in forced colors", () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active[\s\S]*?border-color:\s*Highlight;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread\.is-active \.activity-thread-select,[\s\S]*?color:\s*HighlightText;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-select:focus-visible[\s\S]*?outline-color:\s*Highlight;/u);
-    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-state-mark,[\s\S]*?border:\s*1px solid CanvasText;/u);
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.activity-thread-status-label \.agent-pixel-loader > span\s*\{[^}]*background:\s*CanvasText;/u);
   });
 });

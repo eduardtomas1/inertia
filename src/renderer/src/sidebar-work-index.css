@@ -22,42 +22,57 @@
   outline-offset: -2px;
 }
 
-.activity-thread-state-mark {
-  position: absolute;
-  right: -2px;
-  bottom: 1px;
-  display: grid;
-  width: 11px;
-  height: 11px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--text-muted);
-  background: var(--sidebar-bg);
-  box-shadow: 0 0 0 1.5px var(--sidebar-bg);
+/* Working shows the chat timeline's own 3x3 pixel glyph, so a running thread
+   reads the same in the Work tab and in the conversation. The orbit rhythm
+   (950ms with a dark centre) keeps a list of several running threads calm.
+   BeautifulUiMotion.css only loads with the timeline while this sidebar is
+   always mounted, so the orbit offsets repeat its values here. Only the
+   duration and delay are set, so the hidden-document pause in styles.css
+   still applies. */
+.activity-thread-status-label .agent-pixel-loader {
+  color: currentcolor;
 }
 
-.activity-thread-state-mark > svg { flex: 0 0 auto; stroke-width: 2.25; }
-.activity-thread.status-working .activity-thread-state-mark { color: var(--status-working); }
-.activity-thread.status-approval .activity-thread-state-mark { color: var(--status-approval); }
-.activity-thread.status-input .activity-thread-state-mark { color: var(--status-input); }
-.activity-thread.status-failed .activity-thread-state-mark { color: var(--status-failed); }
-.activity-thread.status-completed .activity-thread-state-mark { color: var(--status-completed); }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(1) { --pixel-orbit-delay: 0ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(2) { --pixel-orbit-delay: 110ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(3) { --pixel-orbit-delay: 220ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(4) { --pixel-orbit-delay: 770ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(6) { --pixel-orbit-delay: 330ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(7) { --pixel-orbit-delay: 660ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(8) { --pixel-orbit-delay: 550ms; }
+.agent-pixel-loader[data-rhythm="orbit"] > span:nth-child(9) { --pixel-orbit-delay: 440ms; }
 
-/* The previous animation drove this element's own box-shadow, which replaced
-   the 1.5px sidebar-bg separator above and let the badge merge into the
-   provider icon while working. The wave now rides on a pseudo-element, so the
-   separator survives. */
-.activity-thread.status-working .activity-thread-state-mark::before {
-  /* This badge overlaps the provider icon inside a 42px row, so its wave
-     travels less far than the standalone status dots. */
-  --thread-ripple-reach: 1.9;
-  position: absolute;
-  inset: 0;
-  border: 1.25px solid currentcolor;
-  border-radius: 50%;
-  content: "";
-  animation: thread-working-ripple var(--thread-ripple-duration)
-    var(--thread-ripple-ease) infinite;
+.agent-pixel-loader[data-animated="true"][data-rhythm="orbit"] > span {
+  animation-duration: 950ms;
+  animation-delay: var(--pixel-orbit-delay);
+}
+
+.agent-pixel-loader[data-animated="true"][data-rhythm="orbit"] > span:nth-child(5) {
+  animation: none;
+  opacity: 0.07;
+}
+
+/* A status the user has not seen yet arrives with one short pop, then rests.
+   Only Working loops. */
+.activity-thread-status-label [data-work-arrival] > svg {
+  animation: work-status-arrival 420ms var(--motion-ease) both;
+}
+
+@keyframes work-status-arrival {
+  0% {
+    opacity: 0.4;
+    transform: scale(0.72);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .activity-thread-trailing {
@@ -95,6 +110,24 @@
 .activity-thread.status-failed .activity-thread-status-label { color: var(--status-failed); }
 .activity-thread.status-completed .activity-thread-status-label { color: var(--status-completed); }
 
+.work-status-separator {
+  opacity: 0.6;
+  font-weight: 450;
+}
+
+.work-status-elapsed {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Read, idle threads recede so rows that still need the user keep full
+   strength. The weight stays below the sidebar's 520 title weight, and the
+   active and unread rows never recede. */
+.activity-thread.status-idle:not(.is-active, .is-unread) .activity-thread-title {
+  color: var(--text-muted);
+  font-weight: 450;
+}
+
 .activity-thread:hover .activity-thread-trailing,
 .activity-thread:focus-within .activity-thread-trailing {
   opacity: 0;
@@ -114,6 +147,13 @@
 
 .sidebar.is-narrow .activity-thread-status-label {
   max-width: 34px;
+}
+
+/* The narrow slot keeps the elapsed time and drops the word; the pixel glyph
+   and its colour still say Working. */
+.sidebar.is-narrow .activity-thread-status-label[data-work-elapsed]
+  :is(.work-status-word, .work-status-separator) {
+  display: none;
 }
 
 .work-thread-meta > .activity-thread-repository-meta,
@@ -149,16 +189,25 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .activity-thread-trailing,
-  .activity-thread.status-working .activity-thread-state-mark {
+  .activity-thread-trailing {
     animation: none;
     transition: none;
   }
-}
 
-.app-shell[data-document-visible="false"]
-  .activity-thread.status-working .activity-thread-state-mark::before {
-  animation-play-state: paused;
+  /* A still ring keeps reading as the working glyph without moving. */
+  .activity-thread-status-label .agent-pixel-loader[data-animated="true"] > span {
+    animation: none;
+    opacity: 0.62;
+  }
+
+  .activity-thread-status-label
+    .agent-pixel-loader[data-animated="true"][data-rhythm="orbit"] > span:nth-child(5) {
+    opacity: 0.07;
+  }
+
+  .activity-thread-status-label [data-work-arrival] > svg {
+    animation: none;
+  }
 }
 
 @media (forced-colors: active) {
@@ -189,12 +238,22 @@
     outline-color: Highlight;
   }
 
-  .activity-thread-state-mark,
   .thread-status-dot,
   .conversation-unread {
     border: 1px solid CanvasText;
     background: Canvas;
     box-shadow: none;
     forced-color-adjust: auto;
+  }
+
+  /* The pixel cells are drawn with background colour, which forced colours
+     would otherwise flatten into the row. */
+  .activity-thread-status-label .agent-pixel-loader > span {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  .activity-thread.is-active .activity-thread-status-label .agent-pixel-loader > span {
+    background: HighlightText;
   }
 }

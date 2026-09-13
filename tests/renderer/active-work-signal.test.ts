@@ -23,6 +23,10 @@ const timelineSource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
 );
+const pixelGridSource = readFileSync(
+  new URL("../../src/renderer/src/components/AgentPixelGrid.tsx", import.meta.url),
+  "utf8",
+);
 
 function cssBlock(source: string, marker: string): string {
   const markerIndex = source.indexOf(marker);
@@ -71,15 +75,16 @@ describe("Minimal Workstream active pixel signal", () => {
       "data-active-agent-phase={activePresentation.phase}",
     );
     expect(activeBranch).toContain("<AgentPixelLoader");
-    expect(timelineSource).toContain("data-phase={phase}");
+    expect(timelineSource).toContain("<AgentPixelGrid animated={animated} phase={phase} />");
+    expect(pixelGridSource).toContain("data-phase={phase}");
     expect(settledBranch).not.toContain("data-active-work-region");
     expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
 
   it("keeps pixel motion on the derived state with a static working label", () => {
     expect(timelineSource).toContain("animated={activePresentation.animated}");
-    expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
-    expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = Array.from");
+    expect(pixelGridSource).toContain('data-animated={animated ? "true" : "false"}');
+    expect(pixelGridSource).toContain("AGENT_PIXEL_GRID_CELLS = Array.from");
     expect(exactMotionCss).toContain("--pixel-drive-delay: 90ms");
     expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
     expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');

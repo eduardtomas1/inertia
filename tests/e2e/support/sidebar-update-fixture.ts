@@ -12,6 +12,7 @@ export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents)
   let available = false;
   let releaseCheck: (() => void) | null = null;
   let gateCheck: Promise<void> | null = null;
+  let checkEntered = false;
   let finish: (() => void) | null = null;
   let fail: ((error: Error) => void) | null = null;
   let progress: ((value: AppUpdaterDownloadProgress) => void) | null = null;
@@ -20,7 +21,7 @@ export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents)
     fetch: async () => { throw new Error("No release network in fixture"); },
     loadUpdater: async () => ({
       check: async () => {
-        counts.checks++; if (gateCheck) await gateCheck;
+        counts.checks++; if (gateCheck) { checkEntered = true; await gateCheck; }
         return { available, version: available ? metadata.latestVersion! : metadata.currentVersion, releaseNotes: metadata.releaseNotes };
       },
       download: (callbacks) => {
@@ -50,8 +51,11 @@ export async function installUpdateFixture(ipcMain: IpcMain, owner: WebContents)
   counts.checks = 0;
   return {
     counts,
-    holdCheck: () => { available = true; gateCheck = new Promise<void>((resolve) => { releaseCheck = resolve; }); },
-    finishCheck: () => { releaseCheck?.(); gateCheck = null; },
+    holdCheck: () => { available = true; checkEntered = false; gateCheck = new Promise<void>((resolve) => { releaseCheck = resolve; }); },
+    finishCheck: () => {
+      if (!checkEntered) throw new Error("The held update check has not entered its adapter.");
+      releaseCheck?.(); gateCheck = null;
+    },
     progress: (percent: number) => progress?.({ percent, transferred: percent, total: 100, bytesPerSecond: 10 }),
     finishDownload: () => finish?.(),
     failDownload: () => fail?.(new Error("private fixture transport failure")),

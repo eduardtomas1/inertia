@@ -19,15 +19,18 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
       moduleUrl = output;
     } });
   const page = app.page;
-  // Flush the original test-mode check (no network) before switching its adapter.
-  await page.evaluate(async () => await window.inertia.checkAppUpdate(false));
+  const button = page.locator(".sidebar-update-button");
+  // Settle the hook's scheduled startup check, including its final rotation.
+  // A direct IPC check does not settle that timer and can leave a later click
+  // blocked by the unrelated startup check while its icon says "checking".
+  await expect(button).toHaveAccessibleName("Up to date — check again");
+  await expect(button).toHaveAttribute("data-update-state", "idle");
   await app.electronApp.evaluate(async ({ ipcMain, BrowserWindow }, url) => {
     const load = process.getBuiltinModule("module").createRequire(url);
     const module = load(url) as typeof import("./support/sidebar-update-fixture");
     const owner = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())!.webContents;
     (globalThis as FixtureGlobal).sidebarUpdateFixture = await module.installUpdateFixture(ipcMain, owner);
   }, moduleUrl);
-  const button = page.locator(".sidebar-update-button");
   const popup = page.getByRole("dialog", { name: "Application update details" });
   const capture = async (name: string): Promise<void> => {
     await app.expectNoViewportOverflow();
@@ -54,6 +57,9 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
       await capture("update-current-dark");
       await app.electronApp.evaluate(() => (globalThis as FixtureGlobal).sidebarUpdateFixture.holdCheck());
       await button.click();
+      await expect.poll(async () => await app.electronApp.evaluate(
+        () => (globalThis as FixtureGlobal).sidebarUpdateFixture.counts.checks,
+      )).toBe(1);
       await expect(button).toHaveAttribute("data-update-state", "checking");
       await expect(page.locator(".update-status-icon.is-checking")).toHaveCSS("animation-name", "sidebar-update-check");
       await capture("update-checking-dark");

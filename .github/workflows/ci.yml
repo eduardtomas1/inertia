@@ -573,7 +573,8 @@ jobs:
           INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-ci-release-stage
         run: |
           set -euo pipefail
-          export RELEASE_TAG="v$(node -p "require('./package.json').version")"
+          RELEASE_TAG="v$(node -p "require('./package.json').version")"
+          export RELEASE_TAG
           node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"
 
       - name: Download checksummed packaged Windows N-1 installer

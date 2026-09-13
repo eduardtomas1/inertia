@@ -729,11 +729,12 @@ describe("cross-platform packaged behavior contract", () => {
       "codexBinaryPath: packageSmokeCodexExecutable",
     );
     const runtimeForkStart = main.indexOf(
-      "spawn: () => utilityProcess.fork(",
+      "const child = utilityProcess.fork(",
     );
     const runtimeFork = main.slice(runtimeForkStart, runtimeForkStart + 500);
     expect(runtimeForkStart).toBeGreaterThanOrEqual(0);
-    expect(runtimeFork).toContain("env: runtimeBootstrap.runtimeProcessEnvironment(),");
+    expect(runtimeFork).toContain("env: { ...runtimeBootstrap.runtimeProcessEnvironment(),");
+    expect(runtimeFork).toContain('process.env.INERTIA_DIAG_KIMI_GUARDIAN === "1"');
     const packageSmokeEnvironment = await source(
       "src/main/package-smoke-environment.ts",
     );

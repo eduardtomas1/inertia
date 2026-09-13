@@ -38,9 +38,9 @@ jobs:
       - name: Verify frozen source and diagnostic-only delta
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "ed6417672e2137a4bc471caa62bee3fcad119375"
+          test "$(git rev-parse HEAD^)" = "bd55066f2c2beb655f21a9eabf73460101a38cdd"
           git merge-base --is-ancestor 5c9dc929b2ecfcd228b4a013fa770c0683e6108f HEAD
-          git diff --exit-code 86b8402b37c500f1b464a962a00bc53c6b55a833 HEAD -- . ':!.github/workflows/kimi-startup-diagnostic.yml'
+          git diff --exit-code 86b8402b37c500f1b464a962a00bc53c6b55a833 HEAD -- . ':!.github/workflows/kimi-startup-diagnostic.yml' ':!tests/main/cross-platform-packaged-behavior.test.ts'
           git diff --exit-code 5c9dc929b2ecfcd228b4a013fa770c0683e6108f HEAD -- tests/e2e/kimi-terminal-auth.spec.ts package.json package-lock.json playwright.config.ts native/runtime-process-guardian .github/workflows/release-platforms.yml
           mkdir -p diagnostic-evidence
           git rev-parse HEAD > diagnostic-evidence/diagnostic-source.txt

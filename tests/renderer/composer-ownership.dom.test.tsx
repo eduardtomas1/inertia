@@ -921,7 +921,20 @@ describe("image-less composer routes", () => {
     const onChooseAttachments = vi.fn<React.ComponentProps<typeof Composer>["onChooseAttachments"]>(
       async () => attachmentLease([attachment("diagram"), notes]),
     );
-    render(<Composer {...composerProps(current, { onChooseAttachments })} />);
+    const bridge = window.inertia;
+    window.inertia = {
+      ...bridge,
+      snapshot: vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null })),
+      onSnapshot: () => () => undefined,
+    };
+    try {
+      render(<Composer {...composerProps(current, { onChooseAttachments })} />);
+      expect(await screen.findByRole("button", { name: "Antigravity can't read images in Inertia." }))
+        .toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Snapshots" })).toBeNull();
+    } finally {
+      window.inertia = bridge;
+    }
 
     expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
       .toBe("Ask for follow-up changes");

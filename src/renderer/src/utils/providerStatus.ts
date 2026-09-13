@@ -2,6 +2,10 @@ import type { ProviderInfo } from "@shared/contracts";
 
 export type ProviderSetupAction = "connect" | "refresh" | null;
 
+export function providerVersionLabel(version: string): string {
+  return `v${version.replace(/^v(?=\d)/iu, "")}`;
+}
+
 function verifiesSignInOnRun(provider: ProviderInfo): boolean {
   return provider.id === "gemini" || provider.id === "antigravity";
 }

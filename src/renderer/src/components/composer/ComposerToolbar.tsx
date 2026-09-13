@@ -274,7 +274,7 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
-        <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} /></Suspense>
+        <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} unavailableReason={imageInputUnavailableReason} /></Suspense>
         <Suspense
           fallback={(
             <ComposerSendActionsFallback

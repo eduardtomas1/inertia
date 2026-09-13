@@ -4,6 +4,7 @@ import {
   providerSetupAction,
   providerStateDetail,
   providerStateLabel,
+  providerVersionLabel,
 } from "../../src/renderer/src/utils/providerStatus";
 import type { ProviderInfo } from "../../src/shared/contracts";
 
@@ -120,5 +121,13 @@ describe("provider compatibility status", () => {
       statusMessage: null,
       version: null,
     })).toBe("Gemini CLI was not found on this device.");
+  });
+
+  it("prefixes exactly one v whether or not the CLI printed one", () => {
+    expect(providerVersionLabel("26.5.0")).toBe("v26.5.0");
+    expect(providerVersionLabel("v26.5.0")).toBe("v26.5.0");
+    expect(providerVersionLabel("V1.2.2")).toBe("v1.2.2");
+    expect(providerVersionLabel("2025.09.12-abc")).toBe("v2025.09.12-abc");
+    expect(providerVersionLabel("vnext")).toBe("vvnext");
   });
 });

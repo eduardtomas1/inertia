@@ -12,7 +12,11 @@ const original = window.inertia;
 const removeListeners: Array<() => void> = [];
 afterEach(() => { cleanup(); for (const remove of removeListeners.splice(0)) remove(); window.inertia = original; });
 
-function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full" | "commit-rejected" = "ready", split = false) {
+function fixture(
+  mode: "ready" | "submitting" | "importing" | "blocked" | "full" | "commit-rejected" = "ready",
+  split = false,
+  imageInputUnavailableReason: string | null = null,
+) {
   let listener!: (event: SnapshotDelivery) => void;
   const errors: unknown[] = [];
   const onError = (event: Event): void => { errors.push((event as CustomEvent<unknown>).detail); };
@@ -30,7 +34,7 @@ function fixture(mode: "ready" | "submitting" | "importing" | "blocked" | "full"
     attachmentsRef: { current: existing }, pendingAttachmentIdsRef: { current: new Set<string>() },
     blocked: mode === "blocked", conversationId: "chat-a", markEditorChanged: vi.fn(), mountedRef: { current: true },
     onChooseAttachments: async () => null, onImportAttachments: async () => null, releaseAttachmentRef: { current: release },
-    running: false, imageInputUnavailableReason: null, setAttachments: vi.fn(), setAttachmentImporting: vi.fn(), setAttachmentError: vi.fn(), setPendingAttachmentIds: vi.fn(),
+    running: false, imageInputUnavailableReason, setAttachments: vi.fn(), setAttachmentImporting: vi.fn(), setAttachmentError: vi.fn(), setPendingAttachmentIds: vi.fn(),
     submittingRef: { current: mode === "submitting" },
   };
   if (mode === "commit-rejected") commit.mockRejectedValueOnce(new Error("commit denied /private/fixture.png"));
@@ -150,4 +154,16 @@ it.each(["chat-b", null])("keeps a late commit rejection silent after the destin
   expect(value.errors).toEqual([]); expect(value.button).toHaveFocus();
   expect(value.cancel).toHaveBeenCalledExactlyOnceWith("snapshot-batch");
   expect(value.options.attachmentsRef.current).toEqual([]); expect(value.options.pendingAttachmentIdsRef.current.size).toBe(0);
+});
+
+it("never lets a snapshot land in a draft whose route can't read images", async () => {
+  const reason = "Antigravity can't read images in Inertia.";
+  const value = fixture("ready", false, reason);
+  value.deliver(); await value.settle();
+  expect(value.options.attachmentsRef.current).toEqual([]);
+  expect(value.options.pendingAttachmentIdsRef.current.size).toBe(0);
+  expect(value.commit).not.toHaveBeenCalled();
+  expect(value.cancel).toHaveBeenCalledExactlyOnceWith("snapshot-batch");
+  expect(value.options.setAttachmentError).toHaveBeenCalledWith(`${reason} Images were not attached.`);
+  expect(value.button).toHaveFocus();
 });

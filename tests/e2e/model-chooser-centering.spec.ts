@@ -50,7 +50,7 @@ test("repositions an open chooser when empty-thread layout centers its unchanged
     expect(after.y).toBeLessThan(before.y);
     expect(await chooser.evaluate((element) => getComputedStyle(element).maxHeight))
       .not.toBe(previousMaxHeight);
-    await expect(chooser.getByRole("searchbox", { name: "Search models" })).toBeFocused();
+    await expect(chooser.getByRole("combobox", { name: "Search models" })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(chooser).toBeHidden();
     await expect(trigger).toBeFocused();

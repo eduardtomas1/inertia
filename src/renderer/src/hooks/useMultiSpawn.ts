@@ -243,6 +243,9 @@ export function useMultiSpawn({
   const [submitting, setSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reconciliationState, setReconciliationState] = useState<
+    "idle" | "checking" | "blocked" | "clear"
+  >("idle");
   const [recoveryGuidance, setRecoveryGuidance] = useState<
     IdentifiedDuoRecoveryGuidance[]
   >([]);
@@ -576,6 +579,7 @@ export function useMultiSpawn({
     const isCurrent = () => operationGenerationRef.current === generation;
     if (isCurrent()) {
       recoveryProjectIdsRef.current = [...new Set(projectIds)];
+      setReconciliationState("checking");
     }
     try {
       const pending = await queryPendingLaunches(projectIds);
@@ -603,12 +607,14 @@ export function useMultiSpawn({
         (message): message is string => Boolean(message),
       );
       if (reconciliationFailed) {
+        setReconciliationState("blocked");
         setError(
           "One or more previous duo launches could not be reconciled yet. Refresh before launching another pair.",
         );
         return "blocked";
       }
       if (pending.hasMore) {
+        setReconciliationState("blocked");
         setError(
           "More previous duo launches need reconciliation. Reconcile again.",
         );
@@ -625,9 +631,13 @@ export function useMultiSpawn({
       } else {
         setError(null);
       }
+      // One retained launch has its own authoritative recovery state. More
+      // than one needs another complete project reconciliation before launch.
+      setReconciliationState(retained.length > 1 ? "blocked" : "clear");
       return retained.length > 0 ? "blocked" : "clear";
     } catch {
       if (!isCurrent()) return "stale";
+      setReconciliationState("blocked");
       setError(
         "A previous duo launch could not be read. Refresh before another.",
       );
@@ -717,6 +727,7 @@ export function useMultiSpawn({
       return;
     }
     operationGenerationRef.current += 1;
+    setReconciliationState("idle");
     setError(null);
     setRecoveryGuidance([]);
     setRecoveryStatus(null);
@@ -1146,7 +1157,8 @@ export function useMultiSpawn({
     cancelling,
     launchBlocked: open && (
       (recoveryStatus !== null && launchRetainsRecoveryIdentity(recoveryStatus))
-      || error?.includes("previous duo launch") === true
+      || reconciliationState === "checking"
+      || reconciliationState === "blocked"
     ),
     error,
     recoveryGuidance,

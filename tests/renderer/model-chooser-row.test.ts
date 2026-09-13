@@ -74,7 +74,9 @@ describe("ModelChooserRow", () => {
       },
     }));
 
-    expect(html).not.toContain('role="presentation"');
+    expect(html).toContain('role="presentation"');
+    expect(html).toContain('role="gridcell"');
+    expect(html).toContain('aria-selected="true"');
     expect(html).toContain('id="model-option-sol"');
     expect(html).not.toContain('role="option"');
     expect(html).toContain('aria-current="true"');

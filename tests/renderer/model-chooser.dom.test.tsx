@@ -115,6 +115,33 @@ function currentRoute(): ComposerModelRoute {
 }
 
 describe("model chooser active route", () => {
+  it("exposes navigated model cells and separate favorite controls to the combobox", async () => {
+    const routes = [catalogRoute(0), catalogRoute(1)];
+    const select = vi.fn();
+    render(<ModelChooser routes={routes} selectedRoute={routes[0]!} onSelect={select} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const search = screen.getByRole("combobox", { name: "Search models" });
+    const grid = screen.getByRole("grid", { name: "Model results" });
+    expect(search).toHaveAttribute("aria-expanded", "true");
+    expect(search).toHaveAttribute("aria-haspopup", "grid");
+    expect(search).toHaveAttribute("aria-controls", grid.id);
+    expect(grid).toHaveAttribute("aria-rowcount", "2");
+    await waitFor(() => expect(search).toHaveFocus());
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    const active = document.getElementById(search.getAttribute("aria-activedescendant")!)!;
+    expect(active).toHaveAttribute("role", "gridcell");
+    expect(active).toHaveAttribute("aria-selected", "true");
+    expect(active).toHaveTextContent("Team Model 1");
+    expect(grid.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    const favorite = active.closest('[role="row"]')!.querySelector<HTMLButtonElement>(".model-chooser-row-favorite")!;
+    expect(active.contains(favorite)).toBe(false);
+    expect(favorite.closest('[role="gridcell"]')).not.toBe(active);
+    fireEvent.click(favorite);
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ key: routes[1]!.key }));
+  });
+
   it("repositions an open chooser after empty-thread centering without a resize and cleans up", async () => {
     const pendingFrames = new Map<number, FrameRequestCallback>();
     let nextFrame = 0;
@@ -155,7 +182,7 @@ describe("model chooser active route", () => {
       });
       await waitFor(() => expect(chooser).toHaveAttribute("data-popover-vertical", "above"));
       expect(chooser.style.maxHeight).toBe("748px");
-      expect(screen.getByRole("searchbox")).toHaveFocus();
+      expect(screen.getByRole("combobox")).toHaveFocus();
 
       // Every observed box keeps its size. Only the workspace class changes,
       // as when detailLoading clears and the empty thread centers the composer.
@@ -171,13 +198,13 @@ describe("model chooser active route", () => {
       expect(chooser).toHaveAttribute("data-popover-vertical", "below");
       expect(chooser.style.maxHeight).toBe("411.46875px");
       expect(chooser.getBoundingClientRect().top).toBe(491.53125);
-      expect(screen.getByRole("searchbox")).toHaveFocus();
+      expect(screen.getByRole("combobox")).toHaveFocus();
       expect(pendingFrames.size).toBe(0);
 
       workspace.classList.remove("is-empty-thread");
       await waitFor(() => expect(pendingFrames.size).toBe(1));
       const placementFrame = [...pendingFrames.keys()][0]!;
-      fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
       expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
       expect(pendingFrames.has(placementFrame)).toBe(false);
       // Closing intentionally queues trigger-focus restoration separately.
@@ -220,7 +247,7 @@ describe("model chooser active route", () => {
     view.rerender(<ModelChooser routes={[current, ready]}
       selectedRoute={current} onSelect={onSelect} />);
     fireEvent.click(await screen.findByRole("button", { name: /^Disabled gateway, custom backend /u }));
-    expect(screen.getByRole("list", { name: "Model results" })).toHaveTextContent("Team Model 1");
+    expect(screen.getByRole("grid", { name: "Model results" })).toHaveTextContent("Team Model 1");
 
     view.rerender(<ModelChooser routes={[{ ...current, providerReady: false }, unavailable]}
       selectedRoute={current} onSelect={onSelect} />);
@@ -255,7 +282,7 @@ describe("model chooser active route", () => {
     expect(option).toHaveTextContent("Full access");
     expect(option).toHaveTextContent("Plan");
     expect(option).not.toHaveAttribute("aria-current", "true");
-    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
     await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
     expect(onSelect.mock.calls[0]![0]).toMatchObject({
       configuration: { accessMode: "full", interactionMode: "plan", fastMode: true },
@@ -277,7 +304,7 @@ describe("model chooser active route", () => {
       configuration={{ accessMode: "supervised", interactionMode: "build" }} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
     fireEvent.click(await screen.findByRole("button", { name: /^Team gateway, custom backend /u }));
-    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "1", code: "Digit1", ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "1", code: "Digit1", ctrlKey: true });
 
     await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
     expect(onSelect.mock.calls[0]![0]).toMatchObject({
@@ -321,7 +348,7 @@ describe("model chooser active route", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
 
-    const result = screen.getByRole("list", { name: "Model results" })
+    const result = screen.getByRole("grid", { name: "Model results" })
       .querySelector(".model-chooser-row-option");
     expect(result).not.toBeNull();
     expect(result).not.toHaveAttribute("aria-current");
@@ -350,7 +377,7 @@ describe("model chooser active route", () => {
     render(<PendingSelectionChooser />);
     const trigger = screen.getByRole("button", { name: /Choose model/u });
     fireEvent.click(trigger);
-    const result = screen.getByRole("list", { name: "Model results" })
+    const result = screen.getByRole("grid", { name: "Model results" })
       .querySelector(".model-chooser-row-option");
     if (!result) throw new Error("Expected a model result action.");
     fireEvent.click(result);
@@ -381,7 +408,7 @@ describe("model chooser active route", () => {
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
     const elapsed = performance.now() - startedAt;
 
-    const resultList = screen.getByRole("list", { name: "Model results" });
+    const resultList = screen.getByRole("grid", { name: "Model results" });
     await waitFor(() => {
       expect(resultList.querySelectorAll(":scope > li").length)
         .toBeGreaterThan(0);
@@ -392,8 +419,8 @@ describe("model chooser active route", () => {
     expect(document.querySelector(".model-chooser-favorite-actions"))
       .toBeNull();
     const first = results[0]!;
-    expect(first).toHaveAttribute("aria-posinset", "1");
-    expect(first).toHaveAttribute("aria-setsize", "750");
+    expect(first).toHaveAttribute("aria-rowindex", "1");
+    expect(resultList).toHaveAttribute("aria-rowcount", "750");
     expect(first.querySelectorAll(".model-chooser-row-option"))
       .toHaveLength(1);
     expect(first.querySelectorAll("button")).toHaveLength(2);
@@ -401,7 +428,7 @@ describe("model chooser active route", () => {
       .toHaveLength(1);
     expect(elapsed).toBeLessThan(750);
 
-    const search = screen.getByRole("searchbox", { name: "Search models" });
+    const search = screen.getByRole("combobox", { name: "Search models" });
     const endStartedAt = performance.now();
     fireEvent.keyDown(search, { key: "End" });
     await waitFor(() => {
@@ -445,7 +472,7 @@ describe("model chooser active route", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    const search = screen.getByRole("searchbox", { name: "Search models" });
+    const search = screen.getByRole("combobox", { name: "Search models" });
     fireEvent.change(search, { target: { value: "Team Model" } });
     fireEvent.keyDown(search, { key: "End" });
     await waitFor(() => {

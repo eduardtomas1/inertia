@@ -143,12 +143,13 @@ const DEFAULT_TIMELINE_ESTIMATE_LAYOUT: TimelineEstimateLayout = {
 };
 const TIMELINE_WIDTH_ESTIMATE_BUCKET = 16;
 
-function useTimelineEstimateLayout(
+export function useTimelineEstimateLayout(
   timelineElementRef: RefObject<HTMLDivElement | null> | undefined,
   conversationId: string,
   onBeforeLayoutChange: () => void,
 ): TimelineEstimateLayout {
   const [layout, setLayout] = useState(DEFAULT_TIMELINE_ESTIMATE_LAYOUT);
+  const measuredLayoutRef = useRef(DEFAULT_TIMELINE_ESTIMATE_LAYOUT);
   useEffect(() => {
     // The timeline element is owned by the parent ChatWorkspace. React runs
     // child layout effects before attaching an ancestor host ref on mount, so
@@ -157,8 +158,9 @@ function useTimelineEstimateLayout(
     const timelineElement = timelineElementRef?.current;
     if (!timelineElement) return;
     const workspace = timelineElement.closest<HTMLElement>(".chat-workspace");
-    let lastLayout = DEFAULT_TIMELINE_ESTIMATE_LAYOUT;
+    let initialMeasurement = true;
     const measure = (): void => {
+      const lastLayout = measuredLayoutRef.current;
       const next = {
         availableWidth: Math.max(
           320,
@@ -174,11 +176,14 @@ function useTimelineEstimateLayout(
         && lastLayout.interfaceScale === next.interfaceScale
         && lastLayout.responseDensity === next.responseDensity
       ) return;
-      onBeforeLayoutChange();
-      lastLayout = next;
+      // A new conversation owns its initial scroll position; never restore
+      // an anchor from the pane's preceding conversation while measuring it.
+      if (!initialMeasurement) onBeforeLayoutChange();
+      measuredLayoutRef.current = next;
       setLayout(next);
     };
     measure();
+    initialMeasurement = false;
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
       : new ResizeObserver(measure);

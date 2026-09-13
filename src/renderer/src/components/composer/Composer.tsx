@@ -458,7 +458,7 @@ export const Composer = memo(function Composer({
   }, []);
 
   const mentionQuery = mentionMatch?.[1] ?? null;
-  useEffect(() => { if (mentionQuery) onMentionQuery(mentionQuery); }, [mentionQuery, onMentionQuery]);
+  useEffect(() => { onMentionQuery(mentionQuery ?? ""); }, [mentionQuery, onMentionQuery]);
 
   useTextareaAutosize(textareaRef, message);
 

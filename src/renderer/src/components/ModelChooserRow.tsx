@@ -64,7 +64,9 @@ export interface ModelChooserRowState {
 
 export interface ModelChooserRowProps {
   row: ModelChooserRowData;
-  /** Stable ID for searchbox aria-activedescendant; generated when omitted. */
+  /** Keyboard suggestion, distinct from the currently committed model. */
+  highlighted?: boolean;
+  /** Stable ID for combobox aria-activedescendant; generated when omitted. */
   optionId?: string;
   /** Result-action tab index; search owns ordinary chooser navigation. */
   tabIndex?: 0 | -1;
@@ -184,6 +186,7 @@ export function activateModelChooserRow(
 
 export const ModelChooserRow = memo(function ModelChooserRow({
   row,
+  highlighted = row.active,
   optionId,
   tabIndex = -1,
   onSelect,
@@ -203,10 +206,14 @@ export const ModelChooserRow = memo(function ModelChooserRow({
 
   return (
     <div
+      role="presentation"
       className={`model-chooser-row${row.active ? " is-active" : ""}${row.selectable ? "" : " is-disabled"}`}
     >
       <button
         type="button"
+        role="gridcell"
+        aria-colindex={1}
+        aria-selected={highlighted}
         id={optionId ?? `${reactId}-model-option`}
         className="model-chooser-row-option"
         aria-current={row.active ? "true" : undefined}
@@ -263,10 +270,12 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         )}
       </button>
       {onFavoriteToggle && (
-        <ModelChooserFavoriteButton
-          row={row}
-          onFavoriteToggle={onFavoriteToggle}
-        />
+        <div role="gridcell" aria-colindex={2}>
+          <ModelChooserFavoriteButton
+            row={row}
+            onFavoriteToggle={onFavoriteToggle}
+          />
+        </div>
       )}
     </div>
   );

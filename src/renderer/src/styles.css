@@ -12117,11 +12117,11 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-thinking-line > .is-entering {
-  animation: turn-thinking-line-in 150ms ease-out both;
+  animation: turn-thinking-line-in 150ms ease-out 60ms both;
 }
 
 .turn-thinking-line > .is-leaving {
-  animation: turn-thinking-line-out 150ms ease-in forwards;
+  animation: turn-thinking-line-out 90ms ease-in forwards;
 }
 
 .turn-thinking > summary .agent-pixel-loader {

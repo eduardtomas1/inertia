@@ -8,8 +8,8 @@ Download the latest release for macOS, Windows or Linux, on Intel/AMD or ARM64. 
 
 The first time Inertia opens on a new computer, a short guide introduces the app in four steps:
 
-1. **Welcome.** What Inertia is: your coding agents, local by default, review before you ship.
-2. **How it works.** A small animated tour of chats, working side by side, Duo, review and shipping, and usage and limits, plus the main shortcuts.
+1. **Welcome.** What Inertia is, with small live demos of following your agents, working side by side, and reviewing before you ship.
+2. **How it works.** A tour of short looping demos: split view, the Work tab, Duo, review and shipping, limits, and your keyboard shortcuts. Each has one line saying what to do.
 3. **Connect an agent.** Which agents are ready on this computer, with **Set up** for any that need attention.
 4. **Start.** A summary and **Add a project**.
 

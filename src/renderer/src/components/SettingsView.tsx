@@ -1113,7 +1113,7 @@ export function SettingsView({
 
         {section === "support" && (
           <section className="settings-card" aria-labelledby="welcome-guide-heading">
-            <div className="settings-card-heading"><div><Compass size={18} /></div><span><h3 id="welcome-guide-heading">Welcome guide</h3><p>Replay the quick tour of chats, split view, Duo, review and limits.</p></span></div>
+            <div className="settings-card-heading"><div><Compass size={18} /></div><span><h3 id="welcome-guide-heading">Welcome guide</h3><p>Replay the quick tour of split view, the Work tab, Duo, review and limits.</p></span></div>
             <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
           </section>
         )}

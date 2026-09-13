@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import type { ElectronApplication, Page } from "@playwright/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -97,6 +98,46 @@ describe("bounded Electron process lifecycle evidence", () => {
     expect(attach).toHaveBeenCalledExactlyOnceWith("electron-process-lifecycle", {
       contentType: "application/json", body: Buffer.from(JSON.stringify(error.processEvidence, null, 2)),
     });
+    f.evidence.stop();
+  });
+
+  it("retains only complete fixed quit lines, bounds partial input and removes the observer", () => {
+    const f = fixture();
+    const stderr = new PassThrough();
+    Object.assign(f.child, { stderr });
+    f.evidence.record("quit-requested");
+    stderr.write("private prefix Waiting for the debugger to disconnect...\n");
+    stderr.write("[Inertia test exit: private-data]\n");
+    stderr.write("private".repeat(1_000));
+    stderr.write("[Inertia test exit: process-exit-called]\n");
+    stderr.write("[Inertia test exit: window-destroy-");
+    stderr.write("entered]\r\n[Inertia test exit: window-destroy-returned]\n");
+    stderr.write("[Inertia test exit: process-exit-called]\nWaiting for the debugger to disconnect...\n");
+    stderr.write("Waiting for the debugger to disconnect...\n");
+    expect(f.evidence.snapshot().stages.map(({ stage }) => stage)).toEqual([
+      "quit-requested", "window-destroy-entered", "window-destroy-returned",
+      "process-exit-called", "debugger-disconnect-wait",
+    ]);
+    expect(JSON.stringify(f.evidence.snapshot())).not.toContain("private");
+    f.evidence.stop();
+    expect(stderr.listenerCount("data")).toBe(0);
+    stderr.destroy();
+  });
+
+  it.each(["present", "ESRCH", "EPERM"])("records main PID presence as advisory only (%s)", async (result) => {
+    const f = fixture();
+    f.evidence.captureMainPid(async () => 434343);
+    await vi.advanceTimersByTimeAsync(0);
+    const probe = vi.fn(() => {
+      if (result !== "present") throw Object.assign(new Error("private error"), { code: result });
+    });
+    f.evidence.observeMainPresence(probe);
+    expect(probe).toHaveBeenCalledExactlyOnceWith(434343);
+    expect(f.evidence.snapshot()).toMatchObject({
+      launcherExitObserved: false, launcherCloseObserved: false,
+      stages: [{ stage: `main-pid-advisory-${result === "present" ? "present" : result === "ESRCH" ? "absent" : "unknown"}`, elapsedMs: 0 }],
+    });
+    expect(JSON.stringify(f.evidence.snapshot())).not.toContain("private");
     f.evidence.stop();
   });
 

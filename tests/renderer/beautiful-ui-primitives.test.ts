@@ -10,6 +10,7 @@ const composerSource = readFileSync(new URL("../../src/renderer/src/components/c
 const commandMenuSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerCommandMenu.tsx", import.meta.url), "utf8");
 const responseSource = readFileSync(new URL("../../src/renderer/src/components/ResponseMarkdown.tsx", import.meta.url), "utf8");
 const layersSource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url), "utf8");
+const pixelGridSource = readFileSync(new URL("../../src/renderer/src/components/AgentPixelGrid.tsx", import.meta.url), "utf8");
 const activitySource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url), "utf8");
 const subagentSource = readFileSync(new URL("../../src/renderer/src/components/SubagentDisclosure.tsx", import.meta.url), "utf8");
 const styles = [
@@ -70,7 +71,8 @@ describe("Beautiful UI primitive adaptations", () => {
   });
 
   it("ports the Beautiful UI motion constants onto real Inertia state", () => {
-    expect(layersSource).toContain("Array.from({ length: 9 }");
+    expect(layersSource).toContain("<AgentPixelGrid animated={animated} phase={phase} />");
+    expect(pixelGridSource).toContain("Array.from({ length: 9 }");
     expect(styles).toContain("--pixel-drive-delay: 90ms");
     expect(styles).toContain("--pixel-orbit-delay: 770ms");
     expect(styles).toContain("animation: agent-pixel-shimmer 650ms ease-in-out infinite");

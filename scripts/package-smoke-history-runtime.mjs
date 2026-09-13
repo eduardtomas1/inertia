@@ -9,7 +9,7 @@ export const historySettings = { theme: "dark", compactSidebar: true, terminalFo
 
 // This client speaks existing public runtime commands. It grants no filesystem
 // or attachment capabilities and has one deadline for the complete proof.
-function runtimeClient(url, deadlineAt) {
+function runtimeClient(url, deadlineAt, describeDeadline) {
   const socket = new WebSocket(url, {
     headers: { Origin: "http://127.0.0.1" }, maxPayload: 1024 * 1024,
   });
@@ -29,7 +29,10 @@ function runtimeClient(url, deadlineAt) {
     pending.clear();
   };
   const timer = setTimeout(() => {
-    fail(new Error("Packaged history and terminal-turn proof exceeded its deadline."));
+    const diagnostic = describeDeadline?.(snapshot, [...pending.values()].map(({ type }) => type));
+    fail(new Error(`Packaged history and terminal-turn proof exceeded its deadline.${
+      diagnostic ? ` Proof state: ${JSON.stringify(diagnostic)}` : ""
+    }`));
     socket.terminate();
   }, Math.max(1, deadlineAt - Date.now()));
   socket.on("error", fail);
@@ -178,14 +181,52 @@ export async function resumePackagedHistorySmoke(websocketUrl, baseline) {
 
 export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory, baseline = null,
   deadlineAt = Date.now() + 8_000 }) {
-  const client = runtimeClient(websocketUrl, deadlineAt);
+  const startedAt = Date.now();
+  let phase = "welcome";
+  let phaseStartedAt = startedAt;
+  let turnNumber = 0;
+  let completedTurns = 0;
+  let observedTurn = null;
+  const markPhase = (value) => { phase = value; phaseStartedAt = Date.now(); };
+  const client = runtimeClient(websocketUrl, deadlineAt, (snapshot, pendingCommands) => {
+    // Only fixed state classifications leave this synthetic proof. Never dump
+    // snapshots, command payloads, IDs, provider output, paths or credentials.
+    const classify = (value, allowed) => allowed.includes(value) ? value : "unknown";
+    const count = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000 ? value : null;
+    const conversation = Array.isArray(snapshot?.conversations) && observedTurn
+      ? snapshot.conversations.find((candidate) => candidate?.id === observedTurn.conversationId) : null;
+    const run = Array.isArray(snapshot?.runs) && observedTurn
+      ? snapshot.runs.find((candidate) => candidate?.id === observedTurn.runId) : null;
+    const owned = snapshot?.lifecycleDiagnostics?.ownedResources;
+    const now = Date.now();
+    return {
+      phase, turnNumber, completedTurns,
+      initialBudgetMs: Math.max(0, deadlineAt - startedAt),
+      elapsedMs: Math.max(0, now - startedAt),
+      phaseElapsedMs: Math.max(0, now - phaseStartedAt),
+      pendingCommands: [...new Set(pendingCommands.map((type) => classify(type, [
+        "provider.refresh", "settings.update", "project.create", "conversation.create",
+        "conversation.detail.load", "conversation.update", "message.send", "conversation.compact",
+      ])))],
+      turnStatus: classify(observedTurn?.status, ["queued", "starting", "running", "waiting-for-approval", "waiting-for-input", "completed", "failed", "cancelled", "interrupted"]),
+      conversationStatus: classify(conversation?.status, ["idle", "running", "needs-input", "completed", "failed"]),
+      latestTurnMatches: Boolean(observedTurn && conversation?.latestTurn?.id === observedTurn.id),
+      runStatus: classify(run?.status, ["running", "waiting", "succeeded", "failed", "cancelled"]),
+      runCanStop: typeof run?.canStop === "boolean" ? run.canStop : null,
+      ownedResources: Object.fromEntries(["providerRuns", "turns", "workspaceRuns", "interactions"]
+        .map((key) => [key, count(owned?.[key])])),
+    };
+  });
   try {
     await client.welcome;
+    markPhase("provider-refresh");
     await client.request("provider.refresh", { providerId: "codex" });
     let conversationId;
     if (baseline) {
+      markPhase("historical-detail");
       assertHistoricalDetail(baseline, client.snapshot(),
         await detail(client, baseline.conversation.id));
+      markPhase("conversation-create");
       const conversation = await client.request("conversation.create", {
         projectId: baseline.project.id, title: "Candidate Fast compact proof",
         providerId: "codex", model: "package-smoke-model", useWorktree: false, activate: false,
@@ -194,11 +235,14 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
         "Packaged candidate conversation was not created.");
       conversationId = conversation.conversationId;
     } else {
+      markPhase("settings-update");
       await client.request("settings.update", historySettings);
+      markPhase("project-create");
       const project = await client.request("project.create", {
         name: "Installed upgrade history Ω", path: workspaceDirectory,
       });
       ok(project?.kind === "project.created", "Packaged history project was not created.");
+      markPhase("conversation-create");
       const conversation = await client.request("conversation.create", {
         projectId: project.projectId, title: "Saved before installed upgrade Ω",
         providerId: "codex", model: "package-smoke-model", useWorktree: false, activate: false,
@@ -207,6 +251,7 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       conversationId = conversation.conversationId;
     }
     const proofs = [];
+    markPhase("conversation-detail");
     let value = await detail(client, conversationId);
     const selectedConversationId = client.snapshot().activeConversationId;
     let providerSession = null;
@@ -215,6 +260,7 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       if (speed === "fast") providerOptions.fastMode = "priority";
       else delete providerOptions.fastMode;
       try {
+        markPhase("mode-update");
         await client.request("conversation.update", {
           conversationId,
           modelSelection: { ...value.conversation.modelSelection, providerOptions },
@@ -224,20 +270,26 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
         throw new Error(`Packaged ${phase} mode configuration admission failed: ${detail}`,
           { cause: error });
       }
+      markPhase("mode-detail");
       value = await detail(client, conversationId);
       ok((value.conversation.modelSelection.providerOptions.fastMode ?? null)
         === (speed === "fast" ? "priority" : null),
       `Packaged conversation did not retain ${speed} mode.`);
     };
     const runTurn = async (speed, phase) => {
+      turnNumber += 1;
+      observedTurn = null;
       await setSpeed(speed, phase);
       const challenge = `package-smoke-${baseline ? "candidate" : "historical"}-${speed}:${randomUUID()}`;
+      markPhase("message-send");
       const acceptance = await client.request("message.send", {
         conversationId, content: challenge, activate: false,
       });
       let proof;
+      markPhase("terminal-persistence");
       do {
         value = await detail(client, conversationId);
+        observedTurn = value.agentTurns.find(({ id }) => id === acceptance?.turnId) ?? null;
         proof = completedTurnProof(value, acceptance, challenge);
         if (!proof) await new Promise((resolve) => setTimeout(resolve, 25));
       } while (!proof);
@@ -249,18 +301,21 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       else ok(turn.providerSessionBefore === providerSession
         && turn.providerSessionAfter === providerSession,
       `Packaged ${phase} turn did not resume the exact provider session.`);
+      markPhase("admission-idle");
       while (!completedTurnAdmissionProof(client.snapshot(), turn)) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       ok(client.snapshot().activeConversationId === selectedConversationId,
         `Packaged ${phase} background turn changed the selected conversation.`);
       proofs.push(proof);
+      completedTurns += 1;
     };
 
     if (baseline) {
       await runTurn("fast", "initial Fast");
       await runTurn("standard", "Fast-to-Standard");
       await runTurn("fast", "Standard-to-Fast");
+      markPhase("compaction");
       const compacted = await client.request("conversation.compact", { conversationId });
       ok(compacted?.kind === "conversation.compacted"
         && compacted.conversationId === conversationId
@@ -280,6 +335,7 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       ok(proof.agentTurns.every((turn) => !baseline.agentTurns.some(({ id, runId }) =>
         id === turn.id || runId === turn.runId)),
       "Upgraded app reused the historical turn/run identity.");
+      markPhase("final-historical-detail");
       assertHistoricalDetail(baseline, client.snapshot(),
         await detail(client, baseline.conversation.id));
     }

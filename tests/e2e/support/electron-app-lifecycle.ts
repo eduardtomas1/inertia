@@ -337,6 +337,7 @@ export async function quitElectronAppBounded<T>(
     evidence.record(outcome === "graceful" ? "graceful-exit" : "abnormal-exit");
   } else {
     options.mainProcessDiagnostic?.stop();
+    evidence.observeMainPresence();
     evidence.record("force-stop-started");
     const exitedAfterForce = await forceStopElectronChild(child, options);
     evidence.record(exitedAfterForce ? "force-stop-confirmed" : "force-stop-unconfirmed");

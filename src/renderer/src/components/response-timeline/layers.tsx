@@ -20,6 +20,7 @@ import {
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
+import { AgentPixelGrid } from "../AgentPixelGrid";
 import { SubagentDisclosure } from "../SubagentDisclosure";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -35,8 +36,6 @@ import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
 
-const AGENT_PIXEL_GRID_CELLS = Array.from({ length: 9 }, (_, index) => index);
-
 function AgentPixelLoader({
   animated,
   phase,
@@ -45,16 +44,7 @@ function AgentPixelLoader({
   phase: ActiveAgentPhase;
 }): React.JSX.Element {
   if (phase === "compacting") return <ContextCompactionIcon />;
-  return (
-    <span
-      className="agent-pixel-loader"
-      aria-hidden="true"
-      data-animated={animated ? "true" : "false"}
-      data-phase={phase}
-    >
-      {AGENT_PIXEL_GRID_CELLS.map((index) => <span key={index} />)}
-    </span>
-  );
+  return <AgentPixelGrid animated={animated} phase={phase} />;
 }
 
 export function UserRequestLayer({

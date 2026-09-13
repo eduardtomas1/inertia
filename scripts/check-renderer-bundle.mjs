@@ -92,8 +92,9 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  // Combined review corrections add 1.5 KiB outside the isolated note editor.
-  coreJavaScript: 2_005.3 * kibibyte,
+  // Preserve the published Work status cue budget while measuring the combined
+  // review corrections on the reconciled build.
+  coreJavaScript: 2_005.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -341,11 +341,6 @@ svg.lucide {
   display: none;
 }
 
-.provider-brand-icon[data-provider-brand="anthropic"] {
-  border-radius: 2px;
-  background: #fff;
-}
-
 :root[data-theme="dark"]
   .provider-brand-icon.has-dark-source .provider-brand-icon-source.is-light {
   display: none;
@@ -359,10 +354,6 @@ svg.lucide {
 :root[data-theme="dark"]
   .provider-brand-icon.is-dark-invert .provider-brand-icon-source {
   filter: invert(1);
-}
-
-:root[data-theme="dark"] .provider-brand-icon[data-provider-brand="anthropic"] {
-  background: transparent;
 }
 
 html,
@@ -1650,8 +1641,7 @@ textarea {
   /* The travelling wave is the whole effect, so it is removed outright
      rather than parked at its first frame as a static ring. */
   .thread-status-dot.is-running::before,
-  .thread-status-dot.is-working::before,
-  .activity-thread.status-working .activity-thread-state-mark::before {
+  .thread-status-dot.is-working::before {
     display: none;
   }
 
@@ -11636,8 +11626,6 @@ button.sent-attachment-open:focus-visible {
   .response-turn.is-active .agent-activity.is-running svg,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-running::before,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-working::before,
-.app-shell[data-document-visible="false"]
-  .activity-thread.status-working .activity-thread-state-mark::before,
 .app-shell[data-document-visible="false"]
   .turn-reasoning-step.is-active::before {
   animation-play-state: paused;

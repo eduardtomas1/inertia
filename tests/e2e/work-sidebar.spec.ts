@@ -126,7 +126,7 @@ test("keeps three-line Work sidebar geometry", async ({
     }
     await expect(sidebar.locator(
       '.provider-brand-icon[data-provider-id="claude"]',
-    ).first()).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    ).first()).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
     const defaultLightScreenshot = testInfo.outputPath(
       "chat-index-default-light-1100x760.png",

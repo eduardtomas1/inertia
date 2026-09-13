@@ -83,6 +83,9 @@ The useful changes in each Inertia release, in plain language.
   remain inside short chat panes, with scrolling for the remaining content.
 - Choose independent light and dark palettes. Shared theme colors keep controls
   and status indicators readable across the built-in themes.
+- The Work tab shows animated agent pixels and elapsed time for running threads.
+  Approval, input and result icons animate once on arrival; read idle rows stay
+  quieter. Reduced motion and hidden-window animation pauses remain supported.
 - Sidebar updates show progress, release notes and restart confirmation. Recent
   attachments open previews, and offline Diagnostics offers actionable failure
   details when the local service is unavailable.

@@ -72,6 +72,8 @@ The useful changes in each Inertia release, in plain language.
   and provider usage can refresh without restarting Inertia.
 - Projects can set agent defaults and limits for delegated work. Cross-chat
   context has stricter size and content checks before it reaches a provider.
+- Long, incomplete control tags in agent output no longer stall the local
+  service while cross-chat context is being prepared.
 - Thread context menus expose common actions, and project menus stay open
   through background discovery. Model selection offers runnable providers with
   clearer choices and placement in short windows. Open menus follow the composer
@@ -95,6 +97,8 @@ The useful changes in each Inertia release, in plain language.
   retain the latest requested size while their native session starts.
 - Windows workspace actions stop cleanly when child processes reparent or exit
   during shutdown, while preserving unrelated terminals.
+- The macOS process helper now targets the app's declared macOS 13 minimum;
+  package verification rejects a helper that requires a newer system.
 - Each provider's completed model catalog appears independently. Settings
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication

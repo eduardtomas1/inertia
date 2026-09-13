@@ -29,24 +29,26 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 3
           persist-credentials: false
       - name: Verify frozen parent and unchanged original scenario
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "5c9dc929b2ecfcd228b4a013fa770c0683e6108f"
-          git diff --exit-code HEAD^ HEAD -- tests/e2e/kimi-terminal-auth.spec.ts package.json package-lock.json playwright.config.ts native/runtime-process-guardian
+          test "$(git rev-parse HEAD^)" = "86b8402b37c500f1b464a962a00bc53c6b55a833"
+          test "$(git rev-parse HEAD^^)" = "5c9dc929b2ecfcd228b4a013fa770c0683e6108f"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/kimi-startup-diagnostic.yml"
+          git diff --exit-code HEAD^^ HEAD -- tests/e2e/kimi-terminal-auth.spec.ts package.json package-lock.json playwright.config.ts native/runtime-process-guardian
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
       - name: Build diagnostic application
         run: npm run build:packaged
       - name: Prepare the existing Electron binary
         run: node -e "console.log(require('electron'))"
-      - name: Original Kimi scenario with bounded diagnostic sampling
+      - name: Original isolated phase with startup attribution
         run: |
           set -euo pipefail
           mkdir -p diagnostic-evidence
-          npm exec -- playwright test tests/e2e/kimi-terminal-auth.spec.ts --project=isolated --repeat-each=3 --output=test-results/kimi-diagnostic 2>&1 | tee diagnostic-evidence/kimi-run.log
+          npm exec -- playwright test --project=isolated --output=test-results/kimi-diagnostic 2>&1 | tee diagnostic-evidence/kimi-run.log
       - name: Retain synthetic diagnostic evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -2971,11 +2971,12 @@ button.environment-row:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 5px;
+  min-height: 28px;
+  padding: 4px 8px;
   border-radius: var(--radius-small);
   color: var(--text-muted);
   background: transparent;
-  font-size: 8px;
+  font-size: var(--metadata-font-size);
 }
 
 .message-revert:hover { color: var(--text); background: var(--surface-hover); }

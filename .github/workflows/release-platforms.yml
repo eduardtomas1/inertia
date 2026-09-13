@@ -527,6 +527,13 @@ jobs:
     needs: [release_identity, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # Builds remain parallel. One publisher per channel owns the final
+    # version check and publication; retain queued tags instead of replacing
+    # the previous pending publisher when another build finishes.
+    concurrency:
+      group: release-publication-${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       attestations: write
@@ -816,7 +823,13 @@ jobs:
           if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
           else
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+            published_releases="$RUNNER_TEMP/inertia-published-stable-releases.json"
+            gh api --paginate -H "Cache-Control: no-cache" \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '[.[] | {tag_name, draft, prerelease}]' \
+              | jq -s 'add' > "$published_releases"
+            mark_latest="$(node scripts/stable-release-latest.mjs "$RELEASE_TAG" "$published_releases")"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$mark_latest"
           fi
 
   publish-canary-feed:

@@ -377,7 +377,7 @@ export default function App({
     const content = prompt.trim();
     if (content.length > PRIVATE_CONNECT_LIMITS.promptCharacters) {
       setPair((current) => current.kind === "ready"
-        ? { ...current, error: `Prompts are limited to ${PRIVATE_CONNECT_LIMITS.promptCharacters.toLocaleString()} characters.` }
+        ? { ...current, error: `Prompts are limited to ${PRIVATE_CONNECT_LIMITS.promptCharacters.toLocaleString("en")} characters.` }
         : current);
       return;
     }

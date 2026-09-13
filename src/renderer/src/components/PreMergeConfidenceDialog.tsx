@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   AlertCircle,
   CheckCircle2,
@@ -470,7 +471,7 @@ export function PreMergeConfidenceDialog({
         </div>
 
         <footer className="pre-merge-footer">
-          <span>{confidence ? `Evidence collected ${new Date(confidence.generatedAt).toLocaleTimeString()}` : "Evidence not yet collected"}{stale ? " · stale" : ""}</span>
+          <span>{confidence ? `Evidence collected ${new Date(confidence.generatedAt).toLocaleTimeString(INTERFACE_LOCALE)}` : "Evidence not yet collected"}{stale ? " · stale" : ""}</span>
           {github && <button type="button" className="secondary-button" onClick={() => void openExternal(github.url)}><ExternalLink size={13} />Open PR #{github.number}</button>}
           <button type="button" className="primary-button" onClick={onClose}>Done</button>
         </footer>

@@ -199,7 +199,7 @@ describe("Linux runtime process guardian", () => {
     }, 30_000);
   }
 
-  linuxIt("retains failed cleanup authority above the live-child census bound", async () => {
+  linuxIt("reaps children above the census batch bound before releasing cleanup authority", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-live-overflow-")); roots.push(root);
     const guardian = compileGuardian(root);
     const payload = join(root, "payload");
@@ -220,15 +220,16 @@ describe("Linux runtime process guardian", () => {
       recorded = recordLinuxProcessTree(child.pid!).slice(1);
       expect(guardianChildCounts(child.pid!)).toEqual({ live: 301, zombies: 0, stopped: 0 });
       writeFileSync(release, "exit");
-      await waitFor(() => readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-bad");
-      expect(guardianChildCounts(child.pid!)).toEqual({ live: 300, zombies: 0, stopped: 0 });
-      expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);
-      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(false);
-      expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toMatchObject([
-        { state: "owned" },
-      ]);
-      await waitFor(runtimeOwnedProcessOwnershipIsTainted);
-      expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true"))).toThrow("tainted until restart");
+      await waitFor(() => child.exitCode !== null || child.signalCode !== null);
+      expect(child.exitCode).toBe(0);
+      expect(child.signalCode).toBeNull();
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(runtimeOwnedProcessCleanupConfirmed()).toBe(true);
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toEqual([]);
+      for (const identity of recorded) {
+        expect(recordLinuxProcess(identity.pid)?.startTimeTicks).not.toBe(identity.startTimeTicks);
+      }
     } finally {
       if (recorded.length === 0) recorded = recordLinuxProcessTree(child.pid!).slice(1);
       for (const identity of recorded) killRecordedLinuxProcess(identity);

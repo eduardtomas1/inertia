@@ -355,6 +355,18 @@ static int exact_process_group_absent(pid_t pid) {
 static void close_children(struct child *children, int count) {
   for (int index = 0; index < count; index++) close(children[index].pidfd);
 }
+static int kill_children(struct child *children, int count) {
+  int complete = 1;
+  // Attempt every pinned child even if one signal fails. In particular, do
+  // not abandon children already stopped by a partially completed freeze.
+  for (int index = 0; index < count; index++) {
+    if (!pidfd_signal(children[index].pidfd, SIGKILL)) complete = 0;
+  }
+  return complete;
+}
+// A partial census (2) owns a bounded, verified prefix, never proof that the
+// whole child set was observed. Only a complete empty census plus ECHILD can
+// establish that the subreaper has no remaining descendants.
 static int census(struct child *children, int *count) {
   char path[96], data[8192];
   snprintf(path, sizeof(path), "/proc/self/task/%d/children", getpid());
@@ -366,8 +378,10 @@ static int census(struct child *children, int *count) {
   while (*cursor) {
     while (*cursor == ' ') cursor++;
     if (!*cursor) break;
+    if (used == MAX_CHILDREN) { *count = used; return 2; }
     char *end = NULL; errno = 0; long raw = strtol(cursor, &end, 10);
-    if (errno || end == cursor || raw <= 1 || raw > INT32_MAX || used >= MAX_CHILDREN) {
+    if (errno || end == cursor || raw <= 1 || raw > INT32_MAX
+      || (end == data + size && size == (ssize_t)sizeof(data) - 1)) {
       close_children(children, used); return 0;
     }
     int pidfd = pidfd_open_exact((pid_t)raw); unsigned long long start = 0;
@@ -458,6 +472,12 @@ static int drain(void) {
     reap(); const int first_result = census(first, &first_count);
     if (first_result < 0) { nanosleep(&pause, NULL); continue; }
     if (!first_result) return 0;
+    if (first_result == 2) {
+      const int killed = kill_children(first, first_count);
+      close_children(first, first_count);
+      if (!killed) return 0;
+      nanosleep(&pause, NULL); continue;
+    }
     if (first_count == 0) {
       int status = 0; errno = 0;
       if (waitpid(-1, &status, WNOHANG) < 0 && errno == ECHILD) return 1;
@@ -466,27 +486,49 @@ static int drain(void) {
     int stable = 0;
     for (int freeze = 0; freeze < STABILIZE_PASSES && !stable; freeze++) {
       for (int i = 0; i < first_count; i++) if (!pidfd_signal(first[i].pidfd, SIGSTOP)) {
+        (void)kill_children(first, first_count);
         close_children(first, first_count); return 0;
       }
       nanosleep(&pause, NULL);
       const int second_result = census(second, &second_count);
       if (second_result < 0) { stable = -1; break; }
-      if (!second_result) { close_children(first, first_count); return 0; }
+      if (!second_result) {
+        (void)kill_children(first, first_count);
+        close_children(first, first_count); return 0;
+      }
+      if (second_result == 2) {
+        const int first_killed = kill_children(first, first_count);
+        const int second_killed = kill_children(second, second_count);
+        close_children(second, second_count);
+        if (!first_killed || !second_killed) {
+          close_children(first, first_count); return 0;
+        }
+        stable = -1; break;
+      }
       stable = same_children(first, first_count, second, second_count);
       if (!stable) {
         close_children(first, first_count);
         memcpy(first, second, (size_t)second_count * sizeof(*first)); first_count = second_count;
       } else close_children(second, second_count);
     }
-    if (stable < 0) { close_children(first, first_count); nanosleep(&pause, NULL); continue; }
-    if (!stable) { close_children(first, first_count); return 0; }
+    if (stable < 0) {
+      const int killed = kill_children(first, first_count);
+      close_children(first, first_count);
+      if (!killed) return 0;
+      nanosleep(&pause, NULL); continue;
+    }
+    if (!stable) {
+      (void)kill_children(first, first_count);
+      close_children(first, first_count); return 0;
+    }
     for (int i = 0; i < first_count; i++) if (
       !pidfd_signal(first[i].pidfd, SIGTERM) || !pidfd_signal(first[i].pidfd, SIGCONT)
     ) {
+      (void)kill_children(first, first_count);
       close_children(first, first_count); return 0;
     }
     for (int grace = 0; grace < 5; grace++) { nanosleep(&pause, NULL); reap(); }
-    for (int i = 0; i < first_count; i++) if (!pidfd_signal(first[i].pidfd, SIGKILL)) {
+    if (!kill_children(first, first_count)) {
       close_children(first, first_count); return 0;
     }
     close_children(first, first_count); nanosleep(&pause, NULL); reap();

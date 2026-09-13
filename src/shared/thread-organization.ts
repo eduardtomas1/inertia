@@ -26,7 +26,7 @@ export function threadSnoozePresets(now: Date): Array<{ id: string; label: strin
   ];
   return presets.map(({ id, label, date }) => ({
     id,
-    label: `${label} (${date.toLocaleString(undefined, {
+    label: `${label} (${date.toLocaleString("en", {
       ...(id === "next-week" ? { weekday: "short" } : {}), hour: "numeric", minute: "2-digit",
     })})`,
     until: date.toISOString(),

@@ -251,9 +251,9 @@
 .subagent-disclosure .subagent-row-actions {
   position: absolute; top: 3px; right: 4px; height: 22px; padding-left: 18px;
   background: linear-gradient(to right, transparent, var(--surface-hover) 18px);
-  opacity: 0; pointer-events: none; transition: opacity 120ms ease;
+  opacity: 0; transition: opacity 120ms ease;
 }
-.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; pointer-events: auto; }
+.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }
 .subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-lane-state { opacity: 0; }
 .subagent-disclosure .subagent-row-actions button { height: 20px; padding: 0 6px; background: var(--surface-hover); }
 @media (hover: none) {

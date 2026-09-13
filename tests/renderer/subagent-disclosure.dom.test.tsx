@@ -312,7 +312,7 @@ describe("delegated-agent timeline disclosure", () => {
     const motion = readFileSync("src/renderer/src/components/BeautifulUiMotion.css", "utf8");
     const styles = readFileSync("src/renderer/src/styles.css", "utf8");
     expect(motion).toContain(
-      '.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; pointer-events: auto; }',
+      '.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }',
     );
     expect(motion).toContain("min-height: 28px");
     expect(styles).toMatch(/\.subagent-disclosure li::before \{[^}]*border-bottom-left-radius/u);

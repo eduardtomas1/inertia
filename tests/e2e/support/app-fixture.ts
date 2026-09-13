@@ -68,7 +68,7 @@ export interface AppFixture {
 
 interface AppFixtureOptions {
   name: string;
-  initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>;
+  initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>; welcomeGuide?: boolean;
   workspaceGit?: boolean;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
@@ -659,6 +659,14 @@ async function createSecondWorkspace(
   return workspaceDirectory;
 }
 
+async function dismissWelcomeGuide(page: Page): Promise<void> {
+  const guide = page.getByRole("dialog", { name: "Welcome guide" });
+  const shown = await guide.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+  if (!shown) return;
+  await guide.getByRole("button", { name: "Skip" }).click();
+  await guide.waitFor({ state: "detached" });
+}
+
 export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
@@ -828,6 +836,7 @@ export async function createAppFixture(
     ).waitFor();
     if (options.initialState === "empty") {
       await page.getByRole("button", { name: "Add your first project" }).waitFor();
+      if (!options.welcomeGuide) await dismissWelcomeGuide(page);
     } else {
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }

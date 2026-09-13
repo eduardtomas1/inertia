@@ -41,3 +41,23 @@ export function parseReasoningSummary(
   if (!segments.some(({ title }) => title !== null)) return [];
   return segments.filter(({ title, body }) => title !== null || body.length > 0);
 }
+
+export interface ReasoningLine {
+  id: string;
+  text: string;
+}
+
+export function latestReasoningLine(content: string): ReasoningLine {
+  const segments = parseReasoningSummary(content);
+  const latest = segments.at(-1);
+  const source = latest ? latest.body || latest.title || "" : content;
+  const lines = source
+    .split("\n")
+    .map((line) => line.replaceAll("**", "").trim())
+    .filter(Boolean);
+  const sentences = (lines.at(-1) ?? "").split(/(?<=[.!?])\s+/u).filter(Boolean);
+  return {
+    id: `${segments.length}:${latest?.body ? "body" : "title"}:${lines.length}:${sentences.length}`,
+    text: sentences.at(-1) ?? "",
+  };
+}

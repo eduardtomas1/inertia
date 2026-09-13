@@ -43,6 +43,7 @@ interface SubagentDisclosureProps {
 }
 
 const MAX_INLINE_SUBAGENTS = 6;
+const MAX_SUMMARY_SQUARES = 12;
 
 function rendererLocalStorage(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -217,6 +218,15 @@ export function SubagentDisclosure({
               subagentRouteLabel(trace, turns)))].join(" · ")}
           </small>
         </span>
+        <span className="subagent-squares" aria-hidden="true">
+          {subagents.slice(0, MAX_SUMMARY_SQUARES).map((trace) => (
+            <i
+              key={trace.id}
+              data-status={trace.status}
+              data-live={isLiveSubagentTrace(trace)}
+            />
+          ))}
+        </span>
         <ChevronDown
           className="subagent-disclosure-chevron"
           size={12}
@@ -246,6 +256,7 @@ export function SubagentDisclosure({
               data-depth={depth}
               data-expanded={expanded ? "true" : "false"}
               aria-label={`${label}, ${mission ? `${mission}, ` : ""}${route}, ${state}`}
+              title={detail && detail !== mission ? detail : undefined}
               style={{
                 "--subagent-depth": depth,
                 "--motion-index": Math.min(index, 6),
@@ -258,40 +269,46 @@ export function SubagentDisclosure({
                   {role && (
                     <span className="subagent-role">{role}</span>
                   )}
-                  <span className="subagent-state-pill" key={trace.status}>
-                    {state}
-                  </span>
+                  {omittedAncestors > 0 && (
+                    <small className="subagent-relationship">
+                      {omittedAncestors} earlier {omittedAncestors === 1
+                        ? "ancestor"
+                        : "ancestors"} compacted
+                    </small>
+                  )}
+                  {(mission ?? detail) && (
+                    <small
+                      className={mission ? "subagent-mission" : "subagent-detail"}
+                      title={mission ?? detail ?? undefined}
+                    >
+                      {mission ?? detail}
+                    </small>
+                  )}
                 </span>
-                {mission && (
-                  <small className="subagent-mission" title={mission}>
-                    {mission}
+                {subagentHasNestedParent(trace) && (
+                  <small className="subagent-relationship visually-hidden">
+                    {relationship}
                   </small>
                 )}
+                {mission && detail && detail !== mission && (
+                  <small className="subagent-detail visually-hidden">
+                    {detail}
+                  </small>
+                )}
+              </span>
+              <span className="subagent-lane-state">
+                <span className="subagent-state-pill" key={trace.status}>
+                  {state}
+                </span>
                 <small
                   className="subagent-route"
                   title={trace.providerStatus
                     ? `Exact provider state: ${trace.providerStatus}`
                     : undefined}
                 >
-                  {route} · <SubagentElapsed trace={trace} now={fixedNow} visible={open} />
+                  <span className="visually-hidden">{route} · </span>
+                  <SubagentElapsed trace={trace} now={fixedNow} visible={open} />
                 </small>
-                {subagentHasNestedParent(trace) && (
-                  <small className="subagent-relationship">
-                    {relationship}
-                  </small>
-                )}
-                {omittedAncestors > 0 && (
-                  <small className="subagent-relationship">
-                    {omittedAncestors} earlier {omittedAncestors === 1
-                      ? "ancestor"
-                      : "ancestors"} compacted
-                  </small>
-                )}
-                {detail && detail !== mission && (
-                  <small className="subagent-detail" title={detail}>
-                    {detail}
-                  </small>
-                )}
               </span>
               <span className="subagent-row-actions">
                 {canFollowUp && (

@@ -14543,7 +14543,7 @@ button.sent-attachment-open:focus-visible {
   font-size: var(--ui-font-micro);
 }
 
-.conversation-split-header > span:first-child {
+.conversation-split-header > span:first-of-type {
   flex: 0 0 auto;
   font-weight: 680;
   letter-spacing: 0.06em;
@@ -14636,6 +14636,59 @@ button.sent-attachment-open:focus-visible {
 .conversation-split-mark {
   flex: 0 0 auto;
   color: var(--accent-strong);
+}
+
+.conversation-split-header.is-draggable {
+  cursor: grab;
+}
+
+.conversation-split-grip {
+  flex: 0 0 auto;
+  margin-left: -3px;
+  color: var(--metadata-text);
+}
+
+html[data-chat-drag],
+html[data-chat-drag] * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.split-drop-highlight {
+  position: fixed;
+  z-index: 115;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
+.chat-drag-chip {
+  position: fixed;
+  z-index: 120;
+  top: 0;
+  left: 0;
+  max-width: 240px;
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-size: var(--ui-font-secondary);
+  font-weight: 600;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .split-drop-highlight {
+    border: 2px solid Highlight;
+    background: transparent;
+  }
 }
 
 .conversation-split-view.is-stacked {

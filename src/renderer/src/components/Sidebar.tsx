@@ -64,6 +64,7 @@ import {
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
+import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
@@ -753,6 +754,9 @@ function SidebarView({
             onPointerLeave={preview.leave}
             onFocus={(event) => preview.enter(conversation.id, event.currentTarget)}
             onBlur={preview.leave}
+            onPointerDown={view === "workspace" && !isDetached && conversation.archivedAt === null
+              ? (event) => startChatDrag(event, { conversationId: conversation.id, title: conversation.title }, preview.close)
+              : undefined}
             onKeyDown={(event) => {
               if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
               event.preventDefault(); event.stopPropagation(); preview.close();

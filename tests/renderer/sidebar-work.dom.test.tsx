@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
+import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
 import type {
   AppSnapshot,
   ConversationShell,
@@ -118,8 +119,9 @@ function renderSidebar(
     projects?: Project[];
     sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
+    detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage";
+    view?: "workspace" | "settings" | "usage" | "home";
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -139,6 +141,7 @@ function renderSidebar(
     onImportProject: vi.fn(),
     onSelectConversation,
     splitConversationId: options.splitConversationId ?? null,
+    detachedConversationIds: options.detachedConversationIds,
     onOpenConversationInSplit: vi.fn(),
     onCloseConversationSplit: vi.fn(),
     onCreateConversation: vi.fn(),
@@ -864,6 +867,43 @@ describe("compact Work sidebar", () => {
     expect(within(docsRow).getByLabelText("Open in split view"))
       .toBeInTheDocument();
     expect(view.container.querySelectorAll(".activity-thread")).toHaveLength(2);
+  });
+
+  it("lets rows be dragged toward split view unless the chat has its own window", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const active = conversation("active-thread", "Active work", new Date(2026, 7, 11, 11));
+    const companion = conversation("companion-thread", "Companion work", new Date(2026, 7, 11, 10));
+    const windowed = conversation("windowed-thread", "Windowed work", new Date(2026, 7, 11, 9));
+    const drag = (name: RegExp) => {
+      fireEvent.pointerDown(screen.getByRole("button", { name }), {
+        button: 0,
+        buttons: 1,
+        pointerId: 1,
+        clientX: 10,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(document, { pointerId: 1, buttons: 1, clientX: 60, clientY: 10 });
+      const started = currentChatDrag();
+      fireEvent.pointerUp(document, { pointerId: 1, buttons: 0 });
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      return started;
+    };
+    const view = renderSidebar([active, companion, windowed], vi.fn(), [], {
+      detachedConversationIds: new Set([windowed.id]),
+    });
+
+    expect(drag(/^Companion work,/)).toMatchObject({
+      conversationId: companion.id,
+      title: "Companion work",
+    });
+    expect(drag(/^Windowed work,/)).toBeNull();
+    view.unmount();
+
+    renderSidebar([active, companion], vi.fn(), [], { view: "home" });
+    expect(drag(/^Companion work,/)).toBeNull();
   });
 
   it("does not reopen a row menu after its Work section is collapsed", () => {

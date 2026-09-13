@@ -2,11 +2,22 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { ArrowLeftRight, PanelBottom, PictureInPicture2, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Columns2,
+  GripVertical,
+  PanelBottom,
+  PictureInPicture2,
+  Rows2,
+  X,
+} from "lucide-react";
 
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { startChatDrag } from "../utils/chatDrag";
+import type { SplitOrientation } from "../utils/splitConversation";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton } from "./ui";
 
@@ -24,6 +35,14 @@ function initialSplitPercent(): number {
     : 50;
 }
 
+function startPaneDrag(
+  event: ReactPointerEvent<HTMLElement>,
+  { conversationId, title }: { conversationId?: string; title: string },
+): void {
+  if (!conversationId || (event.target as Element).closest("button")) return;
+  startChatDrag(event, { conversationId, title });
+}
+
 interface ConversationSplitViewProps {
   primary: ReactNode;
   secondary: ReactNode;
@@ -34,10 +53,14 @@ interface ConversationSplitViewProps {
   primaryToolsOpen: boolean;
   secondaryToolsOpen: boolean;
   secondaryFirst: boolean;
+  orientation?: SplitOrientation;
+  primaryConversationId?: string;
+  secondaryConversationId?: string;
   onTogglePrimaryTools: () => void;
   onToggleSecondaryTools: () => void;
   onSwapPanes: () => void;
   onCloseSecondary: () => void;
+  onToggleOrientation?: () => void;
   onOpenPrimaryInWindow?: () => void;
   onOpenSecondaryInWindow?: () => void;
 }
@@ -52,15 +75,20 @@ export function ConversationSplitView({
   primaryToolsOpen,
   secondaryToolsOpen,
   secondaryFirst,
+  orientation = "columns",
+  primaryConversationId,
+  secondaryConversationId,
   onTogglePrimaryTools,
   onToggleSecondaryTools,
   onSwapPanes,
   onCloseSecondary,
+  onToggleOrientation,
   onOpenPrimaryInWindow,
   onOpenSecondaryInWindow,
 }: ConversationSplitViewProps): React.JSX.Element {
   const [splitPercent, setSplitPercent] = useState(initialSplitPercent);
-  const stacked = useMediaQuery("(max-width: 860px)");
+  const narrow = useMediaQuery("(max-width: 860px)");
+  const stacked = narrow || orientation === "rows";
   const containerRef = useRef<HTMLElement>(null);
   const style = {
     "--conversation-split-percent": `${splitPercent}%`,
@@ -70,6 +98,7 @@ export function ConversationSplitView({
     content: primary,
     title: primaryTitle,
     projectName: primaryProjectName,
+    conversationId: primaryConversationId,
     toolsOpen: primaryToolsOpen,
     onToggleTools: onTogglePrimaryTools,
     onOpenInWindow: onOpenPrimaryInWindow,
@@ -79,6 +108,7 @@ export function ConversationSplitView({
     content: secondary,
     title: secondaryTitle,
     projectName: secondaryProjectName,
+    conversationId: secondaryConversationId,
     toolsOpen: secondaryToolsOpen,
     onToggleTools: onToggleSecondaryTools,
     onOpenInWindow: onOpenSecondaryInWindow,
@@ -95,7 +125,19 @@ export function ConversationSplitView({
         details.projectName
       } · ${details.title}`}
     >
-      <header className="conversation-split-header">
+      <header
+        className={`conversation-split-header${
+          details.conversationId ? " is-draggable" : ""
+        }`}
+        onPointerDown={(event) => startPaneDrag(event, details)}
+      >
+        {details.conversationId && (
+          <GripVertical
+            size={12}
+            aria-hidden="true"
+            className="conversation-split-grip"
+          />
+        )}
         <span title={details.projectName}>{details.projectName}</span>
         <strong title={details.title}>{details.title}</strong>
         <span className="conversation-split-actions">
@@ -116,6 +158,16 @@ export function ConversationSplitView({
           >
             <PanelBottom size={14} />
           </IconButton>
+          {position === "secondary" && onToggleOrientation && !narrow && (
+            <IconButton
+              label={stacked
+                ? "Place split chats side by side"
+                : "Stack split chats"}
+              onClick={onToggleOrientation}
+            >
+              {stacked ? <Columns2 size={13} /> : <Rows2 size={13} />}
+            </IconButton>
+          )}
           {position === "secondary" && (
             <IconButton
               label={`Move ${details.title} to the primary position`}

@@ -228,12 +228,11 @@
 .subagent-disclosure[data-active="true"] > summary > svg:first-child { color: var(--accent-strong); }
 .subagent-disclosure ol { gap: 0; margin-top: 3px; }
 .subagent-disclosure li {
-  grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; min-height: 28px; padding: 3px 6px;
+  grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; min-height: 28px; padding: 3px 6px;
   border: 0; border-radius: 7px; background: transparent; box-shadow: none;
   transition: background-color 150ms ease;
 }
-.subagent-disclosure li[data-expanded="true"] { background: color-mix(in srgb, var(--surface-muted) 52%, transparent); }
-.subagent-disclosure li:is(:hover, :focus-within) { background: color-mix(in srgb, var(--surface-hover) 62%, transparent); }
+.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) { background: var(--surface-hover); }
 .subagent-disclosure li::before { top: -2px; left: -9px; width: 8px; }
 .subagent-disclosure .subagent-status-mark { width: 16px; height: 16px; flex-basis: 16px; }
 .subagent-disclosure .subagent-status-mark::before { width: 9px; height: 9px; }
@@ -247,12 +246,20 @@
 .subagent-disclosure .subagent-copy-heading > .subagent-relationship { flex: 0 0 auto; }
 .subagent-lane-state { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
 .subagent-lane-state .subagent-route { color: var(--text-muted); font-size: var(--ui-font-micro); }
-.subagent-disclosure .subagent-state-pill { min-height: 0; padding: 0; background: transparent; }
-.subagent-disclosure .subagent-row-actions { opacity: 0; transition: opacity 120ms ease; }
-.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; }
-.subagent-disclosure .subagent-row-actions button { height: 20px; padding: 0 6px; }
+.subagent-disclosure ol > li[data-status] .subagent-state-pill { min-height: 0; padding: 0; background: transparent; }
+.subagent-disclosure .subagent-lane-state { transition: opacity 120ms ease; }
+.subagent-disclosure .subagent-row-actions {
+  position: absolute; top: 3px; right: 4px; height: 22px; padding-left: 18px;
+  background: linear-gradient(to right, transparent, var(--surface-hover) 18px);
+  opacity: 0; pointer-events: none; transition: opacity 120ms ease;
+}
+.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-row-actions { opacity: 1; pointer-events: auto; }
+.subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-lane-state { opacity: 0; }
+.subagent-disclosure .subagent-row-actions button { height: 20px; padding: 0 6px; background: var(--surface-hover); }
 @media (hover: none) {
-  .subagent-disclosure .subagent-row-actions { opacity: 1; }
+  .subagent-disclosure li { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
+  .subagent-disclosure .subagent-row-actions { position: static; padding-left: 0; background: none; opacity: 1; pointer-events: auto; }
+  .subagent-disclosure li:is(:hover, :focus-within, [data-expanded="true"]) .subagent-lane-state { opacity: 1; }
 }
 .subagent-status-mark {
   position: relative; display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center;

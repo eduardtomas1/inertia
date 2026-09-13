@@ -879,7 +879,7 @@ jobs:
               per_page: 100,
             });
             const existing = issues.find((issue) =>
-              !issue.pull_request && (issue.title === title || issue.body?.includes(marker))
+              !issue.pull_request && issue.user?.login === "github-actions[bot]" && issue.body?.includes(marker)
             );
             const priorComments = existing
               ? await github.paginate(github.rest.issues.listComments, {

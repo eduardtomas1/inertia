@@ -416,7 +416,9 @@ export function useMultiSpawn({
         }
         if (!mutation || mutationSettled) {
           const message = launchStatusMessage(status);
-          if (message) setActionError(message);
+          if (message && message !== launchStatusMessage(watchedComparisonStatus)) {
+            setActionError(message);
+          }
         }
       }).catch(() => {
         if (cancelled) return;

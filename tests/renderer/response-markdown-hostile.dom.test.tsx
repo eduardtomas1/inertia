@@ -68,19 +68,19 @@ describe("hostile provider markdown", () => {
     const bridge = inertiaBridge();
     renderMarkdown("[click](javascript:window.inertia.openExternal('x'))");
     const blocked = screen.getByTitle(/blocked/u);
-    expect(blocked).toBeTruthy();
+    expect(blocked).toBeInTheDocument();
     expect(blocked.tagName.toLowerCase()).toBe("span");
     expect(bridge.openExternal).not.toHaveBeenCalled();
   });
 
   it("blocks data: links", () => {
     renderMarkdown("[click](data:text/html;base64,PHNjcmlwdD4x)");
-    expect(screen.getByTitle(/blocked/u)).toBeTruthy();
+    expect(screen.getByTitle(/blocked/u)).toBeInTheDocument();
   });
 
   it("blocks file: links", () => {
     renderMarkdown("[etc](file:///etc/passwd)");
-    expect(screen.getByTitle(/blocked/u)).toBeTruthy();
+    expect(screen.getByTitle(/blocked/u)).toBeInTheDocument();
   });
 
   it("blocks custom application schemes", () => {
@@ -156,7 +156,8 @@ describe("hostile provider markdown", () => {
       + "\n<table><tr><td>[link](javascript:x)",
     );
     expect(container.querySelector("script")).toBeNull();
-    expect(container.textContent).toBeTruthy();
+    expect(container.querySelector('a[href^="javascript:" i]')).toBeNull();
+    expect(container.textContent).toContain("[link](javascript:x)");
   });
 
   it("handles an extremely large markdown input", () => {

@@ -294,7 +294,7 @@ describe("Duo third-model comparison dialog", () => {
         throw new Error(`Unexpected command: ${command.type}`);
       }
       statusReads += 1;
-      const cancellationFinished = statusReads > 1;
+      const cancellationFinished = statusReads > 2;
       return {
         type: "request.result",
         requestId: crypto.randomUUID(),
@@ -311,6 +311,7 @@ describe("Duo third-model comparison dialog", () => {
         },
       };
     });
+    const setActionError = vi.fn();
     const hook = renderHook(() => useMultiSpawn({
       snapshot,
       settings,
@@ -322,7 +323,7 @@ describe("Duo third-model comparison dialog", () => {
       closeSidebar: vi.fn(),
       focusWorkspace: vi.fn(),
       discardDraftConversation: vi.fn(),
-      setActionError: vi.fn(),
+      setActionError,
     }));
 
     await act(async () => hook.result.current.openDialog());
@@ -333,6 +334,11 @@ describe("Duo third-model comparison dialog", () => {
       cancelRequested: true,
     });
     expect(hook.result.current.error).toContain("waiting for provider cleanup");
+
+    setActionError.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(750));
+    expect(setActionError).not.toHaveBeenCalled();
+    expect(hook.result.current.launchBlocked).toBe(true);
 
     await act(async () => vi.advanceTimersByTimeAsync(750));
 

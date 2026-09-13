@@ -1,5 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { staticJavaScriptImports } from "./renderer-bundle-imports.mjs";
 
 const outputDirectory = resolve("out/renderer");
 const assetDirectory = resolve(outputDirectory, "assets");
@@ -104,12 +105,9 @@ async function assetBytes(assetPath) {
   return (await stat(resolve(outputDirectory, assetPath))).size;
 }
 
-async function staticJavaScriptImports(assetName) {
+async function assetJavaScriptImports(assetName) {
   const source = await readFile(resolve(assetDirectory, assetName), "utf8");
-  const imports = new Set();
-  const pattern = /\bimport(?:\{[^;]*?\}from)?["']\.\/([^"']+\.js)["']/gu;
-  for (const match of source.matchAll(pattern)) imports.add(match[1]);
-  return imports;
+  return staticJavaScriptImports(source);
 }
 
 async function javaScriptClosure(entryName) {
@@ -119,7 +117,7 @@ async function javaScriptClosure(entryName) {
     const name = pending.pop();
     if (!name || closure.has(name)) continue;
     closure.add(name);
-    for (const dependency of await staticJavaScriptImports(name)) {
+    for (const dependency of await assetJavaScriptImports(name)) {
       if (!closure.has(dependency)) pending.push(dependency);
     }
   }

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 import { expect, test, vi } from "vitest";
 
@@ -132,6 +133,7 @@ test("executes a selected local Vitest suite through the bounded runner without 
       if (name.toUpperCase() === "PATH") vi.stubEnv(name, undefined);
     }
     vi.stubEnv("PATH", "");
+    vi.stubEnv("FORCE_COLOR", "1");
     const result = await runLifecycleAttempt({
       ...repeatedLifecycleInvocation(["tests/shared/source-language.test.ts"]),
       label: "Local lifecycle runner proof",
@@ -139,7 +141,7 @@ test("executes a selected local Vitest suite through the bounded runner without 
       timeoutMs: 15_000,
     });
     expect(result).toMatchObject({ outcome: "passed", passed: true });
-    const output = await readFile(outputPath, "utf8");
+    const output = stripVTControlCharacters(await readFile(outputPath, "utf8"));
     expect(output).toContain("1 passed");
     expect(output).toMatch(/Tests\s+\d+ passed/u);
   } finally {

@@ -13,25 +13,19 @@ import {
   Activity,
   ArrowLeft,
   BarChart3,
-  CheckCircle2,
   Check,
   Clock,
   ChevronDown,
   ChevronRight,
-  CircleDot,
-  CircleX,
   FolderOpen,
   FolderGit2,
   RefreshCw,
   GitBranch,
   Layers3,
-  MessageCircleQuestion,
-  Minus,
   Pencil,
   Search,
   Settings,
   Share2,
-  ShieldAlert,
   SquarePen,
   Trash2,
   X,
@@ -41,7 +35,6 @@ import type { Conversation, Project, ProjectGroupingMode } from "@shared/contrac
 import { canOrganizeThread } from "../../../shared/thread-organization";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon } from "./ProjectIcon";
-import { formatRelativeTime, formatWorkAge } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -79,6 +72,8 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
+import { WorkStatusCue } from "./sidebar/WorkStatusCue";
+import { INTERFACE_LOCALE } from "../lib/locale";
 const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
 }));
@@ -93,15 +88,6 @@ const statusLabels: Record<SidebarThreadStatus, string> = {
   failed: "Failed",
   completed: "Completed",
   idle: "Idle",
-};
-
-const workStatusIcons: Record<SidebarThreadStatus, typeof CircleDot> = {
-  working: CircleDot,
-  approval: ShieldAlert,
-  input: MessageCircleQuestion,
-  failed: CircleX,
-  completed: CheckCircle2,
-  idle: Minus,
 };
 
 function workProjectLabel(project: Project | undefined): string {
@@ -692,9 +678,9 @@ function SidebarView({
       ?? agentRequestProviderName(conversation.providerId);
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
-    const WorkStatusIcon = workStatusIcons[model.status];
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
+    const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
     const accessibleContext = [
       conversation.title,
       providerLabel,
@@ -744,7 +730,7 @@ function SidebarView({
             data-work-focus-id={`thread:${conversation.id}`}
             aria-current={isActive ? "page" : undefined}
             aria-label={accessibleContext}
-            aria-description="Right-click or press Shift+F10 for thread actions."
+            aria-description={`${workingSince ? `Working since ${new Date(workingSince).toLocaleString(INTERFACE_LOCALE)}. ` : ""}Right-click or press Shift+F10 for thread actions.`}
             aria-haspopup="menu"
             aria-expanded={conversationMenu === conversation.id}
             aria-controls={conversationMenu === conversation.id ? `conversation-actions-${conversation.id}` : undefined}
@@ -768,7 +754,13 @@ function SidebarView({
               <span className="activity-thread-project-meta" title={project?.path}>{projectLabel}</span>
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationId === conversation.id} />
               <span className="activity-thread-trailing" aria-hidden="true">
-                {model.status !== "idle" ? <span className="activity-thread-status-label"><span data-work-status={model.status}><WorkStatusIcon size={12} /></span>{statusLabels[model.status]}</span> : <time dateTime={conversation.updatedAt} title={formatRelativeTime(conversation.updatedAt)}><span className="activity-idle-icon" data-work-status="idle"><Minus size={10} /></span>{formatWorkAge(conversation.updatedAt)}</time>}
+                <WorkStatusCue
+                  conversationId={conversation.id}
+                  status={model.status}
+                  label={statusLabels[model.status]}
+                  updatedAt={conversation.updatedAt}
+                  workingSince={workingSince}
+                />
               </span>
             </span>
             <span className="activity-thread-topline">

@@ -11,6 +11,7 @@ import type {
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -1299,7 +1300,7 @@ describe("compact Work sidebar", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const statusCases = [
-      ["working", "running", null, "lucide-circle-dot"],
+      ["working", "running", null, "agent-pixel-loader"],
       ["approval", "needs-input", "approval", "lucide-shield-alert"],
       ["input", "needs-input", "input", "lucide-message-circle-question-mark"],
       ["failed", "failed", null, "lucide-circle-x"],
@@ -1318,5 +1319,56 @@ describe("compact Work sidebar", () => {
       expect(cue).not.toBeNull();
       expect(cue?.querySelector(`.${iconClass}`)).not.toBeNull();
     }
+  });
+
+  it("shows the orbiting pixel glyph and how long a running thread has been working", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const startedAt = new Date(2026, 7, 11, 11, 57);
+    const running = conversation("elapsed-working", "Elapsed task", startedAt, { status: "running" });
+    renderSidebar([running], vi.fn(), [{
+      id: "run-elapsed-working",
+      kind: "agent",
+      projectId: running.projectId,
+      conversationId: running.id,
+      actionId: null,
+      label: running.title,
+      detail: null,
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: null,
+      startedAt: startedAt.toISOString(),
+      finishedAt: null,
+    }]);
+
+    const cue = document.querySelector('[data-work-status="working"]');
+    expect(cue?.querySelector('.agent-pixel-loader[data-rhythm="orbit"][data-animated="true"]'))
+      .not.toBeNull();
+    expect(cue?.querySelectorAll(".agent-pixel-loader > span")).toHaveLength(9);
+    const label = cue?.closest(".activity-thread-status-label");
+    expect(label).toHaveAttribute("data-work-elapsed");
+    expect(label).toHaveTextContent(/Working\s*·\s*3m/u);
+    expect(cue?.closest("button")).toHaveAccessibleDescription(
+      `Working since ${startedAt.toLocaleString(INTERFACE_LOCALE)}. Right-click or press Shift+F10 for thread actions.`,
+    );
+  });
+
+  it("plays the arrival cue only when a thread reaches a status the user has not seen", () => {
+    const at = new Date(2026, 7, 11, 9);
+    const working = conversation("arrival-thread", "Arrival task", at, { status: "running" });
+    const approval = conversation("arrival-thread", "Arrival task", at, {
+      status: "needs-input",
+      attentionKind: "approval",
+    });
+    const view = renderSidebar([working]);
+    expect(document.querySelector("[data-work-arrival]")).toBeNull();
+
+    view.rerenderSnapshot(snapshot([approval]));
+    expect(document.querySelector('[data-work-status="approval"]')).toHaveAttribute("data-work-arrival");
+
+    view.unmount();
+    renderSidebar([approval]);
+    expect(document.querySelector('[data-work-status="approval"]')).not.toHaveAttribute("data-work-arrival");
   });
 });

@@ -86,7 +86,9 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  coreJavaScript: 2_003.5 * kibibyte,
+  // The Work status cue (pixel glyph, elapsed time, arrival cue) adds ~1.1 KiB:
+  // shared core measures 2,004.6 KiB on macOS ARM64; keep <2 KiB headroom.
+  coreJavaScript: 2_005.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

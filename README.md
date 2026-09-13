@@ -35,6 +35,7 @@ Choose **All projects** to search by name or folder path, filter the sidebar, or
 - **Work side by side.** Open two chats in a split workspace, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
+- **Follow active work.** The Work tab shows agent pixels and elapsed time for running threads, with a brief cue when a thread needs input or finishes.
 - **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)

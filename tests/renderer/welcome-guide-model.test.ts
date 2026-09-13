@@ -99,13 +99,13 @@ describe("welcome guide model", () => {
   });
 
   it("keeps motion decorative, reduced-motion safe and paused while hidden", async () => {
-    const css = await readFile(
+    const css = (await readFile(
       new URL(
         "../../src/renderer/src/components/welcome-guide/WelcomeGuide.css",
         import.meta.url,
       ),
       "utf8",
-    );
+    )).replace(/\r\n/gu, "\n");
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
     expect(reduced).toContain(".welcome-demo *");
     expect(reduced).toContain(".welcome-demo *::after");

@@ -871,9 +871,9 @@ function startPreparedGeminiRun(
 }
 
 function isGeminiPreSessionAuthRejection(error: unknown): boolean {
-  return error instanceof acp.RequestError
-    && error.code === -32_000
-    && error.message.length <= 1_024
+  if (!(error instanceof acp.RequestError) || error.message.length > 1_024) return false;
+  if (/no longer supported for gemini code assist for individuals/iu.test(error.message)) return true;
+  return error.code === -32_000
     && /auth_required|not authenticated|authentication required|login required|unauthorized|gemini api key is missing or not configured/iu
       .test(error.message);
 }

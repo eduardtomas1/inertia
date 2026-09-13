@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE } from "../../shared/provider";
 import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import { Transform, type TransformCallback } from "node:stream";
 
@@ -151,6 +152,9 @@ export interface GeminiRuntimeFailureContext {
   workspaceRoot: string;
 }
 
+export const GEMINI_INDIVIDUAL_ACCESS_RETIRED_PHASE = "individual-access-retired";
+export { GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE };
+
 export function geminiRuntimeFailure(
   error: unknown,
   context: GeminiRuntimeFailureContext,
@@ -169,9 +173,11 @@ export function geminiRuntimeFailure(
     .test(detail);
   const unsupportedTerminalAuth = /advertised terminal authentication without client terminal support/iu
     .test(detail);
+  const individualAccessRetired = /no longer supported for gemini code assist for individuals/iu
+    .test(detail);
   const rejectedLocalConfiguration = /does not advertise (?:the selected reasoning effort|the selected model|a plan mode|its permission-reporting default mode|the required http mcp transport)|did not advertise image prompt support|does not support the attached image type/iu
     .test(detail);
-  const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth
+  const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth || individualAccessRetired
     ? "provider-error"
     : isAuth
     ? "provider-error"
@@ -190,7 +196,9 @@ export function geminiRuntimeFailure(
               : /stream (?:was )?closed|connection (?:was )?closed|transport|end of (?:file|stream)|\beof\b|epipe|econnreset|broken pipe/iu.test(detail)
                 ? "transport-closed"
                 : "provider-error";
-  const message = unsupportedTerminalAuth
+  const message = individualAccessRetired
+    ? GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE
+    : unsupportedTerminalAuth
     ? "Gemini ACP advertised unsupported terminal authentication."
     : isAuth
     ? "Gemini CLI is not authenticated. Run 'gemini' to connect an account and try again."
@@ -213,7 +221,9 @@ export function geminiRuntimeFailure(
     workspaceRoot: context.workspaceRoot,
     maxChars: MAX_TECHNICAL_DETAIL_CHARS,
   }) ?? undefined;
-  const phase = isAuth ? "auth" : context.phase;
+  const phase = individualAccessRetired
+    ? GEMINI_INDIVIDUAL_ACCESS_RETIRED_PHASE
+    : isAuth ? "auth" : context.phase;
   const terminalEvent = isAuth
     ? "session/new:auth"
     : reason === "protocol-overflow" || reason === "malformed-protocol"

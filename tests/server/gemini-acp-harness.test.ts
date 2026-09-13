@@ -32,6 +32,7 @@ import {
 import { geminiEnvironmentSecretValues } from
   "../../src/server/provider/gemini-acp-redaction";
 import { BoundedGeminiJsonLineTransform } from "../../src/server/provider/gemini-acp-support";
+import { GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE } from "../../src/shared/provider";
 import type { GeminiSessionCleanupRequest } from
   "../../src/server/provider/gemini-session-cleanup";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -1562,6 +1563,39 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "initialize",
       "session/new",
     ]);
+  });
+
+  it("explains Google's individual-account retirement without failing cleanup", async () => {
+    const root = portableFixtureRoot("gemini individual access retired");
+    roots.push(root);
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
+  if (message.method === "session/new") return send({
+    jsonrpc: "2.0",
+    id: message.id,
+    error: {
+      code: -32603,
+      message: "This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google",
+    },
+  });
+});
+`);
+
+    await expect(managerFor(command).run(geminiInput(root, {
+      conversationId: "gemini-individual-access-retired",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      error: GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE,
+      failure: {
+        reason: "provider-error",
+        phase: "individual-access-retired",
+      },
+    });
   });
 
   it("fails cleanup closed for an identity-less non-auth session error", async () => {

@@ -21,6 +21,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { appUpdateCandidateViabilityRequest } from
   "../../src/node/app-update-candidate-viability-protocol";
+import { createAppUpdateScratch } from
+  "../../src/node/app-update-validation-scratch";
 import { RuntimeGenerationLeaseJournal } from
   "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from
@@ -68,9 +70,9 @@ describe("app update candidate viability worker", () => {
   it("validates the native SQLite binding and complete migration catalog for a fresh profile", async () => {
     const dataDirectory = await dataRoot();
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
   });
 
   it("treats an existing empty SQLite file as a fresh isolated clone", async () => {
@@ -78,9 +80,9 @@ describe("app update candidate viability worker", () => {
     const databasePath = join(dataDirectory, "inertia.sqlite");
     await writeFile(databasePath, "", { mode: 0o600 });
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
     await expect(stat(databasePath).then(({ size }) => size)).resolves.toBe(0);
   });
 
@@ -90,9 +92,9 @@ describe("app update candidate viability worker", () => {
     migrateRuntimeDatabase(database);
     database.close();
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
   });
 
   it("accepts a current-schema profile above 256 MiB without losing its WAL snapshot or migration guard", async () => {
@@ -115,18 +117,69 @@ describe("app update candidate viability worker", () => {
       const names = await readdir(dataDirectory);
       expect((await stat(`${databasePath}-wal`)).size).toBeGreaterThan(256 * 1024 * 1024);
       const request = appUpdateCandidateViabilityRequest({ operationId, dataDirectory });
-      expect(() => validateAppUpdateCandidateViability(request)).not.toThrow();
+      await expect(validateAppUpdateCandidateViability(request)).resolves.toBeUndefined();
       expect(database.prepare("SELECT COUNT(*) FROM app_update_large_profile").pluck().get()).toBe(257);
       expect(database.prepare("SELECT * FROM schema_migrations ORDER BY version").all()).toEqual(lineage);
       expect(await readdir(dataDirectory)).toEqual(names);
 
       // A complete known lineage is required to bypass the migration copy.
-      database.exec("DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)");
-      expect(() => validateAppUpdateCandidateViability(request)).toThrow("database-incompatible");
+      database.exec("DELETE FROM schema_migrations WHERE version = 74");
+      await expect(validateAppUpdateCandidateViability(request)).rejects.toThrow("database-incompatible");
     } finally {
       database.close();
     }
   });
+
+  it("rehearses migrations on a private backup above 256 MiB and preserves the live WAL profile", async () => {
+    const dataDirectory = await dataRoot();
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const database = new Database(databasePath);
+    const scratch = createAppUpdateScratch(operationId);
+    try {
+      database.pragma("journal_mode = WAL");
+      database.pragma("wal_autocheckpoint = 0");
+      database.pragma("cache_size = -2048");
+      migrateRuntimeDatabase(database, 74);
+      database.exec(`
+        CREATE TABLE app_update_large_profile (payload BLOB NOT NULL);
+        WITH RECURSIVE rows(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM rows WHERE value < 257
+        ) INSERT INTO app_update_large_profile SELECT zeroblob(1048576) FROM rows;
+      `);
+      const schema = database.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
+      const lineage = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
+      const names = await readdir(dataDirectory);
+      const request = appUpdateCandidateViabilityRequest({
+        operationId, dataDirectory, scratch: scratch.identity,
+      });
+
+      await expect(validateAppUpdateCandidateViability(request)).resolves.toBeUndefined();
+
+      expect(database.prepare("SELECT COUNT(*) FROM app_update_large_profile").pluck().get()).toBe(257);
+      expect(database.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all()).toEqual(schema);
+      expect(database.prepare("SELECT * FROM schema_migrations ORDER BY version").all()).toEqual(lineage);
+      expect(await readdir(dataDirectory)).toEqual(names);
+      const clonePath = join(scratch.identity.directory, "candidate.sqlite");
+      expect((await stat(clonePath)).size).toBeGreaterThan(256 * 1024 * 1024);
+      if (process.platform !== "win32") {
+        expect((await stat(scratch.identity.directory)).mode & 0o777).toBe(0o700);
+        expect((await stat(clonePath)).mode & 0o777).toBe(0o600);
+      }
+      const clone = new Database(clonePath, { readonly: true });
+      try {
+        expect(clone.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(75);
+        expect(clone.prepare("SELECT COUNT(*) FROM app_update_large_profile").pluck().get()).toBe(257);
+        expect(tableSql(clone, "messages")).toContain("private_connect_device_id");
+        expect(clone.pragma("integrity_check", { simple: true })).toBe("ok");
+      } finally {
+        clone.close();
+      }
+    } finally {
+      database.close();
+      scratch.remove();
+    }
+    await expect(stat(scratch.identity.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30_000);
 
   it("migrates an actual N-1 WAL snapshot without changing the live profile", async () => {
     const dataDirectory = await dataRoot();
@@ -144,9 +197,9 @@ describe("app update candidate viability worker", () => {
     `);
 
     const schemaBefore = database.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all();
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
 
     expect(database.prepare(
       "SELECT MAX(version) FROM schema_migrations",
@@ -178,9 +231,9 @@ describe("app update candidate viability worker", () => {
     `);
     database.close();
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("database-incompatible");
+    )).rejects.toThrow("database-incompatible");
 
     const unchanged = new Database(databasePath, { readonly: true });
     expect(unchanged.prepare(
@@ -216,9 +269,9 @@ describe("app update candidate viability worker", () => {
     ).run(99_999, new Date(0).toISOString());
     database.close();
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("database-incompatible");
+    )).rejects.toThrow("database-incompatible");
     const unchanged = new Database(databasePath, { readonly: true });
     expect(unchanged.prepare(
       "SELECT version FROM schema_migrations",
@@ -235,9 +288,9 @@ describe("app update candidate viability worker", () => {
       join(dataDirectory, `.runtime-generation-lease-${"a".repeat(64)}.json`),
     );
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("authenticates runtime and maintenance journals without mutating them", async () => {
@@ -267,9 +320,9 @@ describe("app update candidate viability worker", () => {
       bytes: await readFile(join(dataDirectory, name)),
     })));
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
     await expect(Promise.all(before.map(async ({ name, bytes }) =>
       (await readFile(join(dataDirectory, name))).equals(bytes),
     ))).resolves.toEqual(before.map(() => true));
@@ -287,9 +340,9 @@ describe("app update candidate viability worker", () => {
       JSON.stringify(damaged),
       { mode: 0o600 },
     );
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("accepts the exact quiescent live runtime ownership topology without mutating it", async () => {
@@ -308,13 +361,13 @@ describe("app update candidate viability worker", () => {
         bytes: await readFile(join(dataDirectory, name)),
       })));
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({
         operationId,
         dataDirectory,
         expectedActiveRuntimeOwner: { runtimeGenerationId, systemBootId },
       }),
-    )).not.toThrow();
+    )).resolves.toBeUndefined();
 
     await expect(readdir(dataDirectory).then((entries) => entries.sort()))
       .resolves.toEqual(names);
@@ -338,9 +391,9 @@ describe("app update candidate viability worker", () => {
     );
     await writeFile(transient, "{}", { mode: 0o600 });
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
     await expect(readFile(transient, "utf8")).resolves.toBe("{}");
   });
 
@@ -353,13 +406,13 @@ describe("app update candidate viability worker", () => {
     expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
     expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({
         operationId,
         dataDirectory,
         expectedActiveRuntimeOwner: null,
       }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("rejects a live runtime owner that does not match the handoff identity", async () => {
@@ -371,7 +424,7 @@ describe("app update candidate viability worker", () => {
     expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
     expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({
         operationId,
         dataDirectory,
@@ -380,7 +433,7 @@ describe("app update candidate viability worker", () => {
           systemBootId,
         },
       }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("rejects an active runtime session whose exact boot identity is not leased", async () => {
@@ -395,9 +448,9 @@ describe("app update candidate viability worker", () => {
       otherBootId,
     )).toBe(true);
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("rejects an unbound runtime ownership writer directory", async () => {
@@ -407,9 +460,9 @@ describe("app update candidate viability worker", () => {
       { mode: 0o700 },
     );
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("rejects a redirected writer for an otherwise exact live session", async () => {
@@ -431,9 +484,9 @@ describe("app update candidate viability worker", () => {
     await mkdir(redirected, { mode: 0o700 });
     await symlink(redirected, writer, "dir");
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
     await expect(stat(redirected).then((metadata) => metadata.isDirectory()))
       .resolves.toBe(true);
   });
@@ -450,9 +503,9 @@ describe("app update candidate viability worker", () => {
     expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
     expect(leases.publish(otherGenerationId, systemBootId)).toBe(true);
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
   });
 
   it("rejects corrupt and incomplete runtime journals without repairing them", async () => {
@@ -468,9 +521,9 @@ describe("app update candidate viability worker", () => {
       systemBootId,
       createdAt: new Date(0).toISOString(),
     }), { mode: 0o600 });
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
 
     await rm(canonical);
     const transient = join(
@@ -478,9 +531,9 @@ describe("app update candidate viability worker", () => {
       `.runtime-generation-lease-${hash}.publish.tmp`,
     );
     await writeFile(transient, "{", { mode: 0o600 });
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
     await expect(readFile(transient, "utf8")).resolves.toBe("{");
   });
 
@@ -510,9 +563,9 @@ describe("app update candidate viability worker", () => {
     expect(transientName).toBeDefined();
     const before = await readFile(join(dataDirectory, transientName!));
 
-    expect(() => validateAppUpdateCandidateViability(
+    await expect(validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
-    )).toThrow("recovery-storage-invalid");
+    )).rejects.toThrow("recovery-storage-invalid");
     await expect(readFile(join(dataDirectory, transientName!))).resolves
       .toEqual(before);
   });

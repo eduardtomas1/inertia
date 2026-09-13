@@ -9,6 +9,7 @@ import {
   type AppUpdateCandidateViabilityResult,
   type AppUpdateCandidateExpectedRuntimeOwner,
 } from "../node/app-update-candidate-viability-protocol.js";
+import { createAppUpdateScratch } from "../node/app-update-validation-scratch.js";
 import { verifyLinuxRuntimeOwnedGuardianSandbox } from
   "../node/runtime-owned-process-linux.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from
@@ -37,9 +38,18 @@ function runCandidateViabilityWorker(options: {
   readonly retainLateTerminationAuthority: boolean;
 }): Promise<void> {
   let child: UtilityProcess;
+  let scratch: ReturnType<typeof createAppUpdateScratch>;
+  try {
+    scratch = createAppUpdateScratch(options.operationId);
+  } catch {
+    return Promise.reject(new Error(
+      "The app update viability temporary storage could not be created.",
+    ));
+  }
   try {
     child = options.spawn();
   } catch {
+    scratch.remove();
     return Promise.reject(new Error(
       "The app update viability process could not be created.",
     ));
@@ -59,8 +69,10 @@ function runCandidateViabilityWorker(options: {
       if (terminationObserved || !options.retainLateTerminationAuthority) {
         child.removeListener("spawn", onSpawn);
         child.removeListener("error", onError);
-        child.removeListener("exit", onExit);
       }
+      // A rejected validation can still have a live worker. Retain this one
+      // listener on every platform to delete private data only after its exit.
+      if (terminationObserved) child.removeListener("exit", onExit);
     };
     const settle = (error?: Error): void => {
       if (settled) return;
@@ -94,6 +106,7 @@ function runCandidateViabilityWorker(options: {
         child.postMessage(appUpdateCandidateViabilityRequest({
           operationId: options.operationId,
           dataDirectory: options.dataDirectory,
+          scratch: scratch.identity,
           expectedActiveRuntimeOwner: options.expectedActiveRuntimeOwner,
         }));
       } catch {
@@ -127,12 +140,24 @@ function runCandidateViabilityWorker(options: {
     ));
     const onExit = (code: number): void => {
       exitObserved = true;
+      let storageError: Error | null = null;
+      try {
+        scratch.remove();
+      } catch {
+        storageError = new Error(
+          "The app update viability temporary storage cleanup is unconfirmed.",
+        );
+      }
       if (settled) {
         cleanup(true);
         return;
       }
       if (stoppingError) {
         settle(stoppingError);
+        return;
+      }
+      if (storageError) {
+        settle(storageError);
         return;
       }
       if (result?.status === "validated" && code === 0) {

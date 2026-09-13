@@ -44,11 +44,14 @@ import {
   "../node/runtime-owned-process-session-journal.js";
 import {
   appUpdateCandidateViabilityResult,
+  CandidateViabilityError,
   parseAppUpdateCandidateViabilityRequest,
   parseAppUpdateCandidateViabilityResultAck,
   type AppUpdateCandidateViabilityCode,
   type AppUpdateCandidateViabilityRequest,
 } from "../node/app-update-candidate-viability-protocol.js";
+import { candidateDatabaseError, diskAppUpdateDatabaseClone } from
+  "./app-update-database-clone.js";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from
   "./persistence/migrations/runtime-catalog.js";
 import { validateProviderMaintenanceJournalStorage } from
@@ -68,12 +71,6 @@ const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-class CandidateViabilityError extends Error {
-  constructor(readonly code: AppUpdateCandidateViabilityCode) {
-    super(code);
-  }
-}
 
 function samePath(left: string, right: string): boolean {
   const normalizedLeft = normalize(left);
@@ -491,25 +488,28 @@ function constrainCloneSize(clone: Database.Database): void {
     { simple: true },
   );
   if (appliedMaximum !== maximumPages) {
-    throw new CandidateViabilityError("database-incompatible");
+    throw new CandidateViabilityError("validation-resource-limit");
   }
 }
 
 /**
- * Serializes the read-only live snapshot into a bounded, process-local clone.
- * This includes committed WAL pages but cannot strand profile data in a temp
- * file if the validation worker is killed. BetterSqlite3 copies the supplied
- * buffer; the source copy is erased immediately and the native copy is freed
- * when the returned database closes.
+ * Small snapshots stay in bounded process-local memory. BetterSqlite3 copies
+ * the serialized buffer, so erase that source copy immediately. Larger pending
+ * migrations use a private disk backup cleaned by main after exact worker exit.
  */
-function isolatedDatabaseClone(database: Database.Database): Database.Database {
+async function isolatedDatabaseClone(
+  database: Database.Database,
+  request: AppUpdateCandidateViabilityRequest,
+): Promise<Database.Database> {
   const pageSize = safeIntegerPragma(database, "page_size", 1);
   const pageCount = safeIntegerPragma(database, "page_count", 0);
   const expectedBytes = pageSize * pageCount;
-  if (
-    !Number.isSafeInteger(expectedBytes)
-    || expectedBytes > MAX_DATABASE_CLONE_BYTES
-  ) throw new CandidateViabilityError("database-incompatible");
+  if (!Number.isSafeInteger(expectedBytes)) {
+    throw new CandidateViabilityError("validation-resource-limit");
+  }
+  if (expectedBytes > MAX_DATABASE_CLONE_BYTES) {
+    return await diskAppUpdateDatabaseClone(database, request, expectedBytes);
+  }
   if (expectedBytes === 0) {
     const clone = new Database(":memory:");
     try {
@@ -517,8 +517,7 @@ function isolatedDatabaseClone(database: Database.Database): Database.Database {
       return clone;
     } catch (error) {
       clone.close();
-      if (error instanceof CandidateViabilityError) throw error;
-      throw new CandidateViabilityError("database-incompatible");
+      throw candidateDatabaseError(error);
     }
   }
   const serialized = database.serialize();
@@ -539,8 +538,7 @@ function isolatedDatabaseClone(database: Database.Database): Database.Database {
     return clone;
   } catch (error) {
     clone?.close();
-    if (error instanceof CandidateViabilityError) throw error;
-    throw new CandidateViabilityError("database-incompatible");
+    throw candidateDatabaseError(error);
   } finally {
     serialized.fill(0);
   }
@@ -554,14 +552,15 @@ function validateMigrationsOnClone(clone: Database.Database): void {
       !databaseIntegrityIsValid(clone)
       || (clone.pragma("foreign_key_check") as unknown[]).length > 0
     ) throw new Error("The migrated database clone is invalid.");
-  } catch {
-    throw new CandidateViabilityError("database-incompatible");
+  } catch (error) {
+    throw candidateDatabaseError(error);
   } finally {
     clone.close();
   }
 }
 
-function validateDatabase(dataDirectory: string): void {
+async function validateDatabase(request: AppUpdateCandidateViabilityRequest): Promise<void> {
+  const { dataDirectory } = request;
   const databasePath = join(dataDirectory, DATABASE_NAME);
   if (!existsSync(databasePath)) {
     if (
@@ -589,6 +588,8 @@ function validateDatabase(dataDirectory: string): void {
   try {
     database.pragma("query_only = ON");
     database.pragma("busy_timeout = 5000");
+    database.pragma("cache_size = -8192");
+    database.pragma("mmap_size = 0");
     database.exec("BEGIN");
     const appliedMigrations = knownAppliedMigrationCount(database);
     if (
@@ -599,31 +600,30 @@ function validateDatabase(dataDirectory: string): void {
     // A current profile has no data migration to rehearse. Its integrity and
     // lineage were checked on this coherent, read-only WAL snapshot; exercise
     // the candidate's complete catalog on a fresh private database instead of
-    // copying an arbitrarily large profile. Pending migrations still require
-    // the bounded data clone and are not covered by this fast path.
+    // copying an arbitrarily large profile. Pending migrations use a bounded
+    // memory clone or a private disk backup owned by the supervising process.
     validateMigrationsOnClone(appliedMigrations === runtimeMigrationCatalog().length
       ? new Database(":memory:")
-      : isolatedDatabaseClone(database));
+      : await isolatedDatabaseClone(database, request));
     const confirmed = ownedRegularFile(databasePath);
     if (!sameFile(named, confirmed)) {
       throw new CandidateViabilityError("database-incompatible");
     }
   } catch (error) {
-    if (error instanceof CandidateViabilityError) throw error;
-    throw new CandidateViabilityError("database-incompatible");
+    throw candidateDatabaseError(error);
   } finally {
     database.close();
   }
 }
 
-export function validateAppUpdateCandidateViability(
+export async function validateAppUpdateCandidateViability(
   request: AppUpdateCandidateViabilityRequest,
-): void {
+): Promise<void> {
   inspectRecoveryStorage(
     request.dataDirectory,
     request.expectedActiveRuntimeOwner,
   );
-  validateDatabase(request.dataDirectory);
+  await validateDatabase(request);
 }
 
 async function validateWithTransientRecoveryRetry(
@@ -635,7 +635,7 @@ async function validateWithTransientRecoveryRetry(
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
     }
     try {
-      validateAppUpdateCandidateViability(request);
+      await validateAppUpdateCandidateViability(request);
       return;
     } catch (error) {
       lastError = error;

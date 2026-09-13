@@ -20,6 +20,7 @@ import {
 import type {
   ProviderActivityEvent,
   ProviderSessionEvent,
+  ProviderStatusEvent,
   ProviderUsageEvent,
 } from "../../src/server/provider/contracts";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
@@ -33,7 +34,28 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const CONVERSATION = "4f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a11";
 const PROMPT_FLAGS = new Set(["-p", "--print", "--prompt", "--prompt-interactive", "-i"]);
 
+const CLOSE_STDOUT_SOURCE = `
+const stdoutFd = process.stdout.fd;
+const realStdoutDestroy = Object.getPrototypeOf(process.stdout)._destroy;
+if (typeof realStdoutDestroy !== "function") throw new Error("Node stdout is not a pipe-backed Socket.");
+process.stdout._destroy = realStdoutDestroy;
+process.stdout.destroy();
+require("node:fs").closeSync(stdoutFd);
+`;
+
 const roots: string[] = [];
+
+function terminalStatuses(): { statuses: string[]; onStatus: (event: ProviderStatusEvent) => void } {
+  const statuses: string[] = [];
+  return {
+    statuses,
+    onStatus: (event) => {
+      if (event.status === "completed" || event.status === "failed" || event.status === "cancelled") {
+        statuses.push(event.status);
+      }
+    },
+  };
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
@@ -388,18 +410,129 @@ hang();
     });
   });
 
-  it("fails when Antigravity exits without a result", async () => {
-    const root = fixtureRoot("antigravity early exit");
+  it("fails a clean exit that sent no result", async () => {
+    const root = fixtureRoot("antigravity exit zero");
     const { command } = fakeAgy(root, `
 emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+`);
+    const recorder = terminalStatuses();
+    await expect(managerFor(command).run(antigravityInput(root), { onStatus: recorder.onStatus }))
+      .resolves.toMatchObject({
+        status: "failed",
+        text: "Partial",
+        exitCode: 0,
+        error: "Antigravity exited without a result (code 0).",
+        failure: { reason: "process-exit", terminalEvent: "result:exit" },
+        cleanupConfirmed: true,
+      });
+    expect(recorder.statuses).toEqual(["failed"]);
+  });
+
+  it("fails a non-zero exit without a result and keeps the stderr tail", async () => {
+    const root = fixtureRoot("antigravity exit code");
+    const { command } = fakeAgy(root, `
+process.stderr.write("warming up\\nfatal: backend unavailable\\n");
 process.exitCode = 3;
 `);
-    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+    const result = await managerFor(command).run(antigravityInput(root));
+    expect(result).toMatchObject({
       status: "failed",
-      text: "Partial",
+      exitCode: 3,
+      error: "Antigravity exited without a result (code 3).",
       failure: { reason: "process-exit" },
       cleanupConfirmed: true,
     });
+    expect(result.failure?.technicalDetail).toContain("fatal: backend unavailable");
+  });
+
+  it("fails a signal kill without a result", async () => {
+    const root = fixtureRoot("antigravity signal kill");
+    const { command } = fakeAgy(root, `
+process.stdout.write(JSON.stringify({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } }) + "\\n",
+  () => process.kill(process.pid, "SIGKILL"));
+`);
+    const recorder = terminalStatuses();
+    const result = await managerFor(command).run(antigravityInput(root), { onStatus: recorder.onStatus });
+    expect(result).toMatchObject({ status: "failed", text: "Partial", cleanupConfirmed: true });
+    if (process.platform === "win32") {
+      expect(result.error).toMatch(/^Antigravity exited without a result \(code \d+\)\.$/u);
+    } else {
+      expect(result).toMatchObject({
+        signal: "SIGKILL",
+        error: "Antigravity exited without a result (signal SIGKILL).",
+        failure: { reason: "process-signal", terminalEvent: "result:signal" },
+      });
+    }
+    expect(recorder.statuses).toEqual(["failed"]);
+  });
+
+  it("uses the terminal result even when the process then exits with an error code", async () => {
+    const root = fixtureRoot("antigravity result then exit");
+    const { command } = fakeAgy(root, `
+emit({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } });
+process.exitCode = 7;
+`);
+    const recorder = terminalStatuses();
+    await expect(managerFor(command).run(antigravityInput(root), { onStatus: recorder.onStatus }))
+      .resolves.toMatchObject({ status: "completed", text: "Done", exitCode: 7, cleanupConfirmed: true });
+    expect(recorder.statuses).toEqual(["completed"]);
+  });
+
+  it("fails and stops Antigravity when it closes its output without a result", async () => {
+    const root = fixtureRoot("antigravity output closed");
+    const { command } = fakeAgy(root, process.platform === "win32" ? `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+process.stdout.end(() => process.exit(0));
+` : `
+process.stdout.write(JSON.stringify({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } }) + "\\n", () => {
+  ${CLOSE_STDOUT_SOURCE}
+  hang();
+});
+`);
+    const startedAt = Date.now();
+    const recorder = terminalStatuses();
+    const result = await managerFor(command).run(antigravityInput(root), { onStatus: recorder.onStatus });
+    expect(Date.now() - startedAt).toBeLessThan(15_000);
+    expect(result).toMatchObject({ status: "failed", text: "Partial", cleanupConfirmed: true });
+    expect(result.error).toBe(process.platform === "win32"
+      ? "Antigravity exited without a result (code 0)."
+      : "Antigravity closed its output without a result.");
+    expect(recorder.statuses).toEqual(["failed"]);
+  });
+
+  it("keeps a result that arrived before the output closed", async () => {
+    const root = fixtureRoot("antigravity result then output closed");
+    const { command } = fakeAgy(root, process.platform === "win32" ? `
+emit({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } });
+process.stdout.end(() => process.exit(0));
+` : `
+process.stdout.write(JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } }) + "\\n", () => {
+  ${CLOSE_STDOUT_SOURCE}
+  hang();
+});
+`);
+    await expect(managerFor(command, { resultExitGraceMs: 50 }).run(antigravityInput(root)))
+      .resolves.toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
+  });
+
+  it("settles instead of hanging when process-tree cleanup cannot be confirmed", async () => {
+    const root = fixtureRoot("antigravity unconfirmed cleanup");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+`);
+    const startedAt = Date.now();
+    const recorder = terminalStatuses();
+    const result = await managerFor(command, {
+      terminateProcessTree: () => new Promise<boolean>(() => undefined),
+      terminationConfirmMs: 200,
+    }).run(antigravityInput(root), { onStatus: recorder.onStatus });
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    expect(result).toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      error: "Antigravity's process tree could not be confirmed stopped.",
+    });
+    expect(recorder.statuses).toEqual(["failed"]);
   });
 
   it("reports a non-success result as a failed turn", async () => {

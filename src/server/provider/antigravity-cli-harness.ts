@@ -40,10 +40,13 @@ import { providerProcessInvocation } from "./process";
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_STDERR_TAIL_CHARS = 4 * 1024;
+const MAX_STDERR_DETAIL_LINES = 20;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_TRACKED_TOOLS = 1_024;
 const MAX_DECLINED_NOTICES = 32;
 const RESULT_EXIT_GRACE_MS = 2_000;
+const OUTPUT_DRAIN_GRACE_MS = 1_000;
+const TERMINATION_CONFIRM_MS = 10_000;
 
 export const ANTIGRAVITY_CLI_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -66,6 +69,8 @@ export const ANTIGRAVITY_CLI_CAPABILITIES = {
 export interface AntigravityCliHarnessOptions {
   terminateProcessTree?: ProcessTreeTerminator;
   resultExitGraceMs?: number;
+  outputDrainGraceMs?: number;
+  terminationConfirmMs?: number;
 }
 
 const RUN_EXTENSION: ProviderInteractiveRunExtension = {
@@ -109,6 +114,26 @@ function settledRun(
   };
 }
 
+function boundedWait(promise: Promise<void>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Process tree termination was not confirmed in time.")),
+      timeoutMs,
+    );
+    timer.unref?.();
+    promise.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error("Process tree termination failed."));
+      },
+    );
+  });
+}
+
 function startAntigravityRun(
   options: AgentHarnessStartOptions,
   harnessOptions: AntigravityCliHarnessOptions,
@@ -141,6 +166,8 @@ function startAntigravityRun(
   let result: AntigravityResult | undefined;
   let failure: ProviderRunFailure | undefined;
   let spawnError: Error | undefined;
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let outputClosed = false;
   let sawText = false;
   let stderrTail = "";
   let declinedNotices = 0;
@@ -148,8 +175,16 @@ function startAntigravityRun(
   let settled = false;
   let finalizing = false;
   let resultTimer: NodeJS.Timeout | undefined;
+  let drainTimer: NodeJS.Timeout | undefined;
+  let closedOutputTimer: NodeJS.Timeout | undefined;
   let requestProcessTermination = (_force: boolean): void => {};
+  let finish = (): void => {};
 
+  const stderrDetail = (): string => stderr.toString()
+    .split(/\r?\n/u)
+    .filter((line) => line.trim().length > 0)
+    .slice(-MAX_STDERR_DETAIL_LINES)
+    .join("\n");
   const fail = (next: ProviderRunFailure): void => {
     failure ??= next;
     requestProcessTermination(true);
@@ -172,7 +207,7 @@ function startAntigravityRun(
       emitter.activity("tool", event.phase, event.label, {
         activityId: `antigravity:${input.runId}:${event.id}`,
       });
-    } else if (!result) {
+    } else {
       result = event.result;
       adoptSession(event.result.conversationId);
       if (event.result.status === "SUCCESS" && !sawText && event.result.response) {
@@ -190,13 +225,16 @@ function startAntigravityRun(
   const decoder = new ProviderNdjsonDecoder(
     MAX_LINE_BYTES,
     (line) => {
-      if (settled || failure) return;
+      if (settled || finalizing || failure || result) return;
       const events = parseAntigravityLine(line);
       if (!events) {
         fail(antigravityFailure("malformed", line.slice(0, 2_000), input.cwd));
         return;
       }
-      for (const event of events) handle(event);
+      for (const event of events) {
+        handle(event);
+        if (result) return;
+      }
     },
     () => emitter.activity("system", "info", "Antigravity sent an oversized line that Inertia skipped"),
   );
@@ -260,30 +298,47 @@ function startAntigravityRun(
     cleanupConfirmed: boolean,
     runFailure?: ProviderRunFailure,
   ): void => {
+    if (settled) return;
     settled = true;
     if (resultTimer) clearTimeout(resultTimer);
+    if (drainTimer) clearTimeout(drainTimer);
+    if (closedOutputTimer) clearTimeout(closedOutputTimer);
     emitter.status(status, runFailure?.message);
     resolveResult({
       ...providerRunTerminal(input, status, runFailure),
       sessionId,
       text: resultText.toString(),
       textTruncated: resultText.truncated,
-      exitCode: child.exitCode,
-      signal: child.signalCode,
+      exitCode: exit?.code ?? child.exitCode,
+      signal: exit?.signal ?? child.signalCode,
       ...(runFailure ? { error: runFailure.message, failure: runFailure } : {}),
       cleanupConfirmed,
     });
   };
-  const finish = (): void => {
+  const exitedWithoutResult = (): ProviderRunFailure => {
+    const signal = exit?.signal ?? child.signalCode;
+    const code = exit?.code ?? child.exitCode;
+    return antigravityFailure(
+      signal ? "signal" : "exit",
+      stderrDetail(),
+      input.cwd,
+      `Antigravity exited without a result (${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}).`,
+    );
+  };
+  finish = (): void => {
     if (settled || finalizing) return;
     finalizing = true;
+    if (drainTimer) clearTimeout(drainTimer);
     void (async () => {
       try {
-        await terminate(false);
+        await boundedWait(
+          terminate(false),
+          harnessOptions.terminationConfirmMs ?? TERMINATION_CONFIRM_MS,
+        );
       } catch {
         settle("failed", false, antigravityFailure(
           "exit",
-          stderr.toString(),
+          stderrDetail(),
           input.cwd,
           "Antigravity's process tree could not be confirmed stopped.",
         ));
@@ -293,33 +348,68 @@ function startAntigravityRun(
         settle("cancelled", true);
       } else if (failure) {
         settle("failed", true, failure);
-      } else if (spawnError && !result) {
+      } else if (result) {
+        const resultFailure = antigravityResultFailure(result, input.cwd);
+        if (resultFailure) settle("failed", true, resultFailure);
+        else settle("completed", true);
+      } else if (spawnError && child.pid === undefined) {
         settle("failed", true, antigravityFailure(
           "exit",
           spawnError.message,
           input.cwd,
           "Antigravity could not be started.",
         ));
-      } else if (!result) {
-        settle("failed", true, antigravityFailure(
-          child.signalCode ? "signal" : "exit",
-          stderr.toString(),
-          input.cwd,
-        ));
       } else {
-        const resultFailure = antigravityResultFailure(result, input.cwd);
-        if (resultFailure) settle("failed", true, resultFailure);
-        else settle("completed", true);
+        settle("failed", true, exitedWithoutResult());
       }
     })();
   };
+  const finishWhenDrained = (): void => {
+    if (exit && outputClosed) finish();
+  };
+  const onOutputClosed = (): void => {
+    if (outputClosed) return;
+    outputClosed = true;
+    decoder.end();
+    if (!result && !exit && !cancelRequested) {
+      closedOutputTimer = setTimeout(() => {
+        if (result || exit || cancelRequested) return;
+        fail(antigravityFailure(
+          "exit",
+          stderrDetail(),
+          input.cwd,
+          "Antigravity closed its output without a result.",
+        ));
+      }, harnessOptions.outputDrainGraceMs ?? OUTPUT_DRAIN_GRACE_MS);
+      closedOutputTimer.unref?.();
+    }
+    finishWhenDrained();
+  };
+  const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+    exit ??= { code, signal };
+    if (closedOutputTimer) clearTimeout(closedOutputTimer);
+    requestProcessTermination(true);
+    if (!outputClosed && !drainTimer) {
+      drainTimer = setTimeout(() => {
+        child.stdout.destroy();
+        onOutputClosed();
+      }, harnessOptions.outputDrainGraceMs ?? OUTPUT_DRAIN_GRACE_MS);
+      drainTimer.unref?.();
+    }
+    finishWhenDrained();
+  };
   requestProcessTermination = (force: boolean): void => {
-    void terminate(force).then(finish, finish);
+    terminate(force).catch(() => {
+      exit ??= { code: child.exitCode, signal: child.signalCode };
+      outputClosed = true;
+      finish();
+    });
   };
 
   child.once("spawn", () => emitter.status("running"));
   child.stdout.on("data", (chunk: Buffer) => decoder.push(chunk));
-  child.stdout.once("end", () => decoder.end());
+  child.stdout.once("end", onOutputClosed);
+  child.stdout.once("close", onOutputClosed);
   child.stdout.on("error", (error: Error) => {
     spawnError ??= error;
   });
@@ -330,10 +420,20 @@ function startAntigravityRun(
   });
   child.once("error", (error: Error) => {
     spawnError ??= error;
+    if (child.pid === undefined) {
+      exit ??= { code: null, signal: null };
+      outputClosed = true;
+      finish();
+      return;
+    }
     requestProcessTermination(true);
   });
-  child.once("exit", () => requestProcessTermination(true));
-  child.once("close", finish);
+  child.once("exit", onExit);
+  child.once("close", (code: number | null, signal: NodeJS.Signals | null) => {
+    exit ??= { code, signal };
+    onOutputClosed();
+    finishWhenDrained();
+  });
 
   try {
     child.stdin.end(antigravityUserLine(input.prompt));

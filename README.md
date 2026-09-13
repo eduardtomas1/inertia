@@ -8,7 +8,7 @@
   A calm desktop workspace for building with coding agents.
 </p>
 
-[Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
+[Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [User guide](docs/user/README.md) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
 
 ![Inertia 0.0.55 — project sidebar, conversation, and floating composer in dark mode](docs/screenshots/inertia-dark.png)
 
@@ -71,6 +71,6 @@ See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RE
 
 If an older Windows update leaves startup blocked by unconfirmed process cleanup, follow the [profile recovery steps](docs/WINDOWS_STARTUP_RECOVERY.md).
 
-Refresh a provider in **Settings → Providers** if it stops responding. For app problems, use **Settings → Runtime diagnostics → Copy diagnostic report**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
+See [Troubleshooting](docs/user/troubleshooting.md) for fixes grouped by symptom. Refresh a provider in **Settings → Providers** if it stops responding. For app problems, use **Settings → Runtime diagnostics → Copy diagnostic report**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
 
 [Apache 2.0](LICENSE). Packaged builds include third-party notices and dependency licenses.

@@ -12093,7 +12093,7 @@ button.sent-attachment-open:focus-visible {
 
 .turn-thinking-label {
   flex: 0 0 auto;
-  color: var(--text-soft);
+  color: inherit;
   font-weight: 620;
 }
 
@@ -12129,11 +12129,13 @@ button.sent-attachment-open:focus-visible {
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
+  color: var(--text-soft);
 }
 
 .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
-  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);
-  mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);
+  color: var(--text);
+  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.65) 38%, #000 50%, rgb(0 0 0 / 0.65) 62%);
+  mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.65) 38%, #000 50%, rgb(0 0 0 / 0.65) 62%);
   -webkit-mask-size: 300% 100%;
   mask-size: 300% 100%;
   animation: turn-thinking-sweep 1800ms var(--motion-ease-inout) infinite;
@@ -12144,7 +12146,7 @@ button.sent-attachment-open:focus-visible {
   align-items: center;
   gap: 5px;
   margin-left: 0;
-  color: var(--text-soft);
+  color: inherit;
   font-size: inherit;
   font-variant-numeric: tabular-nums;
 }

@@ -333,7 +333,7 @@ describe("agent loading and trace DOM", () => {
         /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep/u,
       );
       expect(styles).toContain(
-        "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.78) 38%, #000 50%, rgb(0 0 0 / 0.78) 62%);",
+        "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.65) 38%, #000 50%, rgb(0 0 0 / 0.65) 62%);",
       );
       expect(styles).toMatch(
         /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,

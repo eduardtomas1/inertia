@@ -1,4 +1,5 @@
 import anthropicIcon from "../assets/provider-icons/anthropic.svg?no-inline";
+import antigravityTextIcon from "../assets/provider-icons/antigravity-text.svg?no-inline";
 import cursorDarkIcon from "../assets/provider-icons/cursor-dark.svg?no-inline";
 import cursorLightIcon from "../assets/provider-icons/cursor-light.svg?no-inline";
 import geminiIcon from "../assets/provider-icons/gemini.svg?no-inline";
@@ -11,7 +12,7 @@ import type { ProviderId } from "@shared/contracts";
 
 export type ProviderIconDefinition = Readonly<{
   providerId: ProviderId;
-  brand: "openai" | "anthropic" | "cursor" | "gemini" | "kimi" | "opencode";
+  brand: "openai" | "anthropic" | "cursor" | "gemini" | "kimi" | "opencode" | "antigravity";
   label: string;
   lightSrc: string;
   darkSrc?: string;
@@ -58,6 +59,13 @@ const providerIconDefinitions: Readonly<Record<ProviderId, ProviderIconDefinitio
     label: "OpenCode",
     lightSrc: opencodeLightIcon,
     darkSrc: opencodeDarkIcon,
+  },
+  antigravity: {
+    providerId: "antigravity",
+    brand: "antigravity",
+    label: "Antigravity",
+    lightSrc: antigravityTextIcon,
+    invertInDark: true,
   },
 };
 

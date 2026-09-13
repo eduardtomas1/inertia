@@ -58,6 +58,13 @@ describe("ProviderBrandIcon", () => {
         hasDarkAsset: true,
         invertInDark: false,
       },
+      {
+        providerId: "antigravity",
+        brand: "antigravity",
+        label: "Antigravity",
+        hasDarkAsset: false,
+        invertInDark: true,
+      },
     ]);
 
     for (const definition of supportedProviderIconDefinitions()) {

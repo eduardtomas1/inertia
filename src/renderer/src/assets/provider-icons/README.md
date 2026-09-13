@@ -36,6 +36,11 @@ property of their respective owners.
   `apps/vscode/resources/kimi-icon.svg` (MIT repository license; local SHA-256
   `39b9072b6d235732ecdc8e0aa39674bc64afaa09ff31f29ecc955d61dc4fdda5`).
   The geometry is unchanged; comments and multiline formatting were removed.
+- `antigravity-text.svg`: an Inertia-authored neutral "AG" text mark in a
+  rounded square. It is not a Google or Antigravity logo. No official
+  Antigravity mark with a verifiable license and source was available to
+  bundle, so this placeholder carries no vendor geometry or colors. Replace it
+  only with an official asset whose source and license are recorded here.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

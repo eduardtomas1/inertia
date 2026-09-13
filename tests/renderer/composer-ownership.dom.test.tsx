@@ -32,6 +32,7 @@ import {
 import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 import { requestComposerPrefill } from "../../src/renderer/src/utils/composerPrefill";
+import { requestProviderRouteSwitch } from "../../src/renderer/src/utils/providerRouteSwitch";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -870,5 +871,35 @@ describe("composer detachment ownership", () => {
       status: "ready",
       draft: "",
     });
+  });
+});
+
+describe("Gemini retirement route switch", () => {
+  it("opens a new Antigravity chat only after confirmation and leaves the Gemini chat untouched", async () => {
+    const current: Conversation = {
+      ...conversation("gemini-retired"),
+      providerId: "gemini",
+      modelSelection: providerNativeModelSelection({ providerId: "gemini" }),
+    };
+    const onUpdateConversation = vi.fn<React.ComponentProps<typeof Composer>["onUpdateConversation"]>(async () => undefined);
+    const onCreateConversationForSelection = vi.fn<
+      NonNullable<React.ComponentProps<typeof Composer>["onCreateConversationForSelection"]>
+    >(async () => undefined);
+    render(<Composer {...composerProps(current, { onUpdateConversation, onCreateConversationForSelection })} />);
+
+    act(() => requestProviderRouteSwitch({ conversationId: "another-chat", providerId: "antigravity" }));
+    expect(screen.queryByText("Open a new chat for Antigravity?")).toBeNull();
+
+    act(() => requestProviderRouteSwitch({ conversationId: current.id, providerId: "antigravity" }));
+    expect(await screen.findByText("Open a new chat for Antigravity?")).toBeTruthy();
+    expect(onCreateConversationForSelection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
+    expect(onCreateConversationForSelection.mock.calls[0]![0]).toMatchObject({
+      harnessId: "antigravity-cli",
+      backendProfileId: "builtin:antigravity",
+    });
+    expect(onUpdateConversation).not.toHaveBeenCalled();
   });
 });

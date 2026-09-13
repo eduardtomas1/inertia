@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { providerSetupAction, providerStateLabel } from "../../src/renderer/src/utils/providerStatus";
+import {
+  providerSetupAction,
+  providerStateDetail,
+  providerStateLabel,
+} from "../../src/renderer/src/utils/providerStatus";
 import type { ProviderInfo } from "../../src/shared/contracts";
 
 describe("provider compatibility status", () => {
@@ -73,5 +77,48 @@ describe("provider compatibility status", () => {
 
     expect(providerStateLabel(provider)).toBe("Update required");
     expect(providerSetupAction(provider)).toBe("refresh");
+  });
+
+  it("treats Antigravity sign-in as checked per turn and version-gated", () => {
+    const metadataState: ProviderInfo["metadataState"] = {
+      models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+    };
+    const ready: ProviderInfo = {
+      id: "antigravity",
+      label: "Antigravity",
+      command: "agy",
+      available: true,
+      version: "1.2.2",
+      executable: "/opt/bin/agy",
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      statusMessage: "Installed; Antigravity checks your sign-in when a turn starts",
+      models: [],
+      rateLimits: [],
+      metadataState,
+    };
+    expect(providerStateLabel(ready)).toBe("Ready");
+    expect(providerSetupAction(ready)).toBe("connect");
+
+    const outdated: ProviderInfo = {
+      ...ready,
+      version: "1.1.0",
+      canRun: false,
+      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
+    };
+    expect(providerStateLabel(outdated)).toBe("Update required");
+    expect(providerSetupAction(outdated)).toBe("refresh");
+    expect(providerStateDetail({ ...ready, installState: "not-installed", statusMessage: undefined, version: undefined }))
+      .toBe("Antigravity CLI was not found on this device.");
+    expect(providerStateDetail({
+      ...ready,
+      id: "gemini",
+      label: "Gemini CLI",
+      installState: "not-installed",
+      statusMessage: undefined,
+      version: undefined,
+    })).toBe("Gemini CLI was not found on this device.");
   });
 });

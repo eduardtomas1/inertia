@@ -18,6 +18,8 @@ import type {
   AgentTurn,
   ChatMessage,
 } from "../../src/shared/contracts";
+import { GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE } from "../../src/shared/provider";
+import { PROVIDER_ROUTE_SWITCH_EVENT } from "../../src/renderer/src/utils/providerRouteSwitch";
 
 const conversationId = "90909090-9090-4090-8090-909090909090";
 const turnId = "turn-failure-diagnostics";
@@ -117,12 +119,15 @@ function failureActivity(detail = [
   };
 }
 
-function renderFailure(): void {
+function renderFailure(
+  turn: AgentTurn = failedTurn(),
+  activity: AgentActivity = failureActivity(),
+): void {
   render(
     <ResponseTimeline
-      turns={[failedTurn()]}
+      turns={[turn]}
       messages={[userMessage()]}
-      activities={[failureActivity()]}
+      activities={[activity]}
       reasonings={[]}
       plans={[]}
       checkpoints={[]}
@@ -261,5 +266,33 @@ describe("turn failure diagnostics", () => {
       technical: false,
     });
     expect(presentation.copyText).toContain("Provider: Gemini");
+  });
+});
+
+describe("Gemini individual-account retirement", () => {
+  it("offers a new Antigravity chat only for Gemini's retirement failure", async () => {
+    const requests: unknown[] = [];
+    const listener = (event: Event): void => {
+      requests.push((event as CustomEvent<unknown>).detail);
+    };
+    window.addEventListener(PROVIDER_ROUTE_SWITCH_EVENT, listener);
+    try {
+      renderFailure(
+        { ...failedTurn(), providerId: "gemini" },
+        { ...failureActivity(), title: GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE },
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Open in Antigravity" }));
+      expect(requests).toEqual([{ conversationId, providerId: "antigravity" }]);
+      cleanup();
+
+      renderFailure(
+        failedTurn(),
+        { ...failureActivity(), title: GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE },
+      );
+      expect(await screen.findByText("Run failed")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Open in Antigravity" })).toBeNull();
+    } finally {
+      window.removeEventListener(PROVIDER_ROUTE_SWITCH_EVENT, listener);
+    }
   });
 });

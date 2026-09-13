@@ -100,10 +100,12 @@ function identityLabel(profile: ModelBackendProfileView): string {
       : profile.harnessId.startsWith("cursor")
         ? "Cursor"
         : profile.harnessId.startsWith("gemini")
-          ? "Gemini"
-          : profile.harnessId.startsWith("kimi")
-            ? "Kimi Code"
-            : "OpenCode";
+          ? "Gemini CLI"
+          : profile.harnessId.startsWith("antigravity")
+            ? "Antigravity"
+            : profile.harnessId.startsWith("kimi")
+              ? "Kimi Code"
+              : "OpenCode";
   return `${harness} harness · ${profile.displayName}`;
 }
 

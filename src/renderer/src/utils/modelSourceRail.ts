@@ -10,6 +10,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "codex",
   "claude",
   "cursor",
+  "antigravity",
   "gemini",
   "kimi",
   "opencode",
@@ -19,9 +20,10 @@ export const MODEL_SOURCE_PROVIDER_LABELS: Readonly<Record<ProviderId, string>> 
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
-  gemini: "Gemini",
+  gemini: "Gemini CLI",
   kimi: "Kimi Code",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 export type ModelSourceFilter =

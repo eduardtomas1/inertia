@@ -24,6 +24,10 @@ import {
 } from "../../utils/failureDiagnostics";
 import { writeClipboardText } from "../../utils/clipboard";
 import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
+import {
+  geminiIndividualAccessRetired,
+  requestProviderRouteSwitch,
+} from "../../utils/providerRouteSwitch";
 import "./failureDiagnostics.css";
 
 function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.JSX.Element {
@@ -101,6 +105,9 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
           <p id={headingId}>{presentation.summary}</p>
         </div>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
+          {geminiIndividualAccessRetired(turn, activity) && <button type="button" className="turn-failure-action" onClick={() => requestProviderRouteSwitch({
+            conversationId: turn.conversationId, providerId: "antigravity",
+          })}>Open in Antigravity</button>}
           {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
             section: "diagnostics", selection: { turnId: turn.id },
           })}>View diagnostics</button>}

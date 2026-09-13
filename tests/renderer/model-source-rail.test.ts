@@ -200,7 +200,7 @@ describe("model source rail", () => {
     const gemini = items.find(({ filter }) =>
       filter.kind === "provider" && filter.providerId === "gemini")!;
 
-    expect(gemini.label).toBe("Gemini");
+    expect(gemini.label).toBe("Gemini CLI");
     expect(gemini.routes).toEqual([geminiRoute]);
     expect(modelSourceRailItemGlyph(gemini)).toEqual({
       kind: "provider",

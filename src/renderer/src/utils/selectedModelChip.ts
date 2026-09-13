@@ -8,6 +8,7 @@ export type SelectedModelChipGlyph =
   | "gemini"
   | "kimi"
   | "opencode"
+  | "antigravity"
   | "custom"
   | "unknown";
 

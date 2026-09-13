@@ -11,6 +11,7 @@ import type {
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -1348,6 +1349,9 @@ describe("compact Work sidebar", () => {
     const label = cue?.closest(".activity-thread-status-label");
     expect(label).toHaveAttribute("data-work-elapsed");
     expect(label).toHaveTextContent(/Working\s*·\s*3m/u);
+    expect(cue?.closest("button")).toHaveAccessibleDescription(
+      `Working since ${startedAt.toLocaleString(INTERFACE_LOCALE)}. Right-click or press Shift+F10 for thread actions.`,
+    );
   });
 
   it("plays the arrival cue only when a thread reaches a status the user has not seen", () => {

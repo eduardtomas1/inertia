@@ -73,6 +73,7 @@ import {
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
 import { WorkStatusCue } from "./sidebar/WorkStatusCue";
+import { INTERFACE_LOCALE } from "../lib/locale";
 const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
 }));
@@ -679,6 +680,7 @@ function SidebarView({
     const repositoryLabel = workRepositoryLabel(project);
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
+    const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
     const accessibleContext = [
       conversation.title,
       providerLabel,
@@ -728,7 +730,7 @@ function SidebarView({
             data-work-focus-id={`thread:${conversation.id}`}
             aria-current={isActive ? "page" : undefined}
             aria-label={accessibleContext}
-            aria-description="Right-click or press Shift+F10 for thread actions."
+            aria-description={`${workingSince ? `Working since ${new Date(workingSince).toLocaleString(INTERFACE_LOCALE)}. ` : ""}Right-click or press Shift+F10 for thread actions.`}
             aria-haspopup="menu"
             aria-expanded={conversationMenu === conversation.id}
             aria-controls={conversationMenu === conversation.id ? `conversation-actions-${conversation.id}` : undefined}
@@ -757,7 +759,7 @@ function SidebarView({
                   status={model.status}
                   label={statusLabels[model.status]}
                   updatedAt={conversation.updatedAt}
-                  workingSince={model.run?.status === "running" ? model.run.startedAt : null}
+                  workingSince={workingSince}
                 />
               </span>
             </span>

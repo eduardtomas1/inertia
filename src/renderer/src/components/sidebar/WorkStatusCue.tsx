@@ -31,12 +31,19 @@ const ELAPSED_REFRESH_MS = 15_000;
  * first render after launch.
  */
 const lastShownStatus = new Map<string, SidebarThreadStatus>();
+const MAX_REMEMBERED_STATUSES = 1_024;
 
 function useStatusArrival(conversationId: string, status: SidebarThreadStatus): boolean {
   const [arrivedStatus, setArrivedStatus] = useState<SidebarThreadStatus | null>(null);
   useLayoutEffect(() => {
     const previous = lastShownStatus.get(conversationId);
+    lastShownStatus.delete(conversationId);
     lastShownStatus.set(conversationId, status);
+    // An evicted row uses first-render semantics when revisited: no false pop.
+    if (lastShownStatus.size > MAX_REMEMBERED_STATUSES) {
+      const oldest = lastShownStatus.keys().next().value;
+      if (oldest !== undefined) lastShownStatus.delete(oldest);
+    }
     if (previous !== undefined && previous !== status) setArrivedStatus(status);
   }, [conversationId, status]);
   return arrivedStatus === status;

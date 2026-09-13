@@ -4,8 +4,10 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test, type Locator } from "@playwright/test";
+import Database from "better-sqlite3";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openLocalProjectFromDialog } from "./support/add-project";
+import { observeBranchSwitch } from "./support/git-branch-switch-observer";
 
 const execFileAsync = promisify(execFile);
 async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
@@ -17,11 +19,13 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 let app: AppFixture;
 let remote: string;
 let initialBranch: string;
+let trackingIdentity: { projectId: string; conversationId: string } | undefined;
 const pushScenario = "pushes existing commits while preserving unrelated edits";
 const trackingScenario = "tracks an exact remote branch with missing fetch mappings";
 const pullScenario = "fast-forwards incoming commits using checkout filters";
 test.beforeEach(async () => {
   const scenario = test.info().title;
+  trackingIdentity = undefined;
   app = await createAppFixture({
     name: "git-workflows", initialState: "conversation", windowDisplay: "primary",
     beforeLaunch: async ({ workspaceDirectory, testDirectory }) => {
@@ -47,6 +51,12 @@ test.beforeEach(async () => {
         await writeFile(join(workspaceDirectory, "notes.txt"), "unfinished local work\n");
       } else if (scenario === trackingScenario) {
         await git(workspaceDirectory, "config", "--unset-all", "remote.origin.fetch");
+        const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true, fileMustExist: true });
+        try {
+          trackingIdentity = database.prepare("SELECT id AS conversationId, project_id AS projectId FROM conversations WHERE title = ?")
+            .get("git-workflows fixture") as typeof trackingIdentity;
+          expect(trackingIdentity).toBeDefined();
+        } finally { database.close(); }
       } else if (scenario === pullScenario) {
         await git(workspaceDirectory, "switch", "--track", "-c", "feature/remote-review", "refs/remotes/origin/feature/remote-review");
         const peer = join(testDirectory, "peer");
@@ -300,6 +310,10 @@ test(pushScenario, async () => {
 });
 
 test(trackingScenario, async () => {
+  // This functional scenario explicitly allows backend settlement up to 60s
+  // after admission, then retains the ordinary 15s UI bound. Like commit, its
+  // full setup/action/assertion allowance is 120s, not the former 45s.
+  test.setTimeout(120_000);
   const { page, workspaceDirectory } = app;
   await fetchFromUi();
   const trigger = page.locator('[data-header-menu="branch"] > button');
@@ -307,7 +321,14 @@ test(trackingScenario, async () => {
   const branches = page.getByRole("menu", { name: "Branches" });
   await branches.getByRole("searchbox").fill("remote-review");
   await expect(branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
-  await branches.getByRole("searchbox").press("Enter");
+  if (!trackingIdentity) throw new Error("The seeded tracking conversation is unavailable.");
+  const switchObserver = await observeBranchSwitch(page, {
+    ...trackingIdentity, repositoryPath: ".", name: "origin/feature/remote-review", remote: true,
+  });
+  try {
+    await branches.getByRole("searchbox").press("Enter");
+    await switchObserver.waitForResult();
+  } finally { await switchObserver.dispose(); }
   await expect(branches).toBeHidden();
   await expect(trigger).toContainText("feature/remote-review");
   expect(await git(workspaceDirectory, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe("origin/feature/remote-review");

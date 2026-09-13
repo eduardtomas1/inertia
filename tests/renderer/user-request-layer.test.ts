@@ -86,6 +86,7 @@ function message(content: string, attachments: ChatAttachment[] = []): ChatMessa
 function renderRequest(
   content: string,
   options: {
+    privateConnectDeviceId?: string;
     attachment?: ChatAttachment;
     checkpoint?: CheckpointSummary;
     checkpointRestoreDisabled?: boolean;
@@ -97,7 +98,7 @@ function renderRequest(
   return renderToStaticMarkup(createElement(ResponseTimeline, {
     turns: [currentTurn],
     messages: [
-      message(content, options.attachment ? [options.attachment] : []),
+      { ...message(content, options.attachment ? [options.attachment] : []), privateConnectDeviceId: options.privateConnectDeviceId },
       ...(options.internalInstruction
         ? [{
             id: "system-1",
@@ -139,6 +140,13 @@ function renderRequest(
 }
 
 describe("Quiet Ledger user request layer", () => {
+  it("shows the durable remote device origin beside the user request", () => {
+    const deviceId = "11111111-1111-4111-8111-111111111111";
+    const html = renderRequest("Sent remotely", { privateConnectDeviceId: deviceId });
+    expect(html).toContain(`title="Private Connect device ${deviceId}"`);
+    expect(html).toContain("Private Connect · 11111111");
+    expect(renderRequest("Sent locally")).not.toContain("Private Connect");
+  });
   it("keeps request metadata and attachments beneath a content-width request", () => {
     const checkpoint: CheckpointSummary = {
       id: "checkpoint-1",

@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../../src/server/private-connect/runtime-gateway";
@@ -37,12 +37,13 @@ function fixture() {
   const other = store.createProject("Other project", directory);
   const granted = store.createConversation(project.id, "Granted conversation");
   const sibling = store.createConversation(project.id, "Sibling conversation");
+  const queuePrompt = vi.fn(() => ({ turnId: "private-connect-turn" }));
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
     detail: (conversationId) => store.conversationDetail(conversationId),
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
-    queuePrompt: () => ({ turnId: "private-connect-turn" }),
+    queuePrompt,
     privateConnectPromptSafety: () => privateConnectPromptSafetyForHarness("codex-app-server"),
     now: () => new Date("2030-01-01T00:00:00.000Z"),
   });
@@ -67,7 +68,7 @@ function fixture() {
     includeFutureConversations: false,
     legacyProjectWide: false,
   });
-  return { store, gateway, project, other, granted, sibling, subject, explicit };
+  return { store, gateway, project, other, granted, sibling, subject, explicit, queuePrompt };
 }
 
 async function visibleConversations(
@@ -123,6 +124,12 @@ afterEach(async () => {
   }
 });
 describe("Private Connect conversation-scoped authority", () => {
+  it("attributes committed prompts to their authenticated device", async () => {
+    const f = fixture();
+    const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);
+    expect((await sendPrompt(f.gateway, subject, f.granted.id)).ok).toBe(true);
+    expect(f.queuePrompt).toHaveBeenCalledExactlyOnceWith(f.granted.id, "hello", subject.deviceId);
+  });
   it("exposes only the granted conversation from its project", async () => {
     const f = fixture();
     const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);

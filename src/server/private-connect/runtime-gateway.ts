@@ -37,7 +37,7 @@ interface PrivateConnectGatewayDependencies {
   detail(conversationId: string): ConversationDetail | null;
   isConversationActive(conversationId: string): boolean;
   preparePrompt(conversation: Conversation): Promise<void>;
-  queuePrompt(conversationId: string, content: string): {
+  queuePrompt(conversationId: string, content: string, deviceId: string): {
     turnId: string;
   };
   respondToInput?(conversationId: string, inputRequestId: string, answers: Record<string, string[]>): boolean;
@@ -465,6 +465,7 @@ export class PrivateConnectRuntimeGateway {
       const queued = this.dependencies.queuePrompt(
         request.conversationId,
         request.content,
+        subject.deviceId,
       );
       const response: PrivateConnectRuntimeResponse = {
         type: "response",

@@ -347,6 +347,7 @@ export function resolveTurnRequest(
     content: assembled.visibleContent,
     attachments,
     activateConversation: request.activateConversation,
+    privateConnectDeviceId: request.privateConnectDeviceId,
     executionContext: assembled.persistence,
     ...(request.context?.conversationContextPacketIds?.length
       ? {

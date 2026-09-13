@@ -1,4 +1,5 @@
 import type { TurnController } from "../runtime/turns/turn-controller";
+import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 
 interface PrivateConnectPromptAuthority {
   acquire(conversationId: string): boolean;
@@ -23,7 +24,9 @@ export function queuePrivateConnectPrompt(
   dependencies: PrivateConnectPromptAdmissionDependencies,
   conversationId: string,
   content: string,
+  deviceId: string,
 ): { turnId: string } {
+  if (!isMessageOriginDeviceId(deviceId)) throw new Error("The remote prompt has no valid device origin.");
   let queued: ReturnType<TurnController["queue"]> | null = null;
   let reserved = false;
   try {
@@ -42,6 +45,7 @@ export function queuePrivateConnectPrompt(
     queued = dependencies.turns.queue({
       conversationId,
       content,
+      privateConnectDeviceId: deviceId,
       attachments: [],
       activateConversation: false,
       skills: [],

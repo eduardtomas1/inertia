@@ -1,0 +1,17 @@
+export const PRIVATE_CONNECT_LIMITS = Object.freeze({
+  bodyBytes: 128 * 1024,
+  websocketFrameBytes: 128 * 1024,
+  promptCharacters: 8_000,
+  deviceLabelCharacters: 80,
+  projectIds: 64,
+  sessions: 8,
+  requestsPerMinute: 120,
+  inFlightRequestsPerSession: 8,
+  pairingAttemptsPerMinute: 10,
+  pairingTtlMs: 5 * 60 * 1_000,
+  pairingCollectionMs: 60 * 1_000,
+  websocketTicketTtlMs: 45_000,
+  websocketTickets: 64,
+  deliveryReceipts: 512,
+  auditEvents: 1_000,
+});

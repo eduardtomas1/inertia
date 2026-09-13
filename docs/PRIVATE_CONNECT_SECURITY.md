@@ -65,6 +65,22 @@ closed; the next startup disables it, revokes authority fail closed, and
 removes only the still-proven owned Serve mapping before any browser access can
 resume.
 
+## Local audit history
+
+The encrypted Private Connect store records the device identifier for accepted
+prompts, answers and stop requests without recording their content. Answer and
+stop requests first persist an intent record; if that write fails, the runtime
+receives no action. An acknowledgement that cannot be saved after an action is
+reported as uncertain, so the browser asks the user to check the desktop.
+A stop acknowledgement records acceptance of the request, not proof that a
+provider process has exited.
+
+The audit remains bounded to 1,000 events. Connection diagnostics use at most
+100 entries and cannot evict security events; the settings view reserves at most
+10 of its 50 visible entries for those diagnostics. Connection diagnostics are
+best effort and are persisted with meaningful state changes. Remote turn origin
+is not yet attached to the desktop transcript.
+
 ## Runtime authority
 
 The runtime receives only validated state reads, conversation reads, supervised

@@ -33,6 +33,21 @@ function value(): PersistedPrivateConnect {
 }
 
 describe("Private Connect encrypted store", () => {
+  it("round-trips device-attributed mutation audit events through the encrypted store", async () => {
+    let encoded: string | null = null;
+    const store = new PrivateConnectStore("/tmp/private-connect-test.vault", encryption(), {
+      read: async () => encoded,
+      write: async (next) => { encoded = next; },
+    });
+    const state = value();
+    state.audit = (["prompt.accepted", "input.accepted", "run.stop-accepted", "request.started", "request.uncertain"] as const).map((type, index) => ({
+      id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+      type, deviceId: "22222222-2222-4222-8222-222222222222", detail: "Content-free audit event.",
+      createdAt: "2030-01-01T00:00:00.000Z",
+    }));
+    await store.save(state);
+    expect((await store.load())?.audit).toEqual(state.audit);
+  });
   it("round-trips only schema-valid encrypted state", async () => {
     let encoded: string | null = null;
     const persistence = {

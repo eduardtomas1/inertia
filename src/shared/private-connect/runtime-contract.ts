@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PRIVATE_CONNECT_LIMITS } from "./limits";
 
 import {
   privateConnectQuestionAnswersSchema,
@@ -12,13 +13,13 @@ import {
 
 export const PRIVATE_CONNECT_RUNTIME_LIMITS = Object.freeze({
   plaintextBytes: 96 * 1024,
-  promptCharacters: 8_000,
+  promptCharacters: PRIVATE_CONNECT_LIMITS.promptCharacters,
   transcriptMessages: 200,
   activities: 200,
   subagents: 64,
-  sessions: 8,
-  inFlightRequestsPerSession: 8,
-  deliveryReceipts: 512,
+  sessions: PRIVATE_CONNECT_LIMITS.sessions,
+  inFlightRequestsPerSession: PRIVATE_CONNECT_LIMITS.inFlightRequestsPerSession,
+  deliveryReceipts: PRIVATE_CONNECT_LIMITS.deliveryReceipts,
 });
 
 const uuid = z.string().uuid();

@@ -1,37 +1,16 @@
 import {
   isPrivateConnectUuid,
   privateConnectResponseSchema,
+  type PrivateConnectInvitation,
   type PrivateConnectRequest,
   type PrivateConnectResponse,
 } from "../../../shared/private-connect/protocol";
+import { parsePrivateConnectPairingFragment } from "../../../shared/private-connect/pairing-link";
 
-export interface PairingInvitation {
-  protocolVersion: 1;
-  hostId: string;
-  invitationId: string;
-  pairingSecret: string;
-  createdAt: string;
-  expiresAt: string;
-}
+export type PairingInvitation = PrivateConnectInvitation;
 
 export function parsePairingFragment(fragment: string | null): PairingInvitation | null {
-  if (!fragment?.startsWith("#pair=")) return null;
-  const encoded = fragment.slice(6);
-  if (!encoded || encoded.length > 8_192 || !/^[A-Za-z0-9_-]+$/u.test(encoded)) return null;
-  try {
-    const json = atob(encoded.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(encoded.length / 4) * 4, "="));
-    const value = JSON.parse(json) as unknown;
-    if (!plainObject(value)
-      || value.protocolVersion !== 1
-      || typeof value.hostId !== "string"
-      || typeof value.invitationId !== "string"
-      || typeof value.pairingSecret !== "string"
-      || typeof value.createdAt !== "string"
-      || typeof value.expiresAt !== "string") return null;
-    return value as unknown as PairingInvitation;
-  } catch {
-    return null;
-  }
+  return fragment === null ? null : parsePrivateConnectPairingFragment(fragment);
 }
 
 export function browserDeviceId(): string {
@@ -167,8 +146,4 @@ export async function connectPrivateConnectSocket(csrf: string): Promise<Private
       socket.close(1000, "Private Connect client closed");
     },
   };
-}
-
-function plainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

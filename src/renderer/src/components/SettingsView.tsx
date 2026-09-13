@@ -2,10 +2,11 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArchiveRestore,
   Activity,
+  ArchiveRestore,
   Bot,
   ChevronDown,
+  Compass,
   Database,
   Download,
   FileCode2,
@@ -68,6 +69,7 @@ import {
   loadMascotSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
+import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { ThemeLibrary } from "./ThemeLibrary";
 import "./SettingsView.css";
@@ -1110,6 +1112,12 @@ export function SettingsView({
           </section>
         )}
 
+        {section === "support" && (
+          <section className="settings-card" aria-labelledby="welcome-guide-heading">
+            <div className="settings-card-heading"><div><Compass size={18} /></div><span><h3 id="welcome-guide-heading">Welcome guide</h3><p>Replay the quick tour of split view, the Work tab, Duo, review and limits.</p></span></div>
+            <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
+          </section>
+        )}
         {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (

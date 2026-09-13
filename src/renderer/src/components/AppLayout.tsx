@@ -36,6 +36,7 @@ import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
+import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   WorkspaceScene,
@@ -799,6 +800,19 @@ export function AppLayout({
           );
           if (!result.copied) throw new Error("The recovery report could not be copied.");
         }}
+      />
+      <WelcomeGuideHost
+        snapshot={connection.snapshot}
+        blocked={Boolean(providerAuth.provider)}
+        existingProfile={Boolean(connection.databaseRecoveryNotice)}
+        shortcuts={[
+          { keys: formatAppShortcutLabel(platform, settings.keybindings.search), label: "Search" },
+          { keys: formatAppShortcutLabel(platform, settings.keybindings["new-chat"]), label: "New chat" },
+          { keys: formatAppShortcutLabel(platform, settings.keybindings["toggle-sidebar"]), label: "Sidebar" },
+          { keys: formatAppShortcutLabel(platform, settings.keybindings["toggle-terminal"]), label: "Terminal" },
+        ]}
+        onOpenProviderSetup={actions.openProviderSetup}
+        onAddProject={() => void actions.importProject()}
       />
     </div>
   );

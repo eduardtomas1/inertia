@@ -24,6 +24,7 @@ export const loadSettingsView = createSurfaceLoader(async () => ({
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
+export const loadWelcomeGuide = createSurfaceLoader(() => import("./welcome-guide/WelcomeGuide"));
 
 const frequentSurfaceLoads = [
   loadCommandPalette,

@@ -1,0 +1,223 @@
+{
+  "baselineRevision": "1d5daeaa4ec2e603e314ae0cd98b0abad9b76f06",
+  "reviewParents": [
+    "960ed6d51b8acff3da297cb628e4f2aa72a55d6d",
+    "1d5daeaa4ec2e603e314ae0cd98b0abad9b76f06"
+  ],
+  "environment": {
+    "platform": "macOS ARM64",
+    "node": "22.23.2",
+    "dependencyGraph": "unchanged package-lock.json; identical installed dependencies"
+  },
+  "method": "Production renderer build on clean published main and the review branch merged with that main. Original plugins/defaults retained; read-only Rollup module metadata and original bundle-check structural assertions used. Output directories emptied before each build.",
+  "measurementsBytes": {
+    "baseline": {
+      "deferredLegacyPromptStashJavaScript": 1219,
+      "deferredUsageLimitsJavaScript": 17589,
+      "deferredWelcomeGuideJavaScript": 13135,
+      "deferredProjectSettingsJavaScript": 12792,
+      "deferredThreadActionsJavaScript": 8114,
+      "deferredDiagnosticsJavaScript": 12308,
+      "deferredDiagnosticCatalogJavaScript": 9884,
+      "deferredIssueReportJavaScript": 12495,
+      "mascotFirstLoadJavaScript": 5980,
+      "mascotJavaScript": 5980,
+      "mascotSettingsJavaScript": 1994,
+      "entryJavaScript": 192712,
+      "mainWorkbenchFirstLoadJavaScript": 771916,
+      "detachedChatFirstLoadJavaScript": 582399,
+      "entryCss": 348553,
+      "colorThemesCss": 11686,
+      "detachedChatCss": 2677,
+      "settingsJavaScript": 47763,
+      "filesFirstLoadJavaScript": 104876,
+      "deferredMarkdownJavaScript": 429622,
+      "transcriptJavaScript": 534062,
+      "deferredFailureDiagnosticsJavaScript": 6503,
+      "deferredAttachmentPreviewJavaScript": 12266,
+      "deferredPreviewJavaScript": 8062,
+      "deferredBrowserEvidenceJavaScript": 3743,
+      "deferredSpreadsheetJavaScript": 487396,
+      "deferredDiscordSettingsJavaScript": 5395,
+      "deferredCanaryRollbackJavaScript": 2210,
+      "deferredLifecycleIntegritySettingsJavaScript": 4291,
+      "deferredSidebarUpdateControlJavaScript": 10777,
+      "deferredProviderAuthJavaScript": 11915,
+      "deferredProviderMaintenanceJavaScript": 3983,
+      "deferredComposerQueueJavaScript": 6936,
+      "deferredTerminalJavaScript": 25479,
+      "deferredGitMenusJavaScript": 8980,
+      "detachedChatJavaScript": 12506,
+      "preMergeConfidenceJavaScript": 22341,
+      "morphiconsJavaScript": 15829,
+      "morphingIconFeedbackJavaScript": 4221,
+      "coreJavaScript": 2070618,
+      "deferredPdfJavaScript": 437530,
+      "deferredPdfWorker": 1265413
+    },
+    "review": {
+      "deferredLegacyPromptStashJavaScript": 1219,
+      "deferredUsageLimitsJavaScript": 17591,
+      "deferredWelcomeGuideJavaScript": 13135,
+      "deferredProjectSettingsJavaScript": 12792,
+      "deferredReviewNoteJavaScript": 1439,
+      "deferredThreadActionsJavaScript": 8114,
+      "deferredDiagnosticsJavaScript": 12310,
+      "deferredDiagnosticCatalogJavaScript": 9884,
+      "deferredIssueReportJavaScript": 12500,
+      "mascotFirstLoadJavaScript": 5980,
+      "mascotJavaScript": 5980,
+      "mascotSettingsJavaScript": 1994,
+      "entryJavaScript": 193174,
+      "mainWorkbenchFirstLoadJavaScript": 773588,
+      "detachedChatFirstLoadJavaScript": 583594,
+      "entryCss": 348591,
+      "colorThemesCss": 11686,
+      "detachedChatCss": 2677,
+      "settingsJavaScript": 47778,
+      "filesFirstLoadJavaScript": 104950,
+      "deferredMarkdownJavaScript": 429674,
+      "transcriptJavaScript": 534651,
+      "deferredFailureDiagnosticsJavaScript": 6503,
+      "deferredAttachmentPreviewJavaScript": 12332,
+      "deferredPreviewJavaScript": 8062,
+      "deferredBrowserEvidenceJavaScript": 3751,
+      "deferredSpreadsheetJavaScript": 487396,
+      "deferredDiscordSettingsJavaScript": 5395,
+      "deferredCanaryRollbackJavaScript": 2210,
+      "deferredLifecycleIntegritySettingsJavaScript": 4291,
+      "deferredSidebarUpdateControlJavaScript": 10777,
+      "deferredProviderAuthJavaScript": 11915,
+      "deferredProviderMaintenanceJavaScript": 3983,
+      "deferredComposerQueueJavaScript": 6936,
+      "deferredTerminalJavaScript": 25941,
+      "deferredGitMenusJavaScript": 8980,
+      "detachedChatJavaScript": 12558,
+      "preMergeConfidenceJavaScript": 22349,
+      "morphiconsJavaScript": 15829,
+      "morphingIconFeedbackJavaScript": 4221,
+      "coreJavaScript": 2073554,
+      "deferredPdfJavaScript": 437530,
+      "deferredPdfWorker": 1265413
+    }
+  },
+  "duplicateRenderedModules": {
+    "baseline": [],
+    "review": []
+  },
+  "firstLoadNewModules": {
+    "src/renderer/src/App.tsx": [
+      "src/renderer/src/components/WindowErrorBoundary.tsx",
+      "src/renderer/src/utils/layoutStorage.ts"
+    ],
+    "src/renderer/src/DetachedChatApp.tsx": [
+      "src/renderer/src/components/WindowErrorBoundary.tsx"
+    ]
+  },
+  "largestSourceModuleDeltasBeforeMinification": [
+    {
+      "path": "src/renderer/src/components/ReviewNoteDialog.tsx",
+      "deltaBytes": 2787
+    },
+    {
+      "path": "src/renderer/src/components/TerminalPanel.tsx",
+      "deltaBytes": 1165
+    },
+    {
+      "path": "src/renderer/src/hooks/workspace-tools/useWorkspaceMentions.ts",
+      "deltaBytes": 729
+    },
+    {
+      "path": "src/renderer/src/components/WindowErrorBoundary.tsx",
+      "deltaBytes": 714
+    },
+    {
+      "path": "src/shared/contracts/run-state-schema.ts",
+      "deltaBytes": 589
+    },
+    {
+      "path": "src/renderer/src/components/ChangesPanel.tsx",
+      "deltaBytes": 517
+    },
+    {
+      "path": "src/renderer/src/hooks/useMultiSpawn.ts",
+      "deltaBytes": 475
+    },
+    {
+      "path": "src/renderer/src/components/response-timeline/compatibility.tsx",
+      "deltaBytes": 455
+    },
+    {
+      "path": "src/renderer/src/utils/globalShortcuts.ts",
+      "deltaBytes": 443
+    },
+    {
+      "path": "src/shared/contracts/server-event-schema.ts",
+      "deltaBytes": -404
+    },
+    {
+      "path": "src/renderer/src/utils/layoutStorage.ts",
+      "deltaBytes": 347
+    },
+    {
+      "path": "src/renderer/src/components/response-timeline/MessageOrigin.tsx",
+      "deltaBytes": 336
+    },
+    {
+      "path": "src/shared/contracts/chat-message-schema.ts",
+      "deltaBytes": 300
+    },
+    {
+      "path": "src/renderer/src/components/ModelChooser.tsx",
+      "deltaBytes": 262
+    },
+    {
+      "path": "src/renderer/src/components/ModelChooserRow.tsx",
+      "deltaBytes": 258
+    },
+    {
+      "path": "src/renderer/src/components/response-timeline/viewport.tsx",
+      "deltaBytes": 187
+    },
+    {
+      "path": "src/renderer/src/components/DocumentAttachmentPreview.tsx",
+      "deltaBytes": 154
+    },
+    {
+      "path": "src/renderer/src/components/composer/Composer.tsx",
+      "deltaBytes": 136
+    },
+    {
+      "path": "src/renderer/src/utils/surfaceLoader.ts",
+      "deltaBytes": 121
+    },
+    {
+      "path": "src/shared/source-language.ts",
+      "deltaBytes": 111
+    },
+    {
+      "path": "src/renderer/src/components/response-timeline/layers.tsx",
+      "deltaBytes": 95
+    },
+    {
+      "path": "src/renderer/src/hooks/useGlobalShortcuts.ts",
+      "deltaBytes": 91
+    },
+    {
+      "path": "src/renderer/src/App.tsx",
+      "deltaBytes": -85
+    },
+    {
+      "path": "src/renderer/src/utils/planFromText.ts",
+      "deltaBytes": 84
+    },
+    {
+      "path": "src/renderer/src/main.tsx",
+      "deltaBytes": 74
+    }
+  ],
+  "limitations": [
+    "Module rendered-length deltas precede final minification and are not additive final-chunk attribution.",
+    "No runtime latency or browser heap claim is inferred from bundle size."
+  ]
+}

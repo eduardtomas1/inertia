@@ -25,12 +25,12 @@ const budgets = {
   // larger settings UI/catalog stay deferred and have separate ceilings below.
   // Project preference validation, independent appearance and chat-owned stash
   // state add ~2 KiB here; the project editor and thread menus stay deferred.
-  // Against published main 83b24956, the review adds 1,672 bytes
+  // Against published welcome-guide main 1d5daeaa, the review adds 1,672 bytes
   // here and 1,195 bytes to detached first load. Required error/optional-storage
   // guards are the only added eager modules; optional editor UI stays deferred.
-  // Measured 753.7 / 569.9 KiB; retain <0.3 KiB headroom per initial route.
-  // See docs/pr-evidence/issue-356-358-renderer-bundle-reasoning.json.
-  mainWorkbenchFirstLoadJavaScript: 754 * kibibyte,
+  // Measured 755.5 / 569.9 KiB; retain <0.3 KiB headroom per initial route.
+  // See docs/pr-evidence/issue-356-358-renderer-bundle-welcome.json.
+  mainWorkbenchFirstLoadJavaScript: 755.7 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -46,6 +46,7 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 17.5 * kibibyte,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -94,10 +95,10 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  // Review corrections add 2,926 bytes over published reasoning-strip main.
-  // Core measures 2,022.7 KiB with no duplicated rendered modules; retain
-  // <0.35 KiB headroom. Deferred editor and terminal caps remain separate.
-  coreJavaScript: 2_023 * kibibyte,
+  // Review corrections add 2,936 bytes over published welcome-guide main.
+  // Core measures 2,025.0 KiB with no duplicated rendered modules; retain
+  // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
+  coreJavaScript: 2_025.25 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -535,10 +536,17 @@ if (mainWorkbenchJavaScriptClosure.has(usageLimitsEntry) || detachedChatJavaScri
   throw new Error("Provider Limits must remain deferred from the initial workbench");
 }
 const deferredUsageLimitsJavaScriptBytes = await closureBytes(await javaScriptClosure(usageLimitsEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
+const welcomeGuideEntry = assetNames.find((name) => /^WelcomeGuide-.*\.js$/u.test(name));
+if (!welcomeGuideEntry) throw new Error("Missing deferred welcome guide");
+if (mainWorkbenchJavaScriptClosure.has(welcomeGuideEntry) || detachedChatJavaScriptClosure.has(welcomeGuideEntry)) {
+  throw new Error("The welcome guide must remain deferred from the initial workbench");
+}
+const deferredWelcomeGuideJavaScriptBytes = await closureBytes(await javaScriptClosure(welcomeGuideEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
   - deferredUsageLimitsJavaScriptBytes
+  - deferredWelcomeGuideJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -571,6 +579,7 @@ const coreJavaScriptBytes =
 const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
+  deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

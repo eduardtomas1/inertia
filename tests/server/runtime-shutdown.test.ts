@@ -200,7 +200,7 @@ describe("runtime shutdown phases", () => {
     ]);
   });
 
-  it("fails closed when command cleanup outlives the shutdown deadline", async () => {
+  it("attempts owned cancellation and retains storage when command cleanup outlives the deadline", async () => {
     vi.useFakeTimers();
     try {
       const calls: string[] = [];
@@ -220,7 +220,7 @@ describe("runtime shutdown phases", () => {
       });
       await vi.advanceTimersByTimeAsync(100);
       await rejected;
-      expect(calls).toEqual([]);
+      expect(calls).toEqual(["terminals", "isolated", "turns"]);
     } finally {
       vi.useRealTimers();
     }

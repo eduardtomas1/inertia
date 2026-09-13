@@ -18,7 +18,7 @@ import type {
 } from "@shared/contracts";
 
 import type { useAppUpdate } from "../app-update";
-import type { WorkspaceSceneProps } from "../components/WorkspaceScene";
+import type { SplitPaneDetails } from "../components/WorkspaceScene";
 import {
   createWorkspaceSceneModel,
   type WorkspaceSceneActions,
@@ -37,6 +37,7 @@ import {
 import { planFromText } from "../utils/planFromText";
 import { requestComposerPrefill } from "../utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
+import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
   useActivityActions,
@@ -66,12 +67,9 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
-const focusSecondaryPreview = (): void => {
-  focusWorkspacePreviewAddress("secondary");
-};
 
 export interface SplitWorkspaceSceneController {
-  scene: WorkspaceSceneProps["splitScene"];
+  pane: SplitPaneDetails | null;
   openWorkspaceRunPreview: (run: PreviewWorkspaceRun) => void;
 }
 
@@ -112,8 +110,7 @@ interface SplitWorkspaceActions
 }
 
 interface UseSplitWorkspaceSceneOptions {
-  conversation: Conversation | null;
-  project: Project | null;
+  owner: Exclude<SplitPaneOwner, "primary">;
   splitConversation: Conversation | null;
   visible: boolean;
   layout: ConversationPaneLayout;
@@ -130,23 +127,17 @@ interface UseSplitWorkspaceSceneOptions {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   actions: SplitWorkspaceActions;
   sendingConversationIds: ReadonlySet<string>;
-  secondaryPaneFirst: boolean;
-  primaryToolsOpen: boolean;
-  onTogglePrimaryTools: () => void;
-  onSwapPanes: () => void;
-  onCloseSecondary: () => void;
-  onSecondaryConversationCreated: (conversationId: string) => void;
+  onConversationCreated: (conversationId: string) => void;
   onTerminal: () => void;
 }
 
 /**
- * Owns every stateful controller behind the secondary pane. Nothing in this
+ * Owns every stateful controller behind one split pane. Nothing in this
  * hook resolves paths or tools through the primary project, which makes the
  * cross-project split boundary explicit and reviewable.
  */
 export function useSplitWorkspaceScene({
-  conversation,
-  project,
+  owner,
   splitConversation,
   visible,
   layout,
@@ -163,14 +154,10 @@ export function useSplitWorkspaceScene({
   request,
   actions,
   sendingConversationIds,
-  secondaryPaneFirst,
-  primaryToolsOpen,
-  onTogglePrimaryTools,
-  onSwapPanes,
-  onCloseSecondary,
-  onSecondaryConversationCreated,
+  onConversationCreated,
   onTerminal,
 }: UseSplitWorkspaceSceneOptions): SplitWorkspaceSceneController {
+  const busyPrefix = `split:${owner}:`;
   const splitProject = useMemo(
     () => splitConversation
       ? snapshotProjects.find(
@@ -205,7 +192,7 @@ export function useSplitWorkspaceScene({
     key: string,
     command: CommandWithoutId,
   ): Promise<ServerEvent> => {
-    const busyKey = `split:${key}`;
+    const busyKey = `${busyPrefix}${key}`;
     setBusyAction(busyKey);
     setActionError(null);
     try {
@@ -225,6 +212,7 @@ export function useSplitWorkspaceScene({
       setBusyAction((current) => current === busyKey ? null : current);
     }
   }, [
+    busyPrefix,
     connection,
     projection,
     setActionError,
@@ -254,7 +242,7 @@ export function useSplitWorkspaceScene({
   }));
   const desktopTools = useStableController(useDesktopTools({
     setActionError,
-    previewOwnerId: "secondary",
+    previewOwnerId: owner,
     previewContextId: visible ? splitConversation?.id ?? null : null,
   }));
   const activatePreviewContext = useCallback((run: PreviewWorkspaceRun) => {
@@ -269,6 +257,9 @@ export function useSplitWorkspaceScene({
     layout.setActiveTool("preview");
     return true;
   }, [layout, splitConversation, splitProject]);
+  const focusPreview = useCallback(() => {
+    focusWorkspacePreviewAddress(owner);
+  }, [owner]);
   const activityActions = useStableController(useActivityActions({
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
@@ -277,7 +268,7 @@ export function useSplitWorkspaceScene({
     setActionError,
     activateContext: activatePreviewContext,
     navigatePreview: desktopTools.navigatePreview,
-    focusPreview: focusSecondaryPreview,
+    focusPreview,
   }));
   const planSteps = useMemo(() => {
     if (!splitConversation) return [];
@@ -338,7 +329,7 @@ export function useSplitWorkspaceScene({
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }
-      onSecondaryConversationCreated(event.result.conversationId);
+      onConversationCreated(event.result.conversationId);
       if (options?.prefillText) {
         const conversationId = event.result.conversationId;
         window.requestAnimationFrame(() => requestComposerPrefill({
@@ -408,8 +399,8 @@ export function useSplitWorkspaceScene({
     view: "workspace",
     settingsTarget: null,
     settings,
-    busyAction: busyAction?.startsWith("split:")
-      ? busyAction.slice("split:".length)
+    busyAction: busyAction?.startsWith(busyPrefix)
+      ? busyAction.slice(busyPrefix.length)
       : null,
     project: splitProject,
     draftConversation: null,
@@ -451,6 +442,7 @@ export function useSplitWorkspaceScene({
     appUpdate,
     backendProfileActions,
     busyAction,
+    busyPrefix,
     connection,
     desktopTools,
     layout,
@@ -466,10 +458,16 @@ export function useSplitWorkspaceScene({
     workflow,
   ]);
 
-  const scene = useMemo(() => {
+  const pane = useMemo((): SplitPaneDetails | null => {
     if (!splitConversation || !splitProject) return null;
     return {
-      secondary: {
+      owner,
+      conversationId: splitConversation.id,
+      title: splitConversation.title,
+      projectName: splitProject.name,
+      toolsOpen: layout.activeTool !== null,
+      onToggleTools: layout.toggleWorkspaceTools,
+      scene: {
         detailState: model.detailState,
         chat: {
           ...model.chat,
@@ -478,35 +476,18 @@ export function useSplitWorkspaceScene({
         resizeHandle: model.resizeHandle,
         tools: model.tools,
       },
-      primaryTitle: conversation?.title ?? "Primary chat",
-      secondaryTitle: splitConversation.title,
-      primaryProjectName: project?.name ?? "Project",
-      secondaryProjectName: splitProject.name,
-      primaryToolsOpen,
-      secondaryToolsOpen: layout.activeTool !== null,
-      secondaryFirst: secondaryPaneFirst,
-      onTogglePrimaryTools,
-      onToggleSecondaryTools: layout.toggleWorkspaceTools,
-      onSwapPanes,
-      onCloseSecondary,
     };
   }, [
-    conversation?.title,
     layout.activeTool,
     layout.toggleWorkspaceTools,
     model,
-    onCloseSecondary,
-    onSwapPanes,
-    onTogglePrimaryTools,
-    primaryToolsOpen,
-    project?.name,
-    secondaryPaneFirst,
+    owner,
     sendingConversationIds,
     splitConversation,
     splitProject,
   ]);
   return useMemo(() => ({
-    scene,
+    pane,
     openWorkspaceRunPreview: activityActions.openWorkspaceRunPreview,
-  }), [activityActions.openWorkspaceRunPreview, scene]);
+  }), [activityActions.openWorkspaceRunPreview, pane]);
 }

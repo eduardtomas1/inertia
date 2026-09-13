@@ -25,10 +25,11 @@ export interface SidebarProps {
   onSelectConversation: (conversation: Conversation) => void;
   detachedConversationIds?: ReadonlySet<string>;
   detachedChatLimitReached?: boolean;
-  splitConversationId: string | null;
+  splitConversationIds: ReadonlySet<string>;
+  splitViewFull?: boolean;
   onOpenConversationInSplit: (conversation: Conversation) => void;
   onOpenConversationInWindow?: (conversation: Conversation) => void;
-  onCloseConversationSplit: () => void;
+  onCloseConversationSplit: (conversation: Conversation) => void;
   onCreateConversation: (project: Project) => void;
   onOpenMultiSpawn: () => void;
   onOpenDailyWork: () => void;

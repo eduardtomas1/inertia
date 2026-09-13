@@ -4,12 +4,14 @@ import type { MessageSearchHit } from "@shared/message-search";
 import type { DetachedChatWindowsController } from "./useDetachedChatWindows";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { splitConversationAfterPrimaryChange } from "../utils/splitConversation";
+import type { SplitPaneOwner } from "../utils/splitLayout";
 
 export function useConversationNavigation({
   snapshot, conversation, splitConversation, detachedChats, exitGlobalChat,
   conversationSelectionGenerationRef, splitSelectionTransitionsRef,
   setSuppressedMainConversationIds, setSecondaryPaneFirst,
   selectConversationCommand, updateSplitConversationId, request, setActionError,
+  extraSplitPanes = [],
 }: {
   snapshot: AppSnapshot | null;
   conversation: Conversation | null;
@@ -19,15 +21,16 @@ export function useConversationNavigation({
   conversationSelectionGenerationRef: RefObject<number>;
   splitSelectionTransitionsRef: RefObject<number>;
   setSuppressedMainConversationIds: Dispatch<SetStateAction<Set<string>>>;
-  setSecondaryPaneFirst: Dispatch<SetStateAction<boolean>>;
+  setSecondaryPaneFirst: (secondaryFirst: boolean) => void;
   selectConversationCommand: (key: string, conversationId: string, isCurrent?: () => boolean) => Promise<ServerEvent>;
-  updateSplitConversationId: (id: string | null) => void;
+  updateSplitConversationId: (id: string | null, keepPaneOrder?: boolean) => void;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   setActionError: Dispatch<SetStateAction<string | null>>;
+  extraSplitPanes?: readonly { owner: SplitPaneOwner; conversation: Conversation }[];
 }) {
   const selectConversationInMain = useCallback((
     nextConversation: Conversation,
-    { focusComposer = true, preserveDraft = false } = {},
+    { focusComposer = true, preserveDraft = false, keepPaneOrder = false } = {},
   ): Promise<number | false> => {
     if (!preserveDraft) exitGlobalChat();
     const selectionGeneration = ++conversationSelectionGenerationRef.current;
@@ -56,12 +59,23 @@ export function useConversationNavigation({
       }, 0);
       return Promise.resolve(commitSelection());
     }
+    const extraPane = extraSplitPanes.find(
+      (pane) => pane.conversation.id === nextConversation.id,
+    );
+    if (extraPane) {
+      if (focusComposer) window.setTimeout(() => {
+        document.querySelector<HTMLElement>(
+          `#${extraPane.owner}-conversation-pane textarea`,
+        )?.focus({ preventScroll: true });
+      }, 0);
+      return Promise.resolve(commitSelection());
+    }
     const nextSplitConversationId = splitConversationAfterPrimaryChange(
       conversation,
       nextConversation,
       splitConversation,
     );
-    if (!preserveDraft) setSecondaryPaneFirst(false);
+    if (!preserveDraft && !keepPaneOrder) setSecondaryPaneFirst(false);
     splitSelectionTransitionsRef.current += 1;
     return selectConversationCommand(
       "conversation.select",
@@ -72,8 +86,8 @@ export function useConversationNavigation({
         selectionGeneration === conversationSelectionGenerationRef.current
       ) {
         const committedGeneration = commitSelection();
-        if (preserveDraft) setSecondaryPaneFirst(false);
-        updateSplitConversationId(nextSplitConversationId);
+        if (preserveDraft && !keepPaneOrder) setSecondaryPaneFirst(false);
+        updateSplitConversationId(nextSplitConversationId, keepPaneOrder);
         return committedGeneration;
       }
       return false;
@@ -90,14 +104,18 @@ export function useConversationNavigation({
     setSuppressedMainConversationIds,
     setSecondaryPaneFirst,
     exitGlobalChat,
+    extraSplitPanes,
     selectConversationCommand,
     splitConversation,
     updateSplitConversationId,
   ]);
-  const selectConversation = useCallback((nextConversation: Conversation) => {
+  const selectConversation = useCallback((
+    nextConversation: Conversation,
+    { keepPaneOrder = false } = {},
+  ) => {
     const generation = ++conversationSelectionGenerationRef.current;
     if (!detachedChats.conversationIds.has(nextConversation.id)) {
-      void selectConversationInMain(nextConversation);
+      void selectConversationInMain(nextConversation, { keepPaneOrder });
       return;
     }
     void detachedChats.focus(nextConversation.id).then((focused) => {

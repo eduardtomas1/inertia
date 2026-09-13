@@ -25,6 +25,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { SplitDropZone } from "../utils/splitConversation";
+import type { SplitDropPlan, SplitPaneOwner } from "../utils/splitLayout";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { MessageSearchHit } from "@shared/message-search";
@@ -32,6 +34,7 @@ import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
@@ -87,7 +90,13 @@ interface AppLayoutActions {
   selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
-  closeConversationSplit: () => void;
+  closeConversationSplit: (conversation: Conversation) => void;
+  planConversationDrop?: (
+    conversationId: string,
+    target: SplitPaneOwner,
+    zones: readonly SplitDropZone[],
+  ) => SplitDropPlan | null;
+  dropConversationInSplit?: (conversationId: string, plan: SplitDropPlan) => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openConnectionsSettings: () => void;
@@ -149,7 +158,8 @@ interface AppLayoutProps {
   project: Project | null;
   conversation: Conversation | null;
   headerConversation: Conversation | null;
-  splitConversationId: string | null;
+  splitConversationIds: ReadonlySet<string>;
+  splitViewFull: boolean;
   detachedConversationIds: ReadonlySet<string>;
   detachedChatLimitReached: boolean;
   conversationSuppressedInMain: boolean;
@@ -242,7 +252,8 @@ export function AppLayout({
   project,
   conversation,
   headerConversation,
-  splitConversationId,
+  splitConversationIds,
+  splitViewFull,
   detachedConversationIds,
   detachedChatLimitReached,
   conversationSuppressedInMain,
@@ -466,7 +477,7 @@ export function AppLayout({
           snapshot={connection.snapshot}
           documentActive={documentActive}
           activeConversationVisible={activeConversationVisible}
-          secondaryConversationId={splitConversationId}
+          splitConversationIds={splitConversationIds}
           enabled={settings.desktopNotifications}
           onActivate={notificationActions.activate}
         />
@@ -496,7 +507,8 @@ export function AppLayout({
             onOpenHome={sidebarActions.openHome}
             onImportProject={sidebarActions.importProject}
             onSelectConversation={sidebarActions.selectConversation}
-            splitConversationId={splitConversationId}
+            splitConversationIds={splitConversationIds}
+            splitViewFull={splitViewFull}
             detachedConversationIds={detachedConversationIds}
             detachedChatLimitReached={detachedChatLimitReached}
             onOpenConversationInSplit={sidebarActions.openConversationInSplit}
@@ -635,10 +647,10 @@ export function AppLayout({
             id="workspace-content"
             data-view={view}
             className={`workspace-body${
-              view === "workspace" && !splitConversationId && toolsVisible
+              view === "workspace" && splitConversationIds.size === 0 && toolsVisible
                 ? " has-tools"
                 : ""
-            }${view === "workspace" && !splitConversationId && stackedTools
+            }${view === "workspace" && splitConversationIds.size === 0 && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}
@@ -655,6 +667,16 @@ export function AppLayout({
               <WorkspaceScene {...scene} />
             )}
           </div>
+          {view === "workspace" && (
+            <SplitDropLayer
+              surfaceRef={workspaceBodyRef}
+              planDrop={conversation && actions.dropConversationInSplit
+                ? actions.planConversationDrop ?? null
+                : null}
+              onDrop={(conversationId, plan) =>
+                actions.dropConversationInSplit?.(conversationId, plan)}
+            />
+          )}
         </div>
       </section>
 

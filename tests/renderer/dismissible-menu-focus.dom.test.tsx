@@ -60,11 +60,20 @@ function Harness(): React.JSX.Element {
           >
             Keep new focus
           </button>
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked="false"
+            onClick={() => dismissMenu("selection")}
+          >
+            Build
+          </button>
         </div>
       )}
       <button type="button" onClick={() => setDisabled(false)}>
         Other control
       </button>
+      <div tabIndex={-1} data-testid="workspace">Workspace</div>
     </>
   );
 }
@@ -99,6 +108,33 @@ describe("useDismissibleMenu focus restoration", () => {
 
     await waitFor(() => expect(trigger).toBeEnabled());
     await waitFor(() => expect(otherControl).toHaveFocus());
+    expect(trigger).not.toHaveFocus();
+  });
+
+  it("returns focus to the trigger after a blank outside click focuses its container", async () => {
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Choose work mode" });
+    fireEvent.click(trigger);
+    const workspace = screen.getByTestId("workspace");
+    fireEvent.pointerDown(workspace);
+    workspace.focus();
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("menu", { name: "Work mode" })).not.toBeInTheDocument();
+  });
+
+  it("keeps focus that moved before the closing menu could restore it", async () => {
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Choose work mode" });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Build" }));
+    const otherControl = screen.getByRole("button", { name: "Other control" });
+    otherControl.focus();
+
+    await new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+    });
+    expect(otherControl).toHaveFocus();
     expect(trigger).not.toHaveFocus();
   });
 });

@@ -39,6 +39,34 @@ afterEach(() => {
   expect(nativePreviewSuspended()).toBe(false);
 });
 describe("real update controller in the sidebar", () => {
+  it("distinguishes the startup check rotation from an admitted manual check", async () => {
+    const background = deferred<AppUpdateStatus>();
+    const manual = deferred<AppUpdateStatus>();
+    check.mockReturnValueOnce(background.promise).mockReturnValueOnce(manual.promise);
+    render(<Harness />);
+    // A direct main-process check can publish current metadata before the hook's
+    // scheduled check starts. An idle icon alone does not settle that timer.
+    publish({ state: "current", latestVersion: "1.2.2" });
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+    await act(async () => vi.advanceTimersByTime(2_500));
+    fireEvent.click(trigger());
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    expect(check).toHaveBeenCalledExactlyOnceWith(false);
+    await act(async () => background.resolve(updateStatus({
+      revision: ++sequence, state: "current", latestVersion: "1.2.2", freshness: "cached",
+    })));
+    // Checking remains visible until its rotation finishes, although no manual
+    // request was admitted. Releasing a test adapter gate here would do nothing.
+    expect(trigger()).toHaveAttribute("data-update-state", "checking");
+    fireEvent.animationIteration(document.querySelector(".update-status-icon")!);
+    expect(trigger()).toHaveAttribute("data-update-state", "idle");
+    fireEvent.click(trigger());
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(check).toHaveBeenNthCalledWith(2, true);
+    await act(async () => manual.resolve(updateStatus({ revision: ++sequence })));
+    fireEvent.animationIteration(document.querySelector(".update-status-icon")!);
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+  });
   it("checks directly, prevents duplicate clicks, and finishes the current rotation without a timer", async () => {
     const request = deferred<AppUpdateStatus>(); check.mockReturnValue(request.promise);
     render(<Harness />);

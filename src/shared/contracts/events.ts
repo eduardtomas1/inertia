@@ -1,3 +1,4 @@
+import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -209,6 +210,9 @@ export type ServerEvent =
         | { kind: "backend.default"; value: ModelBackendDefault | null }
         | { kind: "provider.maintenance"; providers: ProviderMaintenanceStatus[] }
         | { kind: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
+        | { kind: "usage.limits"; snapshot: UsageLimitsSnapshot }
+        | { kind: "usage.reset.confirmation"; confirmation: UsageResetConfirmation }
+        | { kind: "usage.reset.outcome"; outcome: UsageResetOutcome }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "daily.work"; dashboard: DailyWorkDashboard }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }

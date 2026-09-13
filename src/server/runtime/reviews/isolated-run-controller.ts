@@ -144,6 +144,7 @@ export interface IsolatedRunFileSystem {
 }
 
 export interface IsolatedRunControllerOptions {
+  lifetimeSignal?: AbortSignal;
   id?: () => string;
   defaultTimeoutMs?: number;
   defaultOutputLimitChars?: number;
@@ -257,7 +258,15 @@ export class IsolatedRunController<Owner extends object> {
   private readonly defaultOutputLimitChars: number;
   private readonly stopGraceMs: number;
   private readonly fileSystem: IsolatedRunFileSystem;
+  private readonly lifetimeSignal: AbortSignal | undefined;
   private closing = false;
+  // Quiescence waits for command results before dispose(), so request their owned stops at abort.
+  private readonly stopForRuntimeShutdown = (): void => {
+    this.closing = true;
+    for (const active of this.activeByConversation.values()) {
+      this.requestStop(active, "runtime-shutdown");
+    }
+  };
 
   constructor(
     private readonly store: IsolatedRunStore,
@@ -290,6 +299,9 @@ export class IsolatedRunController<Owner extends object> {
         await rm(path, { recursive: true, force: true });
       },
     };
+    this.lifetimeSignal = options.lifetimeSignal;
+    if (this.lifetimeSignal?.aborted) this.stopForRuntimeShutdown();
+    else this.lifetimeSignal?.addEventListener("abort", this.stopForRuntimeShutdown, { once: true });
   }
 
   has(conversationId: string): boolean {
@@ -634,6 +646,7 @@ export class IsolatedRunController<Owner extends object> {
   }
 
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
+    this.lifetimeSignal?.removeEventListener("abort", this.stopForRuntimeShutdown);
     if (this.closing) {
       if (this.activeByConversation.size > 0) {
         throw new Error("Isolated provider cleanup remains unconfirmed.");

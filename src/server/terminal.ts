@@ -3,9 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
-import type {
-  ProviderTerminalResumeDescriptor,
-} from "../shared/contracts";
+import type { ProviderTerminalResumeDescriptor } from "../shared/contracts";
 import type {
   ProviderInstallationTransferredUse,
   ProviderInstallationUseTransfer,
@@ -39,6 +37,8 @@ import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 
+import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
+import type { WindowsTerminalAuthority } from "../node/windows-terminal-authority";
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const OUTPUT_FLUSH_MS = 8;
@@ -86,6 +86,7 @@ interface TerminalSession {
 }
 
 export interface TerminalManagerOptions {
+  windowsTerminalAuthority?: WindowsTerminalAuthority;
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
   closeTimeoutMs?: number;
@@ -161,6 +162,7 @@ export class TerminalManager {
   private disposingAll = false;
   private updatePreparationHeld = false;
   private readonly spawnTerminal: typeof spawn;
+  private readonly windowsTerminalAuthority: WindowsTerminalAuthority | undefined;
   private readonly shutdownTimeoutMs: number;
   private readonly closeTimeoutMs: number;
   private readonly outputFlushMs: number;
@@ -180,6 +182,7 @@ export class TerminalManager {
 
   constructor(options: TerminalManagerOptions = {}) {
     this.platform = options.platform ?? process.platform;
+    this.windowsTerminalAuthority = options.windowsTerminalAuthority;
     this.spawnTerminal = options.spawnTerminal ?? spawn;
     this.shutdownTimeoutMs = boundedMilliseconds(
       options.shutdownTimeoutMs ?? terminalShutdownTimeoutMs(this.platform),
@@ -254,6 +257,7 @@ export class TerminalManager {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
     replacementRequestId?: string,
+    managedAction = false,
   ): Promise<string> {
     const shell = userShell(this.platform);
     return await this.replaceProcessWithBoundary(
@@ -271,6 +275,8 @@ export class TerminalManager {
       this.platform === "darwin",
       replacementRequestId,
       "terminal-session",
+      undefined,
+      managedAction,
     );
   }
 
@@ -398,6 +404,7 @@ export class TerminalManager {
     replacementSupportsGracefulRetirement = false,
     replacementRequestId?: string,
     installationUse?: ProviderInstallationUseTransfer,
+    managedAction = false,
   ): Promise<string> {
     try {
       return await this.replaceProcessWithBoundary(
@@ -416,6 +423,7 @@ export class TerminalManager {
         replacementRequestId,
         "complete-tree",
         installationUse,
+        managedAction,
       );
     } catch (error) {
       installationUse?.abandonBeforeSpawn();
@@ -439,6 +447,7 @@ export class TerminalManager {
     replacementRequestId: string | undefined,
     ownershipBoundary: TerminalOwnershipBoundary,
     installationUse?: ProviderInstallationUseTransfer,
+    managedAction = false,
   ): Promise<string> {
     const replaced = this.ownedSession(owner, terminalId);
     if (replaced.cwd !== cwd) {
@@ -474,6 +483,7 @@ export class TerminalManager {
         providerResume,
         ownershipBoundary,
         installationUse,
+        managedAction,
       );
       if (replacementRequestId && this.sessions.has(replacementId)) {
         this.distinctReplacements.set(replacementRequestId, {
@@ -509,6 +519,7 @@ export class TerminalManager {
         providerResume,
         ownershipBoundary,
         installationUse,
+        managedAction,
       );
       if (replacementRequestId && this.sessions.has(replacementId)) {
         this.distinctReplacements.set(replacementRequestId, {
@@ -613,6 +624,7 @@ export class TerminalManager {
     providerResume: TerminalProviderResumeAttachment | null = null,
     ownershipBoundary: TerminalOwnershipBoundary = "complete-tree",
     installationUse?: ProviderInstallationUseTransfer,
+    managedAction = false,
   ): string {
     this.assertCapacity(owner, replaced, reattachScope);
 
@@ -644,17 +656,21 @@ export class TerminalManager {
           "Provider installation authority was already consumed.",
         );
       }
-      const owned = this.spawnOwnedTerminalProcess(() => this.spawnTerminal(
-        invocation.command,
-        invocation.args,
-        {
-          name: "xterm-256color",
-          cols,
-          rows,
-          cwd,
+      const spawnTerminal = (command: string, terminalArgs: string[] | string) => this.spawnTerminal(
+        command, terminalArgs, {
+          name: "xterm-256color", cols, rows, cwd,
           env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
         },
-      ), { darwinGuardianCommand: invocation.command });
+      );
+      const spawnOwned = (spawnProcess: () => IPty) => this.spawnOwnedTerminalProcess(
+        spawnProcess, { darwinGuardianCommand: invocation.command },
+      );
+      const owned = this.platform === "win32" && managedAction
+        ? spawnWindowsManagedTerminal({
+            authority: this.windowsTerminalAuthority, command: invocation.command,
+            args: invocation.args, spawnOwned, spawnTerminal,
+          })
+        : spawnOwned(() => spawnTerminal(invocation.command, invocation.args));
       pseudoterminal = owned.process;
       confirmOwnedProcessStopped = owned.confirmStopped;
       releaseOwnedProcessIfExited = owned.releaseIfGroupExited;
@@ -715,7 +731,7 @@ export class TerminalManager {
       // A normal PTY exit may precede asynchronous retirement of the exact
       // durable claim. Keep the transferred installation and track that proof
       // within the ordinary close envelope; never signal this exited PID.
-      if (ownsProviderInstallation && !ownedProcessStopped
+      if ((ownsProviderInstallation || (this.platform === "win32" && managedAction)) && !ownedProcessStopped
         && (signal === 0 || signal === undefined)) {
         session.naturalExitCode = exitCode;
         void this.trackDisposal(session, false);

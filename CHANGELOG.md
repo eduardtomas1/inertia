@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.55 — 2026-09-12
+## 0.0.55 — 2026-09-13
 
 ### Find and share context
 
@@ -26,6 +26,12 @@ The useful changes in each Inertia release, in plain language.
 - Up and Down move through wrapped and multiline drafts normally. At the text
   boundaries, repeated presses recall older or newer prompts while preserving
   the unsent draft and edits.
+- Scratch prompts saved before this update can be copied from their own
+  recovery section. Original saved text and each chat's current draft stay
+  intact; keyboard selection waits for that section to load.
+- Cancelling a saved-message jump prevents its queued chat switch. Selecting
+  the current chat again while another switch is underway restores that choice
+  after the pending command finishes.
 
 ### Git and the desktop mascot
 
@@ -35,7 +41,8 @@ The useful changes in each Inertia release, in plain language.
   pushed while unrelated edits remain.
 - Branch search and arrow-key navigation stay usable during a background
   refresh. Selections wait for fresh results; changing the query or moving
-  focus cancels a waiting selection.
+  focus cancels a waiting selection. Branch-name drafts stay editable and
+  focused during refresh, while creation waits for the refreshed list.
 - Git actions keep errors and retry controls near the operation. Branches used
   by other worktrees are identified, and ambiguous remote destinations are
   rejected before a fetch can overwrite another remote's tracking refs.
@@ -51,15 +58,29 @@ The useful changes in each Inertia release, in plain language.
 
 ### Providers and everyday controls
 
+- Usage now includes Limits, with reported quota windows, reset times, account
+  details and freshness. The composer opens the same cached view. Unsupported
+  or unverified information stays explicit instead of appearing as zero usage.
+- Optional CLIProxyAPI hubs show additional accounts without changing agent
+  routing. Equivalent verified accounts can be compared together, while
+  accounts with unknown identities stay separate. Management keys remain in
+  secure storage. Removing a hub keeps its entry available for retry until
+  secure key removal succeeds.
+- Supported Codex connections can use an existing reset credit after explicit
+  account confirmation. Uncertain results retain the original request for
+  retry; ambiguous local credential sources cannot redeem credits.
 - Claude turns tolerate large image pastes and supported tool results; raw
   output is bounded before parsing. Rate-limit updates no longer cancel a turn,
   and provider usage can refresh without restarting Inertia.
 - Projects can set agent defaults and limits for delegated work. Cross-chat
   context has stricter size and content checks before it reaches a provider.
+- Long, incomplete control tags in agent output no longer stall the local
+  service while cross-chat context is being prepared.
 - Thread context menus expose common actions, and project menus stay open
   through background discovery. Model selection offers runnable providers with
   clearer choices and placement in short windows. Open menus follow the composer
-  when loading finishes and the new-chat layout settles.
+  when loading finishes and the new-chat layout settles. Usage details also
+  remain inside short chat panes, with scrolling for the remaining content.
 - Choose independent light and dark palettes. Shared theme colors keep controls
   and status indicators readable across the built-in themes.
 - Sidebar updates show progress, release notes and restart confirmation. Recent
@@ -71,17 +92,40 @@ The useful changes in each Inertia release, in plain language.
 
 ### Reliability and maintenance
 
+- Windows avoids unnecessary font fallback work when streaming the first emoji.
 - Linux startup retires completed discovery probes correctly. Repeated runtime
   recovery failures stop instead of restarting indefinitely.
 - macOS recovery can offer consent after a crash interrupts an ownership-journal
   write, while malformed committed records remain blocked. Windows terminals
   retain the latest requested size while their native session starts.
+- Windows workspace actions stop cleanly when child processes reparent or exit
+  during shutdown, while preserving unrelated terminals.
+- The macOS process helper now targets the app's declared macOS 13 minimum;
+  package verification rejects a helper that requires a newer system.
 - Each provider's completed model catalog appears independently. Settings
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication
   check settle its process cleanup while keeping cancellation final.
   Completed checks retain their result while confirmed cleanup finishes,
   instead of being incorrectly marked as timed out.
+- Successful Claude metadata reads let the SDK finish normally before proving
+  process cleanup. This prevents a completed background check from stopping
+  the local service; cancellation still remains final.
+- Startup recovery preserves unreadable and rejected database backup originals.
+  Temporary access, locking or I/O errors stop validation before moving the
+  current database; a failed check cannot erase the only recoverable copy.
+- Failed Git worktree creation keeps its recovery record when a branch or
+  checkout artifact remains, and leaves pre-existing branches untouched.
+- Persistence errors while handling a provider result or saving cancellation
+  still start exact provider cleanup. A chat remains locked if cleanup or
+  terminal persistence cannot be confirmed. Cursor also waits for process
+  cleanup when its chat-tool server fails to close.
+- Quitting cancels active reviews and context compaction before waiting for
+  their commands to finish, while retaining cleanup and storage safeguards.
+- Private Connect startup failures report the error and clear the stopped
+  gateway, allowing update preparation and a fresh retry.
+- Terminal output no longer disconnects a window while a valid conversation
+  history backlog is draining. Stalled or oversized connections remain bounded.
 - Cancelling a read-only Git inspection on Windows gives it a bounded chance
   to close normally, avoiding a termination race that could block new chats.
   Hung inspections still require confirmed process-tree cleanup.

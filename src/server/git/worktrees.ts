@@ -724,6 +724,9 @@ export async function createWorktreeWithOwnershipReceipt(
   const root = await repositoryRoot(repositoryPath);
   const target = await validateNewAbsolutePath(worktreePath, root);
   const branch = await validateBranch(root, options.branch);
+  if (await exactLocalBranchExists(root, branch)) {
+    throw new GitError("conflict", `A branch named ${branch} already exists.`);
+  }
   const startPoint = validateName(
     options.startPoint,
     "The starting revision",
@@ -751,14 +754,12 @@ export async function createWorktreeWithOwnershipReceipt(
     );
   } catch (error) {
     try {
-      await inspectRegisteredWorktreeOwnership(root, target, branch);
-    } catch (inspectionError) {
-      if (
-        inspectionError instanceof GitError
-        && inspectionError.code === "not-found"
-      ) {
+      if (await inspectUnacknowledgedWorktreeCreation(root, target, branch)
+        === "absent") {
         hooks.notAdded();
       }
+    } catch {
+      // Keep durable recovery when absence of every artifact is unconfirmed.
     }
     throw error;
   }

@@ -1,3 +1,4 @@
+import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
@@ -301,6 +302,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   const terminals = new TerminalManager({
+    windowsTerminalAuthority: options.windowsTerminalAuthority,
     onOwnedProcessCleanupUnconfirmed:
       options.onOwnedProcessCleanupUnconfirmed,
   });
@@ -502,6 +504,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcastSnapshot,
     {
       defaultTimeoutMs: options.reviewSummaryTimeoutMs ?? DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
+      lifetimeSignal: runtimeLifetimeAbort.signal,
     },
   );
   startProjectAutoPull({
@@ -676,6 +679,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
@@ -736,7 +740,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot,
         send,
       }),
-      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, providerInfo: () => providerInfo, broadcast, send }),
+      createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
         store,
         workspaceRuns,

@@ -70,6 +70,7 @@ import {
 } from "./persistence/paired-launch-repository";
 import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
+import { UsageLimitsRepository } from "./persistence/usage-limits-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
@@ -120,6 +121,7 @@ export class RuntimeStore {
   private readonly pairedLaunchRepository: PairedLaunchRepository;
   private readonly recoveryRepository: RecoveryRepository;
   private readonly reviewRepository: ReviewRepository;
+  readonly usageLimits: UsageLimitsRepository;
   private readonly settingsRepository: SettingsRepository;
   private readonly snapshotRepository: SnapshotRepository;
   readonly systemSuspends: SystemSuspendRepository;
@@ -176,6 +178,7 @@ export class RuntimeStore {
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),
     });
+    this.usageLimits = new UsageLimitsRepository(this.database);
     this.settingsRepository = new SettingsRepository({ database: this.database });
     this.conversationRepository = new ConversationRepository({
       database: this.database,
@@ -391,13 +394,8 @@ export class RuntimeStore {
     return this.snapshotRepository.conversationDetail(conversationId);
   }
 
-  loadProviderMetadata(): PersistedProviderMetadata[] {
-    return this.providerMetadataRepository.load();
-  }
-
-  saveProviderMetadata(metadata: PersistedProviderMetadata): void {
-    this.providerMetadataRepository.save(metadata);
-  }
+  loadProviderMetadata = (): PersistedProviderMetadata[] => this.providerMetadataRepository.load();
+  saveProviderMetadata = (metadata: PersistedProviderMetadata): void => this.providerMetadataRepository.save(metadata);
 
   createProject(
     name: string,

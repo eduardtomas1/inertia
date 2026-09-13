@@ -75,6 +75,46 @@ describe("branch menu interaction", () => {
     }
   });
 
+  it("keeps a branch draft focused during refresh after a failed switch without admitting a creation", async () => {
+    const callbacks = props();
+    callbacks.onSwitchBranch.mockRejectedValueOnce(new Error("Commit or stash local changes first."));
+    let finish!: () => void;
+    callbacks.onCreateBranch.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    const view = render(<WorkspaceBranchMenu {...callbacks} />);
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "topic" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await screen.findByRole("alert");
+    const input = screen.getByRole<HTMLInputElement>("textbox", { name: "New branch name" });
+    fireEvent.change(input, { target: { value: "feature/keep-editing" } });
+    input.focus();
+    input.setSelectionRange(8, 12);
+
+    view.rerender(<WorkspaceBranchMenu {...callbacks} branchesLoading />);
+    expect(input).toBeEnabled();
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("feature/keep-editing");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([8, 12]);
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "feature/edited" } });
+    input.setSelectionRange(8, 8);
+    fireEvent.submit(input.closest("form")!);
+    expect(callbacks.onCreateBranch).not.toHaveBeenCalled();
+
+    view.rerender(<WorkspaceBranchMenu {...callbacks} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("feature/edited");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([8, 8]);
+    expect(callbacks.onCreateBranch).not.toHaveBeenCalled();
+    fireEvent.submit(input.closest("form")!);
+    expect(callbacks.onCreateBranch).toHaveBeenCalledExactlyOnceWith("feature/edited");
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    await act(async () => { finish(); });
+    expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
   it("keeps the search and failed checkout available for retry, then closes on success", async () => {
     const callbacks = props();
     callbacks.onSwitchBranch.mockRejectedValueOnce(new Error("Commit or stash local changes first.")).mockResolvedValueOnce(undefined);

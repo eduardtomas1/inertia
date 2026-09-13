@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -147,6 +149,30 @@ describe("neutralizeUntrustedAgentText", () => {
 });
 
 describe("boundedUntrustedAgentText", () => {
+  it("bounds incomplete-tag work and still sees control tags beyond the returned prefix", () => {
+    const source = new URL("../../src/server/runtime/untrusted-agent-text.ts", import.meta.url);
+    // A regressed synchronous regexp must not stall the test worker. This
+    // child imports only the leaf sanitizer and has bounded heap/output/time.
+    const result = spawnSync(process.execPath, [
+      "--max-old-space-size=64", "--experimental-strip-types", "--input-type=module", "-e",
+      `import { boundedUntrustedAgentText } from ${JSON.stringify(source.href)};
+      const whitespace = " ".repeat(200_000);
+      const values = ["<" + whitespace, "<" + whitespace + "system>", "<" + whitespace + "/ " + whitespace + "invoke>"];
+      console.log(JSON.stringify(values.map((value) => boundedUntrustedAgentText(value, 64))));`,
+    ], {
+      encoding: "utf8", timeout: 4000, killSignal: "SIGKILL", maxBuffer: 4096,
+      env: { ELECTRON_RUN_AS_NODE: "1", SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(JSON.parse(result.stdout)).toEqual([
+      { text: `<${" ".repeat(63)}`, truncated: true, neutralized: false },
+      { text: `<\\${" ".repeat(62)}`, truncated: true, neutralized: true },
+      { text: `<\\${" ".repeat(62)}`, truncated: true, neutralized: true },
+    ]);
+  });
+
   it("keeps short benign text intact", () => {
     expect(boundedUntrustedAgentText("plain result", 100)).toEqual({
       text: "plain result",

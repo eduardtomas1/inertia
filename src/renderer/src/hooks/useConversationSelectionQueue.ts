@@ -69,7 +69,7 @@ export function useAuthoritativeSelectionQueue(
   run: RuntimeRunner,
   snapshot: AppSnapshot | null,
   enqueue: AsyncOperationQueue,
-): (key: string, command: AuthoritativeSelectionCommand) => Promise<ServerEvent> {
+): (key: string, command: AuthoritativeSelectionCommand, isCurrent?: () => boolean) => Promise<ServerEvent> {
   const runRef = useRef(run);
   const pendingRef = useRef<AuthoritativeSelection | null>(null);
   runRef.current = run;
@@ -79,9 +79,12 @@ export function useAuthoritativeSelectionQueue(
     if (pending && confirmsSelection(snapshot, pending)) pending[3]();
   }, [snapshot]);
 
-  return useCallback((key: string, command: AuthoritativeSelectionCommand) => {
+  return useCallback((key: string, command: AuthoritativeSelectionCommand, isCurrent?: () => boolean) => {
     let request!: Promise<ServerEvent>;
     const released = enqueue(async () => {
+      // Search can be cancelled while earlier workspace commands own the FIFO.
+      // Reject before dispatch: ignoring the response cannot undo its snapshot.
+      if (isCurrent && !isCurrent()) throw new Error("Selection superseded");
       let resolveAuthoritative!: () => void;
       const authoritative = new Promise<void>((resolve) => {
         resolveAuthoritative = resolve;
@@ -118,11 +121,11 @@ export function useWorkspaceAuthorityCommandQueue(
   run: RuntimeRunner,
   snapshot: AppSnapshot | null,
   enqueue: AsyncOperationQueue,
-): RuntimeRunner {
+): (key: string, command: CommandWithoutId, isCurrent?: () => boolean) => Promise<ServerEvent> {
   const select = useAuthoritativeSelectionQueue(run, snapshot, enqueue);
-  return useCallback((key: string, command: CommandWithoutId) =>
+  return useCallback((key: string, command: CommandWithoutId, isCurrent?: () => boolean) =>
     command.type.endsWith(".select")
-      ? select(key, command as AuthoritativeSelectionCommand)
+      ? select(key, command as AuthoritativeSelectionCommand, isCurrent)
       : enqueue(() => run(key, command)), [enqueue, run, select]);
 }
 

@@ -1,3 +1,4 @@
+import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
@@ -67,6 +68,11 @@ const conversationContextSelectionFields = {
 };
 
 export const appCommandSchemas = [
+  z.strictObject({ ...requestBase, type: z.literal("usage.limits.get"), payload: z.strictObject({ refresh: z.boolean(), force: z.boolean().optional() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("usage.source.save"), payload: usageSourceInputSchema }),
+  z.strictObject({ ...requestBase, type: z.literal("usage.source.remove"), payload: z.strictObject({ id: z.string().uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("usage.reset.prepare"), payload: z.strictObject({ accountId: z.string().min(1).max(256) }) }),
+  z.strictObject({ ...requestBase, type: z.literal("usage.reset.confirm"), payload: z.strictObject({ confirmationId: z.string().uuid(), confirmed: z.literal(true) }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search.cancel"), payload: z.strictObject({ searchRequestId: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.message.reveal"), payload: messageSearchTargetSchema.extend({ focusDetached: z.boolean().optional() }) }),

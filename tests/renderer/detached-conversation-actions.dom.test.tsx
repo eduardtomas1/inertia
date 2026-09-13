@@ -74,7 +74,7 @@ describe.each(["openConversationInWindow", "openConversationInSplit"])("%s detac
       if (outcome === "false") f.focused.resolve(false);
       else f.focused.reject(new Error("Synthetic native focus failure"));
     });
-    expect(f.select).toHaveBeenCalledExactlyOnceWith("conversation.select", target.id);
+    expect(f.select).toHaveBeenCalledExactlyOnceWith("conversation.select", target.id, undefined);
     expect(f.error.mock.calls.flat()).not.toContainEqual(expect.any(String));
   });
 
@@ -94,7 +94,7 @@ describe.each(["openConversationInWindow", "openConversationInSplit"])("%s detac
       if (outcome === "false") f.focused.resolve(false);
       else f.focused.reject(new Error("Synthetic stale focus failure"));
     });
-    expect(f.select).toHaveBeenCalledExactlyOnceWith("conversation.select", newer.id);
+    expect(f.select).toHaveBeenCalledExactlyOnceWith("conversation.select", newer.id, undefined);
     expect(f.error.mock.calls.flat()).not.toContainEqual(expect.any(String));
   });
 });

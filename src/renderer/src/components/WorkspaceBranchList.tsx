@@ -70,7 +70,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
       const name = new FormData(event.currentTarget).get("branch");
       if (!busy && !loading && typeof name === "string" && name.trim()) onCreate(name.trim());
     }}>
-      <input name="branch" placeholder="New branch name" aria-label="New branch name" maxLength={255} required disabled={busy || loading} />
+      <input name="branch" placeholder="New branch name" aria-label="New branch name" maxLength={255} required disabled={busy} />
       <button type="submit" disabled={busy || loading}>Create</button>
     </form>
   </>;

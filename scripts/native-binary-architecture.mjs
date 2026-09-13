@@ -1,4 +1,5 @@
 import { open } from "node:fs/promises";
+import { closeSync, constants, openSync, readSync } from "node:fs";
 
 export const NATIVE_HEADER_READ_LIMIT = 4 * 1024;
 
@@ -128,5 +129,50 @@ export async function inspectNativeBinaryArchitecture(
     return architecture;
   } finally {
     await handle.close();
+  }
+}
+
+/** Inspect the bounded load-command prefix without executing the packaged helper. */
+export function verifyMacosDeploymentTarget(filePath, target, expectedArchitecture = process.arch) {
+  if (typeof target !== "string" || !/^\d{1,5}\.\d{1,3}(?:\.\d{1,3})?$/u.test(target)) {
+    throw new Error("The macOS deployment target is invalid.");
+  }
+  const [major, minor, patch = 0] = target.split(".").map(Number);
+  if (major < 1 || major > 65535 || minor > 255 || patch > 255) {
+    throw new Error("The macOS deployment target is invalid.");
+  }
+  const descriptor = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const prefix = Buffer.alloc(64 * 1024);
+  let bytesRead;
+  try { bytesRead = readSync(descriptor, prefix, 0, prefix.length, 0); }
+  finally { closeSync(descriptor); }
+  const header = prefix.subarray(0, bytesRead);
+  const architecture = parseMachOArchitecture(header);
+  if (architecture !== expectedArchitecture) {
+    throw new Error(`Runtime guardian architecture mismatch: expected ${expectedArchitecture}, found ${architecture}.`);
+  }
+  const invalid = () => new Error("The runtime guardian has invalid macOS deployment metadata.");
+  const byteOrder = MACH_O_64_MAGICS.get(header.subarray(0, 4).toString("hex"));
+  const read = (offset) => byteOrder === "little"
+    ? header.readUInt32LE(offset) : header.readUInt32BE(offset);
+  const count = read(16), commandsEnd = 32 + read(20);
+  if (commandsEnd > bytesRead || count > (commandsEnd - 32) / 8) throw invalid();
+  let offset = 32, minimum;
+  for (let index = 0; index < count; index++) {
+    if (offset + 8 > commandsEnd) throw invalid();
+    const command = read(offset), size = read(offset + 4);
+    if (size < 8 || size % 8 !== 0 || offset + size > commandsEnd) throw invalid();
+    if (command === 0x32 || command === 0x24) {
+      // LC_BUILD_VERSION (MACOS) or the older LC_VERSION_MIN_MACOSX.
+      if (minimum !== undefined || size < (command === 0x32 ? 24 : 16)) throw invalid();
+      if (command === 0x32 && (read(offset + 8) !== 1 || 24 + read(offset + 20) * 8 !== size)) throw invalid();
+      minimum = read(offset + (command === 0x32 ? 12 : 8));
+    }
+    offset += size;
+  }
+  if (offset !== commandsEnd || minimum === undefined || minimum < 65536) throw invalid();
+  if (minimum > major * 65536 + minor * 256 + patch) {
+    const version = `${minimum >>> 16}.${(minimum >>> 8) & 255}.${minimum & 255}`;
+    throw new Error(`The runtime guardian requires macOS ${version}, newer than the declared ${target} minimum.`);
   }
 }

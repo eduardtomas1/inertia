@@ -38,6 +38,8 @@ const budgets = {
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
+  // Account quotas, source setup and deliberate reset confirmation load on demand.
+  deferredUsageLimitsJavaScript: 15.5 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -62,6 +64,9 @@ const budgets = {
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
+  // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
+  // Account only this new module here; all existing ceilings remain unchanged.
+  deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
@@ -79,7 +84,9 @@ const budgets = {
   // New optional editor/menu bytes have their own narrow caps above.
   // Update-state wiring and interactive recent attachments bring shared core
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
-  coreJavaScript: 2_000.75 * kibibyte,
+  // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
+  // Its complete optional closure is separately capped; first-load caps stay fixed.
+  coreJavaScript: 2_003.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -507,8 +514,22 @@ const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu"].map
 });
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
+const legacyPromptStashEntry = assetNames.find((name) => /^LegacyPromptStash-.*\.js$/u.test(name));
+if (!legacyPromptStashEntry) throw new Error("Missing deferred legacy prompt recovery");
+if (mainWorkbenchJavaScriptClosure.has(legacyPromptStashEntry) || detachedChatJavaScriptClosure.has(legacyPromptStashEntry)) {
+  throw new Error("Legacy prompt recovery must stay off the initial workbench");
+}
+const deferredLegacyPromptStashJavaScriptBytes = await assetBytes(`assets/${legacyPromptStashEntry}`);
+const usageLimitsEntry = assetNames.find((name) => /^UsageLimitsPanel-.*\.js$/u.test(name));
+if (!usageLimitsEntry) throw new Error("Missing deferred provider Limits surface");
+if (mainWorkbenchJavaScriptClosure.has(usageLimitsEntry) || detachedChatJavaScriptClosure.has(usageLimitsEntry)) {
+  throw new Error("Provider Limits must remain deferred from the initial workbench");
+}
+const deferredUsageLimitsJavaScriptBytes = await closureBytes(await javaScriptClosure(usageLimitsEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredLegacyPromptStashJavaScriptBytes
+  - deferredUsageLimitsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
@@ -538,6 +559,8 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
+  deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,

@@ -13,6 +13,7 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import {
+  awaitRuntimeOwnedProcessStopped,
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
@@ -31,6 +32,7 @@ export interface ClaudeOwnedQueryProcess {
   readonly spawnClaudeCodeProcess: (options: SpawnOptions) => SpawnedProcess;
   readonly child: () => ChildProcessWithoutNullStreams | undefined;
   readonly transportError: () => Error | undefined;
+  readonly waitForNaturalClose: (waitMs: number, signal?: AbortSignal) => Promise<boolean>;
   readonly requestTermination: (force: boolean) => void;
   readonly terminate: (force: boolean) => Promise<void>;
 }
@@ -52,6 +54,7 @@ export function createClaudeOwnedQueryProcess(
   let child: ChildProcessWithoutNullStreams | undefined;
   let shutdownRequested = false;
   let transportError: Error | undefined;
+  let childClosed: Promise<void> | undefined;
   let terminateOwnedProcessTree: ReturnType<
     typeof createOwnedProcessTreeTermination
   > | undefined;
@@ -87,6 +90,7 @@ export function createClaudeOwnedQueryProcess(
       stdio: ["pipe", "pipe", "pipe"],
     }));
     child = ownedChild;
+    childClosed = new Promise<void>((resolve) => { ownedChild.once("close", resolve); });
     // A custom SDK spawner owns stderr consumption. Drain it so an untrusted
     // provider cannot block shutdown by filling an unread pipe.
     ownedChild.stderr.on("error", () => {
@@ -144,6 +148,31 @@ export function createClaudeOwnedQueryProcess(
     spawnClaudeCodeProcess,
     child: () => child,
     transportError: () => transportError,
+    waitForNaturalClose: async (waitMs, signal) => {
+      const ownedChild = child;
+      if (!ownedChild) return true;
+      if (shutdownRequested || signal?.aborted || !childClosed) return false;
+      let timer: NodeJS.Timeout | undefined;
+      let cancel!: () => void;
+      const interrupted = new Promise<boolean>((resolve) => {
+        cancel = () => resolve(false);
+        timer = setTimeout(cancel, waitMs);
+        timer.unref();
+        signal?.addEventListener("abort", cancel, { once: true });
+      });
+      try {
+        // EOF is not a cleanup receipt. Join the exact guardian's ordinary
+        // close and durable retirement before permitting successful teardown.
+        return await Promise.race([
+          childClosed.then(() => awaitRuntimeOwnedProcessStopped(ownedChild)),
+          interrupted,
+        ]);
+      } catch { return false; }
+      finally {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
+      }
+    },
     requestTermination,
     terminate: async (force) => {
       shutdownRequested = true;

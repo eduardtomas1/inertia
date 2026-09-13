@@ -1,5 +1,7 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -23,6 +25,8 @@ import {
 } from "./UsageProviderChart";
 import { LoadingMark } from "./ui";
 import "./UsageView.css";
+
+const UsageLimitsPanel = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageLimitsPanel }));
 
 type UsageDashboardCommand = Extract<
   CommandWithoutId,
@@ -409,6 +413,7 @@ function UsageSkeleton(): React.JSX.Element {
 }
 
 export function UsageView({ status, request }: UsageViewProps): React.JSX.Element {
+  const [tab, setTab] = useState<"history" | "limits">("history");
   const [days, setDays] = useState<UsageRangeDays>(30);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [dashboard, setDashboard] = useState<UsageDashboard | null>(null);
@@ -418,6 +423,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
 
   useEffect(() => {
     const generation = ++loadGeneration.current;
+    if (tab === "limits") { setLoading(false); return; }
     if (status !== "online") {
       setDashboard(null);
       setLoading(status === "connecting");
@@ -440,12 +446,17 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
     }).finally(() => {
       if (loadGeneration.current === generation) setLoading(false);
     });
-  }, [days, refreshVersion, request, status]);
+  }, [days, refreshVersion, request, status, tab]);
 
   return (
     <main className="usage-view" aria-labelledby="usage-view-heading" aria-busy={loading}>
       <div className="usage-canvas">
         <h1 className="visually-hidden" id="usage-view-heading">Usage</h1>
+        <div className="usage-section-switch" role="group" aria-label="Usage section">
+          <button type="button" aria-pressed={tab === "history"} onClick={() => setTab("history")}>History</button>
+          <button type="button" aria-pressed={tab === "limits"} onClick={() => setTab("limits")}>Limits</button>
+        </div>
+        {tab === "limits" ? <Suspense fallback={<p>Loading limits…</p>}><UsageLimitsPanel request={request} status={status} /></Suspense> : <>
         <header className="usage-toolbar">
           <span>{dashboard
             ? `${displayDate(dashboard.range.startDate)} to ${displayDate(dashboard.range.endDate)}`
@@ -485,6 +496,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
           </div>
         )}
         {!loading && !error && dashboard && <UsageDashboardContent dashboard={dashboard} />}
+        </>}
       </div>
     </main>
   );

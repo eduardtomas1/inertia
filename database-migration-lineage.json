@@ -622,6 +622,11 @@
       "version": 73,
       "name": "IndependentLightAndDarkThemes",
       "digest": "11f67b827773d2ad34d9fbfc26d1aead33c2697d6e1dbad794a061a0e4724638"
+    },
+    {
+      "version": 74,
+      "name": "ProviderUsageSourcesAndResetAttempts",
+      "digest": "49e72d023fbeb6612214b449e71c002155338d9c13349e11c193d4f0505bbc2c"
     }
   ]
 }

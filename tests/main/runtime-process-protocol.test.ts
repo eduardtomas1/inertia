@@ -34,6 +34,22 @@ const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
 const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
 describe("runtime process protocol", () => {
+  it("preserves only a valid trusted Windows terminal helper identity at startup", () => {
+    const command = { type: "runtime.start", options: {
+      dataDirectory, defaultWorkspacePath: workspaceDirectory, enableProviders: false,
+      runtimeGenerationId, systemBootId,
+      windowsTerminalAuthority: { path: "C:\\Inertia\\windows-runtime-job.exe", sha256: "a".repeat(64) },
+    } };
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    for (const authority of [
+      { ...command.options.windowsTerminalAuthority, path: "relative.exe" },
+      { ...command.options.windowsTerminalAuthority, sha256: "invalid" },
+      { ...command.options.windowsTerminalAuthority, extra: true },
+    ]) expect(parseRuntimeWorkerCommand({ ...command, options: {
+      ...command.options, windowsTerminalAuthority: authority,
+    } })).toBeNull();
+  });
+
   it("strictly correlates bounded agent browser requests, cancellation, and results", () => {
     const requestId = crypto.randomUUID();
     const request = {

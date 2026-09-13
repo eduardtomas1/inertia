@@ -95,7 +95,7 @@ jobs:
             platform: macos-x64
             arch: x64
             package_script: package:release:mac:x64
-            timeout_minutes: 70
+            timeout_minutes: 85
             app_path: release/mac/Inertia.app
           - label: macOS arm64
             runner: macos-15
@@ -176,7 +176,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring
 
       - name: Install locked dependencies
         run: npm ci

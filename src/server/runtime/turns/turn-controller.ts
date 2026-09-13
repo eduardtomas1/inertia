@@ -828,9 +828,7 @@ export class TurnController {
           }
           this.timeouts.activity(active);
           acknowledge(true);
-          // App Server harness acceptance happens before initialize/thread open
-          // and, for ordinary turns, before turn/start is acknowledged. Keep
-          // Codex truthfully `starting` until its protocol emits `running`.
+          // Harness acceptance precedes initialize/thread open and turn/start; wait for protocol `running`.
           if (
             active.turn.harnessId !== "codex-app-server"
             && active.turn.harnessId !== "claude-agent-sdk"
@@ -846,7 +844,12 @@ export class TurnController {
       void result.then(
         (providerResult) => {
           acknowledge(false);
-          this.handleProviderResult(active, providerResult);
+          try {
+            this.handleProviderResult(active, providerResult);
+          } catch (error) {
+            requestProviderCancellation(this.providers, active.conversation.id);
+            this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
+          }
         },
         (error: unknown) => {
           acknowledge(false);
@@ -1111,10 +1114,8 @@ export class TurnController {
       });
       return;
     }
-    // ProviderManager records exact cleanup receipts behind stopOwned(). Join
-    // that owner-scoped barrier even after a clean terminal result; neither a
-    // terminal promise nor negative live-map lookup releases host authority.
-    // Exact cleanup stays authoritative; the result cannot replace the root outcome.
+    // Join the exact stopOwned receipt: terminal results and missing live owners are not cleanup proof.
+    // The result cannot replace an already terminal root outcome.
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");

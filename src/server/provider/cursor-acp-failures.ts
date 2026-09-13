@@ -4,7 +4,36 @@ import {
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderActivityDetail,
 } from "./activity-detail";
-import type { ProviderRunFailure } from "./contracts";
+import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+
+export function cursorCleanupResult(
+  outcome: ProviderRunResult,
+  child: ChildProcessWithoutNullStreams,
+  workspaceRoot: string,
+  subject: "process-tree" | "host-tools",
+): ProviderRunResult {
+  const error = subject === "process-tree"
+    ? "Cursor ACP process tree could not be confirmed stopped."
+    : "Cursor Inertia chat tools could not be cleaned up.";
+  const priorFailure = outcome.failure
+    ? cursorPriorFailureDetail(outcome.failure, workspaceRoot)
+    : undefined;
+  return {
+    ...outcome,
+    status: "failed",
+    exitCode: child.exitCode,
+    signal: child.signalCode,
+    error,
+    failure: {
+      reason: "provider-error",
+      message: error,
+      phase: "cleanup",
+      terminalEvent: `${subject}/cleanup`,
+      ...(priorFailure ? { technicalDetail: priorFailure } : {}),
+    },
+    cleanupConfirmed: false,
+  };
+}
 
 export function cursorRuntimeFailure(
   message: string,

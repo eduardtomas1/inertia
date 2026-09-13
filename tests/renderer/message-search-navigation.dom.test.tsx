@@ -78,7 +78,7 @@ describe("message search navigation", () => {
     expect(f.request).toHaveBeenCalledWith({ type: "conversation.message.reveal", payload: { projectId: other.projectId, conversationId: other.id, turnId: "turn", messageId: "message" } });
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
     await act(async () => f.revealed.resolve(ok));
-    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id, expect.any(Function));
     expect(pendingMessageSearchFocus(other.id)).toBeNull();
     expect(ready).not.toHaveBeenCalled();
     expect(f.exitGlobalChat).not.toHaveBeenCalled();
@@ -160,7 +160,7 @@ describe("message search navigation", () => {
     await act(async () => f.revealed.resolve(ok));
     await act(async () => f.selected.resolve(ok));
     expect(f.request).toHaveBeenCalledOnce();
-    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id, expect.any(Function));
     expect(pendingMessageSearchFocus(other.id)?.messageId).toBe(hit.messageId);
   });
 
@@ -177,7 +177,7 @@ describe("message search navigation", () => {
     expect(f.request).toHaveBeenCalledTimes(2);
     expect(f.select).not.toHaveBeenCalled();
     await act(async () => delivered.resolve(ok));
-    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id);
+    expect(f.select).toHaveBeenCalledWith("conversation.select", other.id, expect.any(Function));
     expect(ready).not.toHaveBeenCalled();
     expect(f.exitGlobalChat).not.toHaveBeenCalled();
     await act(async () => {

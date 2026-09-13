@@ -29,6 +29,7 @@ import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
 import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import { issueReportsMigration } from "./issue-reports"; import { contextCompactionMigration } from "./context-compaction";
 import { projectPreferencesMigration } from "./project-preferences";
 import { appearanceThemePairMigration } from "./appearance-theme-pair";
+import { providerUsageLimitsMigration } from "./provider-usage-limits";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -1236,6 +1237,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       contextCompactionMigration,
       projectPreferencesMigration,
       appearanceThemePairMigration,
+      providerUsageLimitsMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

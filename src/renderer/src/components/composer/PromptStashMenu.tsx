@@ -1,8 +1,11 @@
 import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { lazy, Suspense, useRef } from "react";
 import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
-import type { PromptStashEntry } from "../../utils/promptStash";
+import { readPromptStash, type PromptStashEntry } from "../../utils/promptStash";
 import { menuId } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
+
+const LegacyPromptStash = lazy(() => import("./LegacyPromptStash"));
 
 export function PromptStashMenu({
   entries,
@@ -37,6 +40,9 @@ export function PromptStashMenu({
     handleComposerMenuTriggerKeyDown,
     handleMoreMenuNavigation,
   } = menuController;
+  const label = COMPOSER_LABELS.scratchPrompts;
+  const focusLegacy = useRef(false);
+  const legacyEntries = menu === "stash" ? readPromptStash(window.localStorage) : [];
   const entryDeleteLabel = (entry: PromptStashEntry): string => {
     const content = entry.content.replace(/\s+/gu, " ").trim();
     const summary = content.length > 80
@@ -50,14 +56,16 @@ export function PromptStashMenu({
         ref={(node) => setMenuTrigger("stash", node)}
         type="button"
         className="icon-button"
-        aria-label={`${COMPOSER_LABELS.scratchPrompts}${entries.length ? `, ${entries.length} saved` : ""}`}
+        aria-label={`${label}${entries.length ? `, ${entries.length} saved` : ""}`}
         aria-haspopup="menu"
         aria-controls={menuId("stash")}
         aria-expanded={menu === "stash"}
-        title={COMPOSER_LABELS.scratchPrompts}
-        onClick={() => toggleMenu("stash")}
-        onKeyDown={(event) =>
-          handleComposerMenuTriggerKeyDown("stash", event)}
+        title={label}
+        onClick={() => { focusLegacy.current = false; toggleMenu("stash"); }}
+        onKeyDown={(event) => {
+          focusLegacy.current = false;
+          handleComposerMenuTriggerKeyDown("stash", event);
+        }}
       >
         <Archive size={15} />
       </button>
@@ -67,11 +75,11 @@ export function PromptStashMenu({
           id={menuId("stash")}
           className="composer-popover prompt-stash-popover"
           role="menu"
-          aria-label={COMPOSER_LABELS.scratchPrompts}
+          aria-label={label}
           onKeyDown={handleMoreMenuNavigation}
         >
           <div className="popover-title" role="presentation">
-            {COMPOSER_LABELS.scratchPrompts}
+            {label}
           </div>
           <button
             type="button"
@@ -175,6 +183,10 @@ export function PromptStashMenu({
               })}
             </div>
           )}
+          {legacyEntries.length > 0 && <Suspense fallback={<button type="button" role="menuitem" aria-disabled="true"
+            ref={(node) => { if (node) return () => { focusLegacy.current = document.activeElement === node; }; }}>
+            Loading earlier prompts…
+          </button>}><LegacyPromptStash entries={legacyEntries} focusOnMount={focusLegacy} /></Suspense>}
         </div>
       )}
     </div>

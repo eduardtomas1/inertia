@@ -1087,6 +1087,7 @@ async function bootstrap(): Promise<void> {
         ? { manualModernDarwinRecovery: modernDarwinRecoveryAuthority }
         : {}),
       ...(runtimeProcessGuardianPath ? { runtimeProcessGuardianPath } : {}),
+      ...(windowsRuntimeJobAssembly ? { windowsTerminalAuthority: { path: windowsRuntimeJobAssembly.path, sha256: windowsRuntimeJobAssembly.sha256 } } : {}),
       ...(packageSmokeCodexExecutable ? { codexBinaryPath: packageSmokeCodexExecutable } : {}),
       ...(packageSmokePdfInput && packageSmokePdfResult
         ? {

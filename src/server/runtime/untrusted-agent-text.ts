@@ -61,8 +61,10 @@ const IDENTIFIER_TAG_NAMES = new Set(["system", "invoke", "parameter"]);
 // `>` (so attributes split across lines are still caught), or a bare tag with
 // whitespace around the slash and nothing else, so comparisons such as
 // `a < system && b > c` stay untouched.
+// Keep whitespace after the slash inside its optional group: two adjacent
+// whitespace repetitions would retry every split when a tag is incomplete.
 const CONTROL_TAG = new RegExp(
-  `<(?=(/?)(${TAG_NAME})[\\s/>]|[ \\t]*(/?)[ \\t]*(${TAG_NAME})[ \\t]*/?>)`,
+  `<(?=(/?)(${TAG_NAME})[\\s/>]|[ \\t]*(?:(/)[ \\t]*)?(${TAG_NAME})[ \\t]*/?>)`,
   "giu",
 );
 

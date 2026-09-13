@@ -1,3 +1,5 @@
+import { codexUsageContext, readManagedClaudeUsage, type CodexControlContext } from "./provider/usage-context";
+export type { CodexControlContext } from "./provider/usage-context";
 import { randomUUID } from "node:crypto";
 
 import type { AgentApprovalDecision } from "./provider/interactions";
@@ -49,7 +51,6 @@ import {
   type ProviderDetection,
   type ProviderDetectionOptions,
   type ProviderId,
-  type ProviderInstallationUseTransfer,
   type ProviderGoalMutation,
   type ProviderGoalSnapshot,
   type ProviderCompactionResult,
@@ -112,13 +113,6 @@ export interface ResolvedModelRoute {
   backendProfile: ModelBackendProfile;
   compatibility: HarnessBackendCompatibility;
   continuationIdentity: ContinuationIdentity;
-}
-
-export interface CodexControlContext {
-  executable: string;
-  environment: NodeJS.ProcessEnv;
-  cwd: string;
-  installationUse: ProviderInstallationUseTransfer;
 }
 
 export interface ProviderInstallationReadContext {
@@ -1050,31 +1044,13 @@ export class ProviderManager {
     );
   }
 
-  async codexControlContext(cwd: string): Promise<CodexControlContext> {
-    let executable = this.resolvedCommands.get("codex");
-    if (!executable) executable = (await this.detect("codex", { cwd })).executable;
-    if (!executable) {
-      throw new ProviderRuntimeError(
-        "invalid_input",
-        "Codex CLI is not installed.",
-      );
-    }
-    const environment = await providerEnvironment();
-    this.processEnvironment = environment.env;
-    return {
-      executable,
-      environment: providerChildEnvironment("codex", environment.env),
-      cwd,
-      installationUse: this.installationAuthority.transfer(
-        this.installationAuthority.acquire(
-          "codex",
-          executable,
-          providerNativeBackendProfile("codex"),
-          "provider-server",
-          this.installationAuthority.operationIdentity("provider-server"),
-        ),
-      ),
-    };
+  claudeUsage(cwd: string): ReturnType<typeof readManagedClaudeUsage> {
+    return this.trackAuxiliary(() => readManagedClaudeUsage(this.resolvedCommands.get("claude"), cwd, this.installationAuthority, this.lifetimeSignal));
+  }
+
+  codexControlContext(cwd: string): Promise<CodexControlContext> {
+    return codexUsageContext(cwd, async () => this.resolvedCommands.get("codex") ?? (await this.detect("codex", { cwd })).executable,
+      this.installationAuthority, (env) => { this.processEnvironment = env; });
   }
 
   async claudeSkills(

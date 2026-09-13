@@ -184,7 +184,6 @@ function validateOpenDatabase(
   ) return "corrupt";
   const version = versions.length;
   if (version > currentSchemaVersion) return "unsupported-future";
-  if (database.prepare("PRAGMA foreign_key_check").get()) return "corrupt";
   for (const [introducedAt, requiredTables] of requiredTablesBySchemaVersion) {
     if (
       version >= introducedAt
@@ -430,6 +429,7 @@ function validateOpenDatabase(
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "corrupt";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "corrupt";
+  if (database.prepare("PRAGMA foreign_key_check").get()) return "corrupt";
   return "valid-current";
 }
 
@@ -437,9 +437,10 @@ function validateDatabase(
   path: string,
   check: "quick_check" | "integrity_check",
 ): DatabaseValidation {
-  if (!regularOwnedFile(path)) return "corrupt";
   let database: Database.Database | null = null;
   try {
+    const metadata = lstatSync(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) return "corrupt";
     database = new Database(path, { readonly: true, fileMustExist: true });
     return validateOpenDatabase(
       database,
@@ -452,8 +453,13 @@ function validateDatabase(
       authoritativeRunStateSchemaIsValid,
       systemSuspendTimingSchemaIsValid,
     );
-  } catch {
-    return "corrupt";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "SQLITE_NOTADB" || code === "SQLITE_CORRUPT"
+      || code?.startsWith("SQLITE_CORRUPT_")) return "corrupt";
+    throw new Error("The database could not be validated and was left unchanged.", {
+      cause: error,
+    });
   } finally {
     if (database?.open) database.close();
   }
@@ -786,11 +792,10 @@ export function recoverDatabaseOnStartup(
   }
 
   const trigger = primaryExists ? "primary-corrupt" : "primary-missing";
-  const preserved = quarantinePrimary(paths.databasePath, now);
   const backups = listValidatedBackups(paths.databasePath);
+  const preserved = quarantinePrimary(paths.databasePath, now);
   const selected = backups.valid[0];
   if (selected) restoreBackup(paths.databasePath, selected);
-  for (const invalid of backups.invalid) removeIfRegularFile(invalid);
   const report: DatabaseRecoveryReport = {
     checkedAt: now.toISOString(),
     outcome: selected ? "restored" : "created-empty",

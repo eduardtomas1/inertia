@@ -72,7 +72,7 @@ describe("diagnostic and thread navigation", () => {
     await act(async () => { navigateDiagnosticContext({ conversationId: affected.id }); });
     expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
     expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull();
-    expect(h.select).toHaveBeenCalledExactlyOnceWith("conversation.select", affected.id);
+    expect(h.select).toHaveBeenCalledExactlyOnceWith("conversation.select", affected.id, undefined);
     expect(h.error).not.toHaveBeenCalled();
   });
 
@@ -101,7 +101,7 @@ describe("diagnostic and thread navigation", () => {
     expect(h.select).not.toHaveBeenCalled();
     if (outcome === "superseded") fireEvent.click(screen.getByRole("button", { name: "Later settings navigation" }));
     await act(async () => { h.focused.resolve(outcome === "focused"); });
-    if (outcome === "closed") expect(h.select).toHaveBeenCalledExactlyOnceWith("conversation.select", affected.id);
+    if (outcome === "closed") expect(h.select).toHaveBeenCalledExactlyOnceWith("conversation.select", affected.id, undefined);
     else expect(h.select).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Current view")).toHaveTextContent(outcome === "superseded" ? "settings" : "workspace");
   });

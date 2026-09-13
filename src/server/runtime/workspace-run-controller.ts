@@ -56,6 +56,7 @@ export interface WorkspaceActionTerminalManager<Owner> {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
     replacementRequestId?: string,
+    managedAction?: boolean,
   ): Promise<string>;
   input(owner: Owner, terminalId: string, data: string): void;
   close(owner: Owner, terminalId: string): Promise<void>;
@@ -307,12 +308,12 @@ export class WorkspaceRunController<Owner> {
           terminalId = await this.terminals.replaceProcess(
             input.owner, input.terminalId, input.cwd, invocation.command, providerPtyArguments(invocation),
             environment, input.cols, input.rows, onExit, onOutput,
-            null, false, input.replacementRequestId,
+            null, false, input.replacementRequestId, undefined, true,
           );
         } else {
           terminalId = await this.terminals.replace(
             input.owner, input.terminalId, input.cwd, input.cols, input.rows,
-            onExit, onOutput, input.replacementRequestId,
+            onExit, onOutput, input.replacementRequestId, true,
           );
         }
         terminalOwnsReservation = !exited;

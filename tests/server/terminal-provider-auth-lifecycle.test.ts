@@ -33,7 +33,9 @@ function authTerminal(spawnOwnedTerminalProcess?: TerminalManagerOptions["spawnO
   const quarantine = vi.fn(() => true);
   const onExit = vi.fn();
   const recovery = vi.fn();
-  const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() };
+  const owner = { readyState: 1, bufferedAmount: 0,
+    send: vi.fn((_data: string, callback?: (error?: Error) => void) => callback?.()),
+  };
   const manager = new TerminalManager({
     shutdownTimeoutMs: 50,
     closeTimeoutMs: 100,
@@ -142,7 +144,7 @@ describe("provider sign-in terminal settlement", () => {
       expect(terminal.onExit).toHaveBeenCalledExactlyOnceWith(0);
       expect(terminal.owner.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
         type: "terminal.exit", terminalId: terminal.terminalId, exitCode: 0,
-      }));
+      }), expect.any(Function));
       expect(terminal.quarantine).not.toHaveBeenCalled();
       expect(terminal.recovery).not.toHaveBeenCalled();
       expect(terminal.requestGuardianStop).not.toHaveBeenCalled();
@@ -166,7 +168,7 @@ describe("provider sign-in terminal settlement", () => {
     terminal.emitExit(code!, signal);
     expect(terminal.owner.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
       type: "terminal.exit", terminalId: terminal.terminalId, exitCode: expected,
-    }));
+    }), expect.any(Function));
     expect(terminal.onExit).toHaveBeenCalledExactlyOnceWith(expected);
     expect(terminal.release).toHaveBeenCalledExactlyOnceWith({ cleanupConfirmed: true });
     expect(terminal.release.mock.invocationCallOrder[0]).toBeLessThan(
@@ -259,7 +261,7 @@ describe("provider sign-in terminal settlement", () => {
       expect(terminal.onExit).toHaveBeenCalledExactlyOnceWith(7);
       expect(terminal.owner.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
         type: "terminal.exit", terminalId: terminal.terminalId, exitCode: 7,
-      }));
+      }), expect.any(Function));
       expect(terminal.release).toHaveBeenCalledOnce();
       await terminal.manager.disposeAll();
     } finally {
@@ -285,7 +287,7 @@ describe("provider sign-in terminal settlement", () => {
       expect(terminal.onExit).toHaveBeenCalledExactlyOnceWith(130);
       expect(terminal.owner.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
         type: "terminal.exit", terminalId: terminal.terminalId, exitCode: 130,
-      }));
+      }), expect.any(Function));
       expect(terminal.release).toHaveBeenCalledExactlyOnceWith({ cleanupConfirmed: true });
       expect(terminal.quarantine).not.toHaveBeenCalled();
       expect(terminal.requestGuardianStop).not.toHaveBeenCalled();
@@ -357,7 +359,7 @@ describe("provider sign-in terminal settlement", () => {
     expect(terminal.onExit).toHaveBeenCalledExactlyOnceWith(130);
     expect(terminal.owner.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({
       type: "terminal.exit", terminalId: terminal.terminalId, exitCode: 130,
-    }));
+    }), expect.any(Function));
     expect(terminal.release).toHaveBeenCalledExactlyOnceWith({ cleanupConfirmed: true });
     await terminal.manager.disposeAll();
   });

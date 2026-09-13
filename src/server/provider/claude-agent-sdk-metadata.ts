@@ -116,7 +116,9 @@ export async function readClaudeAgentSdkMetadata(
   fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
   lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
   signal?: AbortSignal,
+  includeAccount = false,
 ): Promise<{
+  account?: { email?: string; organization?: string; subscriptionType?: string; apiProvider?: string };
   models?: ProviderModel[];
   rateLimits?: ProviderRateLimit[];
   rateLimitsUnavailable?: boolean;
@@ -137,6 +139,7 @@ export async function readClaudeAgentSdkMetadata(
   }
   let query: Query | undefined;
   let metadata: Awaited<ReturnType<typeof readClaudeAgentSdkMetadata>> = {};
+  let completed = false;
   let timer: NodeJS.Timeout | undefined;
   let rejectCancelled!: (error: Error) => void;
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -169,23 +172,36 @@ export async function readClaudeAgentSdkMetadata(
       }, timeoutMs);
       timer.unref();
     });
-    const [modelsResult, limitsResult] = await Promise.race([
+    const [modelsResult, limitsResult, accountResult] = await Promise.race([
       Promise.allSettled([
         fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
         fields.includes("rateLimits") && typeof usageReader === "function"
           ? usageReader.call(query)
           : Promise.resolve(undefined),
+        includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
       ]),
       timeout,
       cancelled,
     ]);
     metadata = {
+      ...(accountResult.status === "fulfilled" && accountResult.value ? { account: { email: accountResult.value.email, organization: accountResult.value.organization, subscriptionType: accountResult.value.subscriptionType, apiProvider: accountResult.value.apiProvider } } : {}),
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
       ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? claudeRateLimitReadResult(limitsResult.value) : {}),
     };
+    // Ordinary SDK control errors may yield partial metadata. Every request
+    // has settled here, so these also finish through EOF instead of a stop.
+    completed = true;
   } finally {
-    signal?.removeEventListener("abort", cancel);
     if (timer) clearTimeout(timer);
+    if (completed && !abortController.signal.aborted && !ownedProcess.transportError()) {
+      // A successful metadata query has no prompt to cancel. Let the SDK
+      // send EOF and the provider finish before asking its guardian to stop.
+      // Match the pinned SDK's bounded two-second normal-close window.
+      release();
+      try { query?.close(); query = undefined; } catch { /* Final cleanup retries a failed SDK close. */ }
+      await ownedProcess.waitForNaturalClose(2_000, signal);
+    }
+    signal?.removeEventListener("abort", cancel);
     ownedProcess.requestTermination(true);
     release();
     abortController.abort();
@@ -193,6 +209,7 @@ export async function readClaudeAgentSdkMetadata(
     await ownedProcess.terminate(true);
   }
   if (ownedProcess.transportError()) throw ownedProcess.transportError();
+  if (signal?.aborted) throw new Error("Claude metadata discovery was cancelled.");
   return metadata;
 }
 

@@ -39,6 +39,7 @@ export interface ConversationCompactionCommandDependencies {
   isolatedRuns: IsolatedRunController<WebSocket>;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   enableProviders: boolean;
+  lifetimeSignal?: AbortSignal;
   providerInfo(): readonly ProviderInfo[];
   broadcast(event: RuntimeMutationEvent): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -117,6 +118,7 @@ export function createConversationCompactionCommandHandler(
     "conversation.compact",
   ], async (socket, command) => {
     if (command.type !== "conversation.compact") return "not-handled";
+    dependencies.lifetimeSignal?.throwIfAborted();
     if (!dependencies.enableProviders) {
       throw new RuntimeRequestError(
         "Provider operations are unavailable in recovery safety mode.",
@@ -181,6 +183,7 @@ export function createConversationCompactionCommandHandler(
       selection,
       exactProvider,
     );
+    dependencies.lifetimeSignal?.throwIfAborted();
     if (readiness && !readiness.ready) {
       throw new RuntimeRequestError(
         readiness.message ?? "The selected model backend is unavailable.",
@@ -236,6 +239,12 @@ export function createConversationCompactionCommandHandler(
     // Compaction does not create a durable AgentTurn, but it still receives an
     // independently allocated exact turn identity for provider correlation.
     const compactionTurnId = randomUUID();
+    // Request cleanup during quiescence; retain authority until this exact receipt joins below.
+    let lifetimeStop: Promise<boolean> | undefined;
+    const confirmCleanup = (): Promise<boolean> => lifetimeStop ?? confirmCompactionCleanup(
+      dependencies, conversation.id, { runId: compactionRunId, turnId: compactionTurnId },
+    );
+    const stopForRuntimeShutdown = (): void => { lifetimeStop ??= confirmCleanup(); };
     try {
       if (
         dependencies.turns.isActive(conversation.id)
@@ -258,7 +267,9 @@ export function createConversationCompactionCommandHandler(
       let usageObserved = false;
       let usageProjectionFailed = false;
       let result: Awaited<ReturnType<ProviderManager["compact"]>>;
+      dependencies.lifetimeSignal?.throwIfAborted();
       try {
+        dependencies.lifetimeSignal?.addEventListener("abort", stopForRuntimeShutdown, { once: true });
         result = await dependencies.providers.compact({
           providerId: route.providerId,
           harnessId: route.harnessId,
@@ -288,11 +299,7 @@ export function createConversationCompactionCommandHandler(
           },
         });
       } catch (error) {
-        if (!await confirmCompactionCleanup(
-          dependencies,
-          conversation.id,
-          { runId: compactionRunId, turnId: compactionTurnId },
-        )) {
+        if (!await confirmCleanup()) {
           releaseAuthority = false;
           throw new RuntimeRequestError(
             "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely.",
@@ -301,18 +308,15 @@ export function createConversationCompactionCommandHandler(
         throw error;
       }
       if (
-        !result.cleanupConfirmed
-        && !await confirmCompactionCleanup(
-          dependencies,
-          conversation.id,
-          { runId: compactionRunId, turnId: compactionTurnId },
-        )
+        (lifetimeStop || !result.cleanupConfirmed)
+        && !await confirmCleanup()
       ) {
         releaseAuthority = false;
         throw new RuntimeRequestError(
           "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely.",
         );
       }
+      dependencies.lifetimeSignal?.throwIfAborted();
       if (result.status !== "completed") {
         throw new RuntimeRequestError(result.message);
       }
@@ -346,6 +350,7 @@ export function createConversationCompactionCommandHandler(
       });
       return "handled";
     } finally {
+      dependencies.lifetimeSignal?.removeEventListener("abort", stopForRuntimeShutdown);
       if (releaseAuthority) {
         dependencies.providerTerminalResumes.release(conversation.id);
       }

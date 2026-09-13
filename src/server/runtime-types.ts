@@ -1,3 +1,4 @@
+import type { WindowsTerminalAuthority } from "../node/windows-terminal-authority";
 import type { BackendCredentialStatus } from "../shared/backend-credentials.js";
 import type { IncidentSink } from "../node/application-incidents.js";
 import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles.js";
@@ -53,6 +54,7 @@ export interface RuntimeOptions {
   runtimeGenerationId: string;
   systemBootId: string;
   runtimeProcessGuardianPath?: string;
+  windowsTerminalAuthority?: WindowsTerminalAuthority;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
   manuallyRetiredRuntimeGenerationIds?: readonly string[];
   manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;

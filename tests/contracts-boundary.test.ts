@@ -55,6 +55,11 @@ describe("shared contracts boundary", () => {
     });
 
     expect(commandTypes).toEqual([
+      "usage.limits.get",
+      "usage.source.save",
+      "usage.source.remove",
+      "usage.reset.prepare",
+      "usage.reset.confirm",
       "conversation.messages.search",
       "conversation.messages.search.cancel",
       "conversation.message.reveal",

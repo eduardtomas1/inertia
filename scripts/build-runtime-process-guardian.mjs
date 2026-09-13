@@ -30,6 +30,8 @@ import {
 } from "./bounded-process-tree.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const macosDeploymentTarget = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  .build.mac.minimumSystemVersion;
 const testOutputDirectory =
   process.env.NODE_ENV === "test" &&
   typeof process.env.INERTIA_TEST_GUARDIAN_OUTPUT_DIRECTORY === "string" &&
@@ -127,6 +129,7 @@ async function buildWindowsGuardian(runCompiler, runBootstrapLeaf) {
     "/reference:System.dll",
     "/reference:System.Core.dll",
     sourcePath,
+    join(root, "native", "runtime-process-guardian", "windows-terminal.cs"),
   ];
   const environment = {
     PATH: win32.dirname(compiler),
@@ -207,7 +210,7 @@ async function buildUnixGuardian(runCompiler) {
     (process.platform === "darwin" ? "/usr/bin/xcrun" : "/usr/bin/musl-gcc");
   const compilerArgs =
     process.platform === "darwin"
-      ? ["clang"]
+      ? ["clang", `-mmacosx-version-min=${macosDeploymentTarget}`]
       : [
           "-static-pie",
           "-s",

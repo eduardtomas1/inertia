@@ -112,9 +112,14 @@ export class TurnRunStateCoordinator {
     };
     if (active.providerRunStarted) {
       active.runState.requestTerminal(active.deferredSettlement.status);
-      this.suspendForProviderStop(active);
-      this.persist(active);
-      this.stopOwnedProviderAndRelease(active);
+      try {
+        this.suspendForProviderStop(active);
+        this.persist(active);
+      } finally {
+        // A failed cancellation write cannot strand the already durable run
+        // owner after watchdogs stop. Exact cleanup still owns its release.
+        this.stopOwnedProviderAndRelease(active);
+      }
       broadcastTurnConversationShell(this.options.hooks, active);
       return firstRequest;
     }

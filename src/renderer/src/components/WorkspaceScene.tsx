@@ -12,7 +12,6 @@ import {
 } from "react";
 
 import { ChatWorkspace } from "./ChatWorkspace";
-import { ConversationSplitView } from "./ConversationSplitView";
 import { ConversationDetailState } from "./ConversationDetailState";
 import {
   DetachedConversationPlaceholder,
@@ -27,6 +26,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
+  loadConversationSplitView,
   loadFilesPanel,
   loadEnvironmentPanel,
   loadGoalPanel,
@@ -50,6 +50,10 @@ function lazySurface<TModule, TProps>(
 const EnvironmentPanel = lazySurface(
   loadEnvironmentPanel,
   (module) => module.EnvironmentPanel,
+);
+const ConversationSplitView = lazySurface(
+  loadConversationSplitView,
+  (module) => module.ConversationSplitView,
 );
 const FilesPanel = lazySurface(loadFilesPanel, (module) => module.FilesPanel);
 const HistoricalDiffPanel = lazySurface(
@@ -243,6 +247,7 @@ function WorkspaceSceneView({
           ? <SettingsView {...settings} />
           : <LoadingMark label="Loading settings" />
       ) : splitScene ? (
+        <Suspense fallback={<LoadingMark label="Loading split view" />}>
         <ConversationSplitView
           layout={splitScene.layout}
           onLayoutChange={splitScene.onLayoutChange}
@@ -266,6 +271,7 @@ function WorkspaceSceneView({
             ),
           }))}
         />
+        </Suspense>
       ) : detachedChat ? (
         <DetachedConversationPlaceholder {...detachedChat} />
       ) : detailState ? (

@@ -29,6 +29,7 @@ const PROVIDER_INSTALLATION_PACKAGES: Readonly<
   gemini: "@google/gemini-cli",
   kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
+  antigravity: null,
 };
 
 export function providerInstallationPackageIdentity(

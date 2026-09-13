@@ -37,6 +37,7 @@ export const providerIdSchema = z.enum([
   "gemini",
   "kimi",
   "opencode",
+  "antigravity",
 ]);
 export const accessModeSchema = z.enum(["supervised", "auto-edit", "full"]);
 export const interactionModeSchema = z.enum(["build", "plan"]);

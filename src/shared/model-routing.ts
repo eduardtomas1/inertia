@@ -17,6 +17,7 @@ export const KNOWN_HARNESS_IDS = [
 export const CURRENT_KNOWN_HARNESS_IDS = [
   ...KNOWN_HARNESS_IDS,
   "gemini-acp",
+  "antigravity-cli",
 ] as const;
 
 export type KnownHarnessId = (typeof CURRENT_KNOWN_HARNESS_IDS)[number];
@@ -30,6 +31,7 @@ export const MODEL_BACKEND_PROTOCOLS = [
   "gemini-managed",
   "kimi-managed",
   "opencode-native",
+  "antigravity-managed",
 ] as const;
 
 export type ModelBackendProtocol = (typeof MODEL_BACKEND_PROTOCOLS)[number];
@@ -129,6 +131,7 @@ export const HARNESS_BACKEND_COMPATIBILITY_REASON_CODES = [
   "gemini-managed",
   "kimi-managed",
   "opencode-native-catalog",
+  "antigravity-managed",
 ] as const;
 
 export type HarnessBackendCompatibilityReasonCode =
@@ -464,6 +467,7 @@ const NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
 const CURRENT_NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   ...NATIVE_HARNESS,
   gemini: "gemini-acp",
+  antigravity: "antigravity-cli",
 };
 
 const CURRENT_NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
@@ -472,6 +476,16 @@ const CURRENT_NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>>
     id: "builtin:gemini",
     displayName: "Google Gemini",
     protocol: "gemini-managed",
+    authenticationMode: "harness-managed",
+    source: "built-in",
+    enabled: true,
+    configurationRevision: 0,
+    endpointIdentity: null,
+  },
+  antigravity: {
+    id: "builtin:antigravity",
+    displayName: "Google Antigravity",
+    protocol: "antigravity-managed",
     authenticationMode: "harness-managed",
     source: "built-in",
     enabled: true,
@@ -491,6 +505,7 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "kimi-acp": "kimi-managed",
   "opencode-sdk": "opencode-native",
   "opencode-cli": "opencode-native",
+  "antigravity-cli": "antigravity-managed",
 };
 
 export function nativeHarnessId(providerId: ProviderId): KnownHarnessId {
@@ -566,6 +581,7 @@ export function providerNativeBackendProfile(
 
 export function providerIdForHarness(harnessId: HarnessId): ProviderId | null {
   if (harnessId === "gemini-acp") return "gemini";
+  if (harnessId === "antigravity-cli") return "antigravity";
   return legacyProviderIdForHarness(harnessId);
 }
 
@@ -621,6 +637,7 @@ export function resolveHarnessBackendCompatibility(
     const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
     const geminiManaged = harnessId === "gemini-acp";
     const kimiManaged = harnessId === "kimi-acp";
+    const antigravityManaged = harnessId === "antigravity-cli";
     const openCodeNative = harnessId === "opencode-sdk" || harnessId === "opencode-cli";
     return {
       harnessId,
@@ -641,6 +658,8 @@ export function resolveHarnessBackendCompatibility(
           ? "gemini-managed"
         : kimiManaged
           ? "kimi-managed"
+        : antigravityManaged
+          ? "antigravity-managed"
         : openCodeNative
           ? "opencode-native-catalog"
           : "native-backend",
@@ -650,6 +669,8 @@ export function resolveHarnessBackendCompatibility(
           ? "Gemini CLI manages its backend; model selection follows the active ACP session."
         : kimiManaged
           ? "Kimi Code manages its backend; model and thinking selection follow the active ACP session."
+        : antigravityManaged
+          ? "Antigravity manages its backend; each turn uses the model and effort selected for it."
         : openCodeNative
           ? "OpenCode provides its native provider and model catalog."
           : "Built-in native harness and backend pairing.",
@@ -673,6 +694,7 @@ export function resolveHarnessBackendCompatibility(
     || harnessId === "cursor-cli"
     || harnessId === "gemini-acp"
     || harnessId === "kimi-acp"
+    || harnessId === "antigravity-cli"
     || harnessId === "opencode-sdk"
     || harnessId === "opencode-cli"
   ) {
@@ -689,6 +711,8 @@ export function resolveHarnessBackendCompatibility(
           ? "gemini-managed"
         : harnessId.startsWith("kimi-")
           ? "kimi-managed"
+        : harnessId.startsWith("antigravity-")
+          ? "antigravity-managed"
         : "opencode-native-catalog",
       reason: harnessId.startsWith("cursor-")
         ? "Cursor controls its backend; Inertia does not inject external backend profiles."
@@ -696,6 +720,8 @@ export function resolveHarnessBackendCompatibility(
           ? "Gemini CLI controls its backend; Inertia does not inject external backend profiles."
         : harnessId.startsWith("kimi-")
           ? "Kimi Code controls its backend; Inertia does not inject external backend profiles."
+        : harnessId.startsWith("antigravity-")
+          ? "Antigravity controls its backend; Inertia does not inject external backend profiles."
         : "Select a provider and model from OpenCode's native catalog.",
     };
   }

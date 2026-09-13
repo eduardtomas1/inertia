@@ -18,7 +18,7 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
   },
   gemini: {
     id: "gemini",
-    name: "Gemini",
+    name: "Gemini CLI",
     command: "gemini",
   },
   kimi: {
@@ -30,6 +30,11 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     id: "opencode",
     name: "OpenCode",
     command: "opencode",
+  },
+  antigravity: {
+    id: "antigravity",
+    name: "Antigravity",
+    command: "agy",
   },
 });
 

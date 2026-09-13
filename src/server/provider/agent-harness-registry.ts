@@ -1,3 +1,4 @@
+import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
@@ -28,6 +29,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "gemini-acp": "gemini",
   "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
+  "antigravity-cli": "antigravity",
 };
 
 export class AgentHarnessRegistry {
@@ -79,6 +81,7 @@ export class AgentHarnessRegistry {
         input.providerId === "cursor"
         || input.providerId === "gemini"
         || input.providerId === "kimi"
+        || input.providerId === "antigravity"
         || input.providerId === "opencode"
       ) {
         throw new ProviderRuntimeError(
@@ -89,6 +92,8 @@ export class AgentHarnessRegistry {
               ? "Gemini CLI controls its backend; external backend profiles cannot be injected."
             : input.providerId === "kimi"
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
+            : input.providerId === "antigravity"
+              ? "Antigravity controls its backend; external backend profiles cannot be injected."
               : "OpenCode backends must come from OpenCode's native provider catalog.",
         );
       }
@@ -142,6 +147,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createGeminiAcpHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
+    createAntigravityCliHarness(),
   ]);
   const registered = registry.list().map((harness) =>
     `${harness.providerId}\0${harness.id}`);

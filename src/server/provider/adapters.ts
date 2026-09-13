@@ -492,6 +492,12 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
       );
     }
 
+    case "antigravity": {
+      throw new Error(
+        "Antigravity requires its native headless harness; legacy CLI invocation is unsupported.",
+      );
+    }
+
     case "kimi": {
       throw new Error(
         "Kimi Code requires its native ACP harness; legacy CLI invocation is unsupported.",

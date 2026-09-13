@@ -107,6 +107,10 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
     /^GOOGLE_APPLICATION_CREDENTIALS$/u,
     /^KIMI_[A-Z0-9_]+$/u,
   ],
+  antigravity: [
+    /^GEMINI_API_KEY$/u,
+    /^GOOGLE_GEMINI_BASE_URL$/u,
+  ],
   opencode: [
     /^(?:ANTHROPIC|CEREBRAS|COHERE|DEEPSEEK|FIREWORKS|GEMINI|GROQ|MISTRAL|OPENAI|OPENROUTER|PERPLEXITY|TOGETHER|XAI)_API_KEY$/u,
     /^(?:AZURE_OPENAI|GOOGLE_GENERATIVE_AI)_[A-Z0-9_]+$/u,
@@ -359,6 +363,7 @@ async function commonExecutableDirectories(
       volta ? join(volta, "bin") : join(home, ".volta", "bin"),
       local ? join(local, "Programs", "OpenAI", "Codex", "bin") : "",
       local ? join(local, "Programs", "cursor", "resources", "app", "bin") : "",
+      local ? join(local, "agy", "bin") : "",
       join(home, "AppData", "Roaming", "npm"),
     ]);
   }

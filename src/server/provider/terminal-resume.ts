@@ -119,6 +119,8 @@ export function providerTerminalResumeArguments(
     case "kimi":
     case "opencode":
       return ["--session", sessionId];
+    case "antigravity":
+      return ["--conversation", sessionId];
   }
 }
 

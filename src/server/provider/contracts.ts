@@ -29,6 +29,7 @@ export const PROVIDER_IDS = [
   "gemini",
   "kimi",
   "opencode",
+  "antigravity",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];

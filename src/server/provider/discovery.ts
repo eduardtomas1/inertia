@@ -43,6 +43,7 @@ import {
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const CANCELLED_PROBE_COMPLETION_DRAIN_MS = 250;
 export const GEMINI_MINIMUM_STABLE_ACP_VERSION = "0.58.0";
+export const ANTIGRAVITY_MINIMUM_HEADLESS_VERSION = "1.2.2";
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
@@ -78,6 +79,15 @@ function geminiCandidateIsIdentified(
 ): boolean {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
   return name === "gemini" || /\bgemini(?:[ -]cli)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
+function providerShortName(name: string): string {
+  return name.replace(/ CLI$/u, "");
+}
+
+function antigravityCandidateIsIdentified(executable: string): boolean {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "agy" || name === "antigravity";
 }
 
 function versionFromOutput(output: string): string | undefined {
@@ -297,6 +307,11 @@ function geminiVersionSupportsStableAcp(version: string | undefined): boolean {
   if (comparison !== 0) return comparison > 0;
   // A prerelease of the minimum version does not meet the stable boundary.
   return !/-[0-9A-Za-z.-]+(?:\+|$)/u.test(version);
+}
+
+function antigravityVersionSupportsHeadless(version: string | undefined): boolean {
+  return Boolean(version)
+    && compareVersions(version, ANTIGRAVITY_MINIMUM_HEADLESS_VERSION) >= 0;
 }
 
 function nativeExecutablePreference(executable: string): number {
@@ -549,7 +564,12 @@ export async function detectProvider(
       executable,
       probe,
       version,
-      versionReady: providerId !== "gemini" || geminiVersionSupportsStableAcp(version),
+      versionReady: providerId === "gemini"
+        ? geminiVersionSupportsStableAcp(version)
+        : providerId === "antigravity"
+          ? antigravityCandidateIsIdentified(executable)
+            && antigravityVersionSupportsHeadless(version)
+          : true,
       acpReady,
       appServerReady,
       serveReady,
@@ -607,6 +627,11 @@ export async function detectProvider(
     const geminiRequiresStableUpgrade = Boolean(
       bestGeminiInstall && !bestGeminiInstall.versionReady,
     );
+    const antigravityInstall = providerId === "antigravity"
+      ? versionProbes.find(({ executable, probe }) =>
+          antigravityCandidateIsIdentified(executable)
+          && probe.started && !probe.timedOut && probe.exitCode === 0)
+      : undefined;
     const providerWithoutPureServe =
       providerId === "opencode" &&
       versionProbes.some(
@@ -614,7 +639,7 @@ export async function detectProvider(
       );
     return {
       provider,
-      available: providerWithoutAcp || providerWithoutPureServe,
+      available: providerWithoutAcp || providerWithoutPureServe || Boolean(antigravityInstall),
       ...(bestGeminiInstall
         ? {
             executable: bestGeminiInstall.executable,
@@ -624,20 +649,24 @@ export async function detectProvider(
           }
         : {}),
       installState:
-        providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
+        providerWithoutAcp || providerWithoutPureServe || antigravityInstall
+          ? "installed"
+          : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
+        : antigravityInstall
+          ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${ANTIGRAVITY_MINIMUM_HEADLESS_VERSION} or newer; run 'agy update'`
         : geminiRequiresStableUpgrade
           ? bestGeminiInstall?.version
             ? `${provider.name} ${bestGeminiInstall.version} is installed, but stable ACP requires ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer; update ${provider.name}`
             : `${provider.name} is installed, but its version could not be verified; install ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer for stable ACP`
           : providerWithoutAcp
             ? providerId === "gemini"
-              ? `${provider.name} CLI found, but stable ACP is unavailable; update the selected CLI`
-              : `${provider.name} CLI found, but ACP is unavailable`
+              ? `${providerShortName(provider.name)} CLI found, but stable ACP is unavailable; update the selected CLI`
+              : `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
             : providerWithoutPureServe
               ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
               : providerId === "codex"
@@ -740,7 +769,9 @@ export async function detectProvider(
       authState: "unknown",
       canRun: true,
       cleanupConfirmed: true,
-      statusMessage: `Installed; ${provider.name} ACP will verify authentication when a session starts`,
+      statusMessage: providerId === "antigravity"
+        ? "Installed; Antigravity checks your sign-in when a turn starts"
+        : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
     };
   }
   const authArgs =

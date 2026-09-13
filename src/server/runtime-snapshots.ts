@@ -48,6 +48,7 @@ function agentThreadManagement(
     gemini: "Gemini's scoped MCP session",
     kimi: "Kimi Code's scoped MCP session",
     opencode: "OpenCode's scoped MCP session",
+    antigravity: "Antigravity",
   }[providerId];
   return capabilityContract?.installationVerified
     && capabilityContract.hostToolBridgeAvailable

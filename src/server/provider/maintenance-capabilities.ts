@@ -61,6 +61,7 @@ const INSTRUCTIONS_URLS: Readonly<
   gemini: "https://geminicli.com/docs/get-started/installation/",
   kimi: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
   opencode: "https://opencode.ai/docs/cli/#upgrade",
+  antigravity: "https://antigravity.google/docs/cli/install/",
 };
 
 function normalizedPath(value: string): string {

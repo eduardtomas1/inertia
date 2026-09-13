@@ -29,6 +29,7 @@ const PROVIDER_AUTH: Readonly<Record<ProviderId, ProviderAuthCommands>> =
     },
     kimi: { statusArgs: ["provider", "list", "--json"], loginArgs: ["login"] },
     opencode: { statusArgs: ["auth", "list"], loginArgs: ["auth", "login"] },
+    antigravity: { statusArgs: null, loginArgs: [] },
   });
 
 export function providerAuthStatusArgs(

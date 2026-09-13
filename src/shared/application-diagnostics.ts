@@ -164,7 +164,7 @@ export const DIAGNOSTIC_CATALOG = {
 
 export type DiagnosticCode = keyof typeof DIAGNOSTIC_CATALOG;
 const codeSchema = z.enum(Object.keys(DIAGNOSTIC_CATALOG) as [DiagnosticCode, ...DiagnosticCode[]]);
-const providerSchema = z.enum(["codex", "claude", "cursor", "gemini", "kimi", "opencode"]);
+const providerSchema = z.enum(["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"]);
 const timestampSchema = z.string().datetime().max(30);
 const uuidSchema = z.string().uuid();
 const generationSchema = z.string().max(64).refine((value) => {

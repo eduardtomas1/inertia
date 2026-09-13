@@ -1,7 +1,7 @@
 import type { ProviderId } from "./provider";
 
 const PROVIDER_IDS = new Set<ProviderId>([
-  "codex", "claude", "cursor", "gemini", "kimi", "opencode",
+  "codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity",
 ]);
 
 export type ProviderIdentityLabels = Partial<Record<ProviderId, string>>;

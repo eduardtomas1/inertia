@@ -29,6 +29,7 @@ const recoveryConversationFields = {
     "gemini",
     "kimi",
     "opencode",
+    "antigravity",
   ]),
   model: z.string().max(300),
   reasoningEffort: z.string().max(80),

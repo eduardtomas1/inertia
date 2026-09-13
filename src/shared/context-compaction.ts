@@ -1,5 +1,5 @@
 import type { ProviderId } from "./provider";
-const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"];
+const PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"];
 
 /** Provider-confirmed context mutation; it is not an agent turn. */
 export interface ContextCompaction {

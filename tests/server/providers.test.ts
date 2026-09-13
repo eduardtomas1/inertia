@@ -1139,9 +1139,93 @@ setInterval(() => {}, 1000);
       canRun: false,
       cleanupConfirmed: true,
       statusMessage:
-        "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
+        "Gemini CLI 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini CLI",
     });
     expect(probes).toEqual([["--version"], ["--help"]]);
+  });
+
+  it("detects Antigravity from its version alone and never probes sign-in", async () => {
+    const executable = join(temporaryRoot(), "agy");
+    const probes: string[][] = [];
+    await expect(
+      detectProvider(
+        "antigravity",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => {
+            probes.push([...args]);
+            return {
+              exitCode: 0,
+              output: "1.2.2",
+              started: true,
+              timedOut: false,
+              cleanupConfirmed: true,
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "1.2.2",
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      cleanupConfirmed: true,
+      statusMessage: "Installed; Antigravity checks your sign-in when a turn starts",
+    });
+    expect(probes).toEqual([["--version"]]);
+    expect(providerAuthStatusArgs("antigravity")).toBeNull();
+    expect(providerAuthLoginArgs("antigravity")).toEqual([]);
+    expect(providerAuthLaunchEnvironment("antigravity", { TERM: "xterm" }))
+      .toEqual({ TERM: "xterm" });
+  });
+
+  it("asks for an Antigravity update below the headless stream-json release", async () => {
+    const executable = join(temporaryRoot(), "agy");
+    await expect(
+      detectProvider(
+        "antigravity",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async () => ({
+            exitCode: 0,
+            output: "1.1.0",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      canRun: false,
+      statusMessage:
+        "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
+    });
+  });
+
+  it("refuses an Antigravity command that is not the agy executable", async () => {
+    const executable = join(temporaryRoot(), "antigravity-helper");
+    await expect(
+      detectProvider(
+        "antigravity",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async () => ({
+            exitCode: 0,
+            output: "1.2.2",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({ canRun: false });
   });
 
   it("rejects a current Gemini candidate that does not advertise the exact ACP flag", async () => {

@@ -78,7 +78,7 @@ const safeMultilineSchema = (maximum: number) => z.string()
   .max(maximum)
   .refine((value) => !value.includes("\0"));
 const routeSchema = z.object({
-  providerId: z.enum(["codex", "claude", "cursor", "gemini", "kimi", "opencode"])
+  providerId: z.enum(["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"])
     .optional(),
   backendProfileId: safeSingleLineSchema(200).optional(),
   modelId: safeSingleLineSchema(300).optional(),
@@ -177,7 +177,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             providerId: {
-              enum: ["codex", "claude", "cursor", "gemini", "kimi", "opencode"],
+              enum: ["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"],
             },
             backendProfileId: { type: "string", minLength: 1, maxLength: 200 },
             modelId: { type: "string", minLength: 1, maxLength: 300 },

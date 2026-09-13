@@ -125,7 +125,8 @@ type ProductionHarnessId =
   | "cursor-acp"
   | "gemini-acp"
   | "kimi-acp"
-  | "opencode-sdk";
+  | "opencode-sdk"
+  | "antigravity-cli";
 
 interface ManifestDefinition {
   readonly providerId: ProviderId;
@@ -201,6 +202,7 @@ const PROVIDER_IDS = new Set<ProviderId>([
   "gemini",
   "kimi",
   "opencode",
+  "antigravity",
 ]);
 const CAPABILITY_IDS = new Set<ProviderCapabilityId>(PROVIDER_CAPABILITY_IDS);
 const SUPPORT_VALUES = new Set<ProviderCapabilitySupport>([
@@ -236,6 +238,7 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "gemini-acp": "tests/server/gemini-acp-harness.test.ts",
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
+  "antigravity-cli": "tests/server/antigravity-cli-harness.test.ts",
 };
 
 const CORE_NATIVE = {
@@ -367,6 +370,26 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "follow-up-steer": "native",
       "usage-tokens": "native",
       "provider-owned-server": "native",
+    },
+  },
+  {
+    providerId: "antigravity",
+    harnessId: "antigravity-cli",
+    implementationRevision: 1,
+    protocolRevision: "headless-stream-json/agy-1.2.2",
+    bundledSdkVersion: null,
+    support: {
+      "text-streaming": "native",
+      "tool-activity": "native",
+      "file-changes": "native",
+      plans: "native",
+      "session-resume": "native",
+      "usage-tokens": "native",
+      "provider-native-tools": "native",
+      cancellation: "native",
+      "native-session-id": "native",
+      "process-cleanup": "host-exact-turn",
+      "maintenance-update": "unavailable",
     },
   },
 ];

@@ -112,7 +112,10 @@ describe.runIf(process.platform === "win32")("native managed Windows terminal Jo
     const command = userShell("win32").executable;
     expect(command).toBe("powershell.exe");
     const action = launched("", undefined, command, ["-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine('FALLBACK_READY'); exit 7"]);
-    await expect.poll(action.output, { timeout: 4000 }).toContain("FALLBACK_READY");
+    // Cold ARM64 helper-path startup took 8.212s in run 34727886221; see the
+    // open observation in docs/ISSUE_356_TRIAGE.md. This new fixture allowance
+    // does not change the native 3s admission or 2s complete-Job Stop deadlines.
+    await expect.poll(action.output, { timeout: process.arch === "arm64" ? 15000 : 4000 }).toContain("FALLBACK_READY");
     await expect.poll(action.exit, { timeout: 4000 }).toBe(7);
     expect(await action.owned.waitForGuardianStop()).toBe(true);
   });

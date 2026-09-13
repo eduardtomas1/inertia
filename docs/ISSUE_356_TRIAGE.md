@@ -32,6 +32,17 @@ resolved. PR #357 incorporates the bounded corrections below.
 - **D2:** actual SQLite query plans confirm compaction queries can scan history
   by turn ID. No user-visible latency threshold was established by that query
   plan alone. Indexing remains a separate measured performance follow-up.
+- **Windows ARM64 cold shell startup (Refs #356):** the new managed-action
+  helper took 7.045s and 8.212s to emit the ComSpec-unset PowerShell fixture's
+  first marker on fresh hosted runners. Both exited normally with code 7 and
+  exact complete-Job cleanup. The [8.212s observation](https://github.com/eduardtomas1/inertia/actions/runs/34727886221)
+  recorded only 843ms of payload CPU, but did not identify the wait's cause.
+  Direct and inherited-Node controls were faster; parent image, environment
+  reconstruction and Job nesting were not independently isolated. This remains
+  an open performance observation, not a claimed latency fix. Only the new
+  ARM64 fallback fixture permits 15s for its marker; x64 remains at 4s. Native
+  admission stays at 3s, complete-Job Stop at 2s, and all exit, I/O, sibling and
+  ownership assertions remain unchanged.
 
 The database permission and worktree permission witnesses require an
 unprivileged POSIX user. Their Windows cases remain covered by injected

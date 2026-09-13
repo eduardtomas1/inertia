@@ -46,7 +46,7 @@ export function SnapshotControl({ conversationId, unavailableReason = null }: {
   }, [open]);
   if (!window.inertia?.snapshot) return null;
   if (unavailableReason) {
-    return <IconButton label={unavailableReason} disabled onClick={() => undefined}><Camera size={16} /></IconButton>;
+    return <IconButton label={`Snapshots. ${unavailableReason}`} disabled onClick={() => undefined}><Camera size={16} /></IconButton>;
   }
   return <>
     <IconButton label="Snapshots" onClick={() => setOpen(true)}><Camera size={16} /></IconButton>

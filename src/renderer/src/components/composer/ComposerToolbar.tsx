@@ -257,9 +257,10 @@ export function ComposerToolbar({
         <IconButton
           label={running
             ? imageInputUnavailableReason
-              ?? (canSendAttachmentWhileRunning
+              ? `Attach images. ${imageInputUnavailableReason}`
+              : canSendAttachmentWhileRunning
                 ? "Attach follow-up images"
-                : "Attach queued images")
+                : "Attach queued images"
             : imageInputUnavailableReason
               ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
               : "Attach images, documents, or spreadsheets"}

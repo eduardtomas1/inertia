@@ -93,6 +93,8 @@ The useful changes in each Inertia release, in plain language.
 - macOS recovery can offer consent after a crash interrupts an ownership-journal
   write, while malformed committed records remain blocked. Windows terminals
   retain the latest requested size while their native session starts.
+- Windows workspace actions stop cleanly when child processes reparent or exit
+  during shutdown, while preserving unrelated terminals.
 - Each provider's completed model catalog appears independently. Settings
   Refresh can recover an unavailable catalog without restarting the app.
 - Quitting during provider detection lets an already-finished authentication

@@ -74,7 +74,7 @@ describe("thread notification lifecycle", () => {
             snapshot={snapshot(thread)}
             documentActive={false}
             activeConversationVisible={false}
-            secondaryConversationId={null}
+            splitConversationIds={new Set()}
             enabled
             onActivate={(conversation) => activateNotificationConversation(
               conversation,
@@ -134,7 +134,7 @@ describe("thread notification lifecycle", () => {
         snapshot={null}
         documentActive={false}
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -149,7 +149,7 @@ describe("thread notification lifecycle", () => {
         snapshot={snapshot(first)}
         documentActive={false}
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -161,7 +161,7 @@ describe("thread notification lifecycle", () => {
         snapshot={snapshot(latest)}
         documentActive={false}
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -174,7 +174,7 @@ describe("thread notification lifecycle", () => {
         snapshot={{ ...snapshot(latest) }}
         documentActive={false}
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -208,7 +208,7 @@ describe("thread notification lifecycle", () => {
         snapshot={idle}
         documentActive={false}
         activeConversationVisible
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -218,7 +218,7 @@ describe("thread notification lifecycle", () => {
         snapshot={completed}
         documentActive={false}
         activeConversationVisible
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={onActivate}
       />,
@@ -230,7 +230,7 @@ describe("thread notification lifecycle", () => {
         snapshot={completed}
         documentActive={false}
         activeConversationVisible
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled={false}
         onActivate={onActivate}
       />,
@@ -267,7 +267,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeIdle}
         documentActive
         activeConversationVisible
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={vi.fn()}
       />,
@@ -277,7 +277,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeCompleted}
         documentActive
         activeConversationVisible
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={vi.fn()}
       />,
@@ -289,7 +289,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeIdle}
         documentActive
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={vi.fn()}
       />,
@@ -299,7 +299,7 @@ describe("thread notification lifecycle", () => {
         snapshot={activeCompleted}
         documentActive
         activeConversationVisible={false}
-        secondaryConversationId={null}
+        splitConversationIds={new Set()}
         enabled
         onActivate={vi.fn()}
       />,
@@ -337,7 +337,7 @@ describe("thread notification lifecycle", () => {
         snapshot={splitSnapshot(secondaryIdle)}
         documentActive
         activeConversationVisible
-        secondaryConversationId={secondaryIdle.id}
+        splitConversationIds={new Set([secondaryIdle.id])}
         enabled
         onActivate={vi.fn()}
       />,
@@ -348,7 +348,7 @@ describe("thread notification lifecycle", () => {
         snapshot={splitSnapshot(secondaryCompleted)}
         documentActive
         activeConversationVisible
-        secondaryConversationId={secondaryIdle.id}
+        splitConversationIds={new Set([secondaryIdle.id])}
         enabled
         onActivate={vi.fn()}
       />,

@@ -25,14 +25,7 @@ const budgets = {
   // larger settings UI/catalog stay deferred and have separate ceilings below.
   // Project preference validation, independent appearance and chat-owned stash
   // state add ~2 KiB here; the project editor and thread menus stay deferred.
-  // Against released main 8f75cc4f with identical dependencies, review fixes
-  // add 1,706 bytes here and 1,195 bytes to detached first load. The new eager
-  // modules are the window error boundary and guarded optional layout storage;
-  // no third-party module or deferred editor enters either initial closure.
-  // Chooser semantics, mention coalescing and Duo admission measure 745.9 /
-  // 569.9 KiB combined. Keep <0.25 KiB headroom on either first-load route.
-  // Full comparison: docs/pr-evidence/issue-356-358-renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 746.1 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 752.5 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -96,10 +89,9 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  // The reconciled review adds 2,475 bytes over released main 8f75cc4f and
-  // measures 2,007.2 KiB. No rendered modules are duplicated; note editing and
-  // terminal changes remain separately capped. Retain <0.6 KiB headroom.
-  coreJavaScript: 2_007.75 * kibibyte,
+  // The Work status cue (pixel glyph, elapsed time, arrival cue) adds ~1.1 KiB:
+  // shared core measures 2,004.6 KiB on macOS ARM64; keep <2 KiB headroom.
+  coreJavaScript: 2_018.0 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

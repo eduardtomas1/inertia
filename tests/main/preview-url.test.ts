@@ -91,7 +91,7 @@ describe("main preview URL boundary", () => {
     expect(broker).toContain("this.options.openExternal");
   });
 
-  it("bounds preview ownership to the two conversation panes", async () => {
+  it("bounds preview ownership to the four conversation panes", async () => {
     const identity = await readFile(
       new URL("../../src/main/preview-identity.ts", import.meta.url),
       "utf8",
@@ -102,6 +102,8 @@ describe("main preview URL boundary", () => {
 
     expect(ownerBoundary).toContain('value !== "primary"');
     expect(ownerBoundary).toContain('value !== "secondary"');
+    expect(ownerBoundary).toContain('value !== "tertiary"');
+    expect(ownerBoundary).toContain('value !== "quaternary"');
     expect(ownerBoundary).not.toContain("RegExp");
   });
 

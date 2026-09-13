@@ -37,7 +37,7 @@ export function useDismissibleMenu<Menu extends string>(): {
     else popovers.current.delete(name);
   }, []);
 
-  const restoreTriggerFocus = useCallback((name: Menu | null) => {
+  const restoreTriggerFocus = useCallback((name: Menu | null, afterPointer = false) => {
     if (!name) return;
     pendingFocusCleanup.current?.();
     pendingFocusCleanup.current = null;
@@ -49,7 +49,7 @@ export function useDismissibleMenu<Menu extends string>(): {
       pendingFocusCleanup.current = null;
     };
     let removeIntentListeners = (): void => undefined;
-    const intentTimer = window.setTimeout(() => {
+    const listenForIntent = (): void => {
       if (generation !== focusGeneration.current) return;
       const cancel = (): void => {
         if (generation !== focusGeneration.current) return;
@@ -65,7 +65,9 @@ export function useDismissibleMenu<Menu extends string>(): {
         document.removeEventListener("pointerdown", cancel, true);
         document.removeEventListener("focusin", cancelOnFocusMove, true);
       };
-    }, 0);
+    };
+    const intentTimer = afterPointer ? window.setTimeout(listenForIntent, 0) : undefined;
+    if (!afterPointer) listenForIntent();
     pendingFocusCleanup.current = () => {
       window.clearTimeout(intentTimer);
       removeIntentListeners();
@@ -119,7 +121,7 @@ export function useDismissibleMenu<Menu extends string>(): {
         return;
       }
       dispatch({ type: "outside-pointer" });
-      if (outsidePointerShouldRestoreFocus(target)) restoreTriggerFocus(menu);
+      if (outsidePointerShouldRestoreFocus(target)) restoreTriggerFocus(menu, true);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {

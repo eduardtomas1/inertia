@@ -27,7 +27,7 @@ export function useThreadNotifications(
   snapshot: AppSnapshot | null,
   documentActive: boolean,
   activeConversationVisible: boolean,
-  secondaryConversationId: string | null,
+  splitConversationIds: ReadonlySet<string>,
   enabled: boolean,
   onActivate: (conversation: Conversation) => void,
 ): void {
@@ -89,7 +89,7 @@ export function useThreadNotifications(
         && activeConversationVisible
         && (
           snapshot.activeConversationId === conversation.id
-          || secondaryConversationId === conversation.id
+          || splitConversationIds.has(conversation.id)
         )
       ) continue;
       const notification = window.inertia?.showThreadNotification?.({
@@ -102,8 +102,8 @@ export function useThreadNotifications(
     activeConversationVisible,
     documentActive,
     enabled,
-    secondaryConversationId,
     snapshot,
+    splitConversationIds,
   ]);
 }
 
@@ -111,7 +111,7 @@ export function ThreadNotifications(props: {
   snapshot: AppSnapshot | null;
   documentActive: boolean;
   activeConversationVisible: boolean;
-  secondaryConversationId: string | null;
+  splitConversationIds: ReadonlySet<string>;
   enabled: boolean;
   onActivate: (conversation: Conversation) => void;
 }): null {
@@ -119,7 +119,7 @@ export function ThreadNotifications(props: {
     props.snapshot,
     props.documentActive,
     props.activeConversationVisible,
-    props.secondaryConversationId,
+    props.splitConversationIds,
     props.enabled,
     props.onActivate,
   );

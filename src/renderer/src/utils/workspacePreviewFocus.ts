@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 
-export type WorkspacePreviewOwner = "primary" | "secondary";
+export type WorkspacePreviewOwner = "primary" | "secondary" | "tertiary" | "quaternary";
 
 interface PendingPreviewTabCloseFocus {
   closedTabId: string;
@@ -45,18 +45,13 @@ export function routeWorkspaceRunPreview<Run extends {
   conversationId: string | null;
 }>(
   run: Run,
-  secondaryConversationId: string | null,
+  panes: ReadonlyArray<readonly [string | null, (run: Run) => void]>,
   openPrimary: (run: Run) => void,
-  openSecondary: (run: Run) => void,
 ): void {
-  if (
-    run.conversationId !== null
-    && run.conversationId === secondaryConversationId
-  ) {
-    openSecondary(run);
-    return;
-  }
-  openPrimary(run);
+  const pane = run.conversationId === null
+    ? undefined
+    : panes.find(([conversationId]) => conversationId === run.conversationId);
+  (pane?.[1] ?? openPrimary)(run);
 }
 
 interface PendingWorkspacePreviewFocus {

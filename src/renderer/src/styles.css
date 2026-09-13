@@ -14484,35 +14484,21 @@ button.sent-attachment-open:focus-visible {
 
 /* Each split pane owns its chat, project context, and bottom tool surface. */
 .conversation-split-view {
-  display: grid;
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
-  grid-template-columns:
-    minmax(0, var(--conversation-split-percent))
-    7px
-    minmax(0, calc(100% - var(--conversation-split-percent) - 7px));
   overflow: hidden;
   background: var(--conversation-canvas-surface);
 }
 
 .conversation-split-pane {
+  position: absolute;
   display: flex;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-}
-
-.conversation-split-pane.is-primary-position {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.conversation-split-pane.is-secondary-position {
-  grid-column: 3;
-  grid-row: 1;
-  border-left: 1px solid var(--execution-separator);
 }
 
 .conversation-split-header {
@@ -14532,7 +14518,7 @@ button.sent-attachment-open:focus-visible {
   font-size: var(--ui-font-micro);
 }
 
-.conversation-split-header > span:first-child {
+.conversation-split-header > span:first-of-type {
   flex: 0 0 auto;
   font-weight: 680;
   letter-spacing: 0.06em;
@@ -14610,10 +14596,29 @@ button.sent-attachment-open:focus-visible {
   flex: 0 0 7px;
 }
 
-.conversation-split-resize-handle {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: stretch;
+.conversation-split-frame {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.conversation-split-frame > .conversation-split-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.conversation-split-frame.is-columns > .conversation-split-resize-handle {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--split-ratio) - 3.5px);
+  width: 7px;
+}
+
+.conversation-split-frame.is-rows > .conversation-split-resize-handle {
+  top: calc(var(--split-ratio) - 3.5px);
+  right: 0;
+  left: 0;
+  height: 7px;
 }
 
 .conversation-row.is-split,
@@ -14627,32 +14632,62 @@ button.sent-attachment-open:focus-visible {
   color: var(--accent-strong);
 }
 
-.conversation-split-view.is-stacked {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows:
-    minmax(0, var(--conversation-split-percent))
-    7px
-    minmax(0, calc(100% - var(--conversation-split-percent) - 7px));
+.conversation-split-header.is-draggable {
+  cursor: grab;
 }
 
-.conversation-split-view.is-stacked
-  .conversation-split-pane.is-primary-position {
-  grid-column: 1;
-  grid-row: 1;
+.conversation-split-grip {
+  flex: 0 0 auto;
+  margin-left: -3px;
+  color: var(--metadata-text);
 }
 
-.conversation-split-view.is-stacked
-  .conversation-split-pane.is-secondary-position {
-  grid-column: 1;
-  grid-row: 3;
-  border-top: 1px solid var(--execution-separator);
-  border-left: 0;
+html[data-chat-drag],
+html[data-chat-drag] * {
+  cursor: grabbing !important;
+  user-select: none;
 }
 
-.conversation-split-view.is-stacked
-  .conversation-split-resize-handle {
-  grid-column: 1;
-  grid-row: 2;
+.split-drop-highlight {
+  position: fixed;
+  z-index: 115;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  color: var(--accent-strong);
+  font-size: var(--ui-font-secondary);
+  font-weight: 650;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
+.chat-drag-chip {
+  position: fixed;
+  z-index: 120;
+  top: 0;
+  left: 0;
+  max-width: 240px;
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-size: var(--ui-font-secondary);
+  font-weight: 600;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .split-drop-highlight {
+    border: 2px solid Highlight;
+    background: transparent;
+  }
 }
 
 @media (forced-colors: active) {

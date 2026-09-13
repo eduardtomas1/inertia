@@ -57,6 +57,7 @@ import {
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
+import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
@@ -136,7 +137,8 @@ function SidebarView({
   onSelectConversation,
   detachedConversationIds = EMPTY_DETACHED_CONVERSATION_IDS,
   detachedChatLimitReached = false,
-  splitConversationId,
+  splitConversationIds,
+  splitViewFull,
   onOpenConversationInSplit,
   onOpenConversationInWindow,
   onCloseConversationSplit,
@@ -616,7 +618,8 @@ function SidebarView({
         detachedChatLimitReached={detachedChatLimitReached}
         isDetached={detachedConversationIds.has(conversation.id)}
         runs={snapshot?.runs ?? []}
-        splitConversationId={splitConversationId}
+        splitConversationIds={splitConversationIds}
+        splitViewFull={splitViewFull}
         thread={thread}
         onAcknowledgeRun={onAcknowledgeRun}
         onArchiveConversation={onArchiveConversation}
@@ -693,7 +696,7 @@ function SidebarView({
         : null,
       conversation.pinnedAt ? "Pinned" : null,
       isDetached ? "Open in a separate chat window" : null,
-      splitConversationId === conversation.id ? "Open in split view" : null,
+      splitConversationIds.has(conversation.id) ? "Open in split view" : null,
       model.unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
@@ -703,7 +706,7 @@ function SidebarView({
           `status-${model.status}`,
           isActive && "is-active",
           isDetached && "is-detached",
-          splitConversationId === conversation.id && "is-split",
+          splitConversationIds.has(conversation.id) && "is-split",
           model.unread && "is-unread",
           conversationMenu === conversation.id && "has-open-menu",
           canOrganize && "has-thread-inline-actions",
@@ -739,6 +742,9 @@ function SidebarView({
             onPointerLeave={preview.leave}
             onFocus={(event) => preview.enter(conversation.id, event.currentTarget)}
             onBlur={preview.leave}
+            onPointerDown={view === "workspace" && !isDetached && conversation.archivedAt === null
+              ? (event) => startChatDrag(event, { conversationId: conversation.id, title: conversation.title }, preview.close)
+              : undefined}
             onKeyDown={(event) => {
               if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
               event.preventDefault(); event.stopPropagation(); preview.close();
@@ -752,7 +758,7 @@ function SidebarView({
             <span className="activity-thread-projectline">
               {project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
               <span className="activity-thread-project-meta" title={project?.path}>{projectLabel}</span>
-              <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationId === conversation.id} />
+              <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
                   conversationId={conversation.id}

@@ -5,6 +5,7 @@ export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
 }));
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
+export const loadConversationSplitView = createSurfaceLoader(() => import("./ConversationSplitView"));
 export const loadDailyWorkDialog = createSurfaceLoader(() => import("./DailyWorkDialog"));
 export const loadEnvironmentPanel = createSurfaceLoader(() => import("./EnvironmentPanel"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
@@ -26,6 +27,7 @@ export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./Wor
 
 const frequentSurfaceLoads = [
   loadCommandPalette,
+  loadConversationSplitView,
   loadDailyWorkDialog,
   loadSettingsView,
 ] as const;

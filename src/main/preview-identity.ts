@@ -3,10 +3,15 @@ import type { AgentBrowserRunIdentity } from "../shared/agent-browser.js";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-export type PreviewOwner = "primary" | "secondary";
+export type PreviewOwner = "primary" | "secondary" | "tertiary" | "quaternary";
 
 export function previewOwner(value: unknown): PreviewOwner {
-  if (value !== "primary" && value !== "secondary") {
+  if (
+    value !== "primary"
+    && value !== "secondary"
+    && value !== "tertiary"
+    && value !== "quaternary"
+  ) {
     throw new Error("Invalid preview owner");
   }
   return value;

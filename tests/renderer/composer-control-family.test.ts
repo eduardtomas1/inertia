@@ -191,7 +191,7 @@ describe("composer setting control family", () => {
       "outsidePointerShouldRestoreFocus(target)",
     );
     expect(dismissibleMenuSource).toContain(
-      "if (outsidePointerShouldRestoreFocus(target)) restoreTriggerFocus(menu)",
+      "if (outsidePointerShouldRestoreFocus(target)) restoreTriggerFocus(menu, true)",
     );
     expect(dismissibleMenuSource).toContain(
       'if (reason === "escape" || reason === "selection") restoreTriggerFocus(activeMenu)',

@@ -59,7 +59,7 @@ afterEach(async () => {
 
 function host(): PrivateConnectGatewayHost {
   return {
-    wellKnown: () => ({ pairingAvailable: true }),
+    pairingAllowed: () => true,
     pairStart: async () => ({ requestId: "33333333-3333-4333-8333-333333333333", expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123456" }),
     pairStatus: async () => ({ status: "pending", requestId: "33333333-3333-4333-8333-333333333333", expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123456" }),
     session: (cookie) => cookie === "session-token" ? session : null,
@@ -77,12 +77,42 @@ async function startServer(gatewayHost: PrivateConnectGatewayHost = host()): Pro
   writeFileSync(join(root, "index.html"), "<html>ok</html>");
   writeFileSync(join(root, "manifest.webmanifest"), "{}");
   writeFileSync(join(root, "service-worker.js"), "self.addEventListener('fetch', () => undefined);");
-  const server = new PrivateConnectGatewayServer({ host: gatewayHost, staticRoot: root, buildVersion: "0.0.24" });
+  const server = new PrivateConnectGatewayServer({ host: gatewayHost, staticRoot: root });
   servers.push(server);
   return { server, address: await server.start() };
 }
 
 describe("Private Connect loopback gateway", () => {
+  it.each([false, true])("rejects a held request body before reading it when session exists: %s", async (hasSession) => {
+    const { address } = await startServer();
+    const response = await new Promise<{ status: number; connection: string }>((resolve, reject) => {
+      const request = httpRequest({ hostname: "127.0.0.1", port: address.port, path: "/api/request", method: "POST",
+        headers: { Origin: `https://${hostHeader(address)}`, "Content-Type": "application/json", "Content-Length": "131072",
+          ...(hasSession ? { Cookie: "__Host-inertia-private-connect=session-token" } : {}) },
+      }, (response) => {
+        response.resume();
+        response.once("end", () => {
+          resolve({ status: response.statusCode ?? 0, connection: String(response.headers.connection) });
+          request.destroy();
+        });
+      });
+      request.once("error", reject);
+      request.setTimeout(1_000, () => { request.destroy(new Error("The gateway waited for an unauthorized body.")); });
+      request.flushHeaders();
+    });
+    expect(response).toEqual({ status: hasSession ? 403 : 401, connection: "close" });
+  });
+
+  it.each(["start", "status"])("rejects pairing %s before JSON parsing when no pairing is available", async (stage) => {
+    const gatewayHost = Object.assign(host(), { pairingAllowed: () => false });
+    const { address } = await startServer(gatewayHost);
+    const response = await fetch(`http://${hostHeader(address)}/api/pair/${stage}`, {
+      method: "POST", headers: { Origin: `https://${hostHeader(address)}`, "Content-Type": "application/json" },
+      body: "{",
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("connection")).toBe("close");
+  });
   it("caps sockets per device and shares the request quota across its sockets", async () => {
     const gatewayHost = host();
     gatewayHost.consumeWebSocketTicket = (ticket) => ticket === "other"
@@ -119,11 +149,12 @@ describe("Private Connect loopback gateway", () => {
     }
   });
   it("serves discovery with defensive headers and rejects invalid hosts", async () => {
-    const { address } = await startServer();
+    const { server, address } = await startServer();
     const response = await fetch(`http://${hostHeader(address)}/.well-known/inertia/private-connect`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect((await response.json()).product).toBe("Inertia Private Connect");
+    expect(await response.json()).toEqual({ product: "Inertia Private Connect", protocol: { minimum: 1, maximum: 1 }, endpointId: server.endpointId });
+    expect(server.endpointId).not.toBe((await startServer()).server.endpointId);
     expect(await requestWithHost(address.port, "bad host")).toBe(400);
   });
 
@@ -209,7 +240,6 @@ describe("Private Connect loopback gateway", () => {
     const server = new PrivateConnectGatewayServer({
       host: host(),
       staticRoot: root,
-      buildVersion: "0.0.24",
       transportTimeoutMs: 25,
     });
     servers.push(server);
@@ -254,7 +284,6 @@ describe("Private Connect loopback gateway", () => {
     const server = new PrivateConnectGatewayServer({
       host: blockingHost,
       staticRoot: root,
-      buildVersion: "0.0.24",
       requestTimeoutMs: 25,
       transportTimeoutMs: 25,
     });
@@ -292,13 +321,13 @@ describe("Private Connect loopback gateway", () => {
     let nowValue = 2_000_000;
     const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-rate-"));
     writeFileSync(join(root, "index.html"), "<html>ok</html>");
-    const server = new PrivateConnectGatewayServer({ host: host(), staticRoot: root, buildVersion: "0.0.24", now: () => new Date(nowValue) });
+    const server = new PrivateConnectGatewayServer({ host: host(), staticRoot: root, now: () => new Date(nowValue) });
     servers.push(server);
     const address = await server.start();
     const hostValue = hostHeader(address);
     const origin = `https://${hostValue}`;
     const invitation = { protocolVersion: 1, hostId: "11111111-1111-4111-8111-111111111111", invitationId: "33333333-3333-4333-8333-333333333333", pairingSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", createdAt: "2029-12-31T23:55:00.000Z", expiresAt: "2030-01-01T00:05:00.000Z" };
-    const pairRequest = () => fetch(`http://${hostValue}/api/pair/start`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ invitation, deviceId: session.deviceId, deviceLabel: "browser" }) });
+    const pairRequest = () => fetch(`http://${hostValue}/api/pair/start`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ invitation, deviceId: session.deviceId, deviceLabel: "browser", browserNonce: "a".repeat(43) }) });
     const pairStatuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
       const response = await pairRequest();
@@ -307,6 +336,14 @@ describe("Private Connect loopback gateway", () => {
     }
     expect(pairStatuses.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => 202));
     expect(pairStatuses.at(-1)).toBe(429);
+    // Serve proxies every peer through loopback. A different invitation
+    // capability must not inherit this exhausted peer's pairing quota.
+    const otherPair = await fetch(`http://${hostValue}/api/pair/start`, {
+      method: "POST", headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ invitation: { ...invitation, pairingSecret: "B".repeat(43) },
+        deviceId: session.deviceId, deviceLabel: "another browser", browserNonce: "b".repeat(43) }),
+    });
+    expect(otherPair.status).toBe(202);
     const request = (requestId: string) => fetch(`http://${hostValue}/api/request`, { method: "POST", headers: { Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "x-inertia-private-connect-csrf": session.csrf }, body: JSON.stringify({ protocolVersion: 1, type: "client.ping", requestId }) });
     const requestStatuses: number[] = [];
     for (let index = 0; index < 121; index += 1) {
@@ -341,7 +378,6 @@ describe("Private Connect loopback gateway", () => {
     const server = new PrivateConnectGatewayServer({
       host: blockingHost,
       staticRoot: root,
-      buildVersion: "0.0.24",
     });
     servers.push(server);
     const address = await server.start();
@@ -398,7 +434,6 @@ describe("Private Connect loopback gateway", () => {
     const server = new PrivateConnectGatewayServer({
       host: blockingHost,
       staticRoot: root,
-      buildVersion: "0.0.24",
       requestTimeoutMs: 25,
     });
     servers.push(server);

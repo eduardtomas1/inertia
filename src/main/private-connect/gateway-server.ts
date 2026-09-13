@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { readFile, realpath, stat } from "node:fs/promises";
@@ -8,6 +8,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import {
   PRIVATE_CONNECT_LIMITS,
   PRIVATE_CONNECT_SOCKET_CLOSE,
+  isPrivateConnectUuid,
   privateConnectInvitationSchema,
   privateConnectRequestSchema,
   type PrivateConnectRequest,
@@ -15,12 +16,14 @@ import {
 } from "../../shared/private-connect/protocol";
 import type { PrivateConnectInvitation } from "../../shared/private-connect/protocol";
 import { sanitizePrivateConnectLabel } from "../../shared/private-connect/sanitizer";
+import { isPrivateConnectPairingNonce } from "../../shared/private-connect/pairing-link";
 
 const SESSION_COOKIE = "__Host-inertia-private-connect";
 const CSRF_HEADER = "x-inertia-private-connect-csrf";
 const MAX_CONNECTIONS = 8;
 const MAX_DEVICE_CONNECTIONS = 2;
 const MAX_HTTP_CONNECTIONS = 128;
+const MAX_PAIRING_BODY_BYTES = 4 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
 
@@ -35,6 +38,7 @@ export interface PrivateConnectPairStartRequest {
   invitation: PrivateConnectInvitation;
   deviceLabel: string;
   deviceId: string;
+  browserNonce: string;
 }
 
 export type PrivateConnectPairStatus =
@@ -43,10 +47,10 @@ export type PrivateConnectPairStatus =
   | { status: "denied" | "expired"; requestId: string };
 
 export interface PrivateConnectGatewayHost {
-  wellKnown(): Record<string, unknown>;
+  pairingAllowed(stage: "start" | "status"): boolean;
   validHost?(host: string | undefined): boolean;
   pairStart(request: PrivateConnectPairStartRequest, networkLabel: string | null): Promise<{ requestId: string; expiresAt: string; comparisonCode: string }>;
-  pairStatus(requestId: string): Promise<PrivateConnectPairStatus>;
+  pairStatus(requestId: string, browserNonce: string): Promise<PrivateConnectPairStatus>;
   session(cookie: string | null): PrivateConnectSession | null;
   consumeWebSocketTicket(ticket: string): PrivateConnectSession | null;
   csrf(session: PrivateConnectSession): string;
@@ -60,7 +64,6 @@ export interface PrivateConnectGatewayHost {
 export interface PrivateConnectGatewayServerOptions {
   host: PrivateConnectGatewayHost;
   staticRoot: string;
-  buildVersion: string;
   maxBodyBytes?: number;
   requestTimeoutMs?: number;
   transportTimeoutMs?: number;
@@ -68,12 +71,12 @@ export interface PrivateConnectGatewayServerOptions {
 }
 
 export class PrivateConnectGatewayServer {
+  readonly endpointId = randomUUID();
   private readonly server: Server;
   private readonly sockets = new Set<WebSocket>();
   private readonly websocketServer: WebSocketServer;
   private readonly host: PrivateConnectGatewayHost;
   private readonly staticRoot: string;
-  private readonly buildVersion: string;
   private readonly maxBodyBytes: number;
   private readonly requestTimeoutMs: number;
   private readonly transportTimeoutMs: number;
@@ -87,7 +90,6 @@ export class PrivateConnectGatewayServer {
   constructor(options: PrivateConnectGatewayServerOptions) {
     this.host = options.host;
     this.staticRoot = options.staticRoot;
-    this.buildVersion = options.buildVersion;
     this.maxBodyBytes = Math.max(1_024, Math.min(options.maxBodyBytes ?? PRIVATE_CONNECT_LIMITS.bodyBytes, PRIVATE_CONNECT_LIMITS.bodyBytes));
     this.requestTimeoutMs = Math.max(25, Math.min(options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS));
     this.transportTimeoutMs = Math.max(25, Math.min(options.transportTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS));
@@ -212,8 +214,7 @@ export class PrivateConnectGatewayServer {
       writeJson(response, 200, {
         product: "Inertia Private Connect",
         protocol: { minimum: 1, maximum: 1 },
-        buildVersion: this.buildVersion,
-        ...this.host.wellKnown(),
+        endpointId: this.endpointId,
       });
       return;
     }
@@ -238,27 +239,39 @@ export class PrivateConnectGatewayServer {
       writeJson(response, 403, { error: "forbidden", message: "The request origin is not allowed." });
       return;
     }
+    const pairingStage = url.pathname === "/api/pair/start" ? "start"
+      : url.pathname === "/api/pair/status" ? "status" : null;
+    if (pairingStage) {
+      if (!this.host.pairingAllowed(pairingStage)) {
+        response.setHeader("Connection", "close");
+        writeJson(response, 403, { error: "forbidden", message: "Pairing is not currently available." });
+        return;
+      }
+    } else {
+      const session = this.host.session(readCookie(request.headers.cookie, SESSION_COOKIE));
+      if (!session || !this.validCsrf(request, session)) {
+        response.setHeader("Connection", "close");
+        writeJson(response, session ? 403 : 401, { error: "forbidden", message: session
+          ? "The Private Connect request could not be verified."
+          : "Pair this browser before using Private Connect." });
+        return;
+      }
+    }
     let body: unknown;
     try {
-      body = await readJsonBody(request, this.maxBodyBytes, this.transportTimeoutMs);
+      body = await readJsonBody(request, pairingStage ? Math.min(MAX_PAIRING_BODY_BYTES, this.maxBodyBytes) : this.maxBodyBytes, this.transportTimeoutMs);
     } catch (error) {
+      response.setHeader("Connection", "close");
       writeJson(response, 400, { error: "invalid", message: error instanceof Error ? error.message : "The request body is invalid." });
       return;
     }
+    // Recheck after reading: session revocation may race an admitted upload.
     const session = this.host.session(readCookie(request.headers.cookie, SESSION_COOKIE));
     if (url.pathname === "/api/pair/start") {
-      if (!this.admit(`pair-start:${this.clientKey(request)}`, PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute)) {
-        writeJson(response, 429, { error: "rate-limited", message: "Pairing attempts are temporarily limited." });
-        return;
-      }
       await this.handlePairStart(body, request, response);
       return;
     }
     if (url.pathname === "/api/pair/status") {
-      if (!this.admit(`pair-status:${this.clientKey(request)}`, PRIVATE_CONNECT_LIMITS.requestsPerMinute)) {
-        writeJson(response, 429, { error: "rate-limited", message: "Pairing status checks are temporarily limited." });
-        return;
-      }
       await this.handlePairStatus(body, response);
       return;
     }
@@ -310,7 +323,8 @@ export class PrivateConnectGatewayServer {
   }
 
   private async handlePairStart(body: unknown, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!plainObject(body) || typeof body.deviceLabel !== "string" || typeof body.deviceId !== "string") {
+    if (!plainObject(body) || typeof body.deviceLabel !== "string" || typeof body.deviceId !== "string"
+      || !isPrivateConnectPairingNonce(body.browserNonce)) {
       writeJson(response, 400, { error: "invalid", message: "The pairing request is invalid." });
       return;
     }
@@ -319,11 +333,13 @@ export class PrivateConnectGatewayServer {
       writeJson(response, 400, { error: "invalid", message: "The pairing invitation is invalid." });
       return;
     }
+    if (!this.admitPairing(response, "start", invitation.data.invitationId, invitation.data.pairingSecret)) return;
     try {
       const result = await this.host.pairStart({
         invitation: invitation.data,
         deviceLabel: body.deviceLabel,
         deviceId: body.deviceId,
+        browserNonce: body.browserNonce,
       }, normalizeNetworkLabel(request.headers["tailscale-user-login"]));
       writeJson(response, 202, result);
     } catch (error) {
@@ -332,12 +348,13 @@ export class PrivateConnectGatewayServer {
   }
 
   private async handlePairStatus(body: unknown, response: ServerResponse): Promise<void> {
-    if (!plainObject(body) || typeof body.requestId !== "string") {
+    if (!plainObject(body) || !isPrivateConnectUuid(body.requestId) || !isPrivateConnectPairingNonce(body.browserNonce)) {
       writeJson(response, 400, { error: "invalid", message: "The pairing status request is invalid." });
       return;
     }
+    if (!this.admitPairing(response, "status", body.requestId, body.browserNonce)) return;
     try {
-      const status = await this.host.pairStatus(body.requestId);
+      const status = await this.host.pairStatus(body.requestId, body.browserNonce);
       if (status.status === "approved") {
         response.setHeader("Set-Cookie", status.cookie);
         writeJson(response, 200, { status: "approved", requestId: status.requestId, expiresAt: status.expiresAt });
@@ -514,9 +531,15 @@ export class PrivateConnectGatewayServer {
       && secretsMatch(presented, this.host.csrf(session));
   }
 
-  private clientKey(request: IncomingMessage): string {
-    const address = request.socket.remoteAddress?.trim();
-    return address && address.length <= 64 ? address : "unknown";
+  private admitPairing(response: ServerResponse, stage: "start" | "status", id: string, secret: string): boolean {
+    // Proxy IP and public device IDs are not browser authority. Hash the
+    // bounded capability so unrelated peers cannot exhaust its retry quota.
+    const key = createHash("sha256").update(id).update("\0").update(secret).digest("hex");
+    const limit = stage === "start" ? PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute : PRIVATE_CONNECT_LIMITS.requestsPerMinute;
+    if (this.admit(`pair-${stage}:${key}`, limit)) return true;
+    response.setHeader("Connection", "close");
+    writeJson(response, 429, { error: "rate-limited", message: "Pairing requests are temporarily limited." });
+    return false;
   }
 
   private admit(key: string, limit: number): boolean {

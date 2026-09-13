@@ -16,6 +16,7 @@ import { privateConnectRuntimeRequestSchema } from "../../../src/shared/private-
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const otherProjectId = "99999999-9999-4999-8999-999999999999";
+const browserNonce = "a".repeat(43);
 const deviceId = "22222222-2222-4222-8222-222222222222";
 const directories: string[] = [];
 const services: PrivateConnectService[] = [];
@@ -133,11 +134,11 @@ async function createService(): Promise<PrivateConnectService> { return await cr
 async function pairCollaboratingBrowser(service: PrivateConnectService) {
   await service.setEnabled(true);
   const invitation = await service.createInvitation();
-  const started = await service.pairStart({
+  const started = await service.pairStart({ browserNonce,
     invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!, deviceId, deviceLabel: "Browser",
   }, "example");
   await service.approvePairing(started.requestId, "collaborate", [projectId]);
-  const approved = await service.pairStatus(started.requestId);
+  const approved = await service.pairStatus(started.requestId, browserNonce);
   if (approved.status !== "approved") throw new Error("pairing did not approve");
   return service.session(approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "")!;
 }
@@ -147,7 +148,7 @@ describe("Private Connect service lifecycle", () => {
     const service = await createService();
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -185,7 +186,7 @@ describe("Private Connect service lifecycle", () => {
     const service = await createServiceWith({ ...memory, store });
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -213,7 +214,7 @@ describe("Private Connect service lifecycle", () => {
     const service = await createService();
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const request = {
+    const request = { browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -225,12 +226,53 @@ describe("Private Connect service lifecycle", () => {
     expect(service.state().pendingPairings).toHaveLength(1);
   });
 
+  it("consumes the invitation and binds retries to a browser-held nonce", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const request = {
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId, deviceLabel: "Browser", browserNonce: "a".repeat(43),
+    };
+    const started = await service.pairStart(request, "example");
+    expect(service.state().invitation).toBeNull();
+    await expect(service.pairStart({ ...request, browserNonce: "b".repeat(43) }, "example"))
+      .rejects.toThrow();
+    await expect(service.pairStart(request, "example")).resolves.toEqual(started);
+  });
+
+  it("refuses a guessed browser identity from rejoining an already admitted pairing", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const request = {
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId, deviceLabel: "Browser", browserNonce: "a".repeat(43),
+    };
+    await service.pairStart(request, "example");
+    await expect(service.pairStart({ ...request, browserNonce: "b".repeat(43) }, "example"))
+      .rejects.toThrow();
+  });
+
+  it("requires the original browser nonce before collecting an approved session", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const invitation = await service.createInvitation();
+    const started = await service.pairStart({
+      invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
+      deviceId, deviceLabel: "Browser", browserNonce: "a".repeat(43),
+    }, "example");
+    await service.approvePairing(started.requestId, "monitor", [projectId]);
+    await expect(service.pairStatus(started.requestId, "b".repeat(43))).rejects.toThrow();
+    await expect(service.pairStatus(started.requestId, "a".repeat(43))).resolves.toMatchObject({ status: "approved" });
+  });
+
   it("removes directional controls from untrusted device labels", async () => {
     const service = await createService();
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
 
-    await service.pairStart({
+    await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser\u202Ecod.exe",
@@ -244,7 +286,7 @@ describe("Private Connect service lifecycle", () => {
     const service = await createServiceWith(memory);
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -253,7 +295,7 @@ describe("Private Connect service lifecycle", () => {
 
     await expect(service.approvePairing(started.requestId, "collaborate", [projectId]))
       .rejects.toThrow("simulated persistence failure");
-    await expect(service.pairStatus(started.requestId)).resolves.toMatchObject({
+    await expect(service.pairStatus(started.requestId, browserNonce)).resolves.toMatchObject({
       status: "pending",
     });
     expect(service.state().devices).toEqual([]);
@@ -267,7 +309,7 @@ describe("Private Connect service lifecycle", () => {
       projectIds: [projectId],
       grants: [{ projectId, conversationIds: ["allowed-conversation"], includeFutureConversations: false }],
     });
-    await expect(service.pairStatus(started.requestId)).resolves.toMatchObject({
+    await expect(service.pairStatus(started.requestId, browserNonce)).resolves.toMatchObject({
       status: "approved",
     });
   });
@@ -282,7 +324,7 @@ describe("Private Connect service lifecycle", () => {
     );
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -290,7 +332,7 @@ describe("Private Connect service lifecycle", () => {
     await service.approvePairing(started.requestId, "monitor", [projectId]);
     currentTime = Date.parse(invitation.expiresAt) + 1;
 
-    await expect(service.pairStatus(started.requestId)).resolves.toEqual({
+    await expect(service.pairStatus(started.requestId, browserNonce)).resolves.toEqual({
       status: "expired",
       requestId: started.requestId,
     });
@@ -309,7 +351,7 @@ describe("Private Connect service lifecycle", () => {
     );
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
@@ -318,12 +360,12 @@ describe("Private Connect service lifecycle", () => {
     await service.approvePairing(started.requestId, "monitor", [projectId]);
 
     currentTime = Date.parse(invitation.expiresAt) + 5_000;
-    const collected = await service.pairStatus(started.requestId);
+    const collected = await service.pairStatus(started.requestId, browserNonce);
     expect(collected.status).toBe("approved");
     expect(collected).toHaveProperty("cookie");
 
     currentTime += PRIVATE_CONNECT_LIMITS.pairingCollectionMs;
-    await expect(service.pairStatus(started.requestId)).rejects.toThrow();
+    await expect(service.pairStatus(started.requestId, browserNonce)).rejects.toThrow();
   });
 
   it("adapts runtime projections into exactly the contract the packaged client parses", async () => {
@@ -359,13 +401,13 @@ describe("Private Connect service lifecycle", () => {
     });
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsePrivateConnectPairingFragment(new URL(invitation.url).hash)!,
       deviceId,
       deviceLabel: "Browser",
     }, "example");
     await service.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await service.pairStatus(started.requestId);
+    const approved = await service.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing was not approved");
     const session = service.session(approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? null);
 
@@ -396,9 +438,9 @@ describe("Private Connect service lifecycle", () => {
     const invitation = await service.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
     expect(parsed).not.toBeNull();
-    const started = await service.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    const started = await service.pairStart({ browserNonce, invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
     await service.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await service.pairStatus(started.requestId);
+    const approved = await service.pairStatus(started.requestId, browserNonce);
     expect(approved.status).toBe("approved");
     if (approved.status !== "approved") return;
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? null;
@@ -454,13 +496,13 @@ describe("Private Connect service lifecycle", () => {
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsed!,
       deviceId,
       deviceLabel: "Browser",
     }, "example");
     await service.approvePairing(started.requestId, "monitor", [projectId]);
-    const approved = await service.pairStatus(started.requestId);
+    const approved = await service.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     const session = service.session(cookie);
@@ -555,9 +597,9 @@ describe("Private Connect service lifecycle", () => {
     await first.setEnabled(true);
     const invitation = await first.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    const started = await first.pairStart({ browserNonce, invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
     await first.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await first.pairStatus(started.requestId);
+    const approved = await first.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     await first.shutdown();
@@ -577,13 +619,13 @@ describe("Private Connect service lifecycle", () => {
     await first.setEnabled(true);
     const invitation = await first.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await first.pairStart({
+    const started = await first.pairStart({ browserNonce,
       invitation: parsed!,
       deviceId,
       deviceLabel: "Browser",
     }, "example");
     await first.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await first.pairStatus(started.requestId);
+    const approved = await first.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     await first.shutdown();
@@ -618,13 +660,13 @@ describe("Private Connect service lifecycle", () => {
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsed!,
       deviceId,
       deviceLabel: "Browser",
     }, "example");
     await service.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await service.pairStatus(started.requestId);
+    const approved = await service.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     const session = service.session(cookie);
@@ -697,13 +739,13 @@ describe("Private Connect service lifecycle", () => {
     await service.setEnabled(true);
     const invitation = await service.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await service.pairStart({
+    const started = await service.pairStart({ browserNonce,
       invitation: parsed!,
       deviceId,
       deviceLabel: "Browser",
     }, "example");
     await service.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await service.pairStatus(started.requestId);
+    const approved = await service.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     const session = service.session(cookie);
@@ -768,9 +810,9 @@ describe("Private Connect service lifecycle", () => {
     await first.setEnabled(true);
     const invitation = await first.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    const started = await first.pairStart({ browserNonce, invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
     await first.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await first.pairStatus(started.requestId);
+    const approved = await first.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     const session = first.session(cookie);
@@ -937,9 +979,9 @@ describe("Private Connect service lifecycle", () => {
     await first.setEnabled(true);
     const invitation = await first.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await first.pairStart({ invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
+    const started = await first.pairStart({ browserNonce, invitation: parsed!, deviceId, deviceLabel: "Browser" }, "example");
     await first.approvePairing(started.requestId, "collaborate", [projectId]);
-    const approved = await first.pairStatus(started.requestId);
+    const approved = await first.pairStatus(started.requestId, browserNonce);
     if (approved.status !== "approved") throw new Error("pairing did not approve");
     const cookie = approved.cookie.match(/^[^=]+=([^;]+)/u)?.[1] ?? "";
     const request = { protocolVersion: 1 as const, type: "prompt.send" as const, requestId: "77777777-7777-4777-8777-777777777777", deliveryId: "88888888-8888-4888-8888-888888888888", conversationId: "44444444-4444-4444-8444-444444444444", content: "hello" };
@@ -981,7 +1023,7 @@ describe("Private Connect service lifecycle", () => {
     await second.startIfEnabled();
     const invitation = await second.createInvitation();
     const parsed = parsePrivateConnectPairingFragment(new URL(invitation.url).hash);
-    const started = await second.pairStart({ invitation: parsed!, deviceId, deviceLabel: "New browser" }, "example");
+    const started = await second.pairStart({ browserNonce, invitation: parsed!, deviceId, deviceLabel: "New browser" }, "example");
     await expect(second.approvePairing(started.requestId, "monitor", [projectId])).resolves.toBeUndefined();
     expect(memory.saved()?.devices).toEqual([
       expect.objectContaining({ id: deviceId, label: "New browser" }),

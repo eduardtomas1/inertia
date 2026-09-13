@@ -8,7 +8,9 @@ privileged actions. The browser is an untrusted client.
 The local gateway binds only to `127.0.0.1` on an ephemeral port. Tailscale
 Serve maps a preferred HTTPS port to that exact loopback port. Inertia accepts
 only the mapping it created and verifies the HTTPS well-known endpoint before
-reporting readiness. Funnel and unrelated Serve mappings are rejected.
+reporting readiness. Verification matches a random identifier for that exact
+gateway instance. Discovery omits the build version, stable host identifier,
+lock state, and invitation state. Funnel and unrelated Serve mappings are rejected.
 
 The Tailscale executable is spawned without a shell, with bounded arguments,
 time, and output. Tailscale status and Serve JSON are parsed with forward-
@@ -22,7 +24,11 @@ boundary against already-malicious software running as the same host user.
 ## Browser authentication
 
 Pairing uses a short-lived invitation in a URL fragment; it is never sent as a
-query credential. A desktop approval creates a device grant and a session
+query credential. Starting pairing consumes the invitation. Retries require
+the original invitation secret and the initiating tab's random 256-bit nonce;
+collecting an approved session also requires that nonce. Only nonce and
+invitation-secret digests are retained in pending desktop memory. Neither is
+included in the pairing view, audit, or persisted grant. A desktop approval creates a device grant and a session
 cookie named `__Host-inertia-private-connect`. The cookie is Secure, HttpOnly,
 SameSite Strict, host-only, and carries no Domain attribute. Mutations require
 both a same-origin request and the session's CSRF header. WebSocket upgrades
@@ -45,6 +51,14 @@ or idle. Unknown state remains fail closed. The
 encrypted digest of a non-expired session remains local so that the same
 approved browser can reconnect after unlock; while locked, session lookup and
 every request fail closed.
+
+Session and CSRF authority are checked before reading authenticated mutation
+bodies and rechecked afterward. Pairing bodies are limited to 4 KiB and refused
+before parsing unless an invitation or pending pairing exists. Pairing retry
+quotas are keyed by hashed invitation or nonce capabilities, since Serve peers
+share the loopback address. Connection and transport bounds still apply;
+application pairing does not prevent an ACL-authorized peer from flooding the
+underlying network service.
 
 The installable browser client caches only its generated HTML, scripts, styles,
 manifest, and icons. Its service worker bypasses every `/api/` request and never

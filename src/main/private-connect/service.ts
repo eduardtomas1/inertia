@@ -17,6 +17,7 @@ import {
 import {
   createPrivateConnectInvitation,
   createPrivateConnectPairingLink,
+  isPrivateConnectPairingNonce,
 } from "../../shared/private-connect/pairing-link";
 import {
   privateConnectGrantsForSelectedProjects,
@@ -41,6 +42,7 @@ import type { RuntimeSupervisor } from "../runtime-supervisor";
 import {
   PrivateConnectGatewayServer,
   sessionCookie as createSessionCookie,
+  secretsMatch,
   type PrivateConnectGatewayHost,
   type PrivateConnectGatewayServerOptions,
   type PrivateConnectPairStartRequest,
@@ -66,6 +68,8 @@ export interface PrivateConnectServiceOptions {
 interface PendingPairing {
   requestId: string;
   invitationId: string;
+  browserNonceHash: string;
+  pairingSecretHash: string;
   deviceId: string;
   deviceLabel: string;
   receivedAt: string;
@@ -171,12 +175,11 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     };
   }
 
-  wellKnown(): Record<string, unknown> {
-    return {
-      hostId: this.data?.hostId ?? null,
-      pairingAvailable: Boolean(this.data?.enabled && this.status === "ready" && !this.invitation),
-      locked: this.status !== "ready",
-    };
+  pairingAllowed(stage: "start" | "status"): boolean {
+    try { this.requireReady(); } catch { return false; }
+    this.prunePendingPairings();
+    return this.pending.size > 0 || (stage === "start" && this.invitation !== null
+      && Date.parse(this.invitation.expiresAt) > this.now().getTime());
   }
 
   async setEnabled(enabled: boolean): Promise<PrivateConnectStateView> {
@@ -265,24 +268,27 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   async pairStart(request: PrivateConnectPairStartRequest, networkLabel: string | null): Promise<{ requestId: string; expiresAt: string; comparisonCode: string }> {
     this.requireReady();
     this.prunePendingPairings();
+    const deviceLabel = sanitizeDeviceLabel(request.deviceLabel);
+    if (!deviceLabel || !isPrivateConnectUuid(request.deviceId) || !isPrivateConnectPairingNonce(request.browserNonce)) {
+      throw new Error("The browser identity is invalid.");
+    }
+    const browserNonceHash = createHash("sha256").update(request.browserNonce).digest("hex");
+    const pairingSecretHash = createHash("sha256").update(request.invitation.pairingSecret).digest("hex");
+    const existing = [...this.pending.values()].find((pending) => pending.invitationId === request.invitation.invitationId);
+    if (existing) {
+      if (existing.deviceId !== request.deviceId || !secretsMatch(browserNonceHash, existing.browserNonceHash)
+        || !secretsMatch(pairingSecretHash, existing.pairingSecretHash)) {
+        throw new Error("A pairing request is already waiting for approval.");
+      }
+      return { requestId: existing.requestId, expiresAt: existing.expiresAt, comparisonCode: existing.comparisonCode };
+    }
     const invitation = this.invitation;
-    if (!invitation || invitation.invitationId !== request.invitation.invitationId || invitation.pairingSecret !== request.invitation.pairingSecret) {
+    if (!invitation || invitation.invitationId !== request.invitation.invitationId || !secretsMatch(request.invitation.pairingSecret, invitation.pairingSecret)) {
       throw new Error("That Private Connect invitation is invalid or has expired.");
     }
     if (Date.parse(invitation.expiresAt) <= this.now().getTime()) {
       this.invitation = null;
       throw new Error("That Private Connect invitation has expired.");
-    }
-    const deviceLabel = sanitizeDeviceLabel(request.deviceLabel);
-    if (!deviceLabel || !isPrivateConnectUuid(request.deviceId)) throw new Error("The browser identity is invalid.");
-    const existing = [...this.pending.values()].find((pending) => pending.invitationId === invitation.invitationId);
-    if (existing) {
-      if (existing.deviceId !== request.deviceId) throw new Error("A pairing request is already waiting for approval.");
-      return {
-        requestId: existing.requestId,
-        expiresAt: existing.expiresAt,
-        comparisonCode: existing.comparisonCode,
-      };
     }
     if (this.pending.size > 0) throw new Error("A pairing request is already waiting for approval.");
     const requestId = randomUUID();
@@ -290,6 +296,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const pending: PendingPairing = {
       requestId,
       invitationId: invitation.invitationId,
+      browserNonceHash,
+      pairingSecretHash,
       deviceId: request.deviceId,
       deviceLabel,
       receivedAt: this.now().toISOString(),
@@ -300,14 +308,19 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       cookie: null,
     };
     this.pending.set(requestId, pending);
+    this.invitation = null;
     this.audit("pairing.requested", request.deviceId, "A browser requested Private Connect pairing.");
     this.emit();
     return { requestId, expiresAt: pending.expiresAt, comparisonCode };
   }
 
-  async pairStatus(requestId: string): Promise<PrivateConnectPairStatus> {
+  async pairStatus(requestId: string, browserNonce: string): Promise<PrivateConnectPairStatus> {
+    this.requireReady();
     const pending = this.pending.get(requestId);
-    if (!pending) throw new Error("That pairing request is no longer available.");
+    if (!pending || !isPrivateConnectPairingNonce(browserNonce)
+      || !secretsMatch(createHash("sha256").update(browserNonce).digest("hex"), pending.browserNonceHash)) {
+      throw new Error("That pairing request is no longer available.");
+    }
     if (Date.parse(pending.expiresAt) <= this.now().getTime()) {
       pending.status = "expired";
       pending.cookie = null;
@@ -759,7 +772,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
         await gateway.stop().catch(() => undefined);
         return;
       }
-      const ready = await this.tailscale.ensurePrivateServe(address.port, this.data.servePort, this.data.serveTarget, { hostId: this.data.hostId, buildVersion: this.options.buildVersion });
+      const ready = await this.tailscale.ensurePrivateServe(address.port, this.data.servePort, this.data.serveTarget, { endpointId: gateway.endpointId });
       if (operation !== this.enableOperation || this.privacyLocked || this.stopped) {
         await this.tailscale.disableOwnedServe(address.port).catch(() => undefined);
         await gateway.stop().catch(() => undefined);
@@ -1160,7 +1173,6 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     const gatewayOptions: PrivateConnectGatewayServerOptions = {
       host: this,
       staticRoot: this.options.staticRoot,
-      buildVersion: this.options.buildVersion,
       now: this.now,
     };
     return new PrivateConnectGatewayServer(gatewayOptions);

@@ -60,8 +60,7 @@ export interface PrivateConnectServeProof {
 }
 
 export interface PrivateConnectEndpointIdentity {
-  hostId: string;
-  buildVersion: string;
+  endpointId: string;
 }
 
 export interface PrivateConnectTailscaleControllerOptions {
@@ -230,9 +229,9 @@ export class PrivateConnectTailscaleController {
       if (!payload || typeof payload !== "object" || (payload as { product?: unknown }).product !== "Inertia Private Connect") {
         throw new Error("The endpoint identity did not match.");
       }
-      const record = payload as { hostId?: unknown; buildVersion?: unknown; protocol?: { minimum?: unknown; maximum?: unknown } };
+      const record = payload as { endpointId?: unknown; protocol?: { minimum?: unknown; maximum?: unknown } };
       if (record.protocol?.minimum !== 1 || record.protocol.maximum !== 1) throw new Error("The endpoint protocol did not match.");
-      if (identity && (record.hostId !== identity.hostId || record.buildVersion !== identity.buildVersion)) throw new Error("The endpoint environment did not match.");
+      if (identity && record.endpointId !== identity.endpointId) throw new Error("The endpoint environment did not match.");
       if (new URL(externalUrl).hostname.toLowerCase() !== expectedHost.toLowerCase()) throw new Error("The endpoint host did not match.");
     } catch (error) {
       if (error instanceof PrivateConnectTailscaleError) throw error;

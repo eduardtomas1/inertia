@@ -17,6 +17,7 @@ import {
 } from "./connection";
 import { CheckingScreen, OfflineScreen, PairScreen, WaitingScreen } from "./pairing/PairingScreen";
 import { onPrivateConnectConversationNavigation } from "./pwa";
+import { createPrivateConnectPairingNonce } from "../../../shared/private-connect/pairing-link";
 import { WorkspaceShell } from "./workspace/WorkspaceShell";
 import type { Detail, Shell } from "./types";
 
@@ -35,6 +36,7 @@ export default function App({
 }): React.JSX.Element {
   const invitation = useMemo(() => parsePairingFragment(initialPairingFragment), [initialPairingFragment]);
   const [pair, setPair] = useState<PairState>(() => ({ kind: "checking" }));
+  const [browserNonce] = useState(createPrivateConnectPairingNonce);
   const [shell, setShell] = useState<Shell | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -182,6 +184,7 @@ export default function App({
           invitation: pairingInvitation,
           deviceId: browserDeviceId(),
           deviceLabel: suggestedDeviceLabel(),
+          browserNonce,
         });
         if (!cancelled) {
           setHostUnavailable(false);
@@ -195,7 +198,7 @@ export default function App({
       }
     })();
     return () => { cancelled = true; };
-  }, [noteRequestFailure, pair.kind, pairRetry, pairingInvitation]);
+  }, [browserNonce, noteRequestFailure, pair.kind, pairRetry, pairingInvitation]);
 
   const readyCsrf = pair.kind === "ready" ? pair.csrf : null;
   useEffect(() => {
@@ -273,7 +276,7 @@ export default function App({
     if (pair.kind !== "waiting") return;
     let cancelled = false;
     const timer = window.setInterval(() => {
-      void jsonRequest<{ status: "pending" | "approved" | "denied" | "expired" }>("/api/pair/status", { requestId: pair.requestId }).then((status) => {
+      void jsonRequest<{ status: "pending" | "approved" | "denied" | "expired" }>("/api/pair/status", { requestId: pair.requestId, browserNonce }).then((status) => {
         if (cancelled) return;
         if (status.status === "approved") void loadSession();
         else if (status.status === "denied" || status.status === "expired") setPair({ kind: "pair", invitation: null, error: "Pairing was not approved." });
@@ -285,7 +288,7 @@ export default function App({
       });
     }, 1_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [pair, loadSession, noteRequestFailure]);
+  }, [browserNonce, pair, loadSession, noteRequestFailure]);
 
   useEffect(() => {
     if (!readyCsrf) return;

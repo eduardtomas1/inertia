@@ -24,7 +24,9 @@ served from the application package.
 The invitation is held in the URL fragment, expires after five minutes, and is
 consumed when pairing starts. The client removes the fragment before rendering
 or making another request. Create a new link if it expires or is accidentally
-shared.
+shared. The initiating tab keeps a random pairing nonce in memory; retrying
+from that tab preserves the nonce. Closing or reloading it before pairing
+finishes requires denying the old request and creating a fresh invitation.
 
 The browser client can be installed as a PWA. Offline installation caches only
 the app shell, icons, and manifest—not conversations or API responses. An open

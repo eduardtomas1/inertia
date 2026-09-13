@@ -64,7 +64,7 @@ it("reports ambiguous window identity without intercepting another window", asyn
 
 it("does not let unavailable instrumentation prevent the prepared quit", async () => {
   const destroy = vi.fn();
-  const window = Object.defineProperty({}, "destroy", { value: destroy, writable: false });
+  const window = Object.defineProperty({ destroy }, "destroy", { value: destroy, writable: false });
   const f = fixture([window]);
   await expect(finishElectronPreparedQuit(f.current)).resolves.toBe(434343);
   expect(window.destroy).toBe(destroy);

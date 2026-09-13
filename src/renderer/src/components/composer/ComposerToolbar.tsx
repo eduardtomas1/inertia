@@ -88,6 +88,7 @@ export interface ComposerToolbarProps {
   attachmentCount: number;
   attachmentImporting: boolean;
   onChooseAttachments: () => Promise<void>;
+  imageInputUnavailableReason: string | null;
   contextAvailable: boolean;
   contextCount: number;
   conversationContextHandoffEnabled: boolean;
@@ -169,6 +170,7 @@ export function ComposerToolbar({
   attachmentCount,
   attachmentImporting,
   onChooseAttachments,
+  imageInputUnavailableReason,
   contextAvailable,
   contextCount,
   conversationContextHandoffEnabled,
@@ -254,16 +256,20 @@ export function ComposerToolbar({
       <div className="composer-input-actions" role="group" aria-label="Message actions">
         <IconButton
           label={running
-            ? canSendAttachmentWhileRunning
-              ? "Attach follow-up images"
-              : "Attach queued images"
-            : "Attach images, documents, or spreadsheets"}
+            ? imageInputUnavailableReason
+              ?? (canSendAttachmentWhileRunning
+                ? "Attach follow-up images"
+                : "Attach queued images")
+            : imageInputUnavailableReason
+              ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
+              : "Attach images, documents, or spreadsheets"}
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled
             || attachmentImporting
             || primaryAction === "submitting"
             || attachmentCount >= MAX_CHAT_ATTACHMENTS
+            || (running && imageInputUnavailableReason !== null)
           }
         >
           <Paperclip size={16} />

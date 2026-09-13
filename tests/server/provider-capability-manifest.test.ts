@@ -18,6 +18,8 @@ import {
   type ProviderCapabilityManifest,
 } from "../../src/server/provider/capability-manifest";
 
+import { harnessImageInputUnavailableReason } from "../../src/shared/provider";
+
 const productionMappings = [
   ["codex", "codex-app-server"],
   ["claude", "claude-agent-sdk"],
@@ -81,6 +83,13 @@ function canonicalManifestDigest(value: ProviderCapabilityManifest): string {
 }
 
 describe("provider capability manifests", () => {
+  it("keeps the composer's image affordance aligned with each harness declaration", () => {
+    for (const value of productionProviderCapabilityManifests()) {
+      expect(harnessImageInputUnavailableReason(value.harnessId) !== null)
+        .toBe(capability(value, "images").support === "unavailable");
+    }
+  });
+
   it("publishes exactly seven complete canonical provider-harness mappings", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>

@@ -91,9 +91,7 @@ export function ProviderAuthDialog({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const providerId = provider?.id ?? null;
   const providerLabel = provider?.label ?? "provider";
-  const isGemini = providerId === "gemini";
   const isAntigravity = providerId === "antigravity";
-  const verifiesOnRun = isGemini || isAntigravity;
   useNativePreviewSuspension(provider !== null);
 
   const openBrowser = useCallback(async (url: string): Promise<void> => {
@@ -242,14 +240,12 @@ export function ProviderAuthDialog({
     terminalIdRef.current = null;
     terminalRef.current?.writeln(exitCode !== 0
       ? "\r\n\x1b[2mThe provider ended the connection flow before it completed.\x1b[0m"
-      : isGemini
-        ? "\r\n\x1b[2mGemini setup closed. Your next Gemini run will verify authentication.\x1b[0m"
-        : isAntigravity
-          ? "\r\n\x1b[2mAntigravity closed. Your next Antigravity turn will check your sign-in.\x1b[0m"
-          : "\r\n\x1b[2mConnection flow finished. You can close this window.\x1b[0m");
+      : isAntigravity
+        ? "\r\n\x1b[2mAntigravity closed. Your next Antigravity turn will check your sign-in.\x1b[0m"
+        : "\r\n\x1b[2mConnection flow finished. You can close this window.\x1b[0m");
     setSessionState(exitCode === 0 ? "finished" : "error");
     setError(exitCode === 0 ? null : "The provider ended the connection flow before it completed.");
-  }, [isAntigravity, isGemini]);
+  }, [isAntigravity]);
 
   useEffect(() => {
     if (!providerId) return;
@@ -331,7 +327,7 @@ export function ProviderAuthDialog({
     // to parse later, contaminating the next attempt's canonical buffer.
     terminal?.write("\x1bc");
     terminal?.writeln(
-      `\x1b[2mOpening ${providerLabel} ${isGemini ? "setup" : "sign-in"}…\x1b[0m`,
+      `\x1b[2mOpening ${providerLabel} sign-in…\x1b[0m`,
     );
     void sendCommand(command({ type: "provider.auth.start", payload: { providerId, ...size } }))
       .then((event) => {
@@ -380,7 +376,6 @@ export function ProviderAuthDialog({
   }, [
     finishTerminal,
     instanceReady,
-    isGemini,
     providerId,
     providerLabel,
     sendCommand,
@@ -392,17 +387,13 @@ export function ProviderAuthDialog({
   const sessionStatusText = sessionState === "starting"
     ? "Starting…"
     : sessionState === "ready"
-      ? isGemini
-        ? "Complete setup in Gemini, then close"
-        : isAntigravity
-          ? "Sign in to Antigravity, then close"
-          : "Waiting for sign-in"
+      ? isAntigravity
+        ? "Sign in to Antigravity, then close"
+        : "Waiting for sign-in"
       : sessionState === "finished"
-        ? isGemini
-          ? "Gemini closed — your next run will verify setup"
-          : isAntigravity
-            ? "Antigravity closed — your next turn will check sign-in"
-            : "Connection flow complete"
+        ? isAntigravity
+          ? "Antigravity closed — your next turn will check sign-in"
+          : "Connection flow complete"
         : error ?? "Connection needs attention";
   return (
     <div className="dialog-backdrop provider-auth-backdrop" role="presentation">
@@ -416,11 +407,9 @@ export function ProviderAuthDialog({
       >
         <header className="provider-auth-header">
           <span className="provider-auth-mark"><PlugZap size={17} /></span>
-          <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p id="provider-auth-description">{isGemini
-            ? "Choose an authentication method in Gemini. For Google sign-in, paste the browser code here, then close after the Gemini prompt appears."
-            : isAntigravity
-              ? "Sign in with Antigravity's own prompt below. Inertia only shows this terminal and doesn't read or store your sign-in. Close this window once Antigravity is ready."
-              : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
+          <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p id="provider-auth-description">{isAntigravity
+            ? "Sign in with Antigravity's own prompt below. Inertia only shows this terminal and doesn't read or store your sign-in. Close this window once Antigravity is ready."
+            : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
           <IconButton label="Close connection window" onClick={closeDialog}><X size={16} /></IconButton>
         </header>
         <div className="provider-auth-terminal" ref={mountRef} />
@@ -447,9 +436,7 @@ export function ProviderAuthDialog({
                     ? "The secure link could not be copied."
                     : browserState === "failed"
                       ? "Retry, or copy the one-time link and open it yourself."
-                      : isGemini
-                        ? "Paste the authorization code into Gemini, then close this window after its prompt appears."
-                        : `Return here after you finish with ${provider.label}.`}</small>
+                      : `Return here after you finish with ${provider.label}.`}</small>
               </span>
             </span>
             <span className="provider-auth-browser-actions">
@@ -460,7 +447,7 @@ export function ProviderAuthDialog({
         ) : null}
         <footer className="provider-auth-footer">
           <span className={`provider-auth-state is-${sessionState}`}>
-            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !verifiesOnRun ? <CheckCircle2 size={15} /> : <PlugZap size={15} />}
+            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isAntigravity ? <CheckCircle2 size={15} /> : <PlugZap size={15} />}
             <span
               aria-live={sessionState === "error" ? "assertive" : "polite"}
               aria-atomic="true"
@@ -468,7 +455,7 @@ export function ProviderAuthDialog({
               {sessionStatusText}
             </span>
           </span>
-          <button type="button" className="secondary-button" onClick={closeDialog}>{verifiesOnRun ? "Close" : sessionState === "finished" ? "Done" : "Close"}</button>
+          <button type="button" className="secondary-button" onClick={closeDialog}>{isAntigravity ? "Close" : sessionState === "finished" ? "Done" : "Close"}</button>
         </footer>
       </section>
     </div>

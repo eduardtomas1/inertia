@@ -164,7 +164,7 @@ describe("Antigravity headless arguments", () => {
       routeInput({ access: "auto-edit" }),
       routeInput({ access: "full" }),
       routeInput({ interactionMode: "plan", access: "full" }),
-      routeInput({ sessionId: CONVERSATION, model: "gemini-3-pro", reasoningEffort: "high" }),
+      routeInput({ sessionId: CONVERSATION, model: "fixture-model", reasoningEffort: "high" }),
     ];
     for (const input of routes) {
       const args = antigravityArguments(input);
@@ -184,11 +184,11 @@ describe("Antigravity headless arguments", () => {
       .toEqual(["--mode", "plan"]);
     expect(antigravityArguments(routeInput({
       sessionId: CONVERSATION,
-      model: "gemini-3-pro",
+      model: "fixture-model",
       reasoningEffort: "medium",
     })).slice(4)).toEqual([
       "--conversation", CONVERSATION,
-      "--model", "gemini-3-pro",
+      "--model", "fixture-model",
       "--effort", "medium",
     ]);
   });
@@ -199,7 +199,7 @@ describe("Antigravity headless arguments", () => {
       model: "-p",
       reasoningEffort: "maximum",
     }))).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
-    expect(antigravityArguments(routeInput({ model: "gemini pro; rm -rf" })))
+    expect(antigravityArguments(routeInput({ model: "fixture model; rm -rf" })))
       .toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
   });
 

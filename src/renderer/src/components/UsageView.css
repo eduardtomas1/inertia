@@ -4,7 +4,6 @@
   --usage-series-codex: #202124;
   --usage-series-claude: #d97757;
   --usage-series-cursor: #575650;
-  --usage-series-gemini: #4285f4;
   --usage-series-kimi: #2563eb;
   --usage-series-opencode: #8a8583;
   width: 100%;
@@ -24,7 +23,6 @@
 :root[data-theme="dark"] .usage-view {
   --usage-series-codex: #ececea;
   --usage-series-cursor: #c9c7c4;
-  --usage-series-gemini: #8ab4f8;
   --usage-series-kimi: #7aa2ff;
   --usage-series-opencode: #9f9a98;
 }
@@ -239,7 +237,6 @@
 .usage-provider-summary [data-provider="codex"] { --usage-provider-series: var(--usage-series-codex); }
 .usage-provider-summary [data-provider="claude"] { --usage-provider-series: var(--usage-series-claude); }
 .usage-provider-summary [data-provider="cursor"] { --usage-provider-series: var(--usage-series-cursor); }
-.usage-provider-summary [data-provider="gemini"] { --usage-provider-series: var(--usage-series-gemini); }
 .usage-provider-summary [data-provider="kimi"] { --usage-provider-series: var(--usage-series-kimi); }
 .usage-provider-summary [data-provider="opencode"] { --usage-provider-series: var(--usage-series-opencode); }
 
@@ -339,10 +336,6 @@
 .usage-chart-series[data-provider="cursor"],
 .usage-chart-isolated-point[data-provider="cursor"],
 .usage-chart-partial-point[data-provider="cursor"] { --usage-provider-series: var(--usage-series-cursor); }
-.usage-chart-area[data-provider="gemini"],
-.usage-chart-series[data-provider="gemini"],
-.usage-chart-isolated-point[data-provider="gemini"],
-.usage-chart-partial-point[data-provider="gemini"] { --usage-provider-series: var(--usage-series-gemini); }
 .usage-chart-area[data-provider="kimi"],
 .usage-chart-series[data-provider="kimi"],
 .usage-chart-isolated-point[data-provider="kimi"],

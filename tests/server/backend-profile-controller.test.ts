@@ -269,43 +269,6 @@ describe("model backend profile controller", () => {
     runtimeStore.close();
   });
 
-  it("publishes and validates the built-in Gemini ACP backend", async () => {
-    const runtimeStore = await store();
-    const controller = await BackendProfileController.create({ store: runtimeStore });
-    const gemini: ProviderInfo = {
-      ...nativeProvider(),
-      id: "gemini",
-      label: "Gemini",
-      command: "gemini",
-      executable: "/opt/bin/gemini",
-      models: [{
-        id: "gemini-2.5-pro",
-        label: "Gemini 2.5 Pro",
-        description: "Gemini CLI model",
-        isDefault: true,
-        inputModalities: ["text", "image"],
-        reasoningOptions: [],
-        defaultReasoningEffort: "",
-      }],
-    };
-
-    expect(controller.profiles([gemini])).toContainEqual(expect.objectContaining({
-      id: "builtin:gemini",
-      displayName: "Google Gemini",
-      harnessId: "gemini-acp",
-      protocol: "gemini-managed",
-    }));
-    expect(controller.validateSelection(providerNativeModelSelection({
-      providerId: "gemini",
-      modelId: "gemini-2.5-pro",
-    }))).toMatchObject({
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      alias: "Gemini 2.5 Pro",
-    });
-    runtimeStore.close();
-  });
-
   it("publishes and validates the built-in Antigravity backend without a stored row", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
@@ -346,7 +309,6 @@ describe("model backend profile controller", () => {
       "codex",
       "claude",
       "cursor",
-      "gemini",
       "kimi",
       "opencode",
       "antigravity",

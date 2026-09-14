@@ -5,7 +5,6 @@ export type SelectedModelChipGlyph =
   | "codex"
   | "claude"
   | "cursor"
-  | "gemini"
   | "kimi"
   | "opencode"
   | "antigravity"

@@ -209,57 +209,6 @@ describe("composer route readiness", () => {
     });
   });
 
-  it("names Gemini readiness without claiming unavailable capabilities", () => {
-    const selection = customSelection({
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      backendProfileDisplayName: "Google Gemini",
-      modelId: "provider-default",
-      backendConfigurationRevision: 0,
-    });
-    expect(composerRouteReadiness({
-      provider: provider({
-        id: "gemini",
-        label: "Gemini",
-        command: "gemini",
-        available: false,
-        executable: null,
-        installState: "not-installed",
-        authState: "unknown",
-        canRun: false,
-        statusMessage: "Gemini CLI not found",
-      }),
-      profile: undefined,
-      selection,
-    })).toMatchObject({
-      ready: false,
-      title: "Gemini CLI not found",
-      action: "install",
-    });
-
-    expect(composerRouteReadiness({
-      provider: provider({
-        id: "gemini",
-        label: "Gemini",
-        command: "gemini",
-        version: "0.29.5",
-        executable: "/opt/bin/gemini",
-        installState: "installed",
-        authState: "unknown",
-        canRun: false,
-        statusMessage:
-          "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
-      }),
-      profile: undefined,
-      selection,
-    })).toMatchObject({
-      ready: false,
-      badge: "Update needed",
-      title: "Gemini cannot run this route",
-      action: "refresh",
-    });
-  });
-
   it("asks for an Antigravity update and never gates a runnable install on sign-in", () => {
     const selection = customSelection({
       harnessId: "antigravity-cli",

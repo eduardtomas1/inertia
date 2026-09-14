@@ -139,13 +139,12 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   codex: ["models", "rateLimits"],
   claude: ["models", "rateLimits"],
   cursor: [],
-  gemini: [],
   kimi: [],
   opencode: ["models"],
   antigravity: [],
 };
 
-Object.assign(AVAILABLE_FIELDS, { gemini: ["models"] as const, antigravity: [] as const });
+Object.assign(AVAILABLE_FIELDS, { antigravity: [] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;

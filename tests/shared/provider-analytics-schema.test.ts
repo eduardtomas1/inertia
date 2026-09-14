@@ -10,8 +10,8 @@ const measured = {
   coverage: "complete",
 };
 
-describe("Gemini analytics schemas", () => {
-  it("accepts Gemini in the daily-work provider breakdown", () => {
+describe("Antigravity analytics schemas", () => {
+  it("accepts Antigravity in the daily-work provider breakdown", () => {
     expect(dailyWorkDashboardSchema({
       generatedAt: "2030-01-01T12:00:00.000Z",
       date: "2030-01-01",
@@ -28,8 +28,8 @@ describe("Gemini analytics schemas", () => {
         processedTokens: measured,
       },
       providers: [{
-        providerId: "gemini",
-        providerLabel: "Gemini",
+        providerId: "antigravity",
+        providerLabel: "Antigravity",
         turnCount: 0,
         activeTurnCount: 0,
         runtime: measured,
@@ -39,7 +39,7 @@ describe("Gemini analytics schemas", () => {
     })).toBe(true);
   });
 
-  it("accepts Gemini in the usage provider breakdown", () => {
+  it("accepts Antigravity in the usage provider breakdown", () => {
     expect(usageDashboardSchema({
       generatedAt: "2030-01-01T12:00:00.000Z",
       range: {
@@ -80,9 +80,9 @@ describe("Gemini analytics schemas", () => {
         providers: [],
       })),
       providers: [{
-        key: "gemini",
-        providerId: "gemini",
-        providerLabel: "Gemini",
+        key: "antigravity",
+        providerId: "antigravity",
+        providerLabel: "Antigravity",
         requestCount: 0,
         runtime: measured,
         processedTokens: measured,

@@ -18,8 +18,6 @@ import type {
   AgentTurn,
   ChatMessage,
 } from "../../src/shared/contracts";
-import { GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE } from "../../src/shared/provider";
-import { PROVIDER_ROUTE_SWITCH_EVENT } from "../../src/renderer/src/utils/providerRouteSwitch";
 
 const conversationId = "90909090-9090-4090-8090-909090909090";
 const turnId = "turn-failure-diagnostics";
@@ -243,56 +241,5 @@ describe("turn failure diagnostics", () => {
     expect(presentation.copyText.length).toBeLessThanOrEqual(
       MAX_COPIED_FAILURE_DIAGNOSTICS_CHARS,
     );
-  });
-
-  it("attributes Gemini failures without falling through to another provider", () => {
-    const base = failedTurn();
-    const presentation = failureDiagnosticsPresentation({
-      ...base,
-      providerId: "gemini",
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      modelSelection: {
-        ...base.modelSelection,
-        harnessId: "gemini-acp",
-        backendProfileId: "builtin:gemini",
-        backendProfileDisplayName: "Google Gemini",
-      },
-    }, failureActivity());
-
-    expect(presentation.executionFacts[0]).toEqual({
-      label: "Provider",
-      value: "Gemini",
-      technical: false,
-    });
-    expect(presentation.copyText).toContain("Provider: Gemini");
-  });
-});
-
-describe("Gemini individual-account retirement", () => {
-  it("offers a new Antigravity chat only for Gemini's retirement failure", async () => {
-    const requests: unknown[] = [];
-    const listener = (event: Event): void => {
-      requests.push((event as CustomEvent<unknown>).detail);
-    };
-    window.addEventListener(PROVIDER_ROUTE_SWITCH_EVENT, listener);
-    try {
-      renderFailure(
-        { ...failedTurn(), providerId: "gemini" },
-        { ...failureActivity(), title: GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE },
-      );
-      fireEvent.click(await screen.findByRole("button", { name: "Open in Antigravity" }));
-      expect(requests).toEqual([{ conversationId, providerId: "antigravity" }]);
-      cleanup();
-
-      renderFailure(
-        failedTurn(),
-        { ...failureActivity(), title: GEMINI_INDIVIDUAL_ACCESS_RETIRED_MESSAGE },
-      );
-      expect(await screen.findByText("Run failed")).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Open in Antigravity" })).toBeNull();
-    } finally {
-      window.removeEventListener(PROVIDER_ROUTE_SWITCH_EVENT, listener);
-    }
   });
 });

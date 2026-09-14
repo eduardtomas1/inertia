@@ -6,7 +6,7 @@ No. History and preferences stay on your computer. Agents run through the provid
 
 ## Which agents does Inertia support?
 
-Codex, Claude, Cursor, Gemini CLI, Kimi Code and OpenCode. Connect them in **Settings → Providers**.
+Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Providers**.
 
 ## Do I need a new subscription?
 

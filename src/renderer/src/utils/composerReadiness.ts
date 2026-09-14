@@ -48,7 +48,6 @@ function harnessLabel(harnessId: string): string {
   if (harnessId.startsWith("claude")) return "Claude harness";
   if (harnessId.startsWith("codex")) return "Codex harness";
   if (harnessId.startsWith("cursor")) return "Cursor harness";
-  if (harnessId.startsWith("gemini")) return "Gemini";
   if (harnessId.startsWith("antigravity")) return "Antigravity";
   if (harnessId.startsWith("opencode")) return "OpenCode harness";
   return "Selected harness";
@@ -140,15 +139,13 @@ function nativeReadiness(
     );
   }
   if (
-    (provider.id === "gemini" || provider.id === "antigravity")
+    provider.id === "antigravity"
     && provider.authState === "unknown"
   ) {
     return unavailable(
       "Update needed",
       `${provider.label} cannot run this route`,
-      provider.statusMessage ?? (provider.id === "gemini"
-        ? "Update Gemini CLI, then refresh agent status."
-        : "Run 'agy update', then refresh agent status."),
+      provider.statusMessage ?? "Run 'agy update', then refresh agent status.",
       "refresh",
     );
   }

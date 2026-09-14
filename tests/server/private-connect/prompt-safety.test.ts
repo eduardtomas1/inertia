@@ -11,17 +11,7 @@ import {
 describe("Private Connect prompt safety", () => {
   it("advertises only known harness contracts", () => {
     expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("codex-app-server");
-    expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("gemini-acp");
     expect(privateConnectPromptSafetyForHarness("codex-app-server").supported).toBe(true);
-    expect(privateConnectPromptSafetyForHarness("gemini-acp")).toMatchObject({
-      supported: false,
-      writesRequireLocalApproval: false,
-      commandsRequireLocalApproval: false,
-      permissionModel: "provider-controlled",
-    });
-    expect(privateConnectPromptSafetyIsUsable(
-      privateConnectPromptSafetyForHarness("gemini-acp"),
-    )).toBe(false);
     expect(PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS).toContain("antigravity-cli");
     expect(privateConnectPromptSafetyForHarness("antigravity-cli")).toMatchObject({
       supported: false,

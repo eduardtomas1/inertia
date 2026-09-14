@@ -486,12 +486,6 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
       return { command, args };
     }
 
-    case "gemini": {
-      throw new Error(
-        "Gemini requires its native ACP harness; legacy CLI invocation is unsupported.",
-      );
-    }
-
     case "antigravity": {
       throw new Error(
         "Antigravity requires its native headless harness; legacy CLI invocation is unsupported.",

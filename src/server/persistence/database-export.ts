@@ -26,7 +26,6 @@ const recoveryConversationFields = {
     "codex",
     "claude",
     "cursor",
-    "gemini",
     "kimi",
     "opencode",
     "antigravity",

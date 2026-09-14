@@ -78,7 +78,7 @@ describe("headless runtime status", () => {
       mutationSupport: "unsupported",
     }]);
     expect(JSON.stringify(report)).not.toContain("connection metadata");
-    expect(detectProvider).toHaveBeenCalledTimes(7);
+    expect(detectProvider).toHaveBeenCalledTimes(6);
     expect(detectProvider.mock.calls.every(([, options]) =>
       options?.probeAuthentication === false)).toBe(true);
   });
@@ -164,7 +164,6 @@ describe("headless runtime status", () => {
       "codex",
       "claude",
       "cursor",
-      "gemini",
       "kimi",
       "opencode",
       "antigravity",

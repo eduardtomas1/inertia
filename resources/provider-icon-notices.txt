@@ -1,6 +1,6 @@
 VENDORED PROVIDER ICONS
 
-The OpenAI, Anthropic, Cursor, Gemini CLI, Antigravity, Kimi Code, and OpenCode marks are
+The OpenAI, Anthropic, Cursor, Antigravity, Kimi Code, and OpenCode marks are
 used only to identify the corresponding provider in Inertia. The marks remain the property of their
 respective owners. Source URLs, pinned revisions, and asset hashes are recorded
 in src/renderer/src/assets/provider-icons/README.md.
@@ -55,9 +55,16 @@ Official brand kit and usage guidance: https://cursor.com/brand
 Copyright Anysphere, Inc. The brand kit does not state an open-source license;
 the unmodified official marks are used under Cursor's published brand guidance.
 
-Gemini CLI mark
-Source repository license: Apache License 2.0
-Copyright 2025 Google LLC
+Antigravity mark
+Source: agentclientprotocol/registry at commit
+a3d294f480dee2e506a1c51f802455d4d49783a2, file antigravity-acp/icon.svg,
+contributed with Google's official Antigravity registry entry (PR #542).
+Registry license: Apache License 2.0 (text reproduced below). The Antigravity
+entry declares a proprietary license:
+https://antigravity.google/terms
+The Antigravity name and mark belong to Google LLC. They are used only to
+identify the Antigravity provider in Inertia and do not imply any affiliation
+with, sponsorship by, or endorsement by Google.
 
                                  Apache License
                            Version 2.0, January 2004
@@ -235,17 +242,6 @@ Copyright 2025 Google LLC
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
-
-Antigravity mark
-Source: agentclientprotocol/registry at commit
-a3d294f480dee2e506a1c51f802455d4d49783a2, file antigravity-acp/icon.svg,
-contributed with Google's official Antigravity registry entry (PR #542).
-Registry license: Apache License 2.0 (text reproduced above with the Gemini
-CLI mark). The Antigravity entry declares a proprietary license:
-https://antigravity.google/terms
-The Antigravity name and mark belong to Google LLC. They are used only to
-identify the Antigravity provider in Inertia and do not imply any affiliation
-with, sponsorship by, or endorsement by Google.
 
 Kimi Code mark
 Source repository license: MIT

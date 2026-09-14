@@ -2,7 +2,6 @@ import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
-import { createGeminiAcpHarness } from "./gemini-acp-harness";
 import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import {
@@ -26,7 +25,6 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "opencode-cli": "opencode",
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
-  "gemini-acp": "gemini",
   "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
@@ -79,7 +77,6 @@ export class AgentHarnessRegistry {
     if (input.backendProfile.source === "custom") {
       if (
         input.providerId === "cursor"
-        || input.providerId === "gemini"
         || input.providerId === "kimi"
         || input.providerId === "antigravity"
         || input.providerId === "opencode"
@@ -88,8 +85,6 @@ export class AgentHarnessRegistry {
           "invalid_input",
           input.providerId === "cursor"
             ? "Cursor controls its backend; external backend profiles cannot be injected."
-            : input.providerId === "gemini"
-              ? "Gemini CLI controls its backend; external backend profiles cannot be injected."
             : input.providerId === "kimi"
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
             : input.providerId === "antigravity"
@@ -144,7 +139,6 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
-    createGeminiAcpHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
     createAntigravityCliHarness(),

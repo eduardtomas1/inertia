@@ -49,7 +49,6 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
-import { useComposerProviderRouteSwitch } from "./useComposerProviderRouteSwitch";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
 /*
@@ -387,10 +386,6 @@ export const Composer = memo(function Composer({
       if (settleFrame) window.cancelAnimationFrame(settleFrame);
     };
   }, [pendingRoute]);
-
-  useComposerProviderRouteSwitch({
-    conversation, latestTurn, latestTurnSummary, setPendingRoute, setRouteCreationError,
-  });
 
   useEffect(() => {
     if (!pendingRoute) return;

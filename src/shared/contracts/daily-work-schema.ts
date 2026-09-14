@@ -10,7 +10,7 @@ import {
   type UnknownRecord,
 } from "./usage-dashboard-schema";
 
-const PROVIDERS = ["codex", "claude", "cursor", "gemini", "kimi", "opencode", "antigravity"];
+const PROVIDERS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"];
 
 function booleanField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "boolean";

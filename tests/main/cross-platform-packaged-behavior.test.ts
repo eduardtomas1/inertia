@@ -467,11 +467,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(portableRunner).toContain('"--maxWorkers=1"');
     for (const portableTest of [
       "tests/server/codex-app-server-subagent-continuation.test.ts",
-      "tests/server/gemini-acp-redaction.test.ts",
-      "tests/server/gemini-acp-harness.test.ts",
-      "tests/server/gemini-acp-validation.test.ts",
-      "tests/server/gemini-history-reconstruction.test.ts",
-      "tests/server/gemini-session-cleanup.test.ts",
+      "tests/server/acp-redaction.test.ts",
       "tests/server/native-gemini-provider-migration.test.ts",
       "tests/server/opencode-descendant-completion.test.ts",
       "tests/server/opencode-descendant-interactions.test.ts",
@@ -1219,10 +1215,5 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(workflow).toContain("npm run pretest");
     expect(workflow.match(/--connect-timeout 20 --max-time 120/gu)).toHaveLength(2);
-    expect(workflow).toContain('"@google/gemini-cli"');
-
-    const probe = await source("scripts/provider-drift-probe.mjs");
-    expect(probe).toContain('"@google/gemini-cli"');
-    expect(probe).toContain("inspectGeminiCliAcpSurface");
   });
 });

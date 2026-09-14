@@ -34,7 +34,6 @@ export const providerIdSchema = z.enum([
   "codex",
   "claude",
   "cursor",
-  "gemini",
   "kimi",
   "opencode",
   "antigravity",

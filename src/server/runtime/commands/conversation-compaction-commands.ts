@@ -17,8 +17,6 @@ import {
   providerNativeBackendProfile,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
-import { GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from
-  "../../../shared/provider";
 import type { RuntimeStore } from "../../database";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
@@ -127,11 +125,6 @@ export function createConversationCompactionCommandHandler(
     const conversation = dependencies.store.conversation(
       command.payload.conversationId,
     );
-    if (conversation.providerId === "gemini") {
-      throw new RuntimeRequestError(
-        GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
-      );
-    }
     if (!conversation.providerSessionId) {
       throw new RuntimeRequestError(
         "This chat does not have a provider session to compact yet.",

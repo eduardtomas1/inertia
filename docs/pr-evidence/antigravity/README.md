@@ -38,12 +38,6 @@ network requests, and no account, token or keyring is involved.
   inverted in dark themes like the other monochrome marks.
 - Both turns complete with the streamed text and no renderer errors.
 
-The Gemini "Open in Antigravity" failure action and its new-chat confirmation
-are covered by DOM tests (`tests/renderer/failure-diagnostics.dom.test.tsx`
-and `tests/renderer/composer-ownership.dom.test.tsx`), not by these captures.
-A real Gemini turn needs Gemini CLI's own session records for cleanup, which
-this fixture does not fake.
-
 ## Reproduction
 
 Run `npm run check`, then, with no other build running:

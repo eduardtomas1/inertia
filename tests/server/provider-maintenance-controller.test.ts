@@ -448,13 +448,13 @@ describe("ProviderMaintenanceController", () => {
 
     await waitForTerminal(operations, started.id);
     const diagnosticStates = controller.diagnosticStates();
-    expect(diagnosticStates).toHaveLength(7);
+    expect(diagnosticStates).toHaveLength(6);
     expect(diagnosticStates).toContainEqual({
       providerId: "claude",
       state: "quarantined",
     });
     expect(diagnosticStates).toContainEqual({
-      providerId: "gemini",
+      providerId: "kimi",
       state: "idle",
     });
     expect(diagnosticStates.every(

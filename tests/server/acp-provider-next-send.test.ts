@@ -2,20 +2,20 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createGeminiAcpHarness } from "../../src/server/provider/gemini-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import type { ProviderRunResult } from "../../src/server/provider/contracts";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { executableProcessExists } from "../helpers/executable-process";
 import {
   portableFixtureRoot, portableNodeExecutable, removePortableFixture,
-  writeNodeFlagExecutable, writeNodeSubcommand,
+  writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-describe.each(["gemini", "kimi"] as const)("%s completed turn and next send", (providerId) => {
+describe("kimi completed turn and next send", () => {
   it("retires each native child, rejects active steering and excludes output after the prompt response", async () => {
-    const root = portableFixtureRoot(`${providerId} two sequential ACP turns`);
+    const providerId = "kimi";
+    const root = portableFixtureRoot("kimi two sequential ACP turns");
     const capturePath = join(root, "wire.jsonl");
     const source = `
 const fs = require("node:fs");
@@ -31,7 +31,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   }) + "\\n");
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
     protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } },
-    authMethods: [], agentInfo: { name: ${JSON.stringify(providerId === "gemini" ? "gemini-cli" : "Kimi Code CLI")}, version: "fixture" },
+    authMethods: [], agentInfo: { name: "Kimi Code CLI", version: "fixture" },
   } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes, configOptions: [] } });
   if (message.method === "session/resume") {
@@ -49,14 +49,10 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   }
 });
 `;
-    const command = providerId === "gemini"
-      ? writeNodeFlagExecutable(root, providerId, source)
-      : portableNodeExecutable(root, providerId);
-    if (providerId === "kimi") writeNodeSubcommand(root, "acp", source);
+    const command = portableNodeExecutable(root, providerId);
+    writeNodeSubcommand(root, "acp", source);
     const manager = ProviderManager.createForTests({ commands: { [providerId]: command } },
-      new AgentHarnessRegistry([providerId === "gemini"
-        ? createGeminiAcpHarness({ cleanupSessionArtifacts: async () => {} })
-        : createKimiAcpHarness()]));
+      new AgentHarnessRegistry([createKimiAcpHarness()]));
     const results: ProviderRunResult[] = [];
     let pending: Promise<ProviderRunResult> | undefined;
     try {
@@ -69,13 +65,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
           providerId, conversationId: "same-conversation", runId, turnId,
           cwd: root, prompt: index === 0 ? "First request" : "Second request",
           interactionMode: "build", access: "supervised",
-          ...(index === 1 && providerId === "kimi" ? { sessionId: results[0]!.sessionId } : {}),
-          ...(index === 1 && providerId === "gemini" ? {
-            reconstructedHistory: { source: "visible-transcript", truncated: false, messages: [
-              { role: "user", content: "First request" },
-              { role: "assistant", content: "Accepted answer" },
-            ] },
-          } : {}),
+          ...(index === 1 ? { sessionId: results[0]!.sessionId } : {}),
         }), {
           onStatus: ({ status }) => statuses.push(status),
           onText: () => {
@@ -97,13 +87,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       expect(new Set(messages.map(message => message.pid)).size).toBe(2);
       expect(messages.filter(message => message.method === "session/prompt")).toHaveLength(2);
       expect(messages.filter(message => message.method === "session/load")).toEqual([]);
-      if (providerId === "kimi") {
-        expect(messages.find(message => message.method === "session/resume")?.sessionId).toBe(results[0]!.sessionId);
-      } else {
-        expect(messages.filter(message => message.method === "session/new")).toHaveLength(2);
-        expect(messages.filter(message => message.method === "session/prompt")[1]!.prompt?.[0]?.text)
-          .toContain("application-reconstructed conversation context");
-      }
+      expect(messages.find(message => message.method === "session/resume")?.sessionId).toBe(results[0]!.sessionId);
     } finally {
       manager.cancel("same-conversation");
       if (pending) await pending;

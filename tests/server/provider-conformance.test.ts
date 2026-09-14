@@ -112,7 +112,6 @@ function inactiveExtension(
   if (
     harnessId === "claude-agent-sdk"
     || harnessId === "cursor-acp"
-    || harnessId === "gemini-acp"
     || harnessId === "kimi-acp"
     || harnessId === "opencode-sdk"
   ) {
@@ -263,7 +262,6 @@ describe("production provider lifecycle conformance", () => {
       "codex-app-server",
       "claude-agent-sdk",
       "cursor-acp",
-      "gemini-acp",
       "kimi-acp",
       "opencode-sdk",
       "antigravity-cli",

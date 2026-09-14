@@ -7,7 +7,7 @@ export function providerVersionLabel(version: string): string {
 }
 
 function verifiesSignInOnRun(provider: ProviderInfo): boolean {
-  return provider.id === "gemini" || provider.id === "antigravity";
+  return provider.id === "antigravity";
 }
 
 export function providerStateLabel(provider: ProviderInfo): string {

@@ -219,7 +219,7 @@ describe("AgentThreadManager", () => {
     const { manager, project, source, sourceTurn, store } = await runtime(browser);
     try {
       store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
-      for (const harnessId of ["codex-app-server", "claude-agent-sdk", "cursor-acp", "gemini-acp", "kimi-acp", "opencode-sdk"] as const) {
+      for (const harnessId of ["codex-app-server", "claude-agent-sdk", "cursor-acp", "kimi-acp", "opencode-sdk"] as const) {
         const bridge = manager.bridgeFor({ conversation: source, turn: { ...sourceTurn, harnessId } });
         const result = await bridge!.invoke(call("inertia_browser_snapshot", {}));
         expect(result.success).toBe(false);
@@ -237,7 +237,6 @@ describe("AgentThreadManager", () => {
         "codex-app-server",
         "claude-agent-sdk",
         "cursor-acp",
-        "gemini-acp",
         "kimi-acp",
         "opencode-sdk",
       ] as const) {

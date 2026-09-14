@@ -16,10 +16,10 @@ The ACP findings below remain the reason that route was not taken.
 ## Product and transport boundaries
 
 Google ended individual Gemini CLI requests for Free/Google AI Pro/Ultra on
-June 18, 2026. API-key and Gemini Code Assist enterprise access are unaffected.
-Keep the existing Gemini provider and its history for those supported users;
-never reinterpret an existing Gemini session as an Antigravity session.
-[Official transition announcement](https://github.com/google-gemini/gemini-cli/discussions/28017).
+June 18, 2026
+([official transition announcement](https://github.com/google-gemini/gemini-cli/discussions/28017)).
+Inertia has since removed its Gemini CLI provider. Schema 76 moves those chats
+to Antigravity with their transcripts and without their Gemini session IDs.
 
 The `agy` CLI and the Antigravity ACP server are separate distributions. The
 CLI's documented streaming input accepts text but rejects interactive control
@@ -118,9 +118,9 @@ bridge would exceed the supported public SDK contract.
 ## Design once the contract is resolved
 
 Add distinct `antigravity` / `antigravity-acp` / `builtin:antigravity` identities
-with an append-only migration and exact continuation identity. Keep legacy
-Gemini identities and transcripts unchanged; switching providers starts a new
-native conversation, never retargets an old session ID.
+with an append-only migration and exact continuation identity. Migrated
+Gemini chats keep their transcripts and start a new native conversation; an old
+Gemini session ID is never reused.
 
 Reuse bounded ACP framing, owned-process admission/cleanup, descriptor-bound
 images, host MCP, exact interaction ownership and replay suppression. Keep

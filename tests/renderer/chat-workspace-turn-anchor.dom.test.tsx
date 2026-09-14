@@ -1035,7 +1035,7 @@ describe("draft turn anchoring", () => {
     }));
   });
 
-  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const)(
+  it.each(["codex", "claude", "cursor", "kimi", "opencode"] as const)(
     "marks %s ultra reasoning for the animated frame",
     (providerId) => {
       const ultra = conversation(

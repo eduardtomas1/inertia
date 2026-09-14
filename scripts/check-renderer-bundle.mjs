@@ -30,11 +30,11 @@ const budgets = {
   // guards are the only added eager modules; optional editor UI stays deferred.
   // Measured 755.5 / 569.9 KiB; retain <0.3 KiB headroom per initial route.
   // See docs/pr-evidence/issue-356-358-renderer-bundle-welcome.json.
-  mainWorkbenchFirstLoadJavaScript: 759.0 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 756.5 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 573.5 * kibibyte,
+  detachedChatFirstLoadJavaScript: 571.0 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -69,7 +69,7 @@ const budgets = {
   // Entry and core ceilings are unchanged; Markdown still loads only on demand.
   deferredSidebarUpdateControlJavaScript: 10.75 * kibibyte,
   // Provider OAuth validation and its terminal UI remain off the initial route.
-  deferredProviderAuthJavaScript: 12.5 * kibibyte,
+  deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
@@ -98,7 +98,7 @@ const budgets = {
   // Review corrections add 2,936 bytes over published welcome-guide main.
   // Core measures 2,025.0 KiB with no duplicated rendered modules; retain
   // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
-  coreJavaScript: 2_029.0 * kibibyte,
+  coreJavaScript: 2_026.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -99,8 +99,6 @@ function identityLabel(profile: ModelBackendProfileView): string {
       ? "Codex"
       : profile.harnessId.startsWith("cursor")
         ? "Cursor"
-        : profile.harnessId.startsWith("gemini")
-          ? "Gemini CLI"
           : profile.harnessId.startsWith("antigravity")
             ? "Antigravity"
             : profile.harnessId.startsWith("kimi")

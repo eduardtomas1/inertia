@@ -14,8 +14,8 @@ describe("production provider portable-test registration", () => {
     const manifest = await discoverPortableTests();
 
     expect(Object.keys(manifest.harnessTests).sort()).toEqual(productionHarnessIds);
-    expect(manifest.harnessTests["gemini-acp"]).toBe(
-      "tests/server/gemini-acp-harness.test.ts",
+    expect(manifest.harnessTests["antigravity-cli"]).toBe(
+      "tests/server/antigravity-cli-harness.test.ts",
     );
     for (const path of Object.values(manifest.harnessTests)) {
       expect(manifest.files).toContain(path);

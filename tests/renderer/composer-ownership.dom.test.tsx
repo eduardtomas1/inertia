@@ -872,3 +872,56 @@ describe("composer detachment ownership", () => {
     });
   });
 });
+
+describe("image-less composer routes", () => {
+  it("says up front that Antigravity can't read images and keeps images out of the draft", async () => {
+    const current: Conversation = {
+      ...conversation("antigravity-images"),
+      providerId: "antigravity",
+      modelSelection: providerNativeModelSelection({ providerId: "antigravity" }),
+    };
+    const notes: ChatAttachment = {
+      id: "notes",
+      name: "notes.txt",
+      path: "/private/tmp/notes.txt",
+      mimeType: "text/plain",
+      size: 64,
+    };
+    const onChooseAttachments = vi.fn<React.ComponentProps<typeof Composer>["onChooseAttachments"]>(
+      async () => attachmentLease([attachment("diagram"), notes]),
+    );
+    const bridge = window.inertia;
+    window.inertia = {
+      ...bridge,
+      snapshot: vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null })),
+      onSnapshot: () => () => undefined,
+    };
+    try {
+      render(<Composer {...composerProps(current, { onChooseAttachments })} />);
+      expect(await screen.findByRole("button", { name: "Snapshots. Antigravity can't read images in Inertia." }))
+        .toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Snapshots" })).toBeNull();
+    } finally {
+      window.inertia = bridge;
+    }
+
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
+      .toBe("Ask for follow-up changes");
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
+    }));
+    await waitFor(() => expect(onChooseAttachments).toHaveBeenCalledWith("all"));
+    expect(await screen.findByText("Antigravity can't read images in Inertia. Images were not attached."))
+      .toBeTruthy();
+    expect(screen.queryByText("diagram.png")).toBeNull();
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+  });
+
+  it("keeps image wording for routes that accept images", () => {
+    render(<Composer {...composerProps(conversation("codex-images"))} />);
+    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
+      .toBe("Ask for follow-up changes or attach images");
+    expect(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }))
+      .toBeTruthy();
+  });
+});

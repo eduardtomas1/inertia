@@ -5,8 +5,6 @@ import {
   versionedContinuationIdentityForSelection,
   fastModeProviderValue,
   modelSelectionSchema,
-  nativeHarnessId,
-  nativeModelSelection,
   providerIdForHarness,
   providerNativeBackendProfile,
   providerNativeHarnessId,
@@ -24,7 +22,6 @@ describe("model routing contracts", () => {
       ["codex", "codex-app-server", "builtin:openai"],
       ["claude", "claude-agent-sdk", "builtin:anthropic"],
       ["cursor", "cursor-acp", "builtin:cursor"],
-      ["gemini", "gemini-acp", "builtin:gemini"],
       ["kimi", "kimi-acp", "builtin:kimi"],
       ["opencode", "opencode-sdk", "builtin:opencode"],
     ];
@@ -38,11 +35,6 @@ describe("model routing contracts", () => {
         backendProfileId,
       });
     }
-  });
-
-  it("does not mutate migration-pinned pre-Gemini routing helpers", () => {
-    expect(nativeHarnessId("gemini")).toBeUndefined();
-    expect(() => nativeModelSelection({ providerId: "gemini" })).toThrow();
   });
 
   it("keeps harness, backend profile, and exact model as separate identities", () => {
@@ -63,28 +55,6 @@ describe("model routing contracts", () => {
       backendConfigurationRevision: 0,
     });
     expect(modelSelectionSchema.parse(selection)).toEqual(selection);
-  });
-
-  it("routes Gemini through its native ACP-managed backend", () => {
-    const selection = providerNativeModelSelection({
-      providerId: "gemini",
-      modelId: "gemini-2.5-pro",
-    });
-
-    expect(selection).toMatchObject({
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      backendProfileDisplayName: "Google Gemini",
-      modelId: "gemini-2.5-pro",
-    });
-    expect(resolveHarnessBackendCompatibility(
-      providerNativeHarnessId("gemini"),
-      providerNativeBackendProfile("gemini"),
-    )).toMatchObject({
-      state: "verified",
-      reasonCode: "gemini-managed",
-      allowsModelSwitchWithinSession: true,
-    });
   });
 
   it("does not imply universal interoperability from a matching model name", () => {

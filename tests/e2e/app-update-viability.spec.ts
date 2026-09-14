@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { appUpdateCandidateViabilityRequest } from "../../src/node/app-update-candidate-viability-protocol";
 import { createAppUpdateScratch } from "../../src/node/app-update-validation-scratch";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { createAppFixture } from "./support/app-fixture";
 
@@ -86,7 +87,7 @@ test("the real update validator rehearses a large WAL profile in private storage
     expect(database.prepare("SELECT COUNT(*) FROM large_fixture").pluck().get()).toBe(257);
     const clone = new Database(join(scratch.identity.directory, "candidate.sqlite"), { readonly: true });
     try {
-      expect(clone.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(75);
+      expect(clone.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect(clone.prepare("SELECT COUNT(*) FROM large_fixture").pluck().get()).toBe(257);
     } finally { clone.close(); }
     scratch.remove();

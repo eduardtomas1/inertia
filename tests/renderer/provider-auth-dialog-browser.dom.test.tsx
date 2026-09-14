@@ -9,21 +9,6 @@ import type {
 } from "../../src/shared/contracts";
 
 const AUTH_URL = "https://claude.com/cai/oauth/authorize?client_id=fixture&response_type=code&state=fixture-state&code_challenge=fixture-challenge";
-const GEMINI_AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
-  access_type: "offline",
-  client_id:
-    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-  redirect_uri: "https://codeassist.google.com/authcode",
-  response_type: "code",
-  scope: [
-    "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-  ].join(" "),
-  state: "a".repeat(64),
-  code_challenge: "b".repeat(43),
-  code_challenge_method: "S256",
-}).toString()}`;
 const TERMINAL_ID = "11111111-1111-4111-8111-111111111111";
 const terminalConstructorOptions = vi.hoisted(() =>
   [] as Array<Record<string, unknown>>);
@@ -100,16 +85,6 @@ const provider: ProviderInfo = {
       refreshing: false,
     },
   },
-};
-const geminiProvider: ProviderInfo = {
-  ...provider,
-  id: "gemini",
-  label: "Gemini",
-  command: "gemini",
-  version: "0.58.0",
-  authState: "unknown",
-  canRun: true,
-  statusMessage: "Authentication is verified when a Gemini session starts",
 };
 const kimiProvider: ProviderInfo = {
   ...provider, id: "kimi", label: "Kimi Code", command: "kimi",
@@ -269,7 +244,7 @@ describe("ProviderAuthDialog browser handoff", () => {
     expect(dialog.openExternal).not.toHaveBeenCalled();
     if (action === "close") fireEvent.click(screen.getByRole("button", { name: "Close connection window" }));
     else if (action === "exit") act(() => dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode: 0 }));
-    else dialog.rerender("online", geminiProvider);
+    else dialog.rerender("online", kimiProvider);
     await act(async () => { terminalParsing.callbacks.splice(0).forEach((callback) => callback()); });
     expect(dialog.openExternal).not.toHaveBeenCalled();
   });
@@ -291,47 +266,6 @@ describe("ProviderAuthDialog browser handoff", () => {
     terminalParsing.holdCallbacks = false;
     act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID, data: `\r\n${AUTH_URL}\r\n` }));
     await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledExactlyOnceWith(AUTH_URL));
-  });
-
-  it("explains Gemini's manual OAuth handoff without claiming its persistent TUI will finish", async () => {
-    const dialog = renderDialog({ provider: geminiProvider });
-    await waitFor(() => expect(
-      screen.getByText("Complete setup in Gemini, then close"),
-    ).toBeInTheDocument());
-    expect(screen.getByText(/paste the browser code here/iu)).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveAttribute(
-      "aria-describedby",
-      "provider-auth-description",
-    );
-    expect(terminalConstructorOptions.at(-1)).toMatchObject({
-      screenReaderMode: true,
-    });
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
-      "Complete setup in Gemini, then close",
-    );
-    expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
-
-    act(() => dialog.emit({
-      type: "terminal.output",
-      terminalId: TERMINAL_ID,
-      data: `Open this URL: ${GEMINI_AUTH_URL}\r\n`,
-    }));
-
-    await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledWith(
-      GEMINI_AUTH_URL,
-    ));
-    expect(dialog.openExternal).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/paste the authorization code into Gemini/iu))
-      .toBeInTheDocument();
-
-    act(() => dialog.emit({
-      type: "terminal.exit",
-      terminalId: TERMINAL_ID,
-      exitCode: 0,
-    }));
-    expect(screen.getByText("Gemini closed — your next run will verify setup"))
-      .toBeInTheDocument();
-    expect(screen.queryByText("Connection flow complete")).toBeNull();
   });
 
   it.each([0, 1, 130, 143])("reports explicit Kimi login exit %s without claiming authentication", async (exitCode) => {

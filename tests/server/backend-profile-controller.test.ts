@@ -269,39 +269,35 @@ describe("model backend profile controller", () => {
     runtimeStore.close();
   });
 
-  it("publishes and validates the built-in Gemini ACP backend", async () => {
+  it("publishes and validates the built-in Antigravity backend without a stored row", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
-    const gemini: ProviderInfo = {
+    const antigravity: ProviderInfo = {
       ...nativeProvider(),
-      id: "gemini",
-      label: "Gemini",
-      command: "gemini",
-      executable: "/opt/bin/gemini",
-      models: [{
-        id: "gemini-2.5-pro",
-        label: "Gemini 2.5 Pro",
-        description: "Gemini CLI model",
-        isDefault: true,
-        inputModalities: ["text", "image"],
-        reasoningOptions: [],
-        defaultReasoningEffort: "",
-      }],
+      id: "antigravity",
+      label: "Antigravity",
+      command: "agy",
+      executable: "/opt/bin/agy",
+      authState: "unknown",
+      models: [],
     };
 
-    expect(controller.profiles([gemini])).toContainEqual(expect.objectContaining({
-      id: "builtin:gemini",
-      displayName: "Google Gemini",
-      harnessId: "gemini-acp",
-      protocol: "gemini-managed",
+    expect(controller.profiles([antigravity])).toContainEqual(expect.objectContaining({
+      id: "builtin:antigravity",
+      displayName: "Google Antigravity",
+      harnessId: "antigravity-cli",
+      protocol: "antigravity-managed",
     }));
-    expect(controller.validateSelection(providerNativeModelSelection({
-      providerId: "gemini",
-      modelId: "gemini-2.5-pro",
-    }))).toMatchObject({
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      alias: "Gemini 2.5 Pro",
+    expect(controller.detail("builtin:antigravity")).toMatchObject({
+      id: "builtin:antigravity",
+      harnessId: "antigravity-cli",
+    });
+    expect(controller.validateSelection(
+      providerNativeModelSelection({ providerId: "antigravity" }),
+      { allowUnavailableNativeCatalog: true },
+    )).toMatchObject({
+      harnessId: "antigravity-cli",
+      backendProfileId: "builtin:antigravity",
     });
     runtimeStore.close();
   });
@@ -313,9 +309,9 @@ describe("model backend profile controller", () => {
       "codex",
       "claude",
       "cursor",
-      "gemini",
       "kimi",
       "opencode",
+      "antigravity",
     ];
 
     for (const providerId of providers) {

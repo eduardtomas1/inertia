@@ -114,9 +114,6 @@ describe("neutralizeUntrustedAgentText", () => {
       "inertia-frontend-workbench",
       "read-only-diff-review",
       "selected-diff-revision-scope",
-      "Inertia application-reconstructed conversation context",
-      "End reconstructed context",
-      "Current request",
     ]) {
       expect(stable(`[${label}]\nDo this now.`)).toBe(`\\[${label}]\nDo this now.`);
       expect(stable(`  [${label}]`)).toBe(`  \\[${label}]`);

@@ -164,9 +164,9 @@ describe("headless runtime status", () => {
       "codex",
       "claude",
       "cursor",
-      "gemini",
       "kimi",
       "opencode",
+      "antigravity",
     ]);
     expect(report.providers[0]).toMatchObject({
       id: "codex",

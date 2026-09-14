@@ -94,18 +94,13 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
   cursor: [
     /^CURSOR_(?:API_KEY|HOME)$/u,
   ],
-  gemini: [
-    /^CLOUD_SHELL$/u,
-    /^GEMINI_(?:API_KEY|API_KEY_AUTH_MECHANISM|DEFAULT_AUTH_TYPE|MODEL)$/u,
-    /^GEMINI_CLI_(?:CUSTOM_HEADERS|HOME|SYSTEM_DEFAULTS_PATH|SYSTEM_SETTINGS_PATH|TRUSTED_FOLDERS_PATH|USE_COMPUTE_ADC)$/u,
-    /^GOOGLE_(?:API_KEY|APPLICATION_CREDENTIALS)$/u,
-    /^GOOGLE_CLOUD_(?:ACCESS_TOKEN|LOCATION|PROJECT|PROJECT_ID|QUOTA_PROJECT)$/u,
-    /^GOOGLE_GENAI_(?:API_VERSION|USE_GCA|USE_VERTEXAI)$/u,
-    /^GOOGLE_(?:GEMINI|VERTEX)_BASE_URL$/u,
-  ],
   kimi: [
     /^GOOGLE_APPLICATION_CREDENTIALS$/u,
     /^KIMI_[A-Z0-9_]+$/u,
+  ],
+  antigravity: [
+    /^GEMINI_API_KEY$/u,
+    /^GOOGLE_GEMINI_BASE_URL$/u,
   ],
   opencode: [
     /^(?:ANTHROPIC|CEREBRAS|COHERE|DEEPSEEK|FIREWORKS|GEMINI|GROQ|MISTRAL|OPENAI|OPENROUTER|PERPLEXITY|TOGETHER|XAI)_API_KEY$/u,
@@ -359,6 +354,7 @@ async function commonExecutableDirectories(
       volta ? join(volta, "bin") : join(home, ".volta", "bin"),
       local ? join(local, "Programs", "OpenAI", "Codex", "bin") : "",
       local ? join(local, "Programs", "cursor", "resources", "app", "bin") : "",
+      local ? join(local, "agy", "bin") : "",
       join(home, "AppData", "Roaming", "npm"),
     ]);
   }

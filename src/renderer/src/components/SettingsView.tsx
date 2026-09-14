@@ -54,6 +54,7 @@ import {
   type AppShortcutKey,
 } from "@shared/keybindings";
 import { ProviderActionIcon, ProviderStatus, providerSetupAction, providerStateDetail, providerStateLabel } from "./ProviderStatus";
+import { providerVersionLabel } from "../utils/providerStatus";
 import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
@@ -742,7 +743,7 @@ export function SettingsView({
                         <span>
                           <span className="provider-settings-list-title">
                             <strong>{identityLabel ?? provider.label}</strong>
-                            {provider.version && <code>v{provider.version}</code>}
+                            {provider.version && <code>{providerVersionLabel(provider.version)}</code>}
                           </span>
                           <small>
                             {identityLabel ? `${provider.label} · ` : ""}
@@ -771,7 +772,7 @@ export function SettingsView({
                             {selectedProviderIdentityLabel ?? selectedProvider.label}
                           </strong>
                           {selectedProvider.version && (
-                            <code>v{selectedProvider.version}</code>
+                            <code>{providerVersionLabel(selectedProvider.version)}</code>
                           )}
                         </span>
                         <small>

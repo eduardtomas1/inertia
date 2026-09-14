@@ -1,10 +1,8 @@
 import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { requireAcpInitializeHandshake } from "./provider-drift-process.mjs";
-import { inspectGeminiCliAcpSurface } from "./provider-drift-gemini-surface.mjs";
 import { stageKimiTerminalAuthPolicy, stageOpenCodeRuntime } from "./provider-drift-staging.mjs";
 import { runBounded } from "./bounded-process-tree.mjs";
 import {
@@ -28,7 +26,6 @@ const productSdks = [
 const latestPackages = [
   "@openai/codex",
   "@anthropic-ai/claude-code",
-  "@google/gemini-cli",
   "@moonshot-ai/kimi-code",
   "opencode-ai",
 ];
@@ -306,55 +303,6 @@ async function main() {
       }
     });
 
-    await check("Gemini latest CLI exposes version and stable ACP help", async () => {
-      const version = await requireSuccessfulCommand(
-        bin("gemini"),
-        ["--version"],
-        { cwd: options.workspace, environment },
-      );
-      const help = await requireSuccessfulCommand(
-        bin("gemini"),
-        ["--help"],
-        { cwd: options.workspace, environment },
-      );
-      const normalizedVersion = version.trim();
-      if (
-        !isExactVersion(normalizedVersion)
-        || normalizedVersion !== report.latestPackages["@google/gemini-cli"]
-        || !/(?:^|\s)--acp(?:\s|,|$)/mu.test(help)
-        || !/(?:^|\s)--session-id(?:\s|,|$)/mu.test(help)
-      ) {
-        throw new Error(
-          "Gemini CLI version or stable ACP owned-session surface no longer matches its package.",
-        );
-      }
-    });
-
-    await check("Gemini latest shipped ACP extensions remain compatible", async () => {
-      const inspection = await inspectGeminiCliAcpSurface(
-        join(options.workspace, "node_modules", "@google", "gemini-cli"),
-      );
-      process.stdout.write(
-        `Inspected ${inspection.filesInspected} bounded Gemini artifact(s) (${inspection.totalBytes} bytes).\n`,
-      );
-    });
-
-    await check("Gemini latest CLI accepts an owned identity for secret-free ACP initialize", async () => {
-      await requireAcpInitializeHandshake(
-        bin("gemini"),
-        [
-          "--acp",
-          "--session-id",
-          `${randomBytes(18).toString("base64url")}-inertia-drift`,
-        ],
-        { cwd: options.workspace, environment },
-        {
-          expectedAgent: "gemini-cli",
-          requireLoadSession: false,
-          advertiseCompaction: false,
-        },
-      );
-    });
 
     await check("Kimi latest CLI exposes version and ACP help", async () => {
       const version = await requireSuccessfulCommand(

@@ -88,35 +88,6 @@ function retainedLegacyBackendProfile(): PersistedModelBackendProfile {
   };
 }
 
-function nativeGeminiBackendProfile(): PersistedModelBackendProfile {
-  return {
-    id: "builtin:gemini",
-    displayName: "Google Gemini",
-    harnessId: "gemini-acp",
-    protocol: "gemini-managed",
-    authenticationMode: "harness-managed",
-    source: "built-in",
-    enabled: true,
-    configurationRevision: 0,
-    endpointIdentity: null,
-    preset: "native",
-    baseUrl: null,
-    allowInsecureLocalhost: false,
-    credentialGeneration: null,
-    models: [{
-      id: "provider-default",
-      displayName: "Provider default",
-      contextWindowTokens: null,
-      reasoningOptions: [],
-      capabilities: [],
-    }],
-    routing: { mode: "simple", primaryModelId: "provider-default" },
-    capabilityHints: [],
-    createdAt: PROFILE_TIMESTAMP,
-    updatedAt: PROFILE_TIMESTAMP,
-  };
-}
-
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "inertia-gemini-migration-"));
   temporaryDirectories.push(directory);
@@ -547,40 +518,7 @@ describe("native Gemini provider migration", { concurrent: false }, () => {
       recoverInterruptedRuns: false,
     });
     expect(reopened.agentTurn(fixture.turnId).continuationReasonCode).toBe("harness-changed");
-    expect(reopened.agentTurn(fixture.turnId).providerId).toBe("gemini");
-    reopened.close();
-  });
-
-  it("round-trips native Gemini profiles through the post-migration repository", async () => {
-    const fixture = await populatedFixture();
-    const database = new Database(fixture.databasePath);
-    migrateRuntimeDatabase(database);
-    database.close();
-
-    const migrated = new RuntimeStore(
-      fixture.databasePath,
-      fixture.workspacePath,
-      { recoverInterruptedRuns: false },
-    );
-    expect(migrated.databaseRecoveryReport().outcome).toBe("healthy");
-    expect(migrated.modelBackendProfile(fixture.backendProfileId).profile)
-      .toEqual(retainedLegacyBackendProfile());
-    expect(migrated.saveModelBackendProfile(nativeGeminiBackendProfile()).profile)
-      .toEqual(nativeGeminiBackendProfile());
-    migrated.close();
-
-    const reopened = new RuntimeStore(
-      fixture.databasePath,
-      fixture.workspacePath,
-      { recoverInterruptedRuns: false },
-    );
-    expect(reopened.modelBackendProfile("builtin:gemini").profile)
-      .toEqual(nativeGeminiBackendProfile());
-    expect(reopened.listModelBackendProfiles().map(({ profile }) => profile.id))
-      .toEqual([
-        "builtin:gemini",
-        fixture.backendProfileId,
-      ]);
+    expect(reopened.agentTurn(fixture.turnId).providerId).toBe("antigravity");
     reopened.close();
   });
 });

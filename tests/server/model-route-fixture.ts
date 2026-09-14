@@ -33,7 +33,6 @@ interface NativeProviderRunInput {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
-  reconstructedHistory?: ProviderRunInput["reconstructedHistory"];
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   goalStart?: ProviderRunInput["goalStart"];

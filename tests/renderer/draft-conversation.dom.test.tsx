@@ -192,6 +192,57 @@ describe("useDraftConversation", () => {
     expect(window.localStorage.getItem("inertia:draft:unrelated")).toBe("Another chat's draft");
   });
 
+  it("moves a saved Gemini draft to Antigravity's provider default", () => {
+    const values = new Map<string, string>([[
+      "inertia:new-project-conversation-draft:v1",
+      JSON.stringify({
+        version: 2,
+        state: "draft",
+        conversationId: "55555555-5555-4555-8555-555555555555",
+        createdAt: "2026-09-01T10:00:00.000Z",
+        payload: {
+          projectId,
+          title: "New chat",
+          providerId: "gemini",
+          modelSelection: {
+            harnessId: "gemini-acp",
+            backendProfileId: "builtin:gemini",
+            backendProfileDisplayName: "Google Gemini",
+            modelId: "gemini-2.5-pro",
+            alias: null,
+            reasoningEffort: "high",
+            contextWindowOverride: null,
+            providerOptions: {},
+            capabilities: [],
+            backendConfigurationRevision: 0,
+          },
+          model: "gemini-2.5-pro",
+          reasoningEffort: "high",
+          accessMode: "supervised",
+        },
+      }),
+    ]]);
+    vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);
+
+    const restored = readPersistedDraftConversation();
+
+    expect(restored?.payload).toEqual({
+      projectId,
+      title: "New chat",
+      providerId: "antigravity",
+      accessMode: "supervised",
+    });
+    expect(restored?.conversation).toMatchObject({
+      id: "55555555-5555-4555-8555-555555555555",
+      providerId: "antigravity",
+      modelSelection: {
+        harnessId: "antigravity-cli",
+        backendProfileId: "builtin:antigravity",
+        modelId: "provider-default",
+      },
+    });
+  });
+
   it("starts from the project backend default before the global default", () => {
     const globalSelection = providerNativeModelSelection({
       providerId: "codex",

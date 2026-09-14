@@ -34,7 +34,7 @@ function provider(
 const providers = [
   provider("codex", "Codex"),
   provider("claude", "Claude", { canRun: false, authState: "unauthenticated" }),
-  provider("gemini", "Gemini CLI", {
+  provider("antigravity", "Antigravity", {
     canRun: false,
     installState: "not-installed",
     authState: "unknown",
@@ -199,7 +199,7 @@ describe("WelcomeGuide", () => {
     expect(agents.map((agent) => agent.textContent)).toEqual([
       "CodexReady",
       "ClaudeSign in neededSet up",
-      "Gemini CLINot installedSet up",
+      "AntigravityNot installedSet up",
     ]);
     expect(screen.getByText(/1 of 3 ready/)).toBeVisible();
 

@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import {
-  GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+  ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
   type ProviderId,
 } from "../../../../shared/provider";
 import type { CompactComposerCommand } from "../../utils/composerCommands";
@@ -66,8 +66,8 @@ export function useComposerCompaction(options: {
   >>({});
   const operationSequence = useRef(0);
   const activeOperations = useRef(new Map<string, number>());
-  const compactUnavailableReason = providerId === "gemini"
-    ? GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
+  const compactUnavailableReason = providerId === "antigravity"
+    ? ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
     : null;
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {

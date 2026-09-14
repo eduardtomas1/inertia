@@ -10,9 +10,9 @@ const PROVIDER_HARNESS_IDS = {
   codex: "codex-app-server",
   claude: "claude-agent-sdk",
   cursor: "cursor-acp",
-  gemini: "gemini-acp",
   kimi: "kimi-acp",
   opencode: "opencode-sdk",
+  antigravity: "antigravity-cli",
 } as const;
 
 const CAPABILITY_CONTRACT_KEYS = [

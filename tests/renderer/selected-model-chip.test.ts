@@ -137,9 +137,6 @@ describe("selected model chip", () => {
       harnessId: "cursor-acp",
     }))).toBe("cursor");
     expect(selectedModelChipGlyph(route({
-      harnessId: "gemini-acp",
-    }))).toBe("gemini");
-    expect(selectedModelChipGlyph(route({
       harnessId: "opencode-sdk",
     }))).toBe("opencode");
     expect(selectedModelChipGlyph(route({

@@ -7,7 +7,6 @@ const PROVIDERS: readonly ProviderId[] = [
   "codex",
   "claude",
   "cursor",
-  "gemini",
   "kimi",
   "opencode",
 ];

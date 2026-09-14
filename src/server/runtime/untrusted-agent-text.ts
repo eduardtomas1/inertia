@@ -16,7 +16,7 @@
  *   mentions and the short `H:`/`A:` forms stay as written because they are
  *   common in ordinary Q&A prose.
  * - Inertia's own provider-prompt markers: the section headers and `[label]`
- *   lines that `assembleTurnRequest` and the Gemini history replay emit.
+ *   lines that `assembleTurnRequest` emits.
  * - Permission-configuration mentions are left as written, as the SDK does.
  *
  * No pattern matches its own output, so neutralizing is idempotent. No pattern
@@ -75,8 +75,8 @@ const TURN_MARKER = /^([ \t]*(?:Human|Assistant)[ \t]*):/gmu;
 const INERTIA_SECTION_HEADER = /^([ \t]*(?:Internal provider instructions|Structured execution context)[^\n\r:]*?)(?<!\\):/gimu;
 
 // `[label]` lines: hidden-instruction labels (build mode, capability packs,
-// isolated review) and the Gemini reconstructed-history markers.
-const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|read-only-diff-review|selected-diff-revision-scope|Inertia application-reconstructed conversation context|End reconstructed context|Current request)\])/gimu;
+// isolated review).
+const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|read-only-diff-review|selected-diff-revision-scope)\])/gimu;
 
 function neutralizeControlTag(
   match: string,

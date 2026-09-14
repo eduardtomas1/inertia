@@ -13,7 +13,6 @@ import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle"
 import {
   ProviderMetadataCache,
   currentProviderMetadataScopeKey,
-  providerNativeMetadataScope,
   type PersistedProviderMetadata,
   validateProviderModels,
   validateProviderRateLimits,
@@ -88,28 +87,6 @@ describe("provider metadata cache", () => {
     expect(current.rateLimits).toEqual(previous.rateLimits);
     expect(current.metadataState.rateLimits).toMatchObject({ freshness: "stale", updatedAt: previous.metadataState.rateLimits.updatedAt });
     expect(close).toHaveBeenCalledTimes(2);
-  });
-
-  it("constructs Gemini catalog scopes through the current provider maps", () => {
-    const scope = providerNativeMetadataScope("gemini", {
-      executable: "/opt/bin/gemini",
-      version: "0.4.0",
-      authState: "authenticated",
-    });
-    expect(scope).toMatchObject({
-      providerId: "gemini",
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      modelId: "provider-catalog",
-    });
-
-    const cache = new ProviderMetadataCache();
-    cache.correlate("gemini", {
-      executable: scope.executable,
-      version: scope.version,
-      authState: scope.authState,
-    });
-    expect(cache.nativeScope("gemini")).toEqual(scope);
   });
 
   it("accepts only structured provider-native Fast mode metadata", () => {

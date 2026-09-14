@@ -42,8 +42,6 @@ function providerLabel(providerId: ProviderInfo["id"]): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : providerId === "gemini"
-          ? "Gemini"
           : providerId === "kimi"
             ? "Kimi Code"
             : "OpenCode";

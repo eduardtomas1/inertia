@@ -1,18 +1,25 @@
 # Antigravity integration investigation — 2026-09-07
 
-Status: **investigation complete; no Antigravity provider route implemented**.
+Status: **investigation complete; ACP route not used**.
 No Gemini provider, persisted identity, session, authentication configuration,
 installer, or user application was changed by this investigation. A complete
-adapter is not claimed: the currently published ACP runtime has a confirmed
-terminal-failure ambiguity described below.
+ACP adapter is not claimed: the currently published ACP runtime has a
+confirmed terminal-failure ambiguity described below.
+
+Update, 2026-09-13: Inertia now ships Antigravity through the documented
+headless `agy` CLI (`antigravity` / `antigravity-cli` /
+`builtin:antigravity`) instead of this ACP server. Its contract, limits, and
+unverified protocol details are in
+[the harness capabilities](HARNESS_CAPABILITIES.md#antigravity-headless-contract).
+The ACP findings below remain the reason that route was not taken.
 
 ## Product and transport boundaries
 
 Google ended individual Gemini CLI requests for Free/Google AI Pro/Ultra on
-June 18, 2026. API-key and Gemini Code Assist enterprise access are unaffected.
-Keep the existing Gemini provider and its history for those supported users;
-never reinterpret an existing Gemini session as an Antigravity session.
-[Official transition announcement](https://github.com/google-gemini/gemini-cli/discussions/28017).
+June 18, 2026
+([official transition announcement](https://github.com/google-gemini/gemini-cli/discussions/28017)).
+Inertia has since removed its Gemini CLI provider. Schema 76 moves those chats
+to Antigravity with their transcripts and without their Gemini session IDs.
 
 The `agy` CLI and the Antigravity ACP server are separate distributions. The
 CLI's documented streaming input accepts text but rejects interactive control
@@ -111,9 +118,9 @@ bridge would exceed the supported public SDK contract.
 ## Design once the contract is resolved
 
 Add distinct `antigravity` / `antigravity-acp` / `builtin:antigravity` identities
-with an append-only migration and exact continuation identity. Keep legacy
-Gemini identities and transcripts unchanged; switching providers starts a new
-native conversation, never retargets an old session ID.
+with an append-only migration and exact continuation identity. Migrated
+Gemini chats keep their transcripts and start a new native conversation; an old
+Gemini session ID is never reused.
 
 Reuse bounded ACP framing, owned-process admission/cleanup, descriptor-bound
 images, host MCP, exact interaction ownership and replay suppression. Keep

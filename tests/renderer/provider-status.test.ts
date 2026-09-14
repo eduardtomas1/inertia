@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { providerSetupAction, providerStateLabel } from "../../src/renderer/src/utils/providerStatus";
+import {
+  providerSetupAction,
+  providerStateDetail,
+  providerStateLabel,
+  providerVersionLabel,
+} from "../../src/renderer/src/utils/providerStatus";
 import type { ProviderInfo } from "../../src/shared/contracts";
 
 describe("provider compatibility status", () => {
@@ -27,51 +32,46 @@ describe("provider compatibility status", () => {
     expect(providerSetupAction(provider)).toBe("refresh");
   });
 
-  it("offers Gemini's interactive setup when static authentication is unknown", () => {
-    const provider: ProviderInfo = {
-      id: "gemini",
-      label: "Gemini",
-      command: "gemini",
+  it("treats Antigravity sign-in as checked per turn and version-gated", () => {
+    const metadataState: ProviderInfo["metadataState"] = {
+      models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+    };
+    const ready: ProviderInfo = {
+      id: "antigravity",
+      label: "Antigravity",
+      command: "agy",
       available: true,
-      version: "0.58.0",
+      version: "1.2.2",
+      executable: "/opt/bin/agy",
       installState: "installed",
       authState: "unknown",
       canRun: true,
-      statusMessage: "Installed; Gemini ACP will verify authentication when a session starts",
+      statusMessage: "Installed; Antigravity checks your sign-in when a turn starts",
       models: [],
       rateLimits: [],
-      metadataState: {
-        models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
-        rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
-      },
+      metadataState,
     };
+    expect(providerStateLabel(ready)).toBe("Ready");
+    expect(providerSetupAction(ready)).toBe("connect");
 
-    expect(providerStateLabel(provider)).toBe("Ready");
-    expect(providerSetupAction(provider)).toBe("connect");
+    const outdated: ProviderInfo = {
+      ...ready,
+      version: "1.1.0",
+      canRun: false,
+      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
+    };
+    expect(providerStateLabel(outdated)).toBe("Update required");
+    expect(providerSetupAction(outdated)).toBe("refresh");
+    expect(providerStateDetail({ ...ready, installState: "not-installed", statusMessage: null, version: null }))
+      .toBe("Antigravity CLI was not found on this device.");
   });
 
-  it("offers refresh instead of connection when Gemini ACP needs an update", () => {
-    const provider: ProviderInfo = {
-      id: "gemini",
-      label: "Gemini",
-      command: "gemini",
-      available: true,
-      version: "0.29.5",
-      executable: "/opt/bin/gemini",
-      installState: "installed",
-      authState: "unknown",
-      canRun: false,
-      statusMessage:
-        "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
-      models: [],
-      rateLimits: [],
-      metadataState: {
-        models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
-        rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
-      },
-    };
-
-    expect(providerStateLabel(provider)).toBe("Update required");
-    expect(providerSetupAction(provider)).toBe("refresh");
+  it("prefixes exactly one v whether or not the CLI printed one", () => {
+    expect(providerVersionLabel("26.5.0")).toBe("v26.5.0");
+    expect(providerVersionLabel("v26.5.0")).toBe("v26.5.0");
+    expect(providerVersionLabel("V1.2.2")).toBe("v1.2.2");
+    expect(providerVersionLabel("2025.09.12-abc")).toBe("v2025.09.12-abc");
+    expect(providerVersionLabel("vnext")).toBe("vvnext");
   });
 });

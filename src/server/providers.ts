@@ -832,7 +832,7 @@ export class ProviderManager {
     return this.trackAuxiliary(async () => {
       let executable = this.resolvedCommands.get(providerId);
       if (!executable) executable = (await this.detect(providerId, { cwd, refreshEnvironment: true })).executable;
-      if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
+      if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name.replace(/ CLI$/u, "")} CLI is not installed.`);
       const environment = await providerEnvironment();
       this.processEnvironment = environment.env;
       return await prepareProviderAuthLaunch({
@@ -854,7 +854,7 @@ export class ProviderManager {
     if (!detection.executable) {
       throw new ProviderRuntimeError(
         "invalid_input",
-        `${PROVIDER_INFO[providerId].name} CLI is not installed.`,
+        `${PROVIDER_INFO[providerId].name.replace(/ CLI$/u, "")} CLI is not installed.`,
       );
     }
     if (

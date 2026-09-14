@@ -266,8 +266,8 @@ describe("provider drift ACP initialize", () => {
     await expect(acpFixture(validResponse())).resolves.toBeUndefined();
   });
 
-  it("can advertise the reduced Gemini client capability surface", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-provider-gemini-capabilities-"));
+  it("can advertise the reduced client capability surface", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-provider-reduced-capabilities-"));
     try {
       const capture = join(root, "initialize.json");
       const source = `
@@ -279,7 +279,7 @@ describe("provider drift ACP initialize", () => {
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {
             protocolVersion: 1,
             agentCapabilities: {},
-            agentInfo: { name: "gemini-cli", version: "0.58.0" },
+            agentInfo: { name: "fixture-agent", version: "1.0.0" },
           } }) + "\\n");
         });
         setInterval(() => {}, 1_000);
@@ -289,7 +289,7 @@ describe("provider drift ACP initialize", () => {
         ["--input-type=commonjs", "-e", source],
         { cwd: root, environment: process.env },
         {
-          expectedAgent: "gemini-cli",
+          expectedAgent: "fixture-agent",
           requireLoadSession: false,
           advertiseCompaction: false,
         },

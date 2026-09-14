@@ -17,15 +17,6 @@ property of their respective owners.
   Cursor's official brand kit downloaded from <https://cursor.com/brand> on
   2026-08-11. The downloaded archive SHA-256 is
   `97488a7751914e60f9ff532bc33810cdeaebdddc017548abe6ca2bc29bbc3928`.
-- `gemini.svg`: the multicolor Gemini CLI header glyph from
-  `google-gemini/gemini-cli` at commit
-  `87a9c71d57a4ec56c00f3ff628970fea8291d812`, file
-  `packages/cli/src/ui/components/__snapshots__/AppHeaderIcon-AppHeader-Icon-Rendering-renders-the-default-icon-in-standard-terminals.snap.svg`
-  (Apache-2.0 repository license; local SHA-256
-  `9e015cb9e3718f5245ef8ac3359a858ba94cd239817c70c3a99b6b3146948731`).
-  The glyph geometry, colors, and text rendering properties are unchanged;
-  unrelated terminal-snapshot content was omitted and the view box was cropped
-  to the glyph. The local SVG carries the corresponding modification notice.
 - `opencode-light.svg` and `opencode-dark.svg`: OpenCode identity marks from
   `anomalyco/opencode` at commit
   `9fdd4824d3c1e1c533a72359dd6c5f285ae9fc63`, files
@@ -36,6 +27,19 @@ property of their respective owners.
   `apps/vscode/resources/kimi-icon.svg` (MIT repository license; local SHA-256
   `39b9072b6d235732ecdc8e0aa39674bc64afaa09ff31f29ecc955d61dc4fdda5`).
   The geometry is unchanged; comments and multiline formatting were removed.
+- `antigravity.svg`: the Google Antigravity mark from
+  `agentclientprotocol/registry` at commit
+  `a3d294f480dee2e506a1c51f802455d4d49783a2`, file `antigravity-acp/icon.svg`.
+  It was contributed with Google's official Antigravity registry entry in PR
+  #542 by a Google engineer, as the icon ACP clients display to identify the
+  agent. The registry is licensed Apache-2.0; the Antigravity entry itself
+  declares a proprietary license with terms at <https://antigravity.google/terms>.
+  Local SHA-256
+  `ef068db27db956dbf947b59a3e6d21e8aa170656c55ff04d0b66fa673ea852c1`. The
+  16×16 single-color `currentColor` glyph is unmodified; like the other
+  monochrome marks, Inertia inverts it in dark themes. The mark belongs to
+  Google LLC and is used only to identify the provider, without implying any
+  affiliation or endorsement.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

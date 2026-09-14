@@ -192,7 +192,6 @@ export const backendCompatibilityProbeResultSchema = /* @__PURE__ */ (() => z.ob
     "openai-responses",
     "anthropic-messages",
     "cursor-managed",
-    "gemini-managed",
     "kimi-managed",
     "opencode-native",
   ]),

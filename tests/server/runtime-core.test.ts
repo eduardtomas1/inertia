@@ -191,9 +191,9 @@ describe("runtime boundary helpers", () => {
       "codex",
       "claude",
       "cursor",
-      "gemini",
       "kimi",
       "opencode",
+      "antigravity",
     ]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
     expect(providers.every(

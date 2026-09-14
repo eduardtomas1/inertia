@@ -28,7 +28,7 @@ export function desktopDiscoveryHostIsIsolated(): boolean {
   return process.platform === "linux" && ![
     "/usr/local/bin", "/usr/bin", "/bin", "/opt/homebrew/bin",
   ].some((root) => [
-    "codex", "claude", "cursor-agent", "agent", "gemini", "kimi", "opencode",
+    "codex", "claude", "cursor-agent", "agent", "agy", "kimi", "opencode",
   ].some((name) => existsSync(join(root, name))));
 }
 

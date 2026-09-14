@@ -454,7 +454,7 @@ describe("ProviderMaintenanceController", () => {
       state: "quarantined",
     });
     expect(diagnosticStates).toContainEqual({
-      providerId: "gemini",
+      providerId: "kimi",
       state: "idle",
     });
     expect(diagnosticStates.every(

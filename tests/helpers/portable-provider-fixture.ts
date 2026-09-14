@@ -53,7 +53,7 @@ export function readStableFixtureCapture<T>(capturePath: string): T {
 
 /**
  * Create a portable executable for CLIs whose protocol is selected by a flag
- * (for example `gemini --acp`) instead of a Node-compatible subcommand.
+ * (for example `agy --output-format stream-json`) instead of a Node-compatible subcommand.
  */
 export function writeNodeFlagExecutable(
   root: string,

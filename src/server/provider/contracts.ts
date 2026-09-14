@@ -26,9 +26,9 @@ export const PROVIDER_IDS = [
   "codex",
   "claude",
   "cursor",
-  "gemini",
   "kimi",
   "opencode",
+  "antigravity",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -91,20 +91,6 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
-  /**
-   * Bounded visible transcript context reconstructed by Inertia only when a
-   * provider's native resume path cannot be used safely. This is contextual
-   * input, not a provider session identity, and never includes reasoning,
-   * activities, tool payloads, credentials, or attachment bytes.
-   */
-  reconstructedHistory?: {
-    source: "visible-transcript";
-    truncated: boolean;
-    messages: readonly {
-      role: "user" | "assistant";
-      content: string;
-    }[];
-  };
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by

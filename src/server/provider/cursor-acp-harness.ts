@@ -1,4 +1,4 @@
-import { GeminiAcpSecretRedactor as AcpSecretRedactor } from "./gemini-acp-redaction";
+import { AcpSecretRedactor } from "./acp-redaction";
 import { acpPermissionDetail } from "./acp-permission-detail";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";

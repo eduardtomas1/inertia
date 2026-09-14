@@ -129,9 +129,12 @@ function changedFiles(status: GitRepositoryStatus): ChangedFile[] {
   }));
 }
 
-function readyRepository(repositoryPath: string, status: GitRepositoryStatus): WorkspaceGitRepositorySnapshot {
+function readyRepository(repositoryPath: string, status: GitRepositoryStatus, workspaceRoot: string): WorkspaceGitRepositorySnapshot {
   return {
     repositoryPath,
+    ...(repositoryPath === "." && canonicalIdentity(status.root) !== canonicalIdentity(workspaceRoot)
+      ? { workspacePrefix: relative(status.root, workspaceRoot).split(sep).join("/") }
+      : {}),
     state: "ready",
     error: null,
     branch: status.branch,
@@ -391,12 +394,29 @@ export async function discoverWorkspaceGitRepositories(
       const current = queue.shift()!;
       scannedDirectories += 1;
 
-      const marker = await beforeDiscoveryDeadline(
+      let candidatePath = current.absolutePath;
+      let marker = await beforeDiscoveryDeadline(
         (signal) => markerState(current.absolutePath, signal),
         traversalDeadlineAt,
       );
       if (current.depth === 0 && marker !== "present") {
         limits.maxDepth = Math.min(limits.maxDepth, WORKSPACE_GIT_DISCOVERY_BOUNDS.containerDepth);
+      }
+      if (current.depth === 0 && marker === "absent") {
+        // Git may own this workspace from an ancestor. Inspect that one root,
+        // but keep directory traversal inside the user's selected workspace.
+        try {
+          candidatePath = await repositoryRoot(workspaceRoot, { deadlineAt: traversalDeadlineAt });
+          if (!isContained(candidatePath, workspaceRoot)) {
+            throw new GitError("not-repository", "The Git repository does not contain this workspace.");
+          }
+          marker = await beforeDiscoveryDeadline(
+            (signal) => markerState(candidatePath, signal),
+            traversalDeadlineAt,
+          );
+        } catch (error) {
+          if (!(error instanceof GitError) || error.code !== "not-repository") throw error;
+        }
       }
       if (marker === "unsafe") {
         partial = true;
@@ -404,7 +424,7 @@ export async function discoverWorkspaceGitRepositories(
       } else if (marker === "present") {
         discoveredRepositories += 1;
         if (candidates.length >= limits.maxRepositories) truncated = true;
-        else candidates.push({ absolutePath: current.absolutePath, repositoryPath: current.repositoryPath });
+        else candidates.push({ absolutePath: candidatePath, repositoryPath: current.repositoryPath });
       }
 
       let entries;
@@ -589,12 +609,15 @@ export async function discoverWorkspaceGitRepositories(
       }
       const candidateIdentity = canonicalIdentity(candidate.absolutePath);
       const rootIdentity = canonicalIdentity(status.root);
-      if (candidateIdentity !== rootIdentity || !isContained(workspaceRoot, status.root)) {
+      const contained = candidate.repositoryPath === "."
+        ? isContained(status.root, workspaceRoot)
+        : isContained(workspaceRoot, status.root);
+      if (candidateIdentity !== rootIdentity || !contained) {
         throw new GitError("not-repository", "The Git marker does not identify this workspace folder.");
       }
       return {
         rootIdentity,
-        repository: readyRepository(candidate.repositoryPath, status),
+        repository: readyRepository(candidate.repositoryPath, status, workspaceRoot),
         secureRoot,
         metadataMarkerIdentity,
       };
@@ -669,8 +692,8 @@ function normalizedRepositoryPath(repositoryPath: string): string {
 }
 
 /**
- * Resolves a repository identity received from the renderer back beneath the
- * active workspace. Every segment is lstat'ed so a newly introduced symlink
+ * Resolves "." to the Git root owning the active workspace, and nested identities
+ * beneath the workspace. Every nested segment is lstat'ed so a newly introduced symlink
  * cannot redirect a subsequent diff request outside the project.
  */
 export async function resolveWorkspaceGitRepositoryIdentity(
@@ -688,7 +711,9 @@ export async function resolveWorkspaceGitRepositoryIdentity(
   requireRepositoryResolutionActive(signal);
   const normalized = normalizedRepositoryPath(repositoryPath);
   const segments = normalized === "." ? [] : normalized.split("/");
-  let candidate = workspaceRoot;
+  let candidate = normalized === "."
+    ? await repositoryRoot(workspaceRoot, { signal })
+    : workspaceRoot;
   for (const segment of segments) {
     candidate = resolve(candidate, segment);
     let info;
@@ -717,7 +742,9 @@ export async function resolveWorkspaceGitRepositoryIdentity(
     throw new GitError("not-found", "The repository folder could not be found.");
   }
   requireRepositoryResolutionActive(signal);
-  if (!isContained(workspaceRoot, canonical)) {
+  if (!(normalized === "."
+    ? isContained(canonical, workspaceRoot)
+    : isContained(workspaceRoot, canonical))) {
     throw new GitError("invalid-input", "The repository is outside the workspace.");
   }
   const canonicalInfo = await beforeRepositoryResolutionAbort(

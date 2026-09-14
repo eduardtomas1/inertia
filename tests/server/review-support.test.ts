@@ -13,9 +13,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
-import { selectedReviewContext } from "../../src/server/runtime/commands/review-support";
+import { assembleReadOnlyReviewRequest, selectedReviewContext } from "../../src/server/runtime/commands/review-support";
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { parseUnifiedDiff } from "../../src/shared/diff-review";
+import { turnRequestContextSchema } from "../../src/shared/contracts/client-command/common";
 
 const roots: string[] = [];
 
@@ -52,7 +53,7 @@ describe("selected review context", () => {
     store.close();
   });
 
-  it("validates a file-scoped selection while retaining the full revision audit patch", async () => {
+  it.each([".", "app"])("validates a selection from workspace %s while retaining the full repository revision audit patch", async (workspaceFolder) => {
     const root = mkdtempSync(join(tmpdir(), "inertia-review-support-"));
     roots.push(root);
     const workspace = join(root, "workspace");
@@ -69,7 +70,10 @@ describe("selected review context", () => {
     writeFileSync(join(workspace, "existing.ts"), "export const existing = 1;\n");
     execFileSync("git", ["add", "existing.ts"], { cwd: workspace });
     execFileSync("git", ["commit", "-m", "initial"], { cwd: workspace });
-    writeFileSync(join(workspace, "selected.ts"), "export const selected = 2;\n");
+    const projectFolder = join(workspace, workspaceFolder);
+    mkdirSync(projectFolder, { recursive: true });
+    const selectedPath = workspaceFolder === "." ? "selected.ts" : `${workspaceFolder}/selected.ts`;
+    writeFileSync(join(projectFolder, "selected.ts"), "export const selected = 2;\n");
     writeFileSync(join(workspace, "existing.ts"), "export const existing = 2;\n");
     const secureReads: string[] = [];
     const secureFiles: RuntimeSecureFileBroker = {
@@ -97,10 +101,10 @@ describe("selected review context", () => {
     };
 
     const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
-    const project = store.createProject("Review project", workspace);
+    const project = store.createProject("Review project", projectFolder);
     const conversation = store.createConversation(project.id, "Review");
     const selectedDiff = parseUnifiedDiff((await getUnifiedDiff(workspace, {
-      paths: ["selected.ts"],
+      paths: [selectedPath],
     }, undefined, secureFiles)).text);
     const file = selectedDiff.files[0]!;
     const hunk = file.hunks[0]!;
@@ -118,13 +122,33 @@ describe("selected review context", () => {
 
     expect(context.fingerprint).toBe(selectedDiff.fingerprint);
     expect(parseUnifiedDiff(context.patch).files.map(({ path }) => path).sort())
-      .toEqual(["existing.ts", "selected.ts"]);
+      .toEqual(["existing.ts", selectedPath].sort());
     expect(context.requestContext.diffSelections?.[0]?.path).toBe("selected.ts");
     expect(secureReads).toEqual([
-      "selected.ts",
-      "selected.ts",
-      "selected.ts",
+      selectedPath,
+      selectedPath,
+      selectedPath,
     ]);
+    if (workspaceFolder !== ".") {
+      const outside = parseUnifiedDiff((await getUnifiedDiff(workspace, { paths: ["existing.ts"] })).text);
+      const outsideFile = outside.files[0]!;
+      const outsideHunk = outsideFile.hunks[0]!;
+      const selection = {
+        projectId: project.id, conversationId: conversation.id, repositoryPath: ".",
+        fingerprint: outside.fingerprint, filePath: outsideFile.path, hunkId: outsideHunk.id,
+        lineIds: outsideHunk.lines.filter(({ kind }) => kind === "addition").map(({ id }) => id),
+      };
+      await expect(selectedReviewContext(store, selection, "revision", secureFiles))
+        .rejects.toThrow("inside the project folder");
+      const question = await selectedReviewContext(store, selection, "ask", secureFiles);
+      expect(question.requestContext.diffSelections?.[0]?.path).toBe("../existing.ts");
+      expect(question.requestContext.fileReferences).toBeUndefined();
+      const context = turnRequestContextSchema.parse(question.requestContext);
+      // Selected diff context contains captured text, not authority to read this path.
+      rmSync(join(workspace, "existing.ts"));
+      expect(assembleReadOnlyReviewRequest(projectFolder, question.visibleContent, context).executionPrompt)
+        .toContain("../existing.ts");
+    }
     store.close();
   });
 });

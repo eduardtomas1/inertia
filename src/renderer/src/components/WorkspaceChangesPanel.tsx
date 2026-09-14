@@ -29,7 +29,7 @@ import { headerGitActions } from "../utils/headerGitActions";
 import {
   parseWorkspaceGitIdentity,
   workspaceGitFile,
-  workspaceGitFilePath,
+  workspaceGitOpenFilePath,
   workspaceGitIdentity,
   workspaceGitRepositoryLabel,
   type WorkspaceChangesRequest,
@@ -299,6 +299,9 @@ export function WorkspaceChangesPanel({
     [activeRepository, activeRepositoryPath, selected, selectedEntry],
   );
   const nestedRepository = activeRepositoryPath !== null && activeRepositoryPath !== ".";
+  const selectedOpenPath = activeRepository && effectiveSelection
+    ? workspaceGitOpenFilePath(activeRepository, effectiveSelection.filePath)
+    : null;
   const activeFiles = activeRepository?.files ?? [];
   const activeReviewStates = reviewStates.filter(
     (state) => (state.repositoryPath ?? ".") === (activeRepositoryPath ?? "."),
@@ -769,6 +772,7 @@ export function WorkspaceChangesPanel({
                 repositoryPath: activeRepository.repositoryPath,
                 filePath: file.path,
               };
+              const openPath = workspaceGitOpenFilePath(activeRepository, file.path);
               const isSelected = effectiveSelection
                 ? workspaceGitIdentity(effectiveSelection) === workspaceGitIdentity(identity)
                 : false;
@@ -790,7 +794,9 @@ export function WorkspaceChangesPanel({
                   </button>
                   <IconButton
                     label={`Open ${file.path} from ${label}`}
-                    onClick={() => onOpenWorkspaceFile(workspaceGitFilePath(identity))}
+                    disabled={openPath === null}
+                    {...(openPath === null ? { title: "This file is outside the project folder." } : {})}
+                    onClick={() => { if (openPath !== null) onOpenWorkspaceFile(openPath); }}
                   >
                     <ExternalLink size={12} />
                   </IconButton>
@@ -913,15 +919,13 @@ export function WorkspaceChangesPanel({
       }}
       capabilities={{
         persistentReview: true,
-        agentRevision: !nestedRepository,
+        agentRevision: !nestedRepository && selectedOpenPath !== null,
         selectiveRevert: true,
       }}
       onSelectFile={(filePath) => {
         if (activeRepositoryPath) setSelected({ repositoryPath: activeRepositoryPath, filePath });
       }}
-      onOpenFile={(filePath) => {
-        if (activeRepositoryPath) onOpenWorkspaceFile(workspaceGitFilePath({ repositoryPath: activeRepositoryPath, filePath }));
-      }}
+      onOpenFile={selectedOpenPath === null ? undefined : () => onOpenWorkspaceFile(selectedOpenPath)}
       onRefresh={onRefresh}
       onGenerateSummary={nestedRepository ? undefined : onGenerateSummary}
       onCancelSummary={nestedRepository ? undefined : onCancelSummary}

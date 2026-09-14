@@ -134,25 +134,32 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await firstResult.evaluate((element) => {
     element.style.minHeight = "92px";
   });
-  const rowCenters = await modelChooser.locator(".model-chooser-result")
-    .evaluateAll((elements) => elements.map((element) => {
-      const bounds = element.getBoundingClientRect();
-      return bounds.top + bounds.height / 2;
-    }));
-  const favoriteCenters = await modelResults.locator(
-    ".model-chooser-row-favorite",
-  )
-    .evaluateAll((elements) => elements.map((element) => {
-      const bounds = element.getBoundingClientRect();
-      return bounds.top + bounds.height / 2;
-    }));
-  expect(favoriteCenters).toHaveLength(rowCenters.length);
-  for (const [index, center] of rowCenters.entries()) {
-    expect(Math.abs(center - favoriteCenters[index]!)).toBeLessThanOrEqual(1);
+  try {
+    // The popover can reposition after the height change. Compare rows and
+    // favorites in one browser call so both use the same layout snapshot.
+    const { rowCenters, favoriteCenters } = await modelResults.evaluate((grid) => {
+      const centers = (selector: string) => Array.from(
+        grid.querySelectorAll(selector),
+        (element) => {
+          const bounds = element.getBoundingClientRect();
+          return bounds.top + bounds.height / 2;
+        },
+      );
+      return {
+        rowCenters: centers(".model-chooser-result"),
+        favoriteCenters: centers(".model-chooser-row-favorite"),
+      };
+    });
+    expect(favoriteCenters).toHaveLength(rowCenters.length);
+    for (const [index, center] of rowCenters.entries()) {
+      expect(Math.abs(center - favoriteCenters[index]!)).toBeLessThanOrEqual(1);
+    }
+  } finally {
+    // This fixture is shared with the remaining chooser scenarios.
+    await firstResult.evaluate((element) => {
+      element.style.removeProperty("min-height");
+    });
   }
-  await firstResult.evaluate((element) => {
-    element.style.removeProperty("min-height");
-  });
   const searchModels = modelChooser.getByRole("combobox", { name: "Search models" });
   await expect(searchModels).toHaveAttribute("aria-haspopup", "grid");
   await expect(searchModels).toHaveAttribute("aria-expanded", "true");

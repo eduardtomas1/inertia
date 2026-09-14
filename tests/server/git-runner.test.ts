@@ -1,4 +1,6 @@
 import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -447,6 +449,7 @@ process.stdin.on("data", (chunk) => {
     temporaryDirectories.push(directory);
     portableNodeExecutable(directory, "git");
     writeNodeSubcommand(directory, "update-ref", `
+require("node:fs").writeFileSync("git-abort.pid", String(process.pid));
 let input = "";
 let prepared = false;
 process.stdin.on("data", (chunk) => {
@@ -465,7 +468,20 @@ setInterval(() => {}, 1000);
 `);
     const previousPath = process.env.PATH;
     process.env.PATH = directory;
+    const deadlineAt = Date.now() + (hostedWindowsCi ? 10_000 : 2_000);
     let stall: NodeJS.Timeout | undefined;
+    let observedFixtureExit = false;
+    const fixtureExited = (pid: number): boolean => {
+      if (process.platform !== "darwin") return !executableProcessExists(pid);
+      // A blocked macOS parent cannot reap its zombie yet. Observe only this
+      // fixture PID, without a shell or extending the operation deadline.
+      const state = spawnSync("/bin/ps", ["-p", String(pid), "-o", "stat="], {
+        encoding: "utf8", maxBuffer: 1_024,
+        timeout: Math.max(1, Math.min(100, deadlineAt - Date.now())),
+      });
+      return (state.status === 0 && state.stdout.trim().startsWith("Z"))
+        || (state.status === 1 && state.stdout.trim() === "");
+    };
     try {
       await expect(withPreparedGitRefReservation(
         directory,
@@ -476,19 +492,31 @@ setInterval(() => {}, 1000);
           // hosted Windows enough time to start the copied Node executable;
           // the 480ms abort acknowledgement and 500ms cleanup race below stay
           // unchanged and remain the behavior this test proves.
-          deadlineAt: Date.now() + (hostedWindowsCi ? 10_000 : 2_000),
+          deadlineAt,
           failureMessage: "Git reservation failed.",
         },
         () => {
+          const fixturePid = Number(readFileSync(join(directory, "git-abort.pid"), "utf8"));
+          expect(Number.isSafeInteger(fixturePid) && fixturePid > 0).toBe(true);
           stall = setTimeout(() => {
             const releaseAt = Date.now() + 250;
             while (Date.now() < releaseAt) {
               // Queue the child's abort acknowledgement behind the due
               // cleanup timer, reproducing the Windows timers/poll race.
             }
+            // An ACK does not prove the child has exited. Keep the parent
+            // blocked until native exit is observable so both ACK and close
+            // are ready behind the due cleanup timer when the loop resumes.
+            while (Date.now() < deadlineAt) {
+              if (fixtureExited(fixturePid)) {
+                observedFixtureExit = true;
+                break;
+              }
+            }
           }, 400);
         },
       )).resolves.toBeUndefined();
+      expect(observedFixtureExit).toBe(true);
     } finally {
       if (stall) clearTimeout(stall);
       if (previousPath === undefined) delete process.env.PATH;

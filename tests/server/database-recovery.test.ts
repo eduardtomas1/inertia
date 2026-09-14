@@ -129,8 +129,9 @@ function expectSchemaMismatchPreserved(databasePath: string, directory: string, 
   expect(() => new RuntimeStore(databasePath, directory, {
     recoverInterruptedRuns: false,
   })).toThrow("schema or stored relationships are inconsistent");
-  expect(readFileSync(databasePath)).toEqual(original);
-  expect(readFileSync(backupPath)).toEqual(backup);
+  // SQLite files need exact byte equality, without deep-enumerating each byte.
+  expect(readFileSync(databasePath).equals(original)).toBe(true);
+  expect(readFileSync(backupPath).equals(backup)).toBe(true);
   expect(existsSync(paths.corruptDirectory)).toBe(false);
 }
 

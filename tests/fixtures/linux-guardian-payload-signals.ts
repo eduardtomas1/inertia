@@ -32,6 +32,7 @@ async function withGuardian(
   check: (fixture: {
     child: ChildProcess; payloadPid: number; root: string; command: (action: string) => void;
   }) => Promise<void>,
+  inheritBlockedSignals = false,
 ): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "inertia-linux-payload-signals-"));
   const executable = join(root, "guardian");
@@ -40,8 +41,16 @@ async function withGuardian(
     execFileSync("cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
       "native/runtime-process-guardian/linux.c", "-o", executable], { timeout: 10_000 });
     const metadata = statSync(executable, { bigint: true });
-    child = spawn(executable, ["watch", String(process.pid), String(metadata.dev),
-      String(metadata.ino), "--", ...payload(root)], { detached: true, stdio: "ignore" });
+    const args = ["watch", String(process.pid), String(metadata.dev),
+      String(metadata.ino), "--", ...payload(root)];
+    let launcher = executable;
+    if (inheritBlockedSignals) {
+      launcher = join(root, "blocked-signals");
+      execFileSync("cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "tests/fixtures/linux-blocked-signals.c", "-o", launcher], { timeout: 10_000 });
+      args.unshift(executable);
+    }
+    child = spawn(launcher, args, { detached: true, stdio: "ignore" });
     const ready = execFileSync(executable, ["ready", String(child.pid)], {
       encoding: "utf8", timeout: 5_000,
     }).trim().split("|");
@@ -79,18 +88,45 @@ async function withGuardian(
   }
 }
 
-for (const signal of ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"] as const) {
-  void linuxIt(`restores ${signal} for the payload while it waits for authorization`, async () => {
-    await withGuardian((root) => ["/usr/bin/touch", join(root, "executed")], async (fixture) => {
-      process.kill(fixture.payloadPid, signal);
-      await waitFor(() => processState(fixture.payloadPid) === "Z");
-      assert.equal(existsSync(join(fixture.root, "executed")), false);
-      fixture.child.kill("SIGTERM");
-      await stopped(fixture.child);
-      assert.equal(fixture.child.exitCode, 143);
-      assert.equal(processState(fixture.payloadPid), null);
+void linuxIt("admits, executes, and releases a guardian with inherited blocked control signals", async () => {
+  await withGuardian((root) => ["/usr/bin/touch", join(root, "executed")], async ({
+    child, payloadPid, root, command,
+  }) => {
+    assert.equal(existsSync(join(root, "executed")), false);
+    command("claim");
+    assert.equal(existsSync(join(root, "executed")), false);
+    for (const pid of [child.pid, payloadPid]) {
+      const status = readFileSync(`/proc/${pid}/status`, "utf8");
+      const mask = BigInt(`0x${status.match(/^SigBlk:\s*([0-9a-f]+)$/mu)![1]}`);
+      // Keep unrelated SIGWINCH blocked while making lifecycle signals usable.
+      assert.equal(mask & 0x08000000n, 0x08000000n);
+      assert.equal(mask & 0x4a07n, 0n);
+    }
+    command("exec");
+    await waitFor(() => readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-exdone");
+    command("release");
+    await stopped(child);
+    assert.equal(child.exitCode, 0);
+    assert.equal(child.signalCode, null);
+    assert.equal(existsSync(join(root, "executed")), true);
+    assert.equal(processState(payloadPid), null);
+  }, true);
+});
+
+for (const inheritBlockedSignals of [false, true]) {
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"] as const) {
+    void linuxIt(`restores ${signal} for the gated payload (inherited blocking: ${inheritBlockedSignals})`, async () => {
+      await withGuardian((root) => ["/usr/bin/touch", join(root, "executed")], async (fixture) => {
+        process.kill(fixture.payloadPid, signal);
+        await waitFor(() => processState(fixture.payloadPid) === "Z");
+        assert.equal(existsSync(join(fixture.root, "executed")), false);
+        fixture.child.kill("SIGTERM");
+        await stopped(fixture.child);
+        assert.equal(fixture.child.exitCode, 143);
+        assert.equal(processState(fixture.payloadPid), null);
+      }, inheritBlockedSignals);
     });
-  });
+  }
 }
 
 for (const missing of [true, false]) {

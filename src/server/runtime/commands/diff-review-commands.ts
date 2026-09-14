@@ -20,10 +20,12 @@ import {
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import { repositoryMetadataMarkerIdentity } from "../../git/paths";
+import { sameFilesystemPath } from "../../git/paths";
+import type { ReversalWorkspaceScope } from "../../git/reversal-scope";
 import { changedFiles } from "../../runtime-snapshots";
 import {
   resolveWorkspaceGitRepository,
+  resolveWorkspaceGitRepositoryIdentity,
   workspaceGitFilePath,
 } from "../../workspace-git";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -57,6 +59,7 @@ function reversalApplyBinding(
     ignoreWhitespace?: boolean;
   },
   validation: DiffReversalValidation,
+  scopeBinding: readonly string[],
 ): string[] {
   return [
     projectId,
@@ -73,6 +76,7 @@ function reversalApplyBinding(
     validation.hunkFingerprint,
     validation.selectionFingerprint,
     validation.gitStateFingerprint,
+    ...scopeBinding,
   ];
 }
 
@@ -82,6 +86,7 @@ function reversalUndoBinding(
   workspaceRoot: string,
   repositoryPath: string,
   operationId: string,
+  scopeBinding: readonly string[],
 ): string[] {
   return [
     projectId,
@@ -89,12 +94,47 @@ function reversalUndoBinding(
     workspaceRoot,
     repositoryPath,
     operationId,
+    ...scopeBinding,
   ];
 }
 
 export function createDiffReviewCommandHandler(
   dependencies: DiffReviewCommandDependencies,
 ): RuntimeCommandHandler {
+  const resolveReversalScope = async (payload: {
+    projectId: string; conversationId?: string; repositoryPath?: string;
+  }) => {
+    const workspaceRoot = dependencies.workspacePath(payload.projectId, payload.conversationId);
+    const repository = await resolveWorkspaceGitRepositoryIdentity(
+      workspaceRoot, payload.repositoryPath ?? ".", dependencies.secureFiles,
+    );
+    if (!repository.secureRoot) throw new RuntimeRequestError("Secure repository access is unavailable.");
+    const secureRoot = repository.secureRoot;
+    const workspaceRootCapability = await dependencies.secureFiles.authorizeRoot(workspaceRoot);
+    const workspace: ReversalWorkspaceScope = {
+      root: workspaceRootCapability,
+      verifyContext: async () => {
+        const current = dependencies.workspacePath(payload.projectId, payload.conversationId);
+        if (current !== workspaceRoot || !await sameFilesystemPath(current, workspaceRootCapability.root)) {
+          throw new RuntimeRequestError("The project folder changed after this reversal was inspected. Refresh and try again.");
+        }
+        await dependencies.secureFiles.verifyRoot(workspaceRootCapability);
+      },
+    };
+    await workspace.verifyContext();
+    return {
+      workspaceRoot, workspace, secureRoot,
+      metadataMarkerIdentity: repository.metadataMarkerIdentity,
+      binding: [
+        workspaceRootCapability.root,
+        workspaceRootCapability.identity.dev,
+        workspaceRootCapability.identity.ino,
+        workspaceRootCapability.birthtimeNs,
+        secureRoot.root, secureRoot.identity.dev, secureRoot.identity.ino, secureRoot.birthtimeNs,
+        repository.metadataMarkerIdentity,
+      ],
+    };
+  };
   return defineRuntimeCommandHandler([
     "git.selection.revert",
     "git.selection.inspect",
@@ -116,12 +156,10 @@ export function createDiffReviewCommandHandler(
             "Stop the active run or review before reverting selected changes.",
           );
         }
-        const workspaceRoot = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const scope = await resolveReversalScope(command.payload);
+        const { workspaceRoot, secureRoot } = scope;
         const repositoryPath = command.payload.repositoryPath ?? ".";
-        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+        const retainedWorkspace = await dependencies.secureFileAuthorities.resolve(
           socket,
           command.payload.authorityRef,
           "reversal-apply",
@@ -132,12 +170,14 @@ export function createDiffReviewCommandHandler(
             repositoryPath,
             command.payload,
             command.payload.expected,
+            scope.binding,
           ),
           { consume: true },
         );
+        const workspace = { ...scope.workspace, root: retainedWorkspace };
         const scanInvalidation = sourceControlMutationInvalidation(
           secureRoot.root,
-          await repositoryMetadataMarkerIdentity(secureRoot.root),
+          scope.metadataMarkerIdentity,
         );
         const reversed = await dependencies.workspaceRuns.trackSourceControl(
           `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}`,
@@ -158,6 +198,7 @@ export function createDiffReviewCommandHandler(
             dependencies.secureFiles,
             undefined,
             secureRoot,
+            workspace,
           ),
           {
             recoverReviewedCommit: false,
@@ -174,6 +215,7 @@ export function createDiffReviewCommandHandler(
         }
         const status = await getRepositoryStatus(secureRoot.root);
         await dependencies.secureFiles.verifyRoot(secureRoot);
+        await workspace.verifyContext();
         const authorityRef = await dependencies.secureFileAuthorities.issue(
           socket,
           "reversal-undo",
@@ -183,8 +225,9 @@ export function createDiffReviewCommandHandler(
             workspaceRoot,
             repositoryPath,
             reversed.operation.id,
+            scope.binding,
           ),
-          secureRoot,
+          retainedWorkspace,
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -207,22 +250,10 @@ export function createDiffReviewCommandHandler(
         return "handled";
       }
       case "git.selection.inspect": {
-        const workspaceRoot = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
-        const repository = await resolveWorkspaceGitRepository(
-          workspaceRoot,
-          command.payload.repositoryPath ?? ".",
-          dependencies.secureFiles,
-        );
-        if (!repository.secureRoot) {
-          throw new RuntimeRequestError(
-            "Secure repository access is unavailable.",
-          );
-        }
+        const scope = await resolveReversalScope(command.payload);
+        const { workspaceRoot, secureRoot, workspace } = scope;
         const plan = await inspectDiffSelection(
-          repository.root,
+          secureRoot.root,
           {
             fingerprint: command.payload.fingerprint,
             filePath: command.payload.filePath,
@@ -231,7 +262,8 @@ export function createDiffReviewCommandHandler(
             ignoreWhitespace: command.payload.ignoreWhitespace,
           },
           dependencies.secureFiles,
-          repository.secureRoot,
+          secureRoot,
+          workspace,
         );
         const repositoryPath = command.payload.repositoryPath ?? ".";
         const authorityRef = await dependencies.secureFileAuthorities.issue(
@@ -244,8 +276,9 @@ export function createDiffReviewCommandHandler(
             repositoryPath,
             command.payload,
             plan.validation,
+            scope.binding,
           ),
-          repository.secureRoot,
+          workspace.root,
         );
         dependencies.send(socket, {
           type: "request.result",
@@ -268,12 +301,10 @@ export function createDiffReviewCommandHandler(
             "Stop the active run or review before restoring the selective-revert backup.",
           );
         }
-        const workspaceRoot = dependencies.workspacePath(
-          command.payload.projectId,
-          command.payload.conversationId,
-        );
+        const scope = await resolveReversalScope(command.payload);
+        const { workspaceRoot, secureRoot } = scope;
         const repositoryPath = command.payload.repositoryPath ?? ".";
-        const secureRoot = await dependencies.secureFileAuthorities.resolve(
+        const retainedWorkspace = await dependencies.secureFileAuthorities.resolve(
           socket,
           command.payload.authorityRef,
           "reversal-undo",
@@ -283,12 +314,14 @@ export function createDiffReviewCommandHandler(
             workspaceRoot,
             repositoryPath,
             command.payload.operationId,
+            scope.binding,
           ),
           { consume: true },
         );
+        const workspace = { ...scope.workspace, root: retainedWorkspace };
         const scanInvalidation = sourceControlMutationInvalidation(
           secureRoot.root,
-          await repositoryMetadataMarkerIdentity(secureRoot.root),
+          scope.metadataMarkerIdentity,
         );
         const diff = await dependencies.workspaceRuns.trackSourceControl(
           "Undo selective reversal",
@@ -301,6 +334,7 @@ export function createDiffReviewCommandHandler(
             command.payload.operationId,
             dependencies.secureFiles,
             secureRoot,
+            workspace,
           ),
           {
             recoverReviewedCommit: false,

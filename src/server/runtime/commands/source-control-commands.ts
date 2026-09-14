@@ -584,9 +584,11 @@ export function createSourceControlCommandHandler(
         );
         try {
           const repository = await deadline.run(
-            async () => await resolveWorkspaceGitRepositoryIdentity(
+            async (signal) => await resolveWorkspaceGitRepositoryIdentity(
               path,
               command.payload.repositoryPath,
+              undefined,
+              signal,
             ),
           );
           const secureRoot = await deadline.run(

@@ -5,6 +5,7 @@ import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/pr
 import { join, resolve } from "node:path";
 import { runPackagedHistorySmoke, runPackagedWorkspaceDiscovery, resumePackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { assertHistoryAfterShutdown } from "./package-smoke-history-storage.mjs";
+import { releaseLinuxSmokeLauncherHandles } from "./linux-guarded-smoke.mjs";
 
 if (process.platform !== "linux") throw new Error("Installed AppImage updates require native Linux.");
 const source = resolve(process.argv[2]);
@@ -124,5 +125,8 @@ try {
     const state = JSON.parse(await readFile(join(root, name), "utf8"));
     if (alive(state.mainPid)) await command(state, "quit").catch(() => undefined);
   }
-  for (const child of launchers) child.unref();
+  // unref alone leaves inherited stdout/stderr pipes keeping this driver alive.
+  // Release only our handles; the outer guardian still owns and must drain all
+  // wrappers/descendants before it can confirm cleanup and remove the fixture.
+  releaseLinuxSmokeLauncherHandles(launchers);
 }

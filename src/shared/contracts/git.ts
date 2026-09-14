@@ -179,12 +179,14 @@ export interface GitCommitReviewReceipt {
 export type WorkspaceGitRepositoryState = "ready" | "error";
 
 /**
- * Status for one Git toplevel discovered inside the active workspace.
+ * Status for the Git toplevel owning the workspace or discovered inside it.
  * `repositoryPath` is a safe, POSIX-style path relative to that workspace;
- * the workspace root itself is represented by ".".
+ * the repository owning the workspace is represented by ".".
  */
 export interface WorkspaceGitRepositorySnapshot {
   repositoryPath: string;
+  /** Repository-relative workspace folder when "." owns a subfolder workspace. */
+  workspacePrefix?: string;
   /** Ephemeral runtime-owned reference for diffs from this repository status. */
   authorityRef?: string | null;
   state: WorkspaceGitRepositoryState;

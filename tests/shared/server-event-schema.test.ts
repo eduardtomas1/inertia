@@ -508,6 +508,7 @@ describe("server event request-result trust boundary", () => {
       status: {
         repositories: [{
           repositoryPath: ".",
+          workspacePrefix: "src",
           authorityRef: "authority-1",
           state: "ready",
           error: null,

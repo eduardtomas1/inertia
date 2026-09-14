@@ -151,8 +151,10 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await page.getByRole("button", { name: "Providers", exact: true }).click();
     const antigravity = page.getByRole("button", { name: "Configure Antigravity" });
     await expect(antigravity).toContainText("Antigravity checks your sign-in when a turn starts", { timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /^Configure Gemini/u })).toHaveCount(0);
     await antigravity.click();
     await expect(page.locator(".provider-settings-shell")).not.toContainText(/\bvv\d/u);
+    await expect(page.locator(".provider-settings-shell")).not.toContainText(/gemini/iu);
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });
     await expect(executable).not.toHaveValue("");
     expect(realpathSync(await executable.inputValue())).toBe(realpathSync(fakeAgy));

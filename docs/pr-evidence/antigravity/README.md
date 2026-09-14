@@ -19,7 +19,7 @@ network requests, and no account, token or keyring is involved.
 
 | Surface | Light | Dark |
 | --- | --- | --- |
-| Provider readiness: version-gated install, per-turn sign-in, Connect | [Light](provider-readiness-light.png) | [Dark](provider-readiness-dark.png) |
+| Provider readiness: version-gated install, per-turn sign-in, Connect, no Gemini CLI row | [Light](provider-readiness-light.png) | [Dark](provider-readiness-dark.png) |
 | Model chooser with the Antigravity source | [Light](model-chooser-light.png) | [Dark](model-chooser-dark.png) |
 | Running turn: streamed text and a running tool step | [Light](running-turn-light.png) | [Dark](running-turn-dark.png) |
 | Completed turns, the second resumed with `--conversation` | [Light](completed-turn-light.png) | [Dark](completed-turn-dark.png) |
@@ -31,6 +31,7 @@ network requests, and no account, token or keyring is involved.
 - Every turn launches `agy --input-format stream-json --output-format stream-json`.
   No launch carries `-p`, `--print` or `--prompt`.
 - The second turn adds `--conversation <id>` from the first turn's result.
+- The Settings provider list has no Gemini CLI row.
 - The Antigravity composer drops the images wording and offers documents and
   spreadsheets only, because the harness declares no image input.
 - The Settings tile and the composer route chip render the official

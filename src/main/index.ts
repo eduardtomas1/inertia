@@ -33,7 +33,7 @@ import {
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
-import { safeHttpUrl } from "../shared/preview-url.js";
+import { openDesktopLink } from "./external-link-open.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
@@ -630,8 +630,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
     assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
-    const url = safeHttpUrl(value);
-    await shell.openExternal(url.toString());
+    await openDesktopLink(value, shell);
   });
 
   ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {

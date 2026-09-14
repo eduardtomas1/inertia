@@ -1,12 +1,14 @@
 // @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app!: AppFixture;
+let outsideFile: string;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -18,6 +20,8 @@ test.beforeAll(async () => {
       workspaceDirectory,
       secondWorkspaceDirectory,
     }) => {
+      outsideFile = join(testDirectory, "Workflow with spaces.json");
+      await writeFile(outsideFile, "{}\n", { mode: 0o600 });
       await mkdir(join(workspaceDirectory, "docs", "nested"), {
         recursive: true,
       });
@@ -78,7 +82,10 @@ test.beforeAll(async () => {
       if (!conversationId) throw new Error("Markdown fixture needs a conversation.");
       store.createMessage(
         conversationId,
-        "Read the [project guide](docs/guide.md#details) before continuing.",
+        "Read the [project guide](docs/guide.md#details) before continuing.\n\n"
+          + `[outside workflow](<${outsideFile.replace(/\\/gu, "/")}>)\n\n`
+          + `[outside file URL](${pathToFileURL(outsideFile).href})\n\n`
+          + `[outside source location](${pathToFileURL(outsideFile).href}:42)`,
         "assistant",
       );
       const companion = store.snapshot().conversations.find(
@@ -183,5 +190,29 @@ test("opens a rendered project Markdown file directly from the chat", async () =
   await expect(primaryTools.getByRole("document", {
     name: "Preview of docs/guide.md",
   })).toBeVisible();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("opens outside-project links through the trusted desktop bridge and reports missing files", async () => {
+  const { page, electronApp, rendererErrors } = app;
+  await electronApp.evaluate(({ shell }) => {
+    Reflect.set(globalThis, "__openedLocalFilePaths", []);
+    Reflect.set(shell, "openPath", async (path: string) => {
+      (Reflect.get(globalThis, "__openedLocalFilePaths") as string[]).push(path);
+      return "";
+    });
+  });
+  const opened = () => electronApp.evaluate(() => Reflect.get(globalThis, "__openedLocalFilePaths") as string[]);
+  expect(await opened()).toEqual([]);
+  await page.getByRole("link", { name: "outside workflow", exact: true }).click();
+  await expect.poll(opened).toEqual([outsideFile]);
+  await page.getByRole("link", { name: "outside file URL", exact: true }).click();
+  await expect.poll(opened).toEqual([outsideFile, outsideFile]);
+  await page.getByRole("link", { name: "outside source location", exact: true }).click();
+  await expect.poll(opened).toEqual([outsideFile, outsideFile, outsideFile]);
+  await rm(outsideFile);
+  await page.getByRole("link", { name: "outside workflow", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "The local file could not be opened." })).toBeVisible();
+  expect(await opened()).toEqual([outsideFile, outsideFile, outsideFile]);
   expect(rendererErrors).toEqual([]);
 });

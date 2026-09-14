@@ -235,6 +235,10 @@ export function claudeAssistantFailure(
         return "This Claude organization does not allow OAuth access.";
       case "account_on_hold":
         return "Claude could not continue because the account is on hold.";
+      case "verification_required":
+        return "Claude requires account verification before continuing.";
+      case "cloud_credential_error":
+        return "Claude could not continue because of a cloud credential error.";
       case "billing_error":
         return "Claude could not continue because of an account billing issue.";
       case "rate_limit":

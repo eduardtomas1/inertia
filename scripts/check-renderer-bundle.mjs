@@ -9,7 +9,10 @@ const kibibyte = 1024;
 // bootstrap and both window surfaces separate makes a detached chat regression
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
-  entryJavaScript: 205 * kibibyte,
+  // React 19.3 adds 29,322 emitted bytes on identical application source.
+  // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.
+  // See docs/pr-evidence/dependency-batch-v0.0.56-renderer.json.
+  entryJavaScript: 217.5 * kibibyte,
   mascotFirstLoadJavaScript: 6 * kibibyte,
   mascotJavaScript: 6 * kibibyte,
   mascotSettingsJavaScript: 4 * kibibyte,
@@ -30,11 +33,14 @@ const budgets = {
   // guards are the only added eager modules; optional editor UI stays deferred.
   // Measured 755.5 / 569.9 KiB; retain <0.3 KiB headroom per initial route.
   // See docs/pr-evidence/issue-356-358-renderer-bundle-welcome.json.
-  mainWorkbenchFirstLoadJavaScript: 755.7 * kibibyte,
+  // React, Zod, Lucide and TanStack dependency updates add 36,303 bytes to
+  // this closure and 35,972 to detached first load. Application module bytes
+  // are unchanged; retain less than 0.3 KiB headroom per route.
+  mainWorkbenchFirstLoadJavaScript: 791.2 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 570.1 * kibibyte,
+  detachedChatFirstLoadJavaScript: 605.3 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -98,7 +104,9 @@ const budgets = {
   // Review corrections add 2,936 bytes over published welcome-guide main.
   // Core measures 2,025.0 KiB with no duplicated rendered modules; retain
   // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
-  coreJavaScript: 2_025.25 * kibibyte,
+  // The same dependency batch adds 37,916 bytes to shared core. Its measured
+  // 2,111,470 bytes retain 274 bytes of headroom; deferred caps stay separate.
+  coreJavaScript: 2_062.25 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

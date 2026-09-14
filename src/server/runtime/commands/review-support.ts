@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 import type {
   CheckpointSummary,
@@ -16,12 +16,10 @@ import {
 import { createCheckpoint } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, getUnifiedDiff } from "../../git";
+import { canonicalDirectoryPath, isContained } from "../../git/paths";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
-import {
-  resolveWorkspaceGitRepository,
-  workspaceGitFilePath,
-} from "../../workspace-git";
+import { resolveWorkspaceGitRepository } from "../../workspace-git";
 import {
   assembleReadOnlyReviewRequest as assembleIsolatedReadOnlyReviewRequest,
 } from "../reviews/isolated-run-controller";
@@ -172,6 +170,11 @@ export async function selectedReviewContext(
       "The selected file or hunk is no longer present.",
     );
   }
+  const canonicalWorkspace = await canonicalDirectoryPath(workspaceRoot, { signal });
+  const selectedPath = resolve(repository.root, file.path);
+  if (purpose === "revision" && !isContained(canonicalWorkspace, selectedPath)) {
+    throw new RuntimeRequestError("Agent revisions are available only for files inside the project folder.");
+  }
   let context;
   try {
     context = buildDiffContext(file, hunk, selection.lineIds, {
@@ -203,7 +206,7 @@ export async function selectedReviewContext(
       ),
     requestContext: {
       diffSelections: [{
-        path: workspaceGitFilePath(repositoryPath, file.path),
+        path: relative(canonicalWorkspace, selectedPath).split(sep).join("/"),
         hunkHeader: hunk.header,
         content: context.text,
         selectedLineCount: context.selectedLineCount,

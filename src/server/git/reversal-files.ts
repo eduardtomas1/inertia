@@ -11,6 +11,7 @@ import {
 } from "../secure-files";
 import { runGit } from "./runner";
 import { GitError } from "./types";
+import { reversalFileLocation, type ReversalWorkspaceScope } from "./reversal-scope";
 
 export interface IndexEntry {
   mode: string;
@@ -88,7 +89,9 @@ export async function updateIndexEntry(
   path: string,
   mode: string,
   oid: string,
+  scope?: { secureFiles: RuntimeSecureFileBroker; repository: SecureFileRootCapability; workspace: ReversalWorkspaceScope },
 ): Promise<void> {
+  if (scope) await reversalFileLocation(scope.secureFiles, scope.repository, path, scope.workspace);
   await runGit(root, ["update-index", "--cacheinfo", mode, oid, path], {
     maxOutputBytes: 256,
     failureMessage: "Unable to update the selected file in the Git index.",
@@ -106,13 +109,15 @@ export async function writeAtomic(
   testHooks?: {
     afterTargetOpened?: () => void | Promise<void>;
   },
+  workspace?: ReversalWorkspaceScope,
 ): Promise<void> {
   const expectedDigest = bufferHash(expectedContent);
   const desiredDigest = bufferHash(content);
   try {
+    const location = await reversalFileLocation(secureFiles, secureRoot, path, workspace);
     const before = await secureFiles.read(
-      secureRoot,
-      path,
+      location.root,
+      location.path,
       MAX_DIFF_BYTES,
     );
     if (before.digest !== expectedDigest) {
@@ -122,9 +127,10 @@ export async function writeAtomic(
       );
     }
     await testHooks?.afterTargetOpened?.();
+    await reversalFileLocation(secureFiles, secureRoot, path, workspace);
     const replaced = await secureFiles.replace(
-      secureRoot,
-      path,
+      location.root,
+      location.path,
       content,
       before.digest,
       before.mode,
@@ -140,9 +146,10 @@ export async function writeAtomic(
   } catch (error) {
     if (error instanceof GitError) throw error;
     if (error instanceof SecureFileError) {
+      const location = await reversalFileLocation(secureFiles, secureRoot, path, workspace);
       const current = await secureFiles.read(
-        secureRoot,
-        path,
+        location.root,
+        location.path,
         MAX_DIFF_BYTES,
       ).catch(() => null);
       if (current?.digest === desiredDigest) return;
@@ -170,10 +177,12 @@ export async function fileStateMatches(
   indexMode: string,
   secureFiles: RuntimeSecureFileBroker,
   secureRoot: SecureFileRootCapability,
+  workspace?: ReversalWorkspaceScope,
 ): Promise<boolean> {
   try {
+    const location = await reversalFileLocation(secureFiles, secureRoot, path, workspace);
     const [worktree, index] = await Promise.all([
-      secureFiles.read(secureRoot, path, MAX_DIFF_BYTES),
+      secureFiles.read(location.root, location.path, MAX_DIFF_BYTES),
       readIndexEntry(root, path),
     ]);
     return (worktree.mode & 0o777) === (worktreeMode & 0o777)

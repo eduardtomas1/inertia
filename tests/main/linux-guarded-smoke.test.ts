@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +11,13 @@ const guardian = resolve("resources/generated/runtime-process-guardian/runtime-p
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe.skipIf(process.platform !== "linux")("installed smoke native process containment", () => {
+  it("releases driver-owned launcher pipes while retaining native descendant cleanup", () => {
+    execFileSync(process.execPath, ["--experimental-strip-types",
+      resolve("tests/fixtures/linux-smoke-launcher-handles.ts"), guardian], {
+      timeout: 30_000, maxBuffer: 64 * 1024, stdio: "pipe",
+    });
+  }, 35_000);
+
   it("returns only after a successful command's descendants are gone", async () => {
     await expect(runLinuxGuardedSmoke({ guardian, command: process.execPath,
       args: ["-e", 'console.log("finished")'], timeoutMs: 2_000 })).resolves.toContain("finished");

@@ -53,8 +53,8 @@ export async function finishElectronPreparedQuit(
     if (!runtime?.finishPreparedQuit) {
       throw new Error("The test prepared-quit controller is unavailable.");
     }
-    // Observe only the already-clean test exit. Forward every original call;
-    // these markers neither authorize shutdown nor replace its outcome.
+    // The prepared-quit controller still owns cleanup and final exit. Retain
+    // its outcome while observing the already-clean test exit below.
     const mark = (stage: string): void => {
       try { process.getBuiltinModule("node:fs").writeSync(2, `[Inertia test exit: ${stage}]\n`); } catch { /* advisory */ }
     };
@@ -74,6 +74,10 @@ export async function finishElectronPreparedQuit(
     try {
       const exit = process.exit;
       process.exit = function (...args): never {
+        // Node waits for attached debuggers inside process.exit. Detach the
+        // test inspector here, after privileged cleanup and window destruction,
+        // so Playwright's debugger cannot keep the clean process resident.
+        process.getBuiltinModule("node:inspector").close();
         mark("process-exit-called");
         return exit.apply(this, args);
       };

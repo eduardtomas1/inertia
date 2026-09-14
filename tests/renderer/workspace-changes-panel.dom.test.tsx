@@ -112,6 +112,32 @@ const snapshot: WorkspaceGitSnapshot = {
 };
 
 describe("WorkspaceChangesPanel repository scope", () => {
+  it("creates a file note through the in-app dialog with its repository scope", async () => {
+    const onCreateNote = vi.fn(async () => undefined);
+    render(<ChangesPanel
+      repositoryPath="modules/alpha"
+      files={[changedFile("README.md")]}
+      diff={{ patch: patchFor("README.md"), truncated: false, files: [changedFile("README.md")] }}
+      selectedPath="README.md" summary={null}
+      onSelectFile={vi.fn()} onAsk={vi.fn(async () => undefined)}
+      onRequestRevision={vi.fn(async () => undefined)} onRevert={vi.fn(async () => undefined)}
+      onSetReviewState={vi.fn(async () => undefined)} onCreateNote={onCreateNote}
+      onUpdateNote={vi.fn(async () => undefined)} onDeleteNote={vi.fn(async () => undefined)}
+      onAddTextToPrompt={vi.fn()} onAddToPrompt={vi.fn()}
+    />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Note" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "Add note for README.md" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Review note" }), {
+      target: { value: "  Explain this change  " },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save note" }));
+    await waitFor(() => expect(onCreateNote).toHaveBeenCalledWith({
+      repositoryPath: "modules/alpha", path: "README.md", hunkId: null,
+      lineIds: [], targetFingerprint: expect.any(String), body: "Explain this change",
+    }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("keeps a keyboard-focusable stop control beside an active selection question", async () => {
     let finishQuestion: (() => void) | undefined;
     let finishCancellation: (() => void) | undefined;

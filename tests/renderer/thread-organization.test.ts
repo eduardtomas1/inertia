@@ -13,6 +13,7 @@ describe("thread organization", () => {
       const expected = new Date(date); expected.setDate(date.getDate() + 1);
       expect(tomorrow.getDate()).toBe(expected.getDate());
       const monday = new Date(presets.find(({ id }) => id === "next-week")!.until);
+      expect(presets.find(({ id }) => id === "next-week")!.label).toContain("Mon");
       expect(monday.getDay()).toBe(1); expect(monday.getHours()).toBe(9);
       expect(Date.parse(presets[0]!.until) - date.getTime()).toBe(3600000);
     }

@@ -115,13 +115,13 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelChooser).toBeVisible();
   await expect(modelChooser).toHaveAttribute("data-popover-vertical", "above");
   await expect(modelChooser.getByRole("navigation", { name: "Model sources" })).toBeVisible();
-  const modelResults = modelChooser.getByRole("list", {
+  const modelResults = modelChooser.getByRole("grid", {
     name: "Model results",
   });
   const modelOptions = modelResults.locator(".model-chooser-row-option");
   const modelResultsAx = await modelResults.ariaSnapshot();
-  expect(modelResultsAx).toContain('- list "Model results"');
-  expect(modelResultsAx).toContain("- listitem:");
+  expect(modelResultsAx).toContain('- grid "Model results"');
+  expect(modelResultsAx).toContain('- row "');
   expect(modelResultsAx).toContain('- button "Add ');
   await expect(modelResults.locator(
     ".model-chooser-row.is-active .model-chooser-row-option",
@@ -153,7 +153,10 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await firstResult.evaluate((element) => {
     element.style.removeProperty("min-height");
   });
-  const searchModels = modelChooser.getByRole("searchbox", { name: "Search models" });
+  const searchModels = modelChooser.getByRole("combobox", { name: "Search models" });
+  await expect(searchModels).toHaveAttribute("aria-haspopup", "grid");
+  await expect(searchModels).toHaveAttribute("aria-expanded", "true");
+  await expect(modelResults.getByRole("gridcell", { selected: true })).toHaveCount(1);
   await expect(searchModels).toBeFocused();
   const codexSource = modelChooser.getByRole("button", {
     name: /^Codex, \d+ models?$/u,
@@ -234,7 +237,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelTrigger).toBeFocused();
 
   await modelTrigger.click();
-  await expect(modelChooser.getByRole("searchbox", { name: "Search models" }))
+  await expect(modelChooser.getByRole("combobox", { name: "Search models" }))
     .toBeFocused();
   await page.keyboard.press("Escape");
   await expect(modelChooser).toBeHidden();
@@ -632,11 +635,11 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     "xpath=ancestor::li",
   );
   await expect(lastSelectableCatalogItem).toHaveAttribute(
-    "aria-posinset",
+    "aria-rowindex",
     "600",
   );
-  await expect(lastSelectableCatalogItem).toHaveAttribute(
-    "aria-setsize",
+  await expect(modelResults).toHaveAttribute(
+    "aria-rowcount",
     "600",
   );
   await expect(searchModels).toBeFocused();
@@ -645,8 +648,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   expect(await modelResults.locator(":scope > li").count())
     .toBeLessThanOrEqual(40);
   const catalogAx = await modelResults.ariaSnapshot();
-  expect(catalogAx).toContain('- list "Model results"');
-  expect(catalogAx).toContain("- listitem:");
+  expect(catalogAx).toContain('- grid "Model results"');
+  expect(catalogAx).toMatch(/- '?row "/u);
   expect(catalogAx).toContain('- button "Add Catalog Model');
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
@@ -688,7 +691,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
     for (const source of await chooser.locator("[data-model-source-rail-item]").all()) {
       await expect(source).toBeInViewport({ ratio: 1 });
     }
-    const search = chooser.getByRole("searchbox", { name: "Search models" });
+    const search = chooser.getByRole("combobox", { name: "Search models" });
     await expect(search).toBeInViewport({ ratio: 1 });
     await expect.poll(() => search.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
@@ -717,7 +720,7 @@ test("keeps branded model sources and rows legible across themes and narrow wind
     await page.getByRole("radio", { name: theme, exact: true }).click();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await trigger.click();
-    const search = chooser.getByRole("searchbox", { name: "Search models" });
+    const search = chooser.getByRole("combobox", { name: "Search models" });
     await expect(search).toBeFocused();
     for (const [provider, id] of [["Codex", "codex"], ["Claude", "claude"]] as const) {
       const source = chooser.getByRole("button", { name: new RegExp(`^${provider}, \\d+ models?$`, "u") });

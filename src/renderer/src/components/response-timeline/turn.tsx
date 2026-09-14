@@ -177,6 +177,7 @@ export function sameTurnTimelineProps(
     && previous.subagents === next.subagents
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
+    && left.providerIdentityLabels === right.providerIdentityLabels
     && left.projectRoot === right.projectRoot
     && left.projectId === right.projectId
     && left.conversationId === right.conversationId

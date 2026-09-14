@@ -1,7 +1,9 @@
+import type { AgentBrowserRequest } from "../shared/agent-browser-approval.js";
+import { PreviewAgentApprovalRegistry, type BrowserApprovalGuard } from "./preview-agent-approvals.js";
+import { AgentBrowserRefusal, changedGeometry, sameBounds, providerVisiblePageUrl, stopForAbort, waitForNavigationCommand } from "./preview-agent-action.js";
 import type { BrowserWindow, NativeImage, Rectangle, WebContents } from "electron";
 import type {
   AgentBrowserActivity,
-  AgentBrowserCommand,
   AgentBrowserResult,
   AgentBrowserRunIdentity,
   AgentBrowserState,
@@ -63,27 +65,11 @@ interface PreviewBrokerOptions {
 }
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
-const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
 
-class AgentBrowserRefusal extends Error {
-  constructor(readonly result: AgentBrowserResult) {
-    super(result.ok ? "The Browser action was refused." : result.message);
-  }
-}
-
-function changedGeometry(): AgentBrowserResult {
-  return failure(
-    "not-found",
-    "The Browser page layout changed during this action. Inspect the page again for current refs.",
-  );
-}
-
-function sameBounds(left: Rectangle | null, right: Rectangle): boolean { return left !== null && left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height; }
-function providerVisiblePageUrl(value: string): string { try { return new URL("/", value).origin; } catch { return ""; } }
-function stopForAbort(signal?: AbortSignal): void { if (signal?.aborted) throw new Error("browser-action-cancelled"); }
 export class PreviewBroker {
   reportInputRefusal(contents: WebContents, value: unknown): boolean { return captureAgentPageInputRefusal(contents, value); }
   readonly #slots = new Map<PreviewOwner, PreviewSlot>();
+  readonly #approvals = new PreviewAgentApprovalRegistry();
   readonly #registeredContexts = new PreviewContextRegistry();
   readonly #pendingBounds = new Map<PreviewOwner, {
     contextId: string;
@@ -142,7 +128,7 @@ export class PreviewBroker {
         const targetUrl = contents.navigationHistory.getEntryAtIndex(
           contents.navigationHistory.getActiveIndex() - 1,
         )?.url;
-        await this.#waitForNavigationCommand(
+        await waitForNavigationCommand(
           contents,
           () => contents.navigationHistory.goBack(),
           targetUrl,
@@ -154,13 +140,13 @@ export class PreviewBroker {
         const targetUrl = contents.navigationHistory.getEntryAtIndex(
           contents.navigationHistory.getActiveIndex() + 1,
         )?.url;
-        await this.#waitForNavigationCommand(
+        await waitForNavigationCommand(
           contents,
           () => contents.navigationHistory.goForward(),
           targetUrl,
         );
       } else if (action === "reload") {
-        await this.#waitForNavigationCommand(contents, () => contents.reload());
+        await waitForNavigationCommand(contents, () => contents.reload());
       }
       return this.#state(ownerId, contextId);
     });
@@ -215,7 +201,7 @@ export class PreviewBroker {
 
   async perform(
     owner: string | AgentBrowserRunIdentity,
-    command: AgentBrowserCommand,
+    request: AgentBrowserRequest,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     try {
@@ -239,21 +225,30 @@ export class PreviewBroker {
         stopForAbort(signal);
         slot.activeIdentity = identity;
         try {
+          const resolved = await this.#approvals.resolve(request, identity, slot, async (tab, ref) => {
+            const contents = tab.view.webContents;
+            await this.#prepareAgentPage(contents, signal);
+            return await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal });
+          }, signal);
+          if (typeof resolved === "string") return this.#success(slot, resolved);
+          const command = "command" in resolved ? resolved.command : resolved;
+          const validate = "command" in resolved ? resolved.validate : undefined;
+          validate?.();
           switch (command.action) {
             case "snapshot":
               return await this.#snapshot(ownerId, slot, signal);
             case "screenshot":
               return await this.#screenshot(ownerId, slot, signal);
             case "navigate":
-              return await this.#agentNavigate(ownerId, slot, command.url, signal);
+              return await this.#agentNavigate(ownerId, slot, command.url, signal, validate);
             case "click":
-              return await this.#click(ownerId, slot, command.ref, signal);
+              return await this.#click(ownerId, slot, command.ref, signal, validate);
             case "type":
-              return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
+              return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal, validate);
             case "press":
-              return await this.#press(ownerId, slot, command.key, signal);
+              return await this.#press(ownerId, slot, command.key, signal, validate);
             case "scroll":
-              return await this.#scroll(ownerId, slot, command.deltaY, signal);
+              return await this.#scroll(ownerId, slot, command.deltaY, signal, validate);
             case "tabs":
               return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
             case "tab-open":
@@ -872,13 +867,14 @@ export class PreviewBroker {
     slot: PreviewSlot,
     url: string,
     signal?: AbortSignal,
+    validate?: BrowserApprovalGuard,
   ): Promise<AgentBrowserResult> {
     const target = previewNavigationTarget(url);
     if (target.kind !== "embed") {
       return failure("invalid", "Only local development URLs can open inside Inertia Browser.");
     }
     const contents = this.#active(slot).view.webContents;
-    await this.#loadURL(contents, target.url.toString(), signal);
+    await this.#loadURL(contents, target.url.toString(), signal, validate);
     stopForAbort(signal);
     this.#record(ownerId, slot, "navigate", "Agent navigated the page");
     return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
@@ -913,7 +909,7 @@ export class PreviewBroker {
     return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
   }
 
-  async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
+  async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
     const boundsGeneration = slot.boundsGeneration;
@@ -952,6 +948,7 @@ export class PreviewBroker {
     }
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
+    validate?.(revalidated);
     stopForAbort(signal);
     try {
       const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
@@ -977,6 +974,7 @@ export class PreviewBroker {
         if (finalTarget.disabled) throw new AgentBrowserRefusal(failure(
           "invalid", "That page element is disabled.",
         ));
+        validate?.(finalTarget);
         contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
         contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
       }, signal, ref);
@@ -1000,6 +998,7 @@ export class PreviewBroker {
     text: string,
     replace: boolean,
     signal?: AbortSignal,
+    validate?: BrowserApprovalGuard,
   ): Promise<AgentBrowserResult> {
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
@@ -1041,6 +1040,7 @@ export class PreviewBroker {
     if (revalidated.blocked) return failure("invalid", "That page element cannot be controlled by the Browser agent.");
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     if (!revalidated.editable) return failure("invalid", "That page element does not accept text input.");
+    validate?.(revalidated);
     stopForAbort(signal);
     try {
       await this.#sendInputAndWait(contents, async () => {
@@ -1078,6 +1078,7 @@ export class PreviewBroker {
           "not-found",
           "That page element lost focus before typing. Inspect the page again for current refs.",
         ));
+        if (validate) validate(await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal }));
         await contents.insertText(text);
       }, signal);
     } catch (error) {
@@ -1089,7 +1090,7 @@ export class PreviewBroker {
     return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
   }
 
-  async #press(ownerId: PreviewOwner, slot: PreviewSlot, key: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
+  async #press(ownerId: PreviewOwner, slot: PreviewSlot, key: string, signal?: AbortSignal, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
@@ -1099,11 +1100,16 @@ export class PreviewBroker {
         activationBlocked = await deliverAgentPageActivation(
           contents,
           key,
-          async (operation) => await this.#rendererOperation(contents, operation, { signal }),
+          async (operation) => {
+            const result = await this.#rendererOperation(contents, operation, { signal });
+            validate?.();
+            return result;
+          },
           signal,
         );
         if (activationBlocked) return;
       } else {
+        validate?.();
         contents.sendInputEvent({ type: "keyDown", keyCode: key });
         contents.sendInputEvent({ type: "keyUp", keyCode: key });
       }
@@ -1114,18 +1120,18 @@ export class PreviewBroker {
     return successfulAgentBrowserResult(JSON.stringify({ pressed: key }), this.#agentState(slot));
   }
 
-  async #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal): Promise<AgentBrowserResult> {
+  async #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal, validate?: BrowserApprovalGuard): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
     const bounds = slot.bounds ?? { width: 800, height: 600 };
-    await this.#sendInputAndWait(contents, () => contents.sendInputEvent({
+    await this.#sendInputAndWait(contents, () => { validate?.(); contents.sendInputEvent({
       type: "mouseWheel",
       x: Math.max(0, Math.floor(bounds.width / 2)),
       y: Math.max(0, Math.floor(bounds.height / 2)),
       deltaX: 0,
       deltaY,
-    }), signal);
+    }); }, signal);
     this.#record(ownerId, slot, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
     return successfulAgentBrowserResult(JSON.stringify({ scrolled: deltaY }), this.#agentState(slot));
   }
@@ -1141,11 +1147,12 @@ export class PreviewBroker {
     contents: PreviewTab["view"]["webContents"],
     url: string,
     signal?: AbortSignal,
+    validate?: BrowserApprovalGuard,
   ): Promise<void> {
     await this.#rendererOperation(contents, () => ensureAgentFileChooserBlock(contents), { signal });
     await this.#rendererOperation(
       contents,
-      async () => { await contents.loadURL(url); settleAgentPageDebuggerBootstrap(contents); },
+      async () => { validate?.(); await contents.loadURL(url); settleAgentPageDebuggerBootstrap(contents); },
       {
         signal,
         cancel: () => contents.stop(),
@@ -1170,52 +1177,6 @@ export class PreviewBroker {
     );
   }
 
-  async #waitForNavigationCommand(
-    contents: PreviewTab["view"]["webContents"],
-    dispatch: () => void,
-    inPageTargetUrl?: string,
-  ): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const finish = (error?: Error): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        contents.removeListener("did-stop-loading", onStopped);
-        contents.removeListener("did-navigate-in-page", onInPage);
-        contents.removeListener("destroyed", onDestroyed);
-        if (error) reject(error);
-        else resolve();
-      };
-      const onStopped = (): void => finish();
-      const onInPage = (
-        _event: unknown,
-        url: string,
-        isMainFrame: boolean,
-      ): void => {
-        if (isMainFrame && inPageTargetUrl && url === inPageTargetUrl) finish();
-      };
-      const onDestroyed = (): void => finish(
-        new Error("The active Browser tab was closed during navigation."),
-      );
-      const timeout = setTimeout(() => {
-        finish(new Error("The Browser navigation command timed out."));
-        if (!contents.isDestroyed()) contents.stop();
-      }, PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
-      contents.once("did-stop-loading", onStopped);
-      if (inPageTargetUrl) contents.on("did-navigate-in-page", onInPage);
-      contents.once("destroyed", onDestroyed);
-      try {
-        if (contents.isDestroyed()) {
-          finish(new Error("The active Browser tab was closed before navigation."));
-          return;
-        }
-        dispatch();
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error("The Browser navigation command failed."));
-      }
-    });
-  }
 
   async #sendInputAndWait(contents: PreviewTab["view"]["webContents"], dispatch: () => void | Promise<void>,
     signal?: AbortSignal, expectedClickRef?: string): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {

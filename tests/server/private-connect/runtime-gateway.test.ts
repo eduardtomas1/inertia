@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrivateConnectRuntimeGateway } from "../../../src/server/private-connect/runtime-gateway";
 import { RuntimeStore } from "../../../src/server/database";
@@ -18,6 +18,50 @@ afterEach(() => {
 });
 
 describe("Private Connect supervised runtime gateway", () => {
+  it.each(["input.respond", "run.stop"] as const)("requires runtime mutation authority for %s", async (type) => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-scope-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const conversation = store.createConversation(project.id, "Allowed chat");
+    const respondToInput = vi.fn(() => true);
+    const stopRun = vi.fn(() => ({ stopped: true, alreadyStopped: false }));
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => {
+        const shell = store.shellSnapshot();
+        return { ...shell, conversations: shell.conversations.map((item) => ({ ...item, pendingInput: true })) };
+      },
+      detail: (id) => store.conversationDetail(id),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+      respondToInput, stopRun,
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view", "prompt"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const request = {
+      type, requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
+      ...(type === "input.respond"
+        ? { inputRequestId: "44444444-4444-4444-8444-444444444444", answers: { question: ["answer"] } }
+        : { runId: "run-1" }),
+    };
+    expect((await gateway.request(subject, request)).ok).toBe(true);
+    respondToInput.mockClear();
+    stopRun.mockClear();
+    expect(await gateway.request({ ...subject, scopes: ["view"] }, request))
+      .toMatchObject({ ok: false, code: "forbidden" });
+    expect(respondToInput).not.toHaveBeenCalled();
+    expect(stopRun).not.toHaveBeenCalled();
+  });
+
   it("projects only granted conversations and never queues an ungranted prompt", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-runtime-"));
     directories.push(directory);

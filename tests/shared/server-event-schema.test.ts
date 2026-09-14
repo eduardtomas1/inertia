@@ -1124,6 +1124,27 @@ describe("server event conversation discriminant boundary", () => {
       },
     }))).toThrow("Malformed server event");
   });
+  it.each([2 ** 31, Number.MAX_SAFE_INTEGER])("accepts safe run revision %s", (revision) => {
+    const value = snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        runState: { state: "retrying", providerState: null, revision },
+      },
+    });
+    expect(parseServerEvent(value)).toEqual(value);
+  });
+
+  it.each([1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN])("rejects unsafe run revision %s", (revision) => {
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        runState: { state: "retrying", providerState: null, revision },
+      },
+    }))).toThrow("Malformed server event");
+  });
+
   it("rejects a ready detail whose outer conversation identity disagrees", () => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail",

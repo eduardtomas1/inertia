@@ -156,6 +156,7 @@ function resetWorkspaceAuthorityMigration(database: Database.Database): void {
     DROP TABLE conversation_path_authorities;
     DROP TABLE project_path_authorities;
     DROP TABLE workspace_path_authority_enrollment;
+    ALTER TABLE messages DROP COLUMN private_connect_device_id;
     DROP INDEX messages_created_id_idx;
     DELETE FROM schema_migrations WHERE version >= 53;
   `);

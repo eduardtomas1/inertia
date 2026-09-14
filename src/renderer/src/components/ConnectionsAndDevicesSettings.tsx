@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import type { Project } from "@shared/contracts";
@@ -75,7 +76,7 @@ export function ConnectionsAndDevicesSettings({
   const createInvitation = (): Promise<void> => update(async () => {
     const invitation = await window.inertia.createPrivateConnectInvitation();
     setMessage(
-      `Pairing link ready until ${new Date(invitation.expiresAt).toLocaleTimeString()}.`,
+      `Pairing link ready until ${new Date(invitation.expiresAt).toLocaleTimeString(INTERFACE_LOCALE)}.`,
     );
     return await window.inertia.getPrivateConnectState();
   }, "Pairing link ready.");
@@ -287,7 +288,7 @@ export function ConnectionsAndDevicesSettings({
             {[...(state.audit ?? [])].reverse().map((event) => (
               <div key={event.id}>
                 <span><strong>{event.detail}</strong><small>{event.type}</small></span>
-                <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time>
+                <time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString(INTERFACE_LOCALE)}</time>
               </div>
             ))}
           </div>
@@ -374,7 +375,7 @@ function PairedDeviceEditor({
           <strong>{device.label}</strong>
           <small>
             Last connected {device.lastSeenAt
-              ? new Date(device.lastSeenAt).toLocaleString()
+              ? new Date(device.lastSeenAt).toLocaleString(INTERFACE_LOCALE)
               : "not yet"}
           </small>
         </span>

@@ -1,31 +1,34 @@
+import { DocumentAttachmentError } from "./attachment-errors";
+
 export const DOCUMENT_EXTRACTION_CONCURRENCY = 2;
 // One real-world scanned page may require a bounded 64 MiB source decode plus
 // a 10 MiB output canvas and its at-most-10 MiB PDF input. Raster jobs reserve
-// that complete envelope, so the 96 MiB process cap admits only one at a time.
+// that envelope, so the 96 MiB reservation admits only one raster job at a time.
+// This is scheduling accounting, not a hard bound on decoder or native memory.
 export const DOCUMENT_EXTRACTION_WORKING_BYTES = 96 * 1024 * 1024;
 
-export class DocumentExtractionCancelledError extends Error {
+export class DocumentExtractionCancelledError extends DocumentAttachmentError {
   constructor() {
     super("Document extraction was cancelled.");
     this.name = "DocumentExtractionCancelledError";
   }
 }
 
-export class DocumentExtractionDeadlineError extends Error {
+export class DocumentExtractionDeadlineError extends DocumentAttachmentError {
   constructor() {
     super("Document extraction exceeded the shared turn deadline.");
     this.name = "DocumentExtractionDeadlineError";
   }
 }
 
-export class DocumentExtractionBudgetError extends Error {
+export class DocumentExtractionBudgetError extends DocumentAttachmentError {
   constructor() {
     super("Document extraction exceeds the shared working-memory budget.");
     this.name = "DocumentExtractionBudgetError";
   }
 }
 
-export class DocumentExtractionInitializationError extends Error {
+export class DocumentExtractionInitializationError extends DocumentAttachmentError {
   constructor() {
     super("PDF support initialization exceeded its bounded cold-start deadline.");
     this.name = "DocumentExtractionInitializationError";

@@ -1,5 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { staticJavaScriptImports } from "./renderer-bundle-imports.mjs";
 
 const outputDirectory = resolve("out/renderer");
 const assetDirectory = resolve(outputDirectory, "assets");
@@ -24,11 +25,16 @@ const budgets = {
   // larger settings UI/catalog stay deferred and have separate ceilings below.
   // Project preference validation, independent appearance and chat-owned stash
   // state add ~2 KiB here; the project editor and thread menus stay deferred.
-  mainWorkbenchFirstLoadJavaScript: 754.0 * kibibyte,
+  // Against published welcome-guide main 1d5daeaa, the review adds 1,672 bytes
+  // here and 1,195 bytes to detached first load. Required error/optional-storage
+  // guards are the only added eager modules; optional editor UI stays deferred.
+  // Measured 755.5 / 569.9 KiB; retain <0.3 KiB headroom per initial route.
+  // See docs/pr-evidence/issue-356-358-renderer-bundle-welcome.json.
+  mainWorkbenchFirstLoadJavaScript: 755.7 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 569 * kibibyte,
+  detachedChatFirstLoadJavaScript: 570.1 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -44,6 +50,7 @@ const budgets = {
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
+  deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
@@ -70,7 +77,8 @@ const budgets = {
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
-  deferredTerminalJavaScript: 25 * kibibyte,
+  // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
+  deferredTerminalJavaScript: 25.5 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
@@ -87,9 +95,10 @@ const budgets = {
   // to 2,000.7 KiB; the footer control and Markdown notes stay deferred.
   // Limits adds 2,458 raw bytes (757 gzip) of boundary contracts/context.
   // Its complete optional closure is separately capped; first-load caps stay fixed.
-  // The Work status cue (pixel glyph, elapsed time, arrival cue) adds ~1.1 KiB:
-  // shared core measures 2,004.6 KiB on macOS ARM64; keep <2 KiB headroom.
-  coreJavaScript: 2_022.5 * kibibyte,
+  // Review corrections add 2,936 bytes over published welcome-guide main.
+  // Core measures 2,025.0 KiB with no duplicated rendered modules; retain
+  // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
+  coreJavaScript: 2_025.25 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -102,12 +111,9 @@ async function assetBytes(assetPath) {
   return (await stat(resolve(outputDirectory, assetPath))).size;
 }
 
-async function staticJavaScriptImports(assetName) {
+async function assetJavaScriptImports(assetName) {
   const source = await readFile(resolve(assetDirectory, assetName), "utf8");
-  const imports = new Set();
-  const pattern = /\bimport(?:\{[^;]*?\}from)?["']\.\/([^"']+\.js)["']/gu;
-  for (const match of source.matchAll(pattern)) imports.add(match[1]);
-  return imports;
+  return staticJavaScriptImports(source);
 }
 
 async function javaScriptClosure(entryName) {
@@ -117,7 +123,7 @@ async function javaScriptClosure(entryName) {
     const name = pending.pop();
     if (!name || closure.has(name)) continue;
     closure.add(name);
-    for (const dependency of await staticJavaScriptImports(name)) {
+    for (const dependency of await assetJavaScriptImports(name)) {
       if (!closure.has(dependency)) pending.push(dependency);
     }
   }
@@ -507,7 +513,7 @@ const diagnosticEntries = ["DiagnosticsSettings", "application-diagnostics"].map
 });
 const deferredDiagnosticsJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[0]}`);
 const deferredDiagnosticCatalogJavaScriptBytes = await assetBytes(`assets/${diagnosticEntries[1]}`);
-const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu"].map((prefix) => {
+const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu", "ReviewNoteDialog"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred project/thread surface: ${prefix}`);
   if (mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
@@ -517,6 +523,7 @@ const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu"].map
 });
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
+const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
 const legacyPromptStashEntry = assetNames.find((name) => /^LegacyPromptStash-.*\.js$/u.test(name));
 if (!legacyPromptStashEntry) throw new Error("Missing deferred legacy prompt recovery");
 if (mainWorkbenchJavaScriptClosure.has(legacyPromptStashEntry) || detachedChatJavaScriptClosure.has(legacyPromptStashEntry)) {
@@ -541,6 +548,7 @@ const coreJavaScriptBytes =
   - deferredUsageLimitsJavaScriptBytes
   - deferredWelcomeGuideJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
+  - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
   - deferredDiagnosticCatalogJavaScriptBytes
@@ -573,6 +581,7 @@ const measurements = {
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
+  deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,
   deferredDiagnosticCatalogJavaScript: deferredDiagnosticCatalogJavaScriptBytes,

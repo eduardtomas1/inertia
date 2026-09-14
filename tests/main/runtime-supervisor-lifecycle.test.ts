@@ -50,6 +50,7 @@ class FakeUtilityProcess extends EventEmitter {
 function createHarness(options: {
   onRestartRequested?: RuntimeSupervisorOptions["onRestartRequested"];
   platform?: NodeJS.Platform;
+  runtimeProcessGuardianPath?: string;
   startupTimeoutMs?: number;
   recoverOwnedProcesses?: (
     runtimeGenerationId: string,
@@ -78,6 +79,7 @@ function createHarness(options: {
       dataDirectory,
       defaultWorkspacePath: resolve(tmpdir(), "inertia workspace"),
       enableProviders: false,
+      runtimeProcessGuardianPath: options.runtimeProcessGuardianPath,
     },
     spawn: options.spawn ?? (() => {
       const child = new FakeUtilityProcess(10_000 + children.length);
@@ -116,6 +118,23 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it.each(["linux", "darwin", "win32"] as const)("uses the injected %s recovery policy throughout an unexpected exit", async (platform) => {
+    const deadlines: number[] = [];
+    const { children, supervisor } = createHarness({
+      platform, runtimeProcessGuardianPath: resolve(dataDirectory, "test-guardian"),
+      recoverOwnedProcesses: (_generation, _boot, deadline) => { deadlines.push(deadline); return false; },
+    });
+    supervisor.start(); children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    await vi.advanceTimersByTimeAsync(0);
+    const exitedAt = Date.now();
+    children[0].exit(17);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deadlines).toEqual([exitedAt + (platform === "win32" ? 6_000 : 1_000)]);
+    expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(platform === "darwin");
+    expect(supervisor.snapshot().restartScheduled).toBe(platform !== "darwin");
+  });
+
   it.each([0, 10_000])("bounds repeated containment failures after exact cleanup takes %i ms", async (cleanupDelay) => {
     const { children, supervisor } = createHarness({ platform: "linux" });
     supervisor.start();

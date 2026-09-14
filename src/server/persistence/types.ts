@@ -136,6 +136,7 @@ export interface AgentTurnLifecycleUpdate {
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   content: string;
+  privateConnectDeviceId?: string;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
@@ -153,6 +154,7 @@ export interface BeginAgentTurnInput
 }
 
 export interface CreateMessageOptions {
+  privateConnectDeviceId?: string;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   activateConversation?: boolean;
 }

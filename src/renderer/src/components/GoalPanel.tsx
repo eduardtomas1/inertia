@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { useId, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
@@ -243,7 +244,7 @@ function GoalCard({
 
       {goal.source === "inertia-local" && goal.tokenBudget !== null && (
         <p className="goal-panel-capability-note">
-          Local token target: {goal.tokenBudget.toLocaleString()}. Inertia does
+          Local token target: {goal.tokenBudget.toLocaleString(INTERFACE_LOCALE)}. Inertia does
           not measure or enforce provider usage.
         </p>
       )}
@@ -290,7 +291,7 @@ function GoalCard({
             value={recoveryBudget}
             placeholder={recoveryBudgetFloor === 0
               ? "Higher limit"
-              : `More than ${recoveryBudgetFloor.toLocaleString()}`}
+              : `More than ${recoveryBudgetFloor.toLocaleString(INTERFACE_LOCALE)}`}
             disabled={controlsBusy}
             aria-invalid={parsedRecoveryBudget === undefined
               || (typeof parsedRecoveryBudget === "number"
@@ -617,7 +618,7 @@ function SubagentsSection({
           <Network size={14} aria-hidden="true" />
           <h3 id={headingId}>Delegated work</h3>
         </div>
-        <span aria-label={`${subagents.length} delegated tasks${statsLabel
+        <span aria-label={`${subagents.length} delegated ${subagents.length === 1 ? "task" : "tasks"}${statsLabel
           ? `, ${statsLabel}`
           : ""}`}>
           {statsLabel || subagents.length}

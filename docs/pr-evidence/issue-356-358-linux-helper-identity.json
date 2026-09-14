@@ -1,0 +1,26 @@
+{
+  "sourceCommit": "c81c3122",
+  "method": "Actual linux.c compiled with cc -std=c11 -O2 -Wall -Wextra -Werror; isolated gcc:14 Linux container, network disabled, unprivileged UID 1000; separately compiled synthetic target.",
+  "uid": 1000,
+  "platform": "Linux",
+  "architecture": "aarch64",
+  "targetIsDifferentExecutable": true,
+  "targetProcExeAccess": {
+    "errno": 13,
+    "message": "Permission denied"
+  },
+  "readyAccepted": true,
+  "readyReportsHelperExecutable": true,
+  "parentAndGroupMatch": true,
+  "wrongStartRejected": true,
+  "wrongHelperRejected": true,
+  "targetSurvivesWrongIdentities": true,
+  "claimSignalDelivered": true,
+  "stopSignalDelivered": true,
+  "targetExitCode": 0,
+  "scope": "Low-level helper acceptance for an explicitly supplied synthetic target. No privileged application admission bypass or elevation of same-UID signal authority is established.",
+  "references": [
+    "https://www.man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html",
+    "https://www.kernel.org/doc/html/latest/filesystems/proc.html"
+  ]
+}

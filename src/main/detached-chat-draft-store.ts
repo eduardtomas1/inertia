@@ -223,6 +223,7 @@ export class DetachedChatDraftStore {
   #persistedContent = serialized({ version: STORE_VERSION, drafts: [] });
   #hadPersistedState = false;
   #writeBlocked = false;
+  #retryableWrite: { backupContent: string | null } | null = null;
   readonly #onDiagnostic: (
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
@@ -298,7 +299,16 @@ export class DetachedChatDraftStore {
     evidencePreserved: boolean,
   ): void {
     this.#writeBlocked = true;
+    this.#retryableWrite = null;
     this.#emit({ reason, outcome: "blocked", evidencePreserved });
+  }
+
+  #recordWriteFailure(error: unknown, backupContent: string | null): void {
+    const reason = writeFailureReason(error);
+    this.#block(reason, true);
+    if (reason === "transient-io" || reason === "permission") {
+      this.#retryableWrite = { backupContent };
+    }
   }
 
   #load(snapshot: DetachedChatDraftStoreSnapshot): void {
@@ -432,7 +442,44 @@ export class DetachedChatDraftStore {
     }
   }
 
-  #ensureWritableState(): void {
+  #retryBlockedWrite(): void {
+    const retry = this.#retryableWrite;
+    const target = this.#paths?.target;
+    const backupPath = this.#lastKnownGoodPath;
+    if (!retry || !target || !backupPath) return;
+    const primary = readCandidate(target);
+    if (primary.state === "unavailable"
+      && (primary.reason === "transient-io" || primary.reason === "permission")) return;
+    // An unacknowledged primary commit is not interchangeable with the last
+    // accepted state. Preserve it for explicit recovery rather than retrying.
+    if (primary.state !== "valid" || primary.content !== this.#persistedContent) {
+      this.#block(primary.state === "unavailable" ? primary.reason : "changed", true);
+      return;
+    }
+    const backup = readCandidate(backupPath);
+    if (backup.state === "unavailable"
+      && (backup.reason === "transient-io" || backup.reason === "permission")) return;
+    const backupContent = backup.state === "valid" ? backup.content : null;
+    if ((backup.state !== "valid" && backup.state !== "missing")
+      || (backupContent !== this.#persistedContent && backupContent !== retry.backupContent)) {
+      this.#block(backup.state === "unavailable" ? backup.reason : "changed", true);
+      return;
+    }
+    if (backupContent !== this.#persistedContent) {
+      try {
+        writeSecureAtomicState(backupPath, this.#persistedContent, MAX_STORE_BYTES);
+      } catch (error) {
+        this.#recordWriteFailure(error, backupContent);
+        return;
+      }
+    }
+    this.#writeBlocked = false;
+    this.#retryableWrite = null;
+  }
+
+  #ensureWritableState(): string | null {
+    // Retry only on a new put/acknowledgement; never spin on filesystem errors.
+    this.#retryBlockedWrite();
     const target = this.#paths?.target;
     if (this.#writeBlocked || !this.#lastKnownGoodPath || !target) {
       throw new Error("Detached chat draft persistence is unavailable");
@@ -487,10 +534,11 @@ export class DetachedChatDraftStore {
         backup.reason,
       )
     ) throw new Error("Detached chat draft persistence is unavailable");
+    return backup.state === "valid" ? backup.content : null;
   }
 
   #flush(): void {
-    this.#ensureWritableState();
+    const backupContent = this.#ensureWritableState();
     const lastKnownGoodPath = this.#lastKnownGoodPath;
     const target = this.#paths?.target;
     if (!lastKnownGoodPath || !target) {
@@ -506,15 +554,15 @@ export class DetachedChatDraftStore {
       this.#persistedContent = content;
       this.#hadPersistedState = true;
     } catch (error) {
-      this.#block(writeFailureReason(error), true);
+      this.#recordWriteFailure(error, backupContent);
       throw error;
     }
     try {
       writeSecureAtomicState(lastKnownGoodPath, content, MAX_STORE_BYTES);
     } catch (error) {
       // The primary commit is authoritative. Keep the matching in-memory state,
-      // block subsequent writes, and let restart repair the recovery copy.
-      this.#block(writeFailureReason(error), true);
+      // block writes until the next explicit retry verifies both copies.
+      this.#recordWriteFailure(error, backupContent);
     }
   }
 }

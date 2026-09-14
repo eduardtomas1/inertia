@@ -29,6 +29,10 @@ vi.mock("../../src/server/checkpoints", async (importOriginal) => ({
   restoreCheckpoint: sideEffects.restoreCheckpoint,
 }));
 
+vi.mock("../../src/server/runtime/checkpoint-restoration", () => ({
+  restoreConversationCheckpoint: sideEffects.restoreCheckpoint,
+}));
+
 vi.mock("../../src/server/git", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/server/git")>(),
   removeOwnedWorktree: sideEffects.removeOwnedWorktree,

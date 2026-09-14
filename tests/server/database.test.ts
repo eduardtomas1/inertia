@@ -36,6 +36,7 @@ function dropUnreleasedAgentThreadManagement(
     DROP TABLE IF EXISTS agent_thread_operations;
     DROP TABLE IF EXISTS agent_managed_conversations;
     DROP INDEX IF EXISTS messages_created_id_idx;
+    ALTER TABLE messages DROP COLUMN private_connect_device_id;
     DELETE FROM schema_migrations WHERE version >= 60;
   `);
 }

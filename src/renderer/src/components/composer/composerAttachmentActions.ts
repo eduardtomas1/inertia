@@ -5,7 +5,7 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentKind,
-  chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
 import { formatAttachmentSize, mergeComposerAttachments, type ComposerAttachmentAdoptionResult, type ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ComposerProps } from "./types";

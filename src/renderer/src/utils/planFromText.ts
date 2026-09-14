@@ -9,8 +9,11 @@ export interface TextPlanStep {
 export function planFromText(
   text: string,
   status: Conversation["status"],
+  streamingText?: string,
 ): TextPlanStep[] {
-  const lines = text.split("\n");
+  // A running turn owns its plan, even before its first token arrives.
+  const lines = (status === "running" && streamingText !== undefined
+    ? streamingText : text).split("\n");
   const candidates: TextPlanStep[] = lines.flatMap((line, index) => {
     const match =
       /^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.{3,200})$/u.exec(line);

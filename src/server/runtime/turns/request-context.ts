@@ -150,7 +150,7 @@ function boundedText(value: string, label: string, maximum: number): string {
   const normalized = rejectUnsafeText(value, label);
   const bytes = byteLength(normalized);
   if (bytes === 0) throw new Error(`${label} is empty.`);
-  if (bytes > maximum) throw new Error(`${label} exceeds the ${maximum.toLocaleString()} byte limit.`);
+  if (bytes > maximum) throw new Error(`${label} exceeds the ${maximum.toLocaleString("en")} byte limit.`);
   return normalized;
 }
 
@@ -710,7 +710,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   }
   if (assembledPayloadBytes > MAX_EXECUTION_PAYLOAD_BYTES) {
     throw new Error(
-      `Assembled execution payload exceeds the ${MAX_EXECUTION_PAYLOAD_BYTES.toLocaleString()} byte limit.`,
+      `Assembled execution payload exceeds the ${MAX_EXECUTION_PAYLOAD_BYTES.toLocaleString("en")} byte limit.`,
     );
   }
 

@@ -1,3 +1,6 @@
+import type { ReviewNoteDraft } from "./ReviewNoteDialog";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { createSurfaceLoader } from "../utils/surfaceLoader";
 import {
   useEffect,
   useLayoutEffect,
@@ -69,6 +72,7 @@ export type ChangesPanelProps = {
   onAddToPrompt: (selection: DiffSelection) => void;
 };
 
+const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialog"));
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
 
@@ -169,6 +173,8 @@ export function ChangesPanel({
   onAddTextToPrompt,
   onAddToPrompt,
 }: ChangesPanelProps): React.JSX.Element {
+  const [noteDraft, setNoteDraft] = useState<ReviewNoteDraft | null>(null);
+  const ReviewNoteDialog = useLoadedSurface(loadReviewNoteDialog, noteDraft !== null);
   const [selection, setSelection] = useState<{ hunkId: string; anchor: number; lineIds: string[] } | null>(null);
   useNativePreviewSuspension(selection !== null);
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
@@ -338,21 +344,26 @@ export function ChangesPanel({
       reviewed: !currentReviewed,
     });
   };
-  const createScopedNote = async (file: DiffFile, hunk?: DiffHunk) => {
-    const body = window.prompt(`Add a local note for ${hunk ? "this hunk" : file.path}:`)?.trim();
-    if (!body) return;
-    await onCreateNote({
-      repositoryPath,
-      path: file.path,
-      hunkId: hunk?.id ?? null,
-      lineIds: [],
-      targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
-      body,
+  const createScopedNote = (file: DiffFile, hunk?: DiffHunk) => {
+    setNoteDraft({
+      title: `Add note for ${hunk ? "this hunk" : file.path}`,
+      body: "",
+      save: (body) => onCreateNote({
+        repositoryPath,
+        path: file.path,
+        hunkId: hunk?.id ?? null,
+        lineIds: [],
+        targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
+        body,
+      }),
     });
   };
-  const editNote = async (note: DiffReviewNote) => {
-    const body = window.prompt("Edit local review note:", note.body)?.trim();
-    if (body && body !== note.body) await onUpdateNote(note.id, body);
+  const editNote = (note: DiffReviewNote) => {
+    setNoteDraft({
+      title: "Edit review note",
+      body: note.body,
+      save: async (body) => { if (body !== note.body) await onUpdateNote(note.id, body); },
+    });
   };
   const notePromptText = (note: DiffReviewNote) => [
     `Local review note for ${repositoryPath === "." ? note.path : `${repositoryPath}/${note.path}`}${note.hunkId ? ` (${note.hunkId})` : ""}${note.stale ? " [stale target]" : ""}:`,
@@ -385,6 +396,7 @@ export function ChangesPanel({
 
   return (
     <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
+      {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
           <GitCompareArrows size={17} aria-hidden="true" />

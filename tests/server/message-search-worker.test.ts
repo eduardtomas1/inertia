@@ -49,6 +49,7 @@ beforeAll(async () => {
     expect(db.prepare("SELECT count(*) AS count, sum(length(content)) AS characters FROM messages").get())
       .toEqual({ count: 100_000, characters: 49_999_515 });
   } finally { db.close(); }
+
 }, 30_000);
 
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });

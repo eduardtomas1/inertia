@@ -91,6 +91,7 @@ export async function runPackagedPdfSmoke(
   inputPath: string,
   resultPath: string,
   signal?: AbortSignal,
+  prepare = prepareDocumentAttachments,
 ): Promise<void> {
   let result: PackagedPdfSmokeResult;
   let failure: unknown;
@@ -99,7 +100,7 @@ export async function runPackagedPdfSmoke(
     generatedRoot = await mkdtemp(join(dirname(resultPath), ".pdf-smoke-"));
     const store = await PrivateGeneratedAttachmentStore.create(join(generatedRoot, "generated"));
     const bytes = await readFile(inputPath);
-    const prepared = await prepareDocumentAttachments([{
+    const prepared = await prepare([{
       attachment: {
         id: PACKAGE_SMOKE_ATTACHMENT_ID,
         name: "package-smoke.pdf",

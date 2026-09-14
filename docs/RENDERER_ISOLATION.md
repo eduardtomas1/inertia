@@ -85,10 +85,11 @@ The next preparatory step, so the isolation refactor does not require rewriting
 every UI component, is to funnel transcript-originated privileged calls through a
 single narrow module instead of calling `window.inertia.*` from components. Today
 `ResponseMarkdown` calls `window.inertia.openExternal` and
-`window.inertia.openProjectPath` directly. Those two call sites are the complete
-transcript-originated privileged surface, and they are the natural seam: replace
-them with an injected `transcriptIntents` object, and the same component works
-unchanged whether it runs in the privileged renderer or behind `postMessage`.
+`window.inertia.openProjectPath` directly. The transcript also opens project files
+through changed-file buttons in `response-timeline/changedFiles.tsx` and the
+`onOpenTurnFile`/`onOpenProjectFile` callbacks. An isolation refactor must route
+those callbacks as well as Markdown links through the same ownership-checked
+intent boundary. The two Markdown call sites alone are not a complete inventory.
 
 That seam is intentionally left as the first step of the isolation work rather
 than introduced speculatively here, because introducing an abstraction with a

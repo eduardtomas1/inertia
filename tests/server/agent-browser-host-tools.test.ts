@@ -95,16 +95,46 @@ describe("agent browser host tools", () => {
     );
   });
 
-  it("requires supervised approval for interaction and does not act after denial", async () => {
-    const broker = { perform: vi.fn() };
-    const tools = new AgentBrowserHostTools(broker as never);
+  it.each(["approve", "deny"] as const)("prepares inspectable supervised actions and handles %s", async (decision) => {
+    const token = crypto.randomUUID();
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const, text: JSON.stringify({ token, detail: 'Replace text in Message: "hello"' }),
+      state: { activeTabId: tabId, tabs: [{ id: tabId, title: "App", url: "", loading: false }], activity: null },
+    })) };
+    const tools = new AgentBrowserHostTools(broker);
     const request = call("inertia_browser_interact", {
       action: "type", ref: "e4", text: "hello", replace: true,
-    }, "deny");
+    }, decision);
     await expect(tools.invoke(conversation("supervised"), request, identity))
-      .resolves.toMatchObject({ success: false });
+      .resolves.toMatchObject({ success: decision === "approve" });
     expect(request.requestApproval).toHaveBeenCalledOnce();
-    expect(broker.perform).not.toHaveBeenCalled();
+    expect(request.requestApproval).toHaveBeenCalledWith(expect.objectContaining({ detail: 'Replace text in Message: "hello"' }));
+    expect(broker.perform).toHaveBeenNthCalledWith(1, identity, {
+      action: "prepare-approval", command: { action: "type", ref: "e4", text: "hello", replace: true },
+    }, request.signal);
+    expect(broker.perform.mock.calls[1]).toEqual(decision === "approve"
+      ? [identity, { action: "perform-approved", token }, request.signal]
+      : [identity, { action: "discard-approval", token }]);
+  });
+
+  it("does not ask for approval or execute when the control cannot be inspected", async () => {
+    const broker = { perform: vi.fn(async () => ({ ok: false as const, code: "not-found" as const, message: "stale control" })) };
+    const request = call("inertia_browser_interact", { action: "click", ref: "e1" });
+    await expect(new AgentBrowserHostTools(broker).invoke(conversation("supervised"), request, identity))
+      .resolves.toMatchObject({ success: false });
+    expect(request.requestApproval).not.toHaveBeenCalled();
+    expect(broker.perform).toHaveBeenCalledOnce();
+  });
+
+  it.each(["Click \u202edelete", "Type \u0001text", "Open \u2066address"])("rejects unsafe approval display %j and discards its authority", async (detail) => {
+    const token = crypto.randomUUID();
+    const broker = { perform: vi.fn(async () => ({ ok: true as const, text: JSON.stringify({ token, detail }),
+      state: { activeTabId: tabId, tabs: [], activity: null } })) };
+    const request = call("inertia_browser_interact", { action: "click", ref: "e1" });
+    await expect(new AgentBrowserHostTools(broker).invoke(conversation("supervised"), request, identity))
+      .resolves.toMatchObject({ success: false });
+    expect(request.requestApproval).not.toHaveBeenCalled();
+    expect(broker.perform).toHaveBeenLastCalledWith(identity, { action: "discard-approval", token });
   });
 
   it.each(["auto-edit", "full"] as const)(

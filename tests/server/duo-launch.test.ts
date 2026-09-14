@@ -877,6 +877,7 @@ describe("atomic Duo launch persistence", () => {
     await expect(cancellation).resolves.toMatchObject({ state: "cancelled" });
     expect(runtime.store.snapshot().conversations).toEqual([]);
     expect(runtime.provider.inputs).toEqual([]);
+    expect((launches as unknown as { cancellationRequests: Set<string> }).cancellationRequests.size).toBe(0);
     runtime.store.close();
   });
 

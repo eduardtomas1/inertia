@@ -218,7 +218,9 @@ export class DuoLaunchCoordinator {
   }
 
   async cancel(launchId: string): Promise<DuoLaunchStatus> {
-    this.cancellationRequests.add(launchId);
+    // Only preparation can need an in-memory marker before its durable launch
+    // exists. Its finally block owns removal; all other states persist below.
+    if (this.prepareTasks.has(launchId)) this.cancellationRequests.add(launchId);
     let launch = this.store.findPairedLaunch(launchId);
     if (!launch) {
       const preparing = this.prepareTasks.get(launchId);

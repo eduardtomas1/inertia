@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderActivityDetail,
+  sanitizeProviderFailureSummary,
 } from "./activity-detail";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
 
@@ -40,6 +41,8 @@ export function cursorRuntimeFailure(
   child: ChildProcessWithoutNullStreams,
   phase = "runtime",
   terminalEvent = "acp/exception",
+  workspaceRoot?: string,
+  diagnostic?: string,
 ): ProviderRunFailure {
   const normalized = message.toLowerCase();
   const reason: ProviderRunFailure["reason"] =
@@ -56,11 +59,18 @@ export function cursorRuntimeFailure(
             : /closed|connection|eof|broken pipe/u.test(normalized)
               ? "transport-closed"
               : "provider-error";
+  const summary = sanitizeProviderFailureSummary(
+    message, "Cursor ACP stopped unexpectedly.", { workspaceRoot },
+  );
+  const technicalDetail = sanitizeProviderActivityDetail([message, diagnostic].filter(Boolean).join("\n"), {
+    workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  });
   return {
     reason,
-    message,
+    message: summary,
     phase,
     terminalEvent,
+    ...(technicalDetail && technicalDetail !== summary ? { technicalDetail } : {}),
   };
 }
 

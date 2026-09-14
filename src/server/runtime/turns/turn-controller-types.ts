@@ -188,6 +188,8 @@ export interface TurnControllerHooks {
 
 export interface QueueTurnRequest {
   conversationId: string;
+  /** Authenticated Private Connect origin, supplied only by the privileged gateway. */
+  privateConnectDeviceId?: string;
   /** Server-only authorization for the exact locked Duo judge dispatch. */
   authorizedDuoComparisonLaunchId?: string;
   content: string;

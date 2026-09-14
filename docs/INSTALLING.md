@@ -1,5 +1,10 @@
 # Install Inertia
 
+Worktree management requires Git 2.36 or newer on your PATH. Inertia checks
+this before creating a worktree and when inspecting one for cleanup. Upgrade
+an older Git installation before using worktree chats; ordinary local folders
+do not require worktree support.
+
 Download the [latest stable Inertia release](https://github.com/eduardtomas1/inertia/releases/latest):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |

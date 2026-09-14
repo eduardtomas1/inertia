@@ -55,6 +55,12 @@ test("opens the command palette and manages a thread", async () => {
   const terminalInput = page.locator(".xterm-helper-textarea").first();
   await terminalInput.focus();
   await page.keyboard.press("Control+K");
+  await expect(terminalInput).toBeFocused();
+  await expect(page.getByRole("dialog", { name: "Search Inertia" })).toHaveCount(0);
+  if (process.platform !== "darwin") {
+    await page.getByRole("textbox", { name: "Message", exact: true }).focus();
+  }
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
   const search = page.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
   await expect(search).toBeFocused();
   await search.pressSequentially("settings");

@@ -196,6 +196,7 @@ describe("GoalPanel", () => {
       name: "Goal token budget used",
     })).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getByText("1 of 2 plan steps complete")).toBeInTheDocument();
+    expect(screen.getByLabelText("1 delegated task, 1 working")).toBeInTheDocument();
     expect(screen.getByText("Wire truthful controls")).toBeInTheDocument();
     expect(screen.getByText(
       "Latest conversation plan · not linked to this goal",

@@ -7,7 +7,7 @@ import {
   hasNativeProviderTerminalSession,
   isProviderTerminalSessionId,
 } from "../../../shared/provider-terminal-resume";
-import { restoreCheckpoint } from "../../checkpoints";
+import { restoreConversationCheckpoint } from "../checkpoint-restoration";
 import type { RuntimeStore } from "../../database";
 import { cloneProject } from "../../project-clone";
 import { inspectProjectIdentity } from "../../project-identity";
@@ -465,10 +465,10 @@ export function createProjectWorkspaceCommandHandler(
           );
         }
         try {
-          await restoreCheckpoint(
-            dependencies.store.conversationPath(checkpoint.conversationId),
-            checkpoint.ref,
-            checkpoint.conversationId,
+          await restoreConversationCheckpoint(
+            dependencies.store,
+            checkpoint,
+            () => dependencies.broadcastSnapshot(),
           );
           dependencies.send(socket, {
             type: "request.ok",

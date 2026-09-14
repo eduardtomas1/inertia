@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ChevronRight,
   RefreshCw,
@@ -64,7 +65,7 @@ export function dailyWorkCommand(now = new Date()): DailyWorkCommand {
 
 /** Renders the dashboard day key as a calendar label without re-parsing as UTC. */
 function formatDateLabel(dateKey: string): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
     weekday: "long",
     day: "numeric",
     month: "long",

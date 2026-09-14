@@ -1,3 +1,4 @@
+import { writeClipboardText } from "../utils/clipboard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, Check, Copy, ExternalLink, ShieldCheck, Square } from "lucide-react";
 import type { ModelBackendProfileView, ModelSelection, Project, ProviderInfo, ServerEvent } from "@shared/contracts";
@@ -142,7 +143,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
         {submitted ? <button type="button" className="primary-button" onClick={() => { void window.inertia.openExternal(report.issueUrl!); }}><Check size={16} />View published issue</button> : <>
           {report.status === "uncertain" && <button type="button" className="secondary-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.reconcile", payload: { id: report.id, revision: report.revision } })); }}>Check submission</button>}
           {report.status === "uncertain" && <button ref={retirementTrigger} type="button" className="secondary-button" disabled={busy || disabled} onClick={() => setRetiring(true)}>Retire this report</button>}
-          <button type="button" className="secondary-button" disabled={editing} onClick={() => { void navigator.clipboard.writeText(`${report.title}\n\n${report.body}`).then(() => setCopyStatus("Preview copied."), () => setCopyStatus("Could not copy. Select the preview text manually.")); }}><Copy size={14} />Copy preview</button>
+          <button type="button" className="secondary-button" disabled={editing} onClick={() => { void writeClipboardText(`${report.title}\n\n${report.body}`).then((copied) => setCopyStatus(copied ? "Preview copied." : "Could not copy. Select the preview text manually.")); }}><Copy size={14} />Copy preview</button>
           <button type="button" className="secondary-button" onClick={() => { void window.inertia.openExternal(report.status === "uncertain" || retired ? ISSUE_REPOSITORY_URL : `${ISSUE_REPOSITORY_URL}/new`); }}><ExternalLink size={14} />Open GitHub manually</button>
           {!retired && <button type="button" className="primary-button" disabled={locked || editing} onClick={() => { void perform(async () => {
             if (report.status !== "preview") { await command({ type: "support.report.edit", payload: { id: report.id, revision: report.revision, title: report.title, body: report.body } }); return; }

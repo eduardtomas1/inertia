@@ -50,11 +50,14 @@ Recovery runs before the database is opened for migration:
 
 1. Open the primary database read-only, run `PRAGMA quick_check`, and require a
    coherent released migration history and the schema required by that history.
-2. If it fails, move the primary plus any WAL/SHM sidecars to `corrupt/`. The
-   unreadable source is preserved and is never replaced or deleted as cleanup.
-3. Validate backups newest-first with `integrity_check`, exact migration
-   history, and required schema; skip corrupt candidates, preserve unsupported
-   future candidates, and atomically restore the newest compatible one.
+2. If the file is unreadable, or its readable schema or stored relationships
+   are inconsistent, stop startup and preserve the primary and backups for
+   explicit recovery. A future schema also stops startup without replacement.
+3. Only confirmed SQLite corruption (or a missing primary) permits automatic
+   recovery. Validate backups newest-first with `integrity_check`, exact
+   migration history, and required schema before moving the primary plus any
+   WAL/SHM sidecars to `corrupt/`. Preserve invalid and future backup candidates
+   and atomically restore the newest compatible one.
 4. Run ordinary append-only migrations on the restored database.
 5. If no compatible backup passes validation, initialize a new empty database
    while still preserving the corrupt primary. A clean first launch with no

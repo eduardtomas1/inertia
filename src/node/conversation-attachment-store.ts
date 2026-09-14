@@ -27,7 +27,7 @@ import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-  chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentStorageExtension,
   type ChatAttachmentMimeType,
 } from "../shared/attachments.js";

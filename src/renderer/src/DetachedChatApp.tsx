@@ -400,8 +400,8 @@ export default function DetachedChatApp({
   const revertCheckpoint = useCallback((checkpoint: CheckpointSummary): void => {
     const confirmed = !settings.confirmDestructiveActions
       || window.confirm(
-        "Restore the project to before this turn? "
-        + "Untracked files created later will be left in place.",
+        "Restore the project to this checkpoint? "
+        + "A recovery checkpoint will save current edits first. Untracked files created later will be left in place.",
       );
     if (!confirmed) return;
     void runtimeActions.run("checkpoint.revert", {

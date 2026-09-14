@@ -30,6 +30,7 @@ import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import
 import { projectPreferencesMigration } from "./project-preferences";
 import { appearanceThemePairMigration } from "./appearance-theme-pair";
 import { providerUsageLimitsMigration } from "./provider-usage-limits";
+import { messageChronologyMigration, privateConnectMessageOriginMigration } from "./message-metadata";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -1230,14 +1231,12 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, nativeGeminiProviderMigration,
       persistTurnContinuationEvidence, issueReportsMigration,
-      {
-        name: "IndexMessageSearchChronology",
-        up: "CREATE INDEX messages_created_id_idx ON messages(created_at DESC, id DESC);",
-      },
+      messageChronologyMigration,
       contextCompactionMigration,
       projectPreferencesMigration,
       appearanceThemePairMigration,
       providerUsageLimitsMigration,
+      privateConnectMessageOriginMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

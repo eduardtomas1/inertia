@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../../lib/locale";
 import { lazy, Suspense, useState, type RefObject } from "react";
 import {
   Box,
@@ -505,7 +506,7 @@ export function ComposerInputZone({
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">
-            This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString()} character limit.
+            This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString(INTERFACE_LOCALE)} character limit.
           </p>
         )}
       </div>

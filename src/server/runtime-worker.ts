@@ -7,6 +7,8 @@ import {
 import { startRuntime, type RunningRuntime } from "./index.js";
 import { RuntimeCredentialBrokerClient } from "./runtime/backends/credential-broker-client.js";
 import { RuntimeAttachmentBrokerClient } from "./runtime/attachments/attachment-broker-client.js";
+import { RuntimeDocumentPreparationClient } from "./runtime/attachments/document-preparation-client";
+import { createBrokeredDocumentPreparer } from "./runtime/attachments/brokered-document-preparation";
 import {
   RuntimeConversationAttachmentStoreBrokerClient,
 } from "./runtime/attachments/conversation-attachment-store-broker-client.js";
@@ -88,6 +90,8 @@ const credentials = new RuntimeCredentialBrokerClient({ post });
 const attachments = new RuntimeAttachmentBrokerClient(post);
 const conversationAttachmentStore =
   new RuntimeConversationAttachmentStoreBrokerClient(post);
+const documents = new RuntimeDocumentPreparationClient(post);
+const prepareDocuments = createBrokeredDocumentPreparer(documents.runner);
 const secureFiles = new RuntimeSecureFileBrokerClient(post);
 const agentBrowser = new RuntimeAgentBrowserBrokerClient(post);
 
@@ -104,6 +108,7 @@ async function finishShutdown(
       credentials.close();
       attachments.close();
       conversationAttachmentStore.close();
+      documents.close();
       secureFiles.close();
       agentBrowser.close();
     },
@@ -176,6 +181,7 @@ parentPort.on("message", (messageEvent) => {
     conversationAttachmentStore.handle(command);
     return;
   }
+  if (command.type === "runtime.document-preparation-result") { documents.handle(command); return; }
   if (command.type === "runtime.secure-file-result") {
     secureFiles.handle(command);
     return;
@@ -669,6 +675,7 @@ parentPort.on("message", (messageEvent) => {
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
+    prepareDocumentAttachments: prepareDocuments,
     secureFiles,
     agentBrowser,
   }), async (startedRuntime) => {
@@ -690,6 +697,7 @@ parentPort.on("message", (messageEvent) => {
         command.options.packageSmokePdf.inputPath,
         command.options.packageSmokePdf.resultPath,
         packageSmokePdfController.signal,
+        prepareDocuments,
       ).catch(() => undefined).finally(() => {
         packageSmokePdfController = null;
         packageSmokePdfOperation = null;

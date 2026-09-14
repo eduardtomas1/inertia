@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../../lib/locale";
 import {
   useDeferredValue,
   useEffect,
@@ -135,7 +136,7 @@ function PacketPreview({ packet }: {
         <Detail title={packet.sourceConversationTitle} detail={packet.sourceProjectName} />
         <Detail
           title={packet.sourceWorkspaceLabel}
-          detail={`Captured ${new Date(packet.createdAt).toLocaleString()}`}
+          detail={`Captured ${new Date(packet.createdAt).toLocaleString(INTERFACE_LOCALE)}`}
         />
       </div>
       {packet.sourceState === "deleted" && (

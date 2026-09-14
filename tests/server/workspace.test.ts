@@ -164,6 +164,27 @@ describe("workspace file hierarchy", () => {
       .rejects.toMatchObject({ code: "unsafe-link" });
   });
 
+  it.each(["list", "search"] as const)(
+    "%s skips vanished entries while retaining stable siblings", async (operation) => {
+      const root = await temporaryDirectory();
+      await writeFile(join(root, "needle-gone.ts"), "gone");
+      await writeFile(join(root, "needle-kept.ts"), "kept");
+      let removed = false;
+      const options = {
+        afterEntryObserved: async (path: string) => {
+          if (path !== "needle-gone.ts") return;
+          await rm(join(root, path));
+          removed = true;
+        },
+      };
+      const page = operation === "list"
+        ? await listWorkspaceEntries(root, "", options)
+        : await searchWorkspaceEntries(root, "needle", options);
+      expect(removed).toBe(true);
+      expect(page.entries.map(({ path }) => path)).toEqual(["needle-kept.ts"]);
+    },
+  );
+
   it("does not list an entry swapped to an external link after enumeration", async () => {
     const root = await temporaryDirectory();
     const outside = await temporaryDirectory();

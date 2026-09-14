@@ -1,4 +1,4 @@
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MAX_PATH_BYTES = 4 * 1_024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -11,15 +11,29 @@ export const APP_UPDATE_CANDIDATE_VIABILITY_CODES = Object.freeze([
   "invalid-request",
   "recovery-storage-invalid",
   "validation-failed",
+  "validation-resource-limit",
 ] as const);
 
 export type AppUpdateCandidateViabilityCode =
   (typeof APP_UPDATE_CANDIDATE_VIABILITY_CODES)[number];
 
+export class CandidateViabilityError extends Error {
+  constructor(readonly code: AppUpdateCandidateViabilityCode) {
+    super(code);
+  }
+}
+
+export interface AppUpdateValidationScratch {
+  readonly directory: string;
+  readonly device: string;
+  readonly inode: string;
+}
+
 export interface AppUpdateCandidateViabilityRequest {
   readonly schemaVersion: typeof SCHEMA_VERSION;
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly scratch: AppUpdateValidationScratch | null;
   readonly expectedActiveRuntimeOwner:
     AppUpdateCandidateExpectedRuntimeOwner | null;
 }
@@ -74,6 +88,7 @@ function validCode(value: unknown): value is AppUpdateCandidateViabilityCode {
 export function appUpdateCandidateViabilityRequest(options: {
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly scratch?: AppUpdateValidationScratch | null;
   readonly expectedActiveRuntimeOwner?:
     AppUpdateCandidateExpectedRuntimeOwner | null;
 }): AppUpdateCandidateViabilityRequest {
@@ -81,6 +96,7 @@ export function appUpdateCandidateViabilityRequest(options: {
     schemaVersion: SCHEMA_VERSION,
     operationId: options.operationId,
     dataDirectory: options.dataDirectory,
+    scratch: options.scratch ?? null,
     expectedActiveRuntimeOwner: options.expectedActiveRuntimeOwner ?? null,
   };
   const parsed = parseAppUpdateCandidateViabilityRequest(request);
@@ -100,10 +116,23 @@ export function parseAppUpdateCandidateViabilityRequest(
       "expectedActiveRuntimeOwner",
       "operationId",
       "schemaVersion",
+      "scratch",
     ])
   ) return null;
   const request = value as Partial<AppUpdateCandidateViabilityRequest>;
   const owner = request.expectedActiveRuntimeOwner;
+  const scratch = request.scratch;
+  const validScratch = scratch === null || (
+    !!scratch
+    && typeof scratch === "object"
+    && !Array.isArray(scratch)
+    && exactKeys(scratch, ["directory", "device", "inode"])
+    && boundedAbsolutePath(scratch.directory)
+    && typeof scratch.device === "string"
+    && /^[0-9]{1,32}$/u.test(scratch.device)
+    && typeof scratch.inode === "string"
+    && /^[0-9]{1,32}$/u.test(scratch.inode)
+  );
   const validOwner = owner === null || (
     !!owner
     && typeof owner === "object"
@@ -115,6 +144,7 @@ export function parseAppUpdateCandidateViabilityRequest(
   return request.schemaVersion === SCHEMA_VERSION
     && validOperationId(request.operationId)
     && boundedAbsolutePath(request.dataDirectory)
+    && validScratch
     && validOwner
     ? request as AppUpdateCandidateViabilityRequest
     : null;

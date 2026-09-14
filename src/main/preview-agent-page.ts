@@ -26,6 +26,8 @@ export interface PreviewAgentTarget {
   blocked?: boolean;
   disabled?: boolean;
   editable?: boolean;
+  sensitive?: boolean;
+  role?: string;
   label?: string;
   x?: number;
   y?: number;
@@ -118,6 +120,8 @@ function target(value: unknown): PreviewAgentTarget {
     blocked: value.blocked === true,
     disabled: value.disabled === true,
     editable: value.editable === true,
+    sensitive: value.sensitive === true,
+    role: boundedString(value.role, 50),
     label: boundedString(value.label, 300),
     ...(x === undefined ? {} : { x }),
     ...(y === undefined ? {} : { y }),
@@ -958,14 +962,29 @@ export async function locateAgentPageRef(
       blocked,
       disabled,
       editable,
+      role: password ? "textbox" : boundedLowerAttribute(element, "role", 50)
+        || (editable ? "textbox" : ({ A: "link", SUMMARY: "button" })[element.tagName] || element.tagName.toLowerCase()),
+      sensitive: password || passwordValues.size > 0
+        || /password|passcode|passphrase|token|secret|credential|api.?key|private.?key|authorization/iu.test(
+          ["id", "name", "autocomplete", "placeholder", "aria-label"].map((name) =>
+            String(element.getAttribute?.(name) ?? "").slice(0, 300)).join(" ")
+        ),
       label: passwordValues.size > 0
         ? "page element"
         : redact(
           password
           ? "Password field"
           : element.getAttribute("aria-label")
+            || (() => {
+              const ids = element.getAttribute("aria-labelledby");
+              if (!ids || ids.length > 300) return "";
+              return ids.trim().split(/\\s+/u).slice(0, 16)
+                .map((id) => boundedElementText(document.getElementById(id))).join(" ");
+            })()
+            || (element.labels?.[0] && boundedElementText(element.labels[0]))
             || boundedImageAlt(element, element)
             || boundedElementText(element)
+            || element.getAttribute("title") || element.getAttribute("placeholder")
             || (element.tagName === "INPUT" ? element.value : "")
           || "element"
         ),

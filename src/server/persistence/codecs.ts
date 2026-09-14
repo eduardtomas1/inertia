@@ -1,6 +1,7 @@
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
+import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import {
   AGENT_RUN_STATES,
   type AgentActivity,
@@ -658,6 +659,8 @@ export function messageFromRow(row: MessageRow): ChatMessage {
   let compaction: unknown;
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   return {
+    ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
+      ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     id: row.id,
     conversationId: row.conversation_id,

@@ -22,6 +22,7 @@ const assertionTimeout = 15_000;
 const runtimeRecoveryTag = /@runtime-recovery/u;
 
 export default defineConfig({
+  forbidOnly: Boolean(process.env.CI),
   testDir,
   timeout: testTimeout,
   // Cold Electron runtime, Git, and fixture readiness on macOS ARM64 can exceed

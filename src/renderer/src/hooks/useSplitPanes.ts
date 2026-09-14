@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppSnapshot, Conversation } from "@shared/contracts";
+import { layoutStorage } from "../utils/layoutStorage";
 
 import {
   persistSplitConversationId,
@@ -29,7 +30,7 @@ function storedId(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function readPinnedIds(storage: Storage): PinnedConversationIds {
+function readPinnedIds(storage: Pick<Storage, "getItem">): PinnedConversationIds {
   let extra: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(storage.getItem(EXTRA_SPLIT_STORAGE_KEY) ?? "{}");
@@ -72,11 +73,11 @@ export function useSplitPanes({
   detachedConversationIds: ReadonlySet<string>;
   detachedReady: boolean;
 }) {
-  const [ids, setIds] = useState(() => readPinnedIds(window.localStorage));
+  const [ids, setIds] = useState(() => readPinnedIds(layoutStorage));
   const [storedLayout, setStoredLayout] = useState(() =>
-    readSplitLayout(window.localStorage) ?? PRIMARY_SPLIT_LAYOUT);
+    readSplitLayout(layoutStorage) ?? PRIMARY_SPLIT_LAYOUT);
   const [legacyRatio] = useState(() => Number.parseFloat(
-    window.localStorage.getItem(LEGACY_SPLIT_PERCENT_STORAGE_KEY) ?? "",
+    layoutStorage.getItem(LEGACY_SPLIT_PERCENT_STORAGE_KEY) ?? "",
   ));
   const splitSelectionTransitionsRef = useRef(0);
   const pinned = useMemo(() => resolvePinned(snapshot, ids), [ids, snapshot]);
@@ -103,11 +104,11 @@ export function useSplitPanes({
     layoutRef.current = layout;
   }, [layout]);
   useEffect(() => {
-    persistSplitLayout(window.localStorage, storedLayout);
+    persistSplitLayout(layoutStorage, storedLayout);
   }, [storedLayout]);
   useEffect(() => {
-    persistSplitConversationId(window.localStorage, ids.secondary);
-    window.localStorage.setItem(EXTRA_SPLIT_STORAGE_KEY, JSON.stringify({
+    persistSplitConversationId(layoutStorage, ids.secondary);
+    layoutStorage.setItem(EXTRA_SPLIT_STORAGE_KEY, JSON.stringify({
       tertiary: ids.tertiary,
       quaternary: ids.quaternary,
     }));

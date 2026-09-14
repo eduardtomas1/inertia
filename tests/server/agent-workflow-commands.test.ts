@@ -63,7 +63,6 @@ describe("agent workflow commands", () => {
 
     expect(state).toHaveBeenCalledWith(
       clearCommand.payload.conversationId,
-      false,
     );
     expect(refresh).not.toHaveBeenCalled();
   });

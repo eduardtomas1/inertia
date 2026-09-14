@@ -24,7 +24,9 @@ served from the application package.
 The invitation is held in the URL fragment, expires after five minutes, and is
 consumed when pairing starts. The client removes the fragment before rendering
 or making another request. Create a new link if it expires or is accidentally
-shared.
+shared. The initiating tab keeps a random pairing nonce in memory; retrying
+from that tab preserves the nonce. Closing or reloading it before pairing
+finishes requires denying the old request and creating a fresh invitation.
 
 The browser client can be installed as a PWA. Offline installation caches only
 the app shell, icons, and manifest—not conversations or API responses. An open
@@ -50,8 +52,12 @@ Cloudflare, Clerk, a custom domain, or a tunnel other than Tailscale Serve.
 
 ## Pause, disable, and recover
 
-Locking or suspending the desktop closes every live browser connection and
-removes the Serve mapping. A non-expired encrypted session grant remains on the
+Reported lock and suspend events close every live browser connection and
+remove the Serve mapping. Linux screen-lock events are not available through
+Electron: disable Private Connect before leaving a Linux desktop unattended.
+Resume restores access only if the desktop reports an active or idle state.
+Quitting Inertia also removes its owned mapping; a changed external mapping
+is left untouched and cleanup failure remains explicit. A non-expired encrypted session grant remains on the
 desktop, so the browser can reconnect after unlock without weakening the locked
 state or repeating device approval. **Disable** is different: it revokes active
 sessions and removes Inertia's mapping.

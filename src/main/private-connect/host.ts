@@ -196,6 +196,7 @@ export class PrivateConnectPrivacyMonitor {
     events.on("lock-screen", this.lock);
     events.on("suspend", this.lock);
     events.on("unlock-screen", this.unlock);
+    events.on("resume", this.resume);
     try {
       const state = events.getSystemIdleState(1);
       this.locked = state !== "active" && state !== "idle";
@@ -210,7 +211,16 @@ export class PrivateConnectPrivacyMonitor {
     this.events.removeListener("lock-screen", this.lock);
     this.events.removeListener("suspend", this.lock);
     this.events.removeListener("unlock-screen", this.unlock);
+    this.events.removeListener("resume", this.resume);
   }
+  private readonly resume = (): void => {
+    if (this.stopped) return;
+    try {
+      const state = this.events.getSystemIdleState(1);
+      if (state === "active" || state === "idle") this.unlock();
+      else this.lock();
+    } catch { this.lock(); }
+  };
   private readonly lock = (): void => {
     if (this.stopped) return;
     this.locked = true;

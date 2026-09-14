@@ -1,3 +1,4 @@
+import { acpPermissionDetail } from "./acp-permission-detail";
 import type {
   PermissionOption,
   RequestPermissionRequest,
@@ -11,7 +12,7 @@ export function cursorPermissionDisplayIsSafe(
 ): boolean {
   return isSafeApprovalDisplayText(
     params.toolCall.title || "Cursor requested permission",
-  ) && isSafeApprovalDisplayText(jsonSummary(params.toolCall.rawInput), true);
+  ) && isSafeApprovalDisplayText(acpPermissionDetail(params, "Cursor requested permission."), true);
 }
 
 export function isCursorFileMutationKind(
@@ -29,14 +30,4 @@ export function cursorOneShotPermissionOption(
   // choice for that stronger scope.
   const kind = allow ? "allow_once" : "reject_once";
   return options.find((option) => option.kind === kind);
-}
-
-function jsonSummary(value: unknown): string {
-  try {
-    return value === undefined
-      ? "Cursor requested permission."
-      : JSON.stringify(value);
-  } catch {
-    return "Cursor requested permission.";
-  }
 }

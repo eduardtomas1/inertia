@@ -1,3 +1,4 @@
+import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ExternalLink,
   FileSpreadsheet,
@@ -174,11 +175,11 @@ function SpreadsheetPreview({
           ))}
         </div>
         <span className="spreadsheet-attachment-summary">
-          {activeSheet.totalRows.toLocaleString()} rows
+          {activeSheet.totalRows.toLocaleString(INTERFACE_LOCALE)} {activeSheet.totalRows === 1 ? "row" : "rows"}
           {" · "}
-          {activeSheet.totalColumns.toLocaleString()} columns
+          {activeSheet.totalColumns.toLocaleString(INTERFACE_LOCALE)} {activeSheet.totalColumns === 1 ? "column" : "columns"}
           {workbook.totalSheets > 1
-            ? ` · ${workbook.totalSheets.toLocaleString()} sheets`
+            ? ` · ${workbook.totalSheets.toLocaleString(INTERFACE_LOCALE)} sheets`
             : ""}
         </span>
       </div>

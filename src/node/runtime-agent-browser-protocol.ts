@@ -1,7 +1,6 @@
+import { parseAgentBrowserRequest, type AgentBrowserRequest } from "../shared/agent-browser-approval.js";
 import {
-  parseAgentBrowserCommand,
   parseAgentBrowserResult,
-  type AgentBrowserCommand,
   type AgentBrowserResult,
   type AgentBrowserRunIdentity,
 } from "../shared/agent-browser.js";
@@ -17,7 +16,7 @@ export type RuntimeAgentBrowserEvent =
       type: "runtime.agent-browser-request";
       requestId: string;
       identity: AgentBrowserRunIdentity;
-      command: AgentBrowserCommand;
+      command: AgentBrowserRequest;
     }
   | {
       type: "runtime.agent-browser-cancel";
@@ -90,7 +89,7 @@ export function parseRuntimeAgentBrowserEvent(
       : null;
   }
   if (Object.keys(value).length !== 4) return null;
-  const command = parseAgentBrowserCommand(value.command);
+  const command = parseAgentBrowserRequest(value.command);
   return command
     ? {
         type: "runtime.agent-browser-request",

@@ -148,11 +148,23 @@ export function chatAttachmentMimeTypeForName(
   return extension ? attachmentMimeByExtension[extension] ?? null : null;
 }
 
+// The original lookup above is pinned by released migration 56. Live import
+// boundaries use this own-property lookup; persisted codecs additionally require
+// a string MIME value in the explicit MIME allowlist.
+export function safeChatAttachmentMimeTypeForName(
+  name: string,
+): ChatAttachmentMimeType | null {
+  const extension = /\.([^.]+)$/u.exec(name.trim())?.[1]?.toLocaleLowerCase("en-US");
+  return extension && Object.hasOwn(attachmentMimeByExtension, extension)
+    ? attachmentMimeByExtension[extension]!
+    : null;
+}
+
 export function isPotentialChatAttachment(
   name: string,
   declaredMimeType: string,
 ): boolean {
-  const inferred = chatAttachmentMimeTypeForName(name);
+  const inferred = safeChatAttachmentMimeTypeForName(name);
   if (!inferred) return false;
   const declared = declaredMimeType.split(";", 1)[0]!
     .trim()

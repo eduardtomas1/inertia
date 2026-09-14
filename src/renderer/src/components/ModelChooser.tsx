@@ -165,7 +165,6 @@ interface ModelChooserResultProps {
   route: ComposerModelRoute;
   row: ModelChooserRowData;
   index: number;
-  resultCount: number;
   optionId: string;
   navigated: boolean;
   onNavigate: (index: number) => void;
@@ -179,7 +178,6 @@ const ModelChooserResult = memo(function ModelChooserResult({
   route,
   row,
   index,
-  resultCount,
   optionId,
   navigated,
   onNavigate,
@@ -195,6 +193,7 @@ const ModelChooserResult = memo(function ModelChooserResult({
   );
   return (
     <li
+      role="row"
       className={navigated
         ? "model-chooser-result is-navigated"
         : "model-chooser-result"}
@@ -207,14 +206,14 @@ const ModelChooserResult = memo(function ModelChooserResult({
         width: "100%",
         transform: `translateY(${virtualStart}px)`,
       }}
-      aria-posinset={index + 1}
-      aria-setsize={resultCount}
+      aria-rowindex={index + 1}
       onPointerMove={() => {
         if (route.selectable) onNavigate(index);
       }}
     >
       <ModelChooserRow
         row={row}
+        highlighted={navigated}
         optionId={optionId}
         onSelect={selectRow}
         onFavoriteToggle={toggleFavorite}
@@ -606,6 +605,10 @@ export function ModelChooser({
               ref={searchRef}
               id={searchId}
               type="search"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-haspopup="grid"
+              aria-expanded={true}
               value={query}
               autoComplete="off"
               spellCheck="false"
@@ -638,6 +641,9 @@ export function ModelChooser({
                 className="model-chooser-results"
               >
                 <ul
+                  role="grid"
+                  aria-colcount={2}
+                  aria-rowcount={results.items.length}
                   id={resultsId}
                   className="model-chooser-list"
                   aria-label="Model results"
@@ -654,7 +660,6 @@ export function ModelChooser({
                         route={route}
                         row={chooserRows[item.index]!}
                         index={item.index}
-                        resultCount={results.items.length}
                         optionId={`${reactId}-model-option-${item.index}`}
                         navigated={activeIndex === item.index}
                         onNavigate={navigateTo}

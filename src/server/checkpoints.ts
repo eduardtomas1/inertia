@@ -515,11 +515,26 @@ export async function createCheckpoint(
   }
 }
 
-export async function restoreCheckpoint(repositoryPath: string, ref: string, conversationId: string): Promise<void> {
+export async function restoreCheckpoint(
+  repositoryPath: string,
+  ref: string,
+  conversationId: string,
+  options: CheckpointOperationOptions = {},
+): Promise<void> {
   const prefix = `refs/inertia/checkpoints/${conversationId}/`;
   if (!ref.startsWith(prefix) || !/^refs\/inertia\/checkpoints\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/u.test(ref)) {
     throw new CheckpointError("The checkpoint reference is invalid.");
   }
+  const runRestoreGit = (
+    cwd: string,
+    args: string[],
+    environment: NodeJS.ProcessEnv = {},
+    input?: Buffer,
+    maxStdoutBytes = 1024 * 1024,
+  ): Promise<RunResult> => runGit(
+    cwd, args, environment, input, maxStdoutBytes,
+    options.deadlineAt, options.signal,
+  );
   const restoreId = randomUUID();
   const restoreDirectory = await mkdtemp(
     join(tmpdir(), "inertia-checkpoint-restore-"),
@@ -530,7 +545,7 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
   };
   try {
     const commit = (
-      await runGit(
+      await runRestoreGit(
         repositoryPath,
         checkpointGitArguments([
           "rev-parse",
@@ -540,7 +555,7 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       )
     ).stdout.toString("utf8").trim();
     const indexEntries = (
-      await runGit(
+      await runRestoreGit(
         repositoryPath,
         checkpointGitArguments(["ls-files", "--stage", "-z"]),
         {},
@@ -549,7 +564,7 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       )
     ).stdout;
     const taggedPaths = (
-      await runGit(
+      await runRestoreGit(
         repositoryPath,
         checkpointGitArguments(["ls-files", "--cached", "-t", "-z"]),
         {},
@@ -564,14 +579,16 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       restoreDirectory,
       restoreId,
       baseEnvironment,
+      options.deadlineAt,
+      options.signal,
     );
-    await runGit(
+    await runRestoreGit(
       repositoryPath,
       ["read-tree", "--empty"],
       isolated.environment,
     );
     if (indexEntries.length > 0) {
-      await runGit(
+      await runRestoreGit(
         repositoryPath,
         ["update-index", "-z", "--index-info"],
         isolated.environment,
@@ -579,7 +596,7 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
       );
     }
     if (skippedPaths.length > 0) {
-      await runGit(
+      await runRestoreGit(
         repositoryPath,
         checkpointGitArguments([
           "--literal-pathspecs",
@@ -592,7 +609,7 @@ export async function restoreCheckpoint(repositoryPath: string, ref: string, con
         skippedPaths,
       );
     }
-    await runGit(
+    await runRestoreGit(
       repositoryPath,
       checkpointGitArguments([
         "restore",

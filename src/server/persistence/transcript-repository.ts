@@ -1,5 +1,6 @@
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
+import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -97,10 +98,13 @@ export class TranscriptRepository {
       ? new Date().toISOString()
       : requireTimestamp(createdAt, "Message creation time");
     if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
+    if (options.privateConnectDeviceId !== undefined
+      && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}) };
+    if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, private_connect_device_id) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @privateConnectDeviceId)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null });
       this.context.database.prepare(`
         UPDATE conversations
         SET updated_at = ?, settled_at = NULL,
@@ -215,7 +219,7 @@ export class TranscriptRepository {
       throw new Error("A non-empty assistant snapshot requires a message.");
     }
     this.context.database.transaction(() => {
-      this.context.requireAgentTurn(turnId);
+      const turn = this.context.requireAgentTurn(turnId);
       if (retainedMessageId) {
         const retained = this.context.database.prepare(`
           SELECT id, turn_id, role
@@ -244,10 +248,10 @@ export class TranscriptRepository {
       }
       this.context.database.prepare(`
         DELETE FROM messages
-        WHERE turn_id = ?
+        WHERE conversation_id = ? AND turn_id = ?
           AND role = 'assistant'
           AND (? IS NULL OR id <> ?)
-      `).run(turnId, retainedMessageId, retainedMessageId);
+      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId);
     })();
   }
 

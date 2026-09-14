@@ -114,6 +114,7 @@ describe("document attachment previews", () => {
     expect(await screen.findByRole("table", {
       name: "forecast.xlsx · Notes",
     })).toHaveTextContent("Ada");
+    expect(screen.getByText("2 rows · 1 column · 2 sheets")).toBeInTheDocument();
     expect(fetchPreview).toHaveBeenCalledWith(
       `inertia://bundle/attachment-preview/${workbook.id}`,
       expect.objectContaining({ cache: "no-store" }),

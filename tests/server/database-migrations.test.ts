@@ -75,6 +75,9 @@ function dropUnreleasedAgentThreadManagement(
   database: Database.Database,
 ): void {
   removeProjectSettingsFromLegacyFixture(database);
+  if ((database.pragma("table_info(messages)") as { name: string }[]).some(({ name }) => name === "private_connect_device_id")) {
+    database.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
+  }
   database.exec(`
     DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
     DROP TABLE IF EXISTS agent_context_requests;
@@ -1471,7 +1474,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, private_connect_device_id: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
@@ -1566,6 +1569,7 @@ describe("runtime migration catalog", () => {
 
     const schema63 = new Database(databasePath);
     removeProjectSettingsFromLegacyFixture(schema63);
+    schema63.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
     schema63.exec(`
       DROP INDEX messages_created_id_idx;
       DROP INDEX agent_turns_run_state_requested_idx;
@@ -1726,6 +1730,7 @@ describe("runtime migration catalog", () => {
 
     const schema64 = new Database(databasePath);
     removeProjectSettingsFromLegacyFixture(schema64);
+    schema64.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
     schema64.exec("DROP INDEX messages_created_id_idx");
     schema64.prepare("DELETE FROM schema_migrations WHERE version >= 65").run();
     expect((schema64.prepare(
@@ -2044,6 +2049,7 @@ describe("runtime migration catalog", () => {
 
     const schema65 = new Database(databasePath);
     removeProjectSettingsFromLegacyFixture(schema65);
+    schema65.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
     schema65.exec(`
       DROP INDEX messages_created_id_idx;
       DROP INDEX system_suspend_intervals_range_idx;
@@ -2124,6 +2130,7 @@ describe("runtime migration catalog", () => {
       { version: 72 },
       { version: 73 },
       { version: 74 },
+      { version: 75 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

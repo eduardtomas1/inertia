@@ -79,6 +79,33 @@ test("adds a selected diff range to the next agent prompt", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
+test("creates and edits a review note with keyboard access in the native window", async ({ browserName: _browserName }, testInfo) => {
+  await resizeWindow(1040, 800);
+  await ensureWorkspaceTools();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  const noteButton = page.getByRole("button", { name: "Note", exact: true }).first();
+  await noteButton.click();
+  const dialog = page.getByRole("dialog", { name: /Add note for/u });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole("textbox", { name: "Review note" });
+  await expect(input).toBeFocused();
+  await input.fill("Explain why this exported value changes.");
+  const screenshotPath = testInfo.outputPath("review-note-dialog.png");
+  await page.screenshot({ animations: "disabled", scale: "css", path: screenshotPath });
+  await testInfo.attach("Review note dialog", { path: screenshotPath, contentType: "image/png" });
+  await dialog.getByRole("button", { name: "Save note" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Explain why this exported value changes.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit note", exact: true }).first().click();
+  const editor = page.getByRole("dialog", { name: "Edit review note" });
+  await expect(editor.getByRole("textbox", { name: "Review note" })).toHaveValue("Explain why this exported value changes.");
+  await editor.getByRole("textbox", { name: "Review note" }).fill("Verified with the neighboring call sites.");
+  await editor.getByRole("button", { name: "Save note" }).click();
+  await expect(page.getByText("Verified with the neighboring call sites.", { exact: true })).toBeVisible();
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
 test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();

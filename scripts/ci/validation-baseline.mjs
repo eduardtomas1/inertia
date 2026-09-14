@@ -55,20 +55,22 @@ export async function selectMainBaseline({
   return { base: null, reason: "no-successful-compatible-main-ancestor" };
 }
 
-export function githubApi(endpoint) {
+export function githubApi(endpoint, timeoutMs = 30_000) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) throw new Error("Actions metadata deadline expired.");
   const result = spawnSync("gh", ["api", endpoint], {
-    encoding: "utf8", maxBuffer: MAX_GIT_BYTES, timeout: 30_000,
+    encoding: "utf8", maxBuffer: MAX_GIT_BYTES, timeout: Math.min(30_000, Math.floor(timeoutMs)),
   });
   if (result.status !== 0 || result.error) throw new Error("Trusted Actions metadata is unavailable.");
   return JSON.parse(result.stdout);
 }
 
-export function currentRunJobs(repository, runId) {
+export function currentRunJobs(repository, runId, deadlineAt = Date.now() + 30_000) {
   const jobs = [];
   // This graph has fewer than 100 jobs. Still support bounded pagination and
   // reject a truncated response rather than silently losing a required shard.
   for (let page = 1; page <= 3; page += 1) {
-    const result = githubApi(`repos/${repository}/actions/runs/${runId}/jobs?filter=latest&per_page=100&page=${page}`);
+    const result = githubApi(`repos/${repository}/actions/runs/${runId}/jobs?filter=latest&per_page=100&page=${page}`,
+      deadlineAt - Date.now());
     if (!Array.isArray(result.jobs)) throw new Error("Actions job metadata is malformed.");
     jobs.push(...result.jobs);
     if (jobs.length >= result.total_count) return jobs;

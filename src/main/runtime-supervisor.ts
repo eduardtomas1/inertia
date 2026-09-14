@@ -22,7 +22,7 @@ import { detachedRuntimeConnection, runtimeConnection,
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { reconcileStoppedRuntimeQuarantine, runtimeStopAttemptState, trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
-import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
@@ -51,6 +51,7 @@ export { runtimeRestartDelayMs } from "./runtime-supervisor-values.js";
 type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest,
   { type: "prompt.send" }>;
 export class RuntimeSupervisor {
+  private readonly platform: NodeJS.Platform;
   private readonly spawnProcess: RuntimeSupervisorOptions["spawn"];
   private readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
   private readonly systemBootId: string;
@@ -107,7 +108,8 @@ export class RuntimeSupervisor {
   private resolveStop: ((confirmed: boolean) => void) | null = null;
   private readonly testRecycle = new RuntimeSupervisorRecycle();
   constructor(options: RuntimeSupervisorOptions) {
-    this.stopAttempt = runtimeStopAttemptState((options.platform ?? process.platform) === "linux");
+    this.platform = options.platform ?? process.platform;
+    this.stopAttempt = runtimeStopAttemptState(this.platform === "linux");
     this.spawnProcess = options.spawn;
     const { manualModernDarwinRecovery, ...workerOptions } =
       options.workerOptions;
@@ -135,7 +137,7 @@ export class RuntimeSupervisor {
     this.shutdownGraceMs = boundedDuration(options.shutdownGraceMs, runtimeSupervisorDefaults.shutdownGraceMs);
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, runtimeSupervisorDefaults.forceKillWaitMs);
     this.recoveryWaitMs = runtimeSupervisorRecoveryWaitMs(
-      process.platform,
+      this.platform,
       this.forceKillWaitMs,
     );
     this.setTimer = options.setTimer ?? setTimeout;
@@ -188,6 +190,7 @@ export class RuntimeSupervisor {
       retryUnconfirmedShutdown: this.stopAttempt.retryEnabled, broker: options.secureFileBroker,
       conversationAttachmentStoreRunner:
         options.conversationAttachmentStoreRunner,
+      documentPreparationRunner: options.documentPreparationRunner,
       conversationAttachmentStoreAuthority:
         options.conversationAttachmentStoreAuthority,
       agentBrowserBroker: options.agentBrowserBroker,
@@ -660,13 +663,7 @@ export class RuntimeSupervisor {
     if (event.type === "runtime.credential-request") {
       this.credentials.handle(record, event); return;
     }
-    if (
-      event.type === "runtime.secure-file-request"
-      || event.type === "runtime.agent-browser-request"
-      || event.type === "runtime.agent-browser-cancel"
-      || event.type === "runtime.conversation-attachment-store-request"
-      || event.type === "runtime.conversation-attachment-store-cancel"
-    ) {
+    if (isRuntimeSecureFileBrokerEvent(event)) {
       this.secureFiles.handle(record, event);
       return;
     }
@@ -875,7 +872,7 @@ export class RuntimeSupervisor {
     this.rejectPrivateConnectRuntimeRequests(record, "The local service stopped before the Private Connect request completed.");
     this.credentials.clear(record);
     this.secureFiles.clear(record);
-    if (!this.secureFiles.hasConversationAttachmentOperations(record)) {
+    if (!this.secureFiles.hasUtilityOperations(record)) {
       this.handleDrainedExit(record, code, true);
       return;
     }
@@ -1199,7 +1196,7 @@ export class RuntimeSupervisor {
     return runtimeRecordAcceptsBrokerRequests(record, this.current, this.desiredRunning, this.phase);
   }
   private requiresExplicitModernDarwinRecovery(): boolean {
-    return process.platform === "darwin"
+    return this.platform === "darwin"
       && Boolean(this.workerOptions.runtimeProcessGuardianPath);
   }
   private settleStopped(record: RuntimeProcessRecord): void {

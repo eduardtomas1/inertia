@@ -13,7 +13,7 @@ const status = JSON.stringify({
 const mapping = JSON.stringify({
   Web: { "desktop.example.ts.net:8443": { "/": { Proxy: "http://127.0.0.1:41000" } } },
 });
-const identity = { hostId: "11111111-1111-4111-8111-111111111111", buildVersion: "test" };
+const identity = { endpointId: "11111111-1111-4111-8111-111111111111" };
 
 describe("Private Connect Tailscale controller", () => {
   it("verifies and owns an exact loopback Serve mapping", async () => {
@@ -25,7 +25,7 @@ describe("Private Connect Tailscale controller", () => {
     const controller = new PrivateConnectTailscaleController({
       discover: async () => "/usr/local/bin/tailscale",
       command,
-      fetch: async () => new Response(JSON.stringify({ product: "Inertia Private Connect", protocol: { minimum: 1, maximum: 1 }, hostId: identity.hostId, buildVersion: identity.buildVersion }), { status: 200 }),
+      fetch: async () => new Response(JSON.stringify({ product: "Inertia Private Connect", protocol: { minimum: 1, maximum: 1 }, endpointId: identity.endpointId }), { status: 200 }),
     });
     const ready = await controller.ensurePrivateServe(41000, 8443, null, identity);
     expect(ready.externalUrl).toBe("https://desktop.example.ts.net:8443/");
@@ -78,11 +78,11 @@ describe("Private Connect Tailscale controller", () => {
     expect(command).toHaveBeenCalledWith("tailscale", ["serve", "--bg", "--yes", "--https=8443", "http://127.0.0.1:41000"]);
   });
 
-  it("rejects a matching-product endpoint with a different stable host identity", async () => {
+  it("rejects a matching-product endpoint belonging to a different gateway instance", async () => {
     const controller = new PrivateConnectTailscaleController({
       discover: async () => "tailscale",
       command: vi.fn(async (_executable, args: readonly string[]) => ({ stdout: args[0] === "status" ? status : mapping, stderr: "", code: 0 })),
-      fetch: async () => new Response(JSON.stringify({ product: "Inertia Private Connect", protocol: { minimum: 1, maximum: 1 }, hostId: "33333333-3333-4333-8333-333333333333", buildVersion: "test" }), { status: 200 }),
+      fetch: async () => new Response(JSON.stringify({ product: "Inertia Private Connect", protocol: { minimum: 1, maximum: 1 }, endpointId: "33333333-3333-4333-8333-333333333333" }), { status: 200 }),
     });
     await expect(controller.ensurePrivateServe(41000, 8443, null, identity)).rejects.toMatchObject({ classification: "endpoint-unreachable" });
   });

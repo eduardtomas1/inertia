@@ -30,6 +30,7 @@ import {
   prepareDocumentAttachments,
   type PreparedDocumentAttachments,
 } from "../attachments/document-attachment-context";
+import { DocumentAttachmentError } from "../attachments/attachment-errors";
 import type { PrivateGeneratedAttachmentStore } from "../attachments/private-generated-attachments";
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
@@ -476,11 +477,9 @@ export function createTurnInteractionCommandHandler(
             () => undefined,
           ).catch(() => undefined);
           await relinquishAttachments();
-          throw new RuntimeRequestError(
-            error instanceof Error
-              ? error.message
-              : "The selected document could not be read.",
-          );
+          throw error instanceof DocumentAttachmentError
+            ? new RuntimeRequestError(error.message)
+            : classifiedMessageSendError(error, "documents");
         }
         messageSendStage = "backend-readiness";
         if (dependencies.enableProviders) {
@@ -828,12 +827,10 @@ export function createTurnInteractionCommandHandler(
               sourceAttachments.map(({ id }) => id),
             );
           }
-          if (
-            conversation.title === "New chat"
-            || conversation.title === "New thread"
-          ) {
+          const currentTitle = dependencies.store.conversation(conversation.id).title;
+          if (currentTitle === "New chat" || currentTitle === "New thread") {
             dependencies.store.updateConversation(conversation.id, {
-              title: command.payload.content.slice(0, 64),
+              title: Array.from(command.payload.content.slice(0, 128)).slice(0, 64).join(""),
             });
           }
           dependencies.send(socket, queued

@@ -34,6 +34,7 @@ import {
   validateName,
 } from "./paths";
 import { runGit } from "./runner";
+import { requireGitWorktreeSupport } from "./worktree-support";
 import { getRepositoryStatus } from "./status";
 import {
   GitError,
@@ -691,6 +692,7 @@ export async function createWorktree(
   options: CreateWorktreeOptions = {},
 ): Promise<GitRepositoryStatus> {
   const root = await repositoryRoot(repositoryPath);
+  await requireGitWorktreeSupport(root);
   const target = await validateNewAbsolutePath(worktreePath, root);
   const args = ["worktree", "add"];
   if (options.createBranch) {
@@ -722,6 +724,7 @@ export async function createWorktreeWithOwnershipReceipt(
   dependencies: OwnedWorktreeCreationDependencies = {},
 ): Promise<GitRepositoryStatus> {
   const root = await repositoryRoot(repositoryPath);
+  await requireGitWorktreeSupport(root);
   const target = await validateNewAbsolutePath(worktreePath, root);
   const branch = await validateBranch(root, options.branch);
   if (await exactLocalBranchExists(root, branch)) {
@@ -784,6 +787,7 @@ export async function createWorktreeWithOwnershipReceipt(
 async function registeredWorktrees(
   root: string,
 ): Promise<Array<{ branch: string | null; head: string; path: string }>> {
+  await requireGitWorktreeSupport(root);
   const result = await runGit(
     root,
     ["worktree", "list", "--porcelain", "-z"],

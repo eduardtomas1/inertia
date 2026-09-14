@@ -913,7 +913,7 @@ async function geminiPermission(
       if (!pending || pending.settled) return;
       pending.settled = true;
       approvals.delete(requestId);
-      emit({ type: "approval-resolved", requestId, decision: "cancelled" });
+      emit({ type: "approval-resolved", requestId, decision: "cancel" });
       resolve("cancel");
     }, { once: true });
     emit({

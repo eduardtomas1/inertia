@@ -37,7 +37,7 @@ interface PrivateConnectGatewayDependencies {
   detail(conversationId: string): ConversationDetail | null;
   isConversationActive(conversationId: string): boolean;
   preparePrompt(conversation: Conversation): Promise<void>;
-  queuePrompt(conversationId: string, content: string): {
+  queuePrompt(conversationId: string, content: string, deviceId: string): {
     turnId: string;
   };
   respondToInput?(conversationId: string, inputRequestId: string, answers: Record<string, string[]>): boolean;
@@ -465,6 +465,7 @@ export class PrivateConnectRuntimeGateway {
       const queued = this.dependencies.queuePrompt(
         request.conversationId,
         request.content,
+        subject.deviceId,
       );
       const response: PrivateConnectRuntimeResponse = {
         type: "response",
@@ -504,6 +505,10 @@ export class PrivateConnectRuntimeGateway {
         "forbidden",
         "This device cannot view Private Connect.",
       );
+    }
+    if ((request.type === "input.respond" || request.type === "run.stop")
+      && !subject.scopes.includes("prompt")) {
+      return failedResponse(request.requestId, "forbidden", "This device cannot change a running conversation.");
     }
     return null;
   }

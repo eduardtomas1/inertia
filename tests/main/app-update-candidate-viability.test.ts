@@ -1,6 +1,8 @@
 // @inertia-test-suite portable
 
 import { EventEmitter } from "node:events";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -94,6 +96,9 @@ describe("desktop app update candidate viability", () => {
     expect(child.messages).toHaveLength(2);
     expect(parseAppUpdateCandidateViabilityRequest(child.messages[0]))
       .toMatchObject({ expectedActiveRuntimeOwner });
+    const scratch = parseAppUpdateCandidateViabilityRequest(child.messages[0])?.scratch;
+    expect(scratch).not.toBeNull();
+    expect(existsSync(scratch!.directory)).toBe(false);
     expect(parseAppUpdateCandidateViabilityResultAck(
       child.messages[1],
     )?.operationId).toBe(operationId);
@@ -190,7 +195,7 @@ describe("desktop app update candidate viability", () => {
     expect(child.listenerCount("error")).toBe(0);
   });
 
-  it("does not enable late utility recovery outside Linux", async () => {
+  it("retains only late storage cleanup outside Linux", async () => {
     vi.useFakeTimers();
     const child = new FakeUtilityProcess();
     child.kill.mockReset();
@@ -212,9 +217,47 @@ describe("desktop app update candidate viability", () => {
     await rejected;
     expect(child.listenerCount("spawn")).toBe(0);
     expect(child.listenerCount("error")).toBe(0);
-    expect(child.listenerCount("exit")).toBe(0);
+    expect(child.listenerCount("exit")).toBe(1);
     child.emit("spawn");
     expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    expect(child.listenerCount("exit")).toBe(0);
+  });
+
+  it.each(["darwin", "linux", "win32"] as const)("cleans %s backup bytes only after the exact timed-out worker exits", async (platform) => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    child.kill.mockReset();
+    child.kill.mockReturnValue(true);
+    const validation = validateDesktopAppUpdateCandidate({
+      operationId,
+      dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
+      platform,
+      dependencies: {
+        ...dependencies(child),
+        resolveRuntimeAssets: vi.fn(() => ({
+          runtimeProcessGuardianPath: "/runtime/guardian",
+          windowsRuntimeJobAssembly: { path: "/runtime/job.dll", root: "/runtime", sha256: "0".repeat(64) },
+        })),
+        verifyLinuxGuardian: vi.fn(() => true) as unknown as CandidateViabilityDependencies["verifyLinuxGuardian"],
+        validationTimeoutMs: 10,
+        exitProofMs: 5,
+      },
+    });
+    const rejected = expect(validation).rejects.toThrow("exit is unconfirmed");
+    await vi.advanceTimersByTimeAsync(0);
+    child.emit("spawn");
+    const scratch = parseAppUpdateCandidateViabilityRequest(child.messages[0])!.scratch!;
+    const path = join(scratch.directory, "candidate.sqlite");
+    writeFileSync(path, "private profile fixture", { mode: 0o600 });
+
+    await vi.advanceTimersByTimeAsync(15);
+    await rejected;
+    expect(existsSync(path)).toBe(true);
+    child.emit("exit", 1);
+    expect(existsSync(scratch.directory)).toBe(false);
+    expect(child.listenerCount("exit")).toBe(0);
   });
 
   it("fails before spawning when the Linux guardian is not viable", async () => {

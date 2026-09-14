@@ -60,6 +60,25 @@ describe("provider environment discovery", { concurrent: false }, () => {
     return portableNodeExecutable(root, name);
   }
 
+  it("uses Windows PATHEXT order ahead of adjacent POSIX npm shims", async () => {
+    const root = temporaryRoot();
+    writeFileSync(join(root, "npx"), "#!/bin/sh\n", { mode: 0o755 });
+    writeFileSync(join(root, "npx.cmd"), "@echo off\r\n");
+    writeFileSync(join(root, "npx.exe"), "fixture, never executed");
+    const environment = { env: { PATHEXT: ".exe;.cmd" }, pathEntries: [root] };
+    await expect(executableCandidates("npx", environment, root, "win32")).resolves.toEqual([
+      realpathSync(join(root, "npx.exe")), realpathSync(join(root, "npx.cmd")),
+    ]);
+    await expect(executableCandidates("npx.cmd", environment, root, "win32")).resolves.toEqual([
+      realpathSync(join(root, "npx.cmd")),
+    ]);
+    if (process.platform !== "win32") {
+      await expect(executableCandidates("npx", environment, root, "linux")).resolves.toEqual([
+        realpathSync(join(root, "npx")),
+      ]);
+    }
+  });
+
   function setEnvironment(values: Partial<Record<(typeof ENVIRONMENT_KEYS)[number], string>>): void {
     for (const key of ENVIRONMENT_KEYS) {
       const value = values[key];

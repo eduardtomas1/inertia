@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { queuePrivateConnectPrompt } from "../../../src/server/private-connect/prompt-admission";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
+const deviceId = "33333333-3333-4333-8333-333333333333";
 const turnId = "22222222-2222-4222-8222-222222222222";
 
 function fixture() {
@@ -41,6 +42,7 @@ describe("Private Connect prompt admission", () => {
       subject.dependencies,
       conversationId,
       "Continue remotely",
+      deviceId,
     )).toThrow("End the resumed provider terminal");
 
     expect(subject.queue).not.toHaveBeenCalled();
@@ -62,8 +64,10 @@ describe("Private Connect prompt admission", () => {
       subject.dependencies,
       conversationId,
       "Continue remotely",
+      deviceId,
     )).toEqual({ turnId });
 
+    expect(subject.queue).toHaveBeenCalledWith(expect.objectContaining({ privateConnectDeviceId: deviceId }));
     expect(subject.acquire).toHaveBeenCalledWith(conversationId);
     expect(subject.release).toHaveBeenCalledWith(conversationId);
   });
@@ -76,6 +80,7 @@ describe("Private Connect prompt admission", () => {
       subject.dependencies,
       conversationId,
       "Continue remotely",
+      deviceId,
     )).toThrow("could not start");
 
     expect(subject.failBeforeStart).toHaveBeenCalledWith(

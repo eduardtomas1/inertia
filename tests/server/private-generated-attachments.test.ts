@@ -54,6 +54,19 @@ describe("private generated attachment storage", () => {
     await expect(access(second)).rejects.toThrow();
   });
 
+  it("preserves ordinary OS metadata without admitting it as generated content", async () => {
+    const dataDirectory = await temporaryDataDirectory();
+    const original = await PrivateGeneratedAttachmentStore.create(dataDirectory);
+    const names = [".DS_Store", "desktop.ini", "Thumbs.db"];
+    for (const name of names) await writeFile(join(original.directory, name), "metadata");
+    const reopened = await PrivateGeneratedAttachmentStore.create(dataDirectory);
+    expect(reopened.usage()).toEqual({ bytes: 0, records: 0 });
+    for (const name of names) expect(await readFile(join(original.directory, name), "utf8")).toBe("metadata");
+    await writeFile(join(original.directory, "foreign.txt"), "preserve foreign data");
+    await expect(PrivateGeneratedAttachmentStore.create(dataDirectory)).rejects.toThrow("unexpected entry");
+    expect(await readFile(join(original.directory, "foreign.txt"), "utf8")).toBe("preserve foreign data");
+  });
+
   it("enforces aggregate byte and record quotas and recovers capacity on release", async () => {
     const dataDirectory = await temporaryDataDirectory();
     const store = await PrivateGeneratedAttachmentStore.create(dataDirectory, {

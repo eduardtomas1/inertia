@@ -290,6 +290,32 @@ function pendingLaunchesEvent(
 }
 
 describe("multi-spawn", () => {
+  it.each([false, true])("retains reconciliation admission independently of validation copy (more: %s)", async (hasMore) => {
+    let settle!: (event: ServerEvent) => void;
+    const pending = new Promise<ServerEvent>((resolve) => { settle = resolve; });
+    const run = vi.fn(async () => await pending);
+    const hook = renderHook(() => useMultiSpawn({
+      snapshot, settings, run, request: run,
+      splitSelectionTransitionsRef: { current: 0 },
+      updateSplitConversationId: vi.fn(), showWorkspace: vi.fn(), closeSidebar: vi.fn(),
+      focusWorkspace: vi.fn(), discardDraftConversation: vi.fn(), setActionError: vi.fn(),
+    }));
+    try {
+      act(() => hook.result.current.openDialog());
+      expect(hook.result.current.launchBlocked).toBe(true);
+      await act(async () => hook.result.current.submit({ ...multiSpawnDraft(), prompt: "" }));
+      expect(hook.result.current.error).not.toContain("previous duo launch");
+      expect(hook.result.current.launchBlocked).toBe(true);
+      await act(async () => settle({ type: "request.result", requestId: crypto.randomUUID(), result: {
+        kind: "duo.pending", launchIds: [], hasMore,
+      } }));
+      expect(hook.result.current.launchBlocked).toBe(hasMore);
+      await act(async () => hook.result.current.submit({ ...multiSpawnDraft(), prompt: "" }));
+      expect(hook.result.current.launchBlocked).toBe(hasMore);
+      expect(run).toHaveBeenCalledOnce();
+    } finally { settle(pendingLaunchesEvent([])); hook.unmount(); }
+  });
+
   beforeEach(() => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
@@ -422,7 +448,7 @@ describe("multi-spawn", () => {
       name: /Choose model\..*GPT-5\.6-Sol/u,
     })[1]!);
     expect(screen.getByRole("dialog", { name: "Choose model" })).toBeVisible();
-    const result = screen.getByRole("list", { name: "Model results" })
+    const result = screen.getByRole("grid", { name: "Model results" })
       .querySelector<HTMLElement>(".model-chooser-row-option[data-model-route-key*='gpt-5.5']");
     if (!result) throw new Error("Expected the GPT-5.5 result action.");
     fireEvent.click(result);

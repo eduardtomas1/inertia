@@ -5,6 +5,11 @@ import type { ChatMessage } from "./agent";
 
 type UnknownRecord = Record<string, unknown>;
 
+export function isMessageOriginDeviceId(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+}
+
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -39,6 +44,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
   )) return false;
 
   return (value.compaction === undefined || (value.role === "system" && value.turnId === null && isContextCompaction(value.compaction)))
+    && (value.privateConnectDeviceId === undefined
+      || (value.role === "user" && isMessageOriginDeviceId(value.privateConnectDeviceId)))
     && (value.turnId === null || stringField(value, "turnId"))
     && ["user", "assistant", "system"].includes(value.role as string)
     && Array.isArray(value.attachments)

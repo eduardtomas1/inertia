@@ -1,7 +1,7 @@
+import type { AgentBrowserRequest } from "../../shared/agent-browser-approval.js";
 import { randomUUID } from "node:crypto";
 
 import type {
-  AgentBrowserCommand,
   AgentBrowserResult,
   AgentBrowserRunIdentity,
 } from "../../shared/agent-browser.js";
@@ -24,7 +24,7 @@ interface PendingRequest {
 export interface RuntimeAgentBrowserBroker {
   perform(
     identity: AgentBrowserRunIdentity,
-    command: AgentBrowserCommand,
+    command: AgentBrowserRequest,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult>;
 }
@@ -48,7 +48,7 @@ implements RuntimeAgentBrowserBroker {
 
   perform(
     identity: AgentBrowserRunIdentity,
-    command: AgentBrowserCommand,
+    command: AgentBrowserRequest,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     if (this.closed) {

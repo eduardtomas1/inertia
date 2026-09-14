@@ -733,6 +733,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         enableProviders,
         attachmentResolver,
         generatedAttachments,
+        prepareDocumentAttachments: options.prepareDocumentAttachments,
         workflows: agentWorkflows,
         providerTerminalResumes,
         providerInfo: () => providerInfo,
@@ -987,7 +988,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
-    queuePrompt: (conversationId, content) => queuePrivateConnectPrompt({
+    queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
       authority: providerTerminalResumes,
       turns,
       isolatedRuns,
@@ -998,7 +999,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         });
         broadcastSnapshot();
       },
-    }, conversationId, content),
+    }, conversationId, content, deviceId),
     respondToInput: createPrivateConnectInputResponder(pendingInputs, turns),
     stopRun: (conversationId, runId) => {
       const run = currentSnapshot().runs.find((candidate) => candidate.id === runId);

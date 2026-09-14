@@ -98,7 +98,9 @@ jobs:
             --output "$archive"
           printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --strict
           tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
-          "$binary" -color
+          # Upstream #657: the pinned linter does not recognize GitHub's queue key.
+          # check:quality validates its exact values and cancellation constraint.
+          "$binary" -color -ignore '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
@@ -555,7 +557,25 @@ jobs:
 
       - name: Package Linux AppImage and unpacked app
         if: runner.os == 'Linux'
-        run: npm run "${{ matrix.package_script }}"
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
+        run: npm run "${{ matrix.release_package_script }}"
+
+      # Exercise the release validator against the actual packaged archive and
+      # updater metadata. This only stages local files; it cannot publish a release.
+      - name: Validate native release asset staging
+        shell: bash
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          RELEASE_PLATFORM: ${{ matrix.release_platform }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          INERTIA_RELEASE_STAGE_DIR: ${{ runner.temp }}/inertia-ci-release-stage
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="v$(node -p "require('./package.json').version")"
+          export RELEASE_TAG
+          node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"
 
       - name: Download checksummed packaged Windows N-1 installer
         if: runner.os == 'Windows'
@@ -879,7 +899,7 @@ jobs:
               per_page: 100,
             });
             const existing = issues.find((issue) =>
-              !issue.pull_request && (issue.title === title || issue.body?.includes(marker))
+              !issue.pull_request && issue.user?.login === "github-actions[bot]" && issue.body?.includes(marker)
             );
             const priorComments = existing
               ? await github.paginate(github.rest.issues.listComments, {

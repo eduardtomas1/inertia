@@ -1,4 +1,6 @@
+import type { AgentBrowserRequest } from "../shared/agent-browser-approval.js";
 import type { UtilityProcess } from "electron";
+import type { DocumentPreparationRunner } from "../node/document-preparation";
 
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type { PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
@@ -18,7 +20,6 @@ import type {
 } from "../node/runtime-modern-recovery-authorities.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
 import type {
-  AgentBrowserCommand,
   AgentBrowserResult,
   AgentBrowserRunIdentity,
 } from "../shared/agent-browser.js";
@@ -117,7 +118,7 @@ export interface RuntimeSecureFileBroker {
 export interface RuntimeAgentBrowserBroker {
   perform(
     identity: AgentBrowserRunIdentity,
-    command: AgentBrowserCommand,
+    command: AgentBrowserRequest,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult>;
 }
@@ -187,6 +188,7 @@ export interface RuntimeSupervisorOptions {
   secureFileBroker?: RuntimeSecureFileBroker;
   agentBrowserBroker?: RuntimeAgentBrowserBroker;
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
+  documentPreparationRunner?: DocumentPreparationRunner;
   conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   attachmentBroker?: RuntimeAttachmentBroker;
   attachmentRequestTimeoutMs?: number;

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
 } from "react";
 import { Columns2, Plus, TerminalSquare, X } from "lucide-react";
 import { usePersistedSize } from "../hooks/usePersistedSize";
@@ -364,6 +365,24 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   };
 
   const secondaryId = tabs.find((tab) => tab.id !== activeId)?.id ?? null;
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string): void => {
+    const index = tabs.findIndex((tab) => tab.id === id);
+    let nextIndex: number;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (index + tabs.length - 1) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    else if (event.key === "Delete" && !closingTabIds.has(id)) {
+      nextIndex = index + 1 < tabs.length ? index + 1 : index - 1;
+    } else return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    if (next) {
+      setActiveId(next.id);
+      document.getElementById(`terminal-tab-${next.id}`)?.focus();
+    }
+    if (event.key === "Delete") closeTerminal(id);
+  };
   const sessionIds = new Map(tabs.map((tab) => [tab.id, `terminal-session-${tab.id}`]));
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
   const panelError = actionRoutingError ?? closeError?.[1];
@@ -372,7 +391,18 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
-          {tabs.map((tab) => <div className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" id={`terminal-tab-${tab.id}`} role="tab" aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)} onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
+          {tabs.map((tab) => (
+            <div role="presentation" className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}>
+              <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
+                tabIndex={tab.id === activeId ? 0 : -1}
+                aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
+                <TerminalSquare size={13} /><span>{tab.label}</span>
+              </button>
+              <button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
+                onClick={() => closeTerminal(tab.id)}><X size={11} /></button>
+            </div>
+          ))}
         </div>
         <div className="terminal-tab-actions"><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={addTerminal}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
       </header>

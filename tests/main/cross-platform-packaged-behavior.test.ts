@@ -165,7 +165,7 @@ describe("cross-platform packaged behavior contract", () => {
       "run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated",
       "run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery",
       'run: npm run "${{ matrix.release_package_script }}"',
-      'run: npm run "${{ matrix.package_script }}"',
+      'node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",

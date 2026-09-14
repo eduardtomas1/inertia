@@ -31,6 +31,7 @@ import {
 } from "../../src/renderer/src/utils/composerOwnership";
 import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
+import { requestComposerPrefill } from "../../src/renderer/src/utils/composerPrefill";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -279,6 +280,28 @@ describe("composer detachment ownership", () => {
 
     secondCleanup();
     expect(prepareComposerDetachment("replacement")).toEqual({ status: "ready", draft: "" });
+  });
+
+  it("removes accepted attachment chips while preserving a concurrent prefill", async () => {
+    const current = conversation("prefill-during-send");
+    const image = attachment("accepted");
+    let accept!: () => void;
+    const onSend = vi.fn(() => new Promise<void>((resolve) => { accept = resolve; }));
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      onSend, onReleaseAttachment,
+      onChooseAttachments: async () => attachmentLease([image]),
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Attach images, documents, or spreadsheets" }));
+    await screen.findByText(image.name);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Original request" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    act(() => requestComposerPrefill({ conversationId: current.id, text: "New context" }));
+    await act(async () => accept());
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Original request\n\nNew context");
+    expect(screen.queryByText(image.name)).not.toBeInTheDocument();
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 
   it("reports context blockers for the owning conversation", () => {

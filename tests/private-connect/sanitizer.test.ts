@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { posix, win32 } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -430,5 +431,48 @@ describe("Private Connect safe text projection", () => {
       "\u202eTrusted\u202c\u0000 Browser\u2066",
       80,
     )).toBe("Trusted Browser");
+  });
+});
+
+describe("credential families and bounded scanning", () => {
+  it("bounds adversarial scheme and JWT scans in an isolated process", () => {
+    const source = new URL("../../src/shared/private-connect/credential-redaction.ts", import.meta.url);
+    const result = spawnSync(process.execPath, [
+      "--max-old-space-size=64", "--experimental-strip-types", "--input-type=module", "-e",
+      `import { redactCredentialUrls, removeTrailingSecretFragment } from ${JSON.stringify(source.href)};
+      const scheme = "a.".repeat(400_000);
+      const jwt = "eyJ.".repeat(200_000);
+      console.log(JSON.stringify([redactCredentialUrls(scheme).length, removeTrailingSecretFragment(jwt)]));`,
+    ], {
+      encoding: "utf8", timeout: 4_000, killSignal: "SIGKILL", maxBuffer: 4_096,
+      env: { ELECTRON_RUN_AS_NODE: "1", SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(JSON.parse(result.stdout)).toEqual([800_000, ""]);
+  });
+  it.each([
+    "AKIA0123456789ABCDEF",
+    "AIza0123456789abcdefghij0123456789",
+    "glpat-syntheticfixturecredential",
+    "npm_syntheticfixturecredential",
+    "DATABASE_PASSWORD=syntheticfixturecredential",
+    "AWS_SECRET_ACCESS_KEY=syntheticfixturecredential",
+    "-----BEGIN OPENSSH PRIVATE KEY-----\nsyntheticfixturecredential\n-----END OPENSSH PRIVATE KEY-----",
+  ])("redacts synthetic credential format %s", (value) => {
+    const result = sanitizePrivateConnectContent(value);
+    expect(result).not.toContain("syntheticfixturecredential");
+    expect(result).not.toContain(value);
+    expect(result).toContain("redacted");
+  });
+
+  it("preserves ordinary long scheme-like prose and removes truncated JWT prefixes", () => {
+    const prose = "a.".repeat(32_768);
+    expect(sanitizePrivateConnectContent(prose)).toBe(prose);
+    const jwt = "eyJ.".repeat(20_000);
+    expect(sanitizePrivateConnectContent(jwt)).not.toContain("eyJ");
+    expect(sanitizePrivateConnectContent("custom+".repeat(100) + "scheme://user:password@example.test"))
+      .not.toContain("user:password");
   });
 });

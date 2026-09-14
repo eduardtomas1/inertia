@@ -525,7 +525,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       outcome: { outcome: "selected", optionId: "q0_opt_0" },
     });
     expect(captured.find(({ id }) => id === 102)?.result).toEqual({
-      outcome: { outcome: "selected", optionId: "approve_once" },
+      outcome: { outcome: "cancelled" },
     });
     expect(captured.some(({ method }) => method === "authenticate")).toBe(true);
     expect(captured.some(({ method }) => method === "session/set_mode")).toBe(true);
@@ -1633,7 +1633,7 @@ setInterval(() => {}, 1000);
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       method?: string;
     }>;
-    expect(captured.some(({ method }) => method === "session/cancel")).toBe(true);
+    expect(captured.some(({ method }) => method === "session/cancel")).toBe(false);
     expect(captured.some(({ method }) => method === "session/prompt")).toBe(false);
   });
 });

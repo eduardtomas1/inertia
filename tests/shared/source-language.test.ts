@@ -6,6 +6,14 @@ import {
 } from "../../src/shared/source-language";
 
 describe("source language recognition", () => {
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])(
+    "does not recognize inherited object key %s", (key) => {
+      expect(sourceLanguageFromAlias(key)).toBeNull();
+      expect(sourceLanguageForFile(key).id).toBe("file");
+      expect(sourceLanguageForFile(`file.${key}`).id).toBe("file");
+      expect(sourceLanguageForFile(`file.${key}`, "text").id).toBe("text");
+    },
+  );
   it("gives Java first-class identity without case-sensitive extensions", () => {
     expect(sourceLanguageForFile("src/main/OrderService.java")).toEqual({
       id: "java",

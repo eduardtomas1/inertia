@@ -1,3 +1,4 @@
+import { parseAgentBrowserApproval, type AgentBrowserRequest } from "../../shared/agent-browser-approval.js";
 import { z } from "zod";
 
 import type { Conversation } from "../../shared/contracts.js";
@@ -15,6 +16,7 @@ import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client.js";
 import { withFrontendBrowserAudit } from "./frontend-browser-audit.js";
+import { isSafeApprovalDisplayText } from "../provider/approval-display.js";
 
 const tabIdSchema = z.string().uuid();
 const refSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
@@ -188,22 +190,6 @@ function requiresApproval(command: AgentBrowserCommand): boolean {
     && command.action !== "tabs";
 }
 
-function actionLabel(command: AgentBrowserCommand): string {
-  switch (command.action) {
-    case "navigate": return `Navigate to ${command.url}`;
-    case "click": return `Click ${command.ref}`;
-    case "type": return `Type into ${command.ref}`;
-    case "press": return `Press ${command.key}`;
-    case "scroll": return `Scroll ${command.deltaY > 0 ? "down" : "up"}`;
-    case "tab-open": return "Open a browser tab";
-    case "tab-activate": return "Switch browser tabs";
-    case "tab-close": return "Close a browser tab";
-    case "snapshot": return "Inspect the browser page";
-    case "screenshot": return "Capture the browser page";
-    case "tabs": return "List browser tabs";
-  }
-}
-
 export class AgentBrowserHostTools {
   constructor(private readonly browser: RuntimeAgentBrowserBroker) {}
 
@@ -217,26 +203,39 @@ export class AgentBrowserHostTools {
     }
     const command = commandFor(call);
     if (!command) return failure("unknown_tool", "That Inertia browser tool is unavailable.");
+    let execution: AgentBrowserRequest = command;
     if (
       conversation.accessMode === "supervised"
       && requiresApproval(command)
     ) {
-      const decision = await call.requestApproval({
-        title: "Control Inertia Browser",
-        detail: actionLabel(command),
-        reason: "The agent requested an interaction in the visible Inertia Browser.",
-        permissionRoots: [],
-      });
-      if (decision !== "approve") {
-        return failure("user_denied", "The user did not approve this browser action.");
+      const prepared = await this.browser.perform(identity, { action: "prepare-approval", command }, call.signal);
+      if (!prepared.ok) return failure(prepared.code, prepared.message);
+      const approval = parseAgentBrowserApproval(prepared.text);
+      if (!approval) return failure("invalid", "The Browser approval could not be inspected.");
+      let approved = false;
+      try {
+        if (!isSafeApprovalDisplayText(approval.detail, true)) {
+          return failure("invalid", "The Browser approval contains unsafe display text.");
+        }
+        approved = await call.requestApproval({
+          title: "Control Inertia Browser",
+          detail: approval.detail,
+          reason: "This approval applies only to the inspected tab and document.",
+          permissionRoots: [],
+        }) === "approve" && !call.signal.aborted;
+      } finally {
+        if (!approved) await this.browser.perform(identity, { action: "discard-approval", token: approval.token })
+          .catch(() => undefined);
       }
+      if (!approved) return failure("user_denied", "The user did not approve this browser action.");
+      execution = { action: "perform-approved", token: approval.token };
     }
     if (call.signal.aborted) {
       return failure("call_cancelled", "The browser action was cancelled.");
     }
     const result = await this.browser.perform(
       identity,
-      command,
+      execution,
       call.signal,
     );
     return result.ok

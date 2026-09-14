@@ -70,6 +70,31 @@ function conversation(
 }
 
 describe("useWorkspaceMentions", () => {
+  it("coalesces typing and keeps callbacks stable across status-only updates", async () => {
+    vi.useFakeTimers();
+    const owner = conversation("22222222-2222-4222-8222-222222222222", project, "/tree");
+    const request = vi.fn(async (_command: { type: string; payload?: unknown }): Promise<ServerEvent> => ({ type: "request.result", requestId: "test", result: {
+      kind: "workspace.entries", entries: [], directory: "", truncated: false,
+    } }));
+    const hook = renderHook(({ current }) => useWorkspaceMentions({ enabled: true, project, conversation: current, request }), {
+      initialProps: { current: owner },
+    });
+    try {
+      const search = hook.result.current.searchMentions;
+      act(() => { search("r"); search("re"); search("readme"); });
+      expect(request).not.toHaveBeenCalled();
+      hook.rerender({ current: { ...owner, status: "running" } });
+      expect(hook.result.current.searchMentions).toBe(search);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(request).toHaveBeenCalledOnce();
+      expect(request.mock.calls[0]?.[0]).toMatchObject({ payload: { query: "readme", conversationId: owner.id } });
+      act(() => search("cancel"));
+      hook.unmount();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(request).toHaveBeenCalledOnce();
+    } finally { hook.unmount(); vi.useRealTimers(); }
+  });
+
   it("queries the selected project before a local draft has a saved conversation", async () => {
     const request = vi.fn(async (): Promise<ServerEvent> => ({
       type: "request.result",
@@ -90,6 +115,44 @@ describe("useWorkspaceMentions", () => {
       type: "workspace.entries",
       payload: { projectId: project.id, conversationId: undefined, query: "README" },
     });
+  });
+
+  it("rejects in-flight results after changing worktrees or closing the mention", async () => {
+    vi.useFakeTimers();
+    const owner = conversation("22222222-2222-4222-8222-222222222222", project, "/old-tree");
+    const completions: Array<(event: ServerEvent) => void> = [];
+    const request = vi.fn(() => new Promise<ServerEvent>((resolve) => completions.push(resolve)));
+    const hook = renderHook(({ current }) => useWorkspaceMentions({
+      enabled: true, project, conversation: current, request,
+    }), { initialProps: { current: owner } });
+    const complete = async (index: number, path: string) => act(async () => {
+      completions[index]!({
+        type: "request.result", requestId: "test",
+        result: {
+          kind: "workspace.entries", entries: [{ path, kind: "file" }],
+          directory: "", truncated: false,
+        },
+      });
+    });
+    try {
+      act(() => hook.result.current.searchMentions("old"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      hook.rerender({ current: { ...owner, worktreePath: "/new-tree" } });
+      act(() => hook.result.current.searchMentions("new"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      await complete(1, "new-tree.ts");
+      await complete(0, "old-tree.ts");
+      expect(hook.result.current.mentionResults).toEqual([{ path: "new-tree.ts", kind: "file" }]);
+
+      act(() => hook.result.current.searchMentions("closed"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      act(() => hook.result.current.searchMentions(""));
+      await complete(2, "closed.ts");
+      expect(hook.result.current.mentionResults).toEqual([]);
+    } finally {
+      hook.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps simultaneous pane searches scoped to their conversation IDs", async () => {

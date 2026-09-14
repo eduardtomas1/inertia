@@ -310,3 +310,44 @@ describe("global shortcut DOM integration", () => {
     expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
 });
+
+describe("terminal and platform shortcut ownership", () => {
+  it.each(["k", "j", "b", "n"])("preserves terminal Control+%s", async (key) => {
+    const { installGlobalShortcuts } = await import("../../src/renderer/src/utils/globalShortcuts");
+    const invoke = vi.fn();
+    const actions = { current: {
+      keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
+      mobileNavigation: false, suspended: false, setActiveTool: invoke,
+      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke,
+    } };
+    render(<div className="xterm"><textarea aria-label="Shell input" /></div>);
+    const dispose = installGlobalShortcuts(window, actions, "linux");
+    try {
+      const event = new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true });
+      screen.getByRole("textbox", { name: "Shell input" }).dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(invoke).not.toHaveBeenCalled();
+    } finally { dispose(); }
+  });
+
+  it("uses physical Command keys on macOS and preserves Cocoa Control chords", async () => {
+    const { installGlobalShortcuts } = await import("../../src/renderer/src/utils/globalShortcuts");
+    const invoke = vi.fn();
+    const actions = { current: {
+      keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
+      mobileNavigation: false, suspended: false, setActiveTool: invoke,
+      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke,
+    } };
+    const dispose = installGlobalShortcuts(window, actions, "darwin");
+    try {
+      const control = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true });
+      window.dispatchEvent(control);
+      expect(control.defaultPrevented).toBe(false);
+      expect(invoke).not.toHaveBeenCalled();
+      const command = new KeyboardEvent("keydown", { key: "л", code: "KeyK", metaKey: true, cancelable: true });
+      window.dispatchEvent(command);
+      expect(command.defaultPrevented).toBe(true);
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally { dispose(); }
+  });
+});

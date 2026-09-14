@@ -23,6 +23,8 @@ network requests, and no account, token or keyring is involved.
 | Model chooser with the Antigravity source | [Light](model-chooser-light.png) | [Dark](model-chooser-dark.png) |
 | Running turn: streamed text and a running tool step | [Light](running-turn-light.png) | [Dark](running-turn-dark.png) |
 | Completed turns, the second resumed with `--conversation` | [Light](completed-turn-light.png) | [Dark](completed-turn-dark.png) |
+| Antigravity mark in the Settings provider tile | [Light](antigravity-mark-settings-light.png) | [Dark](antigravity-mark-settings-dark.png) |
+| Antigravity mark at 16 px in the composer route chip | [Light](antigravity-mark-chip-light.png) | [Dark](antigravity-mark-chip-dark.png) |
 
 ## What the spec asserts
 
@@ -31,6 +33,9 @@ network requests, and no account, token or keyring is involved.
 - The second turn adds `--conversation <id>` from the first turn's result.
 - The Antigravity composer drops the images wording and offers documents and
   spreadsheets only, because the harness declares no image input.
+- The Settings tile and the composer route chip render the official
+  Antigravity mark: the Google-contributed ACP registry icon, unmodified and
+  inverted in dark themes like the other monochrome marks.
 - Both turns complete with the streamed text and no renderer errors.
 
 The Gemini "Open in Antigravity" failure action and its new-chat confirmation

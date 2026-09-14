@@ -24,6 +24,25 @@ it("opens an ordinary file outside any project using the OS document handler", a
   expect(shell.showItemInFolder).not.toHaveBeenCalled();
 });
 
+it("opens source links with line, column, and range suffixes", async () => {
+  const { path, shell } = fixture("source.ts");
+  for (const suffix of [":42", ":42:7", ":42-45", ":42:7-45:8"]) {
+    await openDesktopLink(pathToFileURL(path).href + suffix, shell);
+  }
+  expect(shell.openPath.mock.calls).toEqual([[path], [path], [path], [path]]);
+});
+
+it.runIf(process.platform !== "win32")("prefers literal filenames and never falls back for encoded colons", async () => {
+  const { path, shell } = fixture("source.ts");
+  const literal = `${path}:42`;
+  writeFileSync(literal, "Literal filename", { mode: 0o600 });
+  await openDesktopLink(pathToFileURL(path).href + ":42", shell);
+  expect(shell.openPath).toHaveBeenLastCalledWith(literal);
+  rmSync(literal);
+  await expect(openDesktopLink(pathToFileURL(path).href + "%3A42", shell)).rejects.toThrow("could not be opened");
+  expect(shell.openPath).toHaveBeenCalledTimes(1);
+});
+
 it.each(["launcher.desktop", "setup.exe", "script.command"])("reveals %s without launching it", async (name) => {
   const { path, shell } = fixture(name);
   await openDesktopLink(pathToFileURL(path).href, shell);

@@ -20,6 +20,8 @@ it.each([
   ["[Workflow](file:///C:/Other%20Folder/Workflow.json)", "file:///C:/Other%20Folder/Workflow.json"],
   ["[Workflow](file://server/share/Workflow.json)", "file://server/share/Workflow.json"],
   ["[Workflow](/elsewhere/name%23part%3A42%3F.json#L12)", "file:///elsewhere/name%23part%3A42%3F.json"],
+  ["[Workflow](/elsewhere/source.ts:42:7)", "file:///elsewhere/source.ts:42:7"],
+  ["[Workflow](file:///elsewhere/source.ts:42)", "file:///elsewhere/source.ts:42"],
 ])("opens an outside-project Markdown link on click: %s", (content, url) => {
   const { openExternal, onOpenProjectFile } = fixture(content);
   const link = screen.getByRole("link", { name: "Workflow" });
@@ -28,6 +30,13 @@ it.each([
   expect(openExternal).not.toHaveBeenCalled();
   fireEvent.click(link);
   expect(openExternal).toHaveBeenCalledWith(url);
+  expect(onOpenProjectFile).not.toHaveBeenCalled();
+});
+
+it("makes outside-project code-block file headers clickable", () => {
+  const { openExternal, onOpenProjectFile } = fixture("```ts file=/elsewhere/source.ts:42\nconst value = 1;\n```");
+  fireEvent.click(screen.getByRole("link", { name: "/elsewhere/source.ts:42" }));
+  expect(openExternal).toHaveBeenCalledWith("file:///elsewhere/source.ts:42");
   expect(onOpenProjectFile).not.toHaveBeenCalled();
 });
 

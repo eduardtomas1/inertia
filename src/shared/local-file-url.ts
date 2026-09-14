@@ -17,7 +17,11 @@ export function encodedLocalFilePath(url: URL): string {
     : url.pathname.replace(/^\/([a-z]:\/)/iu, "$1");
 }
 
-export function localFileUrl(path: string): string | null {
+export function localFileLocationSuffix(path: string): string {
+  return /:([1-9]\d{0,8})(?::([1-9]\d{0,8}))?(?:-([1-9]\d{0,8})(?::([1-9]\d{0,8}))?)?$/u.exec(path)?.[0] ?? "";
+}
+
+export function localFileUrl(path: string, literalPath = true): string | null {
   const normalized = path.replace(/\\/gu, "/");
   if (/[\0\r\n]/u.test(normalized)) return null;
   const windowsDrive = /^[a-z]:\//iu.test(normalized);
@@ -30,8 +34,10 @@ export function localFileUrl(path: string): string | null {
     segments.splice(0, 3, "");
   }
   try {
-    const pathname = segments.map((segment, index) => windowsDrive && index === 0
+    let pathname = segments.map((segment, index) => windowsDrive && index === 0
       ? segment : encodeURIComponent(segment)).join("/");
+    const location = literalPath ? "" : localFileLocationSuffix(normalized);
+    if (location) pathname = pathname.slice(0, -encodeURIComponent(location).length) + location;
     const url = parseLocalFileUrl(`file://${host}${windowsDrive ? "/" : ""}${pathname}`);
     return url?.href ?? null;
   } catch { return null; }

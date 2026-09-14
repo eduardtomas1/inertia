@@ -35,4 +35,10 @@ describe("desktop file URLs", () => {
     expect(encodedLocalFilePath(url)).toBe("/tmp/name%23part%3A42.md");
     expect(url.hash).toBe("#L12");
   });
+
+  it("distinguishes literal colons from optional source locations", () => {
+    expect(localFileUrl("/tmp/file.ts:42:7", false)).toBe("file:///tmp/file.ts:42:7");
+    expect(localFileUrl("/tmp/file.ts:42:7", true)).toBe("file:///tmp/file.ts%3A42%3A7");
+    expect(localFileUrl("/tmp/name:part.ts:2-4", false)).toBe("file:///tmp/name%3Apart.ts:2-4");
+  });
 });

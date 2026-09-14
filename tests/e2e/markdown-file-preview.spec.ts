@@ -84,7 +84,8 @@ test.beforeAll(async () => {
         conversationId,
         "Read the [project guide](docs/guide.md#details) before continuing.\n\n"
           + `[outside workflow](<${outsideFile.replace(/\\/gu, "/")}>)\n\n`
-          + `[outside file URL](${pathToFileURL(outsideFile).href})`,
+          + `[outside file URL](${pathToFileURL(outsideFile).href})\n\n`
+          + `[outside source location](${pathToFileURL(outsideFile).href}:42)`,
         "assistant",
       );
       const companion = store.snapshot().conversations.find(
@@ -207,9 +208,11 @@ test("opens outside-project links through the trusted desktop bridge and reports
   await expect.poll(opened).toEqual([outsideFile]);
   await page.getByRole("link", { name: "outside file URL", exact: true }).click();
   await expect.poll(opened).toEqual([outsideFile, outsideFile]);
+  await page.getByRole("link", { name: "outside source location", exact: true }).click();
+  await expect.poll(opened).toEqual([outsideFile, outsideFile, outsideFile]);
   await rm(outsideFile);
   await page.getByRole("link", { name: "outside workflow", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "The local file could not be opened." })).toBeVisible();
-  expect(await opened()).toEqual([outsideFile, outsideFile]);
+  expect(await opened()).toEqual([outsideFile, outsideFile, outsideFile]);
   expect(rendererErrors).toEqual([]);
 });

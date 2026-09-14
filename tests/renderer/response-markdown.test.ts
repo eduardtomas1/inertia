@@ -71,6 +71,7 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "local", path: "/etc/passwd", url: "file:///etc/passwd" });
     expect(resolveResponseLink("/work/project", "file:///etc/passwd#L42")).toEqual({ kind: "local", path: "/etc/passwd", url: "file:///etc/passwd" });
+    expect(resolveResponseLink("/work/project", "file:///etc/passwd:42")).toEqual({ kind: "local", path: "/etc/passwd:42", url: "file:///etc/passwd:42" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
     expect(resolveResponseLink(

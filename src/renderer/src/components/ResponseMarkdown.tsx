@@ -339,7 +339,7 @@ export function resolveResponseLink(
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
   if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) {
-    const url = localFileUrl(candidate);
+    const url = localFileUrl(candidate, encodedPathDelimiter);
     return url ? { kind: "local", path: candidate, url } : { kind: "unsafe" };
   }
   const relativePath = candidate === root ? "." : candidate.slice(root.length + 1);
@@ -595,7 +595,9 @@ function CodeBlock({
       data-language-family={sourceLanguage.family}
     >
       <header>
-        {fileTarget?.kind === "project" && onOpenProjectFile
+        {fileTarget?.kind === "local"
+          ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
+          : fileTarget?.kind === "project" && onOpenProjectFile
           ? (
               <button
                 type="button"

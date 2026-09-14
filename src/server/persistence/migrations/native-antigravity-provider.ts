@@ -31,7 +31,7 @@ function widenedTableSql(table: string, sql: string): string {
   if (!header.test(sql) || sql.includes("'antigravity")) {
     throw new Error(`The ${table} schema has an unexpected shape.`);
   }
-  let next = sql.replace(header, `CREATE TABLE ${quoted(`${table}_v75`)} (`);
+  let next = sql.replace(header, `CREATE TABLE ${quoted(`${table}_v76`)} (`);
   let widened = false;
   for (const [pattern, replacement] of WIDENINGS) {
     const candidate = next.replace(pattern, replacement);
@@ -77,10 +77,10 @@ export const nativeAntigravityProviderMigration: DatabaseMigrationDefinition = {
         .join(", ");
       database.exec(createSql);
       database.exec(
-        `INSERT INTO ${quoted(`${table}_v75`)} (${columns}) SELECT ${columns} FROM ${quoted(table)}`,
+        `INSERT INTO ${quoted(`${table}_v76`)} (${columns}) SELECT ${columns} FROM ${quoted(table)}`,
       );
       database.exec(`DROP TABLE ${quoted(table)}`);
-      database.exec(`ALTER TABLE ${quoted(`${table}_v75`)} RENAME TO ${quoted(table)}`);
+      database.exec(`ALTER TABLE ${quoted(`${table}_v76`)} RENAME TO ${quoted(table)}`);
       for (const sql of indexes) database.exec(sql);
     }
     for (const { sql } of dependentTriggers) database.exec(sql);

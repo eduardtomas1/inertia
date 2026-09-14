@@ -13,8 +13,8 @@ import { DatabaseMigrationError } from "../../src/server/database-migrations";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import type { PersistedModelBackendProfile } from "../../src/shared/backend-profile-settings";
 
-const PREVIOUS_SCHEMA_VERSION = 74;
-const ANTIGRAVITY_SCHEMA_VERSION = 75;
+const PREVIOUS_SCHEMA_VERSION = 75;
+const ANTIGRAVITY_SCHEMA_VERSION = 76;
 
 const REBUILT_TABLES = [
   "provider_metadata_cache",
@@ -315,7 +315,7 @@ describe("native Antigravity provider migration", { concurrent: false }, () => {
     ));
   });
 
-  it("widens provider constraints while preserving every schema-74 row and relation", async () => {
+  it("widens provider constraints while preserving every schema-75 row and relation", async () => {
     const fixture = await populatedFixture();
     const database = new Database(fixture.databasePath);
     database.pragma("foreign_keys = ON");

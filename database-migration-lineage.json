@@ -632,6 +632,11 @@
       "version": 75,
       "name": "PersistPrivateConnectMessageOrigin",
       "digest": "b96832796614ae3644b7204d43c8bb4f7e3addcc0eff0697b2daf7c168a113e3"
+    },
+    {
+      "version": 76,
+      "name": "SupportNativeAntigravityProvider",
+      "digest": "d37ff39f3ad6fb30ab17ab6b3d56d7236204dd194ac4426ffffb4e9dc9333c7e"
     }
   ]
 }

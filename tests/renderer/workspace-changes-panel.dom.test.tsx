@@ -115,23 +115,26 @@ describe("WorkspaceChangesPanel repository scope", () => {
   it("opens the workspace file while keeping a same-name parent file reviewable without opening it", async () => {
     const files = [changedFile("app/README.md"), changedFile("README.md")];
     const onOpenWorkspaceFile = vi.fn();
-    render(<WorkspaceChangesPanel
-      projectName="Subfolder"
-      snapshot={{ ...snapshot, repositories: [{ ...snapshot.repositories[0], workspacePrefix: "app", files }] }}
-      summary={null}
-      onRefresh={vi.fn()}
-      onLoadRepositoryDiff={async (repositoryPath, filePath) => ({ repositoryPath, patch: patchFor(filePath!), files, truncated: false })}
-      onOpenWorkspaceFile={onOpenWorkspaceFile}
-      onAsk={vi.fn(async () => undefined)}
-      onRequestRevision={vi.fn(async () => undefined)}
-      onRevert={vi.fn(async () => undefined)}
-      onSetReviewState={vi.fn(async () => undefined)}
-      onCreateNote={vi.fn(async () => undefined)}
-      onUpdateNote={vi.fn(async () => undefined)}
-      onDeleteNote={vi.fn(async () => undefined)}
-      onAddTextToPrompt={vi.fn()}
-      onAddToPrompt={vi.fn()}
-    />);
+    // Settle the loaded diff and its selection-reset effect before clicking a line.
+    await act(async () => {
+      render(<WorkspaceChangesPanel
+        projectName="Subfolder"
+        snapshot={{ ...snapshot, repositories: [{ ...snapshot.repositories[0], workspacePrefix: "app", files }] }}
+        summary={null}
+        onRefresh={vi.fn()}
+        onLoadRepositoryDiff={async (repositoryPath, filePath) => ({ repositoryPath, patch: patchFor(filePath!), files, truncated: false })}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Open app/README.md from Subfolder" }));
     expect(onOpenWorkspaceFile).toHaveBeenCalledExactlyOnceWith("README.md");
@@ -144,7 +147,9 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.getByRole("button", { name: "Revert" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
     const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
-    fireEvent.click(navigator.querySelectorAll(".workspace-repository-file")[1]);
+    await act(async () => {
+      fireEvent.click(navigator.querySelectorAll(".workspace-repository-file")[1]);
+    });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open file" })).not.toBeInTheDocument());
     await screen.findByRole("region", { name: "Diff content for README.md" });
     fireEvent.click(screen.getByRole("button", { name: "+ after" }));

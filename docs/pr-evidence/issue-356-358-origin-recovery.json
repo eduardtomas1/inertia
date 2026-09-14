@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "review": "https://github.com/eduardtomas1/inertia/pull/359#discussion_r4001075220",
+  "sourceBeforeCorrection": "22df4e371634afcc83a787a78e189319d0ef0bc7",
+  "negativeControl": {
+    "command": "npx vitest run tests/server/database-recovery.test.ts -t 'Private Connect|schema-74'",
+    "result": "2 failed, 1 passed, 88 skipped",
+    "failures": [
+      "A current-schema primary without private_connect_device_id was accepted instead of refusing startup with the inconsistency error and preserving its original bytes.",
+      "With a corrupt primary, a newer current-schema backup without private_connect_device_id was selected instead of being skipped in favor of the coherent older backup."
+    ],
+    "passingBoundary": "A real schema-74 primary without the origin column remains valid and can upgrade."
+  },
+  "correction": "Require messages.private_connect_device_id only from its introducing migration (currently version 75). Both in-process recovery and off-thread backup validation use the same self-contained validator. Historical migration source and lineage are unchanged.",
+  "positiveFocused": {
+    "command": "VITEST_MAX_WORKERS=2 npx vitest run tests/server/database-recovery.test.ts tests/server/database-recovery-import-worker.test.ts tests/server/private-connect/message-origin.test.ts tests/server/app-update-candidate-viability-worker.test.ts",
+    "passed": 131,
+    "suites": 4,
+    "durationSeconds": 20.45,
+    "proved": [
+      "Malformed primary and backup classification",
+      "Byte preservation of the inconsistent primary and existing backup",
+      "Selection of the coherent older backup",
+      "Successful real schema-74 startup and upgrade",
+      "Existing recovery import, origin persistence and large-profile update validation regressions"
+    ]
+  },
+  "fullGate": {
+    "command": "VITEST_MAX_WORKERS=2 npm run check",
+    "node": "22.23.2",
+    "exitCode": 0,
+    "passed": 9049,
+    "skipped": 139,
+    "suites": 861,
+    "includes": [
+      "quality",
+      "75 immutable migration lineage entries",
+      "build",
+      "all renderer bundle budgets"
+    ]
+  }
+}

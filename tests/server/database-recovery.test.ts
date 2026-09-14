@@ -30,6 +30,7 @@ import {
   recoverDatabaseOnStartup,
 } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const directories: string[] = [];
 
@@ -1292,6 +1293,41 @@ describe("database backup and startup recovery", () => {
     },
   );
 
+  it("preserves all evidence and refuses startup when the primary lost the Private Connect origin column", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "origin column backup");
+    const backup = await store.createBackup();
+    store.close();
+    const incomplete = new Database(databasePath);
+    incomplete.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
+    expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
+    incomplete.close();
+
+    expectSchemaMismatchPreserved(databasePath, directory, backup.filename);
+  });
+
+  it("accepts and upgrades a schema-74 primary without Private Connect origin", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const legacy = new Database(databasePath);
+    migrateRuntimeDatabase(legacy, 74);
+    legacy.close();
+
+    const store = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    try {
+      expect(store.databaseRecoveryReport().outcome).toBe("healthy");
+      const project = store.createProject("Upgraded", directory);
+      const conversation = store.createConversation(project.id, "Upgraded");
+      const message = store.createMessage(conversation.id, "After upgrade", "user");
+      expect(store.message(message.id).content).toBe("After upgrade");
+    } finally {
+      store.close();
+    }
+  });
+
   it("preserves all evidence and refuses startup when the primary lost the suspend-duration check", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1925,6 +1961,12 @@ describe("database backup and startup recovery", () => {
       label: "a required current-schema index",
       mutate: (database: Database.Database) => {
         database.exec("DROP INDEX conversations_snoozed_until_idx");
+      },
+    },
+    {
+      label: "the Private Connect origin column",
+      mutate: (database: Database.Database) => {
+        database.exec("ALTER TABLE messages DROP COLUMN private_connect_device_id");
       },
     },
     {

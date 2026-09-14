@@ -194,7 +194,10 @@ function validateOpenDatabase(
   const requiredColumns: Record<string, readonly string[]> = {
     projects: ["id", "name", "path"],
     conversations: ["id", "project_id"],
-    messages: ["id", "conversation_id", "content"],
+    messages: [
+      "id", "conversation_id", "content",
+      ...(version >= 75 ? ["private_connect_device_id"] : []),
+    ],
     app_state: ["id"],
   };
   for (const [table, columns] of Object.entries(requiredColumns)) {

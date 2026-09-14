@@ -157,7 +157,6 @@ jobs:
                 "@opencode-ai/sdk",
                 "@openai/codex",
                 "@anthropic-ai/claude-code",
-                "@google/gemini-cli",
                 "@moonshot-ai/kimi-code",
                 "opencode-ai",
               ]);

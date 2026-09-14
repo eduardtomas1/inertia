@@ -48,7 +48,7 @@ describe("Claude rate-limit availability", () => {
   });
 });
 
-type ProviderId = "codex" | "claude" | "cursor" | "gemini" | "kimi" | "opencode";
+type ProviderId = "codex" | "claude" | "cursor" | "kimi" | "opencode";
 type State = ReturnType<ProviderUsageRefreshDependencies<string>["cachedState"]>;
 
 function fixture(overrides: Partial<ProviderUsageRefreshDependencies<string>> = {}) {

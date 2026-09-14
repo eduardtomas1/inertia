@@ -117,12 +117,15 @@ function failureActivity(detail = [
   };
 }
 
-function renderFailure(): void {
+function renderFailure(
+  turn: AgentTurn = failedTurn(),
+  activity: AgentActivity = failureActivity(),
+): void {
   render(
     <ResponseTimeline
-      turns={[failedTurn()]}
+      turns={[turn]}
       messages={[userMessage()]}
-      activities={[failureActivity()]}
+      activities={[activity]}
       reasonings={[]}
       plans={[]}
       checkpoints={[]}
@@ -238,28 +241,5 @@ describe("turn failure diagnostics", () => {
     expect(presentation.copyText.length).toBeLessThanOrEqual(
       MAX_COPIED_FAILURE_DIAGNOSTICS_CHARS,
     );
-  });
-
-  it("attributes Gemini failures without falling through to another provider", () => {
-    const base = failedTurn();
-    const presentation = failureDiagnosticsPresentation({
-      ...base,
-      providerId: "gemini",
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      modelSelection: {
-        ...base.modelSelection,
-        harnessId: "gemini-acp",
-        backendProfileId: "builtin:gemini",
-        backendProfileDisplayName: "Google Gemini",
-      },
-    }, failureActivity());
-
-    expect(presentation.executionFacts[0]).toEqual({
-      label: "Provider",
-      value: "Gemini",
-      technical: false,
-    });
-    expect(presentation.copyText).toContain("Provider: Gemini");
   });
 });

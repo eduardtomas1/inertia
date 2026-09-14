@@ -1,7 +1,7 @@
 # Inertia harness capabilities
 
 Inertia does not replace Codex App Server, the Claude Agent SDK, Cursor ACP,
-Gemini CLI ACP, Kimi ACP, or the OpenCode SDK with a
+Kimi ACP, the OpenCode SDK, or Antigravity's headless CLI with a
 lowest-common-denominator agent loop. Each provider keeps its native protocol,
 approvals, plans, reasoning, usage, cancellation, and extensions. Native
 session continuity remains provider-specific: a harness may instead declare
@@ -68,66 +68,72 @@ not currently visible to the provider model. The pack tells the model this
 directly so it cannot quietly convert “capture succeeded” into a visual claim.
 The current Browser also has no agent-owned viewport-resize command.
 
-## Gemini ACP contract
+## Antigravity headless contract
 
-Gemini uses the official `gemini --acp` process from Gemini CLI 0.58.0 or newer.
-The harness does not call ACP `authenticate`. Gemini advertises every supported
-method whether or not it is active, while
-[calling `authenticate` can change the CLI's saved method and clear cached credentials](https://github.com/google-gemini/gemini-cli/blob/v0.58.0/packages/cli/src/acp/acpRpcDispatcher.ts#L106-L166).
-The user selects authentication through the ordinary interactive `gemini` flow,
-and `session/new` is the authoritative per-turn check. Inertia starts that
-setup terminal with `NO_BROWSER=true`: for Google OAuth, Gemini prints its
-official one-time URL and waits for the code, while Inertia opens only the
-reviewed Google URL once and the user pastes the returned code into Gemini.
-API-key, Vertex AI, and gateway choices remain entirely CLI-owned.
+Antigravity is Inertia's only Google provider; the former Gemini CLI provider
+is removed. Database schema 76 moves its chats to Antigravity. Transcripts stay
+visible, while native Gemini session IDs and Gemini model and effort
+selections are dropped, so the next turn starts a fresh Antigravity
+conversation on the provider default. Gemini backend profiles, cached
+metadata, and identity labels are removed.
 
-Every Gemini turn receives a fresh ACP process and session. Gemini CLI 0.58
-[starts saved-history replay without awaiting it](https://github.com/google-gemini/gemini-cli/blob/v0.58.0/packages/cli/src/acp/acpSessionManager.ts#L164-L228),
-provides no replay-complete notification, and can interleave that history with a
-new prompt. Inertia therefore does not call `session/load` or claim native
-Gemini resume. It supplies only bounded visible user and assistant messages as
-application-reconstructed context. The reconstruction is labeled in the prompt,
-may report truncation, and excludes reasoning, activities, tool payloads,
-provider-managed credential state, provider session identity, and historical
-attachment bytes. Text explicitly entered into visible messages remains part of
-the reconstruction and should be reviewed like any prompt sent to a provider.
+Inertia runs the user's own locally installed `agy` 1.2.2 or newer in its
+documented headless mode
+([headless contract](https://antigravity.google/docs/cli/headless/)). Every
+turn is one owned process started with
+`--input-format stream-json --output-format stream-json`. The prompt is written
+as one `user` event on stdin, and stdin is then closed. Inertia never passes
+`-p` or `--print`: without stream-json input, an unauthenticated `agy -p`
+prints a sign-in URL and waits, while stream-json input fails fast with
+"authentication required". A contract test asserts that no Antigravity
+invocation carries a prompt flag.
 
-The same CLI version initializes one provider-side chat before ACP
-`session/new`, then creates a second chat for the ACP session. Both are recorded
-locally by Gemini CLI. Inertia launches `gemini --acp --session-id <random-owned-id>`,
-with 48 bits of entropy in the first eight characters because Gemini 0.58 uses that
-prefix and a minute-resolution timestamp in the outer chat filename,
-tracks the separately returned ACP identity, closes the transport, and confirms
-the complete process tree is stopped before cleanup. Cleanup scans only bounded
-Gemini project directories, requires the exact `.project_root` ownership marker,
-reads chat metadata without following symlinks, and removes only files and
-session-scoped artifacts attesting those exact identities (including bounded
-subagent descendants). Once Gemini reports successful initialization or session
-creation, the corresponding record must be found as well as removed, so an
-unreviewed storage-layout change fails closed. Inertia deliberately does not
-invoke the CLI's session-delete
-command: that command also accepts numeric list indexes, which is not an exact
-ownership primitive. An unconfirmed process, ambiguous workspace marker, or
-remaining owned record makes the public turn fail with `cleanupConfirmed: false`;
-unrelated Gemini history, authentication, settings, and credentials are never
-deleted.
+Detection runs only `agy --version` and requires the selected executable to be
+named `agy` or `antigravity`. Inertia never probes sign-in, never runs
+`agy models`, and never reads or writes Antigravity settings, MCP
+configuration, or state under `~/.gemini/antigravity-cli/`. Sign-in belongs to
+Antigravity. When a turn reports that authentication is required, Inertia stops
+the process and shows Connect. Connect opens interactive `agy` inside
+Inertia's visible terminal, and only when the user clicks it. Inertia does not
+open a browser, read sign-in codes, or store tokens for Antigravity.
 
-Build turns select Gemini's advertised `default` permission-reporting mode;
-plan turns select its advertised `plan` mode. Bounded native ACP `plan`,
-`plan_update`, and `plan_removed` notifications are projected when the CLI sends
-them. The current ACP server exposes neither structured agent questions nor a
-manual compaction command. Usage is projected only from validated standard ACP
-prompt usage, Gemini's prompt `_meta.quota.token_count`, and ACP `usage_update`
-notifications; those sources have different run and session/context scopes and
-are never combined into invented coverage.
+| Inertia | Antigravity CLI |
+| --- | --- |
+| Supervised | Antigravity's own policy. Tools that need approval are declined in headless mode, and the timeline records that an action was declined. |
+| Auto-edit | `--mode accept-edits` |
+| Plan | `--mode plan` |
+| Full Access | `--dangerously-skip-permissions`, only when the user selects Full Access |
+| Resume | `--conversation <conversation_id>` from the previous result |
+| Model and effort | `--model` for safe identifiers, `--effort low\|medium\|high` |
 
-For ACP permission requests Gemini reports, Inertia chooses only one-shot
-options and applies Supervised, Auto-edit, Full Access, or Plan policy locally.
-That is not complete mediation of Gemini CLI: its own policy engine, trusted MCP
-configuration, and
-[saved allowlists can permit tools without emitting `session/request_permission`](https://github.com/google-gemini/gemini-cli/blob/v0.58.0/packages/core/src/tools/mcp-tool.ts#L201-L215).
-Capability text therefore describes these as provider-reported permissions, and
-project trust must include the selected CLI configuration.
+Structured questions, Inertia-mediated approvals, image input, Inertia host
+tools, explicit compaction, reasoning text, and model catalogs are unavailable
+in this harness and are declared that way in its capability manifest. A
+`step_update` text delta becomes assistant text, a `step_update` with a tool
+name becomes tool activity keyed by its step index, `conversation_id` becomes
+the native session, and the `result` event settles the turn. Only `SUCCESS`
+completes a turn; `ERROR`, `WAITING`, `INVALID`, `CANCELED`, and
+`INTERRUPTED` fail it, and an authentication error maps to Connect. Result
+usage is projected with session scope. After a result, a lingering process is
+stopped after a short grace period, and cancellation stops the whole process
+tree.
+
+The following could not be verified without signing in, so the parser is
+deliberately tolerant and the behavior is covered by a fake `agy` in tests:
+
+- whether `step_update` fields are nested under the event name or flat (both
+  are accepted);
+- the exact meaning of `text_delta` and `tool_name`, and whether a tool step
+  repeats while it runs;
+- the stderr wording of headless approval declines (matched conservatively);
+- whether result usage is cumulative across `--conversation` resumes;
+- that `--mode plan` never edits files;
+- how `--effort` interacts with `--model`;
+- how `agy` handles SIGINT (Inertia stops the process tree instead).
+
+The official `antigravity-acp` server was not used: it can end a turn with
+`end_turn` after an error and has no macOS Intel artifact. See
+[the investigation](STABILIZATION_PROVIDERS_ANTIGRAVITY.md).
 
 ## What the open-source review changed
 

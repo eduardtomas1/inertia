@@ -915,6 +915,17 @@ static int watch_mode(int argc, char **argv, int handoff) {
   if (sigaction(SIGTERM, &stop, NULL) || sigaction(SIGINT, &stop, NULL) || sigaction(SIGHUP, &stop, NULL)
     || sigaction(SIGQUIT, &stop_pending, NULL)
     || sigaction(SIGUSR1, &claim, NULL) || sigaction(SIGUSR2, &authorize, NULL)) return 70;
+  sigset_t guarded_signals, previous_signals;
+  sigemptyset(&guarded_signals);
+  const int payload_signals[] = { SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2 };
+  for (size_t i = 0; i < sizeof(payload_signals) / sizeof(payload_signals[0]); i++) {
+    sigaddset(&guarded_signals, payload_signals[i]);
+  }
+  // exec preserves the launching thread's signal mask (including through a
+  // PTY). Installed handlers cannot receive blocked claim, authorization, or
+  // stop signals. Normalize only our control signals once handlers are ready;
+  // the payload also needs usable default dispositions when released below.
+  if (sigprocmask(SIG_UNBLOCK, &guarded_signals, NULL)) return 70;
   if (handoff) {
     struct stat ready_channel;
     if (prctl(PR_SET_NAME, "inertia-ready", 0, 0, 0)
@@ -928,12 +939,6 @@ static int watch_mode(int argc, char **argv, int handoff) {
   int gate[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, gate)) return 70;
   // Block before fork: the child must never run a guardian handler in the
   // interval before restoring payload dispositions.
-  sigset_t guarded_signals, previous_signals;
-  sigemptyset(&guarded_signals);
-  const int payload_signals[] = { SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2 };
-  for (size_t i = 0; i < sizeof(payload_signals) / sizeof(payload_signals[0]); i++) {
-    sigaddset(&guarded_signals, payload_signals[i]);
-  }
   if (sigprocmask(SIG_BLOCK, &guarded_signals, &previous_signals)) return 70;
   pid_t payload = fork(); if (payload < 0) return 70;
   if (payload == 0) {

@@ -88,13 +88,12 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
         + "write or command. Cursor controls project reads, and the Private Connect answer "
         + "can include project-derived text, so this is not a sandbox.",
     },
-    "gemini-acp": {
+    "antigravity-cli": {
       ...UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
       explanation:
-        "Gemini CLI policy, trusted MCP configuration, or allowlists can authorize "
-        + "actions without emitting an ACP permission request. Because Inertia cannot "
-        + "guarantee local approval for every write or command, Private Connect prompts "
-        + "are refused for Gemini conversations.",
+        "Antigravity's headless mode applies its own approval policy and cannot "
+        + "deliver approval requests to Inertia, so Private Connect prompts are "
+        + "refused for Antigravity conversations.",
     },
     "kimi-acp": {
       ...APPROVAL_ROUTED,

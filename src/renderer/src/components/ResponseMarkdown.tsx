@@ -19,7 +19,7 @@ import {
   Table2,
   WrapText,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -38,6 +38,7 @@ import { writeClipboardText } from "../utils/clipboard";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
+import { encodedLocalFilePath, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
 import {
   MarkdownImageSchedulerProvider,
   useMarkdownImageSchedule,
@@ -55,7 +56,7 @@ const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [...RESPONSE_MARKDOWN_TAG_NAMES],
   protocols: {
-    href: ["http", "https", "mailto"],
+    href: ["http", "https", "mailto", "file"],
     src: ["http", "https"],
     cite: ["http", "https"],
   },
@@ -110,6 +111,7 @@ type ResponseMarkdownProps = {
 
 type ProjectLink =
   | { kind: "external"; url: string }
+  | { kind: "local"; path: string; url: string }
   | {
       kind: "project";
       relativePath: string;
@@ -245,8 +247,13 @@ export function resolveResponseLink(
   syntax: "markdown" | "file" = "markdown",
   markdownBasePath = "",
 ): ProjectLink {
-  const href = rawHref.trim();
+  let href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
+  if (/^file:/iu.test(href)) {
+    const url = parseLocalFileUrl(href);
+    if (!url) return { kind: "unsafe" };
+    href = encodedLocalFilePath(url) + url.hash;
+  }
   if (syntax === "markdown" && href.startsWith("#")) {
     return { kind: "anchor", href };
   }
@@ -331,7 +338,10 @@ export function resolveResponseLink(
   const insensitive = /^[a-z]:\//iu.test(root) || root.startsWith("//");
   const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
   const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
-  if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) return { kind: "unsafe" };
+  if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) {
+    const url = localFileUrl(candidate, encodedPathDelimiter);
+    return url ? { kind: "local", path: candidate, url } : { kind: "unsafe" };
+  }
   const relativePath = candidate === root ? "." : candidate.slice(root.length + 1);
   return relativePath
     ? {
@@ -585,7 +595,9 @@ function CodeBlock({
       data-language-family={sourceLanguage.family}
     >
       <header>
-        {fileTarget?.kind === "project" && onOpenProjectFile
+        {fileTarget?.kind === "local"
+          ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
+          : fileTarget?.kind === "project" && onOpenProjectFile
           ? (
               <button
                 type="button"
@@ -673,6 +685,29 @@ function useMarkdownRenderContext(): MarkdownRenderContextValue {
   return context;
 }
 
+function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & {
+  path: string;
+  url: string;
+}): React.JSX.Element {
+  const [error, setError] = useState(false);
+  const language = sourceLanguageForFile(path);
+  return <>
+    <a {...props} href={url}
+      className={[props.className, "response-project-file-link"].filter(Boolean).join(" ")}
+      data-language-family={language.family}
+      title={props.title ?? "Open local file"}
+      onClick={(event) => {
+        event.preventDefault();
+        setError(false);
+        void window.inertia.openExternal(url).catch(() => setError(true));
+      }}>
+      <FileCode2 className="response-project-file-icon" size={13} aria-hidden="true" />
+      <span>{children}</span>
+    </a>
+    {error && <span className="response-copy-error" role="alert">The local file could not be opened.</span>}
+  </>;
+}
+
 function MarkdownLink({
   href = "",
   children,
@@ -691,6 +726,9 @@ function MarkdownLink({
     "markdown",
     markdownBasePath,
   );
+  if (target.kind === "local") {
+    return <LocalFileLink {...props} path={target.path} url={target.url}>{children}</LocalFileLink>;
+  }
   if (target.kind === "external") {
     const externalLinkClass = [props.className, "response-web-link"]
       .filter(Boolean)
@@ -792,7 +830,7 @@ function MarkdownLink({
       heading?.focus({ preventScroll: true });
     }}>{children}</a>;
   }
-  return <span className="response-unsafe-link" title="This link was blocked because it is outside the project or uses an unsafe protocol.">{children}</span>;
+  return <span className="response-unsafe-link" title="This link was blocked because its address is invalid or uses an unsafe protocol.">{children}</span>;
 }
 
 function MarkdownImage({
@@ -973,6 +1011,8 @@ function ResponseMarkdownComponent({
       <MarkdownImageSchedulerProvider key={imageSchedulerIdentity}>
         <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
           <ReactMarkdown
+            urlTransform={(url, key) => key === "href" && parseLocalFileUrl(url)
+              ? url : defaultUrlTransform(url)}
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_PLUGINS}
             components={RESPONSE_MARKDOWN_COMPONENTS}

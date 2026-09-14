@@ -32,9 +32,9 @@ const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
-  gemini: "Gemini",
   kimi: "Kimi Code",
   opencode: "OpenCode",
+  antigravity: "Antigravity",
 };
 
 const PROVIDER_TERMINAL_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -91,13 +91,6 @@ export function providerTerminalResumeAvailability(
       }
     : null;
 
-  if (conversation.providerId === "gemini") {
-    return {
-      kind: "unavailable",
-      resume,
-      reason: "Gemini conversations use bounded application-reconstructed context; Inertia does not expose Gemini ACP session IDs as provider-native terminal sessions.",
-    };
-  }
   if (!conversation.providerSessionId) {
     return {
       kind: "unavailable",

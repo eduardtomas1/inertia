@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildComposerModelRoutes,
-  modelChooserHarnessLabel,
   providerRunsModels,
   readyModelChooserRoutes,
   selectedModelSearchRoute,
@@ -161,10 +160,6 @@ function nativeProfile(): ModelBackendProfileView {
 }
 
 describe("composer model chooser route projection", () => {
-  it("uses the native Gemini CLI identity without leaking a raw harness ID", () => {
-    expect(modelChooserHarnessLabel("gemini-acp")).toBe("Gemini CLI");
-  });
-
   it("builds exact native routes and preserves the active selection settings", () => {
     const current = providerNativeModelSelection({
       providerId: "codex",

@@ -49,6 +49,7 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
+import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -619,6 +620,7 @@ export const Composer = memo(function Composer({
     }
   };
 
+  const imageInputUnavailableReason = harnessImageInputUnavailableReason(conversation.modelSelection.harnessId);
   const { adoptAttachments, chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
@@ -633,7 +635,7 @@ export const Composer = memo(function Composer({
       onChooseAttachments,
       onImportAttachments,
       releaseAttachmentRef,
-      running,
+      running, imageInputUnavailableReason,
       setAttachments,
       setAttachmentImporting, setPendingAttachmentIds,
       setAttachmentError,
@@ -1112,7 +1114,7 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
-          running={running}
+          running={running} imageInputUnavailable={imageInputUnavailableReason !== null}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1148,7 +1150,7 @@ export const Composer = memo(function Composer({
           running={running}
           attachmentCount={attachments.length}
           attachmentImporting={attachmentImporting}
-          onChooseAttachments={chooseAttachments}
+          onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
           {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand), conversationContextHandoffEnabled)}
           onRunAction={onRunAction}
           skills={skills}

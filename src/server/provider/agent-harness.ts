@@ -172,21 +172,6 @@ export interface KimiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities
   };
 }
 
-export interface GeminiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
-  extension: {
-    kind: "gemini-acp";
-    protocol: "acp-v1-json-rpc";
-    approvals: "native";
-    questions: "unavailable-in-current-acp";
-    plans: "mode-and-acp-updates";
-    reasoning: "native";
-    usage: "prompt-response-and-acp-updates";
-    images: "capability-negotiated";
-    authentication: "gemini-cli";
-    modelMetadata: "experimental-session-models";
-  };
-}
-
 export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
   extension: {
     kind: "opencode-sdk";
@@ -202,6 +187,21 @@ export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabili
   };
 }
 
+export interface AntigravityCliHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "antigravity-cli";
+    protocol: "headless-stream-json";
+    approvals: "provider-policy";
+    questions: "unavailable-in-headless";
+    plans: "native-mode";
+    reasoning: "unavailable-in-headless";
+    usage: "result-usage";
+    images: "unavailable-in-current-harness";
+    authentication: "antigravity-cli";
+    modelMetadata: "unavailable-in-current-harness";
+  };
+}
+
 export type AgentHarnessCapabilities =
   | CodexAppServerHarnessCapabilities
   | CodexCliHarnessCapabilities
@@ -210,9 +210,9 @@ export type AgentHarnessCapabilities =
   | OpenCodeCliHarnessCapabilities
   | ClaudeAgentSdkHarnessCapabilities
   | CursorAcpHarnessCapabilities
-  | GeminiAcpHarnessCapabilities
   | KimiAcpHarnessCapabilities
-  | OpenCodeSdkHarnessCapabilities;
+  | OpenCodeSdkHarnessCapabilities
+  | AntigravityCliHarnessCapabilities;
 
 export type AgentHarnessCoreEvent =
   | ProviderTextEvent
@@ -271,9 +271,9 @@ interface ProviderInteractiveHarnessExtensionEventBase {
 export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "gemini"; extension: "gemini-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" });
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-cli" });
 
 export type AgentHarnessEvent =
   | AgentHarnessCoreEvent
@@ -316,7 +316,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "gemini-acp" | "kimi-acp" | "opencode-sdk";
+  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk" | "antigravity-cli";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -471,9 +471,9 @@ export function createAgentHarnessEmitter(
     rich: (event) => {
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
       else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
-      else if (providerId === "gemini") emit({ ...base, providerId, type: "extension", extension: "gemini-acp", event });
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
+      else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-cli", event });
     },
   };
 }

@@ -32,6 +32,22 @@ const MATERIALIZED_STORAGE_KEY =
 const UUID_PATTERN =
   /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu;
 const MAX_ACCEPTED_ID_LENGTH = 200;
+const RETIRED_PROVIDER_FIELDS = ["providerId", "modelSelection", "model", "reasoningEffort"];
+
+function withRetiredProviderFallback(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const candidate = payload as Record<string, unknown>;
+  const harnessId = (candidate.modelSelection as { harnessId?: unknown } | null | undefined)?.harnessId;
+  if (
+    candidate.providerId !== "gemini"
+    && !(typeof harnessId === "string" && harnessId.startsWith("gemini-"))
+  ) return payload;
+  return {
+    ...Object.fromEntries(Object.entries(candidate)
+      .filter(([key]) => !RETIRED_PROVIDER_FIELDS.includes(key))),
+    providerId: "antigravity",
+  };
+}
 
 function isAcceptedId(value: unknown): value is string {
   return typeof value === "string"
@@ -68,7 +84,7 @@ function readPersistedDraftRecord(): PersistedDraftConversation | null {
   const parsed = conversationCreateCommandSchema.safeParse({
     requestId: crypto.randomUUID(),
     type: "conversation.create",
-    payload: candidate.payload,
+    payload: withRetiredProviderFallback(candidate.payload),
   });
   if (!parsed.success) {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -153,7 +169,7 @@ export function readPersistedMaterializedDraftConversation():
     const parsed = conversationCreateCommandSchema.safeParse({
       requestId: crypto.randomUUID(),
       type: "conversation.create",
-      payload: candidate.payload,
+      payload: withRetiredProviderFallback(candidate.payload),
     });
     if (
       !parsed.success

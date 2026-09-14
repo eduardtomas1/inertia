@@ -19,6 +19,8 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+
 import { appUpdateCandidateViabilityRequest } from
   "../../src/node/app-update-candidate-viability-protocol";
 import { createAppUpdateScratch } from
@@ -167,7 +169,7 @@ describe("app update candidate viability worker", () => {
       }
       const clone = new Database(clonePath, { readonly: true });
       try {
-        expect(clone.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(75);
+        expect(clone.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
         expect(clone.prepare("SELECT COUNT(*) FROM app_update_large_profile").pluck().get()).toBe(257);
         expect(tableSql(clone, "messages")).toContain("private_connect_device_id");
         expect(clone.pragma("integrity_check", { simple: true })).toBe("ok");

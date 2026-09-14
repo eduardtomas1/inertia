@@ -122,29 +122,27 @@ maintenance evidence remains quarantined and provider admission stays closed.
 `native` means the exact production transport exposes the operation;
 `negotiated` means availability must be learned for the installed protocol;
 `host` means Inertia supplies a separately labelled exact-turn host feature;
-`application-context` means visible conversation history is reconstructed into
-a fresh provider session rather than claiming native resume; `none` is a
-deterministic unsupported result, not silent emulation.
+`none` is a deterministic unsupported result, not silent emulation.
 
-| Capability | Codex App Server | Claude Agent SDK | Cursor ACP | Gemini ACP | Kimi ACP | OpenCode SDK |
-| --- | --- | --- | --- | --- | --- | --- |
-| Streaming text | native | native | native | native | native | native |
-| Reasoning/thinking | native summary | native streaming | native | native output; no effort selector | native | native |
-| Tool/file activity | native | native | native | native | native | native |
-| Images/attachments | native local input | native structured input | negotiated ACP | negotiated at initialize | negotiated ACP | native file input |
-| Plans | native | native | native | negotiated session mode | native | native |
-| Approvals | native | native | native | native ACP request; exact-turn Inertia/user decision | native | native |
-| Structured input | native | native | Cursor extension | none | native-over-permission | native |
-| Follow-up/steer | native parent steer | native persistent stream | none unless attested | none | none unless attested | native prompt input |
-| Session resume | native thread | native session | native session | application-context | native session | native session |
-| Usage/rate limits | native | native result usage | optional ACP / negotiated | negotiated usage / no rate limits | optional ACP / negotiated | native token usage |
-| Structured subagent create/stop | events / no exact stop | native task IDs / stop | none unless attested | none | protocol-specific | none unless attested |
-| Host-tool bridge | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn on built-in route | host, exact-turn | host, exact-turn |
-| Model/auth discovery | App Server / CLI | SDK / CLI | ACP/config | session catalog / no separate auth-state probe | ACP/config | owned server/config |
-| Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + session/process cleanup | ACP cancel + containment | prompt abort + owned-server cleanup |
-| Provider-owned server | none | none | none | none | none | native, run-owned |
-| Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none | none |
-| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | npm/Homebrew installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
+| Capability | Codex App Server | Claude Agent SDK | Cursor ACP | Kimi ACP | OpenCode SDK |
+| --- | --- | --- | --- | --- | --- |
+| Streaming text | native | native | native | native | native |
+| Reasoning/thinking | native summary | native streaming | native | native | native |
+| Tool/file activity | native | native | native | native | native |
+| Images/attachments | native local input | native structured input | negotiated ACP | negotiated ACP | native file input |
+| Plans | native | native | native | native | native |
+| Approvals | native | native | native | native | native |
+| Structured input | native | native | Cursor extension | native-over-permission | native |
+| Follow-up/steer | native parent steer | native persistent stream | none unless attested | none unless attested | native prompt input |
+| Session resume | native thread | native session | native session | native session | native session |
+| Usage/rate limits | native | native result usage | optional ACP / negotiated | optional ACP / negotiated | native token usage |
+| Structured subagent create/stop | events / no exact stop | native task IDs / stop | none unless attested | protocol-specific | none unless attested |
+| Host-tool bridge | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn |
+| Model/auth discovery | App Server / CLI | SDK / CLI | ACP/config | ACP/config | owned server/config |
+| Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + containment | prompt abort + owned-server cleanup |
+| Provider-owned server | none | none | none | none | native, run-owned |
+| Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none |
+| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
 
 The machine-readable manifest and runtime attestation are versioned and bound
 to one harness, provider installation/configuration identity (including
@@ -175,16 +173,7 @@ evidence is durable and monotonic independently per profile/model, bounded to
 restart. Custom host-tool injection remains disabled until a dedicated bridge
 probe exists, even when the provider's native summary advertises that bridge;
 the immutable built-in Kimi-through-Claude profile retains Claude's trusted
-exact-turn host bridge. Gemini's host bridge is likewise admitted only for the
-exact built-in `gemini` / `gemini-acp` / `builtin:gemini` route and only when
-the ACP HTTP MCP channel is available; foreign or custom profiles cannot
-inherit that authority. Gemini also requires provider-native tools before
-spawn because persisted allowlists can bypass a permission callback. Each
-Gemini turn creates a fresh ACP process and session, never calls
-`session/load`, never exposes its internal session ID, and reconstructs only
-bounded visible user/assistant history. Explicit model selection is accepted
-only after the new session advertises that exact model and `session/set_model`
-succeeds. Custom runs also bind the persisted selection,
+exact-turn host bridge. Custom runs also bind the persisted selection,
 deprecated model projection, privileged launch spelling, and exact probe to one
 model identity. A changed executable or backend probe withdraws its prior
 attestation, and maintenance is available only when the exact verified installation

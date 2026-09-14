@@ -1,6 +1,6 @@
 # Inertia user guide
 
-Inertia is a calm desktop workspace for building with coding agents. It keeps agent conversations, project files, Git review and terminals in one local workspace, and works with the accounts you already have for **Codex, Claude, Cursor, Gemini CLI, Kimi Code and OpenCode**.
+Inertia is a calm desktop workspace for building with coding agents. It keeps agent conversations, project files, Git review and terminals in one local workspace, and works with the accounts you already have for **Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode**.
 
 ## Start here
 
@@ -24,7 +24,7 @@ No. History and preferences stay on your computer, and each provider keeps its o
 
 ### Which agents can I use?
 
-Codex, Claude, Cursor, Gemini CLI, Kimi Code and OpenCode. Connect them in **Settings → Providers**. See [Getting started](getting-started.md#connect-an-agent).
+Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Settings → Providers**. See [Getting started](getting-started.md#connect-an-agent).
 
 ### Can I work on two things at once?
 

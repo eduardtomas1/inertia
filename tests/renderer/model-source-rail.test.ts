@@ -186,32 +186,6 @@ describe("model source rail", () => {
     expect(teamA[0]).toBe(routes[4]);
   });
 
-  it("groups the native Gemini route with its own stable source identity", () => {
-    const geminiRoute = route("gemini-default", {
-      harnessId: "gemini-acp",
-      harnessLabel: "Gemini CLI",
-      backendProfileId: "builtin:gemini",
-      backendProfileName: "Google Gemini",
-      providerLabel: "Gemini",
-      modelId: "provider-default",
-      displayName: "Provider default",
-    });
-    const items = deriveModelSourceRailItems([...routes, geminiRoute]);
-    const gemini = items.find(({ filter }) =>
-      filter.kind === "provider" && filter.providerId === "gemini")!;
-
-    expect(gemini.label).toBe("Gemini");
-    expect(gemini.routes).toEqual([geminiRoute]);
-    expect(modelSourceRailItemGlyph(gemini)).toEqual({
-      kind: "provider",
-      providerId: "gemini",
-    });
-    expect(filterModelRoutesBySource([geminiRoute], {
-      kind: "provider",
-      providerId: "gemini",
-    })).toEqual([geminiRoute]);
-  });
-
   it("filters favorites and all routes without mutating discovery order", () => {
     expect(filterModelRoutesBySource(
       routes,

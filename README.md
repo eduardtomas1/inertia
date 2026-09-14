@@ -12,7 +12,7 @@
 
 ![Inertia 0.0.55 — project sidebar, conversation, and floating composer in dark mode](docs/screenshots/inertia-dark.png)
 
-Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode**.
+Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Antigravity, Kimi Code, or OpenCode**.
 
 ## Start working
 

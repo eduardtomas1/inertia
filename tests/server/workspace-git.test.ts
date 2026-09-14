@@ -89,6 +89,83 @@ afterEach(() => {
 });
 
 describe("workspace Git repository discovery", () => {
+  it("shares the containing repository with Environment without scanning sibling repositories", async () => {
+    const root = temporaryRoot("subfolder-workspace");
+    initializeRepository(root, "app/src/main.ts");
+    writeFileSync(join(root, "app/src/main.ts"), "inside workspace\n");
+    writeFileSync(join(root, "README.md"), "outside workspace\n");
+    initializeRepository(join(root, "sibling"), "sibling.txt");
+    const workspace = join(root, "app");
+    const onRepositoryAuthorized = vi.fn();
+    const secureFiles = new SecureFileTestBroker();
+
+    const snapshot = await discoverWorkspaceGitRepositories(workspace, {
+      secureFiles,
+      onRepositoryAuthorized,
+    });
+    const environment = await getRepositoryStatus(workspace);
+    const repository = await resolveWorkspaceGitRepository(workspace, ".", secureFiles);
+    const diff = await getUnifiedDiff(repository.root, { paths: ["app/src/main.ts"] });
+
+    expect(snapshot.repositories).toEqual([expect.objectContaining({
+      repositoryPath: ".",
+      workspacePrefix: "app",
+      state: "ready",
+      clean: false,
+      files: expect.arrayContaining([
+        expect.objectContaining({ path: "app/src/main.ts" }),
+        expect.objectContaining({ path: "README.md" }),
+      ]),
+    })]);
+    expect(snapshot.files).toBe(environment.files.length);
+    expect(snapshot.scannedDirectories).toBe(2);
+    expect(snapshot.discoveredRepositories).toBe(1);
+    expect(repository.root).toBe(realpathSync(root));
+    expect(repository.secureRoot?.root).toBe(realpathSync(root));
+    expect(onRepositoryAuthorized).toHaveBeenCalledExactlyOnceWith(
+      ".", expect.objectContaining({ root: realpathSync(root) }), repository.metadataMarkerIdentity,
+    );
+    expect(diff.text).toContain("+inside workspace");
+    expect(diff.text).not.toContain("outside workspace");
+    await expect(resolveWorkspaceGitRepository(workspace, "src")).rejects.toThrow(/not a Git repository/u);
+    await expect(resolveWorkspaceGitRepository(workspace, "../sibling")).rejects.toThrow(/repository path/u);
+  });
+
+  it("resolves a subfolder in a linked worktree to that checkout", async () => {
+    const source = temporaryRoot("subfolder-worktree-source");
+    initializeRepository(source, "app/main.ts");
+    const root = temporaryRoot("subfolder-worktree-checkout");
+    const checkout = join(root, "checkout");
+    git(source, "worktree", "add", "-q", "-b", "subfolder-checkout", checkout);
+    writeFileSync(join(checkout, "app/main.ts"), "checkout change\n");
+
+    const snapshot = await discoverWorkspaceGitRepositories(join(checkout, "app"));
+    const repository = await resolveWorkspaceGitRepository(join(checkout, "app"), ".");
+
+    expect(snapshot.repositories).toEqual([expect.objectContaining({
+      repositoryPath: ".", workspacePrefix: "app", branch: "subfolder-checkout",
+      files: [expect.objectContaining({ path: "app/main.ts" })],
+    })]);
+    expect(repository.root).toBe(realpathSync(checkout));
+    expect((await getRepositoryStatus(source)).clean).toBe(true);
+  });
+
+  it("rejects a containing repository with a symbolic-link Git marker", async () => {
+    const source = temporaryRoot("subfolder-unsafe-metadata");
+    initializeRepository(source);
+    const checkout = temporaryRoot("subfolder-unsafe-checkout");
+    const workspace = join(checkout, "app");
+    mkdirSync(workspace);
+    symlinkSync(join(source, ".git"), join(checkout, ".git"), process.platform === "win32" ? "junction" : "dir");
+
+    const snapshot = await discoverWorkspaceGitRepositories(workspace);
+
+    expect(snapshot.repositories).toEqual([]);
+    expect(snapshot.partial).toBe(true);
+    expect(snapshot.issues).toEqual([expect.objectContaining({ repositoryPath: ".", message: expect.stringMatching(/symbolic-link/u) })]);
+    await expect(resolveWorkspaceGitRepository(workspace, ".")).rejects.toThrow(/symbolic-link/u);
+  });
+
   it.skipIf(process.platform === "win32")(
     "preserves whitespace in a resolved Git metadata path",
     async () => {

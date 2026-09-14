@@ -74,7 +74,6 @@ describe("harness-specific backend compatibility", () => {
       ["codex-app-server", "codex", "native-backend"],
       ["claude-agent-sdk", "claude", "native-backend"],
       ["cursor-acp", "cursor", "cursor-managed"],
-      ["gemini-acp", "gemini", "gemini-managed"],
       ["kimi-acp", "kimi", "kimi-managed"],
       ["opencode-sdk", "opencode", "opencode-native-catalog"],
     ];

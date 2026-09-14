@@ -1062,12 +1062,12 @@ setInterval(() => {}, 1000);
     });
   });
 
-  it("accepts Gemini only at the stable ACP version boundary without an auth-status probe", async () => {
-    const executable = join(temporaryRoot(), "gemini");
+  it("detects Antigravity from its version alone and never probes sign-in", async () => {
+    const executable = join(temporaryRoot(), "agy");
     const probes: string[][] = [];
     await expect(
       detectProvider(
-        "gemini",
+        "antigravity",
         { command: executable },
         {
           executableCandidates: async () => [executable],
@@ -1075,10 +1075,7 @@ setInterval(() => {}, 1000);
             probes.push([...args]);
             return {
               exitCode: 0,
-              output:
-                args[0] === "--version"
-                  ? "Gemini CLI 0.58.0"
-                  : "Gemini CLI\n  --acp  Start the Agent Client Protocol server\n  --session-id <id>  Start a new session with this ID",
+              output: "1.2.2",
               started: true,
               timedOut: false,
               cleanupConfirmed: true,
@@ -1089,75 +1086,31 @@ setInterval(() => {}, 1000);
     ).resolves.toMatchObject({
       available: true,
       executable,
-      version: "0.58.0",
+      version: "1.2.2",
       installState: "installed",
       authState: "unknown",
       canRun: true,
       cleanupConfirmed: true,
-      statusMessage:
-        "Installed; Gemini ACP will verify authentication when a session starts",
+      statusMessage: "Installed; Antigravity checks your sign-in when a turn starts",
     });
-    expect(probes).toEqual([["--version"], ["--help"]]);
-    expect(providerAuthStatusArgs("gemini")).toBeNull();
-    expect(providerAuthLoginArgs("gemini")).toEqual([]);
-    expect(providerAuthLaunchEnvironment("gemini", { TERM: "xterm" }))
-      .toEqual({ TERM: "xterm", NO_BROWSER: "true" });
-    expect(providerAuthLaunchEnvironment("codex", { TERM: "xterm" }))
+    expect(probes).toEqual([["--version"]]);
+    expect(providerAuthStatusArgs("antigravity")).toBeNull();
+    expect(providerAuthLoginArgs("antigravity")).toEqual([]);
+    expect(providerAuthLaunchEnvironment("antigravity", { TERM: "xterm" }))
       .toEqual({ TERM: "xterm" });
   });
 
-  it("reports an old Gemini install as installed but requiring a stable ACP update", async () => {
-    const executable = join(temporaryRoot(), "gemini");
-    const probes: string[][] = [];
+  it("asks for an Antigravity update below the headless stream-json release", async () => {
+    const executable = join(temporaryRoot(), "agy");
     await expect(
       detectProvider(
-        "gemini",
+        "antigravity",
         { command: executable },
         {
           executableCandidates: async () => [executable],
-          probeProcess: async (_candidate, args) => {
-            probes.push([...args]);
-            return {
-              exitCode: 0,
-              output:
-                args[0] === "--version"
-                  ? "Gemini CLI 0.29.5"
-                  : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
-              started: true,
-              timedOut: false,
-              cleanupConfirmed: true,
-            };
-          },
-        },
-      ),
-    ).resolves.toMatchObject({
-      available: true,
-      executable,
-      version: "0.29.5",
-      installState: "installed",
-      authState: "unknown",
-      canRun: false,
-      cleanupConfirmed: true,
-      statusMessage:
-        "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
-    });
-    expect(probes).toEqual([["--version"], ["--help"]]);
-  });
-
-  it("rejects a current Gemini candidate that does not advertise the exact ACP flag", async () => {
-    const executable = join(temporaryRoot(), "gemini");
-    await expect(
-      detectProvider(
-        "gemini",
-        { command: executable },
-        {
-          executableCandidates: async () => [executable],
-          probeProcess: async (_candidate, args) => ({
+          probeProcess: async () => ({
             exitCode: 0,
-            output:
-              args[0] === "--version"
-                ? "Gemini CLI 0.58.0"
-                : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
+            output: "1.1.0",
             started: true,
             timedOut: false,
             cleanupConfirmed: true,
@@ -1166,48 +1119,31 @@ setInterval(() => {}, 1000);
       ),
     ).resolves.toMatchObject({
       available: true,
-      executable,
-      version: "0.58.0",
       installState: "installed",
-      authState: "unknown",
       canRun: false,
-      cleanupConfirmed: true,
       statusMessage:
-        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
+        "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer; run 'agy update'",
     });
   });
 
-  it("rejects a current Gemini candidate without an owned session-id flag", async () => {
-    const executable = join(temporaryRoot(), "gemini");
+  it("refuses an Antigravity command that is not the agy executable", async () => {
+    const executable = join(temporaryRoot(), "antigravity-helper");
     await expect(
       detectProvider(
-        "gemini",
+        "antigravity",
         { command: executable },
         {
           executableCandidates: async () => [executable],
-          probeProcess: async (_candidate, args) => ({
+          probeProcess: async () => ({
             exitCode: 0,
-            output:
-              args[0] === "--version"
-                ? "Gemini CLI 0.58.0"
-                : "Gemini CLI\n  --acp  Start the Agent Client Protocol server",
+            output: "1.2.2",
             started: true,
             timedOut: false,
             cleanupConfirmed: true,
           }),
         },
       ),
-    ).resolves.toMatchObject({
-      available: true,
-      executable,
-      version: "0.58.0",
-      installState: "installed",
-      authState: "unknown",
-      canRun: false,
-      cleanupConfirmed: true,
-      statusMessage:
-        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
-    });
+    ).resolves.toMatchObject({ canRun: false });
   });
 
   it("accepts Cursor only after the executable advertises ACP", async () => {

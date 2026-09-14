@@ -26,8 +26,8 @@ if (process.argv[2] === "status") {
 }
 process.stdout.write("Sign-in complete\\n");
 `;
-const providerIds = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const;
-const backendIds = ["builtin:openai", "builtin:anthropic", "builtin:cursor", "builtin:gemini", "builtin:kimi", "builtin:opencode"] as const;
+const providerIds = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const;
+const backendIds = ["builtin:openai", "builtin:anthropic", "builtin:cursor", "builtin:kimi", "builtin:opencode", "builtin:antigravity"] as const;
 const installStates = ["checking", "installed", "not-installed", "error"] as const;
 const authStates = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"] as const;
 const actions = ["send-disabled", "send-ready", "submitting", "stop-ready", "stop-pending"] as const;
@@ -42,7 +42,7 @@ const statusCodes = new Map([
   ["Codex CLI was found but failed to start", "cli-unresponsive"],
   ["Codex App Server is unsupported; update the selected CLI", "protocol-unavailable"],
 ]);
-for (const label of ["Codex", "Claude Code", "Cursor", "Gemini", "Kimi Code", "OpenCode"]) {
+for (const label of ["Codex", "Claude Code", "Cursor", "Kimi Code", "OpenCode", "Antigravity"]) {
   statusCodes.set(`${label} is installed; authentication was not checked`, "auth-unchecked");
   statusCodes.set(`${label} probe cleanup could not be confirmed stopped`, "cleanup-unconfirmed");
   statusCodes.set(`${label} connection probe timed out, and its process tree could not be confirmed stopped`, "cleanup-unconfirmed");

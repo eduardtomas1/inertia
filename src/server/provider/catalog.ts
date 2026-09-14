@@ -16,11 +16,6 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     name: "Cursor",
     command: "cursor-agent",
   },
-  gemini: {
-    id: "gemini",
-    name: "Gemini",
-    command: "gemini",
-  },
   kimi: {
     id: "kimi",
     name: "Kimi Code",
@@ -30,6 +25,11 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ProviderInfo>> = Object.
     id: "opencode",
     name: "OpenCode",
     command: "opencode",
+  },
+  antigravity: {
+    id: "antigravity",
+    name: "Antigravity",
+    command: "agy",
   },
 });
 

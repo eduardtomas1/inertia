@@ -83,6 +83,7 @@ export interface ComposerInputZoneProps {
   canQueue: boolean;
   onQueue: () => void;
   running: boolean;
+  imageInputUnavailable: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -142,6 +143,7 @@ export function ComposerInputZone({
   canQueue,
   onQueue,
   running,
+  imageInputUnavailable,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -502,7 +504,9 @@ export function ComposerInputZone({
           aria-label="Message"
           placeholder={running
             ? "Enter sends · Tab queues"
-            : "Ask for follow-up changes or attach images"}
+            : imageInputUnavailable
+              ? "Ask for follow-up changes"
+              : "Ask for follow-up changes or attach images"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

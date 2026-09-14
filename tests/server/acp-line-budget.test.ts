@@ -3,13 +3,11 @@ import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { describe, expect, it } from "vitest";
 import { BoundedJsonLineTransform } from "../../src/server/provider/cursor-acp-framing";
-import { BoundedGeminiJsonLineTransform } from "../../src/server/provider/gemini-acp-support";
 import { BoundedKimiJsonLineTransform } from "../../src/server/provider/kimi-acp-support";
 import { ProviderRunEventBudget } from "../../src/server/provider/io";
 
 const implementations = [
   ["Cursor", BoundedJsonLineTransform],
-  ["Gemini", BoundedGeminiJsonLineTransform],
   ["Kimi", BoundedKimiJsonLineTransform],
 ] as const;
 

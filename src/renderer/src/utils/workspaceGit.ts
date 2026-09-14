@@ -55,10 +55,16 @@ export function parseWorkspaceGitIdentity(
     : null;
 }
 
-export function workspaceGitFilePath(identity: WorkspaceGitFileIdentity): string {
-  return identity.repositoryPath === "."
-    ? identity.filePath
-    : `${identity.repositoryPath}/${identity.filePath}`;
+/** Files outside a subfolder workspace remain reviewable, but cannot open there. */
+export function workspaceGitOpenFilePath(
+  repository: WorkspaceGitRepositorySnapshot,
+  filePath: string,
+): string | null {
+  if (repository.repositoryPath === "." && repository.workspacePrefix) {
+    const prefix = `${repository.workspacePrefix}/`;
+    return filePath.startsWith(prefix) ? filePath.slice(prefix.length) : null;
+  }
+  return repository.repositoryPath === "." ? filePath : `${repository.repositoryPath}/${filePath}`;
 }
 
 export function workspaceGitRepositoryLabel(projectName: string, repositoryPath: string): string {

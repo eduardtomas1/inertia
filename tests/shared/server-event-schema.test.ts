@@ -508,6 +508,7 @@ describe("server event request-result trust boundary", () => {
       status: {
         repositories: [{
           repositoryPath: ".",
+          workspacePrefix: "src",
           authorityRef: "authority-1",
           state: "ready",
           error: null,
@@ -919,10 +920,10 @@ describe("server event settings trust boundary", () => {
       type: "snapshot.updated",
     });
   });
-  it("accepts Gemini as the default provider", () => {
+  it("accepts Antigravity as the default provider", () => {
     expect(parseServerEvent(snapshotEvent({
       ...defaultSettings,
-      defaultProvider: "gemini",
+      defaultProvider: "antigravity",
     }))).toMatchObject({ type: "snapshot.updated" });
   });
   it.each([
@@ -1189,9 +1190,9 @@ describe("server event provider identity boundary", () => {
     codex: "codex-app-server",
     claude: "claude-agent-sdk",
     cursor: "cursor-acp",
-    gemini: "gemini-acp",
     kimi: "kimi-acp",
     opencode: "opencode-sdk",
+    antigravity: "antigravity-cli",
   } as const;
   const provider = {
     id: "codex",
@@ -1245,7 +1246,7 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
-  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode"])(
+  it.each(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])(
     "accepts the canonical %s provider identity",
     (id) => {
       const expectedFastMode = id === "codex"

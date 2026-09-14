@@ -18,6 +18,7 @@ import {
   type WaitForProcessExit,
 } from "./process-lifecycle";
 import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
+import { waitForTerminalExit } from "./terminal-exit";
 import {
   terminalCloseTimeoutMs,
   terminalShutdownTimeoutMs,
@@ -1075,22 +1076,9 @@ export class TerminalManager {
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      const waitForExit: WaitForProcessExit = (waitMs) => {
-        if (session.exitObserved) return Promise.resolve(true);
-        return new Promise<boolean>((resolveWait) => {
-          let waitSettled = false;
-          const finishWait = (didExit: boolean): void => {
-            if (waitSettled) return;
-            waitSettled = true;
-            clearTimeout(waitTimer);
-            session.exitWaiters.delete(observeExit);
-            resolveWait(didExit);
-          };
-          const observeExit = (): void => finishWait(true);
-          session.exitWaiters.add(observeExit);
-          const waitTimer = setTimeout(() => finishWait(false), waitMs);
-        });
-      };
+      const waitForExit: WaitForProcessExit = (waitMs) => (
+        waitForTerminalExit(session, waitMs)
+      );
       const finish = (error?: Error): void => {
         if (settled) return;
         settled = true;
@@ -1117,14 +1105,26 @@ export class TerminalManager {
               fallbackDeadlineAt,
             );
             if (!admitted) return false;
-            const exited = session.exitObserved
-              ? true
-              : await waitForBooleanWithinTerminalDeadline(
-                  waitForExit(this.shutdownTimeoutMs),
-                  session,
-                  fallbackDeadlineAt,
-                );
-            return exited;
+            if (session.exitObserved) return true;
+            // Linux drain and PTY delivery share the existing absolute close
+            // envelope. A shorter per-step timeout can reject a still-running
+            // native proof even when its exact claim retires inside that budget.
+            const exitDeadlineAt = fallbackDeadlineAt ?? session.shutdownDeadlineAt;
+            const exitWaitMs = this.platform === "linux" && exitDeadlineAt !== null
+              ? Math.max(1, exitDeadlineAt - Date.now())
+              : this.shutdownTimeoutMs;
+            const exitWait = new AbortController();
+            try {
+              return await waitForBooleanWithinTerminalDeadline(
+                waitForTerminalExit(session, exitWaitMs, exitWait.signal),
+                session,
+                fallbackDeadlineAt,
+              );
+            } finally {
+              // A runtime shutdown can tighten the deadline while this wait
+              // is active. Do not leave its old timer or exit listener alive.
+              exitWait.abort();
+            }
           }
           : this.createProcessTreeTermination(session.pty.pid, waitForExit);
       }

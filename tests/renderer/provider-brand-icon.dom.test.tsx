@@ -38,13 +38,6 @@ describe("ProviderBrandIcon", () => {
         invertInDark: false,
       },
       {
-        providerId: "gemini",
-        brand: "gemini",
-        label: "Gemini CLI",
-        hasDarkAsset: false,
-        invertInDark: false,
-      },
-      {
         providerId: "kimi",
         brand: "kimi",
         label: "Kimi Code",
@@ -57,6 +50,13 @@ describe("ProviderBrandIcon", () => {
         label: "OpenCode",
         hasDarkAsset: true,
         invertInDark: false,
+      },
+      {
+        providerId: "antigravity",
+        brand: "antigravity",
+        label: "Antigravity",
+        hasDarkAsset: false,
+        invertInDark: true,
       },
     ]);
 
@@ -78,9 +78,9 @@ describe("ProviderBrandIcon", () => {
         <ProviderBrandIcon providerId="codex" size={18} />
         <ProviderBrandIcon providerId="claude" />
         <ProviderBrandIcon providerId="cursor" />
-        <ProviderBrandIcon providerId="gemini" />
         <ProviderBrandIcon providerId="kimi" />
         <ProviderBrandIcon providerId="opencode" />
+        <ProviderBrandIcon providerId="antigravity" size={16} />
       </>,
     );
 
@@ -93,12 +93,32 @@ describe("ProviderBrandIcon", () => {
       .toHaveAttribute("data-provider-brand", "anthropic");
     expect(screen.getByRole("img", { name: "Cursor icon" }).querySelectorAll("img"))
       .toHaveLength(2);
-    expect(screen.getByRole("img", { name: "Gemini CLI icon" }))
-      .toHaveAttribute("data-provider-brand", "gemini");
     expect(screen.getByRole("img", { name: "Kimi Code icon" }))
       .toHaveAttribute("data-provider-brand", "kimi");
     expect(screen.getByRole("img", { name: "OpenCode icon" }).querySelectorAll("img"))
       .toHaveLength(2);
+    const antigravity = screen.getByRole("img", { name: "Antigravity icon" });
+    expect(antigravity).toHaveAttribute("data-provider-icon-kind", "official");
+    expect(antigravity).toHaveAttribute("data-provider-brand", "antigravity");
+    expect(antigravity).toHaveStyle("--provider-icon-size: 16px");
+    expect(antigravity).toHaveClass("is-dark-invert");
+    expect(antigravity).not.toHaveClass("has-dark-source");
+    const sources = antigravity.querySelectorAll("img");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toHaveClass("is-light");
+  });
+
+  it("resolves Antigravity to the Google-contributed registry mark, not a text placeholder", () => {
+    const definition = providerIconDefinition("antigravity");
+    expect(definition).toMatchObject({
+      providerId: "antigravity",
+      brand: "antigravity",
+      label: "Antigravity",
+      invertInDark: true,
+    });
+    expect(definition?.darkSrc).toBeUndefined();
+    expect(definition?.lightSrc).toMatch(/antigravity\.svg(?:\?|$)/u);
+    expect(definition?.lightSrc).not.toMatch(/antigravity-text/u);
   });
 
   it("uses an intentional neutral fallback for unknown and custom providers", () => {

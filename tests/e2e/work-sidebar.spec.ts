@@ -35,8 +35,8 @@ test("keeps three-line Work sidebar geometry", async ({
       );
       store.createConversation(
         project.id,
-        "Exercise Gemini ACP",
-        { providerId: "gemini", branch: "gemini/acp-provider", activate: false },
+        "Exercise Antigravity CLI",
+        { providerId: "antigravity", branch: "antigravity/headless-provider", activate: false },
       );
       store.createConversation(
         project.id,
@@ -65,9 +65,9 @@ test("keeps three-line Work sidebar geometry", async ({
           codex: "OpenAI",
           claude: "Anthropic",
           cursor: "Cursor",
-          gemini: "Google",
           kimi: "Kimi Code",
           opencode: "OpenCode",
+          antigravity: "Google",
         },
       });
       store.selectConversation(recent.id);
@@ -106,7 +106,7 @@ test("keeps three-line Work sidebar geometry", async ({
     expect(statusBox).not.toBeNull();
     expect(statusBox!.width).toBeCloseTo(10, 3);
     expect(statusBox!.height).toBeCloseTo(10, 3);
-    for (const providerId of ["codex", "claude", "cursor", "gemini", "kimi", "opencode"]) {
+    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();

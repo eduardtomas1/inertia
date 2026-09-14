@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { WorkspaceGitSnapshot } from "../../src/shared/contracts";
 import {
   parseWorkspaceGitIdentity,
-  workspaceGitFilePath,
   workspaceGitIdentity,
+  workspaceGitOpenFilePath,
   workspaceGitRefreshIdentity,
   workspaceGitRepositoryLabel,
 } from "../../src/renderer/src/utils/workspaceGit";
@@ -68,6 +68,15 @@ const snapshot: WorkspaceGitSnapshot = {
 };
 
 describe("workspace Git renderer identity", () => {
+  it("opens repository files relative to a subfolder workspace without redirecting sibling files", () => {
+    const repository = { ...snapshot.repositories[0], repositoryPath: ".", workspacePrefix: "app" };
+    expect(workspaceGitOpenFilePath(repository, "app/src/main.ts")).toBe("src/main.ts");
+    expect(workspaceGitOpenFilePath(repository, "README.md")).toBeNull();
+    expect(workspaceGitOpenFilePath(repository, "application/src/main.ts")).toBeNull();
+    expect(workspaceGitOpenFilePath(snapshot.repositories[0], "src/Main.java"))
+      .toBe("modules/alpha/src/Main.java");
+  });
+
   it("does not flatten identical paths from different repositories", () => {
     const alpha = { repositoryPath: "modules/alpha", filePath: "src/Main.java" };
     const beta = { repositoryPath: "modules/beta", filePath: "src/Main.java" };
@@ -75,8 +84,8 @@ describe("workspace Git renderer identity", () => {
     expect(workspaceGitIdentity(alpha)).not.toBe(workspaceGitIdentity(beta));
     expect(parseWorkspaceGitIdentity(workspaceGitIdentity(alpha), snapshot)).toEqual(alpha);
     expect(parseWorkspaceGitIdentity(workspaceGitIdentity(beta), snapshot)).toEqual(beta);
-    expect(workspaceGitFilePath(alpha)).toBe("modules/alpha/src/Main.java");
-    expect(workspaceGitFilePath(beta)).toBe("modules/beta/src/Main.java");
+    expect(workspaceGitOpenFilePath(snapshot.repositories[0], alpha.filePath)).toBe("modules/alpha/src/Main.java");
+    expect(workspaceGitOpenFilePath(snapshot.repositories[1], beta.filePath)).toBe("modules/beta/src/Main.java");
   });
 
   it("labels the project-root repository safely", () => {

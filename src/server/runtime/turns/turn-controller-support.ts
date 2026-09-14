@@ -67,8 +67,6 @@ export function providerLabel(providerId: ProviderId): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : providerId === "gemini"
-          ? "Gemini"
           : providerId === "kimi"
             ? "Kimi Code"
             : "OpenCode";

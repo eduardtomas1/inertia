@@ -7,7 +7,10 @@ import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { IconButton } from "../ui";
 import "./SnapshotControl.css";
 
-export function SnapshotControl({ conversationId }: { conversationId: string }): React.JSX.Element | null {
+export function SnapshotControl({ conversationId, unavailableReason = null }: {
+  conversationId: string;
+  unavailableReason?: string | null;
+}): React.JSX.Element | null {
   const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
   const [state, setState] = useState<SnapshotState | null>(null);
@@ -42,6 +45,9 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
     return () => { active = false; window.removeEventListener("focus", refresh); restore(); };
   }, [open]);
   if (!window.inertia?.snapshot) return null;
+  if (unavailableReason) {
+    return <IconButton label={`Snapshots. ${unavailableReason}`} disabled onClick={() => undefined}><Camera size={16} /></IconButton>;
+  }
   return <>
     <IconButton label="Snapshots" onClick={() => setOpen(true)}><Camera size={16} /></IconButton>
     {open && createPortal(<div className="snapshot-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>

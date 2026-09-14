@@ -42,7 +42,7 @@ import {
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const CANCELLED_PROBE_COMPLETION_DRAIN_MS = 250;
-export const GEMINI_MINIMUM_STABLE_ACP_VERSION = "0.58.0";
+export const ANTIGRAVITY_MINIMUM_HEADLESS_VERSION = "1.2.2";
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
@@ -71,13 +71,13 @@ function kimiCandidateIsIdentified(
   return name === "kimi" || /\bkimi(?:[ -]code)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
 }
 
-function geminiCandidateIsIdentified(
-  executable: string,
-  versionOutput: string,
-  acpOutput: string,
-): boolean {
+function providerShortName(name: string): string {
+  return name.replace(/ CLI$/u, "");
+}
+
+function antigravityCandidateIsIdentified(executable: string): boolean {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
-  return name === "gemini" || /\bgemini(?:[ -]cli)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+  return name === "agy" || name === "antigravity";
 }
 
 function versionFromOutput(output: string): string | undefined {
@@ -291,12 +291,9 @@ function compareVersions(left: string | undefined, right: string | undefined): n
   return 0;
 }
 
-function geminiVersionSupportsStableAcp(version: string | undefined): boolean {
-  if (!version) return false;
-  const comparison = compareVersions(version, GEMINI_MINIMUM_STABLE_ACP_VERSION);
-  if (comparison !== 0) return comparison > 0;
-  // A prerelease of the minimum version does not meet the stable boundary.
-  return !/-[0-9A-Za-z.-]+(?:\+|$)/u.test(version);
+function antigravityVersionSupportsHeadless(version: string | undefined): boolean {
+  return Boolean(version)
+    && compareVersions(version, ANTIGRAVITY_MINIMUM_HEADLESS_VERSION) >= 0;
 }
 
 function nativeExecutablePreference(executable: string): number {
@@ -500,14 +497,12 @@ export async function detectProvider(
   const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
     const version = versionFromOutput(probe.output);
-    const acpProbe = (providerId === "cursor" || providerId === "gemini" || providerId === "kimi")
+    const acpProbe = (providerId === "cursor" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
           providerId === "cursor"
             ? cursorAgentCommandArgs(executable, ["acp", "--help"])
-            : providerId === "gemini"
-            ? ["--help"]
             : ["acp", "--help"],
           probeEnvironment,
           cwd,
@@ -518,13 +513,9 @@ export async function detectProvider(
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
-      && /(?:agent client protocol|\bacp\b|cursor|gemini|kimi)/iu.test(acpProbe.output)
+      && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
       && (providerId === "cursor"
         ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
-        : providerId === "gemini"
-        ? geminiCandidateIsIdentified(executable, probe.output, acpProbe.output)
-          && /(?:^|\s)--acp(?:\s|,|$)/mu.test(acpProbe.output)
-          && /(?:^|\s)--session-id(?:\s|,|$)/mu.test(acpProbe.output)
         : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
@@ -549,7 +540,10 @@ export async function detectProvider(
       executable,
       probe,
       version,
-      versionReady: providerId !== "gemini" || geminiVersionSupportsStableAcp(version),
+      versionReady: providerId === "antigravity"
+        ? antigravityCandidateIsIdentified(executable)
+          && antigravityVersionSupportsHeadless(version)
+        : true,
       acpReady,
       appServerReady,
       serveReady,
@@ -584,29 +578,15 @@ export async function detectProvider(
       ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
     const providerWithoutAcp =
-      (providerId === "cursor" ||
-        providerId === "gemini" ||
-        providerId === "kimi") &&
+      (providerId === "cursor" || providerId === "kimi") &&
       versionProbes.some(
         ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
       );
-    const bestGeminiInstall =
-      providerId === "gemini"
-        ? versionProbes
-            .filter(
-              ({ probe }) =>
-                probe.started && !probe.timedOut && probe.exitCode === 0,
-            )
-            .sort(
-              (left, right) =>
-                compareVersions(right.version, left.version) ||
-                nativeExecutablePreference(right.executable) -
-                  nativeExecutablePreference(left.executable),
-            )[0]
-        : undefined;
-    const geminiRequiresStableUpgrade = Boolean(
-      bestGeminiInstall && !bestGeminiInstall.versionReady,
-    );
+    const antigravityInstall = providerId === "antigravity"
+      ? versionProbes.find(({ executable, probe }) =>
+          antigravityCandidateIsIdentified(executable)
+          && probe.started && !probe.timedOut && probe.exitCode === 0)
+      : undefined;
     const providerWithoutPureServe =
       providerId === "opencode" &&
       versionProbes.some(
@@ -614,35 +594,25 @@ export async function detectProvider(
       );
     return {
       provider,
-      available: providerWithoutAcp || providerWithoutPureServe,
-      ...(bestGeminiInstall
-        ? {
-            executable: bestGeminiInstall.executable,
-            ...(bestGeminiInstall.version
-              ? { version: bestGeminiInstall.version }
-              : {}),
-          }
-        : {}),
+      available: providerWithoutAcp || providerWithoutPureServe || Boolean(antigravityInstall),
       installState:
-        providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
+        providerWithoutAcp || providerWithoutPureServe || antigravityInstall
+          ? "installed"
+          : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
-        : geminiRequiresStableUpgrade
-          ? bestGeminiInstall?.version
-            ? `${provider.name} ${bestGeminiInstall.version} is installed, but stable ACP requires ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer; update ${provider.name}`
-            : `${provider.name} is installed, but its version could not be verified; install ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer for stable ACP`
-          : providerWithoutAcp
-            ? providerId === "gemini"
-              ? `${provider.name} CLI found, but stable ACP is unavailable; update the selected CLI`
-              : `${provider.name} CLI found, but ACP is unavailable`
-            : providerWithoutPureServe
-              ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
-              : providerId === "codex"
-                ? "Codex CLI was found but failed to start"
-                : statusMessage("error", "unknown"),
+        : antigravityInstall
+          ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${ANTIGRAVITY_MINIMUM_HEADLESS_VERSION} or newer; run 'agy update'`
+        : providerWithoutAcp
+          ? `${providerShortName(provider.name)} CLI found, but ACP is unavailable`
+          : providerWithoutPureServe
+            ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
+            : providerId === "codex"
+              ? "Codex CLI was found but failed to start"
+              : statusMessage("error", "unknown"),
     };
   }
 
@@ -740,7 +710,9 @@ export async function detectProvider(
       authState: "unknown",
       canRun: true,
       cleanupConfirmed: true,
-      statusMessage: `Installed; ${provider.name} ACP will verify authentication when a session starts`,
+      statusMessage: providerId === "antigravity"
+        ? "Installed; Antigravity checks your sign-in when a turn starts"
+        : `Installed; ${providerShortName(provider.name)} ACP will verify authentication when a session starts`,
     };
   }
   const authArgs =

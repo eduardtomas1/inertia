@@ -152,11 +152,10 @@ test.beforeAll(async () => {
         model: "cursor-managed",
         activate: false,
       });
-      const gemini = store.createConversation(project.id, "Gemini usage", {
-        providerId: "gemini",
+      const antigravity = store.createConversation(project.id, "Antigravity usage", {
+        providerId: "antigravity",
         modelSelection: providerNativeModelSelection({
-          providerId: "gemini",
-          modelId: "gemini-2.5-pro",
+          providerId: "antigravity",
         }),
         activate: false,
       });
@@ -207,9 +206,9 @@ test.beforeAll(async () => {
         inputTokens: 80,
         outputTokens: 20,
       });
-      addTurn(store, gemini, {
-        providerId: "gemini",
-        modelSelection: gemini.modelSelection,
+      addTurn(store, antigravity, {
+        providerId: "antigravity",
+        modelSelection: antigravity.modelSelection,
         daysAgo: 3,
         total: 900,
         scope: "run",
@@ -342,7 +341,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     }))))
     .toEqual([
       { kind: "official", providerId: "claude" },
-      { kind: "official", providerId: "gemini" },
+      { kind: "official", providerId: "antigravity" },
       { kind: "official", providerId: "codex" },
       { kind: "official", providerId: "kimi" },
       { kind: "official", providerId: "cursor" },

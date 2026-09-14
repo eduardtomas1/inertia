@@ -112,7 +112,6 @@ function inactiveExtension(
   if (
     harnessId === "claude-agent-sdk"
     || harnessId === "cursor-acp"
-    || harnessId === "gemini-acp"
     || harnessId === "kimi-acp"
     || harnessId === "opencode-sdk"
   ) {
@@ -121,6 +120,13 @@ function inactiveExtension(
       respondToApproval,
       respondToInput,
       steer,
+    };
+  }
+  if (harnessId === "antigravity-cli") {
+    return {
+      kind: harnessId,
+      respondToApproval: () => false,
+      respondToInput: () => false,
     };
   }
   return {
@@ -256,11 +262,12 @@ describe("production provider lifecycle conformance", () => {
       "codex-app-server",
       "claude-agent-sdk",
       "cursor-acp",
-      "gemini-acp",
       "kimi-acp",
       "opencode-sdk",
+      "antigravity-cli",
     ]);
-    expect(PRODUCTION_HARNESSES.some(({ harnessId }) => harnessId.endsWith("-cli")))
+    expect(PRODUCTION_HARNESSES.some(({ harnessId }) =>
+      ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli"].includes(harnessId)))
       .toBe(false);
   });
 
@@ -754,7 +761,7 @@ describe("production provider lifecycle conformance", () => {
     },
   );
 
-  it.each(PRODUCTION_HARNESSES)(
+  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) => harnessId !== "antigravity-cli"))(
     "$harnessId binds interaction response, replay, and cancellation to the exact run",
     async (route) => {
       const controlled = controlledManager(route);
@@ -821,6 +828,39 @@ describe("production provider lifecycle conformance", () => {
     },
   );
 
+  it("keeps Antigravity approvals and questions inside its own headless policy", async () => {
+    const route = PRODUCTION_HARNESSES.find(({ harnessId }) =>
+      harnessId === "antigravity-cli")!;
+    const controlled = controlledManager(route);
+    const input = inputFor(route);
+    const running = controlled.manager.run(input);
+    const exact = { runId: input.runId, turnId: input.turnId };
+
+    expect(controlled.manager.respondToApproval(
+      input.conversationId,
+      "approval-1",
+      "approve",
+      exact,
+    )).toBe(false);
+    expect(controlled.manager.respondToInput(
+      input.conversationId,
+      "input-1",
+      { answer: ["yes"] },
+      exact,
+    )).toBe(false);
+    expect(controlled.observations).toMatchObject({ approvals: [], inputs: [] });
+    expect(controlled.manager.cancel(input.conversationId)).toBe(true);
+    controlled.resolve({
+      ...providerRunTerminal(input, "cancelled"),
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+    await running;
+  });
+
   it.each(PRODUCTION_HARNESSES)(
     "$harnessId applies its declared follow-up exception at the exact run",
     async (route) => {
@@ -865,14 +905,17 @@ describe("production provider lifecycle conformance", () => {
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
       const input = inputFor(route);
+      const capability = route.harnessId === "antigravity-cli"
+        ? "tool-activity" as const
+        : "approvals" as const;
       expect(controlled.manager.providerCapabilityAvailable(
         input,
-        "approvals",
+        capability,
       )).toBe(false);
       await controlled.manager.detect(route.providerId);
       expect(controlled.manager.providerCapabilityAvailable(
         input,
-        "approvals",
+        capability,
       )).toBe(true);
       controlled.manager.setCommand(
         route.providerId,
@@ -880,7 +923,7 @@ describe("production provider lifecycle conformance", () => {
       );
       expect(controlled.manager.providerCapabilityAvailable(
         input,
-        "approvals",
+        capability,
       )).toBe(false);
       expect(() => controlled.manager.run({
         ...input,

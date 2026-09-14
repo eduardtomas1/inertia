@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../../src/shared/attachments";
-import { geminiPrompt } from "../../src/server/provider/gemini-acp-session";
 import { kimiPrompt } from "../../src/server/provider/kimi-acp-session";
 import { cursorPrompt } from "../../src/server/provider/cursor-acp-harness";
 
@@ -30,7 +29,6 @@ afterEach(async () => {
 });
 
 describe.each([
-  ["Gemini", geminiPrompt],
   ["Kimi", kimiPrompt],
   ["Cursor", cursorPrompt],
 ] as const)("%s final provider image read", (_provider, prompt) => {

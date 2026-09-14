@@ -209,53 +209,42 @@ describe("composer route readiness", () => {
     });
   });
 
-  it("names Gemini readiness without claiming unavailable capabilities", () => {
+  it("asks for an Antigravity update and never gates a runnable install on sign-in", () => {
     const selection = customSelection({
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
-      backendProfileDisplayName: "Google Gemini",
+      harnessId: "antigravity-cli",
+      backendProfileId: "builtin:antigravity",
+      backendProfileDisplayName: "Google Antigravity",
       modelId: "provider-default",
       backendConfigurationRevision: 0,
     });
+    const installed = {
+      id: "antigravity" as const,
+      label: "Antigravity",
+      command: "agy",
+      version: "1.2.2",
+      executable: "/opt/bin/agy",
+      installState: "installed" as const,
+      authState: "unknown" as const,
+    };
     expect(composerRouteReadiness({
-      provider: provider({
-        id: "gemini",
-        label: "Gemini",
-        command: "gemini",
-        available: false,
-        executable: null,
-        installState: "not-installed",
-        authState: "unknown",
-        canRun: false,
-        statusMessage: "Gemini CLI not found",
-      }),
+      provider: provider({ ...installed, canRun: true }),
       profile: undefined,
       selection,
-    })).toMatchObject({
-      ready: false,
-      title: "Gemini CLI not found",
-      action: "install",
-    });
-
+    })).toEqual({ ready: true });
     expect(composerRouteReadiness({
       provider: provider({
-        id: "gemini",
-        label: "Gemini",
-        command: "gemini",
-        version: "0.29.5",
-        executable: "/opt/bin/gemini",
-        installState: "installed",
-        authState: "unknown",
+        ...installed,
+        version: "1.1.0",
         canRun: false,
-        statusMessage:
-          "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
+        statusMessage: undefined,
       }),
       profile: undefined,
       selection,
     })).toMatchObject({
       ready: false,
       badge: "Update needed",
-      title: "Gemini cannot run this route",
+      title: "Antigravity cannot run this route",
+      detail: "Run 'agy update', then refresh agent status.",
       action: "refresh",
     });
   });

@@ -19,7 +19,7 @@ import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchem
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
-type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -741,6 +741,7 @@ function gitDiff(value: unknown): boolean {
 }
 function workspaceGitRepository(value: unknown): boolean {
   return recordWithStrings(value, "repositoryPath")
+    && optionalStringField(value, "workspacePrefix")
     && optionalNullableStringField(value, "authorityRef")
     && oneOf(value, "state", ["ready", "error"])
     && nullableStringField(value, "error")
@@ -1198,7 +1199,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
                 "sessionId",
               )
               && oneOf(value.providerResume, "providerId", [
-                "codex", "claude", "cursor", "gemini", "kimi", "opencode",
+                "codex", "claude", "cursor", "kimi", "opencode", "antigravity",
               ])
               && nonemptyStringField(value.providerResume, "providerLabel")
               && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(

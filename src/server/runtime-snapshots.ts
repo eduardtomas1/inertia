@@ -45,9 +45,9 @@ function agentThreadManagement(
     codex: "Codex dynamic tools",
     claude: "Claude's in-process tool server",
     cursor: "Cursor's scoped MCP session",
-    gemini: "Gemini's scoped MCP session",
     kimi: "Kimi Code's scoped MCP session",
     opencode: "OpenCode's scoped MCP session",
+    antigravity: "Antigravity",
   }[providerId];
   return capabilityContract?.installationVerified
     && capabilityContract.hostToolBridgeAvailable

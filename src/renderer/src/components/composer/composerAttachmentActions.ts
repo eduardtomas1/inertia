@@ -28,6 +28,7 @@ interface ComposerAttachmentActionOptions {
   onImportAttachments: ComposerProps["onImportAttachments"];
   releaseAttachmentRef: MutableRefObject<ComposerProps["onReleaseAttachment"]>;
   running: boolean;
+  imageInputUnavailableReason: string | null;
   setAttachments: Dispatch<SetStateAction<ChatAttachment[]>>;
   setAttachmentImporting: Dispatch<SetStateAction<boolean>>;
   setAttachmentError: Dispatch<SetStateAction<string | null>>;
@@ -57,6 +58,7 @@ export function composerAttachmentActions({
   onImportAttachments,
   releaseAttachmentRef,
   running,
+  imageInputUnavailableReason,
   setAttachments,
   setAttachmentImporting,
   setAttachmentError,
@@ -66,12 +68,23 @@ export function composerAttachmentActions({
   const reportAttachmentLimit = (): void => setAttachmentError(
     `Some files were not attached. A message supports up to ${MAX_CHAT_ATTACHMENTS} attachments totaling ${formatAttachmentSize(MAX_CHAT_ATTACHMENT_TOTAL_BYTES)}.`,
   );
+  const permitsKind = (mimeType: Parameters<typeof chatAttachmentKind>[0] | null): boolean => {
+    const image = mimeType !== null && chatAttachmentKind(mimeType) === "image";
+    return image ? !imageInputUnavailableReason : !running;
+  };
+  const reportImagesRejected = (
+    mimeTypes: readonly (Parameters<typeof chatAttachmentKind>[0] | null)[],
+  ): void => {
+    if (imageInputUnavailableReason && mimeTypes.some((mimeType) =>
+      mimeType !== null && chatAttachmentKind(mimeType) === "image")) {
+      setAttachmentError(`${imageInputUnavailableReason} Images were not attached.`);
+    }
+  };
   const addAttachments = (
     incoming: readonly ChatAttachment[],
   ): string[] => {
-    const permitted = running
-      ? incoming.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
-      : incoming;
+    const permitted = incoming.filter(({ mimeType }) => permitsKind(mimeType));
+    reportImagesRejected(incoming.map(({ mimeType }) => mimeType));
     const current = attachmentsRef.current;
     const merged = mergeComposerAttachments(current, permitted);
     const acceptedIds = new Set(merged.attachments.map(({ id }) => id));
@@ -195,12 +208,11 @@ export function composerAttachmentActions({
         0,
         MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length,
       );
-      const eligible = running
-        ? files.filter((file) => {
-            const mimeType = chatAttachmentMimeTypeForName(file.name);
-            return mimeType !== null && chatAttachmentKind(mimeType) === "image";
-          })
+      const mimeTypes = files.map((file) => chatAttachmentMimeTypeForName(file.name));
+      const eligible = running || imageInputUnavailableReason
+        ? files.filter((_file, index) => permitsKind(mimeTypes[index] ?? null))
         : files;
+      reportImagesRejected(mimeTypes);
       const candidates = eligible.slice(0, remaining);
       if (candidates.length === 0) {
         if (eligible.length > remaining) reportAttachmentLimit();

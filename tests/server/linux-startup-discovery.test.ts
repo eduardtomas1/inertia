@@ -133,7 +133,6 @@ else {
         codex: { command: fixture, cwd: root },
         claude: { command: fixture, cwd: root },
         cursor: { command: join(root, "absent-cursor"), cwd: root },
-        gemini: { command: join(root, "absent-gemini"), cwd: root },
         kimi: { command: join(root, "absent-kimi"), cwd: root },
         opencode: { command: join(root, "absent-opencode"), cwd: root },
       }),

@@ -442,6 +442,20 @@ hang();
     });
   });
 
+  it("fails closed and stops the process when Antigravity floods its output", async () => {
+    const root = fixtureRoot("antigravity flood");
+    const { command } = fakeAgy(root, `
+const line = JSON.stringify({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "." } }) + "\\n";
+process.stdout.write(line.repeat(9_000));
+hang();
+`);
+    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+      status: "failed",
+      failure: { reason: "malformed-protocol", message: expect.stringMatching(/exceeded the bounded event/u) },
+      cleanupConfirmed: true,
+    });
+  });
+
   it("fails a clean exit that sent no result", async () => {
     const root = fixtureRoot("antigravity exit zero");
     const { command } = fakeAgy(root, `

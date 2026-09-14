@@ -35,7 +35,7 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
-import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
+import { CappedProviderBuffer, ProviderNdjsonDecoder, ProviderRunEventBudget } from "./io";
 import { providerProcessInvocation } from "./process";
 
 const MAX_LINE_BYTES = 1024 * 1024;
@@ -45,6 +45,8 @@ const MAX_STDERR_DETAIL_LINES = 20;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_TRACKED_TOOLS = 1_024;
 const MAX_DECLINED_NOTICES = 32;
+const MAX_RUN_EVENTS = 8_192;
+const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const RESULT_EXIT_GRACE_MS = 2_000;
 const OUTPUT_DRAIN_GRACE_MS = 1_000;
 const TERMINATION_CONFIRM_MS = 10_000;
@@ -209,10 +211,26 @@ function startAntigravityRun(
       resultTimer.unref?.();
     }
   };
+  const eventBudget = new ProviderRunEventBudget(
+    "Antigravity",
+    MAX_LINE_BYTES,
+    MAX_RUN_EVENTS,
+    MAX_RUN_EVENT_BYTES,
+  );
+  const admit = (byteLength: number): boolean => {
+    if (settled || finalizing || failure || result) return false;
+    try {
+      eventBudget.observeBytes(byteLength);
+      return true;
+    } catch (error) {
+      fail(antigravityFailure("malformed", "", input.cwd, error instanceof Error ? error.message : undefined));
+      return false;
+    }
+  };
   const decoder = new ProviderNdjsonDecoder(
     MAX_LINE_BYTES,
     (line) => {
-      if (settled || finalizing || failure || result) return;
+      if (!admit(Buffer.byteLength(line, "utf8"))) return;
       const events = parseAntigravityLine(line);
       if (!events) {
         fail(antigravityFailure("malformed", line.slice(0, 2_000), input.cwd));
@@ -223,7 +241,11 @@ function startAntigravityRun(
         if (result) return;
       }
     },
-    () => emitter.activity("system", "info", "Antigravity sent an oversized line that Inertia skipped"),
+    () => {
+      if (admit(MAX_LINE_BYTES)) {
+        emitter.activity("system", "info", "Antigravity sent an oversized line that Inertia skipped");
+      }
+    },
   );
   const onStderr = (chunk: Buffer): void => {
     const text = chunk.toString("utf8");

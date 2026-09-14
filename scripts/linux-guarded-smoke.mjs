@@ -2,6 +2,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { linuxProcessGroupCanExecute } from "./linux-process-group.mjs";
 
+export function releaseLinuxSmokeLauncherHandles(launchers) {
+  for (const child of launchers) {
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    child.unref();
+  }
+}
+
 // The native subreaper owns the whole smoke, including AppImage wrappers and
 // update candidates that create new sessions/process groups before readiness.
 export async function runLinuxGuardedSmoke({ guardian, command, args, env = process.env, timeoutMs = 180_000 }) {

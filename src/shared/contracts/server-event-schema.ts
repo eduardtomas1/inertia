@@ -741,6 +741,7 @@ function gitDiff(value: unknown): boolean {
 }
 function workspaceGitRepository(value: unknown): boolean {
   return recordWithStrings(value, "repositoryPath")
+    && optionalStringField(value, "workspacePrefix")
     && optionalNullableStringField(value, "authorityRef")
     && oneOf(value, "state", ["ready", "error"])
     && nullableStringField(value, "error")

@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "sourceBeforeBenchmarkCorrection": "5c918bad0f776c9f6885e3e16b353b2486632115",
+  "integratedMain": "1d5daeaa4ec2e603e314ae0cd98b0abad9b76f06",
+  "hostedRun": "https://github.com/eduardtomas1/inertia/actions/runs/34788723039",
+  "testedMerge": "cdb41a86380655fb13cb9b0f6e1f77c367e6e951",
+  "benchmark": {
+    "failedJob": "macOS x64",
+    "failure": "interaction target did not appear: .command-palette[role=\"dialog\"]",
+    "cause": "The benchmark unconditionally dispatched Control+K. The intended macOS application shortcut is Command+K, preserving Cocoa Control chords.",
+    "correction": "Pass the Node platform into page.evaluate; dispatch Meta on darwin and Control elsewhere.",
+    "negativeControl": {
+      "platform": "darwin-arm64",
+      "command": "CI=true npm run benchmark:desktop:built",
+      "result": "failed with the same missing command-palette target before the correction"
+    },
+    "positiveControl": {
+      "platform": "darwin-arm64",
+      "command": "CI=true npm run benchmark:desktop:built",
+      "result": "1 passed (1.4m)",
+      "runtime": {
+        "node": "v22.23.2",
+        "electron": "44.2.0",
+        "playwright": "bundled"
+      },
+      "collectedAt": "2026-09-14T00:29:53.680Z",
+      "streamingSamples": 3,
+      "firstOpenLatency": {
+        "coldIntentDialogMs": 187.39999997615814,
+        "commandPaletteFirstOpenMs": 4.399999976158142,
+        "settingsFirstOpenMs": 13.700000047683716
+      }
+    },
+    "limits": "A single local run establishes completion of this workload, not a cross-platform latency claim. Assertions, timeouts and performance targets are unchanged.",
+    "positiveFullGate": {
+      "command": "VITEST_MAX_WORKERS=2 npm run check",
+      "node": "22.23.2",
+      "exitCode": 0,
+      "testsPassed": 9046,
+      "testsSkipped": 139,
+      "suites": 861,
+      "includes": [
+        "quality",
+        "75 immutable migration lineage entries",
+        "build",
+        "all renderer bundle budgets"
+      ]
+    }
+  },
+  "attachmentShutdown": {
+    "failedJob": "macOS arm64",
+    "test": "tests/e2e/image-send-regression.spec.ts:126",
+    "observed": "All three native image imports/sends, restart and persisted previews passed. Final fixture shutdown reported resource-close-failed and attachment-close-unconfirmed, then forced fixture termination.",
+    "cause": "not established",
+    "runtimeRecords": {
+      "outcome": "captured",
+      "value": [
+        {
+          "at": "2026-09-13T23:29:50.430Z",
+          "event": "runtime.state",
+          "phase": "starting",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:29:50.907Z",
+          "event": "runtime.state",
+          "phase": "ready",
+          "generation": 1,
+          "pid": 51513,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:09.982Z",
+          "event": "runtime.state",
+          "phase": "stopping",
+          "generation": 1,
+          "pid": 51513,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:10.818Z",
+          "event": "runtime.state",
+          "phase": "stopping",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:10.843Z",
+          "event": "runtime.state",
+          "phase": "stopped",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:11.993Z",
+          "event": "runtime.state",
+          "phase": "starting",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:12.856Z",
+          "event": "runtime.state",
+          "phase": "ready",
+          "generation": 1,
+          "pid": 52137,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:14.739Z",
+          "event": "runtime.state",
+          "phase": "stopping",
+          "generation": 1,
+          "pid": 52137,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": null,
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:21.176Z",
+          "event": "runtime.failure",
+          "phase": "stopping",
+          "generation": 1,
+          "pid": 52137,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": "resource-close-failed",
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:21.185Z",
+          "event": "runtime.failure",
+          "phase": "stopping",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": "resource-close-failed",
+          "startupBlockerCode": null
+        },
+        {
+          "at": "2026-09-13T23:30:21.200Z",
+          "event": "runtime.failure",
+          "phase": "stopped",
+          "generation": 1,
+          "pid": null,
+          "restartAttempt": 0,
+          "restartScheduled": false,
+          "lastErrorCode": "attachment-close-unconfirmed",
+          "startupBlockerCode": null
+        }
+      ]
+    },
+    "fixtureLifecycle": {
+      "launcherPid": 52129,
+      "mainPid": 52129,
+      "mainIdentity": "captured",
+      "launcherExitObserved": true,
+      "launcherCloseObserved": true,
+      "launcherExitCode": null,
+      "stages": [
+        {
+          "stage": "quit-requested",
+          "elapsedMs": 9555
+        },
+        {
+          "stage": "quit-request-fulfilled",
+          "elapsedMs": 9555
+        },
+        {
+          "stage": "main-pid-advisory-present",
+          "elapsedMs": 9557
+        },
+        {
+          "stage": "force-stop-started",
+          "elapsedMs": 9557
+        },
+        {
+          "stage": "main-window-page-closed",
+          "elapsedMs": 9602
+        },
+        {
+          "stage": "launcher-exit",
+          "elapsedMs": 9602
+        },
+        {
+          "stage": "force-stop-confirmed",
+          "elapsedMs": 9602
+        },
+        {
+          "stage": "transport-started",
+          "elapsedMs": 9602
+        },
+        {
+          "stage": "transport-settled",
+          "elapsedMs": 9602
+        },
+        {
+          "stage": "launcher-close",
+          "elapsedMs": 9607
+        },
+        {
+          "stage": "directory-remove-started",
+          "elapsedMs": 9617
+        },
+        {
+          "stage": "directory-remove-fulfilled",
+          "elapsedMs": 9630
+        }
+      ]
+    },
+    "localReproductions": {
+      "standaloneTargetPassed": 1,
+      "CIRepeatEachTargetPassed": 3,
+      "fullFileTestsPassed": 2,
+      "fullFileTargetExecutions": 1,
+      "targetExecutionsTotal": 5
+    },
+    "disposition": "Retain the failure; retest on the new benchmark-corrected head. No production shutdown, timeout, assertion or cleanup guarantee was changed for this incident.",
+    "oldJobRerun": "CLI refused the request while the overall run was active; no old-head job rerun started. A new source commit supersedes that plan."
+  }
+}

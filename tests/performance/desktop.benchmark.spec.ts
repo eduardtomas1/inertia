@@ -1647,7 +1647,7 @@ async function rendererInteractionMeasurement(
   page: Page,
   measurement: RendererInteractionMeasurement,
 ): Promise<number> {
-  return page.evaluate(({ triggerSelector, targetSelector, shortcut }) => (
+  return page.evaluate(({ triggerSelector, targetSelector, shortcut, platform }) => (
     new Promise<number>((resolveMeasurement, rejectMeasurement) => {
       const startedAt = performance.now();
       const timeout = window.setTimeout(() => {
@@ -1670,7 +1670,8 @@ async function rendererInteractionMeasurement(
         window.dispatchEvent(new KeyboardEvent("keydown", {
           key: "k",
           code: "KeyK",
-          ctrlKey: true,
+          ctrlKey: platform !== "darwin",
+          metaKey: platform === "darwin",
           bubbles: true,
           cancelable: true,
         }));
@@ -1690,7 +1691,7 @@ async function rendererInteractionMeasurement(
       }
       finishIfVisible();
     })
-  ), measurement);
+  ), { ...measurement, platform: process.platform });
 }
 
 async function coldIntentDialogMeasurement(page: Page): Promise<number> {

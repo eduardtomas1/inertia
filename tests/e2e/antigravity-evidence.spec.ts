@@ -157,7 +157,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await expect(page.locator(".provider-settings-shell")).not.toContainText(/gemini/iu);
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });
     await expect(executable).not.toHaveValue("");
-    expect(realpathSync(await executable.inputValue())).toBe(realpathSync(fakeAgy));
+    expect(realpathSync.native(await executable.inputValue())).toBe(realpathSync.native(fakeAgy));
     const mark = antigravity.locator('[data-provider-brand="antigravity"]').first();
     await expect(mark).toHaveAttribute("data-provider-icon-kind", "official");
     await captureElement(antigravity, testInfo, `antigravity-mark-settings-${theme.toLowerCase()}`);
@@ -223,9 +223,9 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
 
   const entries = wire().filter(({ kind }) => kind === "launch");
   expect(entries.length).toBeGreaterThan(0);
-  const fakeEntryPoints = [fakeAgy, join(dirname(fakeAgy), "agy-fixture.cjs")].map((path) => realpathSync(path));
+  const fakeEntryPoints = [fakeAgy, join(dirname(fakeAgy), "agy-fixture.cjs")].map((path) => realpathSync.native(path));
   for (const entry of entries) {
-    expect(fakeEntryPoints).toContain(realpathSync(entry.executable));
+    expect(fakeEntryPoints).toContain(realpathSync.native(entry.executable));
     expect(entry.args.some((arg) => arg === "-p" || arg === "--print" || arg === "--prompt")).toBe(false);
   }
   const turns = entries.filter(({ args }) => args[0] === "--input-format");

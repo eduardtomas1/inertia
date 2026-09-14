@@ -78,9 +78,12 @@ describe("hostile provider markdown", () => {
     expect(screen.getByTitle(/blocked/u)).toBeInTheDocument();
   });
 
-  it("blocks file: links", () => {
-    renderMarkdown("[etc](file:///etc/passwd)");
-    expect(screen.getByTitle(/blocked/u)).toBeInTheDocument();
+  it("opens file: links only after clicking them", () => {
+    const bridge = inertiaBridge();
+    renderMarkdown("[notes](file:///elsewhere/notes.md)");
+    expect(bridge.openExternal).not.toHaveBeenCalled();
+    screen.getByRole("link", { name: "notes" }).click();
+    expect(bridge.openExternal).toHaveBeenCalledWith("file:///elsewhere/notes.md");
   });
 
   it("blocks custom application schemes", () => {

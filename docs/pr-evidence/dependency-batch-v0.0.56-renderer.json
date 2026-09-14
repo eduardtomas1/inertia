@@ -1,13 +1,13 @@
 {
-  "baselineRevision": "325434496d998a144792ead1018456ccf0549f80",
-  "sourceComparison": "Renderer, shared source and original build configuration are identical. Only the exact package.json/package-lock.json deltas from Dependabot PRs369\u2013376 affect the renderer build.",
+  "baselineRevision": "00270aa645bd782e93c9fafc6bdade9a469fc816",
+  "sourceComparison": "Renderer, shared source and original build configuration are byte-identical to merged Antigravity main. Both package roots use 0.0.56. Only the exact dependency deltas from Dependabot PRs #369\u2013376 affect the renderer build.",
   "environment": {
     "platform": "macOS ARM64",
     "node": "22.23.2",
-    "baselineLockSha256": "18404aba7f05d3385d60525aab0d4de3022703820df1be7c8384b0d6d191cf20",
-    "updatedLockSha256": "3b11670fb98e49831743e16721a0d4e9b092f4f00dbc030eb032124ff7780587"
+    "baselineLockSha256": "ef1d85dc6334377df4bd619b771e84c9d0c292b2327f45b42f21a2fd06383fdb",
+    "updatedLockSha256": "004c66c07ce56569701baedb810c255f8c31b293bea276561bb9a367d8444588"
   },
-  "method": "Clean separate worktrees with npm ci. Original electron-vite production configuration/plugins and defaults retained. A read-only generateBundle plugin recorded Rollup rendered module lengths and chunk imports; no chunk code, source, minification or import boundaries were changed. Updated measurements exactly match the uninstrumented production build. The existing renderer-bundle checker structural assertions all passed before size thresholds were evaluated.",
+  "method": "Clean separate worktrees with npm ci. Original electron-vite production configuration/plugins and defaults retained. A read-only generateBundle plugin recorded Rollup rendered module lengths and chunk imports; no chunk code, source, minification or import boundaries were changed. The existing renderer-bundle checker structural assertions all passed before size thresholds were evaluated.",
   "interpretation": "The entry growth comes entirely from React and react-dom. First-load and core additionally include updated Zod, Lucide and TanStack Virtual code. Module rendered lengths are before final chunk minification; closure measurements below are final emitted JavaScript bytes. Application rendered module bytes are identical across the two graphs.",
   "measurementsBytes": {
     "baseline": {
@@ -18,22 +18,22 @@
       "deferredReviewNoteJavaScript": 1439,
       "deferredThreadActionsJavaScript": 8114,
       "deferredDiagnosticsJavaScript": 12310,
-      "deferredDiagnosticCatalogJavaScript": 9884,
+      "deferredDiagnosticCatalogJavaScript": 9889,
       "deferredIssueReportJavaScript": 12500,
       "mascotFirstLoadJavaScript": 5980,
       "mascotJavaScript": 5980,
       "mascotSettingsJavaScript": 1994,
       "entryJavaScript": 193174,
-      "mainWorkbenchFirstLoadJavaScript": 773588,
-      "detachedChatFirstLoadJavaScript": 583594,
+      "mainWorkbenchFirstLoadJavaScript": 774491,
+      "detachedChatFirstLoadJavaScript": 584254,
       "entryCss": 348591,
       "colorThemesCss": 11686,
       "detachedChatCss": 2677,
-      "settingsJavaScript": 47778,
+      "settingsJavaScript": 47864,
       "filesFirstLoadJavaScript": 104950,
-      "deferredMarkdownJavaScript": 429674,
-      "transcriptJavaScript": 534651,
-      "deferredFailureDiagnosticsJavaScript": 6503,
+      "deferredMarkdownJavaScript": 431598,
+      "transcriptJavaScript": 536610,
+      "deferredFailureDiagnosticsJavaScript": 6513,
       "deferredAttachmentPreviewJavaScript": 12332,
       "deferredPreviewJavaScript": 8062,
       "deferredBrowserEvidenceJavaScript": 3751,
@@ -42,7 +42,7 @@
       "deferredCanaryRollbackJavaScript": 2210,
       "deferredLifecycleIntegritySettingsJavaScript": 4291,
       "deferredSidebarUpdateControlJavaScript": 10777,
-      "deferredProviderAuthJavaScript": 11915,
+      "deferredProviderAuthJavaScript": 10118,
       "deferredProviderMaintenanceJavaScript": 3983,
       "deferredComposerQueueJavaScript": 6936,
       "deferredTerminalJavaScript": 25941,
@@ -51,7 +51,7 @@
       "preMergeConfidenceJavaScript": 22349,
       "morphiconsJavaScript": 15829,
       "morphingIconFeedbackJavaScript": 4221,
-      "coreJavaScript": 2073554,
+      "coreJavaScript": 2076812,
       "deferredPdfJavaScript": 437530,
       "deferredPdfWorker": 1265413
     },
@@ -63,22 +63,22 @@
       "deferredReviewNoteJavaScript": 1439,
       "deferredThreadActionsJavaScript": 8154,
       "deferredDiagnosticsJavaScript": 12330,
-      "deferredDiagnosticCatalogJavaScript": 9884,
+      "deferredDiagnosticCatalogJavaScript": 9889,
       "deferredIssueReportJavaScript": 12520,
       "mascotFirstLoadJavaScript": 5980,
       "mascotJavaScript": 5980,
       "mascotSettingsJavaScript": 1994,
       "entryJavaScript": 222496,
-      "mainWorkbenchFirstLoadJavaScript": 809891,
-      "detachedChatFirstLoadJavaScript": 619566,
+      "mainWorkbenchFirstLoadJavaScript": 810794,
+      "detachedChatFirstLoadJavaScript": 620226,
       "entryCss": 348591,
       "colorThemesCss": 11686,
       "detachedChatCss": 2677,
-      "settingsJavaScript": 47858,
+      "settingsJavaScript": 47944,
       "filesFirstLoadJavaScript": 105117,
-      "deferredMarkdownJavaScript": 429808,
-      "transcriptJavaScript": 535059,
-      "deferredFailureDiagnosticsJavaScript": 6503,
+      "deferredMarkdownJavaScript": 431732,
+      "transcriptJavaScript": 537018,
+      "deferredFailureDiagnosticsJavaScript": 6513,
       "deferredAttachmentPreviewJavaScript": 12332,
       "deferredPreviewJavaScript": 8082,
       "deferredBrowserEvidenceJavaScript": 3751,
@@ -87,7 +87,7 @@
       "deferredCanaryRollbackJavaScript": 2210,
       "deferredLifecycleIntegritySettingsJavaScript": 4291,
       "deferredSidebarUpdateControlJavaScript": 10797,
-      "deferredProviderAuthJavaScript": 11915,
+      "deferredProviderAuthJavaScript": 10118,
       "deferredProviderMaintenanceJavaScript": 3983,
       "deferredComposerQueueJavaScript": 6956,
       "deferredTerminalJavaScript": 25961,
@@ -96,7 +96,7 @@
       "preMergeConfidenceJavaScript": 22570,
       "morphiconsJavaScript": 15829,
       "morphingIconFeedbackJavaScript": 4221,
-      "coreJavaScript": 2111470,
+      "coreJavaScript": 2114728,
       "deferredPdfJavaScript": 437530,
       "deferredPdfWorker": 1265413
     },
@@ -149,18 +149,18 @@
   "renderedModuleBytes": {
     "entry": {
       "application source": {
-        "baseline": 5047,
-        "updated": 5047,
+        "baseline": 4634,
+        "updated": 4634,
         "delta": 0
       },
       "react": {
-        "baseline": 20048,
-        "updated": 20912,
+        "baseline": 20245,
+        "updated": 21109,
         "delta": 864
       },
       "react-dom": {
-        "baseline": 561127,
-        "updated": 653543,
+        "baseline": 561283,
+        "updated": 653699,
         "delta": 92416
       }
     },
@@ -171,8 +171,8 @@
         "delta": 1195
       },
       "application source": {
-        "baseline": 944267,
-        "updated": 944267,
+        "baseline": 945989,
+        "updated": 945989,
         "delta": 0
       },
       "lucide-react": {
@@ -181,13 +181,13 @@
         "delta": 8693
       },
       "react": {
-        "baseline": 20048,
-        "updated": 20912,
+        "baseline": 20245,
+        "updated": 21109,
         "delta": 864
       },
       "react-dom": {
-        "baseline": 561127,
-        "updated": 653543,
+        "baseline": 561323,
+        "updated": 653739,
         "delta": 92416
       },
       "zod": {
@@ -203,8 +203,8 @@
         "delta": 1195
       },
       "application source": {
-        "baseline": 556489,
-        "updated": 556489,
+        "baseline": 557628,
+        "updated": 557628,
         "delta": 0
       },
       "lucide-react": {
@@ -213,13 +213,13 @@
         "delta": 7731
       },
       "react": {
-        "baseline": 20048,
-        "updated": 20912,
+        "baseline": 20245,
+        "updated": 21109,
         "delta": 864
       },
       "react-dom": {
-        "baseline": 561127,
-        "updated": 653543,
+        "baseline": 561323,
+        "updated": 653739,
         "delta": 92416
       },
       "zod": {
@@ -235,8 +235,8 @@
         "delta": 1195
       },
       "application source": {
-        "baseline": 2485417,
-        "updated": 2485417,
+        "baseline": 2487417,
+        "updated": 2487417,
         "delta": 0
       },
       "lucide-react": {
@@ -245,13 +245,13 @@
         "delta": 14563
       },
       "react": {
-        "baseline": 20048,
-        "updated": 20912,
+        "baseline": 20245,
+        "updated": 21109,
         "delta": 864
       },
       "react-dom": {
-        "baseline": 561127,
-        "updated": 653543,
+        "baseline": 561323,
+        "updated": 653739,
         "delta": 92416
       },
       "zod": {
@@ -263,9 +263,9 @@
   },
   "affectedBudgetsKiB": {
     "entryJavaScript": 217.5,
-    "mainWorkbenchFirstLoadJavaScript": 791.2,
-    "detachedChatFirstLoadJavaScript": 605.3,
-    "coreJavaScript": 2062.25
+    "mainWorkbenchFirstLoadJavaScript": 792,
+    "detachedChatFirstLoadJavaScript": 605.9,
+    "coreJavaScript": 2065.4
   },
   "unchangedGuards": "All deferred-feature ceilings, stylesheet ceilings, import-boundary assertions and production configuration remain unchanged. The existing deferredGitMenusJavaScript ceiling is met exactly at 9,088 bytes."
 }

@@ -434,31 +434,35 @@ describe("Claude Agent SDK message projection", () => {
     }));
   });
 
-  it("surfaces an account hold as the typed cause of a missing result", async () => {
+  it.each([
+    ["account_on_hold", "Claude could not continue because the account is on hold."],
+    ["verification_required", "Claude requires account verification before continuing."],
+    ["cloud_credential_error", "Claude could not continue because of a cloud credential error."],
+  ])("surfaces %s as the typed cause of a missing result", async (error, message) => {
     const { events, result } = await run([
       assistantMessage({
-        uuid: "assistant-account-hold",
-        apiMessageId: "api-account-hold",
+        uuid: "assistant-account-error",
+        apiMessageId: "api-account-error",
         content: [],
-        error: "account_on_hold",
+        error,
       }),
     ]);
 
     expect(result).toMatchObject({
       status: "failed",
-      error: "Claude could not continue because the account is on hold.",
+      error: message,
       failure: {
         reason: "provider-error",
-        message: "Claude could not continue because the account is on hold.",
-        terminalEvent: "assistant/account_on_hold",
-        activityId: "assistant-account-hold",
+        message,
+        terminalEvent: `assistant/${error}`,
+        activityId: "assistant-account-error",
       },
     });
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       phase: "failed",
       label: "Claude response issue",
-      activityId: "assistant-account-hold",
+      activityId: "assistant-account-error",
     }));
   });
 

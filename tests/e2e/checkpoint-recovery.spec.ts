@@ -13,6 +13,17 @@ const before = "export const revision = 'checkpoint';\n";
 const later = "export const revision = 'later edits';\n";
 const staged = "Keep this staged file.\n";
 
+async function readRestoringFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    // Git may unlink the old file before writing its replacement. Keep polling
+    // for the exact contents within the existing assertion deadline.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 test("restores a checkpoint and recovers later edits through the native timeline", async ({ browserName: _browserName }, testInfo) => {
   const app = await createAppFixture({
     name: "checkpoint-recovery",
@@ -60,7 +71,7 @@ test("restores a checkpoint and recovers later edits through the native timeline
     expect(await readFile(join(workspaceDirectory, "later-staged.txt"), "utf8")).toBe(staged);
 
     await restore(original, true);
-    await expect.poll(() => readFile(join(workspaceDirectory, "sample.ts"), "utf8")).toBe(before);
+    await expect.poll(() => readRestoringFile(join(workspaceDirectory, "sample.ts"))).toBe(before);
     await expect.poll(() => access(join(workspaceDirectory, "later-staged.txt")).then(() => true, () => false)).toBe(false);
     expect((await git("git", ["show", ":later-staged.txt"], { cwd: workspaceDirectory, timeout: 10_000 })).stdout).toBe(staged);
     expect(await readFile(join(workspaceDirectory, "untracked.txt"), "utf8")).toBe("Untracked work survives.\n");
@@ -71,8 +82,8 @@ test("restores a checkpoint and recovers later edits through the native timeline
     await page.screenshot({ path: screenshotPath, animations: "disabled", scale: "css" });
     await testInfo.attach("Checkpoint recovery timeline", { path: screenshotPath, contentType: "image/png" });
     await restore(recovery, true);
-    await expect.poll(() => readFile(join(workspaceDirectory, "sample.ts"), "utf8")).toBe(later);
-    await expect.poll(() => readFile(join(workspaceDirectory, "later-staged.txt"), "utf8")).toBe(staged);
+    await expect.poll(() => readRestoringFile(join(workspaceDirectory, "sample.ts"))).toBe(later);
+    await expect.poll(() => readRestoringFile(join(workspaceDirectory, "later-staged.txt"))).toBe(staged);
     expect(await readFile(join(workspaceDirectory, "untracked.txt"), "utf8")).toBe("Untracked work survives.\n");
     await app.expectNoViewportOverflow();
     expect(app.rendererErrors).toEqual([]);

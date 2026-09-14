@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
+import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 
 const delayedAnswerGate = "inertia-anchor-answer-ready";
 
@@ -133,6 +134,7 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
     },
   });
 
+  let bodyFailure: { error: unknown } | undefined;
   try {
     await app.resizeWindow(1440, 920);
     const { page } = app;
@@ -212,8 +214,14 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
     expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    bodyFailure = { error };
+    // Retain same-generation cleanup evidence before fixture shutdown can
+    // replace the initiating provider failure or remove the private profile.
+    await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
+    throw error;
   } finally {
-    await app.close();
+    await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });
 
@@ -286,6 +294,7 @@ test("positions a completed answer at the viewport start by default", async () =
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     bodyFailure = { error };
+    await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
     throw error;
   } finally {
     await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);

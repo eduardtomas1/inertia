@@ -2,6 +2,108 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.56 — 2026-09-14
+
+### A clearer workspace
+
+- Drag chats from the sidebar into split view and arrange up to four panes.
+  Drop onto a pane edge to split or rearrange it, resize each split with the
+  pointer or keyboard, and keep each chat's project, terminal and draft separate.
+- Follow live reasoning in a compact Thinking strip that folds into an
+  expandable summary when reasoning ends. Delegated agents use compact rows
+  with status, elapsed time and accessible actions.
+- Scan provider Limits through logos, remaining-quota rings and clear account
+  states. Unknown and stale information stays explicit; the display does not
+  change provider routing or quota calculations.
+- New installations get a short welcome guide with optional demonstrations,
+  provider setup and project creation. Existing installations can replay it
+  from Settings. The new user guide covers chats, split view, Duo, Git, limits
+  and troubleshooting.
+- Open chat links to files outside the project with the operating system's
+  document handler. Project-local links still open in the workspace preview,
+  and failed opens show an inline error that lets you retry. Files open only
+  after a click; launchable files and symlinks are revealed in the file manager.
+
+### Antigravity replaces Gemini CLI
+
+- Use a locally installed Antigravity CLI (`agy` 1.2.2 or newer) as the Google
+  provider, with streamed text, tool activity and conversation continuation.
+  Sign in through the visible provider terminal when prompted.
+- Existing Gemini transcripts, turns and review history remain available.
+  Their next turn starts a fresh Antigravity conversation; model and reasoning
+  choices reset to the provider default. Saved drafts and project defaults
+  move to Antigravity too.
+
+### Preserve work and recover safely
+
+- Fix Linux startup and restart loops when restoring saved terminals from an
+  environment with blocked guardian control signals. Command admission and
+  process cleanup retain their existing checks.
+- Changes finds the containing Git repository when a project is a subfolder,
+  matching Environment. Refresh and diffs use that repository, while opening
+  files, reverting selected lines and requesting agent revisions stay inside
+  the selected project folder.
+- Restoring a checkpoint first saves a durable recovery checkpoint for later
+  edits. If that save cannot be completed safely, restoration stops before
+  changing files. Restoration still applies to the whole worktree.
+- Database recovery preserves readable but inconsistent profiles and their
+  backups instead of treating them as ordinary corruption. Invalid backup
+  candidates are rejected without replacing the current database.
+- Update validation handles large profiles without requiring a complete
+  in-memory copy. Profiles needing migration use a bounded private copy;
+  validation does not migrate the live profile.
+- Shutdown starts cancellation even when earlier commands do not finish, and
+  provider settlement continues to require confirmed cleanup. Failed draft
+  writes can be retried after revalidating their original recovery evidence.
+- Avoid unnecessary runtime recovery when a detached Linux terminal needs longer
+  to finish cleanup than a shorter internal wait allowed. Cleanup must still
+  be confirmed within the existing overall deadline.
+- Preserve chat renames made while attachments are being prepared. Terminal
+  tabs support arrow keys, Home, End and closing with focus on the next tab;
+  macOS shortcuts preserve terminal Control chords.
+- Optional layout-storage failures no longer prevent startup or split view.
+  Model selection has clearer keyboard and accessibility semantics, and
+  clipboard actions report their actual result.
+- PDF decoding runs in a separate utility process, and unexpected import
+  errors use safe, actionable messages. Opening common scripts, executables or
+  installers from project files reveals them instead of launching them.
+- Worktree operations reject unsupported Git versions before making changes.
+  Git 2.36 or newer is required for managed worktrees. Stored turn-text cleanup
+  uses the owning conversation's index, and patch compression runs asynchronously.
+
+### Private Connect and verification
+
+- Browser approval is bound to the initiating tab, invitations are consumed
+  when pairing starts, and multiple connections share a per-device request
+  allowance. Runtime commands also enforce the granted conversation and
+  mutation scopes.
+- Desktop resume refreshes Private Connect privacy state. Failed authority
+  changes must be resolved before replacing an existing gateway.
+- Pull-request certification stages actual release packages and updater
+  metadata on all six native targets. Focused desktop tests cannot silently
+  reduce CI coverage, and Git fixtures are isolated from developer settings.
+- Desktop tests release debugger connections and launcher pipes at the correct
+  shutdown boundary, while retaining native process-cleanup verification.
+- Update Electron to 44.3.0, React to 19.3.0, Claude Agent SDK to 0.3.268 and
+  OpenCode SDK to 1.18.30, alongside the reviewed native, packaging and UI
+  dependencies. Claude account-verification and cloud-credential failures are
+  reported explicitly.
+
+### Known limitations
+
+- Antigravity currently supports text-based turns in Inertia. Image input,
+  Snapshots, explicit compaction, reasoning text, Inertia host tools and
+  Private Connect prompts are unavailable. Authenticated Antigravity turns
+  and its Plan mode's no-edit behavior have not been verified against a live
+  account; protocol coverage uses controlled fixtures.
+- Very large legacy profiles at schema 17 or earlier can still fail during the
+  historical turn backfill. The verified case with 150,000 activities rolls
+  back without losing its history; no upgrade workaround is claimed. This
+  remains tracked in [#368](https://github.com/eduardtomas1/inertia/issues/368).
+- Windows and macOS retain manual installation while release signing is
+  unavailable. Linux installations still on 0.0.52 need one manual upgrade,
+  preserving the existing profile.
+
 ## 0.0.55 — 2026-09-13
 
 ### Find and share context

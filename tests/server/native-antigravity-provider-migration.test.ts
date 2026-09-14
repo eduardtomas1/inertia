@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,8 @@ import { RuntimeStore } from "../../src/server/database";
 import { DatabaseMigrationError } from "../../src/server/database-migrations";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import type { PersistedModelBackendProfile } from "../../src/shared/backend-profile-settings";
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const PREVIOUS_SCHEMA_VERSION = 75;
 const ANTIGRAVITY_SCHEMA_VERSION = 76;
@@ -25,18 +27,74 @@ const REBUILT_TABLES = [
   "subagent_traces",
 ] as const;
 
-const RELATED_TABLES = [
-  "agent_managed_conversations",
-  "agent_thread_operations",
-] as const;
-
-const PRESERVED_TABLES = [...REBUILT_TABLES, ...RELATED_TABLES] as const;
-
 const PROFILE_TIMESTAMP = "2026-09-01T08:00:00.000Z";
+
+const GEMINI_SELECTION = JSON.stringify({
+  harnessId: "gemini-acp",
+  backendProfileId: "builtin:gemini",
+  backendProfileDisplayName: "Google Gemini",
+  modelId: "gemini-2.5-pro",
+  alias: "Gemini 2.5 Pro",
+  reasoningEffort: "high",
+  contextWindowOverride: null,
+  providerOptions: {},
+  capabilities: [],
+  backendConfigurationRevision: 0,
+});
+
+const GEMINI_CONTINUATION = JSON.stringify({
+  harnessId: "gemini-acp",
+  backendProfileId: "builtin:gemini",
+  backendConfigurationRevision: 0,
+  modelIdentity: "gemini-2.5-pro",
+  endpointIdentity: null,
+});
+
+const RETIRED_PROFILE_SELECTION = JSON.stringify({
+  harnessId: "claude-agent-sdk",
+  backendProfileId: "custom:gemini-team",
+  backendProfileDisplayName: "Team Gemini gateway",
+  modelId: "team-model",
+  alias: null,
+  reasoningEffort: "high",
+  contextWindowOverride: null,
+  providerOptions: {},
+  capabilities: [],
+  backendConfigurationRevision: 3,
+});
 
 const temporaryDirectories: string[] = [];
 
-function nativeAntigravityBackendProfile(): PersistedModelBackendProfile {
+function customProfile(): PersistedModelBackendProfile {
+  return {
+    id: "custom:retained-anthropic",
+    displayName: "Retained Anthropic gateway",
+    harnessId: "claude-agent-sdk",
+    protocol: "anthropic-messages",
+    authenticationMode: "none",
+    source: "custom",
+    enabled: false,
+    configurationRevision: 3,
+    endpointIdentity: backendEndpointIdentity("https://retained.example.test/v1"),
+    preset: "custom",
+    baseUrl: "https://retained.example.test/v1",
+    allowInsecureLocalhost: false,
+    credentialGeneration: null,
+    models: [{
+      id: "retained-model",
+      displayName: "Retained model",
+      contextWindowTokens: 200_000,
+      reasoningOptions: [],
+      capabilities: [],
+    }],
+    routing: { mode: "simple", primaryModelId: "retained-model" },
+    capabilityHints: [],
+    createdAt: PROFILE_TIMESTAMP,
+    updatedAt: PROFILE_TIMESTAMP,
+  };
+}
+
+function nativeAntigravityProfile(): PersistedModelBackendProfile {
   return {
     id: "builtin:antigravity",
     displayName: "Google Antigravity",
@@ -82,20 +140,6 @@ function tableSql(database: Database.Database, table: string): string {
   `).get(table) as { sql: string }).sql;
 }
 
-function rowsByTable(database: Database.Database): Record<string, unknown[]> {
-  return Object.fromEntries(PRESERVED_TABLES.map((table) => [
-    table,
-    database.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(),
-  ]));
-}
-
-function columnsByTable(database: Database.Database): Record<string, string[]> {
-  return Object.fromEntries(PRESERVED_TABLES.map((table) => [
-    table,
-    tableColumns(database, table),
-  ]));
-}
-
 function schemaObjects(
   database: Database.Database,
   type: "index" | "trigger",
@@ -131,11 +175,16 @@ function copyPopulatedRowsToPreviousSchema(
 ): void {
   database.prepare("ATTACH DATABASE ? AS populated").run(populatedDatabasePath);
   database.transaction(() => {
+    database.pragma("defer_foreign_keys = ON");
+    database.exec("DELETE FROM main.app_state");
     for (const table of [
+      "app_state",
       "projects",
       "conversations",
+      "messages",
       ...REBUILT_TABLES,
-      ...RELATED_TABLES,
+      "agent_managed_conversations",
+      "agent_thread_operations",
     ]) {
       const columns = tableColumns(database, table).join(", ");
       database.exec(
@@ -147,12 +196,43 @@ function copyPopulatedRowsToPreviousSchema(
   expect(database.pragma("foreign_key_check")).toEqual([]);
 }
 
-async function populatedFixture(): Promise<{
+function textReferences(database: Database.Database, value: string): string[] {
+  const tables = database.prepare(`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name
+  `).pluck().all() as string[];
+  return tables.flatMap((table) => tableColumns(database, table)
+    .filter((column) => (database.prepare(
+      `SELECT COUNT(*) FROM "${table}" WHERE instr(CAST("${column}" AS TEXT), ?) > 0`,
+    ).pluck().get(value) as number) > 0)
+    .map((column) => `${table}.${column}`));
+}
+
+function cloneRow(
+  database: Database.Database,
+  table: string,
+  where: string,
+  overrides: Record<string, unknown>,
+): void {
+  const columns = tableColumns(database, table);
+  const selected = columns.map((column) => (Object.hasOwn(overrides, column) ? `@${column}` : column));
+  database.prepare(`
+    INSERT INTO ${table} (${columns.join(", ")})
+    SELECT ${selected.join(", ")} FROM ${table} WHERE ${where} LIMIT 1
+  `).run(overrides);
+}
+
+interface Fixture {
   databasePath: string;
   workspacePath: string;
-  conversationId: string;
-  turnId: string;
-}> {
+  geminiConversationId: string;
+  codexConversationId: string;
+  geminiTurnId: string;
+  retiredProfileConversationId: string;
+  retiredProfileTurnId: string;
+  switchedConversationId: string;
+}
+
+async function geminiFixture(): Promise<Fixture> {
   const directory = await temporaryDirectory();
   const workspacePath = join(directory, "workspace");
   await mkdir(workspacePath);
@@ -161,41 +241,58 @@ async function populatedFixture(): Promise<{
   const store = new RuntimeStore(populatedDatabasePath, workspacePath, {
     recoverInterruptedRuns: false,
   });
-  const project = store.createProject("Antigravity migration", workspacePath);
-  const conversation = store.createConversation(project.id, "Retained Gemini chat", {
-    providerId: "gemini",
-    model: "gemini-2.5-pro",
-    reasoningEffort: "",
-    interactionMode: "build",
-    accessMode: "supervised",
-  });
-  const childConversation = store.createConversation(project.id, "Retained child", {
+  const project = store.createProject("Gemini chats", workspacePath);
+  const configuration = {
     providerId: "codex",
     model: "gpt-test",
     reasoningEffort: "high",
     interactionMode: "build",
     accessMode: "supervised",
+  } as const;
+  const geminiConversation = store.createConversation(project.id, "Gemini chat", configuration);
+  const codexConversation = store.createConversation(project.id, "Codex chat", configuration);
+  const childConversation = store.createConversation(project.id, "Managed child", configuration);
+  const retiredProfileConversation = store.createConversation(project.id, "Retired profile chat", {
+    ...configuration,
+    providerId: "claude",
+    model: "team-model",
   });
+  const switchedConversation = store.createConversation(project.id, "Switched from Gemini", configuration);
   const turn = store.beginAgentTurn({
     id: randomUUID(),
-    conversationId: conversation.id,
+    conversationId: geminiConversation.id,
     runId: randomUUID(),
-    content: "Preserve this Gemini turn.",
-    providerId: "gemini",
-    harnessId: "gemini-acp",
-    backendProfileId: "builtin:gemini",
-    model: "gemini-2.5-pro",
-    reasoningEffort: "",
+    content: "Keep this Gemini transcript.",
+    providerId: "codex",
+    harnessId: "codex-app-server",
+    backendProfileId: "builtin:openai",
+    model: "gpt-test",
+    reasoningEffort: "high",
+    interactionMode: "build",
+    accessMode: "supervised",
+    configurationRevision: 0,
+    association: "authoritative",
+  }).turn;
+  const retiredProfileTurn = store.beginAgentTurn({
+    id: randomUUID(),
+    conversationId: retiredProfileConversation.id,
+    runId: randomUUID(),
+    content: "Keep this retired profile transcript.",
+    providerId: "claude",
+    harnessId: "claude-agent-sdk",
+    backendProfileId: "custom:gemini-team",
+    model: "team-model",
+    reasoningEffort: "high",
     interactionMode: "build",
     accessMode: "supervised",
     configurationRevision: 0,
     association: "authoritative",
   }).turn;
   store.upsertSubagentTrace({
-    conversationId: conversation.id,
+    conversationId: geminiConversation.id,
     runId: turn.runId,
     turnId: turn.id,
-    providerId: "gemini",
+    providerId: "codex",
     providerTaskId: "retained-task",
     providerAgentId: null,
     parentProviderAgentId: null,
@@ -212,30 +309,25 @@ async function populatedFixture(): Promise<{
     sequence: 1,
   });
   store.upsertReviewSummary({
-    conversationId: conversation.id,
+    conversationId: geminiConversation.id,
     fingerprint: "a".repeat(64),
-    providerId: "gemini",
-    harnessId: "gemini-acp",
-    backendProfileId: "builtin:gemini",
-    model: "gemini-2.5-pro",
+    providerId: "codex",
+    harnessId: "codex-app-server",
+    backendProfileId: "builtin:openai",
+    model: "gpt-test",
     overall: "Retained summary",
     classifications: [],
-    files: [{
-      path: "src/index.ts",
-      summary: "Retained file summary",
-      classifications: [],
-      hunks: [],
-    }],
+    files: [{ path: "src/index.ts", summary: "Retained file summary", classifications: [], hunks: [] }],
     generatedAt: PROFILE_TIMESTAMP,
   });
   store.saveProviderMetadata({
     scope: {
-      providerId: "gemini",
-      harnessId: "gemini-acp",
-      backendProfileId: "builtin:gemini",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
       modelId: "provider-catalog",
-      executable: "/usr/local/bin/gemini",
-      version: "0.58.0",
+      executable: "/usr/local/bin/codex",
+      version: "1.0.0",
       backendConfigurationRevision: 0,
       authState: "authenticated",
     },
@@ -250,6 +342,7 @@ async function populatedFixture(): Promise<{
     rateLimitsProvenance: null,
     rateLimitsStale: false,
   });
+  store.saveModelBackendProfile(customProfile());
   store.close();
 
   const populated = new Database(populatedDatabasePath);
@@ -257,160 +350,334 @@ async function populatedFixture(): Promise<{
     INSERT INTO agent_managed_conversations (
       child_conversation_id, source_conversation_id, source_turn_id,
       source_run_id, root_conversation_id, source_harness_id, depth, created_at
-    ) VALUES (?, ?, ?, ?, ?, 'gemini-acp', 1, ?)
-  `).run(
-    childConversation.id,
-    conversation.id,
-    turn.id,
-    turn.runId,
-    conversation.id,
-    "2026-09-01T08:01:00.000Z",
-  );
+    ) VALUES (?, ?, ?, ?, ?, 'codex-app-server', 1, ?)
+  `).run(childConversation.id, geminiConversation.id, turn.id, turn.runId, geminiConversation.id, PROFILE_TIMESTAMP);
   populated.prepare(`
-    INSERT INTO agent_thread_operations (
-      id, source_conversation_id, source_turn_id, source_run_id,
-      tool_call_id_hash, tool_name, request_fingerprint, status,
-      child_conversation_id, input_chars, result_json, failure_message,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'inertia_create_conversation', ?, 'completed',
-      ?, 12, '{}', NULL, ?, ?)
-  `).run(
-    "b".repeat(64),
-    conversation.id,
-    turn.id,
-    turn.runId,
-    "c".repeat(64),
-    "d".repeat(64),
-    childConversation.id,
-    "2026-09-01T08:01:00.000Z",
-    "2026-09-01T08:01:01.000Z",
-  );
-  populated.prepare(`
-    INSERT INTO provider_metadata_cache (
-      provider_id, executable, version, auth_state
-    ) VALUES ('gemini', '/usr/local/bin/gemini', '0.58.0', 'authenticated')
+    INSERT INTO provider_metadata_cache (provider_id, executable, version, auth_state)
+    VALUES ('codex', '/usr/local/bin/codex', '1.0.0', 'authenticated')
   `).run();
   populated.close();
 
   const database = new Database(databasePath);
   migrateRuntimeDatabase(database, PREVIOUS_SCHEMA_VERSION);
   copyPopulatedRowsToPreviousSchema(database, populatedDatabasePath);
+  database.prepare(`
+    UPDATE conversations
+    SET provider_id = 'gemini', provider_session_id = 'gemini-session-after',
+        model = 'gemini-2.5-pro', reasoning_effort = 'high',
+        model_selection_json = @selection, continuation_identity_json = @continuation
+    WHERE id = @id
+  `).run({ id: geminiConversation.id, selection: GEMINI_SELECTION, continuation: GEMINI_CONTINUATION });
+  database.prepare(`
+    UPDATE agent_turns
+    SET provider_id = 'gemini', harness_id = 'gemini-acp', backend_profile_id = 'builtin:gemini',
+        model = 'gemini-2.5-pro', model_alias = 'Gemini 2.5 Pro', reasoning_effort = 'high',
+        provider_session_before = 'gemini-session-before',
+        model_selection_json = @selection, continuation_identity_json = @continuation
+    WHERE id = @id
+  `).run({ id: turn.id, selection: GEMINI_SELECTION, continuation: GEMINI_CONTINUATION });
+  database.prepare("UPDATE subagent_traces SET provider_id = 'gemini' WHERE turn_id = ?").run(turn.id);
+  database.prepare("UPDATE diff_review_summaries SET provider_id = 'gemini' WHERE conversation_id = ?")
+    .run(geminiConversation.id);
+  database.prepare(`
+    INSERT INTO provider_metadata_cache (provider_id, executable, version, auth_state)
+    VALUES ('gemini', '/usr/local/bin/gemini', '0.58.0', 'authenticated')
+  `).run();
+  cloneRow(database, "provider_metadata_scoped_cache", "provider_id = 'codex'", {
+    scope_key: "gemini-scope",
+    provider_id: "gemini",
+    harness_id: "gemini-acp",
+    backend_profile_id: "builtin:gemini",
+  });
+  cloneRow(database, "model_backend_profiles", "profile_id = 'custom:retained-anthropic'", {
+    profile_id: "builtin:gemini",
+    harness_id: "gemini-acp",
+    preset: "native",
+    protocol: "gemini-managed",
+    source: "built-in",
+    endpoint_identity: null,
+    credential_generation: null,
+  });
+  database.prepare(`
+    INSERT INTO model_backend_defaults (scope, project_id, selection_json, updated_at)
+    VALUES ('global', NULL, ?, ?)
+  `).run(GEMINI_SELECTION, PROFILE_TIMESTAMP);
+  database.prepare(`
+    UPDATE app_state
+    SET default_provider = 'gemini', default_model = 'gemini-2.5-pro', default_reasoning_effort = 'high',
+        provider_identity_labels_json = '{"codex":"Work Codex","gemini":"Work Gemini"}'
+  `).run();
+  database.prepare("UPDATE agent_managed_conversations SET source_harness_id = 'gemini-acp'").run();
+  cloneRow(database, "model_backend_profiles", "profile_id = 'custom:retained-anthropic'", {
+    profile_id: "custom:gemini-team",
+    protocol: "gemini-managed",
+  });
+  database.prepare(`
+    UPDATE conversations SET provider_session_id = 'team-session', model_selection_json = @selection
+    WHERE id = @id
+  `).run({ id: retiredProfileConversation.id, selection: RETIRED_PROFILE_SELECTION });
+  database.prepare("UPDATE agent_turns SET model_selection_json = @selection WHERE id = @id")
+    .run({ id: retiredProfileTurn.id, selection: RETIRED_PROFILE_SELECTION });
+  database.prepare(`
+    INSERT INTO model_backend_defaults (scope, project_id, selection_json, updated_at)
+    VALUES ('project', ?, ?, ?)
+  `).run(project.id, RETIRED_PROFILE_SELECTION, PROFILE_TIMESTAMP);
+  cloneRow(database, "provider_metadata_scoped_cache", "provider_id = 'codex'", {
+    scope_key: "retired-profile-scope",
+    provider_id: "claude",
+    harness_id: "claude-agent-sdk",
+    backend_profile_id: "custom:gemini-team",
+  });
+  database.prepare(`
+    UPDATE conversations
+    SET provider_session_id = 'gemini-session-left', continuation_identity_json = @continuation
+    WHERE id = @id
+  `).run({ id: switchedConversation.id, continuation: GEMINI_CONTINUATION });
+  expect(database.pragma("foreign_key_check")).toEqual([]);
   expect(schemaVersion(database)).toBe(PREVIOUS_SCHEMA_VERSION);
-  for (const table of REBUILT_TABLES) {
-    expect(tableSql(database, table)).not.toContain("'antigravity");
-  }
   database.close();
   return {
     databasePath,
     workspacePath,
-    conversationId: conversation.id,
-    turnId: turn.id,
+    geminiConversationId: geminiConversation.id,
+    codexConversationId: codexConversation.id,
+    geminiTurnId: turn.id,
+    retiredProfileConversationId: retiredProfileConversation.id,
+    retiredProfileTurnId: retiredProfileTurn.id,
+    switchedConversationId: switchedConversation.id,
   };
 }
 
-describe("native Antigravity provider migration", { concurrent: false }, () => {
+describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, () => {
   afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true }),
     ));
   });
 
-  it("widens provider constraints while preserving every schema-75 row and relation", async () => {
-    const fixture = await populatedFixture();
+  it("moves Gemini chats to Antigravity and removes every Gemini identity", async () => {
+    const fixture = await geminiFixture();
     const database = new Database(fixture.databasePath);
     database.pragma("foreign_keys = ON");
-    const beforeRows = rowsByTable(database);
-    const beforeColumns = columnsByTable(database);
+    const messages = database.prepare("SELECT * FROM messages ORDER BY id").all();
+    const codexConversation = database.prepare("SELECT * FROM conversations WHERE id = ?")
+      .get(fixture.codexConversationId);
     const beforeIndexes = schemaObjects(database, "index");
     const beforeTriggers = schemaObjects(database, "trigger");
     const beforeForeignKeys = foreignKeys(database);
-    expect(beforeTriggers.length).toBeGreaterThan(0);
+    const beforeCounts = Object.fromEntries(["agent_turns", "subagent_traces", "diff_review_summaries", "messages"]
+      .map((table) => [table, database.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()]));
+    expect(messages.length).toBeGreaterThan(0);
 
     migrateRuntimeDatabase(database, ANTIGRAVITY_SCHEMA_VERSION);
 
     expect(schemaVersion(database)).toBe(ANTIGRAVITY_SCHEMA_VERSION);
-    expect(rowsByTable(database)).toEqual(beforeRows);
-    expect(columnsByTable(database)).toEqual(beforeColumns);
+    const antigravitySelection = providerNativeModelSelection({ providerId: "antigravity" });
+    const conversation = database.prepare(`
+      SELECT provider_id, provider_session_id, model, reasoning_effort,
+             model_selection_json, continuation_identity_json
+      FROM conversations WHERE id = ?
+    `).get(fixture.geminiConversationId) as Record<string, string | null>;
+    expect(conversation).toMatchObject({
+      provider_id: "antigravity",
+      provider_session_id: null,
+      model: "",
+      reasoning_effort: "",
+      continuation_identity_json: null,
+    });
+    expect(JSON.parse(conversation.model_selection_json!)).toEqual(antigravitySelection);
+    const turn = database.prepare(`
+      SELECT provider_id, harness_id, backend_profile_id, model, model_alias, reasoning_effort,
+             provider_session_before, provider_session_after, model_selection_json,
+             continuation_identity_json
+      FROM agent_turns WHERE id = ?
+    `).get(fixture.geminiTurnId) as Record<string, string | null>;
+    expect(turn).toMatchObject({
+      provider_id: "antigravity",
+      harness_id: "antigravity-cli",
+      backend_profile_id: "builtin:antigravity",
+      model: "provider-default",
+      model_alias: null,
+      reasoning_effort: "",
+      provider_session_before: null,
+      provider_session_after: null,
+      continuation_identity_json: null,
+    });
+    expect(JSON.parse(turn.model_selection_json!)).toEqual(antigravitySelection);
+    expect(database.prepare("SELECT * FROM messages ORDER BY id").all()).toEqual(messages);
+    expect(database.prepare("SELECT * FROM conversations WHERE id = ?").get(fixture.codexConversationId))
+      .toEqual(codexConversation);
+    expect(Object.fromEntries(Object.keys(beforeCounts)
+      .map((table) => [table, database.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()])))
+      .toEqual(beforeCounts);
+    expect(database.prepare("SELECT DISTINCT provider_id FROM subagent_traces").pluck().all())
+      .toEqual(["antigravity"]);
+    expect(database.prepare("SELECT DISTINCT provider_id FROM diff_review_summaries").pluck().all())
+      .toEqual(["antigravity"]);
+    expect(database.prepare("SELECT provider_id FROM provider_metadata_cache ORDER BY 1").pluck().all())
+      .toEqual(["codex"]);
+    expect(database.prepare("SELECT provider_id FROM provider_metadata_scoped_cache ORDER BY 1").pluck().all())
+      .toEqual(["codex"]);
+    expect(database.prepare("SELECT profile_id FROM model_backend_profiles ORDER BY 1").pluck().all())
+      .toEqual(["custom:retained-anthropic"]);
+    expect(JSON.parse(database.prepare("SELECT selection_json FROM model_backend_defaults").pluck().get() as string))
+      .toEqual(antigravitySelection);
+    expect(database.prepare(`
+      SELECT default_provider, default_model, default_reasoning_effort, provider_identity_labels_json FROM app_state
+    `).get()).toEqual({
+      default_provider: "antigravity",
+      default_model: "",
+      default_reasoning_effort: "",
+      provider_identity_labels_json: '{"codex":"Work Codex"}',
+    });
+    expect(database.prepare("SELECT DISTINCT source_harness_id FROM agent_managed_conversations").pluck().all())
+      .toEqual(["antigravity-cli"]);
+    for (const table of REBUILT_TABLES) {
+      expect(tableSql(database, table)).not.toMatch(/gemini/iu);
+    }
+    expect(tableSql(database, "agent_turns")).toContain("'antigravity'");
+    expect(tableSql(database, "model_backend_profiles")).toContain("'antigravity-managed'");
+    expect(() => database.prepare("UPDATE subagent_traces SET provider_id = 'gemini'").run()).toThrow();
     expect(schemaObjects(database, "index")).toEqual(beforeIndexes);
     expect(schemaObjects(database, "trigger")).toEqual(beforeTriggers);
     expect(foreignKeys(database)).toEqual(beforeForeignKeys);
     expect(database.pragma("foreign_key_check")).toEqual([]);
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(tableSql(database, "model_backend_profiles")).toContain("'antigravity-cli'");
-    expect(tableSql(database, "model_backend_profiles")).toContain("'antigravity-managed'");
-    expect(tableSql(database, "agent_turns")).toContain("'antigravity'");
-    expect(tableSql(database, "agent_turns")).toContain("'gemini'");
-    expect(database.prepare(`
-      SELECT provider_id, harness_id, backend_profile_id FROM agent_turns WHERE id = ?
-    `).get(fixture.turnId)).toEqual({
-      provider_id: "gemini",
-      harness_id: "gemini-acp",
-      backend_profile_id: "builtin:gemini",
-    });
-
-    database.exec(`
-      UPDATE provider_metadata_cache SET provider_id = 'antigravity';
-      UPDATE diff_review_summaries SET provider_id = 'antigravity';
-      UPDATE provider_metadata_scoped_cache
-        SET provider_id = 'antigravity', harness_id = 'antigravity-cli';
-      UPDATE subagent_traces SET provider_id = 'antigravity';
-    `);
-    expect(() => database.prepare(`
-      UPDATE agent_turns SET provider_id = 'unknown-provider' WHERE id = ?
-    `).run(fixture.turnId)).toThrow();
-    expect(database.pragma("foreign_key_check")).toEqual([]);
     database.close();
+
+    const reopened = new RuntimeStore(fixture.databasePath, fixture.workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.databaseRecoveryReport().outcome).toBe("healthy");
+    expect(reopened.agentTurn(fixture.geminiTurnId)).toMatchObject({
+      providerId: "antigravity",
+      harnessId: "antigravity-cli",
+      providerSessionBefore: null,
+      providerSessionAfter: null,
+    });
+    const migrated = reopened.snapshot().conversations.find(({ id }) => id === fixture.geminiConversationId);
+    expect(migrated).toMatchObject({ providerId: "antigravity", providerSessionId: null });
+    expect(migrated?.modelSelection).toEqual(antigravitySelection);
+    expect(reopened.saveModelBackendProfile(nativeAntigravityProfile()).profile)
+      .toEqual(nativeAntigravityProfile());
+    reopened.close();
+  });
+
+  it("repoints every reference to a retired Gemini profile and still commits", async () => {
+    const fixture = await geminiFixture();
+    const database = new Database(fixture.databasePath);
+    database.pragma("foreign_keys = ON");
+    expect(textReferences(database, "custom:gemini-team").sort()).toEqual([
+      "agent_turns.backend_profile_id",
+      "agent_turns.continuation_identity_json",
+      "agent_turns.model_selection_json",
+      "conversations.model_selection_json",
+      "model_backend_defaults.selection_json",
+      "model_backend_profiles.profile_id",
+      "provider_metadata_scoped_cache.backend_profile_id",
+    ]);
+    const switchedBefore = database.prepare(`
+      SELECT provider_id, model, model_selection_json FROM conversations WHERE id = ?
+    `).get(fixture.switchedConversationId) as Record<string, string | null>;
+    expect(switchedBefore.provider_id).toBe("codex");
+
+    migrateRuntimeDatabase(database, ANTIGRAVITY_SCHEMA_VERSION);
+
+    expect(schemaVersion(database)).toBe(ANTIGRAVITY_SCHEMA_VERSION);
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    expect(textReferences(database, "custom:gemini-team")).toEqual([]);
+    const antigravitySelection = providerNativeModelSelection({ providerId: "antigravity" });
+    const conversation = database.prepare(`
+      SELECT provider_id, provider_session_id, continuation_identity_json, model_selection_json
+      FROM conversations WHERE id = ?
+    `).get(fixture.retiredProfileConversationId) as Record<string, string | null>;
+    expect(conversation).toMatchObject({
+      provider_id: "antigravity",
+      provider_session_id: null,
+      continuation_identity_json: null,
+    });
+    expect(JSON.parse(conversation.model_selection_json!)).toEqual(antigravitySelection);
+    const turn = database.prepare(`
+      SELECT provider_id, harness_id, backend_profile_id, provider_session_before,
+             continuation_identity_json, model_selection_json
+      FROM agent_turns WHERE id = ?
+    `).get(fixture.retiredProfileTurnId) as Record<string, string | null>;
+    expect(turn).toMatchObject({
+      provider_id: "antigravity",
+      harness_id: "antigravity-cli",
+      backend_profile_id: "builtin:antigravity",
+      provider_session_before: null,
+      continuation_identity_json: null,
+    });
+    expect(JSON.parse(turn.model_selection_json!)).toEqual(antigravitySelection);
+    expect((database.prepare("SELECT selection_json FROM model_backend_defaults ORDER BY scope")
+      .pluck().all() as string[]).map((value) => JSON.parse(value)))
+      .toEqual([antigravitySelection, antigravitySelection]);
+    expect(database.prepare(`
+      SELECT provider_id, model, model_selection_json, provider_session_id, continuation_identity_json
+      FROM conversations WHERE id = ?
+    `).get(fixture.switchedConversationId)).toEqual({
+      ...switchedBefore,
+      provider_session_id: null,
+      continuation_identity_json: null,
+    });
+    expect(textReferences(database, "gemini-session")).toEqual([]);
+    database.close();
+
+    const reopened = new RuntimeStore(fixture.databasePath, fixture.workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.databaseRecoveryReport().outcome).toBe("healthy");
+    expect(reopened.snapshot().conversations.find(({ id }) => id === fixture.retiredProfileConversationId))
+      .toMatchObject({ providerId: "antigravity", providerSessionId: null });
+    reopened.close();
   });
 
   it("rolls back completely when the upgraded database would violate a foreign key", async () => {
-    const fixture = await populatedFixture();
+    const fixture = await geminiFixture();
     const database = new Database(fixture.databasePath);
     database.pragma("foreign_keys = OFF");
     database.prepare(`
-      UPDATE diff_review_summaries
-      SET conversation_id = 'missing-conversation'
+      UPDATE diff_review_summaries SET conversation_id = 'missing-conversation'
       WHERE conversation_id = ?
-    `).run(fixture.conversationId);
+    `).run(fixture.geminiConversationId);
     database.pragma("foreign_keys = ON");
-    const beforeRows = rowsByTable(database);
-    const beforeIndexes = schemaObjects(database, "index");
+    const before = Object.fromEntries(REBUILT_TABLES.map((table) => [
+      table,
+      { sql: tableSql(database, table), rows: database.prepare(`SELECT * FROM ${table} ORDER BY 1`).all() },
+    ]));
+    const beforeConversations = database.prepare("SELECT * FROM conversations ORDER BY id").all();
+    const beforeState = database.prepare("SELECT * FROM app_state").all();
     const beforeTriggers = schemaObjects(database, "trigger");
-    const beforeSql = REBUILT_TABLES.map((table) => tableSql(database, table));
 
     expect(() => migrateRuntimeDatabase(database)).toThrow(DatabaseMigrationError);
 
     expect(schemaVersion(database)).toBe(PREVIOUS_SCHEMA_VERSION);
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-    expect(rowsByTable(database)).toEqual(beforeRows);
-    expect(schemaObjects(database, "index")).toEqual(beforeIndexes);
+    expect(Object.fromEntries(REBUILT_TABLES.map((table) => [
+      table,
+      { sql: tableSql(database, table), rows: database.prepare(`SELECT * FROM ${table} ORDER BY 1`).all() },
+    ]))).toEqual(before);
+    expect(database.prepare("SELECT * FROM conversations ORDER BY id").all()).toEqual(beforeConversations);
+    expect(database.prepare("SELECT * FROM app_state").all()).toEqual(beforeState);
     expect(schemaObjects(database, "trigger")).toEqual(beforeTriggers);
-    expect(REBUILT_TABLES.map((table) => tableSql(database, table))).toEqual(beforeSql);
     database.close();
   });
 
-  it("stores native Antigravity routes next to untouched Gemini history", async () => {
-    const fixture = await populatedFixture();
-    const copyPath = join(await temporaryDirectory(), "copy.sqlite");
-    await copyFile(fixture.databasePath, copyPath);
-
-    const migrated = new RuntimeStore(fixture.databasePath, fixture.workspacePath, {
-      recoverInterruptedRuns: false,
-    });
-    expect(migrated.databaseRecoveryReport().outcome).toBe("healthy");
-    expect(migrated.agentTurn(fixture.turnId).providerId).toBe("gemini");
-    expect(migrated.saveModelBackendProfile(nativeAntigravityBackendProfile()).profile)
-      .toEqual(nativeAntigravityBackendProfile());
-    migrated.close();
-
-    const reopened = new RuntimeStore(fixture.databasePath, fixture.workspacePath, {
-      recoverInterruptedRuns: false,
-    });
-    expect(reopened.modelBackendProfile("builtin:antigravity").profile)
-      .toEqual(nativeAntigravityBackendProfile());
-    expect(reopened.agentTurn(fixture.turnId)).toMatchObject({
-      providerId: "gemini",
-      harnessId: "gemini-acp",
-    });
-    reopened.close();
+  it("upgrades a schema-75 database without Gemini records unchanged apart from its constraints", async () => {
+    const directory = await temporaryDirectory();
+    const database = new Database(join(directory, "plain.sqlite"));
+    migrateRuntimeDatabase(database, PREVIOUS_SCHEMA_VERSION);
+    const beforeIndexes = schemaObjects(database, "index");
+    const beforeTriggers = schemaObjects(database, "trigger");
+    migrateRuntimeDatabase(database, ANTIGRAVITY_SCHEMA_VERSION);
+    expect(schemaVersion(database)).toBe(ANTIGRAVITY_SCHEMA_VERSION);
+    expect(schemaObjects(database, "index")).toEqual(beforeIndexes);
+    expect(schemaObjects(database, "trigger")).toEqual(beforeTriggers);
+    for (const table of REBUILT_TABLES) {
+      expect(tableSql(database, table)).not.toMatch(/gemini/iu);
+      expect(tableSql(database, table)).toMatch(/antigravity/u);
+    }
+    database.close();
   });
 });

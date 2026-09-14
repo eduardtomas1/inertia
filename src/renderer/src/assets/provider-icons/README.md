@@ -36,11 +36,19 @@ property of their respective owners.
   `apps/vscode/resources/kimi-icon.svg` (MIT repository license; local SHA-256
   `39b9072b6d235732ecdc8e0aa39674bc64afaa09ff31f29ecc955d61dc4fdda5`).
   The geometry is unchanged; comments and multiline formatting were removed.
-- `antigravity-text.svg`: an Inertia-authored neutral "AG" text mark in a
-  rounded square. It is not a Google or Antigravity logo. No official
-  Antigravity mark with a verifiable license and source was available to
-  bundle, so this placeholder carries no vendor geometry or colors. Replace it
-  only with an official asset whose source and license are recorded here.
+- `antigravity.svg`: the Google Antigravity mark from
+  `agentclientprotocol/registry` at commit
+  `a3d294f480dee2e506a1c51f802455d4d49783a2`, file `antigravity-acp/icon.svg`.
+  It was contributed with Google's official Antigravity registry entry in PR
+  #542 by a Google engineer, as the icon ACP clients display to identify the
+  agent. The registry is licensed Apache-2.0; the Antigravity entry itself
+  declares a proprietary license with terms at <https://antigravity.google/terms>.
+  Local SHA-256
+  `ef068db27db956dbf947b59a3e6d21e8aa170656c55ff04d0b66fa673ea852c1`. The
+  16×16 single-color `currentColor` glyph is unmodified; like the other
+  monochrome marks, Inertia inverts it in dark themes. The mark belongs to
+  Google LLC and is used only to identify the provider, without implying any
+  affiliation or endorsement.
 
 These assets are emitted into the packaged renderer for offline use; the
 application does not request vendor-hosted images at runtime. The imports use

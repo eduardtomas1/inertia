@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
@@ -81,6 +81,12 @@ test.afterEach(async () => {
   await current?.close();
 });
 
+async function captureElement(locator: Locator, testInfo: TestInfo, name: string): Promise<void> {
+  const path = testInfo.outputPath(`${name}.png`);
+  await locator.screenshot({ animations: "disabled", path });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
 async function capture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name}.png`);
   await page.screenshot({ animations: "disabled", path });
@@ -150,11 +156,18 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });
     await expect(executable).not.toHaveValue("");
     expect(realpathSync(await executable.inputValue())).toBe(realpathSync(fakeAgy));
+    const mark = antigravity.locator('[data-provider-brand="antigravity"]').first();
+    await expect(mark).toHaveAttribute("data-provider-icon-kind", "official");
+    await captureElement(antigravity, testInfo, `antigravity-mark-settings-${theme.toLowerCase()}`);
   };
 
   const chooseAntigravityModel = async (name: string): Promise<void> => {
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     const composer = page.getByRole("region", { name: "Message composer" });
+    const chip = composer.getByRole("button", { name: /^Choose model\./u });
+    await expect(chip.locator('[data-provider-brand="antigravity"]').first())
+      .toHaveAttribute("data-provider-icon-kind", "official");
+    await captureElement(chip, testInfo, `antigravity-mark-chip-${name.endsWith("dark") ? "dark" : "light"}`);
     await expect(composer.getByRole("textbox", { name: "Message" }))
       .toHaveAttribute("placeholder", "Ask for follow-up changes");
     await expect(composer.getByRole("button", {

@@ -99,9 +99,10 @@ const budgets = {
   // Core measures 2,025.0 KiB with no duplicated rendered modules; retain
   // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
   // Click-only local file links add ~1.9 KiB of URL handling and error UI in
-  // the deferred Markdown surface. Core measures 2,026.9 KiB on Linux x64;
+  // the deferred Markdown surface. After the workspace Git update from main,
+  // core measures 2,027.14 KiB on Linux x64;
   // keep <0.3 KiB headroom and preserve the initial-route/Markdown ceilings.
-  coreJavaScript: 2_027.125 * kibibyte,
+  coreJavaScript: 2_027.375 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

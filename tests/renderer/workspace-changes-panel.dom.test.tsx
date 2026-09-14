@@ -140,9 +140,16 @@ describe("WorkspaceChangesPanel repository scope", () => {
     fireEvent.click(parentFile);
     expect(onOpenWorkspaceFile).toHaveBeenCalledOnce();
     await waitFor(() => expect(screen.getByRole("button", { name: "Open file" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+    expect(screen.getByRole("button", { name: "Revert" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
     const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
     fireEvent.click(navigator.querySelectorAll(".workspace-repository-file")[1]);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open file" })).not.toBeInTheDocument());
+    await screen.findByRole("region", { name: "Diff content for README.md" });
+    fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+    expect(screen.getByRole("button", { name: "Ask about" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Revert" })).not.toBeInTheDocument();
     expect(navigator.querySelectorAll(".workspace-repository-file")[1]).toHaveAttribute("aria-current", "true");
   });
 

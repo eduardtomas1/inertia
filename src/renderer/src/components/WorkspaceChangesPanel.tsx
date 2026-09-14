@@ -920,7 +920,7 @@ export function WorkspaceChangesPanel({
       capabilities={{
         persistentReview: true,
         agentRevision: !nestedRepository && selectedOpenPath !== null,
-        selectiveRevert: true,
+        selectiveRevert: selectedOpenPath !== null,
       }}
       onSelectFile={(filePath) => {
         if (activeRepositoryPath) setSelected({ repositoryPath: activeRepositoryPath, filePath });

@@ -50,7 +50,7 @@ describe("response Markdown", () => {
     expect(html).toContain("<details");
   });
 
-  it("sanitizes raw HTML and blocks unsafe or escaping links", () => {
+  it("sanitizes raw HTML and routes local links while blocking unsafe protocols", () => {
     const html = render('<script>alert("no")</script><img src="x" onerror="alert(1)"><iframe src="https://bad.invalid"></iframe>');
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
@@ -66,11 +66,11 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "src/why%3F.java:42")).toEqual({ kind: "project", relativePath: "src/why?.java", action: "reveal", location: { startLine: 42, endLine: 42 }, literalPath: true });
     expect(resolveResponseLink("/work/project", "src/hash%23part.java:8")).toEqual({ kind: "project", relativePath: "src/hash#part.java", action: "reveal", location: { startLine: 8, endLine: 8 }, literalPath: true });
     expect(resolveResponseLink("/work/project", "src/name%3A42:7")).toEqual({ kind: "project", relativePath: "src/name:42", action: "reveal", location: { startLine: 7, endLine: 7 }, literalPath: true });
-    expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "unsafe" });
-    expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "../secret.txt")).toEqual({ kind: "local", path: "/work/secret.txt", url: "file:///work/secret.txt" });
+    expect(resolveResponseLink("/work/project", "%2e%2e/%2e%2e/secret.txt")).toEqual({ kind: "local", path: "/secret.txt", url: "file:///secret.txt" });
     expect(resolveResponseLink("/work/project", "src/%00secret.txt")).toEqual({ kind: "unsafe" });
-    expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "unsafe" });
-    expect(resolveResponseLink("/work/project", "file:///etc/passwd:42")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "file:///etc/passwd")).toEqual({ kind: "local", path: "/etc/passwd", url: "file:///etc/passwd" });
+    expect(resolveResponseLink("/work/project", "file:///etc/passwd#L42")).toEqual({ kind: "local", path: "/etc/passwd", url: "file:///etc/passwd" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
     expect(resolveResponseLink(
@@ -89,7 +89,7 @@ describe("response Markdown", () => {
       "../../../secret.txt",
       "markdown",
       "docs/reference",
-    )).toEqual({ kind: "unsafe" });
+    )).toEqual({ kind: "local", path: "/work/secret.txt", url: "file:///work/secret.txt" });
     expect(resolveResponseLink(
       "/work/project",
       "../guide.md#overview",
@@ -266,9 +266,9 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("C:\\Work Space\\Project", "C:\\Work Space\\Project\\src\\index.ts:42:7")).toEqual({ kind: "project", relativePath: "src/index.ts:42:7", action: "reveal" });
     expect(resolveResponseLink("C:\\Work Space\\Project", "C%3A%5CWork%20Space%5CProject%5Csrc%5Cindex.ts:42:7")).toEqual({ kind: "project", relativePath: "src/index.ts", action: "reveal", location: { startLine: 42, startColumn: 7, endLine: 42 } });
     expect(resolveResponseLink("C:\\Work Space\\Project", "C%3A%5CWork%20Space%5CProject%5Csrc%5Cindex.ts%3A42")).toEqual({ kind: "project", relativePath: "src/index.ts:42", action: "reveal", literalPath: true });
-    expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "local", path: "C:/Work Space/Elsewhere/secret.ts", url: "file:///C:/Work%20Space/Elsewhere/secret.ts" });
     expect(resolveResponseLink("\\\\Server\\Share\\Project", "\\\\server\\share\\project\\src/App.java#L4")).toEqual({ kind: "project", relativePath: "src/App.java", action: "reveal", location: { startLine: 4, endLine: 4 } });
-    expect(resolveResponseLink("\\\\Server\\Share\\Project", "//server/other/project/src/App.java#L4")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("\\\\Server\\Share\\Project", "//server/other/project/src/App.java#L4")).toEqual({ kind: "local", path: "//server/other/project/src/App.java", url: "file://server/other/project/src/App.java" });
   });
 
   it("treats code-file metadata as a project path instead of a URL", () => {

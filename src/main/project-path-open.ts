@@ -16,7 +16,7 @@ interface ProjectPathShell {
   showItemInFolder(path: string): void;
 }
 
-/** The runtime must resolve and authorize the project path before this call. */
+/** The calling desktop operation must authorize the path before this call. */
 export async function openAuthorizedProjectPath(
   path: string,
   action: OpenProjectPathRequest["action"],

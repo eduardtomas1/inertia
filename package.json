@@ -251,7 +251,7 @@
     "electron": "^44.2.0",
     "electron-builder": "26.16.0",
     "electron-vite": "^5.0.0",
-    "happy-dom": "20.14.0",
+    "happy-dom": "20.14.3",
     "oxlint": "^1.81.0",
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "^4.3.3",

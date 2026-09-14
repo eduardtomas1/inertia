@@ -23,7 +23,6 @@ export function localFileLocationSuffix(path: string): string {
 
 export function localFileUrl(path: string, literalPath = true): string | null {
   const normalized = path.replace(/\\/gu, "/");
-  if (/[\0\r\n]/u.test(normalized)) return null;
   const windowsDrive = /^[a-z]:\//iu.test(normalized);
   if (!windowsDrive && !normalized.startsWith("/")) return null;
   const segments = normalized.split("/");
@@ -38,6 +37,7 @@ export function localFileUrl(path: string, literalPath = true): string | null {
       ? segment : encodeURIComponent(segment)).join("/");
     const location = literalPath ? "" : localFileLocationSuffix(normalized);
     if (location) pathname = pathname.slice(0, -encodeURIComponent(location).length) + location;
+    // The shared parser validates the complete URL, including encoded controls.
     const url = parseLocalFileUrl(`file://${host}${windowsDrive ? "/" : ""}${pathname}`);
     return url?.href ?? null;
   } catch { return null; }

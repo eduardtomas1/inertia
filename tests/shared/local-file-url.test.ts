@@ -26,7 +26,11 @@ describe("desktop file URLs", () => {
     expect(parseLocalFileUrl(href)).toBeNull();
   });
 
-  it.each(["relative/file.json", "/tmp/a\0.json", "/tmp/\ud800", "//user@host/share"]) (
+  it.each([
+    "relative/file.json", "/tmp/a\0.json", "/tmp/a\r.json", "/tmp/a\n.json",
+    "//ho\0st/share", "//ho\rst/share", "//ho\nst/share",
+    "/tmp/\ud800", "//user@host/share",
+  ]) (
     "does not construct a file URL for %s", (path) => expect(localFileUrl(path)).toBeNull(),
   );
 

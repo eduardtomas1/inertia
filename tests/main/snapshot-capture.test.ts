@@ -135,7 +135,8 @@ describe("foreground snapshot failure categories", () => {
 
   it("reports zero active windows after a bounded retry without taking pixels", async () => {
     const app = foreground();
-    native.foreground.mockResolvedValue({ ...app, children: async () => [{ ...app.asElement(), active: false }] });
+    const inactive = { ...app.asElement(), active: false };
+    native.foreground.mockResolvedValue({ ...app, asElement: () => inactive, children: async () => [inactive] });
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground", message: "no-active-window" });
     expect(native.foreground).toHaveBeenCalledTimes(3);
     expect(native.screenshot).not.toHaveBeenCalled();
@@ -170,7 +171,7 @@ describe("foreground snapshot failure categories", () => {
 
   it.each([
     ["permission-denied", "foreground", () => { native.foreground.mockRejectedValue(new PermissionDeniedError("denied")); }],
-    ["invalid-geometry", "foreground", () => { native.foreground.mockResolvedValue({ ...foreground(), children: async () => [{ ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } }] }); }],
+    ["invalid-geometry", "foreground", () => { const flat = { ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } }; native.foreground.mockResolvedValue({ ...foreground(), asElement: () => flat, children: async () => [flat] }); }],
     ["invalid-geometry", "accessibility", () => { native.foreground.mockResolvedValue(foreground("Review window", [{ ...field(), bounds: null }])); }],
     ["native-failure", "screenshot", () => { native.screenshot.mockRejectedValue(new PlatformError("capture failed")); }],
     ["native-failure", "screenshot", () => { native.screenshot.mockResolvedValue({ width: 0, height: 0, pixels: Buffer.alloc(0) }); }],

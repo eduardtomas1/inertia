@@ -283,6 +283,29 @@ describe("runtime diagnostics", () => {
     expect(report.text).not.toContain("scheduled=yes");
   });
 
+  it("records snapshot failures as an allowlisted phase and category only", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.record("snapshot.failure", {
+      phase: "accessibility", category: "accessibility-unavailable",
+      windowTitle: "Private roadmap", message: "Accessibility not enabled for Google Chrome", processId: 4242, pixels: "base64-pixels",
+    });
+    diagnostics.record("snapshot.failure", { phase: "/home/alice", category: "timed-out" });
+    diagnostics.record("snapshot.failure", { phase: "foreground", category: "Google Chrome" });
+    writeFileSync(join(directory, "runtime.log"), `${readFileSync(join(directory, "runtime.log"), "utf8")}${[
+      signedRecord({ schemaVersion: 1, at: new Date().toISOString(), event: "snapshot.failure", category: "changed", windowTitle: "TOP_SECRET" }),
+      signedRecord({ schemaVersion: 1, at: new Date().toISOString(), event: "snapshot.failure", category: "changed", phase: "TOP_SECRET" }),
+      signedRecord({ schemaVersion: 1, at: new Date().toISOString(), event: "snapshot.failure", phase: "screenshot" }),
+    ].join("\n")}\n`, { mode: 0o600 });
+
+    const report = diagnostics.supportReport({ version: "0.0.56", platform: "linux", architecture: "x64", runtime: null });
+    expect(report.eventCount).toBe(2);
+    expect(report.text).toContain("snapshot.failure · phase=accessibility · category=accessibility-unavailable");
+    expect(report.text).toMatch(/snapshot\.failure · category=timed-out\n/u);
+    for (const hidden of ["Private roadmap", "Google Chrome", "4242", "base64-pixels", "alice", "TOP_SECRET"]) expect(report.text).not.toContain(hidden);
+  });
+
   it("rotates within fixed file and byte bounds and removes expired generations", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);

@@ -23,14 +23,19 @@ test("greets a fresh install with a compact, keyboard-friendly guide", async () 
   await expect(guide).toBeVisible();
   await expect(guide.getByRole("heading", { name: "Welcome to Inertia" })).toBeVisible();
   await expect(guide.getByRole("button", { name: "Take the tour" })).toBeFocused();
-  await page.waitForTimeout(400);
+  // Native presentation can delay the opening animation beyond a fixed sleep.
+  await expect.poll(() => guide.evaluate((element) => (
+    element.getAnimations().every((animation) => animation.playState === "finished")
+  ))).toBe(true);
   const first = await guide.boundingBox();
 
   await page.keyboard.press("ArrowRight");
   await expect(guide.getByRole("heading", { name: "How it works" })).toBeVisible();
   await guide.getByRole("tab", { name: "Duo" }).click();
   await expect(guide.getByRole("tabpanel")).toContainText("third model");
-  await page.waitForTimeout(400);
+  await expect.poll(() => guide.evaluate((element) => (
+    element.getAnimations().every((animation) => animation.playState === "finished")
+  ))).toBe(true);
   const tour = await guide.boundingBox();
   expect(Math.round(tour?.width ?? 0)).toBe(Math.round(first?.width ?? 0));
   expect(Math.round(tour?.height ?? 0)).toBe(Math.round(first?.height ?? 0));

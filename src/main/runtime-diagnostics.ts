@@ -49,6 +49,8 @@ import {
   "../shared/lifecycle-build-metadata.js";
 import { isRuntimeStartupBlockerCode } from
   "../shared/runtime-startup-diagnostics.js";
+import { SNAPSHOT_CAPTURE_PHASES, SNAPSHOT_DIAGNOSTIC_CATEGORIES } from
+  "../shared/snapshots.js";
 
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 const DEFAULT_MAX_FILES = 4;
@@ -84,7 +86,8 @@ export type RuntimeDiagnosticEvent =
   | "report.copy"
   | "runtime.failure"
   | "runtime.restart-requested"
-  | "runtime.state";
+  | "runtime.state"
+  | "snapshot.failure";
 
 export interface RuntimeDiagnosticsOptions {
   maxFileBytes?: number;
@@ -120,6 +123,10 @@ type DiagnosticFields = Readonly<Record<string, unknown>>;
 
 export function runtimeDiagnosticsDirectory(userDataDirectory: string): string {
   return resolve(userDataDirectory, "logs", "runtime");
+}
+
+function allowlisted<T extends string>(values: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (values as readonly string[]).includes(value);
 }
 
 function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
@@ -242,6 +249,7 @@ function parseDiagnosticRecord(
       "runtime.failure",
       "runtime.restart-requested",
       "runtime.state",
+      "snapshot.failure",
     ].includes(record.event)
     || typeof record.recordDigest !== "string"
     || !DIAGNOSTIC_DIGEST_PATTERN.test(record.recordDigest)
@@ -267,6 +275,7 @@ function parseDiagnosticRecord(
   ];
   const allowedKeys = record.event === "detached-draft.recovery"
     ? detachedDraftKeys
+    : record.event === "snapshot.failure" ? [...baseKeys, "phase", "category"]
     : record.event === "runtime.failure" || record.event === "runtime.state"
       ? runtimeKeys
       : record.event === "runtime.restart-requested"
@@ -287,6 +296,11 @@ function parseDiagnosticRecord(
       })) return null;
     }
     return record;
+  }
+
+  if (record.event === "snapshot.failure") {
+    return allowlisted(SNAPSHOT_DIAGNOSTIC_CATEGORIES, record.category)
+      && (record.phase === undefined || allowlisted(SNAPSHOT_CAPTURE_PHASES, record.phase)) ? record : null;
   }
 
   if (record.event === "detached-draft.recovery") {
@@ -456,6 +470,11 @@ export class RuntimeDiagnostics {
         event === "detached-draft.recovery"
         && typeof fields.evidencePreserved === "boolean"
       ) entry.evidencePreserved = fields.evidencePreserved;
+      if (event === "snapshot.failure") {
+        if (!allowlisted(SNAPSHOT_DIAGNOSTIC_CATEGORIES, fields.category)) return;
+        if (allowlisted(SNAPSHOT_CAPTURE_PHASES, fields.phase)) entry.phase = fields.phase;
+        entry.category = fields.category;
+      }
       if (message) entry.message = message;
 
       let line = serializeDiagnosticRecord(entry);
@@ -678,7 +697,7 @@ export class RuntimeDiagnostics {
           }
           const event = value.event as RuntimeDiagnosticEvent;
           const at = value.at as string;
-          const lifecycleEvent = event !== "detached-draft.recovery";
+          const lifecycleEvent = event !== "detached-draft.recovery" && event !== "snapshot.failure";
           const fields = [
             event === "runtime.restart-requested" ? `reason=${value.reason}` : null,
             event === "runtime.restart-requested" && value.stage !== undefined ? `stage=${value.stage}` : null,
@@ -722,6 +741,8 @@ export class RuntimeDiagnostics {
               && typeof value.evidencePreserved === "boolean"
               ? `evidence=${value.evidencePreserved ? "preserved" : "unavailable"}`
               : null,
+            event === "snapshot.failure" && value.phase !== undefined ? `phase=${value.phase}` : null,
+            event === "snapshot.failure" ? `category=${value.category}` : null,
             event === "runtime.failure"
               ? runtimeFailureSummary(value.message)
               : null,

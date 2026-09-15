@@ -9,7 +9,8 @@ vi.mock("electron", () => ({
   globalShortcut: { register: native.register, unregister: native.unregister },
   systemPreferences: { getMediaAccessStatus: native.screen, isTrustedAccessibilityClient: native.accessibility },
 }));
-import { SnapshotService, snapshotWorkerEnvironment } from "../../src/main/snapshot-service";
+import { SnapshotService, snapshotFailureMessage, snapshotWorkerEnvironment } from "../../src/main/snapshot-service";
+import { SNAPSHOT_FAILURE_CATEGORIES } from "../../src/shared/snapshots";
 
 class Child extends EventEmitter {
   postMessage = vi.fn();
@@ -24,11 +25,18 @@ afterEach(async () => {
 
 async function fixture() {
   const onCapture = vi.fn(async () => undefined);
-  const service = new SnapshotService(onCapture);
+  const onFailure = vi.fn();
+  const service = new SnapshotService(onCapture, onFailure);
   services.push(service);
   await service.configure(true, "accelerator");
   const child = new Child(); native.fork.mockReturnValue(child);
-  return { service, child, onCapture };
+  return { service, child, onCapture, onFailure };
+}
+
+function withPlatform(platform: NodeJS.Platform): () => void {
+  const prior = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { ...prior, value: platform });
+  return () => Object.defineProperty(process, "platform", prior);
 }
 
 describe("snapshot native worker ownership", () => {
@@ -191,5 +199,62 @@ describe("snapshot native worker ownership", () => {
     expect(snapshotWorkerEnvironment({ HOME: "/home/snapshot-user", XAUTHORITY: "/run/user/1000/Xauthority" })).toEqual({ HOME: "/home/snapshot-user", XAUTHORITY: "/run/user/1000/Xauthority" });
     expect(snapshotWorkerEnvironment({ HOME: "relative-home" })).toEqual({});
     expect(snapshotWorkerEnvironment({ HOME: "/home/invalid\0" })).toEqual({});
+  });
+});
+
+describe("snapshot failure reasons", () => {
+  it.each(SNAPSHOT_FAILURE_CATEGORIES)("delivers the %s category as its specific message and a phase-only diagnostic", async (category) => {
+    const { service, child, onFailure } = await fixture();
+    const capture = service.capture(); const outcome = capture.then(() => "delivered", (error: Error) => error.message);
+    child.emit("message", { ok: false, code: category, phase: "verification" });
+    child.emit("exit", 0);
+    const message = await outcome;
+    expect(message).toBe(snapshotFailureMessage(category));
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category, phase: "verification" });
+    if (category !== "permission-denied") expect(message).not.toMatch(/permission|denied/iu);
+  });
+
+  it("gives Linux-only accessibility bridge guidance and claims denial only from a denial", () => {
+    expect(snapshotFailureMessage("accessibility-unavailable", "linux")).toContain("--force-renderer-accessibility");
+    expect(snapshotFailureMessage("accessibility-unavailable", "linux")).toContain("ACCESSIBILITY_ENABLED=1");
+    for (const platform of ["darwin", "win32"] as const) expect(snapshotFailureMessage("accessibility-unavailable", platform)).not.toContain("--force-renderer-accessibility");
+    expect(snapshotFailureMessage("permission-denied", "darwin")).toContain("Screen Recording");
+    expect(snapshotFailureMessage("permission-denied", "linux")).not.toContain("Screen Recording");
+    expect(snapshotFailureMessage("no-active-window", "linux")).toMatch(/focus.*press the shortcut again/u);
+  });
+
+  it("collapses unknown worker codes and phases to a native failure without forwarding worker text", async () => {
+    const { service, child, onFailure } = await fixture();
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow(snapshotFailureMessage("native-failure"));
+    child.emit("message", { ok: false, code: "Google Chrome: private title", phase: "/home/alice", detail: "raw native detail" });
+    child.emit("exit", 0); await failure;
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "native-failure" });
+  });
+
+  it("records a timed-out capture as a category-only diagnostic", async () => {
+    vi.useFakeTimers();
+    const { service, onFailure } = await fixture();
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(10_000); await failure;
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "timed-out" });
+  });
+
+  it.each([["linux", "unverified"], ["win32", "unverified"]] as const)("does not report an unverified %s permission as granted", (platform, permission) => {
+    const restore = withPlatform(platform);
+    try {
+      const service = new SnapshotService(async () => undefined); services.push(service);
+      expect(service.state().permission).toBe(permission);
+      expect(native.accessibility).not.toHaveBeenCalled();
+    } finally { restore(); }
+  });
+
+  it("reports macOS permission from the system checks", () => {
+    const restore = withPlatform("darwin");
+    try {
+      const service = new SnapshotService(async () => undefined); services.push(service);
+      expect(service.state().permission).toBe("granted");
+      native.screen.mockReturnValueOnce("denied");
+      expect(service.state().permission).toBe("required");
+    } finally { restore(); }
   });
 });

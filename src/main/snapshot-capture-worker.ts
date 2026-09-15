@@ -1,15 +1,32 @@
 import xa11y from "@crowecawcaw/xa11y";
 import { createCanvas, ImageData } from "@napi-rs/canvas";
-import { readSnapshotAccessibility } from "./snapshot-accessibility.js";
-import { SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema, type SnapshotRect, type SnapshotSource } from "../shared/snapshots.js";
-const { App, screenshot } = xa11y;
+import { readSnapshotAccessibility, SnapshotGeometryError } from "./snapshot-accessibility.js";
+import {
+  SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema,
+  type SnapshotCapturePhase, type SnapshotFailureCategory, type SnapshotRect, type SnapshotSource,
+} from "../shared/snapshots.js";
+const { App, screenshot, AccessibilityNotEnabledError, PermissionDeniedError, SelectorNotMatchedError } = xa11y;
+
+export class SnapshotCaptureFailure extends Error {
+  constructor(readonly category: SnapshotFailureCategory, readonly phase?: SnapshotCapturePhase) { super(category); }
+}
+
+export function snapshotFailureCategory(error: unknown, phase: SnapshotCapturePhase): SnapshotFailureCategory {
+  const category = error instanceof SnapshotCaptureFailure ? error.category
+    : error instanceof SnapshotGeometryError ? "invalid-geometry"
+      : error instanceof AccessibilityNotEnabledError ? "accessibility-unavailable"
+        : error instanceof PermissionDeniedError ? "permission-denied"
+          : error instanceof SelectorNotMatchedError ? "no-active-window" : "native-failure";
+  return category === "no-active-window" && phase !== "foreground" ? "changed" : category;
+}
 
 async function foreground() {
   const app = await App.foreground({ timeout: 0 });
   const candidates = process.platform === "win32" ? [app.asElement()] : await app.children();
   const active = candidates.filter((element) => element.active);
-  const window = active.length === 1 ? active[0] : undefined;
-  if (!window?.bounds || !app.pid) throw new Error("unavailable");
+  if (active.length !== 1 || !app.pid) throw new SnapshotCaptureFailure("no-active-window");
+  const window = active[0]!;
+  if (!window.bounds) throw new SnapshotCaptureFailure("invalid-geometry");
   return { app, window, identity: JSON.stringify([app.pid, window.stableId, window.name, window.bounds]) };
 }
 
@@ -17,25 +34,44 @@ function protectedGeometry(rectangles: readonly SnapshotRect[]): string {
   return JSON.stringify(rectangles.map(({ x, y, width, height }) => JSON.stringify([x, y, width, height])).sort());
 }
 
+const RETRYABLE: ReadonlySet<SnapshotFailureCategory> = new Set(["accessibility-unavailable", "no-active-window"]);
+
 export async function captureForegroundSnapshot() {
+  const retryUntil = Date.now() + 1000;
+  for (let attempt = 1; ; attempt += 1) {
+    const progress: { phase: SnapshotCapturePhase } = { phase: "foreground" };
+    try { return await captureOnce(progress); }
+    catch (error) {
+      const failure = new SnapshotCaptureFailure(snapshotFailureCategory(error, progress.phase), progress.phase);
+      if (attempt === 3 || !RETRYABLE.has(failure.category) || Date.now() > retryUntil) throw failure;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+async function captureOnce(progress: { phase: SnapshotCapturePhase }) {
   const { app, window, identity } = await foreground();
   const bounds = window.bounds!;
-  if (!Object.values(bounds).every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0 || bounds.width * bounds.height > 16_000_000) throw new Error("unavailable");
+  if (!Object.values(bounds).every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0 || bounds.width * bounds.height > 16_000_000) throw new SnapshotCaptureFailure("invalid-geometry");
+  progress.phase = "accessibility";
   const deadline = Date.now() + 3000;
   const context = await readSnapshotAccessibility(window, () => Date.now() < deadline);
   // A partial traversal cannot prove where every protected field is. Fail closed.
-  if (!context.complete) throw new Error("incomplete");
-  if ((await foreground()).identity !== identity) throw new Error("changed");
+  if (!context.complete) throw new SnapshotCaptureFailure("incomplete");
+  if ((await foreground()).identity !== identity) throw new SnapshotCaptureFailure("changed");
+  progress.phase = "screenshot";
   const shot = await screenshot({ element: window });
-  if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new Error("unavailable");
+  if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new SnapshotCaptureFailure("native-failure");
+  progress.phase = "verification";
   const after = await foreground();
-  if (after.identity !== identity) throw new Error("changed");
+  if (after.identity !== identity) throw new SnapshotCaptureFailure("changed");
   // A fresh native tree must agree with the masks sampled before pixel capture.
   const verificationDeadline = Date.now() + 3000;
   const verification = await readSnapshotAccessibility(after.window, () => Date.now() < verificationDeadline);
-  if (!verification.complete) throw new Error("incomplete");
+  if (!verification.complete) throw new SnapshotCaptureFailure("incomplete");
   if (protectedGeometry(context.redactions) !== protectedGeometry(verification.redactions)
-    || (await foreground()).identity !== identity) throw new Error("changed");
+    || (await foreground()).identity !== identity) throw new SnapshotCaptureFailure("changed");
+  progress.phase = "encoding";
   const canvas = createCanvas(shot.width, shot.height);
   const ctx = canvas.getContext("2d");
   ctx.putImageData(new ImageData(new Uint8ClampedArray(shot.pixels), shot.width, shot.height), 0, 0);
@@ -47,7 +83,7 @@ export async function captureForegroundSnapshot() {
   const output = createCanvas(Math.max(1, Math.round(shot.width * scale)), Math.max(1, Math.round(shot.height * scale)));
   output.getContext("2d").drawImage(canvas, 0, 0, output.width, output.height);
   const png = output.toBuffer("image/png");
-  if (png.length > SNAPSHOT_MAX_IMAGE_BYTES) throw new Error("large");
+  if (png.length > SNAPSHOT_MAX_IMAGE_BYTES) throw new SnapshotCaptureFailure("large");
   const source: SnapshotSource = {
     appName: app.name.slice(0, 200), windowTitle: (window.name ?? "Captured window").slice(0, 500),
     capturedAt: new Date().toISOString(), width: output.width, height: output.height,
@@ -77,7 +113,6 @@ if (parent) parent.once("message", (event) => {
   void captureForegroundSnapshot().then((result) => {
     finish(result);
   }, (error: unknown) => {
-    const code = error instanceof Error && ["incomplete", "changed", "large"].includes(error.message) ? error.message : "unavailable";
-    finish({ ok: false, code });
+    finish(error instanceof SnapshotCaptureFailure ? { ok: false, code: error.category, phase: error.phase } : { ok: false, code: "native-failure" });
   });
 });

@@ -13,6 +13,12 @@ disabled and saves the chosen setting locally. Linux requires an X11 desktop and
 working AT-SPI accessibility. Wayland is reported as unavailable because reliable
 foreground-window cropping is not available through the selected native backend.
 Applications that omit accessibility information can provide incomplete context.
+On Linux, Chromium and Electron apps can expose an empty accessibility tree until
+their accessibility bridge is enabled. Snapshots refuses to capture such a window,
+because it cannot locate fields to mask, and suggests restarting the app with
+`--force-renderer-accessibility` or `ACCESSIBILITY_ENABLED=1`. Only macOS has an
+app-level permission that Inertia can check. Elsewhere access is established per
+window at capture time, so the permission state is reported as unverified.
 
 The capture worker reads the current window once. It masks detected editable
 controls and protected fields in the image and omits their text and descendants
@@ -22,6 +28,15 @@ which can include overlapping windows outside that accessibility tree. Review th
 attachment before sending it. A changed foreground identity, an
 incomplete protected-field scan, changed protected-field geometry across the
 screenshot, timeout, or oversized image fails the capture.
+Failures keep a fixed category across the worker boundary: target accessibility
+unavailable, no identifiable active window, an actual permission denial, invalid
+protected geometry, or a native capture failure. Each has its own message, and
+only a typed denial from the native backend is reported as a permission problem.
+An unavailable accessibility tree or missing active window is retried twice,
+250 ms apart, within the first second. Each retry repeats the full
+foreground-identity and masking checks. The runtime log records only the capture
+phase and category, never window titles, accessibility text, pixels, raw
+exceptions or identifiers.
 Only the two Shift modifiers are sampled for the default shortcut; no typed text
 or general keyboard events are recorded. There is no continuous screen capture.
 

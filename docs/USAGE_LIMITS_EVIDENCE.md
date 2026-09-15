@@ -224,12 +224,13 @@ Verification used macOS ARM64 and Node 22.23.2 on `70db1278`, main with #390 mer
 
 | JavaScript and CSS scope | Baseline bytes | Feature bytes | Change | New ceiling |
 | --- | ---: | ---: | ---: | ---: |
-| Deferred Limits closure | 17591 | 19942 | +2351 | 19.7 KiB |
-| Main workbench first load | 811095 | 811819 | +724 | 793 KiB |
-| Detached chat first load | 620226 | 620921 | +695 | 606.6 KiB |
-| Core | 2115046 | 2115861 | +815 | 2,066.4 KiB |
+| Deferred Limits closure | 17592 | 19943 | +2351 | 19.7 KiB |
+| Main workbench first load | 811733 | 812457 | +724 | 793.6 KiB |
+| Detached chat first load | 620979 | 621674 | +695 | 607.3 KiB |
+| Core | 2115689 | 2116504 | +815 | 2,067.1 KiB |
 | Entry CSS | 348591 | 350894 | +2303 | unchanged 346 KiB |
 
+Budgets are re-measured on `70fe3cc5`, main with #401 and #403.
 The first-load growth is the quota tone, the lazy hint boundary and the
 remembered Usage section; the hint's logic stays in the deferred Limits closure. Measurements are
 in [the renderer evidence](pr-evidence/limits-strip-composer-quota-renderer-bundle.json).

@@ -1,5 +1,5 @@
 {
-  "baselineRevision": "3baeaef300087567091f75594bc4bc0b569a1f26",
+  "baselineRevision": "70db12781fbd4c922e65d8ffc7ad754086610e13",
   "reviewRevision": "feat/limits-strip-composer-quota working tree on the same base",
   "environment": {
     "platform": "macOS ARM64",
@@ -22,7 +22,7 @@
       "mascotJavaScript": 5980,
       "mascotSettingsJavaScript": 1994,
       "entryJavaScript": 222496,
-      "mainWorkbenchFirstLoadJavaScript": 810794,
+      "mainWorkbenchFirstLoadJavaScript": 811095,
       "detachedChatFirstLoadJavaScript": 620226,
       "entryCss": 348591,
       "colorThemesCss": 11686,
@@ -49,7 +49,7 @@
       "preMergeConfidenceJavaScript": 22570,
       "morphiconsJavaScript": 15829,
       "morphingIconFeedbackJavaScript": 4221,
-      "coreJavaScript": 2114728,
+      "coreJavaScript": 2115046,
       "deferredPdfJavaScript": 437530,
       "deferredPdfWorker": 1265413
     },
@@ -67,7 +67,7 @@
       "mascotJavaScript": 5980,
       "mascotSettingsJavaScript": 1994,
       "entryJavaScript": 222496,
-      "mainWorkbenchFirstLoadJavaScript": 811518,
+      "mainWorkbenchFirstLoadJavaScript": 811819,
       "detachedChatFirstLoadJavaScript": 620921,
       "entryCss": 350894,
       "colorThemesCss": 11686,
@@ -94,7 +94,7 @@
       "preMergeConfidenceJavaScript": 22570,
       "morphiconsJavaScript": 15829,
       "morphingIconFeedbackJavaScript": 4221,
-      "coreJavaScript": 2115543,
+      "coreJavaScript": 2115861,
       "deferredPdfJavaScript": 437530,
       "deferredPdfWorker": 1265413
     }

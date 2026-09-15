@@ -209,7 +209,7 @@ showed unstyled adjacent buttons until Limits loaded. Their rules now live in
 `UsageView.css` and `styles.css`; a stylesheet test and the Usage E2E (computed
 `display: flex` before Limits is opened) cover it.
 
-Verification used macOS ARM64 and Node 22.23.2 on `3baeaef3`:
+Verification used macOS ARM64 and Node 22.23.2 on `70db1278`, main with #390 merged in:
 
 - `npm run check`: passed. **849 files / 9,039 tests passed**, 16 files / 140
   tests skipped, and the real renderer bundle gate passed.
@@ -225,9 +225,9 @@ Verification used macOS ARM64 and Node 22.23.2 on `3baeaef3`:
 | JavaScript and CSS scope | Baseline bytes | Feature bytes | Change | New ceiling |
 | --- | ---: | ---: | ---: | ---: |
 | Deferred Limits closure | 17591 | 19942 | +2351 | 19.7 KiB |
-| Main workbench first load | 810794 | 811518 | +724 | 792.7 KiB |
+| Main workbench first load | 811095 | 811819 | +724 | 793 KiB |
 | Detached chat first load | 620226 | 620921 | +695 | 606.6 KiB |
-| Core | 2114728 | 2115543 | +815 | 2,066.2 KiB |
+| Core | 2115046 | 2115861 | +815 | 2,066.4 KiB |
 | Entry CSS | 348591 | 350894 | +2303 | unchanged 346 KiB |
 
 The first-load growth is the quota tone, the lazy hint boundary and the

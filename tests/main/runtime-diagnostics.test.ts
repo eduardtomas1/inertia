@@ -246,6 +246,71 @@ describe("runtime diagnostics", () => {
     expect(report.text).not.toContain("ghp_1234567890");
   });
 
+  it("keeps Browser operation failures to an allowlisted phase and category", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));
+    diagnostics.record("browser.operation-failure", {
+      phase: "privacy-check",
+      category: "timeout",
+      url: "http://127.0.0.1:8091/private-route?token=secret-value",
+      message: "The page contained API_KEY=sk-private-browser-value",
+      title: "Private page title",
+    });
+    diagnostics.record("browser.operation-failure", { phase: "page-freeze", category: "failed" });
+    diagnostics.record("browser.operation-failure", { phase: "http://127.0.0.1:8091/", category: "timeout" });
+    diagnostics.record("browser.operation-failure", { phase: "page-snapshot", category: "page text" });
+    diagnostics.record("browser.operation-failure", { phase: "page-snapshot" });
+
+    const lines = readFileSync(join(runtimeDiagnosticsDirectory(root), "runtime.log"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map(({ event, phase, category }) => ({ event, phase, category }))).toEqual([
+      { event: "browser.operation-failure", phase: "privacy-check", category: "timeout" },
+      { event: "browser.operation-failure", phase: "page-freeze", category: "failed" },
+    ]);
+    for (const line of lines) {
+      expect(Object.keys(line).sort()).toEqual(["at", "category", "event", "phase", "recordDigest", "schemaVersion"]);
+    }
+
+    const report = diagnostics.supportReport({
+      version: "0.0.56",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    });
+    expect(report.eventCount).toBe(2);
+    expect(report.text).toContain("browser.operation-failure · phase=privacy-check · category=timeout");
+    expect(report.text).toContain("browser.operation-failure · phase=page-freeze · category=failed");
+    expect(report.text).not.toContain("127.0.0.1");
+    expect(report.text).not.toContain("secret-value");
+    expect(report.text).not.toContain("sk-private-browser-value");
+    expect(report.text).not.toContain("Private page title");
+  });
+
+  it("rejects Browser operation records outside the phase and category allowlists", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    new RuntimeDiagnostics(directory).ensureDirectory();
+    const at = new Date().toISOString();
+    writeFileSync(join(directory, "runtime.log"), [
+      signedRecord({ schemaVersion: 1, at, event: "browser.operation-failure", phase: "page-hover", category: "timeout" }),
+      signedRecord({ schemaVersion: 1, at, event: "browser.operation-failure", phase: "ready", category: "timeout" }),
+      signedRecord({ schemaVersion: 1, at, event: "browser.operation-failure", phase: "page-hover", category: "slow" }),
+      signedRecord({ schemaVersion: 1, at, event: "browser.operation-failure", phase: "page-hover", category: "timeout", url: "http://127.0.0.1:8091/" }),
+    ].join("\n") + "\n", { mode: 0o600 });
+
+    const report = new RuntimeDiagnostics(directory).supportReport({
+      version: "0.0.56",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).toContain("phase=page-hover · category=timeout");
+    expect(report.text).not.toContain("phase=ready");
+    expect(report.text).not.toContain("category=slow");
+    expect(report.text).not.toContain("127.0.0.1");
+  });
+
   it("exposes only classified detached-draft recovery diagnostics", () => {
     const root = fixture();
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));

@@ -60,6 +60,7 @@ import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { cachedStatement } from "./persistence/statement-cache";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
 import {
@@ -905,6 +906,7 @@ export class RuntimeStore {
   }
 
   attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
+  referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.transcriptRepository.referencedAttachmentIds(candidateIds); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
 
@@ -1224,19 +1226,19 @@ export class RuntimeStore {
   }
 
   private requireProject(projectId: string): ProjectRow {
-    const project = this.database.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow | undefined;
+    const project = cachedStatement(this.database, "SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow | undefined;
     if (!project) throw new RecordNotFoundError("Project not found.");
     return project;
   }
 
   private requireConversation(conversationId: string): ConversationRow {
-    const conversation = this.database.prepare("SELECT * FROM conversations WHERE id = ?").get(conversationId) as ConversationRow | undefined;
+    const conversation = cachedStatement(this.database, "SELECT * FROM conversations WHERE id = ?").get(conversationId) as ConversationRow | undefined;
     if (!conversation) throw new RecordNotFoundError("Conversation not found.");
     return conversation;
   }
 
   private requireAgentTurn(turnId: string): AgentTurnRow {
-    const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
+    const turn = cachedStatement(this.database, "SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
     if (!turn) throw new RecordNotFoundError("Agent turn not found.");
     return turn;
   }

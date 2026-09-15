@@ -106,14 +106,42 @@ describe.runIf(process.platform === "darwin")("Darwin guardian freeze exit race"
     });
   });
 
-  it("keeps an unreadable non-child zombie fail closed without trying to reap it", () => {
+  it("proves an exited descendant through its kernel birth identity and drains its surviving parent", () => {
     expect(run("non-child-exit")).toMatchObject({
+      cleaned: 1,
+      zombieObserved: 1,
+      zombieLibprocBytes: 0,
+      stopSignalsDelivered: 0,
+      members: 0,
+      survivorReaped: 1,
+      nonChildWaitAttempts: 0,
+    });
+  });
+
+  it.each(["unreadable", "changed-birth", "sidl", "zero-birth"])(
+    "keeps a descendant's %s kernel proof failure closed without signaling or reaping it",
+    (failure) => {
+      expect(run(`non-child-${failure}`)).toMatchObject({
+        cleaned: 0,
+        phase: "freeze-stop-signal",
+        zombieObserved: 1,
+        stopSignalsDelivered: 0,
+        members: 2,
+        nonChildZombieRetained: 1,
+        nonChildWaitAttempts: 0,
+      });
+    },
+  );
+
+  it("retains fork taint after proving the exact exited descendant and draining its parent", () => {
+    expect(run("non-child-fork-taint")).toMatchObject({
       cleaned: 0,
-      phase: "freeze-stop-signal",
+      phase: "term-fork-taint",
       zombieObserved: 1,
       stopSignalsDelivered: 0,
-      members: 2,
-      nonChildZombieRetained: 1,
+      members: 0,
+      survivorReaped: 1,
+      forkTainted: 1,
       nonChildWaitAttempts: 0,
     });
   });

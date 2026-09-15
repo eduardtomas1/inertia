@@ -638,6 +638,14 @@ static int signal_exact_owned_member(
   struct proc_bsdinfo current;
   if (!read_identity(pid, &current)) {
     if (kill(pid, 0) != 0 && errno == ESRCH) return 1;
+    // libproc excludes zombies, but sysctl can still prove the stored birth
+    // identity and SZOMB together. That exact process has already exited:
+    // do not signal it or try to reap somebody else's child. The caller still
+    // rebuilds the full owned census and retains its existing fork taint.
+    int status = 0;
+    if (read_kernel_identity(pid, &current, &status)
+      && status == SZOMB
+      && same_identity(&member->identity, &current)) return 1;
     return 0;
   }
   if (!same_identity(&member->identity, &current)) return 0;

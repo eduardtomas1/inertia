@@ -182,3 +182,58 @@ Native Claude verification includes the separately reviewed #354 teardown fixes:
 normal EOF, partial metadata completion, cancellation during close, exact one-close
 behavior and confirmed process-tree ownership. The usage adapter releases ordinary
 operation failures and quarantines only unconfirmed ownership or failed exact release.
+
+## Compact Limits rows and composer quota (2026-09-15)
+
+Limits now shows one row per provider. Each reported window has a meter, the
+remaining percentage and a countdown; equivalent accounts use the existing
+`usagePools` average. A dot, the meter and the number carry the health tone.
+Accounts open under a disclosure in the same columns and stay inert while
+collapsed. The averages explanation sits behind an info control, and a skeleton
+replaces the loading sentence during the first read. Entry, fill and disclosure
+motion runs only under `prefers-reduced-motion: no-preference`. Account details,
+hub setup and the reset confirmation flow are unchanged.
+
+The composer usage popover shows context as a larger ring and quota with the
+Limits health tones. The trigger adds the tightest selected-route quota figure
+below 50%. A line names another ready, fully reported account of the same
+provider with more room than that figure, with the reading's age after five
+minutes. It reads `usage.limits.get` with `refresh: false`, which returns the
+runtime's in-memory snapshot; it never refreshes providers. It loads with the
+deferred Limits module.
+
+The History/Limits switch and the popover's **All provider limits** button were
+styled only by the lazily loaded Limits stylesheet. On a first visit, History
+showed unstyled adjacent buttons until Limits loaded. Their rules now live in
+`UsageView.css` and `styles.css`; a stylesheet test and the Usage E2E (computed
+`display: flex` before Limits is opened) cover it.
+
+Verification used macOS ARM64 and Node 22.23.2 on `3baeaef3`:
+
+- `npm run check`: passed. **849 files / 9,038 tests passed**, 16 files / 140
+  tests skipped, and the real renderer bundle gate passed.
+- `npx playwright test tests/e2e/usage-limits.spec.ts tests/e2e/usage.spec.ts
+  tests/e2e/usage-popover-placement.spec.ts --project=display-sensitive --workers=1`:
+  **3 passed in 19.5 seconds**, with no renderer errors.
+- Providers, hub, accounts and reset credits are the existing synthetic fixtures.
+  No real provider CLI ran and no reset credit was redeemed. Native Windows and
+  Linux rendering was not exercised locally.
+
+| JavaScript and CSS scope | Baseline bytes | Feature bytes | Change | New ceiling |
+| --- | ---: | ---: | ---: | ---: |
+| Deferred Limits closure | 17591 | 19942 | +2351 | 19.7 KiB |
+| Main workbench first load | 810794 | 811803 | +1009 | 793 KiB |
+| Detached chat first load | 620226 | 621214 | +988 | 606.9 KiB |
+| Core | 2114728 | 2115625 | +897 | 2,066.3 KiB |
+| Entry CSS | 348591 | 351526 | +2935 | unchanged 346 KiB |
+
+The first-load growth is the quota tone, the trigger figure and the lazy hint
+boundary; the hint's logic stays in the deferred Limits closure. Measurements are
+in [the renderer evidence](pr-evidence/limits-strip-composer-quota-renderer-bundle.json).
+The earlier manifest and screenshots remain the original feature snapshot.
+
+- [Light rows with Codex accounts open](screenshots/limits-strip-light.png)
+- [Dark rows](screenshots/limits-strip-dark.png)
+- [Account details and reset action](screenshots/limits-strip-account-details.png)
+- [Narrow layout](screenshots/limits-strip-narrow.png)
+- [Composer popover with a low weekly window and a roomier account](screenshots/composer-usage-quota.png)

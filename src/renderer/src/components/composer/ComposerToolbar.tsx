@@ -526,6 +526,7 @@ export function ComposerToolbar({
         >
         {selectedProvider ? (
           <UsageIndicator
+            providerId={selectedProvider.id}
             usage={usage}
             rateLimits={selectedProvider.rateLimits}
             rateLimitState={selectedProvider.metadataState.rateLimits}

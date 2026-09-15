@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
-import { emptyMascotStatus, type MascotBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_SPRITE_STATES, type MascotBridge, type MascotSnapshot, type MascotSprites } from "../../src/shared/mascot";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
 
 const disposals: Array<() => void> = [];
@@ -32,6 +32,10 @@ function fixture() {
   };
   return {
     action, unsubscribe, media,
+    customize(sprites?: MascotSprites): void {
+      snapshot = { ...snapshot, sprites };
+      act(() => receive(snapshot));
+    },
     interaction(dragging: boolean, placement?: "system", gesture = 1): void {
       snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
@@ -48,6 +52,39 @@ function fixture() {
 }
 
 describe("mascot rendering", () => {
+  it("renders an applied custom sprite set and returns to the bundled artwork on reset", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const main = view.container.querySelector("main")!;
+    const image = view.container.querySelector<HTMLImageElement>(".mascot-activity")!;
+    const pickup = view.container.querySelector<HTMLImageElement>(".mascot-pickup")!;
+    const bundled = image.getAttribute("src");
+    expect(main.dataset.sprites).toBe("default");
+    const url = (name: string): string => `inertia://bundle/mascot-sprites/0123456789abcdef/${name}`;
+    const sprites: MascotSprites = {
+      id: "0123456789abcdef", animated: 5,
+      files: Object.fromEntries(MASCOT_SPRITE_STATES.map((state) => [state, { poster: url(`${state}.png`), animation: url(`${state}.webp`) }])) as MascotSprites["files"],
+    };
+    app.customize(sprites);
+    expect(main.dataset.sprites).toBe("custom");
+    expect(image.getAttribute("src")).toBe(url("idle.png"));
+    expect(pickup.getAttribute("src")).toBe(url("pickup.png"));
+    app.update("running");
+    expect(image.getAttribute("src")).toBe(url("working.webp"));
+    app.update("running", false);
+    expect(image.getAttribute("src")).toBe(url("working.png"));
+    app.update("waiting-for-input");
+    app.interaction(true);
+    expect(pickup.getAttribute("src")).toBe(url("pickup.webp"));
+    app.interaction(false);
+    expect(image.getAttribute("src")).toBe(url("thinking.png"));
+    app.update("idle");
+    app.customize(undefined);
+    expect(main.dataset.sprites).toBe("default");
+    expect(image.getAttribute("src")).toBe(bundled);
+  });
+
   it("stays static at idle, pauses active work, and uses reduced-motion posters", async () => {
     const app = fixture();
     const view = renderMascot();

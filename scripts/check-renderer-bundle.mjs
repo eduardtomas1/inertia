@@ -15,7 +15,7 @@ const budgets = {
   entryJavaScript: 217.5 * kibibyte,
   mascotFirstLoadJavaScript: 6 * kibibyte,
   mascotJavaScript: 6 * kibibyte,
-  mascotSettingsJavaScript: 4 * kibibyte,
+  mascotSettingsJavaScript: 4.5 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
   // detachment ownership live here while their larger UI stays deferred.

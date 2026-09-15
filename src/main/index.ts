@@ -227,6 +227,7 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   attachmentRegistry: () => importedAttachments,
   conversationAttachments: () => conversationAttachments,
   runtimeSupervisor: () => runtimeSupervisor,
+  mascotSprite: (id, name) => mascotMain?.sprite(id, name) ?? null,
 });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
@@ -810,6 +811,23 @@ async function createMainWindow(): Promise<void> {
     openChat: async (conversationId) => {
       if (detachedChatMain?.focusForNotification(conversationId)) return;
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
+    },
+    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`,
+    chooseSpriteDirectory: async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return null;
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: "Import mascot sprites", defaultPath: app.getPath("documents"),
+        buttonLabel: "Import sprites", properties: ["openDirectory"],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    chooseTemplateDirectory: async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return null;
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: "Export mascot sprite template", defaultPath: join(app.getPath("documents"), "Inertia mascot sprites"),
+        buttonLabel: "Export template", properties: ["createDirectory"],
+      });
+      return result.canceled ? null : result.filePath ?? null;
     },
   });
   mascotMain.attach();

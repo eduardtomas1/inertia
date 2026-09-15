@@ -6,6 +6,7 @@ export const MASCOT_IPC = {
   changed: "inertia:mascot-changed",
   snapshot: "inertia:mascot-snapshot",
   action: "inertia:mascot-action",
+  sprites: "inertia:mascot-sprites",
 } as const;
 
 export type MascotPhase = AgentRunState | "idle" | "unavailable";
@@ -34,7 +35,26 @@ export interface MascotSnapshot {
   dragging?: boolean;
   /** Renderer lifetime and monotonically increasing pointer gesture. */
   gesture?: MascotGesture;
+  sprites?: MascotSprites;
 }
+export const MASCOT_SPRITE_STATES = ["idle", "thinking", "working", "idea", "pickup"] as const;
+export type MascotSpriteState = (typeof MASCOT_SPRITE_STATES)[number];
+export const MASCOT_SPRITE_SIZE = 96;
+export const MASCOT_SPRITE_MAX_BYTES = 512 * 1024;
+export interface MascotSpriteFiles { animation: string; poster: string }
+export interface MascotSprites {
+  id: string;
+  animated: number;
+  files: Record<MascotSpriteState, MascotSpriteFiles>;
+}
+export type MascotSpriteAction = "import" | "apply" | "reset" | "export-template";
+export type MascotSpriteImport =
+  | { status: "cancelled" }
+  | { status: "invalid"; message: string }
+  | { status: "ready"; sprites: MascotSprites };
+export type MascotTemplateExport =
+  | { status: "cancelled" | "exported" }
+  | { status: "invalid"; message: string };
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
   | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop";
@@ -102,4 +122,8 @@ export interface MascotBridge {
 
 export interface MascotSettingsBridge extends MascotBridge {
   configure(preferences: MascotPreferences): Promise<MascotSnapshot>;
+  importSprites(): Promise<MascotSpriteImport>;
+  applySprites(id: string): Promise<MascotSnapshot>;
+  resetSprites(): Promise<MascotSnapshot>;
+  exportSpriteTemplate(): Promise<MascotTemplateExport>;
 }

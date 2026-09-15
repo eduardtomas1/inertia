@@ -1,13 +1,21 @@
 import { Switch } from "./ui";
 import { useEffect, useState } from "react";
-import { MASCOT_LABELS, type MascotSettingsBridge, type MascotSnapshot } from "../../../shared/mascot";
+import {
+  MASCOT_LABELS, MASCOT_SPRITE_STATES, type MascotSettingsBridge, type MascotSnapshot, type MascotSprites, type MascotSpriteState,
+} from "../../../shared/mascot";
 
 declare global { interface Window { inertiaMascot?: MascotSettingsBridge } }
 
+const SPRITE_LABELS: Record<MascotSpriteState, string> = {
+  idle: "Idle", thinking: "Thinking", working: "Working", idea: "Complete", pickup: "Picked up",
+};
+
 export function MascotSettings() {
   const [snapshot, setSnapshot] = useState<MascotSnapshot | null>(null);
+  const [pending, setPending] = useState<MascotSprites | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   useEffect(() => {
     const bridge = window.inertiaMascot;
     if (!bridge) return;
@@ -19,16 +27,40 @@ export function MascotSettings() {
     }).catch(() => { if (active) setError("Could not load mascot settings."); });
     return () => { active = false; unsubscribe(); };
   }, []);
-  if (!window.inertiaMascot) return null;
-  const configure = (enabled: boolean): void => {
-    if (!snapshot) return;
+  const bridge = window.inertiaMascot;
+  if (!bridge) return null;
+  const run = (operation: () => Promise<void>, failure: string): void => {
     setBusy(true);
     setError("");
-    void window.inertiaMascot!.configure({ ...snapshot.preferences, enabled })
-      .then(setSnapshot).catch(() => setError("Could not update the mascot. Try again."))
-      .finally(() => setBusy(false));
+    setNotice("");
+    void operation().catch(() => setError(failure)).finally(() => setBusy(false));
   };
+  const configure = (enabled: boolean): void => {
+    if (snapshot) run(async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, enabled })), "Could not update the mascot. Try again.");
+  };
+  const importSprites = (): void => run(async () => {
+    const result = await bridge.importSprites();
+    setPending(result.status === "ready" ? result.sprites : null);
+    if (result.status === "invalid") setError(result.message);
+  }, "Could not import the sprites.");
+  const applySprites = (sprites: MascotSprites): void => run(async () => {
+    setSnapshot(await bridge.applySprites(sprites.id));
+    setPending(null);
+    setNotice("Custom sprites applied.");
+  }, "Could not apply the sprites. Import them again.");
+  const resetSprites = (): void => run(async () => {
+    setSnapshot(await bridge.resetSprites());
+    setPending(null);
+    setNotice("Default sprites restored.");
+  }, "Could not reset the sprites.");
+  const exportTemplate = (): void => run(async () => {
+    const result = await bridge.exportSpriteTemplate();
+    if (result.status === "exported") setNotice("Template exported. Replace its PNG files, then import the folder.");
+    if (result.status === "invalid") setError(result.message);
+  }, "Could not export the template.");
   const enabled = snapshot?.preferences.enabled ?? false;
+  const shown = pending ?? snapshot?.sprites;
+  const counts = shown && `${MASCOT_SPRITE_STATES.length} stills and ${shown.animated} ${shown.animated === 1 ? "animation" : "animations"}`;
   return (
     <div className="mascot-settings">
       <div className="setting-row">
@@ -38,13 +70,41 @@ export function MascotSettings() {
       {enabled && snapshot && <div className="mascot-settings-controls">
         <span role="status">{MASCOT_LABELS[snapshot.status.phase]}</span>
         <button className="secondary-button" type="button" onClick={() => {
-          void window.inertiaMascot!.action("focus").catch(() => setError("Could not focus the mascot."));
+          void bridge.action("focus").catch(() => setError("Could not focus the mascot."));
         }}>{snapshot.placement === "system" ? "Focus mascot" : "Move with keyboard"}</button>
         <button className="secondary-button" type="button" disabled={snapshot.placement === "system"} onClick={() => {
-          void window.inertiaMascot!.action("reset-position").catch(() => setError("Could not reset the position."));
+          void bridge.action("reset-position").catch(() => setError("Could not reset the position."));
         }}>Reset position</button>
         <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Escape hides it. Right-click for animation and hide controls. Reduced motion uses still artwork.</small>
       </div>}
+      {snapshot && <section className="mascot-sprites" aria-labelledby="mascot-sprites-heading">
+        <div className="mascot-sprites-heading">
+          <span className="setting-copy">
+            <strong id="mascot-sprites-heading">Custom sprites</strong>
+            <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : `${MASCOT_SPRITE_STATES.length} PNG images, 96 × 96 pixels each, plus optional animations. The template lists every file.`}</small>
+          </span>
+          <div>
+            <button className="secondary-button" type="button" disabled={busy} onClick={exportTemplate}>Export template</button>
+            <button className="secondary-button" type="button" disabled={busy} onClick={importSprites}>Import sprites</button>
+          </div>
+        </div>
+        {shown && <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
+          {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
+            <picture>
+              <source media="(prefers-reduced-motion: no-preference)" srcSet={shown.files[state].animation} />
+              <img src={shown.files[state].poster} width={96} height={96} alt="" draggable={false} />
+            </picture>
+            <span>{SPRITE_LABELS[state]}</span>
+          </li>)}
+        </ul>}
+        {(pending || snapshot.sprites) && <div className="mascot-sprites-actions">
+          {pending ? <>
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => applySprites(pending)}>Apply sprites</button>
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => setPending(null)}>Discard preview</button>
+          </> : <button className="secondary-button" type="button" disabled={busy} onClick={resetSprites}>Reset to default</button>}
+        </div>}
+        {notice && <p role="status" className="settings-card-note">{notice}</p>}
+      </section>}
       {error && <p role="alert" className="settings-card-note">{error}</p>}
     </div>
   );

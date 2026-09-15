@@ -1,11 +1,14 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } from "electron";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
-import { emptyMascotStatus, MASCOT_IPC } from "../../src/shared/mascot";
+import {
+  emptyMascotStatus, MASCOT_IPC, type MascotSnapshot, type MascotSpriteImport, type MascotSprites,
+} from "../../src/shared/mascot";
+import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
 
 const harness = vi.hoisted(() => ({
@@ -79,15 +82,17 @@ afterEach(() => {
   harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
 });
 
-async function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "mascot-main-"));
+async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) {
   const main = new BrowserWindow({});
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
   const unregister = vi.fn();
+  const chooseSpriteDirectory = vi.fn<() => Promise<string | null>>(async () => null);
+  const chooseTemplateDirectory = vi.fn<() => Promise<string | null>>(async () => null);
   const mascot = new MascotMain({
     mainWindow: () => main, rendererUrl: "inertia://bundle/index.html", userDataDirectory: directory,
     registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat,
+    spriteOrigin: "inertia://bundle/", chooseSpriteDirectory, chooseTemplateDirectory,
   });
   mascot.attach();
   const invoke = async (channel: string, value: unknown[], sender = main as unknown as WindowDouble): Promise<unknown> => {
@@ -97,7 +102,7 @@ async function fixture() {
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
-  return { mascot, main, invoke, openChat, unregister, directory, gesture };
+  return { mascot, main, invoke, openChat, unregister, directory, gesture, chooseSpriteDirectory, chooseTemplateDirectory };
 }
 
 describe("mascot window ownership", () => {
@@ -405,5 +410,62 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], harness.windows[1] as WindowDouble);
     expect(app.mascot.snapshot()).toMatchObject({ placement: "system", dragging: false });
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("mascot custom sprites", () => {
+  it("imports a validated preview, applies it to both windows, restores it after restart and resets", async () => {
+    const app = await fixture();
+    const folder = mkdtempSync(join(tmpdir(), "mascot-sprite-folder-"));
+    cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
+    await writeMascotSpriteTemplate(join(folder, "set"));
+    app.chooseSpriteDirectory.mockResolvedValue(join(folder, "set"));
+    const preview = await app.invoke(MASCOT_IPC.sprites, ["import"]) as MascotSpriteImport;
+    expect(preview).toMatchObject({ status: "ready", sprites: { animated: 0 } });
+    const { id } = (preview as { sprites: MascotSprites }).sprites;
+    expect(app.mascot.snapshot().sprites).toBeUndefined();
+    expect(app.mascot.sprite(id, "idle.png")?.type).toBe("image/png");
+    expect(app.mascot.sprite(id, "idle.webp")).toBeNull();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    await expect(app.invoke(MASCOT_IPC.sprites, ["import"], overlay)).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.sprites, ["read", "/etc/passwd"])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.sprites, ["delete"])).rejects.toThrow("Invalid mascot sprite action");
+    await expect(app.invoke(MASCOT_IPC.sprites, ["apply", "../../etc/passwd"])).rejects.toThrow("Invalid mascot sprite set");
+    await expect(app.invoke(MASCOT_IPC.sprites, ["apply", "0000000000000000"])).rejects.toThrow("preview changed");
+    const applied = await app.invoke(MASCOT_IPC.sprites, ["apply", id]) as MascotSnapshot;
+    expect(applied.sprites?.files.idle).toEqual({
+      poster: `inertia://bundle/mascot-sprites/${id}/idle.png`, animation: `inertia://bundle/mascot-sprites/${id}/idle.png`,
+    });
+    expect(overlay.webContents.send).toHaveBeenLastCalledWith(MASCOT_IPC.changed, expect.objectContaining({ sprites: applied.sprites }));
+    expect(existsSync(join(app.directory, "mascot-sprites", "pickup.png"))).toBe(true);
+
+    const restarted = await fixture(app.directory);
+    expect((await restarted.invoke(MASCOT_IPC.snapshot, []) as MascotSnapshot).sprites?.id).toBe(id);
+    expect(restarted.mascot.sprite(id, "working.png")?.bytes.byteLength).toBeGreaterThan(0);
+    const reset = await restarted.invoke(MASCOT_IPC.sprites, ["reset"]) as MascotSnapshot;
+    expect(reset.sprites).toBeUndefined();
+    expect(restarted.mascot.sprite(id, "idle.png")).toBeNull();
+    expect(existsSync(join(app.directory, "mascot-sprites"))).toBe(false);
+  });
+
+  it("reports invalid folders and exports the template through the owned save dialog only", async () => {
+    const app = await fixture();
+    const folder = mkdtempSync(join(tmpdir(), "mascot-sprite-folder-"));
+    cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
+    expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({ status: "cancelled" });
+    app.chooseSpriteDirectory.mockResolvedValue(folder);
+    expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({
+      status: "invalid", message: "Add idle.png. Every state needs a 96 × 96 PNG.",
+    });
+    expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({ status: "cancelled" });
+    app.chooseTemplateDirectory.mockResolvedValue(join(folder, "template"));
+    expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({ status: "exported" });
+    expect(JSON.parse(readFileSync(join(folder, "template", "template.json"), "utf8"))).toMatchObject({ requiredImages: 5, width: 96, height: 96 });
+    expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({
+      status: "invalid", message: "That name is already in use. Choose a new folder name for the template.",
+    });
+    await expect(app.invoke(MASCOT_IPC.sprites, ["export-template", folder])).rejects.toThrow("untrusted");
+    expect(app.chooseTemplateDirectory).toHaveBeenCalledTimes(3);
   });
 });

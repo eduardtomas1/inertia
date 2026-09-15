@@ -1,7 +1,7 @@
-import type { MascotPhase } from "../../../shared/mascot";
+import type { MascotPhase, MascotSpriteFiles, MascotSpriteState } from "../../../shared/mascot";
 
-type Artwork = "idle" | "thinking" | "working" | "idea" | "pickup";
-type ArtworkFiles = { animation: string; poster: string };
+type Artwork = MascotSpriteState;
+type ArtworkFiles = MascotSpriteFiles;
 
 /** Read Vite-resolved URLs from inert HTML; inactive animations never load. */
 export function readMascotAssets(root: HTMLElement): Record<Artwork, ArtworkFiles> {

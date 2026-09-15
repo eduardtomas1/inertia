@@ -50,3 +50,19 @@ The optional desktop overlay uses this final pixel pack. Its status mapping live
 in the runtime, and its image selection lives in `../../mascot/assets.ts`. No 3D
 models, rendering libraries, alternate studies or preview application are needed
 at runtime.
+
+## Custom sprites
+
+Settings > General > Desktop mascot > Custom sprites exports a template folder and
+imports a replacement set. The template's `template.json` and `README.txt` list the
+required files, and its PNGs are the default still frames. Every state needs one
+single-frame 96 × 96 PNG (`idle.png`, `thinking.png`, `working.png`, `idea.png`,
+`pickup.png`) and may add one 96 × 96 animated WebP or GIF with the same name. Each
+file is at most 512 KB.
+
+The main process shows the folder picker and reads only those fixed names from the
+chosen folder, without following links. It checks every file's structure and size,
+then decodes it before showing a preview. An applied set is stored in
+`mascot-sprites/` in the user data folder, and both windows load it through the app
+protocol at `mascot-sprites/<content id>/<file>`. Custom sets have no lift strip, so
+the pickup artwork cross-fades in directly.

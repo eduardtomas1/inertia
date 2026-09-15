@@ -612,4 +612,5 @@
 .mascot-sprites-heading > div, .mascot-sprites-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .mascot-sprite-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
 .mascot-sprite-preview li { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-medium); color: var(--text-muted); font-size: 9px; }
+.mascot-sprite-preview small { margin-top: -4px; color: var(--text-soft); font-size: 8px; font-weight: 620; }
 .mascot-sprite-preview img { display: block; width: 96px; height: 96px; border-radius: 6px; image-rendering: pixelated; background: repeating-conic-gradient(#737b85 0% 25%, #8a929b 0% 50%) 0 0 / 12px 12px; }

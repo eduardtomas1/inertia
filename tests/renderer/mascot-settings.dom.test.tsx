@@ -53,18 +53,19 @@ describe("mascot custom sprite settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
     const preview = await screen.findByRole("list", { name: "Sprite preview" });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(within(preview).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Idle", "Thinking", "Working", "Complete", "Picked up"]);
+    expect(within(preview).getAllByRole("listitem").map((item) => item.querySelector("span")!.textContent)).toEqual(["Idle", "Thinking", "Working", "Complete", "Picked up"]);
+    expect(within(preview).getAllByRole("listitem").map((item) => item.querySelector("small")?.textContent ?? null)).toEqual(["Animated", "Animated", null, null, null]);
     expect(preview.querySelector("img")).toHaveAttribute("src", url("0123456789abcdef", "idle.png"));
     expect(preview.querySelector("source")).toHaveAttribute("srcset", url("0123456789abcdef", "idle.webp"));
     expect(preview.querySelector("source")).toHaveAttribute("media", "(prefers-reduced-motion: no-preference)");
-    expect(section).toHaveTextContent("Preview: 5 stills and 2 animations. Apply to use them.");
+    expect(section).toHaveTextContent("Preview: 5 states, 2 animated. Apply to use them.");
     expect(bridge.applySprites).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply sprites" }));
     expect(await screen.findByText("Custom sprites applied.")).toBeInTheDocument();
     expect(bridge.applySprites).toHaveBeenCalledWith("0123456789abcdef");
     expect(screen.getByRole("list", { name: "Current sprites" })).toBeInTheDocument();
-    expect(section).toHaveTextContent("Using your sprites: 5 stills and 2 animations.");
+    expect(section).toHaveTextContent("Using your sprites: 5 states, 2 animated.");
 
     fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
     expect(await screen.findByText("Default sprites restored.")).toBeInTheDocument();
@@ -79,7 +80,7 @@ describe("mascot custom sprite settings", () => {
     await screen.findByRole("region", { name: "Custom sprites" });
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("fedcba9876543210", 1) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
-    expect(await screen.findByText("Preview: 5 stills and 1 animation. Apply to use them.")).toBeInTheDocument();
+    expect(await screen.findByText("Preview: 5 states, 1 animated. Apply to use them.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Discard preview" }));
     expect(screen.queryByRole("list")).toBeNull();
     expect(bridge.applySprites).not.toHaveBeenCalled();

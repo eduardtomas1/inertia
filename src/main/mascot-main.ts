@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  app, BrowserWindow, ipcMain, Menu, screen,
+  app, BrowserWindow, dialog, ipcMain, Menu, screen,
   type IpcMainInvokeEvent, type Session, type WebContents,
 } from "electron";
 import {
@@ -26,8 +26,6 @@ interface MascotMainOptions {
   registerHealthRenderer(contents: WebContents): () => void;
   openChat(conversationId: string): Promise<void>;
   spriteOrigin: string;
-  chooseSpriteDirectory(): Promise<string | null>;
-  chooseTemplateDirectory(): Promise<string | null>;
 }
 const SPRITE_ACTIONS: readonly unknown[] = ["import", "apply", "reset", "export-template"] satisfies MascotSpriteAction[];
 
@@ -159,9 +157,13 @@ export class MascotMain {
       const invalid = (error: unknown, fallback: string) => ({
         status: "invalid" as const, message: error instanceof MascotSpriteError ? error.message : fallback,
       });
+      const owner = this.options.mainWindow();
       if (action === "import") {
         this.pendingSprites = null;
-        const directory = await this.options.chooseSpriteDirectory();
+        const picked = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, {
+          title: "Import mascot sprites", defaultPath: app.getPath("documents"), buttonLabel: "Import sprites", properties: ["openDirectory"],
+        }) : null;
+        const directory = picked && !picked.canceled ? picked.filePaths[0] : undefined;
         if (!directory) return { status: "cancelled" };
         try {
           this.pendingSprites = await readMascotSprites(directory);
@@ -169,7 +171,11 @@ export class MascotMain {
         } catch (error) { return invalid(error, "The sprites could not be read."); }
       }
       if (action === "export-template") {
-        const directory = await this.options.chooseTemplateDirectory();
+        const picked = owner && !owner.isDestroyed() ? await dialog.showSaveDialog(owner, {
+          title: "Export mascot sprite template", defaultPath: join(app.getPath("documents"), "Inertia mascot sprites"),
+          buttonLabel: "Export template", properties: ["createDirectory"],
+        }) : null;
+        const directory = picked && !picked.canceled ? picked.filePath : undefined;
         if (!directory) return { status: "cancelled" };
         try {
           await writeMascotSpriteTemplate(directory);

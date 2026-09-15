@@ -813,22 +813,6 @@ async function createMainWindow(): Promise<void> {
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
     },
     spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`,
-    chooseSpriteDirectory: async () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return null;
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Import mascot sprites", defaultPath: app.getPath("documents"),
-        buttonLabel: "Import sprites", properties: ["openDirectory"],
-      });
-      return result.canceled ? null : result.filePaths[0] ?? null;
-    },
-    chooseTemplateDirectory: async () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return null;
-      const result = await dialog.showSaveDialog(mainWindow, {
-        title: "Export mascot sprite template", defaultPath: join(app.getPath("documents"), "Inertia mascot sprites"),
-        buttonLabel: "Export template", properties: ["createDirectory"],
-      });
-      return result.canceled ? null : result.filePath ?? null;
-    },
   });
   mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(

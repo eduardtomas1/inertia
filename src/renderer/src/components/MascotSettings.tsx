@@ -60,7 +60,7 @@ export function MascotSettings() {
   }, "Could not export the template.");
   const enabled = snapshot?.preferences.enabled ?? false;
   const shown = pending ?? snapshot?.sprites;
-  const counts = shown && `${MASCOT_SPRITE_STATES.length} stills and ${shown.animated} ${shown.animated === 1 ? "animation" : "animations"}`;
+  const counts = shown && `${MASCOT_SPRITE_STATES.length} states, ${shown.animated} animated`;
   return (
     <div className="mascot-settings">
       <div className="setting-row">
@@ -95,6 +95,7 @@ export function MascotSettings() {
               <img src={shown.files[state].poster} width={96} height={96} alt="" draggable={false} />
             </picture>
             <span>{SPRITE_LABELS[state]}</span>
+            {shown.files[state].animation !== shown.files[state].poster && <small>Animated</small>}
           </li>)}
         </ul>}
         {(pending || snapshot.sprites) && <div className="mascot-sprites-actions">

@@ -18,6 +18,8 @@ const harness = vi.hoisted(() => ({
   displays: [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }],
   cursor: { x: 1296, y: 820 },
   displayListeners: new Map<string, () => void>(),
+  openDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePaths: string[] }>>(async () => ({ canceled: true, filePaths: [] })),
+  saveDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePath?: string }>>(async () => ({ canceled: true })),
 }));
 vi.mock("../../src/main/preview-broker", () => ({ hardenDesktopSession: vi.fn() }));
 vi.mock("electron", async () => {
@@ -50,7 +52,11 @@ vi.mock("electron", async () => {
     destroy(): void { this.destroyed = true; this.emit("closed"); }
   }
   return {
-    app: { commandLine: { getSwitchValue: () => "" } },
+    app: { commandLine: { getSwitchValue: () => "" }, getPath: () => "/documents" },
+    dialog: {
+      showOpenDialog: (...args: unknown[]) => harness.openDialog(...args),
+      showSaveDialog: (...args: unknown[]) => harness.saveDialog(...args),
+    },
     BrowserWindow: Window,
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
     screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
@@ -80,6 +86,8 @@ afterEach(() => {
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
   harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
   harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
+  harness.openDialog.mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
+  harness.saveDialog.mockReset().mockResolvedValue({ canceled: true });
 });
 
 async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) {
@@ -87,12 +95,10 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
   const unregister = vi.fn();
-  const chooseSpriteDirectory = vi.fn<() => Promise<string | null>>(async () => null);
-  const chooseTemplateDirectory = vi.fn<() => Promise<string | null>>(async () => null);
   const mascot = new MascotMain({
     mainWindow: () => main, rendererUrl: "inertia://bundle/index.html", userDataDirectory: directory,
     registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat,
-    spriteOrigin: "inertia://bundle/", chooseSpriteDirectory, chooseTemplateDirectory,
+    spriteOrigin: "inertia://bundle/",
   });
   mascot.attach();
   const invoke = async (channel: string, value: unknown[], sender = main as unknown as WindowDouble): Promise<unknown> => {
@@ -102,7 +108,7 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
-  return { mascot, main, invoke, openChat, unregister, directory, gesture, chooseSpriteDirectory, chooseTemplateDirectory };
+  return { mascot, main, invoke, openChat, unregister, directory, gesture };
 }
 
 describe("mascot window ownership", () => {
@@ -419,7 +425,7 @@ describe("mascot custom sprites", () => {
     const folder = mkdtempSync(join(tmpdir(), "mascot-sprite-folder-"));
     cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
     await writeMascotSpriteTemplate(join(folder, "set"));
-    app.chooseSpriteDirectory.mockResolvedValue(join(folder, "set"));
+    harness.openDialog.mockResolvedValue({ canceled: false, filePaths: [join(folder, "set")] });
     const preview = await app.invoke(MASCOT_IPC.sprites, ["import"]) as MascotSpriteImport;
     expect(preview).toMatchObject({ status: "ready", sprites: { animated: 0 } });
     const { id } = (preview as { sprites: MascotSprites }).sprites;
@@ -454,18 +460,22 @@ describe("mascot custom sprites", () => {
     const folder = mkdtempSync(join(tmpdir(), "mascot-sprite-folder-"));
     cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
     expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({ status: "cancelled" });
-    app.chooseSpriteDirectory.mockResolvedValue(folder);
+    harness.openDialog.mockResolvedValue({ canceled: false, filePaths: [folder] });
     expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({
       status: "invalid", message: "Add idle.png. Every state needs a 96 × 96 PNG.",
     });
     expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({ status: "cancelled" });
-    app.chooseTemplateDirectory.mockResolvedValue(join(folder, "template"));
+    harness.saveDialog.mockResolvedValue({ canceled: false, filePath: join(folder, "template") });
     expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({ status: "exported" });
     expect(JSON.parse(readFileSync(join(folder, "template", "template.json"), "utf8"))).toMatchObject({ requiredImages: 5, width: 96, height: 96 });
     expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({
       status: "invalid", message: "That name is already in use. Choose a new folder name for the template.",
     });
     await expect(app.invoke(MASCOT_IPC.sprites, ["export-template", folder])).rejects.toThrow("untrusted");
-    expect(app.chooseTemplateDirectory).toHaveBeenCalledTimes(3);
+    expect(harness.saveDialog).toHaveBeenCalledTimes(3);
+    expect(harness.saveDialog).toHaveBeenLastCalledWith(app.main, expect.objectContaining({
+      title: "Export mascot sprite template", defaultPath: join("/documents", "Inertia mascot sprites"),
+    }));
+    expect(harness.openDialog).toHaveBeenLastCalledWith(app.main, expect.objectContaining({ properties: ["openDirectory"] }));
   });
 });

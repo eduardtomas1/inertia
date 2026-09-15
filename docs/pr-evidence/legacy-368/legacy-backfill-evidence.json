@@ -1,8 +1,8 @@
 {
   "issue": 368,
-  "baseline": "5a19e25213b518944bbf1e645cdb771414c5819f",
+  "baseline": "31b606f7f2adbd47d2e1c4efbbce78fcb1ce54de",
   "reproduce": "npx --no-install esbuild docs/pr-evidence/legacy-368/legacy-backfill-evidence.ts --bundle --platform=node --format=esm --packages=external --outfile=node_modules/.cache/legacy-backfill-evidence.mjs --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);' && node node_modules/.cache/legacy-backfill-evidence.mjs",
-  "node": "26.5.0",
+  "node": "22.23.2",
   "platform": "darwin-arm64",
   "fixture": "In-memory schema 17 with one synthetic user request and 150,000 completed activities for one run",
   "failure": {
@@ -87,8 +87,8 @@
     "path": "runDatabaseMigrations over the full runtime catalog at the default stack",
     "diagnostic": "Database migration succeeded source=unpublished-or-new schema=17->76 applied=18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76 compatibility=bounded-legacy-backfill inferredTurns=1 orphanAssistant=0 orphanSystem=0 orphanActivities=0 orphanReasonings=0 orphanPlans=0 orphanUsage=0 orphanCheckpoints=0",
     "compatibility": "bounded-legacy-backfill",
-    "elapsedMs": 773,
-    "evidenceProcessPeakResidentSetMb": 694,
+    "elapsedMs": 542,
+    "evidenceProcessPeakResidentSetMb": 618,
     "turn": {
       "run_id": "legacy-run",
       "user_message_id": "u",
@@ -123,5 +123,11 @@
       }
     },
     "foreignKeyErrors": []
+  },
+  "interruptionReview": {
+    "activityAssignments": 75000,
+    "receiptRequiredBeforeExit": true,
+    "startupFailureNegativeControl": "Rejected at missing interruption receipt",
+    "spawnErrorsRejected": true
   }
 }

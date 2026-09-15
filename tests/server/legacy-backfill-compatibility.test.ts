@@ -690,8 +690,10 @@ describe("bounded legacy backfill fallback", { timeout: 240_000 }, () => {
 
   it("recovers an upgrade killed during the fallback and retries safely", async () => {
     const path = walDatabase("interrupted.sqlite");
+    const interruptionReceipt = join(workRoot, "interrupted-at.txt");
     const before = sha256File(path);
     const childPath = await bundle("interrupted-upgrade", `
+      import { writeFileSync } from "node:fs";
       import Database from "better-sqlite3";
       import { migrateRuntimeDatabase } from "./src/server/persistence/migrations/runtime-catalog.ts";
       const database = new Database(process.argv[2]);
@@ -699,15 +701,21 @@ describe("bounded legacy backfill fallback", { timeout: 240_000 }, () => {
       let assignments = 0;
       database.function("interrupt_midway", () => {
         assignments += 1;
-        if (assignments === ${MIDWAY_ASSIGNMENT}) process.kill(process.pid, "SIGKILL");
+        if (assignments === ${MIDWAY_ASSIGNMENT}) {
+          writeFileSync(process.argv[3], String(assignments), { flag: "wx" });
+          process.kill(process.pid, "SIGKILL");
+        }
         return null;
       });
       database.exec("CREATE TEMP TRIGGER interrupt_midway AFTER UPDATE OF turn_id ON main.activities BEGIN SELECT interrupt_midway(); END");
       migrateRuntimeDatabase(database);
       process.stdout.write("completed");
     `);
-    const child = spawnSync(process.execPath, [childPath, path], { encoding: "utf8", timeout: 180_000 });
+    const child = spawnSync(process.execPath, [childPath, path, interruptionReceipt], { encoding: "utf8", timeout: 180_000 });
+    expect(child.error).toBeUndefined();
+    expect(readFileSync(interruptionReceipt, "utf8")).toBe(String(MIDWAY_ASSIGNMENT));
     expect(child.stdout).toBe("");
+    expect(child.stderr).toBe("");
     expect(child.status === 0).toBe(false);
     if (process.platform !== "win32") expect(child.signal).toBe("SIGKILL");
     expect(sha256File(path)).toBe(before);

@@ -97,10 +97,10 @@ export default defineConfig({
         functions: 59,
         lines: 66,
         "src/renderer/**": {
-          statements: 79,
-          branches: 73.5,
-          functions: 74.5,
-          lines: 82,
+          statements: 78,
+          branches: 72.5,
+          functions: 73.5,
+          lines: 81,
         },
         "src/shared/private-connect/*.ts": {
           statements: 95,

@@ -87,7 +87,9 @@ function chromiumPage(contexts: Array<Record<string, unknown>> = [mainWorld, pri
   let frozen = false;
   let heldRuntimeEnable: (() => void) | null = null;
   const holdRuntimeEnable = { next: false };
+  const strandRuntimeEnable = { next: false };
   const failPageEnable = { next: false };
+  let runtimeEnabled = false;
   const listeners = new Set<DebuggerListener>();
   const worlds = new Map<number, Record<string, unknown>>([
     [privacyWorld.id, worldGlobals(true)],
@@ -116,12 +118,23 @@ function chromiumPage(contexts: Array<Record<string, unknown>> = [mainWorld, pri
         frozen = params.state === "frozen";
         return {};
       }
+      if (method === "Runtime.disable") {
+        runtimeEnabled = false;
+        return {};
+      }
       if (method === "Runtime.enable") {
         if (holdRuntimeEnable.next) {
           holdRuntimeEnable.next = false;
           await new Promise<void>((resolve) => { heldRuntimeEnable = resolve; });
         }
-        for (const context of contexts) emit("Runtime.executionContextCreated", { context });
+        if (!runtimeEnabled) {
+          runtimeEnabled = true;
+          for (const context of contexts) emit("Runtime.executionContextCreated", { context });
+        }
+        if (strandRuntimeEnable.next) {
+          strandRuntimeEnable.next = false;
+          return await new Promise<never>(() => undefined);
+        }
         return {};
       }
       if (method === "Runtime.evaluate") {
@@ -156,6 +169,7 @@ function chromiumPage(contexts: Array<Record<string, unknown>> = [mainWorld, pri
     isFrozen: () => frozen,
     listenerCount: () => listeners.size,
     releaseRuntimeEnable: () => heldRuntimeEnable?.(),
+    strandRuntimeEnable,
     world: (id: number) => worlds.get(id)!,
   };
 }
@@ -264,6 +278,24 @@ describe("frozen Browser evidence", () => {
       { state: "frozen" },
     );
     await expect(agentPageHasSensitiveEvidence(contents)).resolves.toBe(false);
+  });
+
+  it("recovers the preload world after a context lookup whose response never arrived", async () => {
+    const page = await attachedPage();
+    const contents = page.contents as never;
+    page.strandRuntimeEnable.next = true;
+
+    const stranded = setAgentPageFrozen(contents, true);
+    void stranded.catch(() => undefined);
+    await vi.waitFor(() => expect(page.listenerCount()).toBe(2));
+    await setAgentPageFrozen(contents, false);
+
+    await setAgentPageFrozen(contents, true);
+    expect(page.isFrozen()).toBe(true);
+    expect(page.listenerCount()).toBe(1);
+    await expect(withinFreeze(agentPageHasSensitiveEvidence(contents))).resolves.toBe(false);
+    await setAgentPageFrozen(contents, false);
+    expect(page.isFrozen()).toBe(false);
   });
 
   it("retries a failed security debugger setup and releases a reset debugger completely", async () => {

@@ -26,6 +26,7 @@ type AgentPageDebuggerListener = (event: unknown, method: string, params: unknow
 const agentPageBoundaryStates = new WeakMap<WebContents, AgentPageBoundaryState>();
 const agentPageDebuggerBootstraps = new WeakMap<WebContents, number>();
 const agentPageDebuggerListeners = new WeakMap<WebContents, AgentPageDebuggerListener>();
+const agentPageContextCollectors = new WeakMap<WebContents, AgentPageDebuggerListener>();
 const frozenAgentPages = new WeakMap<WebContents, FrozenAgentPage>();
 const agentPageFreezeGenerations = new WeakMap<WebContents, number>();
 
@@ -87,12 +88,15 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
 
 export function releaseAgentPageDebugger(contents: WebContents): void {
   const listener = agentPageDebuggerListeners.get(contents);
+  const collector = agentPageContextCollectors.get(contents);
   agentPageDebuggerListeners.delete(contents);
+  agentPageContextCollectors.delete(contents);
   agentPageBoundaryStates.delete(contents);
   frozenAgentPages.delete(contents);
   agentPageFreezeGenerations.set(contents, (agentPageFreezeGenerations.get(contents) ?? 0) + 1);
   if (contents.isDestroyed()) return;
   if (listener) contents.debugger.removeListener("message", listener);
+  if (collector) contents.debugger.removeListener("message", collector);
   try {
     if (contents.debugger.isAttached()) contents.debugger.detach();
   } catch {
@@ -318,11 +322,16 @@ async function agentPageWorldContext(
       && typeof context.id === "number"
       && Number.isInteger(context.id)) contexts.push(context.id);
   };
+  const stale = agentPageContextCollectors.get(contents);
+  if (stale) contents.debugger.removeListener("message", stale);
+  agentPageContextCollectors.set(contents, collect);
   contents.debugger.on("message", collect);
   try {
+    await contents.debugger.sendCommand("Runtime.disable");
     await contents.debugger.sendCommand("Runtime.enable");
   } finally {
     contents.debugger.removeListener("message", collect);
+    if (agentPageContextCollectors.get(contents) === collect) agentPageContextCollectors.delete(contents);
     await contents.debugger.sendCommand("Runtime.disable");
   }
   const contextId = contexts[0];

@@ -1,16 +1,21 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  app, BrowserWindow, ipcMain, Menu, screen,
+  app, BrowserWindow, dialog, ipcMain, Menu, screen,
   type IpcMainInvokeEvent, type Session, type WebContents,
 } from "electron";
 import {
   emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS,
   parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
+import type { MascotSpriteAction, MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
 import {
   mascotBounds, MASCOT_SIZE, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState,
 } from "./mascot-placement.js";
+import {
+  loadMascotSprites, MascotSpriteError, mascotSprites, readMascotSprites, removeMascotSprites, saveMascotSprites,
+  writeMascotSpriteTemplate, type MascotSpriteFile, type MascotSpriteSet,
+} from "./mascot-sprites.js";
 import { hardenDesktopSession } from "./preview-broker.js";
 
 interface MascotMainOptions {
@@ -20,10 +25,17 @@ interface MascotMainOptions {
   registerProtocol(session: Session): void;
   registerHealthRenderer(contents: WebContents): () => void;
   openChat(conversationId: string): Promise<void>;
+  spriteOrigin: string;
 }
+const SPRITE_ACTIONS: readonly unknown[] = ["import", "apply", "reset", "export-template"] satisfies MascotSpriteAction[];
 
 export class MascotMain {
   private readonly statePath: string;
+  private readonly spritesPath: string;
+  private readonly spritesLoaded: Promise<void>;
+  private spriteQueue: Promise<unknown>;
+  private sprites: MascotSpriteSet | null = null;
+  private pendingSprites: MascotSpriteSet | null = null;
   private readonly rendererUrl: string;
   private state;
   private status = emptyMascotStatus("unavailable");
@@ -43,9 +55,20 @@ export class MascotMain {
     this.statePath = join(options.userDataDirectory, "mascot-window-state.json");
     this.state = readMascotWindowState(this.statePath);
     this.rendererUrl = new URL("mascot.html", options.rendererUrl).href;
+    this.spritesPath = join(options.userDataDirectory, "mascot-sprites");
+    this.spritesLoaded = loadMascotSprites(this.spritesPath).then((sprites) => {
+      this.sprites = sprites;
+      if (sprites) this.broadcast();
+    });
+    this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status }, dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status }, dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+
+  sprite(id: string, name: string): MascotSpriteFile | null {
+    const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
+    return set?.files.find((file) => file.name === name) ?? null;
+  }
 
   observe(status: MascotStatus): void {
     this.status = status;
@@ -62,7 +85,15 @@ export class MascotMain {
       this.registered = true;
       ipcMain.handle(MASCOT_IPC.snapshot, (event, ...args) => {
         this.assertSender(event, args.length, 0);
-        return this.snapshot();
+        return this.spritesLoaded.then(() => this.snapshot());
+      });
+      ipcMain.handle(MASCOT_IPC.sprites, async (event, ...args) => {
+        this.assertSender(event, args.length, args[0] === "apply" ? 2 : 1, true);
+        if (!SPRITE_ACTIONS.includes(args[0])) throw new Error("Invalid mascot sprite action");
+        if (args[0] === "apply" && (typeof args[1] !== "string" || !/^[0-9a-f]{16}$/u.test(args[1]))) {
+          throw new Error("Invalid mascot sprite set");
+        }
+        return await this.spriteAction(args[0] as MascotSpriteAction, args[1] as string | undefined);
       });
       ipcMain.handle(MASCOT_IPC.configure, async (event, ...args) => {
         this.assertSender(event, args.length, 1, true);
@@ -119,6 +150,53 @@ export class MascotMain {
       || event.senderFrame.url !== (ownedMain ? this.options.rendererUrl : this.rendererUrl)) {
       throw new Error("Rejected untrusted mascot request");
     }
+  }
+
+  private spriteAction(action: MascotSpriteAction, id?: string): Promise<MascotSpriteImport | MascotTemplateExport | MascotSnapshot> {
+    const result = this.spriteQueue.then(async (): Promise<MascotSpriteImport | MascotTemplateExport | MascotSnapshot> => {
+      const invalid = (error: unknown, fallback: string) => ({
+        status: "invalid" as const, message: error instanceof MascotSpriteError ? error.message : fallback,
+      });
+      const owner = this.options.mainWindow();
+      if (action === "import") {
+        this.pendingSprites = null;
+        const picked = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, {
+          title: "Import mascot sprites", defaultPath: app.getPath("documents"), buttonLabel: "Import sprites", properties: ["openDirectory"],
+        }) : null;
+        const directory = picked && !picked.canceled ? picked.filePaths[0] : undefined;
+        if (!directory) return { status: "cancelled" };
+        try {
+          this.pendingSprites = await readMascotSprites(directory);
+          return { status: "ready", sprites: mascotSprites(this.pendingSprites, this.options.spriteOrigin) };
+        } catch (error) { return invalid(error, "The sprites could not be read."); }
+      }
+      if (action === "export-template") {
+        const picked = owner && !owner.isDestroyed() ? await dialog.showSaveDialog(owner, {
+          title: "Export mascot sprite template", defaultPath: join(app.getPath("documents"), "Inertia mascot sprites"),
+          buttonLabel: "Export template", properties: ["createDirectory"],
+        }) : null;
+        const directory = picked && !picked.canceled ? picked.filePath : undefined;
+        if (!directory) return { status: "cancelled" };
+        try {
+          await writeMascotSpriteTemplate(directory);
+          return { status: "exported" };
+        } catch (error) { return invalid(error, "The template could not be saved."); }
+      }
+      if (action === "apply") {
+        const pending = this.pendingSprites;
+        if (!pending || pending.id !== id) throw new Error("The sprite preview changed. Import it again.");
+        await saveMascotSprites(this.spritesPath, pending);
+        this.sprites = pending;
+      } else {
+        await removeMascotSprites(this.spritesPath);
+        this.sprites = null;
+      }
+      this.pendingSprites = null;
+      this.broadcast();
+      return this.snapshot();
+    });
+    this.spriteQueue = result.catch(() => undefined);
+    return result;
   }
 
   private async reconcile(): Promise<void> {

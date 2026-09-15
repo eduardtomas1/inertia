@@ -50,3 +50,33 @@ The optional desktop overlay uses this final pixel pack. Its status mapping live
 in the runtime, and its image selection lives in `../../mascot/assets.ts`. No 3D
 models, rendering libraries, alternate studies or preview application are needed
 at runtime.
+
+## Custom sprites
+
+The built-in artwork above stays the default. Settings > General > Desktop mascot >
+Custom sprites lets people import their own set, and shows these requirements before
+anything is imported:
+
+| File | Settings label | Shown when |
+| --- | --- | --- |
+| `idle.png` | Idle | Ready, or the latest chat stopped without finishing |
+| `thinking.png` | Thinking | Queued, starting, retrying, or waiting for an answer or approval |
+| `working.png` | Working | An agent is running, delegating, or stopping |
+| `idea.png` | Complete | Once, for about 3 seconds, when work finishes |
+| `pickup.png` | Picked up | While the mascot is dragged |
+
+Each file is a single-frame PNG of exactly 96 × 96 pixels and at most 512 KB. Any
+state may add an animated WebP or GIF with the same name (for example `idle.webp`),
+also 96 × 96 and at most 512 KB. The file names keep this pack's state names, so
+`idea.png` backs the state labelled Complete; Settings, the template's `README.txt`
+and its `template.json` all show that mapping.
+
+Export template writes a new folder with `template.json`, `README.txt` and these five
+PNGs as ready-to-edit placeholders. On import, the main process reads only the fixed
+names from the chosen folder. It rejects links and files outside that folder, checks
+each file's structure and size, and decodes PNG pixel data before showing a preview.
+A rejected import names the file and the rule it broke: missing, wrong name or
+format, wrong size, too large, or not a valid image. An applied set is stored in
+`mascot-sprites/` in the user data folder, and both windows load it through the app
+protocol at `mascot-sprites/<content id>/<file>`. Custom sets have no lift strip, so
+the pickup artwork cross-fades in directly.

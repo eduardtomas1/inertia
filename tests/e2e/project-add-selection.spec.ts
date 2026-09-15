@@ -36,6 +36,21 @@ test("selects a newly added project as the sidebar scope and active workspace", 
     await testInfo.attach("after-add-project", { path: afterScreenshot, contentType: "image/png" });
     await expect(filter).toHaveText("Launchpad");
     await expect(sidebar.getByRole("list", { name: "Work" }).getByRole("button", { name: /Inertia/u })).toHaveCount(0);
+
+    const toggleNavigation = page.getByRole("button", { name: "Toggle project navigation" });
+    await toggleNavigation.click();
+    await expect(sidebar).toHaveCount(0);
+    const collapsedPath = join(app.testDirectory, "Orbit");
+    await mkdir(collapsedPath);
+    await app.electronApp.evaluate(({ dialog }, path) => {
+      Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: [path], bookmarks: [] }));
+    }, collapsedPath);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+    await page.getByRole("dialog", { name: "Search Inertia" }).locator('[id="palette-action:add-project"]').click();
+    await openLocalProjectFromDialog(page);
+    await expect(page.getByRole("heading", { name: "What should we build in Orbit?" })).toBeVisible();
+    await toggleNavigation.click();
+    await expect(filter).toHaveText("Orbit");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

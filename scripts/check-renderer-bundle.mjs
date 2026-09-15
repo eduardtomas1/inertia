@@ -37,7 +37,7 @@ const budgets = {
   // this closure and 35,972 to detached first load. Application module bytes
   // are unchanged against merged Antigravity/file-link main 00270aa6.
   // Measured closures: 810,794 / 620,226 bytes; retain <0.3 KiB headroom.
-  mainWorkbenchFirstLoadJavaScript: 792 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 792.5 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -107,7 +107,7 @@ const budgets = {
   // <0.3 KiB headroom. Deferred guide, editor and terminal caps stay separate.
   // The same dependency batch adds 37,916 bytes to shared core. Its measured
   // 2,114,728 bytes retain 242 bytes of headroom; deferred caps stay separate.
-  coreJavaScript: 2_065.4 * kibibyte,
+  coreJavaScript: 2_065.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -164,9 +164,10 @@ function SidebarView({
   onSetProjectGitRepositoryLimit,
   onRemoveProject,
   appUpdate,
+  projectScopeId,
+  onProjectScopeChange,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
-  const [projectScopeId, setProjectScopeId] = useState<string | null>(null);
   const {
     menu,
     toggleMenu,
@@ -292,15 +293,6 @@ function SidebarView({
       snapshot?.runs,
     ],
   );
-  const knownProjectIdsRef = useRef<ReadonlySet<string> | null>(null);
-  useEffect(() => {
-    if (!snapshot) return;
-    const known = knownProjectIdsRef.current;
-    const current = new Set(snapshot.projects.map(({ id }) => id));
-    knownProjectIdsRef.current = current;
-    const activeId = snapshot.activeProjectId;
-    if (known && activeId && current.has(activeId) && !known.has(activeId)) setProjectScopeId(activeId);
-  }, [snapshot]);
   const scopedProjectId = projectScopeId && projectById.has(projectScopeId) ? projectScopeId : null;
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -932,7 +924,7 @@ function SidebarView({
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
-        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={setProjectScopeId} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
+        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
           setMenuTrigger(`:${project.id}`, trigger);
           toggleMenu(`:${project.id}`);
         }} />

@@ -34,7 +34,6 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { planFromText } from "../utils/planFromText";
 import { requestComposerPrefill } from "../utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
 import type { SplitPaneOwner } from "../utils/splitLayout";
@@ -52,6 +51,7 @@ import type {
   ConversationPaneLayout,
 } from "./useConversationPaneLayout";
 import { useConversationProjection } from "./useConversationProjection";
+import { usePlanSteps } from "./usePlanSteps";
 import { useDesktopTools } from "./useDesktopTools";
 import type { useInertiaConnection } from "./useInertiaConnection";
 import type { useProviderMaintenance } from "./useProviderMaintenance";
@@ -270,29 +270,12 @@ export function useSplitWorkspaceScene({
     navigatePreview: desktopTools.navigatePreview,
     focusPreview,
   }));
-  const planSteps = useMemo(() => {
-    if (!splitConversation) return [];
-    const latestPlan = projection.plans.at(-1);
-    if (latestPlan) {
-      return latestPlan.steps.map((step, index) => ({
-        id: `native-${index}`,
-        title: step.step,
-        status: step.status === "inProgress"
-          ? "in-progress" as const
-          : step.status,
-      }));
-    }
-    const text = [...projection.messages]
-      .reverse()
-      .find((message) => message.role === "assistant")?.content
-      ?? "";
-    return planFromText(text, splitConversation.status, projection.streamingText);
-  }, [
-    projection.messages,
+  const planSteps = usePlanSteps(
     projection.plans,
-    projection.streamingText,
-    splitConversation,
-  ]);
+    projection.messages,
+    splitConversation?.status ?? "idle",
+    projection.streaming,
+  );
   const turnActions = useMemo(() => createWorkspaceTurnActions({
     conversation: splitConversation,
     confirmDestructiveActions: settings.confirmDestructiveActions,

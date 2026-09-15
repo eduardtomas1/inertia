@@ -67,9 +67,9 @@
       "mascotJavaScript": 5980,
       "mascotSettingsJavaScript": 1994,
       "entryJavaScript": 222496,
-      "mainWorkbenchFirstLoadJavaScript": 811803,
-      "detachedChatFirstLoadJavaScript": 621214,
-      "entryCss": 351526,
+      "mainWorkbenchFirstLoadJavaScript": 811518,
+      "detachedChatFirstLoadJavaScript": 620921,
+      "entryCss": 350894,
       "colorThemesCss": 11686,
       "detachedChatCss": 2677,
       "settingsJavaScript": 47944,
@@ -94,16 +94,16 @@
       "preMergeConfidenceJavaScript": 22570,
       "morphiconsJavaScript": 15829,
       "morphingIconFeedbackJavaScript": 4221,
-      "coreJavaScript": 2115625,
+      "coreJavaScript": 2115543,
       "deferredPdfJavaScript": 437530,
       "deferredPdfWorker": 1265413
     }
   },
   "changedBytes": {
     "deferredUsageLimitsJavaScript": 2351,
-    "mainWorkbenchFirstLoadJavaScript": 1009,
-    "detachedChatFirstLoadJavaScript": 988,
-    "entryCss": 2935,
-    "coreJavaScript": 897
+    "mainWorkbenchFirstLoadJavaScript": 724,
+    "detachedChatFirstLoadJavaScript": 695,
+    "entryCss": 2303,
+    "coreJavaScript": 815
   }
 }

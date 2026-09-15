@@ -116,7 +116,6 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await expect(page.getByRole("button", { name: "Confirm reset", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.locator(".activity-thread-select").first().click();
-  await expect(page.locator(".usage-trigger-quota")).toHaveText("23%");
   await page.locator(".usage-popover-trigger").click();
   await expect(page.getByRole("dialog", { name: "Usage & context", exact: true }).locator(".usage-accounts-hint")).toContainText(/Account \d has more room/);
   await capture("composer-usage");

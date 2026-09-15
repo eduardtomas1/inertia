@@ -19,6 +19,8 @@ Subscription quota across your accounts:
 
 An unavailable measurement is never shown as zero, and a countdown reaching zero doesn't refill a bar: refresh to get the provider's answer.
 
-The composer's usage indicator shows the context window and the selected account's quota. When a quota window drops below half, the indicator adds its percentage. The popover says when another account of the same provider has more room, using the last Limits reading, and offers **All provider limits**, which opens the same information without sending a message.
+The composer's usage indicator shows the context window. Its popover adds the selected account's quota in the same colours, says when another account of the same provider has more room, using the last Limits reading, and offers **All provider limits**, which opens the same information without sending a message.
+
+The **Usage** section of the Environment panel opens by default in every chat. If you collapse it, it stays collapsed until you open it again.
 
 For accounts, averages, optional CLIProxyAPI hubs and reset credits, see [Provider usage limits](../USAGE_LIMITS.md).

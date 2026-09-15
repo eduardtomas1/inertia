@@ -1,5 +1,5 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Clock3, EyeOff, X } from "lucide-react";
 
 import type {
@@ -263,7 +263,6 @@ export function UsageIndicator({
     const remaining = displayPercent(limit.remainingPercent);
     return remaining !== null && (lowest === null || remaining < lowest) ? remaining : lowest;
   }, null);
-  const quotaTone = tightestQuota === null ? null : tightestQuota < 20 ? "critical" : tightestQuota < 50 ? "low" : null;
 
   const closePopover = useCallback((restoreFocus: boolean): void => {
     setOpen(false);
@@ -311,7 +310,7 @@ export function UsageIndicator({
 
   const hasQuota = scopedRateLimits.length > 0;
   const quotaRefreshing = scopedRateLimitState.refreshing;
-  const triggerSummary = `${contextTriggerSummary(context, quotaRefreshing)}${quotaTone ? ` Provider quota ${Math.round(tightestQuota!)}% left.` : ""}`;
+  const triggerSummary = contextTriggerSummary(context, quotaRefreshing);
   const triggerLabel = `${open ? "Close" : "Open"} usage and context. ${triggerSummary}`;
   const ringState = contextRingState(context);
 
@@ -341,17 +340,6 @@ export function UsageIndicator({
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
           {behavior.showAdjacentValue && (
             <span className="usage-trigger-value" aria-hidden="true">{context.valueLabel}</span>
-          )}
-          {quotaTone && (
-            <span
-              className="usage-trigger-quota"
-              data-tone={quotaTone}
-              data-stale={scopedRateLimitState.freshness === "fresh" ? undefined : "true"}
-              style={{ "--quota": `${tightestQuota}%` } as CSSProperties}
-              aria-hidden="true"
-            >
-              {Math.round(tightestQuota!)}%
-            </span>
           )}
         </button>
 

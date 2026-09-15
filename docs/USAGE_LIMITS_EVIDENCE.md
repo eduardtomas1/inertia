@@ -195,10 +195,11 @@ motion runs only under `prefers-reduced-motion: no-preference`. Account details,
 hub setup and the reset confirmation flow are unchanged.
 
 The composer usage popover shows context as a larger ring and quota with the
-Limits health tones. The trigger adds the tightest selected-route quota figure
-below 50%. A line names another ready, fully reported account of the same
-provider with more room than that figure, with the reading's age after five
-minutes. It reads `usage.limits.get` with `refresh: false`, which returns the
+Limits health tones; the trigger itself still shows only the context ring. A
+line names another ready, fully reported account of the same provider with more
+room than the selected route's tightest window, with the reading's age after five
+minutes. The Environment panel's Usage section opens by default and remembers a
+collapse or reopen in the renderer's optional layout storage. It reads `usage.limits.get` with `refresh: false`, which returns the
 runtime's in-memory snapshot; it never refreshes providers. It loads with the
 deferred Limits module.
 
@@ -210,11 +211,13 @@ showed unstyled adjacent buttons until Limits loaded. Their rules now live in
 
 Verification used macOS ARM64 and Node 22.23.2 on `3baeaef3`:
 
-- `npm run check`: passed. **849 files / 9,038 tests passed**, 16 files / 140
+- `npm run check`: passed. **849 files / 9,039 tests passed**, 16 files / 140
   tests skipped, and the real renderer bundle gate passed.
 - `npx playwright test tests/e2e/usage-limits.spec.ts tests/e2e/usage.spec.ts
   tests/e2e/usage-popover-placement.spec.ts --project=display-sensitive --workers=1`:
-  **3 passed in 19.5 seconds**, with no renderer errors.
+  **3 passed in 21.8 seconds**, with no renderer errors. `npx playwright test
+  tests/e2e/layout.spec.ts --workers=1`: **6 passed**, including the default-open
+  Usage section and its keyboard order.
 - Providers, hub, accounts and reset credits are the existing synthetic fixtures.
   No real provider CLI ran and no reset credit was redeemed. Native Windows and
   Linux rendering was not exercised locally.
@@ -222,13 +225,13 @@ Verification used macOS ARM64 and Node 22.23.2 on `3baeaef3`:
 | JavaScript and CSS scope | Baseline bytes | Feature bytes | Change | New ceiling |
 | --- | ---: | ---: | ---: | ---: |
 | Deferred Limits closure | 17591 | 19942 | +2351 | 19.7 KiB |
-| Main workbench first load | 810794 | 811803 | +1009 | 793 KiB |
-| Detached chat first load | 620226 | 621214 | +988 | 606.9 KiB |
-| Core | 2114728 | 2115625 | +897 | 2,066.3 KiB |
-| Entry CSS | 348591 | 351526 | +2935 | unchanged 346 KiB |
+| Main workbench first load | 810794 | 811518 | +724 | 792.7 KiB |
+| Detached chat first load | 620226 | 620921 | +695 | 606.6 KiB |
+| Core | 2114728 | 2115543 | +815 | 2,066.2 KiB |
+| Entry CSS | 348591 | 350894 | +2303 | unchanged 346 KiB |
 
-The first-load growth is the quota tone, the trigger figure and the lazy hint
-boundary; the hint's logic stays in the deferred Limits closure. Measurements are
+The first-load growth is the quota tone, the lazy hint boundary and the
+remembered Usage section; the hint's logic stays in the deferred Limits closure. Measurements are
 in [the renderer evidence](pr-evidence/limits-strip-composer-quota-renderer-bundle.json).
 The earlier manifest and screenshots remain the original feature snapshot.
 
@@ -240,7 +243,7 @@ The earlier manifest and screenshots remain the original feature snapshot.
 
 Comparison captures from the same fixtures, with `3baeaef3` as the before state:
 
-- [Composer popover before](screenshots/composer-usage-before.png) and
-  [after](screenshots/composer-usage-after.png), taken when the popover first opens.
-- [Usage before](screenshots/usage-switch-before.png), on a first visit with Limits
-  never opened, and [after](screenshots/usage-switch-after.png).
+- [Composer popover and Environment Usage before](screenshots/composer-usage-before.png)
+  and [after](screenshots/composer-usage-after.png), taken when the popover first opens.
+- [Usage switch before](screenshots/usage-switch-before.png), cropped to the header
+  on a first visit with Limits never opened, and [after](screenshots/usage-switch-after.png).

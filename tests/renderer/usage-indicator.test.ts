@@ -457,7 +457,7 @@ describe("UsageIndicator", () => {
     expect(html).not.toContain("Reset time unavailable");
   });
 
-  it("adds a quota figure to the trigger only when a selected-route limit falls below half", () => {
+  it("keeps the trigger to context while the popover tones each quota window", () => {
     const limit = (remainingPercent: number): ProviderRateLimit => ({
       id: `quota-${remainingPercent}`,
       label: "Weekly",
@@ -467,17 +467,12 @@ describe("UsageIndicator", () => {
       resetsAt: null,
     });
     const low = render(usage(), [limit(80), limit(23)], freshState, "compact");
-    expect(low).toContain('class="usage-trigger-quota" data-tone="low" style="--quota:23%" aria-hidden="true">23%</span>');
-    expect(low).toContain('title="Context window 50% remaining. Provider quota 23% left."');
-    expect(low).toContain('aria-label="Open usage and context. Context window 50% remaining. Provider quota 23% left."');
+    expect(low).not.toContain("usage-trigger-quota");
+    expect(low).toContain('title="Context window 50% remaining."');
+    expect(low).toContain('aria-label="Open usage and context. Context window 50% remaining."');
     expect(low).toContain('class="usage-popover-quota" data-tone="ok"');
     expect(low).toContain('class="usage-popover-quota" data-tone="low"');
-
-    const cached = render(usage(), [limit(12)], { ...freshState, freshness: "stale", provenance: "persistent-cache" });
-    expect(cached).toContain('class="usage-trigger-quota" data-tone="critical" data-stale="true"');
-    expect(cached).toContain('class="usage-popover-quota" data-tone="critical"');
-    expect(render(usage(), [limit(50)], freshState)).not.toContain("usage-trigger-quota");
-    expect(render(usage(), [limit(10)], freshState, "expanded", { quotaSource: "isolated" })).not.toContain("usage-trigger-quota");
+    expect(render(usage(), [limit(12)], freshState)).toContain('class="usage-popover-quota" data-tone="critical"');
   });
 
   it("repeats the context ring inside the popover without a second quota refresh marker", () => {

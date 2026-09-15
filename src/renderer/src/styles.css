@@ -5470,36 +5470,6 @@ button.environment-row:focus-visible,
   font-weight: 580;
 }
 
-.usage-trigger-quota {
-  --quota-tone: var(--warning-state);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding-right: 8px;
-  color: var(--quota-tone);
-  font-size: max(var(--ui-font-micro), 11px);
-  font-weight: 680;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.usage-trigger-quota::before {
-  content: "";
-  width: 6px;
-  height: 12px;
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  background: linear-gradient(to top, currentColor var(--quota), transparent 0);
-}
-
-.usage-trigger-quota[data-tone="critical"] {
-  --quota-tone: var(--danger);
-}
-
-.usage-trigger-quota[data-stale="true"] {
-  opacity: 0.68;
-}
-
 .usage-popover {
   position: absolute;
   z-index: 30;
@@ -5844,10 +5814,6 @@ button.environment-row:focus-visible,
 
   .usage-popover:not([hidden]) .usage-popover-meter > span {
     animation: usage-popover-meter-fill 640ms var(--motion-ease-out) 90ms backwards;
-  }
-
-  .usage-trigger-quota {
-    animation: usage-popover-enter 220ms var(--motion-ease-out) backwards;
   }
 }
 

@@ -1460,6 +1460,8 @@ describe("compact Work sidebar", () => {
     expect(scope).toHaveTextContent("Launchpad");
     expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
     expect(screen.getByText("No work yet")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
   });
 
   it("keeps the chosen scope when no newly created project becomes active", () => {
@@ -1481,6 +1483,10 @@ describe("compact Work sidebar", () => {
     view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime, launchpad]), activeProjectId: runtime.id });
     expect(scope).toHaveTextContent("Studio");
     expect(screen.getByText("Polish studio")).toBeInTheDocument();
+
+    scopeTo("All projects");
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime, launchpad]), activeProjectId: launchpad.id });
+    expect(scope).toHaveTextContent("All projects");
   });
 
   it("keeps the scope while collapsed and selects a project created before reopening", () => {
@@ -1507,5 +1513,7 @@ describe("compact Work sidebar", () => {
 
     expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("Launchpad");
     expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
   });
 });

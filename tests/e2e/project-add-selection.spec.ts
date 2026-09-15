@@ -2,8 +2,22 @@
 import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { createAppFixture } from "./support/app-fixture";
 import { openLocalProjectFromDialog } from "./support/add-project";
+
+function activeChatProject(testDirectory: string): string | null {
+  const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true, fileMustExist: true });
+  try {
+    const row = database.prepare(`
+      SELECT projects.name AS name FROM app_state
+      JOIN conversations ON conversations.id = app_state.active_conversation_id
+      JOIN projects ON projects.id = conversations.project_id
+      WHERE app_state.id = 1 AND app_state.active_project_id = projects.id
+    `).get() as { name: string } | undefined;
+    return row?.name ?? null;
+  } finally { database.close(); }
+}
 
 test("selects a newly added project as the sidebar scope and active workspace", async ({ browserName: _browserName }, testInfo) => {
   const app = await createAppFixture({ name: "project-add-selection", initialState: "conversation", seedSecondProject: true });
@@ -36,6 +50,8 @@ test("selects a newly added project as the sidebar scope and active workspace", 
     await testInfo.attach("after-add-project", { path: afterScreenshot, contentType: "image/png" });
     await expect(filter).toHaveText("Launchpad");
     await expect(sidebar.getByRole("list", { name: "Work" }).getByRole("button", { name: /Inertia/u })).toHaveCount(0);
+    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Launchpad");
 
     const toggleNavigation = page.getByRole("button", { name: "Toggle project navigation" });
     await toggleNavigation.click();
@@ -51,6 +67,45 @@ test("selects a newly added project as the sidebar scope and active workspace", 
     await expect(page.getByRole("heading", { name: "What should we build in Orbit?" })).toBeVisible();
     await toggleNavigation.click();
     await expect(filter).toHaveText("Orbit");
+    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Orbit");
+    expect(app.rendererErrors).toEqual([]);
+  } finally { await app.close(); }
+});
+
+test("keeps the chosen project scope after a cancelled or failed import", async () => {
+  const app = await createAppFixture({ name: "project-add-failure-selection", initialState: "conversation", seedSecondProject: true });
+  try {
+    await app.resizeWindow(1200, 800);
+    const page = app.page;
+    const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+    const filter = sidebar.getByRole("button", { name: "Filter work by project" });
+    await filter.click();
+    await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("option", { name: "Companion", exact: true }).click();
+    await expect(filter).toHaveText("Companion");
+
+    await app.electronApp.evaluate(({ dialog }) => {
+      Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: true, filePaths: [], bookmarks: [] }));
+    });
+    await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+    await dialog.getByRole("button", { name: /Local folder/u }).click();
+    await dialog.getByRole("button", { name: "Browse", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Open project", exact: true })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Close add project" }).click();
+    await expect(page.locator(".add-project-dialog")).toHaveCount(0);
+    await expect(filter).toHaveText("Companion");
+
+    await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
+    await dialog.getByRole("button", { name: /Local folder/u }).click();
+    await dialog.getByRole("textbox", { name: "Folder path" }).fill(app.attachmentImagePath);
+    await dialog.getByRole("button", { name: "Open project", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText("Project path must be an existing directory.");
+    await dialog.getByRole("button", { name: "Close add project" }).click();
+    await expect(page.locator(".add-project-dialog")).toHaveCount(0);
+    await expect(filter).toHaveText("Companion");
+    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Companion");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

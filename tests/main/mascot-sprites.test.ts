@@ -96,13 +96,18 @@ describe("mascot sprite validation", () => {
     expect(await rejection(folder)).toBe("idle.png must be a regular file.");
   });
 
-  it.skipIf(process.platform === "win32")("does not follow symbolic links out of the chosen folder", async () => {
+  it("rejects a sprite linked from outside the chosen folder on every platform", async (context) => {
     const outside = temporary();
     writeFileSync(join(outside, "secret.png"), png());
     const directory = spriteFolder();
     rmSync(join(directory, "idle.png"));
-    symlinkSync(join(outside, "secret.png"), join(directory, "idle.png"));
-    expect(await rejection(directory)).toBe("idle.png could not be read.");
+    try {
+      symlinkSync(join(outside, "secret.png"), join(directory, "idle.png"), "file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      context.skip();
+    }
+    expect(await rejection(directory)).toBe("idle.png must be a file in the chosen folder, not a link.");
   });
 });
 

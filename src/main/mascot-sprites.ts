@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { inflateSync } from "node:zlib";
 import idea from "../renderer/src/assets/mascot/idea.png?inline";
 import idle from "../renderer/src/assets/mascot/idle.png?inline";
@@ -93,15 +93,19 @@ export function validateMascotSprite(name: string, bytes: Buffer): MascotSpriteF
 }
 
 async function readSprite(directory: string, name: string): Promise<Buffer | null> {
+  const path = join(directory, name);
   let handle;
   try {
-    handle = await open(join(directory, name), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw new MascotSpriteError(`${name} could not be read.`);
-  }
-  try {
-    if (!(await handle.stat()).isFile()) throw new MascotSpriteError(`${name} must be a regular file.`);
+    const named = await lstat(path, { bigint: true });
+    const outside = `${name} must be a file in the chosen folder, not a link.`;
+    if (named.isSymbolicLink()) throw new MascotSpriteError(outside);
+    if (!named.isFile()) throw new MascotSpriteError(`${name} must be a regular file.`);
+    if (dirname(await realpath(path)) !== await realpath(directory)) throw new MascotSpriteError(outside);
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || opened.dev !== named.dev || opened.ino !== named.ino) {
+      throw new MascotSpriteError(`${name} changed while it was being read.`);
+    }
     const buffer = Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1);
     let length = 0;
     while (length < buffer.byteLength) {
@@ -112,9 +116,10 @@ async function readSprite(directory: string, name: string): Promise<Buffer | nul
     if (length > MASCOT_SPRITE_MAX_BYTES) throw new MascotSpriteError(`${name} is larger than ${BYTES_LABEL}.`);
     return Buffer.from(buffer.subarray(0, length));
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     if (error instanceof MascotSpriteError) throw error;
     throw new MascotSpriteError(`${name} could not be read.`);
-  } finally { await handle.close(); }
+  } finally { await handle?.close(); }
 }
 
 export async function readMascotSprites(directory: string): Promise<MascotSpriteSet> {

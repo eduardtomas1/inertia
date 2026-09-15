@@ -46,9 +46,9 @@ import {
   turnEventOwner,
   withoutHydratedBaseline,
   withTerminalTurnProjection,
-  type StreamingAgentState,
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
+import { createStreamingAgentStore } from "./useStreamingAgentState";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_TURNS: AgentTurn[] = [];
@@ -116,8 +116,8 @@ export function useConversationProjection({
   const [detailState, setDetailState] =
     useState<ConversationDetailViewState | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
-  const [[streamingText, streamingReasoning, streamingChannel], setStreaming] =
-    useState<StreamingAgentState>(EMPTY_STREAMING_AGENT_STATE);
+  const [streamingStore] = useState(createStreamingAgentStore);
+  const setStreaming = streamingStore.update;
   const [liveMessages, setLiveMessages] =
     useState<Record<string, ChatMessage[]>>({});
   const [liveUsage, setLiveUsage] =
@@ -176,7 +176,7 @@ export function useConversationProjection({
     setLiveSubagents({});
     setNativePlans({});
     setTerminalProjections({});
-  }, []);
+  }, [setStreaming]);
   const closeTextStream = useCallback((): void => {
     const hydration = freshHydrationRef.current;
     if (hydration) {
@@ -184,7 +184,7 @@ export function useConversationProjection({
       hydration.channel = null;
     }
     setStreaming(closeTextStreamState);
-  }, []);
+  }, [setStreaming]);
 
   const conversationId = enabled
     ? targetConversationId === undefined
@@ -213,7 +213,7 @@ export function useConversationProjection({
       liveTurnOwnerRef.current = null;
       setStreaming(closeStreamingChannelState);
     }
-  }, [status]);
+  }, [setStreaming, status]);
   const detail = useMemo(() => {
     if (
       detailState?.state !== "ready"
@@ -366,6 +366,7 @@ export function useConversationProjection({
     detailRefresh,
     conversationId,
     request,
+    setStreaming,
     status,
   ]);
 
@@ -868,6 +869,7 @@ export function useConversationProjection({
   }), [
     closeTextStream,
     resetLiveProjection,
+    setStreaming,
     subscribe,
     subscriptionOwner,
   ]);
@@ -939,9 +941,7 @@ export function useConversationProjection({
     checkpoints: detail?.checkpoints ?? EMPTY_CHECKPOINTS,
     turnGitArtifacts: detail?.turnGitArtifacts ?? EMPTY_GIT_ARTIFACTS,
     usage,
-    streamingText,
-    streamingReasoning,
-    streamingChannel,
+    streaming: streamingStore,
     terminalProjections,
     pendingApprovals: approvals,
     pendingInputs: inputRequests,

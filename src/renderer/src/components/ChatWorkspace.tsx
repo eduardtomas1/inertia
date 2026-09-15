@@ -58,10 +58,12 @@ import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { shouldFollowTimeline } from "../utils/responseTimeline";
 import {
-  shouldFollowTimeline,
-  type StreamingAgentChannel,
-} from "../utils/responseTimeline";
+  EMPTY_STREAMING_AGENT_SOURCE,
+  useStreamingAgentState,
+  type StreamingAgentSource,
+} from "../hooks/useStreamingAgentState";
 import {
   turnEventOwner,
   type TerminalTurnProjections,
@@ -88,7 +90,10 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "./conversation-context/types";
-import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
+import type {
+  FinalAnswerAutoScrollEvent,
+  ResponseTimelineProps,
+} from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
@@ -96,6 +101,34 @@ import "./ChatWorkspace.css";
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
 }));
+
+function StreamingResponseTimeline({
+  streaming,
+  onStreamingContent,
+  ...props
+}: Omit<
+  ResponseTimelineProps,
+  "streamingText" | "streamingReasoning" | "streamingChannel"
+> & {
+  streaming: StreamingAgentSource;
+  onStreamingContent: () => (() => void) | undefined;
+}): React.JSX.Element {
+  const [streamingText, streamingReasoning, streamingChannel] =
+    useStreamingAgentState(streaming);
+  useEffect(() => {
+    if (!streamingText && !streamingReasoning) return;
+    markTestStreamingReaderActivityReceipt(streamingText);
+    return onStreamingContent();
+  }, [onStreamingContent, streamingReasoning, streamingText]);
+  return (
+    <ResponseTimeline
+      {...props}
+      streamingText={streamingText}
+      streamingReasoning={streamingReasoning}
+      streamingChannel={streamingChannel}
+    />
+  );
+}
 const ProviderMaintenanceNotice = lazy(async () => ({
   default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
 }));
@@ -130,9 +163,7 @@ type ChatWorkspaceProps = {
   plans: AgentPlan[];
   checkpoints: CheckpointSummary[];
   turnGitArtifacts: TurnGitArtifact[];
-  streamingText: string;
-  streamingReasoning: string;
-  streamingChannel?: StreamingAgentChannel;
+  streaming?: StreamingAgentSource;
   terminalProjections?: TerminalTurnProjections;
   usage: ThreadUsageSnapshot | null;
   skills: AgentSkillSummary[];
@@ -243,9 +274,7 @@ export function ChatWorkspace({
   plans,
   checkpoints,
   turnGitArtifacts,
-  streamingText,
-  streamingReasoning,
-  streamingChannel = null,
+  streaming = EMPTY_STREAMING_AGENT_SOURCE,
   terminalProjections,
   usage,
   skills,
@@ -486,7 +515,7 @@ export function ChatWorkspace({
     (request) => request.conversationContextRequest === undefined,
   );
   const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
-  const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${streamingText.length}:${streamingReasoning.length}:${ownedApprovals.length}:${ownedInputRequests.length}`;
+  const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}`;
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
@@ -659,15 +688,19 @@ export function ChatWorkspace({
     [clearPendingFinalAnswerNavigation, clearReaderIntent],
   );
 
-  useEffect(() => {
-    markTestStreamingReaderActivityReceipt(streamingText);
+  const followLatestContent = useCallback((): (() => void) | undefined => {
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(() => {
       if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
       performScrollToLatest("auto");
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal, performScrollToLatest, streamingText]);
+  }, [performScrollToLatest]);
+
+  useEffect(
+    () => followLatestContent(),
+    [contentSignal, followLatestContent],
+  );
 
   useEffect(() => {
     const content = timelineRef.current;
@@ -897,7 +930,7 @@ export function ChatWorkspace({
             </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
-            <ResponseTimeline
+            <StreamingResponseTimeline
               turns={ownedTurns}
               messages={ownedMessages}
               contextPackets={contextPackets}
@@ -914,9 +947,10 @@ export function ChatWorkspace({
                 conversationId: conversation.id,
                 turn: latestTurnSummary,
               } : null}
-              streamingText={detailLoading ? "" : streamingText}
-              streamingReasoning={detailLoading ? "" : streamingReasoning}
-              streamingChannel={detailLoading ? null : streamingChannel}
+              streaming={detailLoading
+                ? EMPTY_STREAMING_AGENT_SOURCE
+                : streaming}
+              onStreamingContent={followLatestContent}
               terminalProjections={detailLoading
                 ? undefined
                 : terminalProjections}

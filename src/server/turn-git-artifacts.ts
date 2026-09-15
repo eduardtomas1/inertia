@@ -564,7 +564,7 @@ export class TurnGitArtifactManager {
         modifiedAt: info.mtimeMs,
       })).catch(() => null)];
     }))).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      .sort((left, right) => right.modifiedAt - left.modifiedAt || left.digest.localeCompare(right.digest));
+      .sort((left, right) => right.modifiedAt - left.modifiedAt || left.digest.localeCompare(right.digest, "en"));
     let retainedBytes = 0;
     let retainedCount = 0;
     for (const entry of candidates) {

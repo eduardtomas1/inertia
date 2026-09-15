@@ -148,8 +148,8 @@ function readGenerationLeases(
     }
   }
   return leases.sort((left, right) => (
-    left.createdAt.localeCompare(right.createdAt)
-    || left.runtimeGenerationId.localeCompare(right.runtimeGenerationId)
+    left.createdAt.localeCompare(right.createdAt, "en")
+    || left.runtimeGenerationId.localeCompare(right.runtimeGenerationId, "en")
   ));
 }
 

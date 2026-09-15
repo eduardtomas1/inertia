@@ -42,11 +42,11 @@ export interface ObservedWorkspaceEntry {
   kind: WorkspaceEntryKind;
 }
 
-const workspaceEntryNameCollator = new Intl.Collator(undefined, {
+const workspaceEntryNameCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
 });
-const workspaceEntryPathCollator = new Intl.Collator(undefined, {
+const workspaceEntryPathCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "variant",
 });

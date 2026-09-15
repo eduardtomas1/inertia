@@ -320,8 +320,8 @@ export class AgentWorkflowController {
         .filter(({ routeKey }) => routeKey === currentSkillRouteKey)
         .map(({ summary }) => summary)
         .sort((left, right) =>
-          left.scope.localeCompare(right.scope)
-          || left.name.localeCompare(right.name)),
+          left.scope.localeCompare(right.scope, "en")
+          || left.name.localeCompare(right.name, "en")),
       skillsCapability: native
         ? {
             kind: "codex-native",
@@ -1200,8 +1200,8 @@ export class AgentWorkflowController {
       },
     });
     return summaries.sort((left, right) =>
-      left.scope.localeCompare(right.scope)
-      || left.name.localeCompare(right.name));
+      left.scope.localeCompare(right.scope, "en")
+      || left.name.localeCompare(right.name, "en"));
   }
 
   private requireNativeCodexGoal(conversation: Conversation): void {

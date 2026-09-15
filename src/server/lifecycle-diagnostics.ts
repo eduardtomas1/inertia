@@ -118,8 +118,8 @@ export function runtimeLifecycleDiagnosticSnapshot(
     ).values(),
   ].sort(
     (left, right) =>
-      left.providerId.localeCompare(right.providerId) ||
-      left.harnessId.localeCompare(right.harnessId),
+      left.providerId.localeCompare(right.providerId, "en") ||
+      left.harnessId.localeCompare(right.harnessId, "en"),
   );
   const activeWorkspaceRuns = input.runs.filter(
     ({ status }) => status === "running" || status === "waiting",

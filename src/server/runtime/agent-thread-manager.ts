@@ -310,7 +310,7 @@ function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => left.localeCompare(right, "en"))
     .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
     .join(",")}}`;
 }
@@ -470,7 +470,7 @@ export class AgentThreadManager {
         conversation.projectId === source.projectId
         && (input.includeArchived || conversation.archivedAt === null)
       ))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt, "en"))
       .slice(0, limit + 1);
     const rows = candidates
       .slice(0, limit)

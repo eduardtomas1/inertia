@@ -42,7 +42,7 @@ function pruneStoredOpenDisclosures(storage: Storage): void {
   }
   if (entries.length <= MAX_STORED_OPEN_DISCLOSURES) return;
   entries.sort((left, right) => (
-    left.updatedAt - right.updatedAt || left.key.localeCompare(right.key)
+    left.updatedAt - right.updatedAt || left.key.localeCompare(right.key, "en")
   ));
   for (const { key } of entries.slice(
     0,

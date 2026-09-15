@@ -889,7 +889,7 @@ function projectionValidator(
         ...grant,
         conversationIds: [...grant.conversationIds].sort(),
       }))
-      .sort((left, right) => left.projectId.localeCompare(right.projectId)),
+      .sort((left, right) => left.projectId.localeCompare(right.projectId, "en")),
     grantVersion: subject.grantVersion,
     expiresAt: subject.expiresAt,
   };

@@ -91,7 +91,7 @@ export function workspaceRunIsOperationallyVisible(run: WorkspaceRun): boolean {
 }
 
 function compareRunRecency(a: WorkspaceRun, b: WorkspaceRun): number {
-  return b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id);
+  return b.startedAt.localeCompare(a.startedAt, "en") || b.id.localeCompare(a.id, "en");
 }
 
 function runIsOperational(run: WorkspaceRun): boolean {

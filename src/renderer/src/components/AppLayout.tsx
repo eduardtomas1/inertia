@@ -19,6 +19,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 
 import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
+import { useProjectScope } from "../hooks/useProjectScope";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import type { useWorkspaceLayout } from "../hooks/useWorkspaceLayout";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -276,6 +277,7 @@ export function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
   const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
@@ -501,6 +503,8 @@ export function AppLayout({
             view={view}
             open={sidebarOpen}
             busy={busyAction === "project.create"}
+            projectScopeId={projectScopeId}
+            onProjectScopeChange={setProjectScopeId}
             appUpdate={appUpdate}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type BetterSqlite3 from "better-sqlite3";
+import { boundedMathMax, boundedMathMin } from "./bounded-math";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 
 // Migration execution is isolated from the RuntimeStore facade so schema
@@ -75,6 +76,8 @@ export interface DatabaseMigration {
   readonly up: string | ((database: SqliteDatabase, context: DatabaseMigrationContext) => void);
 }
 
+export type MigrationCompatibility = "bounded-legacy-backfill";
+
 export interface DatabaseMigrationDiagnostic {
   readonly outcome: "succeeded" | "failed";
   readonly sourceSchemaVersion: number;
@@ -85,6 +88,7 @@ export interface DatabaseMigrationDiagnostic {
   readonly failedMigration: string | null;
   readonly errorCategory: string | null;
   readonly legacyBackfill: LegacyBackfillDiagnostics | null;
+  readonly compatibility: MigrationCompatibility | null;
 }
 
 export class DatabaseMigrationError extends Error {
@@ -283,6 +287,7 @@ export function runDatabaseMigrations(
   let failedVersion: number | null = null;
   let failedMigration: string | null = null;
   let legacyBackfill: LegacyBackfillDiagnostics | null = null;
+  let compatibility: MigrationCompatibility | null = null;
   let restoreForeignKeys = false;
 
   try {
@@ -343,7 +348,9 @@ export function runDatabaseMigrations(
         failedVersion = migration.version;
         failedMigration = migration.name;
         if (typeof migration.up === "string") database.exec(migration.up);
-        else migration.up(database, context);
+        else if (isReleasedLegacyBackfill(migration)) {
+          compatibility = applyReleasedLegacyBackfill(database, migration.up, context);
+        } else migration.up(database, context);
         insertApplied.run(migration.version, options.now?.() ?? new Date().toISOString());
         appliedVersions.push(migration.version);
       }
@@ -365,6 +372,7 @@ export function runDatabaseMigrations(
       failedMigration,
       errorCategory: safeErrorCategory(error),
       legacyBackfill: null,
+      compatibility: null,
     };
     emitDiagnostic(options.onDiagnostic, diagnostic);
     throw new DatabaseMigrationError(diagnostic, error);
@@ -382,6 +390,7 @@ export function runDatabaseMigrations(
     failedMigration: null,
     errorCategory: null,
     legacyBackfill,
+    compatibility,
   };
   emitDiagnostic(options.onDiagnostic, diagnostic);
   return diagnostic;
@@ -870,6 +879,315 @@ export function backfillLegacyAgentTurns(
   return diagnostics;
 }
 
+function isReleasedLegacyBackfill(migration: DatabaseMigration): boolean {
+  return migration.version === 18 && migration.name === "BackfillLegacyAgentTurns";
+}
+
+function applyReleasedLegacyBackfill(
+  database: SqliteDatabase,
+  up: Exclude<DatabaseMigration["up"], string>,
+  context: DatabaseMigrationContext,
+): MigrationCompatibility | null {
+  try {
+    database.transaction(() => up(database, context))();
+    return null;
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+  }
+  context.setLegacyBackfillDiagnostics(backfillLegacyAgentTurnsBounded(database, {
+    sourceSchemaVersion: context.sourceSchemaVersion,
+  }));
+  return "bounded-legacy-backfill";
+}
+
+export function backfillLegacyAgentTurnsBounded(
+  database: SqliteDatabase,
+  options: { readonly sourceSchemaVersion: number },
+): LegacyBackfillDiagnostics {
+  if (!database.inTransaction) {
+    return database.transaction(() => backfillLegacyAgentTurnsBounded(database, options))();
+  }
+  requireLegacyOwnershipSchema(database);
+
+  const messages = database.prepare(
+    "SELECT id, conversation_id, role, created_at, turn_id"
+    + " FROM messages ORDER BY conversation_id, created_at, id",
+  ).all() as MessageRow[];
+  const activities = database.prepare(
+    "SELECT id, conversation_id, run_id, status, created_at, turn_id"
+    + " FROM activities ORDER BY conversation_id, created_at, id",
+  ).all() as ActivityRow[];
+  const reasonings = database.prepare(
+    "SELECT id, conversation_id, run_id, status, created_at, turn_id"
+    + " FROM agent_reasonings ORDER BY conversation_id, created_at, id",
+  ).all() as ReasoningRow[];
+  const checkpoints = database.prepare(
+    "SELECT id, conversation_id, turn_index, created_at, turn_id"
+    + " FROM checkpoints ORDER BY conversation_id, turn_index, created_at, id",
+  ).all() as CheckpointRow[];
+  const conversations = database.prepare(
+    "SELECT id, provider_id, model, reasoning_effort, interaction_mode,"
+    + " access_mode, provider_session_id FROM conversations ORDER BY id",
+  ).all() as ConversationRow[];
+  const existingTurns = database.prepare(
+    "SELECT id, conversation_id, run_id, user_message_id, association"
+    + " FROM agent_turns ORDER BY requested_at, id",
+  ).all() as ExistingTurnRow[];
+  const workspaceRuns = hasTable(database, "workspace_runs")
+    ? database.prepare(
+      "SELECT id, conversation_id, kind, status, started_at, finished_at"
+      + " FROM workspace_runs WHERE conversation_id IS NOT NULL"
+      + " ORDER BY conversation_id, started_at, id",
+    ).all() as WorkspaceRunRow[]
+    : [];
+  const plans = hasTable(database, "agent_plans")
+    ? database.prepare(
+      "SELECT conversation_id, run_id, updated_at, turn_id FROM agent_plans"
+      + " ORDER BY conversation_id, updated_at, run_id",
+    ).all() as PlanRow[]
+    : [];
+  const usageRows = hasTable(database, "thread_usage")
+    ? database.prepare(
+      "SELECT conversation_id, updated_at, turn_id FROM thread_usage"
+      + " ORDER BY conversation_id, updated_at",
+    ).all() as UsageRow[]
+    : [];
+
+  const groups = buildResponseGroups(messages);
+  const conversationById = new Map(conversations.map((row) => [row.id, row]));
+  const turnByUserMessage = new Map(existingTurns.map((row) => [row.user_message_id, row]));
+  const usedRunIds = new Set(existingTurns.map((row) => row.run_id));
+  const activityByConversation = groupByConversation(activities);
+  const reasoningByConversation = groupByConversation(reasonings);
+  const checkpointByConversation = groupByConversation(checkpoints);
+  const workspaceByConversation = groupByConversation(workspaceRuns);
+  const planByConversation = groupByConversation(plans);
+  const usageByConversation = groupByConversation(usageRows);
+  const insertTurn = database.prepare(`
+    INSERT INTO agent_turns (
+      id, conversation_id, run_id, user_message_id, terminal_assistant_message_id,
+      provider_id, harness_id, backend_profile_id, model, model_alias, reasoning_effort,
+      interaction_mode, access_mode, provider_session_before, provider_session_after,
+      requested_at, started_at, completed_at, status, terminal_reason, checkpoint_id,
+      usage_start_json, usage_completion_json, configuration_revision, association,
+      created_at, updated_at
+    ) VALUES (
+      @id, @conversationId, @runId, @userMessageId, @terminalAssistantMessageId,
+      @providerId, @harnessId, @backendProfileId, @model, NULL, @reasoningEffort,
+      @interactionMode, @accessMode, @providerSessionBefore, @providerSessionAfter,
+      @requestedAt, @startedAt, @completedAt, @status, @terminalReason, @checkpointId,
+      NULL, NULL, 0, 'inferred', @createdAt, @updatedAt
+    )
+  `);
+  const assignMessage = database.prepare(
+    "UPDATE messages SET turn_id = ? WHERE id = ? AND turn_id IS NULL",
+  );
+  const assignActivity = database.prepare(
+    "UPDATE activities SET turn_id = ? WHERE id = ? AND turn_id IS NULL",
+  );
+  const assignReasoning = database.prepare(
+    "UPDATE agent_reasonings SET turn_id = ? WHERE id = ? AND turn_id IS NULL",
+  );
+  const assignPlan = database.prepare(
+    "UPDATE agent_plans SET turn_id = ?"
+    + " WHERE conversation_id = ? AND run_id = ? AND turn_id IS NULL",
+  );
+  const assignUsage = database.prepare(
+    "UPDATE thread_usage SET turn_id = ? WHERE conversation_id = ? AND turn_id IS NULL",
+  );
+  const assignCheckpoint = database.prepare(
+    "UPDATE checkpoints SET turn_id = ? WHERE id = ? AND turn_id IS NULL",
+  );
+
+  let turnsCreated = 0;
+  let inferredTurnsReused = 0;
+  let runIdsReused = 0;
+  let deterministicRunIdsCreated = 0;
+  let associatedMessages = 0;
+  let associatedActivities = 0;
+  let associatedReasonings = 0;
+  let associatedPlans = 0;
+  let associatedUsageSnapshots = 0;
+  let associatedCheckpoints = 0;
+  let fallbackTimestampIndex = 0;
+
+  for (const group of groups) {
+    const existing = turnByUserMessage.get(group.user.id);
+    if (existing) {
+      if (existing.association === "inferred") inferredTurnsReused += 1;
+      continue;
+    }
+    if (group.user.turn_id !== null) continue;
+    const conversation = conversationById.get(group.conversationId);
+    if (!conversation) continue;
+
+    const requestedMillis = parseTimestamp(group.user.created_at);
+    const requestFallback = Date.UTC(2000, 0, 1) + fallbackTimestampIndex;
+    fallbackTimestampIndex += 1;
+    const requestedAtMillis = requestedMillis ?? requestFallback;
+    const conversationActivities = activityByConversation.get(group.conversationId) ?? [];
+    const conversationReasonings = reasoningByConversation.get(group.conversationId) ?? [];
+    const conversationCheckpoints = checkpointByConversation.get(group.conversationId) ?? [];
+    const conversationWorkspaceRuns = workspaceByConversation.get(group.conversationId) ?? [];
+    const conversationPlans = planByConversation.get(group.conversationId) ?? [];
+    const conversationUsage = usageByConversation.get(group.conversationId) ?? [];
+    const chosenRun = chooseRunId(
+      group,
+      requestedMillis,
+      conversationActivities,
+      conversationReasonings,
+      conversationWorkspaceRuns,
+      conversationPlans,
+      usedRunIds,
+    );
+    usedRunIds.add(chosenRun.runId);
+    if (chosenRun.reused) runIdsReused += 1;
+    else deterministicRunIdsCreated += 1;
+
+    const matchedActivities = conversationActivities.filter(
+      (row) => row.turn_id === null && validRunId(row.run_id) === chosenRun.runId,
+    );
+    const matchedReasonings = conversationReasonings.filter(
+      (row) => row.turn_id === null && validRunId(row.run_id) === chosenRun.runId,
+    );
+    const matchedPlans = conversationPlans.filter(
+      (row) => row.turn_id === null && validRunId(row.run_id) === chosenRun.runId,
+    );
+    const matchedUsage = conversationUsage.filter(
+      (row) =>
+        row.turn_id === null
+        && isWithinGroup(
+          parseTimestamp(row.updated_at),
+          requestedMillis,
+          group.nextRequestedAt,
+          group.hasNextUser,
+        ),
+    );
+    const matchedCheckpoints = conversationCheckpoints.filter(
+      (row) => row.turn_id === null && row.turn_index === group.ordinal,
+    );
+    const matchedWorkspaceRun = conversationWorkspaceRuns.find(
+      (row) => row.kind === "agent" && validRunId(row.id) === chosenRun.runId,
+    ) ?? null;
+    const assistants = group.messages.filter(({ role }) => role === "assistant");
+    const terminalAssistant = assistants.at(-1) ?? null;
+    const eventTimes = [
+      ...group.messages.map(({ created_at }) => parseTimestamp(created_at)),
+      ...matchedActivities.map(({ created_at }) => parseTimestamp(created_at)),
+      ...matchedReasonings.map(({ created_at }) => parseTimestamp(created_at)),
+      ...matchedPlans.map(({ updated_at }) => parseTimestamp(updated_at)),
+      ...matchedUsage.map(({ updated_at }) => parseTimestamp(updated_at)),
+      ...matchedCheckpoints.map(({ created_at }) => parseTimestamp(created_at)),
+      parseTimestamp(matchedWorkspaceRun?.started_at ?? null),
+      parseTimestamp(matchedWorkspaceRun?.finished_at ?? null),
+    ].filter((value): value is number => value !== null && value >= requestedAtMillis);
+    const startedAtMillis = eventTimes.length > 0
+      ? Math.max(requestedAtMillis, boundedMathMin(eventTimes))
+      : requestedAtMillis;
+    const completedAtMillis = boundedMathMax([startedAtMillis], eventTimes);
+    const hasFailure = matchedWorkspaceRun?.status === "failed"
+      || matchedActivities.some(({ status }) => status === "failed")
+      || matchedReasonings.some(({ status }) => status === "failed");
+    const status = matchedWorkspaceRun?.status === "cancelled"
+      ? "cancelled"
+      : hasFailure
+        ? "failed"
+        : terminalAssistant
+          || matchedCheckpoints.length > 0
+          || matchedActivities.some(({ status }) => status === "completed")
+          || matchedReasonings.some(({ status }) => status === "completed")
+          || (matchedWorkspaceRun && TERMINAL_WORKSPACE_STATUSES.has(matchedWorkspaceRun.status))
+          ? "completed"
+          : "interrupted";
+    const normalized = normalizedConversation(conversation);
+    const turnId = stableIdentifier("legacy-turn", group.user.id);
+    const requestedAt = isoTimestamp(requestedAtMillis);
+    const startedAt = isoTimestamp(startedAtMillis);
+    const completedAt = isoTimestamp(completedAtMillis);
+    insertTurn.run({
+      id: turnId,
+      conversationId: group.conversationId,
+      runId: chosenRun.runId,
+      userMessageId: group.user.id,
+      terminalAssistantMessageId: terminalAssistant?.id ?? null,
+      providerId: normalized.providerId,
+      harnessId: `legacy-${normalized.providerId}`,
+      backendProfileId: `legacy-${normalized.providerId}`,
+      model: normalized.model,
+      reasoningEffort: normalized.reasoningEffort,
+      interactionMode: normalized.interactionMode,
+      accessMode: normalized.accessMode,
+      providerSessionBefore: null,
+      providerSessionAfter: null,
+      requestedAt,
+      startedAt,
+      completedAt,
+      status,
+      terminalReason: `legacy-backfill-${status}`,
+      checkpointId: matchedCheckpoints[0]?.id ?? null,
+      createdAt: requestedAt,
+      updatedAt: completedAt,
+    });
+    turnsCreated += 1;
+
+    for (const message of group.messages) {
+      associatedMessages += assignMessage.run(turnId, message.id).changes;
+    }
+    for (const activity of matchedActivities) {
+      associatedActivities += assignActivity.run(turnId, activity.id).changes;
+    }
+    for (const reasoning of matchedReasonings) {
+      associatedReasonings += assignReasoning.run(turnId, reasoning.id).changes;
+    }
+    for (const plan of matchedPlans) {
+      associatedPlans += assignPlan.run(turnId, plan.conversation_id, plan.run_id).changes;
+    }
+    for (const usage of matchedUsage) {
+      associatedUsageSnapshots += assignUsage.run(turnId, usage.conversation_id).changes;
+    }
+    for (const checkpoint of matchedCheckpoints) {
+      associatedCheckpoints += assignCheckpoint.run(turnId, checkpoint.id).changes;
+    }
+  }
+
+  const orphanRole = database.prepare(
+    "SELECT COUNT(*) AS count FROM messages WHERE role = ? AND turn_id IS NULL",
+  );
+  const orphanCount = (table: TurnOwnershipTable): number => {
+    const tableSql = quotedSqlIdentifier(table, TURN_OWNERSHIP_TABLES);
+    return (database.prepare(`SELECT COUNT(*) AS count FROM ${tableSql} WHERE turn_id IS NULL`).get() as {
+      count: number;
+    }).count;
+  };
+  const diagnostics: LegacyBackfillDiagnostics = {
+    sourceSchemaVersion: options.sourceSchemaVersion,
+    sourceReleases: publishedReleasesForSchema(options.sourceSchemaVersion),
+    responseGroups: groups.length,
+    turnsCreated,
+    inferredTurnsReused,
+    runIdsReused,
+    deterministicRunIdsCreated,
+    associated: {
+      messages: associatedMessages,
+      activities: associatedActivities,
+      reasonings: associatedReasonings,
+      plans: associatedPlans,
+      usageSnapshots: associatedUsageSnapshots,
+      checkpoints: associatedCheckpoints,
+    },
+    orphans: {
+      assistantMessages: (orphanRole.get("assistant") as { count: number }).count,
+      systemMessages: (orphanRole.get("system") as { count: number }).count,
+      activities: orphanCount("activities"),
+      reasonings: orphanCount("agent_reasonings"),
+      plans: orphanCount("agent_plans"),
+      usageSnapshots: orphanCount("thread_usage"),
+      checkpoints: orphanCount("checkpoints"),
+    },
+  };
+  return diagnostics;
+}
+
 export function formatMigrationDiagnostic(diagnostic: DatabaseMigrationDiagnostic): string {
   const releases = diagnostic.sourceReleases.length > 0
     ? diagnostic.sourceReleases.join("/")
@@ -890,6 +1208,7 @@ export function formatMigrationDiagnostic(diagnostic: DatabaseMigrationDiagnosti
     `source=${releases}`,
     `schema=${diagnostic.sourceSchemaVersion}->${diagnostic.targetSchemaVersion}`,
     `applied=${diagnostic.appliedVersions.join(",") || "none"}`,
+    ...(diagnostic.compatibility ? [`compatibility=${diagnostic.compatibility}`] : []),
     ...(backfill
       ? [
         `inferredTurns=${backfill.turnsCreated}`,

@@ -288,6 +288,8 @@ describe("detached chat leaf controls", () => {
         view="workspace"
         open
         busy={false}
+        projectScopeId={null}
+        onProjectScopeChange={vi.fn()}
         layoutWidth={276}
         detachedConversationIds={new Set([conversation.id])}
         detachedChatLimitReached={false}

@@ -450,7 +450,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     name: "Message composer",
   }));
   await expect(compact).toHaveAttribute("data-context-state", "near-limit");
-  await expect(compact.locator(".usage-context-ring")).toHaveAttribute("data-context-ring-state", "near-limit");
+  await expect(compact.locator(".usage-popover-trigger .usage-context-ring")).toHaveAttribute("data-context-ring-state", "near-limit");
   const toolbarIntegration = await compact.evaluate((control) => {
     const toolbar = control.closest(".composer-toolbar");
     const options = control.parentElement;
@@ -483,7 +483,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     "Context window 15% remaining, near limit.",
   );
   await expect(compactTrigger).toHaveAttribute("aria-expanded", "false");
-  const ringGeometry = await compact.locator(".usage-context-ring").evaluate((ring) => {
+  const ringGeometry = await compact.locator(".usage-popover-trigger .usage-context-ring").evaluate((ring) => {
     const bounds = ring.getBoundingClientRect();
     const value = ring.querySelector<SVGCircleElement>(".usage-context-ring-value");
     return {

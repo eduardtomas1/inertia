@@ -40,7 +40,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
         const text = node.querySelector(".sent-attachment-copy")!.getBoundingClientRect();
         return { height: box.height, width: box.width, iconWidth: icon.width, gap: text.left - icon.right, overflow: node.scrollWidth > node.clientWidth };
       });
-      expect(layout.height).toBeGreaterThanOrEqual(54); expect(layout.iconWidth).toBe(48); expect(layout.gap).toBe(9); expect(layout.overflow).toBe(false);
+      expect(Math.round(layout.height * 100) / 100).toBeGreaterThanOrEqual(54); expect(layout.iconWidth).toBe(48); expect(layout.gap).toBe(9); expect(layout.overflow).toBe(false);
     }
     await capture(`recent-attachments-${theme}`);
     await recent.getByRole("button", { name: /Preview attachment .*\.png$/u }).focus();

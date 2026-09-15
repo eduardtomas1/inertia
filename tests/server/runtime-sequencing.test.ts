@@ -83,8 +83,8 @@ describe("RuntimeSequencer", () => {
     const first = sequencer.commit((sync) => ({
       type: "snapshot.updated",
       snapshot: { ...snapshot(), sync },
-    }));
-    const second = sequencer.commit(() => detailEvent(CONVERSATION_A, "ready"));
+    })).event;
+    const second = sequencer.commit(() => detailEvent(CONVERSATION_A, "ready")).event;
 
     expect(first.sync).toEqual({ runtimeGeneration: GENERATION, latestSequence: 1 });
     expect(first.event.type === "snapshot.updated" ? first.event.snapshot.sync : null).toEqual(first.sync);
@@ -116,7 +116,7 @@ describe("RuntimeSequencer", () => {
     const shell = sequencer.commit((sync) => ({
       type: "snapshot.updated",
       snapshot: { ...snapshot(), sync },
-    }));
+    })).event;
     sequencer.commit(() => detailEvent(CONVERSATION_A, "after snapshot"));
 
     expect(sequencer.replay(GENERATION, 0, {
@@ -135,8 +135,8 @@ describe("RuntimeSequencer", () => {
 
   it("keeps a subscription switch contiguous while detail events race on either side", () => {
     const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
-    const beforeSwitch = sequencer.commit(() => detailEvent(CONVERSATION_A, "old detail"));
-    const afterSwitch = sequencer.commit(() => detailEvent(CONVERSATION_B, "new detail"));
+    const beforeSwitch = sequencer.commit(() => detailEvent(CONVERSATION_A, "old detail")).event;
+    const afterSwitch = sequencer.commit(() => detailEvent(CONVERSATION_B, "new detail")).event;
 
     expect(projectRuntimeFrame(beforeSwitch, {
       conversationIds: [CONVERSATION_B],
@@ -193,7 +193,7 @@ describe("RuntimeSequencer", () => {
 describe("runtime sequence helpers", () => {
   it("scopes shell and detail mutations without leaking another detail", () => {
     const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
-    const frame = sequencer.commit(() => detailEvent(CONVERSATION_B, "secret detail"));
+    const frame = sequencer.commit(() => detailEvent(CONVERSATION_B, "secret detail")).event;
     expect(runtimeMutationScope(frame.event)).toEqual({
       kind: "conversation-detail",
       conversationId: CONVERSATION_B,
@@ -212,7 +212,7 @@ describe("runtime sequence helpers", () => {
       type: "conversation.shell.updated",
       conversation: conversationShell(CONVERSATION_B),
       runs: [],
-    }));
+    })).event;
     const commentary = sequencer.commit(() => ({
       type: "agent.commentary.persisted",
       message: {
@@ -224,11 +224,11 @@ describe("runtime sequence helpers", () => {
         attachments: [],
         createdAt: "2026-07-30T12:00:01.000Z",
       },
-    }));
+    })).event;
     const invalidated = sequencer.commit(() => ({
       type: "conversation.detail.invalidated",
       conversationId: CONVERSATION_B,
-    }));
+    })).event;
 
     expect(runtimeMutationScope(shell.event)).toEqual({ kind: "shell" });
     expect(runtimeMutationScope(commentary.event)).toEqual({
@@ -260,10 +260,10 @@ describe("runtime sequence helpers", () => {
     const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
     const alpha = sequencer.commit(
       () => detailEvent(CONVERSATION_A, "alpha"),
-    );
+    ).event;
     const beta = sequencer.commit(
       () => detailEvent(CONVERSATION_B, "beta"),
-    );
+    ).event;
     const subscription = {
       conversationIds: [CONVERSATION_A, CONVERSATION_B],
     };
@@ -290,7 +290,7 @@ describe("runtime sequence helpers", () => {
         output: null,
         outputTruncated: false,
       },
-    }));
+    })).event;
     sequencer.commit(() => detailEvent(CONVERSATION_B, "private detail"));
 
     expect(runtimeMutationScope(maintenance.event)).toEqual({ kind: "shell" });

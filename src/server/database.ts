@@ -1135,6 +1135,8 @@ export class RuntimeStore {
     return this.workspaceRunRepository.forConversation(conversationId);
   }
 
+  findWorkspaceRun(id: string): WorkspaceRun | null { return this.workspaceRunRepository.find(id); }
+  hasRecordedActiveWorkspaceRun(): boolean { return this.workspaceRunRepository.hasActive(); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
   hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }

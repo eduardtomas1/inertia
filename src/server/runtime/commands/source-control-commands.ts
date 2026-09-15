@@ -460,17 +460,16 @@ export function createSourceControlCommandHandler(
               { deadlineAt, signal },
             ),
           );
-          if (
+          const reviewMetadataChanged = Boolean(
             command.payload.conversationId
             && !command.payload.path
             && !diff.truncated
-          ) {
-            reconcileReviews(
+            && reconcileReviews(
               dependencies.store,
               command.payload.conversationId,
               diff.text,
-            );
-          }
+            ),
+          );
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,
@@ -484,11 +483,7 @@ export function createSourceControlCommandHandler(
               },
             },
           });
-          if (
-            command.payload.conversationId
-            && !command.payload.path
-            && !diff.truncated
-          ) {
+          if (reviewMetadataChanged) {
             dependencies.broadcastSnapshot();
           }
           return "handled";

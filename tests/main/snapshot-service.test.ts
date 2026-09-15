@@ -231,6 +231,24 @@ describe("snapshot failure reasons", () => {
     expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "native-failure" });
   });
 
+  it("reports a worker that exits before any result as a native failure", async () => {
+    const { service, child, onFailure } = await fixture();
+    const capture = service.capture(); const failure = expect(capture).rejects.toThrow(snapshotFailureMessage("native-failure"));
+    child.emit("exit", 1); await failure;
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith({ category: "native-failure" });
+  });
+
+  it("does not report cancellation or disposal as a native failure", async () => {
+    const cancelled = await fixture(); const controller = new AbortController();
+    const cancel = expect(cancelled.service.capture(controller.signal)).rejects.toThrow("cancelled");
+    controller.abort(); await cancel;
+    const disposed = await fixture();
+    const stop = expect(disposed.service.capture()).rejects.toThrow("stopped");
+    await disposed.service.dispose(); await stop;
+    expect(cancelled.onFailure).not.toHaveBeenCalled();
+    expect(disposed.onFailure).not.toHaveBeenCalled();
+  });
+
   it("records a timed-out capture as a category-only diagnostic", async () => {
     vi.useFakeTimers();
     const { service, onFailure } = await fixture();

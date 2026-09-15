@@ -179,8 +179,12 @@ export class SnapshotService {
           signal?.removeEventListener("abort", abort);
           if (this.captureChild === child) { this.captureChild = null; this.cancelCapture = null; }
           confirmExit();
-          if (code === 0 && result && !error) resolve(result);
-          else reject(error ?? new SnapshotError("Snapshot capture stopped before completing."));
+          if (code === 0 && result && !error) { resolve(result); return; }
+          if (!result && !error && !this.disposed) {
+            this.onFailure({ category: "native-failure" });
+            error = new SnapshotError(snapshotFailureMessage("native-failure"));
+          }
+          reject(error ?? new SnapshotError("Snapshot capture stopped before completing."));
         });
         child.once("spawn", () => {
           if (error) { child.kill(); return; }

@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SnapshotDelivery } from "../../src/shared/snapshots";
@@ -95,7 +95,9 @@ it("explains an empty Chromium accessibility tree on Linux from worker to visibl
   const alert = await visibleMessage(message);
   expect(alert).toHaveTextContent("This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing.");
   expect(alert).toHaveTextContent("restart the app with --force-renderer-accessibility or with ACCESSIBILITY_ENABLED=1 set");
-  expect(alert.textContent).not.toMatch(/Google Chrome|permission/iu);
+  expect(alert.textContent).not.toMatch(/Google Chrome|permission|`/iu);
+  expect(alert).toHaveClass("snapshot-alert");
+  for (const token of ["--force-renderer-accessibility", "ACCESSIBILITY_ENABLED=1"]) expect(within(alert).getByText(token).tagName).toBe("CODE");
   expect(screen.getByRole("dialog", { name: "Snapshots" })).toBeVisible();
 });
 

@@ -67,7 +67,7 @@ export function SnapshotControl({ conversationId, unavailableReason = null }: {
           {state.message && <p role="status">{state.message}</p>}
           {state.enabled && <p>Switch to the window you want to share and press {state.shortcut === "both-shift" ? "both Shift keys together" : navigator.platform.includes("Mac") ? "⌘⌥S" : "Ctrl+Alt+S"}. Inertia will bring you back to this chat.</p>}
         </>}
-        {error && <p role="alert">{error}</p>}
+        {error && <p role="alert" className="snapshot-alert">{error.split(/`([^`]+)`/u).map((part, index) => index % 2 ? <code key={index}>{part}</code> : part)}</p>}
       </section>
     </div>, document.body)}
   </>;

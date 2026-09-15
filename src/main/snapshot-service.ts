@@ -22,7 +22,7 @@ export class SnapshotError extends Error {}
 export function snapshotFailureMessage(category: SnapshotFailureCategory, platform: NodeJS.Platform = process.platform): string {
   switch (category) {
     case "accessibility-unavailable": return platform === "linux"
-      ? "This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing. Chromium and Electron apps on Linux need their accessibility bridge: restart the app with --force-renderer-accessibility or with ACCESSIBILITY_ENABLED=1 set, then try again."
+      ? "This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing. Chromium and Electron apps on Linux need their accessibility bridge: restart the app with `--force-renderer-accessibility` or with `ACCESSIBILITY_ENABLED=1` set, then try again."
       : "This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing. Wait for the app to finish loading, then try again.";
     case "no-active-window": return "Inertia could not identify one active window to capture. Click the window you want to share so it has focus, then press the shortcut again.";
     case "permission-denied": return platform === "darwin"

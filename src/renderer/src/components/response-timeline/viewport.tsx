@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -1115,36 +1116,33 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem);
 
 
+  const navigateTimelineFromKeyboard = useEffectEvent((
+    event: KeyboardEvent,
+    scrollElement: HTMLElement,
+  ): void => {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.matches("input, textarea, select")
+      || target?.isContentEditable
+    ) return;
+    const current = virtualized
+      ? virtualizer.getVirtualItemForOffset(scrollElement.scrollTop + 8)?.index ?? 0
+      : currentPlainTimelineIndex(props.timelineElementRef?.current, scrollElement, timeline);
+    const intent = resolveTimelineKeyboardIntent(event, current, timeline.length);
+    if (!intent) return;
+    event.preventDefault();
+    beginReaderTimelineNavigation();
+    focusTimelineItem(intent.index, intent.target);
+  });
+
   useEffect(() => {
     const scrollElement = props.scrollElementRef?.current;
     if (!scrollElement) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.matches("input, textarea, select")
-        || target?.isContentEditable
-      ) return;
-      const current = virtualized
-        ? virtualizer.getVirtualItemForOffset(scrollElement.scrollTop + 8)?.index ?? 0
-        : currentPlainTimelineIndex(props.timelineElementRef?.current, scrollElement, timeline);
-      const intent = resolveTimelineKeyboardIntent(event, current, timeline.length);
-      if (!intent) return;
-      event.preventDefault();
-      beginReaderTimelineNavigation();
-      focusTimelineItem(intent.index, intent.target);
-    };
+    const onKeyDown = (event: KeyboardEvent): void => navigateTimelineFromKeyboard(event, scrollElement);
     scrollElement.addEventListener("keydown", onKeyDown);
     return () => scrollElement.removeEventListener("keydown", onKeyDown);
-  }, [
-    beginReaderTimelineNavigation,
-    focusTimelineItem,
-    props.scrollElementRef,
-    props.timelineElementRef,
-    timeline,
-    virtualized,
-    virtualizer,
-  ]);
+  }, [props.scrollElementRef]);
 
   const renderItem = (item: ResponseTimelineItem): React.JSX.Element => item.kind === "turn"
     ? (

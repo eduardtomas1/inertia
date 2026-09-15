@@ -6,9 +6,9 @@ import {
 } from "electron";
 import {
   emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS,
-  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotSpriteAction,
-  type MascotSpriteImport, type MascotStatus, type MascotTemplateExport,
+  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
+import type { MascotSpriteAction, MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
 import {
   mascotBounds, MASCOT_SIZE, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState,
 } from "./mascot-placement.js";

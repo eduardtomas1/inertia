@@ -1,20 +1,18 @@
 import { Switch } from "./ui";
 import { useEffect, useState } from "react";
+import { MASCOT_LABELS, type MascotSettingsBridge, type MascotSnapshot } from "../../../shared/mascot";
 import {
-  MASCOT_LABELS, MASCOT_SPRITE_STATES, type MascotSettingsBridge, type MascotSnapshot, type MascotSprites, type MascotSpriteState,
-} from "../../../shared/mascot";
+  MASCOT_SPRITE_LABELS, MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_SIZE, MASCOT_SPRITE_STATES, type MascotSprites,
+} from "../../../shared/mascot-sprites";
 
 declare global { interface Window { inertiaMascot?: MascotSettingsBridge } }
-
-const SPRITE_LABELS: Record<MascotSpriteState, string> = {
-  idle: "Idle", thinking: "Thinking", working: "Working", idea: "Complete", pickup: "Picked up",
-};
 
 export function MascotSettings() {
   const [snapshot, setSnapshot] = useState<MascotSnapshot | null>(null);
   const [pending, setPending] = useState<MascotSprites | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [spriteError, setSpriteError] = useState("");
   const [notice, setNotice] = useState("");
   useEffect(() => {
     const bridge = window.inertiaMascot;
@@ -29,11 +27,12 @@ export function MascotSettings() {
   }, []);
   const bridge = window.inertiaMascot;
   if (!bridge) return null;
-  const run = (operation: () => Promise<void>, failure: string): void => {
+  const run = (operation: () => Promise<void>, failure: string, report = setError): void => {
     setBusy(true);
     setError("");
+    setSpriteError("");
     setNotice("");
-    void operation().catch(() => setError(failure)).finally(() => setBusy(false));
+    void operation().catch(() => report(failure)).finally(() => setBusy(false));
   };
   const configure = (enabled: boolean): void => {
     if (snapshot) run(async () => setSnapshot(await bridge.configure({ ...snapshot.preferences, enabled })), "Could not update the mascot. Try again.");
@@ -41,23 +40,23 @@ export function MascotSettings() {
   const importSprites = (): void => run(async () => {
     const result = await bridge.importSprites();
     setPending(result.status === "ready" ? result.sprites : null);
-    if (result.status === "invalid") setError(result.message);
-  }, "Could not import the sprites.");
+    if (result.status === "invalid") setSpriteError(result.message);
+  }, "Could not import the sprites.", setSpriteError);
   const applySprites = (sprites: MascotSprites): void => run(async () => {
     setSnapshot(await bridge.applySprites(sprites.id));
     setPending(null);
     setNotice("Custom sprites applied.");
-  }, "Could not apply the sprites. Import them again.");
+  }, "Could not apply the sprites. Import them again.", setSpriteError);
   const resetSprites = (): void => run(async () => {
     setSnapshot(await bridge.resetSprites());
     setPending(null);
     setNotice("Default sprites restored.");
-  }, "Could not reset the sprites.");
+  }, "Could not reset the sprites.", setSpriteError);
   const exportTemplate = (): void => run(async () => {
     const result = await bridge.exportSpriteTemplate();
     if (result.status === "exported") setNotice("Template exported. Replace its PNG files, then import the folder.");
-    if (result.status === "invalid") setError(result.message);
-  }, "Could not export the template.");
+    if (result.status === "invalid") setSpriteError(result.message);
+  }, "Could not export the template.", setSpriteError);
   const enabled = snapshot?.preferences.enabled ?? false;
   const shown = pending ?? snapshot?.sprites;
   const counts = shown && `${MASCOT_SPRITE_STATES.length} states, ${shown.animated} animated`;
@@ -81,23 +80,28 @@ export function MascotSettings() {
         <div className="mascot-sprites-heading">
           <span className="setting-copy">
             <strong id="mascot-sprites-heading">Custom sprites</strong>
-            <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : `${MASCOT_SPRITE_STATES.length} PNG images, 96 × 96 pixels each, plus optional animations. The template lists every file.`}</small>
+            <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : "Import your own artwork for each state. The built-in mascot stays until you apply a set."}</small>
           </span>
           <div>
             <button className="secondary-button" type="button" disabled={busy} onClick={exportTemplate}>Export template</button>
             <button className="secondary-button" type="button" disabled={busy} onClick={importSprites}>Import sprites</button>
           </div>
         </div>
-        {shown && <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
+        <p className="mascot-sprite-format">{`Each state needs a PNG: ${MASCOT_SPRITE_SIZE} × ${MASCOT_SPRITE_SIZE} pixels, a single frame, up to ${MASCOT_SPRITE_MAX_BYTES / 1024} KB. To animate a state, add a .webp or .gif with the same name. Export template gives you a ready-to-edit folder with these files.`}</p>
+        {shown ? <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
           {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
             <picture>
               <source media="(prefers-reduced-motion: no-preference)" srcSet={shown.files[state].animation} />
               <img src={shown.files[state].poster} width={96} height={96} alt="" draggable={false} />
             </picture>
-            <span>{SPRITE_LABELS[state]}</span>
+            <span>{MASCOT_SPRITE_LABELS[state]}</span>
+            <code>{`${state}.png`}</code>
             {shown.files[state].animation !== shown.files[state].poster && <small>Animated</small>}
           </li>)}
+        </ul> : <ul className="mascot-sprite-files" aria-label="Required files">
+          {MASCOT_SPRITE_STATES.map((state) => <li key={state}><code>{`${state}.png`}</code>{MASCOT_SPRITE_LABELS[state]}</li>)}
         </ul>}
+        {spriteError && <p role="alert" className="mascot-sprites-error">{spriteError}</p>}
         {(pending || snapshot.sprites) && <div className="mascot-sprites-actions">
           {pending ? <>
             <button className="secondary-button" type="button" disabled={busy} onClick={() => applySprites(pending)}>Apply sprites</button>

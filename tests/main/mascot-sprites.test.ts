@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
@@ -7,7 +7,7 @@ import {
   loadMascotSprites, MascotSpriteError, mascotSprites, mascotSpriteTemplate, readMascotSprites, removeMascotSprites,
   saveMascotSprites, validateMascotSprite, writeMascotSpriteTemplate,
 } from "../../src/main/mascot-sprites";
-import { MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_STATES } from "../../src/shared/mascot";
+import { MASCOT_SPRITE_LABELS, MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_STATES } from "../../src/shared/mascot-sprites";
 
 const assets = join(__dirname, "../../src/renderer/src/assets/mascot");
 const directories: string[] = [];
@@ -77,23 +77,45 @@ describe("mascot sprite validation", () => {
   it("names the missing state, wrong dimensions, formats, sizes and decode failures", async () => {
     const missing = spriteFolder();
     rmSync(join(missing, "thinking.png"));
-    expect(await rejection(missing)).toBe("Add thinking.png. Every state needs a 96 × 96 PNG.");
+    expect(await rejection(missing)).toBe("thinking.png is missing. The Thinking state needs a 96 × 96 PNG named thinking.png.");
     expect(await rejection(spriteFolder({ "idea.png": png(128) }))).toBe("idea.png must be 96 × 96 pixels, not 128 × 128.");
     expect(await rejection(spriteFolder({ "working.png": Buffer.from("not an image") }))).toBe("working.png is not a valid PNG image.");
     expect(await rejection(spriteFolder({ "idle.webp": png() }))).toBe("idle.webp is not a valid WebP image.");
     expect(await rejection(spriteFolder({ "pickup.webp": readFileSync(join(assets, "pickup.webp")), "pickup.gif": Buffer.from("GIF89a") })))
       .toBe("Keep one animation for pickup: pickup.webp or pickup.gif.");
-    expect(await rejection(spriteFolder({ "idle.gif": Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1) }))).toBe("idle.gif is larger than 512 KB.");
+    expect(await rejection(spriteFolder({ "idle.gif": Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1) }))).toBe("idle.gif is larger than 512 KB. Each image must be 512 KB or smaller.");
     expect(() => validateMascotSprite("idle.jpg", png())).toThrow("idle.jpg must be a PNG, WebP or GIF image.");
     expect(() => validateMascotSprite("idle.png", Buffer.alloc(MASCOT_SPRITE_MAX_BYTES + 1))).toThrow("larger than 512 KB");
     const truncated = png();
     expect(() => validateMascotSprite("idle.png", truncated.subarray(0, truncated.byteLength - 20))).toThrow("idle.png is not a valid PNG image.");
-    expect(() => validateMascotSprite("idle.png", corruptPixels(png()))).toThrow("idle.png could not be decoded.");
+    expect(() => validateMascotSprite("idle.png", corruptPixels(png()))).toThrow("idle.png could not be decoded. Save it again as a standard PNG.");
     expect(() => validateMascotSprite("idle.png", corruptPixels(readFileSync(join(assets, "idle.png"))))).toThrow("idle.png could not be decoded.");
     const folder = spriteFolder();
     rmSync(join(folder, "idle.png"));
     mkdirSync(join(folder, "idle.png"));
     expect(await rejection(folder)).toBe("idle.png must be a regular file.");
+  });
+
+  it("names misnamed files and unsupported formats instead of only reporting a missing state", async (context) => {
+    const without = (name: string, extra: Record<string, Buffer>): string => {
+      const directory = spriteFolder(extra);
+      rmSync(join(directory, name));
+      return directory;
+    };
+    expect(await rejection(without("idle.png", { "happy.png": png() }))).toBe(
+      "idle.png is missing. happy.png is not a sprite file name. Name each still after its state: idle.png, thinking.png, working.png, idea.png, pickup.png.",
+    );
+    expect(await rejection(without("idle.png", { "idle.jpg": png() }))).toBe("idle.jpg is not a supported format. Save the Idle image as idle.png, a 96 × 96 PNG.");
+    expect(await rejection(without("idea.png", { "d.png": png(), "c.webp": png(), "b.gif": png(), "a.jpeg": png(), "notes.txt": png() }))).toBe(
+      "idea.png is missing. a.jpeg, b.gif, c.webp are not sprite file names. Name each still after its state: idle.png, thinking.png, working.png, idea.png, pickup.png.",
+    );
+    const hidden = await rejection(without("working.png", { "bad\u202egnp.png": png() }));
+    expect(hidden).toContain("badgnp.png is not a sprite file name.");
+    expect(hidden).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/u);
+    const cased = without("thinking.png", {});
+    writeFileSync(join(cased, "Thinking.PNG"), png());
+    if (existsSync(join(cased, "thinking.png"))) context.skip();
+    expect(await rejection(cased)).toBe("Rename Thinking.PNG to thinking.png. Sprite file names are lowercase.");
   });
 
   it("rejects a sprite linked from outside the chosen folder on every platform", async (context) => {
@@ -149,11 +171,15 @@ describe("mascot sprite template", () => {
     });
     expect(template.formats.still).toContain("PNG");
     expect(template.formats.animation).toContain("WebP or GIF");
-    expect(template.states.map((entry) => [entry.state, entry.still, entry.animation])).toEqual(MASCOT_SPRITE_STATES.map((state) => [
-      state, `${state}.png`, [`${state}.webp`, `${state}.gif`],
+    expect(template.states.map((entry) => [entry.state, entry.label, entry.still, entry.animation])).toEqual(MASCOT_SPRITE_STATES.map((state) => [
+      state, MASCOT_SPRITE_LABELS[state], `${state}.png`, [`${state}.webp`, `${state}.gif`],
     ]));
+    expect(template.states.find((entry) => entry.still === "idea.png")?.label).toBe("Complete");
     const readme = readFileSync(join(directory, "README.txt"), "utf8");
-    expect(readme).toContain("Required: 5 still images, one PNG per state, exactly 96 × 96 pixels, up to 512 KB each.");
+    expect(readme).toContain("Required: 5 still images, one per state.");
+    expect(readme).toContain("Format: PNG, exactly 96 × 96 pixels, a single frame, up to 512 KB each.");
+    expect(readme).toMatch(/^idea\.png +Complete: /mu);
+    expect(readme).toContain("(for example idle.webp)");
     for (const state of MASCOT_SPRITE_STATES) {
       expect(readme).toContain(`${state}.png`);
       expect(readFileSync(join(directory, `${state}.png`))).toEqual(readFileSync(join(assets, `${state}.png`)));

@@ -1,4 +1,5 @@
-import type { MascotPhase, MascotSpriteFiles, MascotSpriteState } from "../../../shared/mascot";
+import type { MascotPhase } from "../../../shared/mascot";
+import type { MascotSpriteFiles, MascotSpriteState } from "../../../shared/mascot-sprites";
 
 type Artwork = MascotSpriteState;
 type ArtworkFiles = MascotSpriteFiles;

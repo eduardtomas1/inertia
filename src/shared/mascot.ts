@@ -1,4 +1,5 @@
 import type { AgentRunState } from "./run-state";
+import type { MascotSpriteImport, MascotSprites, MascotTemplateExport } from "./mascot-sprites";
 
 export const MASCOT_IPC = {
   preferences: "inertia:mascot-preferences",
@@ -37,24 +38,6 @@ export interface MascotSnapshot {
   gesture?: MascotGesture;
   sprites?: MascotSprites;
 }
-export const MASCOT_SPRITE_STATES = ["idle", "thinking", "working", "idea", "pickup"] as const;
-export type MascotSpriteState = (typeof MASCOT_SPRITE_STATES)[number];
-export const MASCOT_SPRITE_SIZE = 96;
-export const MASCOT_SPRITE_MAX_BYTES = 512 * 1024;
-export interface MascotSpriteFiles { animation: string; poster: string }
-export interface MascotSprites {
-  id: string;
-  animated: number;
-  files: Record<MascotSpriteState, MascotSpriteFiles>;
-}
-export type MascotSpriteAction = "import" | "apply" | "reset" | "export-template";
-export type MascotSpriteImport =
-  | { status: "cancelled" }
-  | { status: "invalid"; message: string }
-  | { status: "ready"; sprites: MascotSprites };
-export type MascotTemplateExport =
-  | { status: "cancelled" | "exported" }
-  | { status: "invalid"; message: string };
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
   | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop";

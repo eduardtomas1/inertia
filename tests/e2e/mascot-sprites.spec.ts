@@ -3,7 +3,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MASCOT_SPRITE_STATES, type MascotSpriteState } from "../../src/shared/mascot";
+import { MASCOT_SPRITE_STATES, type MascotSpriteState } from "../../src/shared/mascot-sprites";
 import { createAppFixture } from "./support/app-fixture";
 
 const ACCENTS: Record<MascotSpriteState, string> = {
@@ -57,6 +57,22 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
     };
     await openSettings();
     const section = app.page.getByRole("region", { name: "Custom sprites" });
+    const theme = async (appearance: "light" | "dark"): Promise<void> => {
+      await app.page.getByRole("radio", { name: appearance === "light" ? "Light" : "Dark", exact: true }).click();
+      await expect(app.page.locator("html")).toHaveAttribute("data-theme", appearance);
+    };
+    const capture = async (name: string, label: string): Promise<void> => {
+      await section.scrollIntoViewIfNeeded();
+      const path = info.outputPath(`mascot-sprites-${name}.png`);
+      await app.page.locator(".mascot-settings").screenshot({ path });
+      await info.attach(label, { path, contentType: "image/png" });
+    };
+    await expect(section).toContainText("Each state needs a PNG: 96 × 96 pixels, a single frame, up to 512 KB.");
+    await expect(section.getByRole("list", { name: "Required files" }).getByRole("listitem").filter({ hasText: "idea.png" })).toContainText("Complete");
+    for (const appearance of ["light", "dark"] as const) {
+      await theme(appearance);
+      await capture(`settings-empty-${appearance}`, `Custom sprite guidance ${appearance}`);
+    }
     const templateDirectory = join(app.testDirectory, "Inertia mascot sprites");
     await app.electronApp.evaluate(({ dialog }, path) => {
       Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: false, filePath: path }));
@@ -68,9 +84,14 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
 
     for (const state of MASCOT_SPRITE_STATES.filter((candidate) => candidate !== "idea")) await writeFile(join(templateDirectory, `${state}.png`), sprite(state));
     await writeFile(join(templateDirectory, "working.webp"), sprite("working", true));
+    await writeFile(join(templateDirectory, "thinking.png"), createCanvas(128, 128).toBuffer("image/png"));
     await app.electronApp.evaluate(({ dialog }, path) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: [path] }));
     }, templateDirectory);
+    await section.getByRole("button", { name: "Import sprites" }).click();
+    await expect(section.getByRole("alert")).toHaveText("thinking.png must be 96 × 96 pixels, not 128 × 128.");
+    await capture("settings-import-error", "Rejected custom sprite import");
+    await writeFile(join(templateDirectory, "thinking.png"), sprite("thinking"));
     await section.getByRole("button", { name: "Import sprites" }).click();
     const preview = section.getByRole("list", { name: "Sprite preview" });
     await expect(preview.getByRole("listitem")).toHaveCount(5);
@@ -79,13 +100,11 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
     await expect(preview.getByRole("listitem").filter({ hasText: "Working" })).toContainText("Animated");
     await loaded(app.page, ".mascot-sprite-preview img");
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-sprites", "default");
+    await expect(section.getByRole("list", { name: "Required files" })).toHaveCount(0);
+    await expect(preview.getByRole("listitem").filter({ hasText: "Complete" })).toContainText("idea.png");
     for (const appearance of ["light", "dark"] as const) {
-      await app.page.getByRole("radio", { name: appearance === "light" ? "Light" : "Dark", exact: true }).click();
-      await expect(app.page.locator("html")).toHaveAttribute("data-theme", appearance);
-      await section.scrollIntoViewIfNeeded();
-      const path = info.outputPath(`mascot-sprites-settings-${appearance}.png`);
-      await app.page.locator(".mascot-settings").screenshot({ path });
-      await info.attach(`Custom sprite settings ${appearance}`, { path, contentType: "image/png" });
+      await theme(appearance);
+      await capture(`settings-preview-${appearance}`, `Custom sprite preview ${appearance}`);
     }
 
     await section.getByRole("button", { name: "Apply sprites" }).click();

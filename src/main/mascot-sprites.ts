@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { inflateSync } from "node:zlib";
 import idea from "../renderer/src/assets/mascot/idea.png?inline";
@@ -9,9 +9,9 @@ import pickup from "../renderer/src/assets/mascot/pickup.png?inline";
 import thinking from "../renderer/src/assets/mascot/thinking.png?inline";
 import working from "../renderer/src/assets/mascot/working.png?inline";
 import {
-  MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_SIZE, MASCOT_SPRITE_STATES,
+  MASCOT_SPRITE_LABELS, MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_SIZE, MASCOT_SPRITE_STATES,
   type MascotSprites, type MascotSpriteState,
-} from "../shared/mascot.js";
+} from "../shared/mascot-sprites.js";
 import { decodedImageMatches, inspectImageMetadata } from "./attachment-image-validation.js";
 
 const FORMATS = {
@@ -32,13 +32,17 @@ const STATE_NOTES: Record<MascotSpriteState, string> = {
   idle: "Ready, or the latest chat stopped without finishing.",
   thinking: "Queued, starting, retrying, or waiting for your answer or approval.",
   working: "An agent is running, delegating, or stopping.",
-  idea: "Work complete. Its animation plays once for about 3 seconds.",
+  idea: "Plays once for about 3 seconds when work finishes.",
   pickup: "Shown while you drag the mascot.",
 };
 const PNG_CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 const ADAM7 = [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] as const;
 const SIZE_LABEL = `${MASCOT_SPRITE_SIZE} × ${MASCOT_SPRITE_SIZE} pixels`;
 const BYTES_LABEL = `${MASCOT_SPRITE_MAX_BYTES / 1024} KB`;
+const PNG_LABEL = `${MASCOT_SPRITE_SIZE} × ${MASCOT_SPRITE_SIZE} PNG`;
+const IMAGE_EXTENSION = /\.(?:png|webp|gif|jpe?g|bmp|tiff?|avif|heic|svg)$/iu;
+const SPRITE_NAMES = new Set(MASCOT_SPRITE_STATES.flatMap((state) => [`${state}.png`, `${state}.webp`, `${state}.gif`]));
+const STILL_NAMES = MASCOT_SPRITE_STATES.map((state) => `${state}.png`).join(", ");
 
 export class MascotSpriteError extends Error {}
 
@@ -79,15 +83,18 @@ export function validateMascotSprite(name: string, bytes: Buffer): MascotSpriteF
   const extension = name.slice(name.lastIndexOf(".") + 1);
   if (!Object.hasOwn(FORMATS, extension)) throw new MascotSpriteError(`${name} must be a PNG, WebP or GIF image.`);
   const format = FORMATS[extension as SpriteExtension];
-  if (bytes.byteLength > MASCOT_SPRITE_MAX_BYTES) throw new MascotSpriteError(`${name} is larger than ${BYTES_LABEL}.`);
+  if (bytes.byteLength > MASCOT_SPRITE_MAX_BYTES) throw new MascotSpriteError(`${name} is larger than ${BYTES_LABEL}. Each image must be ${BYTES_LABEL} or smaller.`);
   const metadata = inspectImageMetadata(bytes, format.type);
   if (!metadata) throw new MascotSpriteError(`${name} is not a valid ${format.label} image.`);
   if (metadata.width !== MASCOT_SPRITE_SIZE || metadata.height !== MASCOT_SPRITE_SIZE) {
     throw new MascotSpriteError(`${name} must be ${SIZE_LABEL}, not ${metadata.width} × ${metadata.height}.`);
   }
-  if (extension === "png" && metadata.frames !== 1) throw new MascotSpriteError(`${name} must be a single still frame.`);
+  const stem = name.slice(0, name.lastIndexOf("."));
+  if (extension === "png" && metadata.frames !== 1) {
+    throw new MascotSpriteError(`${name} must be a single still frame. Put the animation in ${stem}.webp or ${stem}.gif.`);
+  }
   if (!decodedImageMatches(bytes, metadata) || (extension === "png" && !pngPixelsDecode(bytes))) {
-    throw new MascotSpriteError(`${name} could not be decoded.`);
+    throw new MascotSpriteError(`${name} could not be decoded. Save it again as a standard ${format.label}.`);
   }
   return { name, type: format.type, bytes };
 }
@@ -113,7 +120,7 @@ async function readSprite(directory: string, name: string): Promise<Buffer | nul
       if (!bytesRead) break;
       length += bytesRead;
     }
-    if (length > MASCOT_SPRITE_MAX_BYTES) throw new MascotSpriteError(`${name} is larger than ${BYTES_LABEL}.`);
+    if (length > MASCOT_SPRITE_MAX_BYTES) throw new MascotSpriteError(`${name} is larger than ${BYTES_LABEL}. Each image must be ${BYTES_LABEL} or smaller.`);
     return Buffer.from(buffer.subarray(0, length));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -122,11 +129,35 @@ async function readSprite(directory: string, name: string): Promise<Buffer | nul
   } finally { await handle?.close(); }
 }
 
+async function strayImages(directory: string): Promise<string[]> {
+  const found: string[] = [];
+  try {
+    let seen = 0;
+    for await (const entry of await opendir(directory)) {
+      seen += 1;
+      if (seen > 512) break;
+      if (IMAGE_EXTENSION.test(entry.name) && !SPRITE_NAMES.has(entry.name)) found.push(entry.name.replace(/[\p{Cc}\p{Cf}]/gu, "").slice(0, 48));
+    }
+  } catch { return []; }
+  return found.sort();
+}
+
+function missingStill(state: MascotSpriteState, strays: string[]): string {
+  const expected = `${state}.png`;
+  const renamed = strays.find((name) => name.toLowerCase() === expected);
+  if (renamed) return `Rename ${renamed} to ${expected}. Sprite file names are lowercase.`;
+  const format = strays.find((name) => name.slice(0, name.lastIndexOf(".")).toLowerCase() === state);
+  if (format) return `${format} is not a supported format. Save the ${MASCOT_SPRITE_LABELS[state]} image as ${expected}, a ${PNG_LABEL}.`;
+  if (!strays.length) return `${expected} is missing. The ${MASCOT_SPRITE_LABELS[state]} state needs a ${PNG_LABEL} named ${expected}.`;
+  const named = strays.slice(0, 3).join(", ");
+  return `${expected} is missing. ${named} ${strays.length === 1 ? "is not a sprite file name" : "are not sprite file names"}. Name each still after its state: ${STILL_NAMES}.`;
+}
+
 export async function readMascotSprites(directory: string): Promise<MascotSpriteSet> {
   const files: MascotSpriteFile[] = [];
   for (const state of MASCOT_SPRITE_STATES) {
     const still = await readSprite(directory, `${state}.png`);
-    if (!still) throw new MascotSpriteError(`Add ${state}.png. Every state needs a ${MASCOT_SPRITE_SIZE} × ${MASCOT_SPRITE_SIZE} PNG.`);
+    if (!still) throw new MascotSpriteError(missingStill(state, await strayImages(directory)));
     files.push(validateMascotSprite(`${state}.png`, still));
     const animations: Array<[string, Buffer]> = [];
     for (const name of [`${state}.webp`, `${state}.gif`]) {
@@ -192,7 +223,7 @@ export function mascotSpriteTemplate() {
       animation: `Optional animated WebP or GIF, exactly ${SIZE_LABEL}, up to 256 frames. It loops while the state is active.`,
     },
     states: MASCOT_SPRITE_STATES.map((state) => ({
-      state, shows: STATE_NOTES[state], still: `${state}.png`, animation: [`${state}.webp`, `${state}.gif`],
+      state, label: MASCOT_SPRITE_LABELS[state], shows: STATE_NOTES[state], still: `${state}.png`, animation: [`${state}.webp`, `${state}.gif`],
     })),
   };
 }
@@ -202,16 +233,19 @@ export function mascotSpriteReadme(): string {
   return [
     "Inertia mascot sprites",
     "",
-    `Required: ${MASCOT_SPRITE_STATES.length} still images, one PNG per state, exactly ${SIZE_LABEL}, up to ${BYTES_LABEL} each.`,
-    `Optional: ${MASCOT_SPRITE_STATES.length} animations, one animated WebP or GIF per state (for example idle.webp),`,
-    `exactly ${SIZE_LABEL}, up to ${BYTES_LABEL} each. A state without an animation shows its still image.`,
-    "",
-    ...MASCOT_SPRITE_STATES.map((state) => `${`${state}.png`.padEnd(width)}${STATE_NOTES[state]}`),
-    "",
-    "The PNG files in this folder are the default artwork. Replace them with your own and keep the file names.",
-    "Pixel art works best: the mascot is drawn at its exact size without smoothing.",
-    "",
+    "Replace the images in this folder with your own artwork and keep the file names.",
     "Then open Settings > General > Desktop mascot, choose Import sprites, select this folder, and apply the preview.",
+    "",
+    `Required: ${MASCOT_SPRITE_STATES.length} still images, one per state.`,
+    `Format: PNG, exactly ${SIZE_LABEL}, a single frame, up to ${BYTES_LABEL} each.`,
+    "",
+    ...MASCOT_SPRITE_STATES.map((state) => `${`${state}.png`.padEnd(width)}${MASCOT_SPRITE_LABELS[state]}: ${STATE_NOTES[state]}`),
+    "",
+    "Optional: an animation for any state, saved next to its still with the same name as an animated WebP or GIF",
+    `(for example idle.webp), exactly ${SIZE_LABEL}, up to ${BYTES_LABEL}. A state without one shows its still image.`,
+    "",
+    "The PNG files in this folder are the built-in artwork, included as placeholders.",
+    "Pixel art works best: the mascot is drawn at its exact size without smoothing.",
     "Other files in this folder are ignored.",
     "",
   ].join("\n");

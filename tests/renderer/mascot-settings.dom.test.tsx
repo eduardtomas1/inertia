@@ -1,9 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MascotSettings } from "../../src/renderer/src/components/MascotSettings";
-import {
-  emptyMascotStatus, MASCOT_SPRITE_STATES, type MascotSettingsBridge, type MascotSnapshot, type MascotSprites,
-} from "../../src/shared/mascot";
+import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 
 afterEach(() => { Reflect.deleteProperty(window, "inertiaMascot"); });
 
@@ -38,8 +37,13 @@ describe("mascot custom sprite settings", () => {
     const bridge = install();
     render(<MascotSettings />);
     const section = await screen.findByRole("region", { name: "Custom sprites" });
-    expect(section).toHaveTextContent("5 PNG images, 96 × 96 pixels each, plus optional animations.");
-    expect(within(section).queryByRole("list")).toBeNull();
+    expect(section).toHaveTextContent("Import your own artwork for each state. The built-in mascot stays until you apply a set.");
+    expect(section).toHaveTextContent("Each state needs a PNG: 96 × 96 pixels, a single frame, up to 512 KB. To animate a state, add a .webp or .gif with the same name. Export template gives you a ready-to-edit folder with these files.");
+    const required = within(section).getByRole("list", { name: "Required files" });
+    expect(within(required).getAllByRole("listitem").map((item) => [item.querySelector("code")!.textContent, item.textContent!.replace(item.querySelector("code")!.textContent!, "")])).toEqual([
+      ["idle.png", "Idle"], ["thinking.png", "Thinking"], ["working.png", "Working"], ["idea.png", "Complete"], ["pickup.png", "Picked up"],
+    ]);
+    expect(within(section).queryByRole("list", { name: "Sprite preview" })).toBeNull();
 
     bridge.exportSpriteTemplate.mockResolvedValueOnce({ status: "exported" });
     fireEvent.click(screen.getByRole("button", { name: "Export template" }));
@@ -47,14 +51,19 @@ describe("mascot custom sprite settings", () => {
 
     bridge.importSprites.mockResolvedValueOnce({ status: "invalid", message: "idea.png must be 96 × 96 pixels, not 128 × 128." });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("idea.png must be 96 × 96 pixels, not 128 × 128.");
+    const rejected = await within(section).findByRole("alert");
+    expect(rejected).toHaveTextContent("idea.png must be 96 × 96 pixels, not 128 × 128.");
+    expect(rejected).toHaveClass("mascot-sprites-error");
+    expect(rejected.previousElementSibling).toBe(within(section).getByRole("list", { name: "Required files" }));
 
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("0123456789abcdef", 2) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
     const preview = await screen.findByRole("list", { name: "Sprite preview" });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(within(preview).getAllByRole("listitem").map((item) => item.querySelector("span")!.textContent)).toEqual(["Idle", "Thinking", "Working", "Complete", "Picked up"]);
+    expect(within(preview).getAllByRole("listitem").map((item) => item.querySelector("code")!.textContent)).toEqual(["idle.png", "thinking.png", "working.png", "idea.png", "pickup.png"]);
     expect(within(preview).getAllByRole("listitem").map((item) => item.querySelector("small")?.textContent ?? null)).toEqual(["Animated", "Animated", null, null, null]);
+    expect(within(section).queryByRole("list", { name: "Required files" })).toBeNull();
     expect(preview.querySelector("img")).toHaveAttribute("src", url("0123456789abcdef", "idle.png"));
     expect(preview.querySelector("source")).toHaveAttribute("srcset", url("0123456789abcdef", "idle.webp"));
     expect(preview.querySelector("source")).toHaveAttribute("media", "(prefers-reduced-motion: no-preference)");
@@ -70,7 +79,8 @@ describe("mascot custom sprite settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
     expect(await screen.findByText("Default sprites restored.")).toBeInTheDocument();
     expect(bridge.resetSprites).toHaveBeenCalledOnce();
-    expect(within(section).queryByRole("list")).toBeNull();
+    expect(within(section).queryByRole("list", { name: "Current sprites" })).toBeNull();
+    expect(within(section).getByRole("list", { name: "Required files" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
   });
 
@@ -82,10 +92,11 @@ describe("mascot custom sprite settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
     expect(await screen.findByText("Preview: 5 states, 1 animated. Apply to use them.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Discard preview" }));
-    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Sprite preview" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Required files" })).toBeInTheDocument();
     expect(bridge.applySprites).not.toHaveBeenCalled();
     bridge.exportSpriteTemplate.mockRejectedValueOnce(new Error("disk full"));
     fireEvent.click(screen.getByRole("button", { name: "Export template" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not export the template.");
+    expect(await within(screen.getByRole("region", { name: "Custom sprites" })).findByRole("alert")).toHaveTextContent("Could not export the template.");
   });
 });

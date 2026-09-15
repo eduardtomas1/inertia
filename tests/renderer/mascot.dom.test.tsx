@@ -1,7 +1,8 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
-import { emptyMascotStatus, MASCOT_SPRITE_STATES, type MascotBridge, type MascotSnapshot, type MascotSprites } from "../../src/shared/mascot";
+import { emptyMascotStatus, type MascotBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
 
 const disposals: Array<() => void> = [];

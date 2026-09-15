@@ -5,9 +5,8 @@ import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } f
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
-import {
-  emptyMascotStatus, MASCOT_IPC, type MascotSnapshot, type MascotSpriteImport, type MascotSprites,
-} from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_IPC, type MascotSnapshot } from "../../src/shared/mascot";
+import type { MascotSpriteImport, MascotSprites } from "../../src/shared/mascot-sprites";
 import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
 
@@ -462,7 +461,7 @@ describe("mascot custom sprites", () => {
     expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({ status: "cancelled" });
     harness.openDialog.mockResolvedValue({ canceled: false, filePaths: [folder] });
     expect(await app.invoke(MASCOT_IPC.sprites, ["import"])).toEqual({
-      status: "invalid", message: "Add idle.png. Every state needs a 96 × 96 PNG.",
+      status: "invalid", message: "idle.png is missing. The Idle state needs a 96 × 96 PNG named idle.png.",
     });
     expect(await app.invoke(MASCOT_IPC.sprites, ["export-template"])).toEqual({ status: "cancelled" });
     harness.saveDialog.mockResolvedValue({ canceled: false, filePath: join(folder, "template") });

@@ -12,6 +12,7 @@ import type {
 import { RuntimeSequencer } from "../../src/server/runtime-sequencing";
 import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
 import { sendRuntimeEvent } from "../../src/server/runtime-protocol";
+import { SerializedRuntimeEvent } from "../../src/server/serialized-runtime-event";
 
 const GENERATION = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -115,9 +116,13 @@ function maintenanceOperation(): ProviderMaintenanceOperation {
 
 function fixture() {
   const events = new Map<string, ServerEvent[]>();
-  const send = (socket: string, event: ServerEvent, onSent?: (sent: boolean) => void): void => {
+  const send = (
+    socket: string,
+    event: ServerEvent | SerializedRuntimeEvent,
+    onSent?: (sent: boolean) => void,
+  ): void => {
     const current = events.get(socket) ?? [];
-    current.push(event);
+    current.push(event instanceof SerializedRuntimeEvent ? event.event : event);
     events.set(socket, current);
     onSent?.(true);
   };
@@ -335,8 +340,9 @@ describe("runtime sync hub", () => {
     let hub: RuntimeSyncHub<string>;
     const events: ServerEvent[] = [];
     hub = new RuntimeSyncHub((socket, event) => {
-      events.push(event);
-      if (event.type === "server.welcome") hub.disconnect(socket);
+      const value = event instanceof SerializedRuntimeEvent ? event.event : event;
+      events.push(value);
+      if (value.type === "server.welcome") hub.disconnect(socket);
     });
 
     hub.connect("immediate", { kind: "none" }, {

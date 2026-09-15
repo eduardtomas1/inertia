@@ -5,6 +5,7 @@ import { diagnosticContextSchema, type DiagnosticContext } from "../../shared/ap
 import type { IncidentObservation } from "../../node/application-incidents";
 import { createIncidentReporter, type IncidentSink } from "../../node/application-incidents";
 import { sendRuntimeEvent } from "../runtime-protocol";
+import { SerializedRuntimeEvent } from "../serialized-runtime-event";
 import type { StreamingTrace } from "./test-streaming-trace";
 
 interface Operation {
@@ -41,10 +42,12 @@ export class CommandIncidents {
 
   sender(trace: StreamingTrace): typeof sendRuntimeEvent {
     return (socket, event, onSent) => {
-      const streaming = event.type === "runtime.event" && event.event.type === "agent.text";
+      const value = event instanceof SerializedRuntimeEvent ? event.event : event;
+      const streaming = value.type === "runtime.event" && value.event.type === "agent.text";
       if (streaming) trace.mark("runtime-event-serialized");
       if (streaming) trace.mark("runtime-websocket-send-started");
-      sendRuntimeEvent(socket, this.observe(event), onSent);
+      const observed = this.observe(value);
+      sendRuntimeEvent(socket, observed === value ? event : observed, onSent);
       if (streaming) trace.mark("runtime-websocket-send-accepted");
     };
   }

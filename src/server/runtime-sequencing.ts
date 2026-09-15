@@ -6,6 +6,7 @@ import type {
   RuntimeSequencedFrame,
   RuntimeSyncCursor,
 } from "../shared/contracts";
+import { SerializedRuntimeEvent } from "./serialized-runtime-event";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DEFAULT_MAX_REPLAY_EVENTS = 2_048;
@@ -94,6 +95,22 @@ export function runtimeMutationScope(event: RuntimeMutationEvent): RuntimeEventS
   }
 }
 
+const cursorFrames = new WeakMap<
+  Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
+  Extract<RuntimeSequencedFrame, { type: "runtime.cursor" }>
+>();
+
+export function runtimeCursorFrame(
+  frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
+): Extract<RuntimeSequencedFrame, { type: "runtime.cursor" }> {
+  let cursor = cursorFrames.get(frame);
+  if (!cursor) {
+    cursor = { type: "runtime.cursor", sync: frame.sync };
+    cursorFrames.set(frame, cursor);
+  }
+  return cursor;
+}
+
 export function projectRuntimeFrame(
   frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
   subscription: RuntimeDetailSubscription,
@@ -110,7 +127,7 @@ export function projectRuntimeFrame(
     && !interaction
     && !subscription.conversationIds.includes(frame.scope.conversationId)
   ) {
-    return { type: "runtime.cursor", sync: frame.sync };
+    return runtimeCursorFrame(frame);
   }
   return frame;
 }
@@ -148,7 +165,7 @@ export class RuntimeSequencer {
 
   commit(
     createEvent: (cursor: RuntimeSyncCursor) => RuntimeMutationEvent,
-  ): Extract<RuntimeSequencedFrame, { type: "runtime.event" }> {
+  ): SerializedRuntimeEvent<Extract<RuntimeSequencedFrame, { type: "runtime.event" }>> {
     const sequence = this.latestSequence + 1;
     if (!Number.isSafeInteger(sequence)) {
       throw new Error("The runtime event sequence is exhausted.");
@@ -164,9 +181,10 @@ export class RuntimeSequencer {
       scope: runtimeMutationScope(event),
       event,
     };
+    const serialized = new SerializedRuntimeEvent(frame);
     this.latestSequence = sequence;
-    this.retain(frame);
-    return frame;
+    this.retain(serialized);
+    return serialized;
   }
 
   replay(
@@ -193,7 +211,10 @@ export class RuntimeSequencer {
     };
   }
 
-  private retain(frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>): void {
+  private retain(
+    serialized: SerializedRuntimeEvent<Extract<RuntimeSequencedFrame, { type: "runtime.event" }>>,
+  ): void {
+    const frame = serialized.event;
     if (frame.event.type === "snapshot.updated") {
       // A shell snapshot is authoritative but highly redundant. Retaining
       // several multi-conversation snapshots wastes memory and makes resumed
@@ -204,7 +225,7 @@ export class RuntimeSequencer {
       this.retainedBytes = 0;
       return;
     }
-    const bytes = Buffer.byteLength(JSON.stringify(frame), "utf8");
+    const { bytes } = serialized.encode();
     if (bytes > this.maxReplayBytes) {
       this.replayFloor = frame.sync.latestSequence;
       this.retained.length = 0;

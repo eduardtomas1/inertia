@@ -237,3 +237,10 @@ The earlier manifest and screenshots remain the original feature snapshot.
 - [Account details and reset action](screenshots/limits-strip-account-details.png)
 - [Narrow layout](screenshots/limits-strip-narrow.png)
 - [Composer popover with a low weekly window and a roomier account](screenshots/composer-usage-quota.png)
+
+Comparison captures from the same fixtures, with `3baeaef3` as the before state:
+
+- [Composer popover before](screenshots/composer-usage-before.png) and
+  [after](screenshots/composer-usage-after.png), taken when the popover first opens.
+- [Usage before](screenshots/usage-switch-before.png), on a first visit with Limits
+  never opened, and [after](screenshots/usage-switch-after.png).

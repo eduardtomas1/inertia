@@ -35,9 +35,14 @@ static int zombie_libproc_bytes = -1;
 static int stop_signals_delivered = 0;
 static int non_child_wait_attempts = 0;
 static int observer_calls = 0;
+static int identity_faults_enabled = 1;
 
 static int scenario_is(const char *value) {
   return strcmp(scenario, value) == 0;
+}
+
+static int non_child_scenario(void) {
+  return strncmp(scenario, "non-child-", 10) == 0;
 }
 
 static int fixture_kevent(
@@ -78,7 +83,7 @@ static int fixture_proc_pidinfo(
   child_identity_reads += 1;
   if (child_identity_reads == 2 && (scenario_is("direct-exit")
     || scenario_is("direct-exit-with-survivor")
-    || scenario_is("non-child-exit")
+    || non_child_scenario()
     || scenario_is("fork-tainted-exit"))) {
     // The first read belonged to the completed ownership census. Release the
     // real child at its subsequent exact signal probe and await real SZOMB;
@@ -114,7 +119,26 @@ static int fixture_sysctl(
     errno = EIO;
     return -1;
   }
-  return sysctl(query, count, result, size, value, value_size);
+  const int outcome = sysctl(query, count, result, size, value, value_size);
+  if (identity_faults_enabled && zombie_observed && non_child_scenario()
+    && count == 4 && query[0] == CTL_KERN && query[1] == KERN_PROC
+    && query[2] == KERN_PROC_PID && query[3] == fixture_child) {
+    if (scenario_is("non-child-unreadable")) {
+      errno = EIO;
+      return -1;
+    }
+    if (outcome == 0 && *size == sizeof(struct kinfo_proc)) {
+      struct kinfo_proc *process = result;
+      if (scenario_is("non-child-changed-birth")) {
+        process->kp_proc.p_starttime.tv_sec += 1;
+      }
+      if (scenario_is("non-child-sidl")) process->kp_proc.p_stat = SIDL;
+      if (scenario_is("non-child-zero-birth")) {
+        process->kp_proc.p_starttime.tv_sec = 0;
+      }
+    }
+  }
+  return outcome;
 }
 
 static int fixture_kill(pid_t pid, int signal_number) {
@@ -129,7 +153,7 @@ static int fixture_kill(pid_t pid, int signal_number) {
 }
 
 static pid_t fixture_waitpid(pid_t pid, int *status, int options) {
-  if (pid == fixture_child && scenario_is("non-child-exit")) {
+  if (pid == fixture_child && non_child_scenario()) {
     non_child_wait_attempts += 1;
   }
   return waitpid(pid, status, options);
@@ -159,7 +183,7 @@ static int run_fixture(void) {
   int gate[2];
   if (pipe(gate) != 0) return 81;
   pid_t survivor = 0;
-  if (scenario_is("non-child-exit")) {
+  if (non_child_scenario()) {
     int report[2];
     if (pipe(report) != 0) return 93;
     survivor = fork();
@@ -209,15 +233,17 @@ static int run_fixture(void) {
   struct owned_tree_tracker tracker;
   if (!initialize_owned_tree_tracker(&tracker)) return 85;
   if (!arm_root_fork_observer(&tracker, fixture_child)) return 86;
-  if (scenario_is("fork-tainted-exit")) tracker.fork_tainted = 1;
+  if (scenario_is("fork-tainted-exit")
+    || scenario_is("non-child-fork-taint")) tracker.fork_tainted = 1;
   const int cleaned = bounded_owned_tree_cleanup(
     getpid(), getpid(), &tracker, 0, 0, 0, NULL
   );
+  identity_faults_enabled = 0;
   int status = 0;
   errno = 0;
   const int survivor_reaped = survivor > 1
     && waitpid(survivor, &status, WNOHANG) < 0 && errno == ECHILD;
-  const int non_child_zombie_retained = scenario_is("non-child-exit")
+  const int non_child_zombie_retained = non_child_scenario()
     && process_status(fixture_child) == SZOMB
     && waitpid(fixture_child, &status, WNOHANG) < 0 && errno == ECHILD;
   printf(

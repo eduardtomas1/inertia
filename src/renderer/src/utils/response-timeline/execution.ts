@@ -218,7 +218,7 @@ export function buildTurnExecutionStream(
     ||
     timestamp(left.createdAt) - timestamp(right.createdAt)
     || left.order - right.order
-    || left.id.localeCompare(right.id));
+    || left.id.localeCompare(right.id, "en"));
 
   const stream: TurnExecutionStreamEntry[] = [];
   for (const item of items) {

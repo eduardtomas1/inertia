@@ -172,7 +172,7 @@ function stableRecordFingerprint(
   value: Readonly<Record<string, string | undefined>>,
 ): string {
   return JSON.stringify(Object.entries(value).sort(([left], [right]) => (
-    left.localeCompare(right)
+    left.localeCompare(right, "en")
   )));
 }
 

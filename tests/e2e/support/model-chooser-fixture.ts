@@ -3,13 +3,16 @@ import type { AppSnapshot, ServerEvent } from "../../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./app-fixture";
 import { seedLargeModelCatalog } from "./model-catalog-fixture";
 
-export async function createModelChooserFixture(name: string): Promise<AppFixture> {
+export async function createModelChooserFixture(
+  name: string,
+  options: { nativeModels?: boolean } = {},
+): Promise<AppFixture> {
   const app = await createAppFixture({
     name,
     initialState: "conversation",
     windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-      seedLargeModelCatalog(testDirectory, workspaceDirectory);
+      seedLargeModelCatalog(testDirectory, workspaceDirectory, options.nativeModels);
     },
   });
   // This fixture disables provider execution. Supply discovery readiness at

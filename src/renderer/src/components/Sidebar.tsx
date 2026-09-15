@@ -292,6 +292,15 @@ function SidebarView({
       snapshot?.runs,
     ],
   );
+  const knownProjectIdsRef = useRef<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    if (!snapshot) return;
+    const known = knownProjectIdsRef.current;
+    const current = new Set(snapshot.projects.map(({ id }) => id));
+    knownProjectIdsRef.current = current;
+    const activeId = snapshot.activeProjectId;
+    if (known && activeId && current.has(activeId) && !known.has(activeId)) setProjectScopeId(activeId);
+  }, [snapshot]);
   const scopedProjectId = projectScopeId && projectById.has(projectScopeId) ? projectScopeId : null;
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();

@@ -1411,4 +1411,65 @@ describe("compact Work sidebar", () => {
     renderSidebar([approval]);
     expect(document.querySelector('[data-work-status="approval"]')).not.toHaveAttribute("data-work-arrival");
   });
+
+  function scopeTo(name: string): HTMLElement {
+    const scope = screen.getByRole("button", { name: "Filter work by project" });
+    fireEvent.click(scope);
+    fireEvent.click(screen.getByRole("option", { name }));
+    expect(scope).toHaveTextContent(name);
+    return scope;
+  }
+
+  function otherProject(id: string, name: string): Project {
+    return {
+      ...project,
+      id,
+      name,
+      path: `/workspace/${id}`,
+      normalizedPath: `/workspace/${id}`,
+      repositoryIdentity: null,
+      repositoryRoot: null,
+      repositoryRelativePath: ".",
+    };
+  }
+
+  it("scopes Work to a newly created project once it becomes active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const studioThread = conversation("studio-thread", "Polish studio", new Date(2026, 7, 11, 9));
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([studioThread]);
+    const scope = scopeTo("Studio");
+
+    view.rerenderSnapshot({
+      ...snapshot([studioThread], [], [project, launchpad]),
+      activeProjectId: launchpad.id,
+      activeConversationId: null,
+    });
+
+    expect(scope).toHaveTextContent("Launchpad");
+    expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
+    expect(screen.getByText("No work yet")).toBeInTheDocument();
+  });
+
+  it("keeps the chosen scope when no newly created project becomes active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const studioThread = conversation("studio-thread", "Polish studio", new Date(2026, 7, 11, 9));
+    const runtime = otherProject("project-runtime", "Runtime");
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([studioThread], vi.fn(), [], { projects: [project, runtime] });
+    expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("All projects");
+    const scope = scopeTo("Studio");
+
+    view.rerenderSnapshot(snapshot([studioThread], [], [project, runtime]));
+    expect(scope).toHaveTextContent("Studio");
+
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime]), activeProjectId: runtime.id });
+    expect(scope).toHaveTextContent("Studio");
+
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime, launchpad]), activeProjectId: runtime.id });
+    expect(scope).toHaveTextContent("Studio");
+    expect(screen.getByText("Polish studio")).toBeInTheDocument();
+  });
 });

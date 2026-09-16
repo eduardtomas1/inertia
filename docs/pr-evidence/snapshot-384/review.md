@@ -26,6 +26,13 @@ the existing bounded utility worker on Linux x64/ARM64.
 - Negative control: run that same regression with the previous capture worker.
   It fails with “could not identify one active window” before the positive
   capture. Restoring the new worker passes.
+- Hosted Linux [x64](https://github.com/eduardtomas1/inertia/actions/runs/35055011392/job/104663573579)
+  and [ARM64](https://github.com/eduardtomas1/inertia/actions/runs/35055011392/job/104663573515)
+  both pass the native X11 regression, all 67 display-sensitive desktop tests,
+  and AppImage mount, guardian and extraction smoke checks. These runs exposed
+  an outdated Antigravity assertion for the removed composer camera button;
+  the assertion now verifies its absence. The corrected Antigravity desktop
+  scenario also passes locally on Linux, retaining provider capability checks.
 - Actual unpacked Linux ARM64 package, unchanged Electron fuses: enable capture
   through the new Settings page, focus a real chat, activate a separate synthetic
   Electron window, send the OS shortcut, and inspect its received attachment in
@@ -63,8 +70,9 @@ core; shared dependencies remain charged there. The checker rejects eager import
 
 ## Limits
 
-Native capture was exercised on Ubuntu ARM64/Xvfb, not the reporter's physical
-x64 AppImage desktop. Hosted Linux x64 native coverage is a merge requirement.
+Native capture was exercised on local Ubuntu ARM64 and hosted Linux x64/ARM64
+with Xvfb, not the reporter's physical x64 AppImage desktop. A complete green
+CI run on the final integrated head remains a merge requirement.
 Native macOS/Windows foreground capture was not exercised locally; existing
 platform contracts, package checks and CI remain required. Chromium targets must
 expose their accessibility tree; missing trees continue to refuse pixels with

@@ -45,7 +45,8 @@ it("retains modal focus when reset preparation replaces its launching button", a
   render(<UsageLimitsProvider request={request} status="online"><Opener /></UsageLimitsProvider>);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open limits directly" })); await vi.dynamicImportSettled(); });
   const dialog = await screen.findByRole("dialog", { name: "Provider usage limits" });
-  fireEvent.click(await screen.findByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show Codex accounts" }));
+  fireEvent.click(screen.getByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
   const useReset = screen.getByRole("button", { name: "Use reset" });
   useReset.focus();
   await act(async () => fireEvent.click(useReset));
@@ -67,7 +68,8 @@ it("renews an expired unattempted confirmation instead of offering an endless sa
       : { kind: "usage.limits", snapshot: { accounts: [account], sources: [], checkedAt: new Date(now).toISOString() } } };
   });
   render(<UsageLimitsPanel request={request} status="online" />);
-  fireEvent.click(await screen.findByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Show Codex accounts" }));
+  fireEvent.click(screen.getByRole("button", { name: /1 Codex account pro ready 2 resets/ }));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use reset" })));
   now = expires + 1;
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Confirm reset" })));

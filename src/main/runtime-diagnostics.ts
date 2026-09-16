@@ -1,5 +1,6 @@
 import { parseRuntimeOwnedProcessDiagnostic, type RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
 import { parseRuntimeFailureDiagnosticMessage } from "../node/runtime-failure-diagnostic.js";
+import { isPreviewAgentFailureCategory, isPreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -81,6 +82,7 @@ const DETACHED_DRAFT_OUTCOMES = [
 export type RuntimeDiagnosticEvent =
   | "app.start"
   | "app.stop"
+  | "browser.operation-failure"
   | "detached-draft.recovery"
   | "logs.reveal"
   | "report.copy"
@@ -243,6 +245,7 @@ function parseDiagnosticRecord(
     || ![
       "app.start",
       "app.stop",
+      "browser.operation-failure",
       "detached-draft.recovery",
       "logs.reveal",
       "report.copy",
@@ -273,7 +276,9 @@ function parseDiagnosticRecord(
     "outcome",
     "evidencePreserved",
   ];
-  const allowedKeys = record.event === "detached-draft.recovery"
+  const allowedKeys = record.event === "browser.operation-failure"
+    ? [...baseKeys, "phase", "category"]
+    : record.event === "detached-draft.recovery"
     ? detachedDraftKeys
     : record.event === "snapshot.failure" ? [...baseKeys, "phase", "category"]
     : record.event === "runtime.failure" || record.event === "runtime.state"
@@ -301,6 +306,12 @@ function parseDiagnosticRecord(
   if (record.event === "snapshot.failure") {
     return allowlisted(SNAPSHOT_DIAGNOSTIC_CATEGORIES, record.category)
       && (record.phase === undefined || allowlisted(SNAPSHOT_CAPTURE_PHASES, record.phase)) ? record : null;
+  }
+
+  if (record.event === "browser.operation-failure") {
+    return isPreviewAgentOperationPhase(record.phase) && isPreviewAgentFailureCategory(record.category)
+      ? record
+      : null;
   }
 
   if (record.event === "detached-draft.recovery") {
@@ -441,6 +452,11 @@ export class RuntimeDiagnostics {
           ...(fields.probe !== undefined ? { probe: fields.probe } : {}),
         });
         if (fields.reason === "owned-process-tainted" && diagnostic) Object.assign(entry, diagnostic);
+      }
+      if (event === "browser.operation-failure") {
+        if (!isPreviewAgentOperationPhase(fields.phase) || !isPreviewAgentFailureCategory(fields.category)) return;
+        entry.phase = fields.phase;
+        entry.category = fields.category;
       }
       if (event === "runtime.failure" || event === "runtime.state") {
         if (phase) entry.phase = phase;
@@ -717,6 +733,9 @@ export class RuntimeDiagnostics {
               : null,
             lifecycleEvent && typeof value.restartScheduled === "boolean"
               ? `scheduled=${value.restartScheduled ? "yes" : "no"}`
+              : null,
+            event === "browser.operation-failure" && isPreviewAgentFailureCategory(value.category)
+              ? `category=${value.category}`
               : null,
             event === "detached-draft.recovery"
               && typeof value.reason === "string"

@@ -456,4 +456,30 @@ describe("UsageIndicator", () => {
     expect(html).not.toContain("Update time unavailable");
     expect(html).not.toContain("Reset time unavailable");
   });
+
+  it("keeps the trigger to context while the popover tones each quota window", () => {
+    const limit = (remainingPercent: number): ProviderRateLimit => ({
+      id: `quota-${remainingPercent}`,
+      label: "Weekly",
+      usedPercent: 100 - remainingPercent,
+      remainingPercent,
+      windowMinutes: 10_080,
+      resetsAt: null,
+    });
+    const low = render(usage(), [limit(80), limit(23)], freshState, "compact");
+    expect(low).not.toContain("usage-trigger-quota");
+    expect(low).toContain('title="Context window 50% remaining."');
+    expect(low).toContain('aria-label="Open usage and context. Context window 50% remaining."');
+    expect(low).toContain('class="usage-popover-quota" data-tone="ok"');
+    expect(low).toContain('class="usage-popover-quota" data-tone="low"');
+    expect(render(usage(), [limit(12)], freshState)).toContain('class="usage-popover-quota" data-tone="critical"');
+  });
+
+  it("repeats the context ring inside the popover without a second quota refresh marker", () => {
+    const html = render(usage(), [], { ...freshState, refreshing: true }, "compact");
+    expect(html.match(/data-context-ring-state="current"/gu)).toHaveLength(2);
+    expect(html.match(/usage-quota-refresh-indicator/gu)).toHaveLength(1);
+    expect(html).toMatch(/class="usage-popover-context"><span class="usage-context-ring is-current"/u);
+    expect(html).toMatch(/<footer class="usage-popover-footer"><button type="button" class="usage-hide-button">/u);
+  });
 });

@@ -2,6 +2,7 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
@@ -33,11 +34,13 @@ import {
   workspaceGitRepositoryLabel,
   type WorkspaceChangesRequestedAction,
 } from "../utils/workspaceGit";
+import { layoutStorage } from "../utils/layoutStorage";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { IconButton } from "./ui";
 import { SentMessageAttachmentList } from "./SentMessageAttachmentList";
 
 export type EnvironmentRepositoryAction = WorkspaceChangesRequestedAction;
+export const ENVIRONMENT_USAGE_OPEN_STORAGE_KEY = "inertia:environment:usage-open:v1";
 
 export interface EnvironmentPanelProps {
   summary: EnvironmentSummarySnapshot;
@@ -193,6 +196,7 @@ export function EnvironmentPanel({
 }: EnvironmentPanelProps): React.JSX.Element {
   const panelId = useId();
   const panelRef = useRef<HTMLElement>(null);
+  const [usageOpen, setUsageOpen] = useState(() => layoutStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY) !== "false");
   const pendingActionFocusRef = useRef<{
     runId: string;
     row: HTMLLIElement | null;
@@ -550,7 +554,15 @@ export function EnvironmentPanel({
         )}
 
         <section className="environment-panel-section environment-usage-section">
-          <details className="environment-disclosure">
+          <details
+            className="environment-disclosure"
+            open={usageOpen}
+            onToggle={(event) => {
+              const open = event.currentTarget.open;
+              setUsageOpen(open);
+              layoutStorage.setItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, String(open));
+            }}
+          >
             <summary>
               {summary.usage ? (
                 <ProviderBrandIcon

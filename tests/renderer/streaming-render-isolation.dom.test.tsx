@@ -265,11 +265,15 @@ beforeEach(async () => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   Reflect.deleteProperty(window, "inertia");
 });
 
 describe("streamed agent text", () => {
   it("re-renders only the transcript for each token", async () => {
+    // LiveElapsed ticks independently of token delivery. Keep its clock fixed
+    // while counting token commits, including on slower Windows workers.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { default: App } = await import("../../src/renderer/src/App");
     let commits = 0;
     function CountedApp(): React.JSX.Element {

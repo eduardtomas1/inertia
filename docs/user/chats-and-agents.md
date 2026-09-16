@@ -16,7 +16,7 @@
 - **Daily work** in the sidebar summarizes processed tokens, agent runtime and conversations.
 - Switching between chats in the same window preserves your reading position. **Jump to latest** resumes following new content. This navigation memory lasts while the window remains open.
 
-If a Claude provider update requires a fresh native session, Inertia supplies a bounded excerpt of this chat’s recent visible messages as historical reference. The execution context records any truncation. Hidden provider state, attachment contents and tool output are not recovered; compatible native sessions continue normally.
+If a Claude provider update requires a fresh native session, Inertia supplies a bounded excerpt of this chat’s recent visible messages as historical reference. The execution context records any truncation. Recovery is omitted if it cannot fit alongside your selected context within the turn limits. Hidden provider state, attachment contents and tool output are not recovered; compatible native sessions continue normally.
 
 ## Keep work organized
 

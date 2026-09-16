@@ -1,5 +1,5 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Clock3, EyeOff, X } from "lucide-react";
 
 import type {
@@ -275,7 +275,8 @@ export function UsageIndicator({
     setOpen(false);
   }, [mode, providerLabel, quotaSource]);
 
-  useEffect(() => {
+  // Release document capture handlers before a successor dialog takes input.
+  useLayoutEffect(() => {
     if (!open) return;
     const popover = document.getElementById(detailsId)!;
     let active = true;

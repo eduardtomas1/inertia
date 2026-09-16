@@ -56,6 +56,8 @@ const budgets = {
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
   deferredWelcomeGuideJavaScript: 13 * kibibyte,
+  // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
+  deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -555,11 +557,19 @@ if (mainWorkbenchJavaScriptClosure.has(welcomeGuideEntry) || detachedChatJavaScr
   throw new Error("The welcome guide must remain deferred from the initial workbench");
 }
 const deferredWelcomeGuideJavaScriptBytes = await closureBytes(await javaScriptClosure(welcomeGuideEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
+const snapshotSettingsEntry = assetNames.find((name) => /^SnapshotSettings-.*\.js$/u.test(name));
+if (!snapshotSettingsEntry) throw new Error("Missing deferred Snapshots settings");
+if (entryJavaScriptClosure.has(snapshotSettingsEntry) || mainWorkbenchJavaScriptClosure.has(snapshotSettingsEntry) || detachedChatJavaScriptClosure.has(snapshotSettingsEntry)) {
+  throw new Error("Snapshots settings must remain deferred from the initial chat routes");
+}
+// Charge only this feature's new module separately. Shared helpers stay in core.
+const deferredSnapshotSettingsJavaScriptBytes = await assetBytes(`assets/${snapshotSettingsEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
   - deferredUsageLimitsJavaScriptBytes
   - deferredWelcomeGuideJavaScriptBytes
+  - deferredSnapshotSettingsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -593,6 +603,7 @@ const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
+  deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

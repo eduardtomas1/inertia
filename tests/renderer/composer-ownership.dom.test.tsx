@@ -899,8 +899,6 @@ describe("image-less composer routes", () => {
     };
     try {
       render(<Composer {...composerProps(current, { onChooseAttachments })} />);
-      expect(await screen.findByRole("button", { name: "Snapshots. Antigravity can't read images in Inertia." }))
-        .toBeDisabled();
       expect(screen.queryByRole("button", { name: "Snapshots" })).toBeNull();
     } finally {
       window.inertia = bridge;

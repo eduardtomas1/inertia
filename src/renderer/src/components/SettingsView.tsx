@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCcw,
   ServerCog,
+  Scan,
   ShieldCheck,
   Sun,
   TerminalSquare,
@@ -68,6 +69,7 @@ import {
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
   loadMascotSettings,
+  loadSnapshotSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
@@ -137,6 +139,7 @@ export type SettingsViewProps = {
 type SettingsSection =
   | "support"
   | "general"
+  | "snapshots"
   | "projects"
   | "providers"
   | "backends"
@@ -149,6 +152,7 @@ type SettingsSection =
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
   { id: "general", label: "General", icon: PanelLeft },
+  { id: "snapshots", label: "Snapshots", icon: Scan },
   { id: "projects", label: "Projects", icon: FolderOpen },
   { id: "providers", label: "Providers", icon: Bot },
   { id: "backends", label: "Model backends", icon: ServerCog },
@@ -270,6 +274,7 @@ export function SettingsView({
   const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, section === "support");
   const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, section === "diagnostics");
   const ProjectSettings = useLoadedSurface(loadProjectSettings, section === "projects");
+  const SnapshotSettings = useLoadedSurface(loadSnapshotSettings, section === "snapshots");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -579,6 +584,7 @@ export function SettingsView({
               backendDefaults={backendDefaults} backendProfiles={backendProfiles}
               disabled={disabled} request={onReportCommand} onUpdateSettings={onUpdate} />
           : <SettingsSectionFallback />)}
+        {section === "snapshots" && (SnapshotSettings ? <SnapshotSettings /> : <SettingsSectionFallback />)}
         {section === "general" && (
           <div className="settings-toolbar">
             <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>

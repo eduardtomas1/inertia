@@ -302,7 +302,8 @@ export function UsageAccountsHint({ providerId, remaining }: { providerId: strin
 export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void; returnFocusTo?: HTMLElement | null }): React.JSX.Element | null {
   const context = useUsageLimitsContext(); const dialog = useRef<HTMLElement>(null);
   useNativePreviewSuspension(true);
-  useEffect(() => {
+  // The visible modal must own keyboard focus in its first committed frame.
+  useLayoutEffect(() => {
     const previous = returnFocusTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     dialog.current?.querySelector<HTMLButtonElement>("button")?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };

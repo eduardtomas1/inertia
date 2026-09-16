@@ -3,10 +3,7 @@
 .snapshot-dialog header { display: flex; align-items: center; justify-content: space-between; }
 .snapshot-dialog h2 { margin: 0; font-size: 16px; }
 .snapshot-dialog header button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; padding: 5px; }
-.snapshot-setting { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-block: 16px; }
-.snapshot-setting select { max-width: 58%; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px; }
 .snapshot-note { color: var(--text-muted); font-size: 12px; }
-.snapshot-permissions button { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; margin-right: 6px; }
 .snapshot-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .snapshot-alert { margin: 14px 0 0; padding: 9px 12px; border-radius: var(--radius-medium); color: var(--danger); background: var(--danger-soft); }
 .snapshot-alert code { padding: 0.13em 0.34em; border: 1px solid var(--code-border); border-radius: 5px; color: inherit; background: var(--inline-code-surface); font-family: var(--font-mono); font-size: 0.88em; white-space: break-spaces; }

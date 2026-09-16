@@ -12,10 +12,15 @@ const native = vi.hoisted(() => {
   };
 });
 vi.mock("@crowecawcaw/xa11y", () => ({ default: {
-  App: { foreground: native.foreground }, screenshot: native.screenshot,
+  App: { foreground: native.foreground, byPid: native.foreground }, screenshot: native.screenshot,
   AccessibilityNotEnabledError: native.AccessibilityNotEnabledError,
   PermissionDeniedError: class extends Error {}, SelectorNotMatchedError: class extends Error {},
 } }));
+vi.mock("../../src/main/snapshot-x11-foreground", () => ({
+  readX11Foreground: () => ({ id: 100, pid: 123, name: "Private roadmap" }),
+  matchesX11Bounds: () => true,
+  SnapshotX11ForegroundError: class extends Error {},
+}));
 vi.mock("electron", () => ({
   app: { getPath: () => "/private/test-data" },
   utilityProcess: { fork: native.fork },

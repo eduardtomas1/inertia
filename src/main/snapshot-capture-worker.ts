@@ -5,6 +5,7 @@ import {
   SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema,
   type SnapshotCapturePhase, type SnapshotFailureCategory, type SnapshotRect, type SnapshotSource,
 } from "../shared/snapshots.js";
+import { readX11Foreground, matchesX11Bounds, SnapshotX11ForegroundError } from "./snapshot-x11-foreground.js";
 const { App, screenshot, AccessibilityNotEnabledError, PermissionDeniedError, SelectorNotMatchedError } = xa11y;
 
 export class SnapshotCaptureFailure extends Error {
@@ -16,18 +17,26 @@ export function snapshotFailureCategory(error: unknown, phase: SnapshotCapturePh
     : error instanceof SnapshotGeometryError ? "invalid-geometry"
       : error instanceof AccessibilityNotEnabledError ? "accessibility-unavailable"
         : error instanceof PermissionDeniedError ? "permission-denied"
-          : error instanceof SelectorNotMatchedError ? "no-active-window" : "native-failure";
+          : error instanceof SelectorNotMatchedError || error instanceof SnapshotX11ForegroundError ? "no-active-window" : "native-failure";
   return category === "no-active-window" && phase !== "foreground" ? "changed" : category;
 }
 
-async function foreground() {
-  const app = await App.foreground({ timeout: 0 });
+async function foreground(phase: SnapshotCapturePhase) {
+  // Chromium can expose a complete AT-SPI tree without marking its frame ACTIVE.
+  // X11 identifies the process; require one exact named AX window in that process.
+  // Keep the native window ID in every before/after identity check, including
+  // switches between identically titled windows in one application.
+  const native = process.platform === "linux" ? readX11Foreground() : null;
+  const app = native ? await App.byPid(native.pid, { timeout: 0 }).catch((error: unknown) => {
+    if (phase === "foreground" && error instanceof SelectorNotMatchedError) throw new SnapshotCaptureFailure("accessibility-unavailable");
+    throw error;
+  }) : await App.foreground({ timeout: 0 });
   const candidates = process.platform === "win32" ? [app.asElement()] : await app.children();
-  const active = candidates.filter((element) => element.active);
+  const active = candidates.filter((element) => native ? element.name === native.name && matchesX11Bounds(element.bounds, native.bounds) : element.active);
   if (active.length !== 1 || !app.pid) throw new SnapshotCaptureFailure("no-active-window");
   const window = active[0]!;
   if (!window.bounds) throw new SnapshotCaptureFailure("invalid-geometry");
-  return { app, window, identity: JSON.stringify([app.pid, window.stableId, window.name, window.bounds]) };
+  return { app, window, identity: JSON.stringify([native, app.pid, window.stableId, window.name, window.bounds]) };
 }
 
 function protectedGeometry(rectangles: readonly SnapshotRect[]): string {
@@ -50,7 +59,7 @@ export async function captureForegroundSnapshot() {
 }
 
 async function captureOnce(progress: { phase: SnapshotCapturePhase }) {
-  const { app, window, identity } = await foreground();
+  const { app, window, identity } = await foreground(progress.phase);
   const bounds = window.bounds!;
   if (!Object.values(bounds).every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0 || bounds.width * bounds.height > 16_000_000) throw new SnapshotCaptureFailure("invalid-geometry");
   progress.phase = "accessibility";
@@ -58,19 +67,19 @@ async function captureOnce(progress: { phase: SnapshotCapturePhase }) {
   const context = await readSnapshotAccessibility(window, () => Date.now() < deadline);
   // A partial traversal cannot prove where every protected field is. Fail closed.
   if (!context.complete) throw new SnapshotCaptureFailure("incomplete");
-  if ((await foreground()).identity !== identity) throw new SnapshotCaptureFailure("changed");
+  if ((await foreground(progress.phase)).identity !== identity) throw new SnapshotCaptureFailure("changed");
   progress.phase = "screenshot";
   const shot = await screenshot({ element: window });
   if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new SnapshotCaptureFailure("native-failure");
   progress.phase = "verification";
-  const after = await foreground();
+  const after = await foreground(progress.phase);
   if (after.identity !== identity) throw new SnapshotCaptureFailure("changed");
   // A fresh native tree must agree with the masks sampled before pixel capture.
   const verificationDeadline = Date.now() + 3000;
   const verification = await readSnapshotAccessibility(after.window, () => Date.now() < verificationDeadline);
   if (!verification.complete) throw new SnapshotCaptureFailure("incomplete");
   if (protectedGeometry(context.redactions) !== protectedGeometry(verification.redactions)
-    || (await foreground()).identity !== identity) throw new SnapshotCaptureFailure("changed");
+    || (await foreground(progress.phase)).identity !== identity) throw new SnapshotCaptureFailure("changed");
   progress.phase = "encoding";
   const canvas = createCanvas(shot.width, shot.height);
   const ctx = canvas.getContext("2d");

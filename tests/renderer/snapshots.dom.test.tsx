@@ -5,6 +5,7 @@ import type { SnapshotDelivery } from "../../src/shared/snapshots";
 import { useComposerSnapshots } from "../../src/renderer/src/components/composer/useComposerSnapshots";
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import { ContextCompactionRow } from "../../src/renderer/src/components/response-timeline/ContextCompactionRow";
+import { SnapshotSettings } from "../../src/renderer/src/components/SnapshotSettings";
 import { SnapshotControl } from "../../src/renderer/src/components/composer/SnapshotControl";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
@@ -12,33 +13,23 @@ import { snapshotFixture } from "../helpers/snapshot-fixture";
 const original = window.inertia;
 afterEach(() => { window.inertia = original; vi.restoreAllMocks(); });
 
-it("suspends the native preview for snapshot settings and capture errors, restoring it on close or unmount", async () => {
-  window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
-  const view = render(<SnapshotControl conversationId="preview-chat" />);
-  const trigger = screen.getByRole("button", { name: "Snapshots" });
+it("shows only capture failures in the composer and restores focus on close or unmount", async () => {
+  const view = render(<><button>Message focus</button><SnapshotControl conversationId="preview-chat" /></>);
+  const trigger = screen.getByRole("button", { name: "Message focus" });
   trigger.focus();
+  expect(screen.queryByRole("button", { name: "Snapshots" })).toBeNull();
   expect(nativePreviewSuspended()).toBe(false);
-
-  fireEvent.click(trigger);
+  const fail = async (): Promise<void> => { await act(() => window.dispatchEvent(new CustomEvent("inertia:snapshot-error", {
+    detail: { conversationId: "preview-chat", message: "The capture could not be attached." },
+  }))); };
+  await fail();
+  expect(screen.getByRole("alert")).toHaveTextContent("The capture could not be attached.");
   expect(nativePreviewSuspended()).toBe(true);
   expect(screen.getByRole("button", { name: "Close Snapshots" })).toHaveFocus();
-  await screen.findByRole("combobox", { name: "Capture shortcut" });
   fireEvent.keyDown(screen.getByRole("dialog", { name: "Snapshots" }), { key: "Escape" });
   expect(nativePreviewSuspended()).toBe(false);
   expect(trigger).toHaveFocus();
-
-  await act(() => window.dispatchEvent(new CustomEvent("inertia:snapshot-error", {
-    detail: { conversationId: "preview-chat", message: "The capture could not be attached." },
-  })));
-  expect(screen.getByRole("alert")).toHaveTextContent("The capture could not be attached.");
-  expect(nativePreviewSuspended()).toBe(true);
-  await act(async () => undefined);
-  fireEvent.click(screen.getByRole("button", { name: "Close Snapshots" }));
-  expect(nativePreviewSuspended()).toBe(false);
-  expect(trigger).toHaveFocus();
-
-  fireEvent.click(trigger);
-  expect(nativePreviewSuspended()).toBe(true);
+  await fail();
   view.unmount();
   expect(nativePreviewSuspended()).toBe(false);
 });
@@ -46,12 +37,11 @@ it("suspends the native preview for snapshot settings and capture errors, restor
 it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only supported snapshot shortcuts on %s", async (platform) => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
   window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
-  render(<SnapshotControl conversationId="shortcut-chat" />);
-  fireEvent.click(screen.getByRole("button", { name: "Snapshots" }));
+  render(<SnapshotSettings />);
   await screen.findByRole("combobox", { name: "Capture shortcut" });
   expect(screen.getByText(/Experimental capture of the foreground window/u)).toBeVisible();
   expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information.*Review before sending/u)).toBeVisible();
-  expect(screen.getByRole("checkbox", { name: "Enable Snapshots" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "Enable Snapshots" })).toBeChecked();
   expect(screen.queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
 });
 

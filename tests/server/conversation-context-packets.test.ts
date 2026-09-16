@@ -15,6 +15,8 @@ import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted
 import {
   MAX_CONVERSATION_CONTEXT_BLOCK_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
+  MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
 } from "../../src/shared/contracts";
 
@@ -788,6 +790,95 @@ describe("conversation context packets", () => {
       .toContain("29-");
     expect(Number(packet.excerpts[0]!.content.split("-")[0]))
       .toBe(packet.droppedMessageCount);
+    store.close();
+  });
+
+  it("bounds the serialized packet when attachment metadata dominates", () => {
+    const { store, sourceId, targetId } = fixture();
+    const total = 400;
+    for (let index = 0; index < total; index += 1) {
+      store.createMessage(
+        sourceId,
+        `m${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        Array.from({ length: 8 }, (_unused, slot) => ({
+          id: `aaaaaaaa-0000-4000-8000-${String(index * 8 + slot).padStart(12, "0")}`,
+          name: `attachment-${index}-${slot}.png`,
+          path: `/private/tmp/attachment-${index}-${slot}.png`,
+          mimeType: "image/png" as const,
+          size: 128,
+        })),
+        null,
+        `2026-08-19T08:00:00.${String(index).padStart(3, "0")}Z`,
+      );
+    }
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+
+    expect(packet.messageCount).toBeGreaterThan(0);
+    expect(packet.droppedMessageCount).toBeGreaterThan(0);
+    expect(packet.messageCount + packet.droppedMessageCount).toBe(total);
+    expect(Buffer.byteLength(JSON.stringify(packet.excerpts), "utf8"))
+      .toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES);
+    expect(store.contextPackets.get(packet.id, targetId).excerpts)
+      .toEqual(packet.excerpts);
+    store.close();
+  });
+
+  it("counts messages the source-message limit discarded", () => {
+    const { store, sourceId, targetId } = fixture();
+    const total = MAX_CONVERSATION_CONTEXT_MESSAGES + 5;
+    for (let index = 0; index < total; index += 1) {
+      store.createMessage(
+        sourceId,
+        `m${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+      );
+    }
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+
+    expect(packet.messageCount)
+      .toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_MESSAGES);
+    expect(packet.droppedMessageCount).toBeGreaterThanOrEqual(5);
+    expect(packet.messageCount + packet.droppedMessageCount).toBe(total);
+    store.close();
+  });
+
+  it("keeps every materialized block inside its transport bound", () => {
+    const { store, sourceId, targetId } = fixture();
+    for (let index = 0; index < 40; index += 1) {
+      store.createMessage(
+        sourceId,
+        `${index}-${"detail ".repeat(1100)}`,
+        index % 2 === 0 ? "user" : "assistant",
+        [],
+        null,
+        `2026-08-19T08:00:${String(index % 60).padStart(2, "0")}.${String(index).padStart(3, "0")}Z`,
+      );
+    }
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      note: '"'.repeat(1000),
+      acknowledgedWorkspaceDifference: false,
+    });
+    const blocks = store.contextPackets.materialize(targetId, [packet.id]);
+
+    expect(blocks.length).toBeGreaterThan(1);
+    for (const block of blocks) {
+      expect(Buffer.byteLength(block.content, "utf8"))
+        .toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_BLOCK_BYTES);
+    }
     store.close();
   });
 });

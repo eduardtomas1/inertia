@@ -8,6 +8,7 @@ import {
   MAX_CONVERSATION_CONTEXT_BLOCK_BYTES,
   MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
+  MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
@@ -552,21 +553,37 @@ export class ConversationContextPacketRepository {
         throw new Error("The selected chat context exceeds the shared size limit.");
       }
     }
+    const eligibleCount = selectedIds
+      ? rows.length
+      : (this.context.database.prepare(`
+          SELECT COUNT(*) AS count FROM messages
+          WHERE conversation_id = ? AND role IN ('user', 'assistant')
+        `).get(source.id) as { count: number }).count;
     let retainedBytes = 0;
+    let retainedJsonBytes = 2;
     let firstRetained = 0;
     for (let index = bounded.length - 1; index >= 0; index -= 1) {
-      const bytes = byteLength(bounded[index]!.content);
-      if (retainedBytes + bytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES) {
+      const excerpt = bounded[index]!;
+      const bytes = byteLength(excerpt.content);
+      const jsonBytes = byteLength(JSON.stringify(excerpt)) + 1;
+      if (
+        retainedBytes + bytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
+        || retainedJsonBytes + jsonBytes > MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES
+      ) {
         firstRetained = index + 1;
         break;
       }
       retainedBytes += bytes;
+      retainedJsonBytes += jsonBytes;
     }
     const excerpts = bounded.slice(firstRetained);
     if (excerpts.length < 1) {
       throw new Error("The selected chat context exceeds the shared size limit.");
     }
-    const droppedMessageCount = bounded.length - excerpts.length;
+    const droppedMessageCount = Math.min(
+      Math.max(eligibleCount - excerpts.length, 0),
+      1_000_000,
+    );
     const noteSource = input.note?.trim();
     const note = noteSource
       ? truncateUtf8(
@@ -577,6 +594,9 @@ export class ConversationContextPacketRepository {
     const now = consumption?.consumedAt ?? new Date().toISOString();
     const id = randomUUID();
     const excerptsJson = JSON.stringify(excerpts);
+    if (byteLength(excerptsJson) > MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES) {
+      throw new Error("The selected chat context exceeds the shared size limit.");
+    }
     const characterCount = excerpts.reduce(
       (total, excerpt) => total + excerpt.content.length,
       0,
@@ -923,17 +943,50 @@ export class ConversationContextPacketRepository {
     budgetBytes = MAX_CONVERSATION_CONTEXT_BLOCK_BYTES
       * MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
   ): MaterializedConversationContext[] {
-    const envelopeReserve = 2048;
+    const buildContent = (
+      excerpts: readonly ConversationContextExcerpt[],
+      blockIndex: number,
+      blockCount: number,
+      droppedMessageCount: number,
+    ): string => JSON.stringify({
+      version: 1,
+      kind: "inertia-conversation-context",
+      packetId: packet.id,
+      blockIndex,
+      blockCount,
+      source: {
+        conversationId: packet.sourceConversationId,
+        conversationTitle: packet.sourceConversationTitle,
+        projectId: packet.sourceProjectId,
+        projectName: packet.sourceProjectName,
+        workspaceLabel: packet.sourceWorkspaceLabel,
+        capturedAt: packet.createdAt,
+      },
+      relationToTarget: packet.workspaceRelation,
+      note: packet.note,
+      droppedMessageCount,
+      excerpts,
+    });
+    const envelopeBytes = byteLength(buildContent(
+      [],
+      99,
+      99,
+      packet.droppedMessageCount + packet.excerpts.length,
+    ));
     const blockCapacity = Math.max(
       1,
-      Math.min(budgetBytes, MAX_CONVERSATION_CONTEXT_BLOCK_BYTES) - envelopeReserve,
+      Math.min(budgetBytes, MAX_CONVERSATION_CONTEXT_BLOCK_BYTES) - envelopeBytes,
+    );
+    const totalCapacity = Math.max(
+      1,
+      budgetBytes - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * envelopeBytes,
     );
     const retained: ConversationContextExcerpt[] = [];
     let used = 0;
     for (let index = packet.excerpts.length - 1; index >= 0; index -= 1) {
       const excerpt = packet.excerpts[index]!;
-      const bytes = byteLength(JSON.stringify(excerpt));
-      if (retained.length > 0 && used + bytes > budgetBytes - envelopeReserve) break;
+      const bytes = byteLength(JSON.stringify(excerpt)) + 1;
+      if (retained.length > 0 && used + bytes > totalCapacity) break;
       used += bytes;
       retained.unshift(excerpt);
     }
@@ -943,7 +996,7 @@ export class ConversationContextPacketRepository {
     let current: ConversationContextExcerpt[] = [];
     let currentBytes = 0;
     for (const excerpt of retained) {
-      const bytes = byteLength(JSON.stringify(excerpt));
+      const bytes = byteLength(JSON.stringify(excerpt)) + 1;
       if (current.length > 0 && currentBytes + bytes > blockCapacity) {
         groups.push(current);
         current = [];
@@ -954,31 +1007,19 @@ export class ConversationContextPacketRepository {
     }
     groups.push(current);
     const blockCount = groups.length;
-    return groups.map((excerpts, blockIndex) => ({
-      packetId: packet.id,
-      label: `Chat context · ${packet.sourceConversationTitle} · ${retained.length} ${retained.length === 1 ? "message" : "messages"}${dropped > 0 ? ` · ${dropped} oldest omitted` : ""}${blockCount > 1 ? ` · part ${blockIndex + 1} of ${blockCount}` : ""}`,
-      content: JSON.stringify({
-        version: 1,
-        kind: "inertia-conversation-context",
+    return groups.map((excerpts, blockIndex) => {
+      const content = buildContent(excerpts, blockIndex, blockCount, dropped);
+      if (byteLength(content) > MAX_CONVERSATION_CONTEXT_BLOCK_BYTES) {
+        throw new Error("The shared chat context block exceeds its transport bound.");
+      }
+      return {
         packetId: packet.id,
+        label: `Chat context · ${packet.sourceConversationTitle} · ${retained.length} ${retained.length === 1 ? "message" : "messages"}${dropped > 0 ? ` · ${dropped} oldest omitted` : ""}${blockCount > 1 ? ` · part ${blockIndex + 1} of ${blockCount}` : ""}`,
+        content,
         blockIndex,
         blockCount,
-        source: {
-          conversationId: packet.sourceConversationId,
-          conversationTitle: packet.sourceConversationTitle,
-          projectId: packet.sourceProjectId,
-          projectName: packet.sourceProjectName,
-          workspaceLabel: packet.sourceWorkspaceLabel,
-          capturedAt: packet.createdAt,
-        },
-        relationToTarget: packet.workspaceRelation,
-        note: packet.note,
-        droppedMessageCount: dropped,
-        excerpts,
-      }),
-      blockIndex,
-      blockCount,
-    }));
+      };
+    });
   }
 
   replayAcceptance(

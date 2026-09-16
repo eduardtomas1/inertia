@@ -3,7 +3,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
-import { THINKING_LINE_INTERVAL_MS } from "../../src/renderer/src/components/response-timeline/activity";
+import {
+  THINKING_LINE_FRAGMENT_INTERVAL_MS,
+  THINKING_LINE_INTERVAL_MS,
+} from "../../src/renderer/src/components/response-timeline/activity";
 import type {
   AgentActivity,
   AgentReasoning,
@@ -347,7 +350,7 @@ describe("agent loading and trace DOM", () => {
     }
   });
 
-  it("holds the readable sentence while a shorter fragment streams in between", () => {
+  it("holds a mid-sentence fragment until it grows, and never longer than its own dwell", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
     try {
@@ -369,7 +372,7 @@ describe("agent loading and trace DOM", () => {
         streamingChannel: "reasoning",
       }, onStop)} />);
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS * 3);
+        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS);
       });
       expect(entering()).toHaveTextContent("Reading the pane reducer.");
 
@@ -378,9 +381,71 @@ describe("agent loading and trace DOM", () => {
         streamingChannel: "reasoning",
       }, onStop)} />);
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS);
+        vi.advanceTimersByTime(1);
       });
       expect(entering()).toHaveTextContent("Checking the drop plans.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a fragment that never grows once its own dwell elapses", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
+    try {
+      const first = "**Tracing ownership**\nReading the pane reducer.";
+      const { container, onStop, rerender } = renderState({
+        streamingReasoning: first,
+        streamingChannel: "reasoning",
+      });
+      const summary = container.querySelector<HTMLElement>(
+        '[data-thinking-state="live"] > summary',
+      );
+      if (!summary) throw new Error("Expected a live thinking strip.");
+      const entering = (): Element | null =>
+        summary.querySelector(".turn-thinking-line > .is-entering");
+
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: `${first} Checking`,
+        streamingChannel: "reasoning",
+      }, onStop)} />);
+      act(() => {
+        vi.advanceTimersByTime(THINKING_LINE_FRAGMENT_INTERVAL_MS - 1);
+      });
+      expect(entering()).toHaveTextContent("Reading the pane reducer.");
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(entering()).toHaveTextContent("Checking");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a complete short sentence on the ordinary dwell", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
+    try {
+      const first = "**Tracing ownership**\nReading the pane reducer.";
+      const { container, onStop, rerender } = renderState({
+        streamingReasoning: first,
+        streamingChannel: "reasoning",
+      });
+      const summary = container.querySelector<HTMLElement>(
+        '[data-thinking-state="live"] > summary',
+      );
+      if (!summary) throw new Error("Expected a live thinking strip.");
+      const entering = (): Element | null =>
+        summary.querySelector(".turn-thinking-line > .is-entering");
+
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: `${first} Run tests.`,
+        streamingChannel: "reasoning",
+      }, onStop)} />);
+      act(() => {
+        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS);
+      });
+      expect(entering()).toHaveTextContent("Run tests.");
     } finally {
       vi.useRealTimers();
     }

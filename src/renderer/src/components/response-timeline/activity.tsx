@@ -584,11 +584,26 @@ export function shouldCollapseSuccessfulWorkOnSettlement(input: {
 
 export const THINKING_LINE_INTERVAL_MS = 1100;
 export const THINKING_LINE_MIN_LENGTH = 12;
+export const THINKING_LINE_FRAGMENT_INTERVAL_MS = 2_600;
 
 interface ThinkingLine {
   current: ReasoningLine;
   previous: ReasoningLine | null;
   at: number;
+}
+
+export function thinkingLineDwellMs(
+  next: ReasoningLine,
+  shown: ThinkingLine,
+): number {
+  const text = next.text.trim();
+  const unfinished = next.id !== shown.current.id
+    && text.length < THINKING_LINE_MIN_LENGTH
+    && !/[.!?\u2026]$/u.test(text)
+    && shown.current.text.trim().length > 0;
+  return unfinished
+    ? THINKING_LINE_FRAGMENT_INTERVAL_MS
+    : THINKING_LINE_INTERVAL_MS;
 }
 
 export function useThrottledReasoningLine(line: ReasoningLine): ThinkingLine {
@@ -599,18 +614,13 @@ export function useThrottledReasoningLine(line: ReasoningLine): ThinkingLine {
   }));
   useEffect(() => {
     if (line.id === shown.current.id && line.text === shown.current.text) return;
-    if (
-      line.id !== shown.current.id
-      && line.text.trim().length < THINKING_LINE_MIN_LENGTH
-      && shown.current.text.trim().length > 0
-    ) return;
     const timer = window.setTimeout(() => {
       setShown((state) => ({
         current: line,
         previous: line.id === state.current.id ? state.previous : state.current,
         at: Date.now(),
       }));
-    }, Math.max(0, shown.at + THINKING_LINE_INTERVAL_MS - Date.now()));
+    }, Math.max(0, shown.at + thinkingLineDwellMs(line, shown) - Date.now()));
     return () => window.clearTimeout(timer);
   }, [line, shown]);
   return shown;

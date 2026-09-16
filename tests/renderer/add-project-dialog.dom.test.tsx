@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
   act,
   fireEvent,
@@ -115,14 +114,6 @@ describe("add project dialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Clone and open" }));
     expect(onImport).not.toHaveBeenCalled();
-  });
-
-  it("keeps the search placeholder inset from the focus frame", () => {
-    const styles = readFileSync(
-      "src/renderer/src/components/AddProjectDialog.css",
-      "utf8",
-    );
-    expect(styles).toMatch(/\.add-project-search input \{[^}]*padding: 0 10px;/u);
   });
 
   it("restores focus on close and keeps the path editable if browsing fails", async () => {

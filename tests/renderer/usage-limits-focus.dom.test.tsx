@@ -1,6 +1,7 @@
 import { UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
 import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../src/shared/provider-usage-limits";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { UsageIndicator } from "../../src/renderer/src/components/UsageIndicator";
 import { UsageLimitsProvider } from "../../src/renderer/src/components/usage-limits-context";
@@ -9,6 +10,31 @@ import { usageAccount } from "../helpers/usage-limits";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import type { ServerEvent } from "../../src/shared/contracts";
 afterEach(() => vi.restoreAllMocks());
+it("accepts Escape at the first committed frame of cold and warm Limits dialogs", async () => {
+  const focusedAtCommit: boolean[] = [];
+  let dismissAtCommit = false;
+  const request = async (): Promise<ServerEvent> => ({ type: "request.result", requestId: "request", result: { kind: "usage.limits", snapshot: { accounts: [], sources: [], checkedAt: null } } });
+  render(<Profiler id="limits-focus" onRender={() => {
+    const dialog = screen.queryByRole("dialog", { name: "Provider usage limits" });
+    if (!dialog || !dismissAtCommit) return;
+    dismissAtCommit = false;
+    // Commit observers run after layout effects, before passive effects/paint.
+    // Deliver the same immediate keyboard action as the native Linux failure.
+    focusedAtCommit.push(dialog.contains(document.activeElement));
+    document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  }}><UsageLimitsProvider request={request} status="online"><UsageIndicator usage={null} rateLimits={[]} rateLimitState={{ freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false }} quotaSource="selected-route" mode="expanded" providerLabel="Codex" onModeChange={() => undefined} /></UsageLimitsProvider></Profiler>);
+  const trigger = screen.getByRole("button", { name: /Open usage and context/ });
+  for (let index = 0; index < 2; index += 1) {
+    trigger.focus(); fireEvent.click(trigger);
+    const shortcut = screen.getByRole("button", { name: "All provider limits" });
+    shortcut.focus();
+    dismissAtCommit = true;
+    await act(async () => { fireEvent.click(shortcut); await vi.dynamicImportSettled(); });
+    expect(focusedAtCommit).toEqual(Array.from({ length: index + 1 }, () => true));
+    expect(screen.queryByRole("dialog", { name: "Provider usage limits" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  }
+});
 it("keeps keyboard focus inside Limits after the shortcut's next animation frame", async () => {
   const frames: FrameRequestCallback[] = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { frames.push(callback); return frames.length; });

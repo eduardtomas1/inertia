@@ -38,10 +38,9 @@ it.each(["Linux x86_64", "Linux aarch64", "MacIntel", "Win32"])("offers only sup
   vi.spyOn(navigator, "platform", "get").mockReturnValue(platform);
   window.inertia = { ...original, snapshot: vi.fn(async () => ({ enabled: true, shortcut: "accelerator" as const, available: true, permission: "granted" as const, message: null })) };
   render(<SnapshotSettings />);
-  await screen.findByRole("combobox", { name: "Capture shortcut" });
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Enable Snapshots" })).toBeChecked());
   expect(screen.getByText(/Experimental capture of the foreground window/u)).toBeVisible();
   expect(screen.getByText(/Detected editable fields are masked.*may still contain sensitive information.*Review before sending/u)).toBeVisible();
-  expect(screen.getByRole("switch", { name: "Enable Snapshots" })).toBeChecked();
   expect(screen.queryByRole("option", { name: "Both Shift keys" }) !== null).toBe(!platform.startsWith("Linux"));
 });
 

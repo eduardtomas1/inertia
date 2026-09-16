@@ -40,6 +40,14 @@ The corrected source also passes the full Node 22 gate (9,140 tests).
 
 Three regression scenarios reproduce reference, segment and payload failures on `590e3c7f` (10 existing request-context tests passed; all 3 new tests failed). They pass after the repair, together with the existing Claude continuity tests: 2 files / 20 tests. The payload case checks exact-fit inclusion, one-byte overflow omission, a completely full selected request, and rejection when the selected request itself exceeds the limit.
 
+## CI follow-up: native reader input and deterministic animation setup
+
+Run `35104889387` failed the reconnect test on five platforms because its setup assigned `scrollTop` and dispatched a scroll event without reader input. This contradicts the new navigation contract: hydration and virtualizer scrolls must not cancel following. The same failure reproduces on macOS ARM64; replacing that setup with native wheel input passes while preserving the mounted-node, draft, attachment, tool-state and exact reader-anchor checks across a real supervised runtime restart.
+
+The macOS x64 background trace contains no reasoning animation during any of its three measurement phases. The renderer-only fixture had introduced a cold synthetic provider process solely to advertise reasoning levels. It now supplies that fixed model catalog at the existing snapshot transport boundary, like the model chooser fixture, and asserts the selected maximum before measuring. This leaves native focus/visibility, five-second idle samples, zero React/RAF work, animation time progression, mature-profile clocks and reduced-motion assertions intact. Provider discovery remains covered by its deterministic provider tests; this fixture no longer launches a provider control process.
+
+Final validation for the CI corrections: native Linux ARM64 passes all four scenarios (2-turn, 128-turn, mature 1,008-turn animation profiles and the supervised restart); native macOS ARM64 passes the restart scenario. Focused navigation/reasoning/history tests pass 38/38; the recovery review recheck passes 20/20. Full Node 22 `npm run check` passes 856 files / 9,140 tests, with 144 expected skips and all quality/build/bundle gates. Production/provider source is unchanged by these fixture corrections; the prior 1,367-test portable result applies. Fresh hosted Windows/macOS/Linux validation is still required.
+
 ## Changed files
 
 - `docs/pr-evidence/chat-input-and-continuity/renderer-bundle.json`
@@ -66,6 +74,7 @@ Three regression scenarios reproduce reference, segment and payload failures on 
 - `src/server/persistence/transcript-repository.ts`
 - `src/server/runtime/turns/request-context.ts`
 - `src/server/runtime/turns/turn-request-preparation.ts`
+- `tests/e2e/chat-reload-stability.spec.ts`
 - `tests/e2e/chat-scroll-memory.spec.ts`
 - `tests/e2e/composer-skills.spec.ts`
 - `tests/e2e/renderer-background.spec.ts`

@@ -7,23 +7,6 @@ import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
 import { seedBackgroundHistoryProfile } from "../helpers/renderer-background-history";
 
-// Advertise the selected level explicitly: maximum reasoning is now based on
-// the exact model catalog, rather than an arbitrary saved "ultra" string.
-const reasoningCatalog = `
-if (process.argv[2] === "--help") { process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n"); process.exit(0); }
-const send = (id, result) => process.stdout.write(JSON.stringify({ id, result }) + "\\n");
-require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
-  const message = JSON.parse(line);
-  if (message.method === "initialize") send(message.id, { userAgent: "background-catalog-fixture" });
-  if (message.method === "model/list") send(message.id, { data: [{
-    model: "background-model", displayName: "Background model", isDefault: true, inputModalities: ["text"],
-    supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }, { reasoningEffort: "ultra", description: "Maximum" }],
-    defaultReasoningEffort: "high",
-  }], nextCursor: null });
-  if (message.method === "account/rateLimits/read") send(message.id, { rateLimits: null, rateLimitsByLimitId: null });
-});
-`;
-
 declare global {
   interface Window {
     __backgroundCounters: { reactCommits: number; rafCallbacks: number; intervalCallbacks: number; rendererInjected: boolean; lastActivityAt: number };
@@ -147,7 +130,6 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
   let seedDurationMs = 0;
   const fixture = await createAppFixture({
     name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
-    codexAppServerSource: reasoningCatalog,
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const startedAt = performance.now();
       const seeded = await test.step("Seed the complete background history profile", () =>
@@ -203,6 +185,28 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
         else throw new Error("The background fixture expects function interval callbacks.");
       }, delay) });
     });
+    // This fixture measures renderer motion, not provider discovery. Project a
+    // fixed catalog into every snapshot so cold control-process discovery cannot
+    // remove the selected maximum while idle/focus measurements are running.
+    await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:/u, (socket) => {
+      socket.connectToServer().onMessage((message) => {
+        const frame = JSON.parse(String(message)) as ServerEvent;
+        const event = frame.type === "runtime.event" ? frame.event : frame;
+        if (event.type === "server.welcome" || event.type === "snapshot.updated") {
+          const provider = event.snapshot.providers.find(({ id }) => id === "codex");
+          if (provider) provider.models = [{
+            id: "background-model", label: "Background model", description: "Renderer motion fixture",
+            isDefault: true, inputModalities: ["text"],
+            reasoningOptions: [
+              { value: "high", label: "High", description: "High reasoning" },
+              { value: "ultra", label: "Maximum", description: "Maximum reasoning" },
+            ],
+            defaultReasoningEffort: "high",
+          }];
+        }
+        socket.send(JSON.stringify(frame));
+      });
+    });
     await page.reload();
     const focusSession = await page.context().newCDPSession(page);
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });
@@ -221,6 +225,7 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       await page.locator(".subagent-disclosure summary").click();
       await expect(page.locator(".subagent-disclosure")).toHaveAttribute("open", "");
     }
+    await expect(page.locator(".composer")).toHaveAttribute("data-maximum-reasoning", "true");
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);

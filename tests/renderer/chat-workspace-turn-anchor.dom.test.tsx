@@ -13,6 +13,7 @@ import type {
   TurnGitArtifact,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { createStreamingAgentStore } from "../../src/renderer/src/hooks/useStreamingAgentState";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../src/renderer/src/utils/transcriptNavigation";
@@ -21,6 +22,12 @@ import {
   COMPOSER_STOP_RESTORE_EVENT,
   type ComposerStopRestoreDetail,
 } from "../../src/renderer/src/utils/composerStopRestore";
+
+function streamingSource(text: string) {
+  const store = createStreamingAgentStore();
+  store.update([text, "", null]);
+  return store;
+}
 
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
@@ -288,8 +295,6 @@ function workspaceProps(
     plans: [],
     checkpoints: [],
     turnGitArtifacts: [],
-    streamingText: "",
-    streamingReasoning: "",
     usage: null,
     skills: [],
     skillsCapability: null,
@@ -932,12 +937,12 @@ describe("draft turn anchoring", () => {
     const scrollTo = vi.fn();
     HTMLElement.prototype.scrollTo = scrollTo;
     const props = workspaceProps(activeConversation, async () => null);
-    const view = render(<ChatWorkspace {...props} streamingText="" />);
+    const view = render(<ChatWorkspace {...props} streaming={streamingSource("")} />);
     await screen.findByTestId("turn-anchor-projection");
     scheduled.clear();
     scrollTo.mockClear();
 
-    view.rerender(<ChatWorkspace {...props} streamingText="settled answer" />);
+    view.rerender(<ChatWorkspace {...props} streaming={streamingSource("settled answer")} />);
     expect(scheduled.size).toBeGreaterThan(0);
     const staleFrames = [...scheduled.values()];
     const callback = timelineCallbacks.get(activeConversation.id)!;
@@ -1024,7 +1029,7 @@ describe("draft turn anchoring", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Settle projected turn anchor",
     }));
-    view.rerender(<ChatWorkspace {...props} streamingText="new turn output" />);
+    view.rerender(<ChatWorkspace {...props} streaming={streamingSource("new turn output")} />);
     const contentFrames = [...scheduled.values()];
     act(() => {
       for (const frame of contentFrames) frame(0);
@@ -1238,7 +1243,7 @@ describe("transcript following motion", () => {
     view.rerender(
       <ChatWorkspace
         {...props}
-        streamingText="partial response"
+        streaming={streamingSource("partial response")}
         goal={{
           workflow,
           loading: false,
@@ -1263,7 +1268,7 @@ describe("transcript following motion", () => {
       return 1;
     });
     const props = workspaceProps(activeConversation, async () => null);
-    const view = render(<ChatWorkspace {...props} streamingText="partial" />);
+    const view = render(<ChatWorkspace {...props} streaming={streamingSource("partial")} />);
     await screen.findByTestId("turn-anchor-projection");
     scrollTo.mockClear();
 
@@ -1280,7 +1285,7 @@ describe("transcript following motion", () => {
       <ChatWorkspace
         {...props}
         messages={[terminalMessage]}
-        streamingText=""
+        streaming={streamingSource("")}
       />,
     );
     await waitFor(() => expect(scrollTo).toHaveBeenCalled());
@@ -1316,7 +1321,7 @@ describe("transcript following motion", () => {
         {...props}
         messages={[terminalMessage]}
         turnGitArtifacts={[settledArtifact]}
-        streamingText=""
+        streaming={streamingSource("")}
       />,
     );
     await waitFor(() => expect(scrollTo).toHaveBeenCalled());

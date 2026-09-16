@@ -5,11 +5,18 @@ usage indicator also offers **All provider limits**, which opens the same
 cached account information without sending a message or running an agent.
 Use **Refresh limits** to request new observations.
 
-Each provider shows its reported windows, remaining percentages, reset time
-and countdown. Expand an account row or select a numbered quota segment to
-inspect its plan, sources, freshness and banked reset credits. Email addresses
-stay hidden until you choose **Reveal**, or deliberately open a reset
-confirmation. Details work with keyboard and touch; no hover is required.
+Each provider is one row with its reported windows, remaining percentages and
+countdowns; equivalent accounts are averaged. Expand the row to see each account
+in the same columns, then select an account to inspect its plan, sources,
+freshness and banked reset credits. Email addresses stay hidden until you choose
+**Reveal**, or deliberately open a reset confirmation. Details work with keyboard
+and touch; no hover is required.
+
+The composer usage popover repeats the selected account's quota with the same
+health colours. When the last cached Limits reading shows another ready account
+of that provider with more room than the selected account's tightest window, the
+popover names it and says how old that reading is. It reads the cache only; it
+never refreshes providers.
 
 An unavailable measurement is never treated as zero. A reset countdown reaching
 zero does not refill a quota bar: refresh to obtain the provider's answer.

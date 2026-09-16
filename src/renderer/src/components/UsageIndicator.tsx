@@ -1,5 +1,5 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Clock3, EyeOff, X } from "lucide-react";
 
 import type {
@@ -18,7 +18,10 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
+const UsageAccountsHint = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageAccountsHint }));
+
 type UsageIndicatorProps = {
+  providerId?: string;
   usage: ThreadUsageSnapshot | null;
   rateLimits: ProviderRateLimit[];
   rateLimitState: ProviderMetadataFieldState;
@@ -220,6 +223,7 @@ function ContextRing({
 }
 
 export function UsageIndicator({
+  providerId,
   usage,
   rateLimits,
   rateLimitState,
@@ -255,6 +259,10 @@ export function UsageIndicator({
         lastAttemptedAt: null,
         refreshing: false,
       };
+  const tightestQuota = scopedRateLimits.reduce<number | null>((lowest, limit) => {
+    const remaining = displayPercent(limit.remainingPercent);
+    return remaining !== null && (lowest === null || remaining < lowest) ? remaining : lowest;
+  }, null);
 
   const closePopover = useCallback((restoreFocus: boolean): void => {
     setOpen(false);
@@ -360,23 +368,25 @@ export function UsageIndicator({
           </header>
 
           <div className="usage-popover-content">
-            {limitsContext && <button type="button" className="usage-limits-shortcut" onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}>All provider limits</button>}
             <section className="usage-popover-section" aria-labelledby={`${reactId}-context-heading`}>
               <div className="usage-popover-section-heading">
                 <strong id={`${reactId}-context-heading`}>Context</strong>
                 <span className={`usage-quality is-${context.quality}`}>{context.quality}</span>
               </div>
-              <div className="usage-popover-value">
-                <strong>{context.valueLabel}</strong>
-                {detail && <span>{detail}</span>}
-                {usage?.compactsAutomatically !== null
-                  && usage?.compactsAutomatically !== undefined
-                  && (
-                    <small>
-                      Automatic compaction {usage.compactsAutomatically ? "enabled" : "disabled"}
-                    </small>
-                  )}
-                {contextUpdated && <small>{contextUpdated}</small>}
+              <div className="usage-popover-context">
+                <ContextRing context={context} quotaRefreshing={false} />
+                <div className="usage-popover-value">
+                  <strong>{context.valueLabel}</strong>
+                  {detail && <span>{detail}</span>}
+                  {usage?.compactsAutomatically !== null
+                    && usage?.compactsAutomatically !== undefined
+                    && (
+                      <small>
+                        Automatic compaction {usage.compactsAutomatically ? "enabled" : "disabled"}
+                      </small>
+                    )}
+                  {contextUpdated && <small>{contextUpdated}</small>}
+                </div>
               </div>
             </section>
 
@@ -424,7 +434,11 @@ export function UsageIndicator({
                     const remaining = displayPercent(limit.remainingPercent);
                     const reset = dateLabel(limit.resetsAt, "Resets");
                     return (
-                      <div className="usage-popover-quota" key={limit.id}>
+                      <div
+                        className="usage-popover-quota"
+                        data-tone={remaining === null ? undefined : remaining < 20 ? "critical" : remaining < 50 ? "low" : "ok"}
+                        key={limit.id}
+                      >
                         <span><strong>{quotaWindowLabel(limit)}</strong><b>{remaining === null ? "Unavailable" : `${Math.round(remaining)}% left`}</b></span>
                         {remaining !== null && (
                           <span
@@ -450,6 +464,11 @@ export function UsageIndicator({
                     : quotaStateDetail(scopedRateLimitState)}
                 </p>
               )}
+              {open && providerId && tightestQuota !== null && limitsContext && (
+                <Suspense fallback={null}>
+                  <UsageAccountsHint providerId={providerId} remaining={tightestQuota} />
+                </Suspense>
+              )}
               {hasQuota && (
                 <p className="usage-popover-quality-detail">{quotaStateDetail(scopedRateLimitState)}</p>
               )}
@@ -457,6 +476,15 @@ export function UsageIndicator({
           </div>
 
           <footer className="usage-popover-footer">
+            {limitsContext && (
+              <button
+                type="button"
+                className="usage-limits-shortcut"
+                onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}
+              >
+                All provider limits
+              </button>
+            )}
             <button
               type="button"
               className="usage-hide-button"

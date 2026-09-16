@@ -1,13 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Sparkles } from "lucide-react";
-import clsx from "clsx";
+import { useEffect, useRef } from "react";
+import { RefreshCw } from "lucide-react";
 
 import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
 } from "@shared/contracts";
-import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
-import { composerSkillsReadiness } from "../../utils/composerToolReadiness";
 import type { ComposerMenuController } from "./useComposerMenus";
 import "./ComposerSkillsMenu.css";
 
@@ -40,192 +37,91 @@ export function ComposerSkillsMenu({
   onList,
   onInsert,
 }: ComposerSkillsMenuProps): React.JSX.Element | null {
-  const searchId = `${listboxId}-search`;
-  const searchRef = useRef<HTMLInputElement>(null);
-  const autoOpenedRef = useRef(false);
-  const [query, setQuery] = useState("");
-  const {
-    menu,
-    toggleMenu,
-    dismissMenu,
-    setMenuTrigger,
-    setMenuPopover,
-  } = menuController;
-  const menuOpen = menu === "skills";
-
-  const browsing = completion === null;
-  const needle = query.trim().toLowerCase();
-  const visibleSkills = !browsing
-    ? skills.filter((skill) => skill.enabled && skill.name
-      .toLowerCase().startsWith(completion))
-    : !needle
-      ? skills
-      : skills.filter((skill) =>
-      `${skill.name} ${skill.shortDescription ?? skill.description}`
-        .toLowerCase()
-        .includes(needle));
+  const activeOption = useRef<HTMLButtonElement>(null);
+  const openedQuery = useRef<string | null>(null);
+  const discoveryRequested = useRef(false);
+  const { menu, toggleMenu, dismissMenu, setMenuPopover } = menuController;
+  const available = Boolean(capability?.available) && !disabled && !running;
+  const showCompletion = completion !== null && available;
+  const visibleSkills = skills.filter((skill) => skill.enabled
+    && skill.name.toLowerCase().startsWith(completion ?? ""));
 
   useEffect(() => {
-    if (menuOpen) return;
-    setQuery("");
-  }, [menuOpen]);
-
-  const showCompletion = !browsing
-    && visibleSkills.length > 0
-    && Boolean(capability?.available)
-    && !disabled
-    && !running;
-  useEffect(() => {
-    if (showCompletion && !autoOpenedRef.current && !menuOpen) {
-      autoOpenedRef.current = true;
-      toggleMenu("skills");
-    } else if (!showCompletion && autoOpenedRef.current) {
-      autoOpenedRef.current = false;
-      if (menuOpen) dismissMenu("context-change");
-    }
-  }, [dismissMenu, menuOpen, showCompletion, toggleMenu]);
-  if (!capability) return null;
-  const readiness = composerSkillsReadiness({
-    capability,
-    composerDisabled: disabled,
-    running,
-    loading,
-  });
-
-  const open = (): void => {
-    if (!readiness.interactive) return;
-    if (!menuOpen && skills.length === 0 && !loading) {
-      void onList(false).catch(() => undefined);
-    }
-    if (!menuOpen) toggleMenu("skills");
-    window.requestAnimationFrame(() => searchRef.current?.focus());
-  };
-  const toggle = (): void => {
-    if (menuOpen) {
-      toggleMenu("skills");
+    if (!showCompletion) {
+      openedQuery.current = null;
+      discoveryRequested.current = false;
+      if (menu === "skills") dismissMenu("context-change");
       return;
     }
-    open();
-  };
+    // Escape/outside dismissal holds for the current query. Editing it opens
+    // suggestions again, without taking focus away from the composer.
+    if (openedQuery.current !== completion) {
+      openedQuery.current = completion;
+      if (menu !== "skills") toggleMenu("skills");
+    }
+    if (!discoveryRequested.current && !loading && skills.length === 0 && !error) {
+      discoveryRequested.current = true;
+      void onList(false).catch(() => undefined);
+    }
+  }, [completion, dismissMenu, error, loading, menu, onList, showCompletion, skills.length, toggleMenu]);
+
+  useEffect(() => {
+    activeOption.current?.scrollIntoView({ block: "nearest" });
+  }, [activeSkillId, menu]);
+
+  if (!showCompletion || menu !== "skills") return null;
   return (
     <div className="popover-anchor composer-skills-control">
-      <button
-        ref={(node) => setMenuTrigger("skills", node)}
-        type="button"
-        className={clsx(
-          "composer-pill",
-          "composer-skills-trigger",
-          menuOpen && "is-active",
-        )}
-        aria-label={!readiness.interactive
-          ? `${COMPOSER_LABELS.skills} unavailable: ${readiness.reason}`
-          : `Insert a ${capability.label.toLowerCase()} invocation`}
-        aria-haspopup={readiness.interactive ? "menu" : undefined}
-        aria-controls={readiness.interactive ? listboxId : undefined}
-        aria-expanded={readiness.interactive ? menuOpen : undefined}
-        aria-disabled={!readiness.interactive}
-        data-readiness={readiness.state}
-        title={readiness.reason ?? "Insert a $skill-name invocation"}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-          event.preventDefault();
-          open();
-        }}
-        onClick={toggle}
+      <div
+        ref={(node) => setMenuPopover("skills", node)}
+        className="composer-popover composer-skills-popover"
       >
-        <Sparkles size={14} aria-hidden="true" />
-        <span>{COMPOSER_LABELS.skills}</span>
-      </button>
-      {readiness.interactive && menuOpen && (
-        <div
-          ref={(node) => setMenuPopover("skills", node)}
-          id={listboxId}
-          className="composer-popover composer-skills-popover"
-          role={browsing ? "menu" : "listbox"}
-          aria-label={browsing
-            ? `Insert ${capability.label}`
-            : "Skill suggestions"}
-        >
-          <header>
-            <span>
-              <strong>Invoke a skill</strong>
-              <small>Inserts the exact <code>$skill-name</code> token.</small>
-            </span>
-            {browsing && <button
+        <header>
+          <span>
+            <strong>Skills</strong>
+            <small>Choose with ↑ ↓, insert with Tab or Enter.</small>
+          </span>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Refresh skills"
+            disabled={loading}
+            onClick={() => void onList(true).catch(() => undefined)}
+          >
+            <RefreshCw size={14} className={loading ? "is-spinning" : undefined} aria-hidden="true" />
+          </button>
+        </header>
+        {error && <p className="composer-skills-error" role="alert">{error}</p>}
+        {loading && <p className="composer-skills-empty" role="status">Discovering skills…</p>}
+        {!error && !loading && visibleSkills.length === 0 && (
+          <p className="composer-skills-empty" role="status">
+            {skills.some((skill) => skill.enabled)
+              ? "No skills match. Edit the name or press Escape to keep typing."
+              : "No enabled skills were reported for this project."}
+          </p>
+        )}
+        <div id={listboxId} className="composer-skills-list" role="listbox" aria-label="Skill suggestions">
+          {visibleSkills.map((skill) => (
+            <button
+              ref={skill.id === activeSkillId ? activeOption : undefined}
+              id={`${listboxId}-${skill.id}`}
               type="button"
-              role="menuitem"
-              tabIndex={-1}
-              className="icon-button"
-              aria-label={`Refresh ${capability.label}`}
-              disabled={loading}
-              onClick={() => void onList(true).catch(() => undefined)}
+              role="option"
+              aria-selected={skill.id === activeSkillId}
+              tabIndex={0}
+              key={skill.id}
+              onClick={() => {
+                onInsert(skill);
+                dismissMenu("context-change");
+              }}
+              title={`Insert $${skill.name}`}
             >
-              <RefreshCw
-                size={14}
-                className={loading ? "is-spinning" : undefined}
-                aria-hidden="true"
-              />
-            </button>}
-          </header>
-          {browsing && <label className="composer-skills-search" htmlFor={searchId}>
-            <input
-              ref={searchRef}
-              id={searchId}
-              name="composer-skill-search"
-              type="search"
-              aria-label="Find a skill"
-              value={query}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Find a skill…"
-              onChange={(event) => setQuery(event.currentTarget.value)}
-            />
-          </label>}
-          {error && <p className="composer-skills-error" role="alert">{error}</p>}
-          {!error && loading && skills.length === 0 && (
-            <p className="composer-skills-empty" role="status">
-              Discovering skills…
-            </p>
-          )}
-          {!error && !loading && skills.length === 0 && (
-            <p className="composer-skills-empty">
-              No enabled skills were reported for this project.
-            </p>
-          )}
-          {!error && skills.length > 0 && visibleSkills.length === 0 && (
-            <p className="composer-skills-empty">No skills match this search.</p>
-          )}
-          <div className="composer-skills-list">
-            {visibleSkills.map((skill) => (
-              <button
-                id={browsing
-                  ? undefined
-                  : `${listboxId}-${skill.id}`}
-                type="button"
-                role={browsing ? "menuitem" : "option"}
-                aria-selected={browsing
-                  ? undefined
-                  : skill.id === activeSkillId}
-                disabled={!skill.enabled}
-                tabIndex={0}
-                key={skill.id}
-                onClick={() => {
-                  onInsert(skill);
-                  // Insertion hands focus back to the editor, so this action
-                  // must not run the menu's normal trigger-focus restoration.
-                  dismissMenu("context-change");
-                }}
-                title={skill.enabled ? `Insert $${skill.name}` : undefined}
-              >
-                <code translate="no">{`$${skill.name}`}</code>
-                <span>
-                  <small>{skill.shortDescription ?? skill.description}</small>
-                </span>
-              </button>
-            ))}
-          </div>
+              <code translate="no">{`$${skill.name}`}</code>
+              <span><small>{skill.shortDescription ?? skill.description}</small></span>
+            </button>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }

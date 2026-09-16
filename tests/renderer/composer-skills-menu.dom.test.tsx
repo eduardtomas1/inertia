@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useLayoutEffect, useRef } from "react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -58,7 +59,14 @@ function Harness(
   props: Omit<ComposerSkillsMenuProps, "menuController">,
 ): React.JSX.Element {
   const menuController = useComposerMenus();
-  return <ComposerSkillsMenu {...props} menuController={menuController} />;
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const { setMenuTrigger } = menuController;
+  useLayoutEffect(() => {
+    setMenuTrigger("skills", editor.current);
+    return () => setMenuTrigger("skills", null);
+  }, [setMenuTrigger]);
+  return <><textarea ref={editor} aria-label="Message" aria-controls={props.listboxId} />
+    <ComposerSkillsMenu {...props} menuController={menuController} /></>;
 }
 
 const defaults: Omit<ComposerSkillsMenuProps, "menuController"> = {
@@ -97,57 +105,30 @@ describe("ComposerSkillsMenu", () => {
     }
   });
 
-  it("keeps unavailable skills visible and explains the runtime reason", () => {
-    const reason = "This harness does not expose skills for this route.";
-    render(
-      <Harness
-        {...defaults}
-        capability={{
-          kind: "unavailable",
-          available: false,
-          label: "Skills unavailable",
-          reason,
-        }}
-      />,
-    );
-
-    const trigger = screen.getByRole("button", {
-      name: `Skills unavailable: ${reason}`,
-    });
-    expect(trigger).toHaveAttribute("aria-disabled", "true");
-    expect(trigger).toHaveAttribute("data-readiness", "unavailable");
-    expect(trigger).toHaveAttribute("title", reason);
-    fireEvent.click(trigger);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  it("has no skills button, and only opens suggestions for a typed dollar query", () => {
+    const view = render(<Harness {...defaults} />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    view.rerender(<Harness {...defaults} completion="" />);
+    expect(screen.getByRole("listbox", { name: "Skill suggestions" })).toBeInTheDocument();
   });
 
-  it("names the temporary reason when insertion is blocked during a turn", () => {
-    render(<Harness {...defaults} running />);
-    const trigger = screen.getByRole("button", {
-      name: /Skills unavailable: Skills can be changed after/u,
-    });
-    expect(trigger).toHaveAttribute("data-readiness", "blocked");
+  it.each([{ running: true }, { disabled: true }, {
+    capability: { kind: "unavailable" as const, available: false as const, label: "Skills unavailable" as const, reason: "Unsupported route" },
+  }])("does not discover or insert skills for a blocked route: %j", (blocked) => {
+    const onList = vi.fn(async () => undefined);
+    render(<Harness {...defaults} {...blocked} skills={[]} completion="" onList={onList} />);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onList).not.toHaveBeenCalled();
   });
 
   it("uses instance-scoped popup relationships in split composers", () => {
-    render(
-      <>
-        <Harness {...defaults} listboxId="split-skills-primary" />
-        <Harness {...defaults} listboxId="split-skills-secondary" />
-      </>,
-    );
-    const triggers = screen.getAllByRole("button", {
-      name: "Insert a codex skills invocation",
-    });
-    fireEvent.click(triggers[0]!);
-    fireEvent.click(triggers[1]!);
-
-    const controls = triggers.map((trigger) => trigger.getAttribute("aria-controls"));
-    expect(controls[0]).not.toBe(controls[1]);
-    for (const id of controls) {
-      expect(id).not.toBeNull();
-      expect(document.getElementById(id ?? "")).not.toBeNull();
+    render(<><Harness {...defaults} completion="" listboxId="primary-skills" />
+      <Harness {...defaults} completion="" listboxId="secondary-skills" /></>);
+    for (const editor of screen.getAllByRole("textbox")) {
+      expect(document.getElementById(editor.getAttribute("aria-controls")!)).not.toBeNull();
     }
+    expect(screen.getAllByRole("listbox")).toHaveLength(2);
   });
 
   it("positions the generated Skills popover inside its split pane", async () => {
@@ -155,7 +136,7 @@ describe("ComposerSkillsMenu", () => {
       <section className="conversation-split-pane">
         <div className="chat-workspace">
           <div className="composer">
-            <Harness {...defaults} listboxId="split-skills-generated" />
+            <Harness {...defaults} completion="" listboxId="split-skills-generated" />
           </div>
         </div>
       </section>,
@@ -166,9 +147,7 @@ describe("ComposerSkillsMenu", () => {
     const workspace = document.querySelector<HTMLElement>(
       ".chat-workspace",
     )!;
-    const trigger = screen.getByRole("button", {
-      name: "Insert a codex skills invocation",
-    });
+    const trigger = screen.getByRole("textbox", { name: "Message" });
     vi.spyOn(window, "innerWidth", "get").mockReturnValue(1_180);
     vi.spyOn(window, "innerHeight", "get").mockReturnValue(640);
     vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(rect({
@@ -190,10 +169,7 @@ describe("ComposerSkillsMenu", () => {
       left: 220,
     }));
 
-    fireEvent.click(trigger);
-    const popover = screen.getByRole("menu", {
-      name: "Insert Codex skills",
-    });
+    const popover = screen.getByRole("listbox", { name: "Skill suggestions" }).parentElement!;
     vi.spyOn(popover, "getBoundingClientRect").mockImplementation(() => {
       const width = Number.parseFloat(popover.style.maxWidth) || 300;
       const [shiftX = 0, shiftY = 0] = popover.style.translate
@@ -211,7 +187,7 @@ describe("ComposerSkillsMenu", () => {
       scrollHeight: { configurable: true, value: 200 },
     });
 
-    expect(trigger).toHaveAttribute("aria-controls", popover.id);
+    expect(trigger).toHaveAttribute("aria-controls", "split-skills-generated");
     await waitFor(() => expect(popover).toHaveAttribute(
       "data-composer-popover-positioned",
       "true",
@@ -221,42 +197,26 @@ describe("ComposerSkillsMenu", () => {
     expect(positioned.right).toBeLessThanOrEqual(252);
   });
 
-  it("searches, navigates, and inserts the exact canonical token", async () => {
-    const user = userEvent.setup();
-    const onInsert = vi.fn();
-    render(<Harness {...defaults} onInsert={onInsert} />);
-    const trigger = screen.getByRole("button", {
-      name: "Insert a codex skills invocation",
-    });
-    trigger.focus();
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    const search = screen.getByRole("searchbox", { name: /Find a skill/u });
-    await waitFor(() => expect(search).toHaveFocus());
-    fireEvent.change(search, { target: { value: "skill 1 summary" } });
-    expect(screen.queryByRole("menuitem", { name: /skill-0/i }))
-      .not.toBeInTheDocument();
-    const item = screen.getByRole("menuitem", { name: /\$skill-1/i });
-    await user.tab();
-    expect(item).toHaveFocus();
-    fireEvent.click(item);
-    expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({
-      name: "skill-1",
-    }));
-    expect(screen.queryByRole("menu", { name: "Insert Codex skills" }))
-      .not.toBeInTheDocument();
+  it("discovers an empty catalog on dollar entry once and offers retry after failure", () => {
+    const onList = vi.fn(async () => undefined);
+    const view = render(<Harness {...defaults} skills={[]} completion="" onList={onList} />);
+    expect(onList).toHaveBeenCalledExactlyOnceWith(false);
+    view.rerender(<Harness {...defaults} skills={[]} completion="s" onList={onList} error="Discovery failed" />);
+    expect(onList).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("Discovery failed");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh skills" }));
+    expect(onList).toHaveBeenLastCalledWith(true);
   });
 
-  it("discovers skills when the empty menu opens from the keyboard", () => {
-    const onList = vi.fn(async () => undefined);
-    render(<Harness {...defaults} skills={[]} onList={onList} />);
-    const trigger = screen.getByRole("button", {
-      name: "Insert a codex skills invocation",
-    });
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-
-    expect(onList).toHaveBeenCalledWith(false);
-    expect(screen.getByRole("menu", { name: "Insert Codex skills" }))
-      .toBeInTheDocument();
+  it("keeps Escape dismissed until the query changes and shows no-match feedback", () => {
+    const view = render(<Harness {...defaults} completion="skill" />);
+    const editor = screen.getByRole("textbox");
+    editor.focus();
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    view.rerender(<Harness {...defaults} completion="missing" />);
+    expect(screen.getByRole("status")).toHaveTextContent("No skills match");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("keeps autocomplete options keyboard reachable and natively activatable", async () => {
@@ -264,7 +224,6 @@ describe("ComposerSkillsMenu", () => {
     const onInsert = vi.fn();
     render(
       <div className="composer">
-        <textarea aria-label="Message" defaultValue="$skill" />
         <Harness {...defaults} completion="skill" onInsert={onInsert} />
       </div>,
     );

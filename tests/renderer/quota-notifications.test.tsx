@@ -126,6 +126,44 @@ describe("provider quota notifications", () => {
     expect(nextWindow.notices.map(({ threshold }) => threshold)).toEqual([25]);
   });
 
+  it("keeps notices acknowledged across reloads and incomplete reset metadata", () => {
+    let state = emptyState;
+    for (const [reset, remaining, expected] of [
+      ["2026-07-29T10:00:00.000Z", 24, [25]],
+      ["", 24, []],
+      ["2026-07-29T10:00:00.000Z", 24, []],
+      ["", 14, [15]],
+      ["2026-07-29T10:00:00.000Z", 14, []],
+      ["2026-07-29T15:00:00.000Z", 24, [25]],
+    ] as const) {
+      const result = evaluateQuotaNotifications([
+        provider("codex", [limit("primary", remaining, 300, reset)]),
+      ], parseQuotaNotificationState(serializeQuotaNotificationState(state)));
+      expect(result.notices.map(({ threshold }) => threshold)).toEqual(expected);
+      state = result.state;
+    }
+  });
+
+  it("does not repeat a notice when the first reset time arrives later", () => {
+    const first = evaluateQuotaNotifications([
+      provider("claude", [limit("primary", 4, 300, "")]),
+    ], emptyState);
+    const resolved = evaluateQuotaNotifications([
+      provider("claude", [limit("primary", 4, 300)]),
+    ], first.state);
+    expect(resolved.notices).toEqual([]);
+    const replenished = evaluateQuotaNotifications([
+      provider("claude", [limit("primary", 100, 300, "")]),
+    ], resolved.state);
+    const newlyLow = evaluateQuotaNotifications([
+      provider("claude", [limit("primary", 24, 300, "")]),
+    ], replenished.state);
+    expect(newlyLow.notices.map(({ threshold }) => threshold)).toEqual([25]);
+    expect(evaluateQuotaNotifications([
+      provider("claude", [limit("primary", 24, 300, "2026-07-29T15:00:00.000Z")]),
+    ], newlyLow.state).notices).toEqual([]);
+  });
+
   it("isolates provider and limit identities across five-hour and weekly windows", () => {
     const result = evaluateQuotaNotifications([
       provider("codex", [

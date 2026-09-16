@@ -27,6 +27,7 @@ import {
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
 export const MAX_EXECUTION_PAYLOAD_BYTES = 240 * 1024;
+export const RECOVERED_PROVIDER_HISTORY_LABEL = "Visible history recovered after provider update";
 export const MAX_EXECUTION_CONTEXT_BLOB_BYTES = 64 * 1024;
 
 const MAX_VISIBLE_MESSAGE_BYTES = 64 * 1024;
@@ -119,6 +120,8 @@ export interface AssembleTurnRequestInput {
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
   internalInstructions?: readonly HiddenProviderInstruction[];
+  /** Privileged same-chat recovery after a verified native provider update. */
+  continuationHistory?: { content: string; truncated: boolean };
 }
 
 interface MaterializedContext {
@@ -625,6 +628,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
       content: snapshotPromptContext([attachment]), truncated: attachment.snapshot!.accessibility.truncated,
     }))],
   );
+  if (input.continuationHistory) {
+    contexts.push({
+      kind: "attachment",
+      label: RECOVERED_PROVIDER_HISTORY_LABEL,
+      content: boundedText(input.continuationHistory.content, "Continuation history", MAX_EXECUTION_CONTEXT_BLOB_BYTES),
+      truncated: input.continuationHistory.truncated,
+    });
+  }
+  if (contexts.length > MAX_EXECUTION_CONTEXT_REFERENCES) {
+    throw new Error(`Execution context exceeds the ${MAX_EXECUTION_CONTEXT_REFERENCES} reference limit.`);
+  }
   const { imagePaths, imageBytes } = validateImages(
     input.attachments ?? [],
     input.imagePaths,
@@ -686,7 +700,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   const sections = [visibleContent];
   if (providerContexts.length > 0) {
     sections.push([
-      "Structured execution context (attachments selected by the user; not user-authored chat prose):",
+      "Structured execution context (reference material; not new user-authored chat prose):",
       JSON.stringify({ version: 1, attachments: providerContexts }),
     ].join("\n"));
   }

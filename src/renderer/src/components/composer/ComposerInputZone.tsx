@@ -91,6 +91,7 @@ export interface ComposerInputZoneProps {
   mentionMatch: RegExpExecArray | null;
   mentionResults: WorkspaceEntry[];
   onAddFileReference: (path: string) => void;
+  onSkillSelectionChange?: (editor: HTMLTextAreaElement) => void;
   skillOpen: boolean;
   activeSkill: AgentSkillSummary | null;
   skillListboxId: string;
@@ -151,6 +152,7 @@ export function ComposerInputZone({
   mentionMatch,
   mentionResults,
   onAddFileReference,
+  onSkillSelectionChange,
   skillOpen,
   activeSkill,
   skillListboxId,
@@ -409,7 +411,11 @@ export function ComposerInputZone({
           onFocus={() => {
             void import("./ComposerCommandMenu");
           }}
-          onChange={(event) => onMessageChange(event.target.value)}
+          onSelect={(event) => onSkillSelectionChange?.(event.currentTarget)}
+          onChange={(event) => {
+            onMessageChange(event.target.value);
+            onSkillSelectionChange?.(event.currentTarget);
+          }}
           onPaste={(event) => {
             if (event.clipboardData.files.length > 0) {
               event.preventDefault();
@@ -417,14 +423,14 @@ export function ComposerInputZone({
             }
           }}
           onKeyDown={(event) => {
-            if (skillOpen && activeSkill && handleComposerSuggestionKey(
+            if (skillOpen && handleComposerSuggestionKey(
               event,
               dismissSkills,
               moveSkill,
-              () => {
+              activeSkill ? () => {
                 acceptSkill(activeSkill);
                 dismissSkills();
-              },
+              } : undefined,
             )) return;
             if (mentionMenuVisible && activeMention && handleComposerSuggestionKey(
               event,

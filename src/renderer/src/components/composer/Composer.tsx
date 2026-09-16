@@ -1,3 +1,4 @@
+import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
@@ -181,6 +182,11 @@ export const Composer = memo(function Composer({
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
+  const { setMenuTrigger } = menuController;
+  useLayoutEffect(() => {
+    setMenuTrigger("skills", textareaRef.current);
+    return () => setMenuTrigger("skills", null);
+  }, [setMenuTrigger]);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
     reason: "action" | "escape" | "outside" | "owner-change",
@@ -1017,6 +1023,7 @@ export const Composer = memo(function Composer({
         )}
         aria-label="Message composer"
         aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
+        data-maximum-reasoning={isMaximumReasoning(selectedModel, selectedReasoning) ? "true" : undefined}
         data-primary-action={primaryAction}
         data-disabled={disabled || conversationUpdatePending}
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}

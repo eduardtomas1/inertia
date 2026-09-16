@@ -213,7 +213,7 @@ function emit(event: ServerEvent): void {
   for (const listener of harness.listeners) listener(event);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   harness.listeners.clear();
   harness.connection = {
     snapshot,
@@ -259,6 +259,8 @@ beforeEach(() => {
       },
     }),
   });
+  // Measure streaming renders after the real lazy transcript module is ready.
+  await import("../../src/renderer/src/components/ResponseTimeline");
 });
 
 afterEach(() => {

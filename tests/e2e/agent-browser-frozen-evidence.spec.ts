@@ -25,6 +25,26 @@ async function command(command: AgentBrowserCommand): Promise<AgentBrowserResult
   }, { id: conversationId, command });
 }
 
+async function showBrowserAndWaitForFrame(targetUrl: string): Promise<void> {
+  await app.electronApp.evaluate(async ({ BrowserWindow, webContents }, previewUrl) => {
+    for (const window of BrowserWindow.getAllWindows()) window.show();
+    const contents = webContents.getAllWebContents().find((entry) => entry.getURL() === previewUrl);
+    if (!contents) throw new Error("Missing Browser tab");
+    // show() returns before the native surface is ready. Let Chromium present
+    // a visible frame before the screenshot command freezes its lifecycle.
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Browser did not present a visible frame")), 5000);
+      void contents.executeJavaScript(`new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.visibilityState)));
+      })`).then((visibility: unknown) => {
+        clearTimeout(timer);
+        if (visibility !== "visible") reject(new Error("Browser frame was not visible"));
+        else resolve();
+      }, (error: unknown) => { clearTimeout(timer); reject(error); });
+    });
+  }, targetUrl);
+}
+
 test.beforeAll(async () => {
   server = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -76,9 +96,7 @@ test("captures the reported page while hidden and restores usable refs after res
     ]));
     // Pixel capture needs a compositor surface; show the window for the image.
     // The separate native Linux test proves the frozen-routing regression.
-    await app.electronApp.evaluate(({ BrowserWindow }) => {
-      for (const window of BrowserWindow.getAllWindows()) window.show();
-    });
+    await showBrowserAndWaitForFrame(`${url}?navigation=${index}`);
     const screenshot = await command({ action: "screenshot" });
     expect(screenshot, JSON.stringify(screenshot)).toMatchObject({ ok: true });
   }
@@ -118,9 +136,11 @@ test("recovers capture and fresh tabs after a frozen privacy response times out"
   expect(failed).toMatchObject({ ok: false, code: "unavailable" });
   if (!failed.ok) expect(failed.message).toContain("the page privacy check within 15 seconds");
   expect(await command({ action: "snapshot" })).toMatchObject({ ok: true });
+  await showBrowserAndWaitForFrame(url);
   expect(await command({ action: "screenshot" })).toMatchObject({ ok: true });
   expect(await command({ action: "tab-open", url: `${url}?fresh` })).toMatchObject({ ok: true });
   expect(await command({ action: "snapshot" })).toMatchObject({ ok: true });
+  await showBrowserAndWaitForFrame(`${url}?fresh`);
   expect(await command({ action: "screenshot" })).toMatchObject({ ok: true });
   const log = await readFile(join(app.testDirectory, "electron-profile", "logs", "runtime", "runtime.log"), "utf8");
   const failures = log.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)

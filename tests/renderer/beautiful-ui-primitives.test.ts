@@ -65,7 +65,7 @@ describe("Beautiful UI primitive adaptations", () => {
   });
 
   it("animates project references and slash commands as prompt actions", () => {
-    expect(composerSource).toContain('aria-label="Project files"');
+    expect(composerSource).toContain('"Chats and project files"');
     expect(commandMenuSource).toContain('aria-label="Composer commands"');
     expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
   });

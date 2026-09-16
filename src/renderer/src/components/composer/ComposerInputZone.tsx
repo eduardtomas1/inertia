@@ -1,10 +1,11 @@
 import { INTERFACE_LOCALE } from "../../lib/locale";
-import { lazy, Suspense, useState, type RefObject } from "react";
+import { Fragment, lazy, Suspense, useState, type RefObject } from "react";
 import {
   Box,
   Check,
   CircleAlert,
   MessageSquarePlus,
+  MessagesSquare,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import type {
   InteractionMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { ConversationContextSourceOption } from "../conversation-context/types";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
@@ -90,7 +92,9 @@ export interface ComposerInputZoneProps {
   messageFits: boolean;
   mentionMatch: RegExpExecArray | null;
   mentionResults: WorkspaceEntry[];
+  chatSuggestions: readonly ConversationContextSourceOption[];
   onAddFileReference: (path: string) => void;
+  onReferenceChat: (source: ConversationContextSourceOption) => void;
   skillOpen: boolean;
   activeSkill: AgentSkillSummary | null;
   skillListboxId: string;
@@ -150,7 +154,9 @@ export function ComposerInputZone({
   messageFits,
   mentionMatch,
   mentionResults,
+  chatSuggestions,
   onAddFileReference,
+  onReferenceChat,
   skillOpen,
   activeSkill,
   skillListboxId,
@@ -201,14 +207,31 @@ export function ComposerInputZone({
     slashMatch && dismissedSuggestionValue !== message,
   );
   const mentionListboxId = `${skillListboxId}-files`;
+  const mentionQuery = (mentionMatch?.[1] ?? "").toLowerCase();
+  const chatMentionResults = chatSuggestions
+    .filter(({ conversationTitle, archived }) =>
+      !archived && conversationTitle.toLowerCase().includes(mentionQuery))
+    .slice(0, 4);
   const visibleMentionResults = mentionResults.slice(0, 8);
-  const [highlightedMentionPath, setHighlightedMentionPath] = useState<string | null>(null);
-  const activeMention = visibleMentionResults.find(({ path }) =>
-    path === highlightedMentionPath) ?? visibleMentionResults[0] ?? null;
+  const mentionOptions = [
+    ...chatMentionResults.map((source) => ({
+      id: `chat:${source.conversationId}`,
+      kind: "chat" as const,
+      source,
+    })),
+    ...visibleMentionResults.map((entry) => ({
+      id: `file:${entry.path}`,
+      kind: "file" as const,
+      entry,
+    })),
+  ];
+  const [highlightedMentionId, setHighlightedMentionId] = useState<string | null>(null);
+  const activeMention = mentionOptions.find(({ id }) =>
+    id === highlightedMentionId) ?? mentionOptions[0] ?? null;
   const mentionMenuVisible = Boolean(
     !running
     && mentionMatch
-    && visibleMentionResults.length > 0
+    && mentionOptions.length > 0
     && dismissedSuggestionValue !== message,
   );
   const reviewNoteContext = promptContext?.startsWith("Local review note for ");
@@ -222,20 +245,25 @@ export function ComposerInputZone({
   const moveMentionHighlight = (
     key: SidebarNavigationKey,
   ): void => {
-    if (visibleMentionResults.length === 0) return;
+    if (mentionOptions.length === 0) return;
     const nextIndex = nextSidebarNavigationIndex(
-      visibleMentionResults.indexOf(activeMention!),
+      mentionOptions.indexOf(activeMention!),
       key,
-      visibleMentionResults.length,
+      mentionOptions.length,
     );
-    setHighlightedMentionPath(visibleMentionResults[nextIndex]!.path);
+    setHighlightedMentionId(mentionOptions[nextIndex]!.id);
   };
-  const acceptMention = (entry: WorkspaceEntry): void => {
-    onMessageChange(message.replace(
-      /@[^\s@]*$/u,
-      `@${entry.path}${entry.kind === "directory" ? "/" : " "}`,
-    ));
-    if (entry.kind === "file") onAddFileReference(entry.path);
+  const acceptMention = (option: (typeof mentionOptions)[number]): void => {
+    if (option.kind === "chat") {
+      onMessageChange(message.replace(/@[^\s@]*$/u, ""));
+      onReferenceChat(option.source);
+    } else {
+      onMessageChange(message.replace(
+        /@[^\s@]*$/u,
+        `@${option.entry.path}${option.entry.kind === "directory" ? "/" : " "}`,
+      ));
+      if (option.entry.kind === "file") onAddFileReference(option.entry.path);
+    }
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
@@ -499,7 +527,7 @@ export function ComposerInputZone({
           aria-activedescendant={skillOpen && activeSkill
             ? `${skillListboxId}-${activeSkill.id}`
             : mentionMenuVisible && activeMention
-              ? `${mentionListboxId}-${visibleMentionResults.indexOf(activeMention)}`
+              ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
               : undefined}
           aria-label="Message"
           placeholder={running
@@ -519,22 +547,48 @@ export function ComposerInputZone({
           id={mentionListboxId}
           className="composer-suggestion-menu"
           role="listbox"
-          aria-label="Project files"
+          aria-label={chatMentionResults.length > 0
+            ? "Chats and project files"
+            : "Project files"}
         >
-          <div className="popover-title">Reference a file</div>
-          {visibleMentionResults.map((entry, index) => (
-            <button
-              id={`${mentionListboxId}-${index}`}
-              type="button"
-              role="option"
-              aria-selected={entry.path === activeMention?.path}
-              key={entry.path}
-              onMouseEnter={() => setHighlightedMentionPath(entry.path)}
-              onClick={() => acceptMention(entry)}
-            >
-              <span>{entry.path}</span>
-              <small>{entry.kind}</small>
-            </button>
+          {chatMentionResults.length > 0 && (
+            <div className="popover-title">Reference a chat</div>
+          )}
+          {mentionOptions.map((option, index) => (
+            <Fragment key={option.id}>
+              {option.kind === "file" && index === chatMentionResults.length && (
+                <div className="popover-title">Reference a file</div>
+              )}
+              <button
+                id={`${mentionListboxId}-${index}`}
+                type="button"
+                role="option"
+                aria-selected={option.id === activeMention?.id}
+                onMouseEnter={() => setHighlightedMentionId(option.id)}
+                onClick={() => acceptMention(option)}
+              >
+                {option.kind === "chat"
+                  ? (
+                    <>
+                      <span className="composer-suggestion-chat">
+                        <MessagesSquare size={11} aria-hidden="true" />
+                        {option.source.conversationTitle}
+                      </span>
+                      <small>
+                        {option.source.workspaceRelation === "different-workspace"
+                          ? "different workspace"
+                          : option.source.projectName}
+                      </small>
+                    </>
+                  )
+                  : (
+                    <>
+                      <span>{option.entry.path}</span>
+                      <small>{option.entry.kind}</small>
+                    </>
+                  )}
+              </button>
+            </Fragment>
           ))}
         </div>
       )}

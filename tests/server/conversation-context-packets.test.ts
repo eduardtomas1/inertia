@@ -13,6 +13,7 @@ import {
 } from "../../src/server/runtime/conversation-context-service";
 import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted-agent-text";
 import {
+  MAX_CONVERSATION_CONTEXT_BLOCK_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
 } from "../../src/shared/contracts";
@@ -559,7 +560,7 @@ describe("conversation context packets", () => {
         source_project_id, target_project_id, source_conversation_title,
         source_project_name, source_workspace_label, target_workspace_label,
         workspace_relation, note, excerpts_json, message_count,
-        character_count, created_at, NULL, NULL, NULL
+        character_count, created_at, NULL, NULL, NULL, 0
       FROM conversation_context_packets WHERE id = ?
     `).run(randomUUID(), packets[0]!.id)).toThrow(
       "conversation context draft limit reached",
@@ -669,5 +670,124 @@ describe("conversation context packets", () => {
       FROM conversation_context_packets WHERE id = ?
     `).get(packet.id)).toEqual({ title: "Architecture notes" });
     database.close();
+  });
+
+  it("references a whole conversation without naming individual messages", () => {
+    const { store, sourceId, targetId } = fixture();
+    store.createMessage(sourceId, "First decision", "user", [], null, "2026-08-19T08:00:00.000Z");
+    store.createMessage(sourceId, "Agreed approach", "assistant", [], null, "2026-08-19T08:00:01.000Z");
+    store.createMessage(sourceId, "Final confirmation", "user", [], null, "2026-08-19T08:00:02.000Z");
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+
+    expect(packet.messageCount).toBe(3);
+    expect(packet.droppedMessageCount).toBe(0);
+    expect(packet.excerpts.map(({ content }) => content)).toEqual([
+      "First decision",
+      "Agreed approach",
+      "Final confirmation",
+    ]);
+    store.close();
+  });
+
+  it("carries media as durable identifiers instead of file paths", () => {
+    const { store, sourceId, targetId } = fixture();
+    store.createMessage(
+      sourceId,
+      "Here is the diagram",
+      "user",
+      [{
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "diagram.png",
+        path: "/private/tmp/secret-location/diagram.png",
+        mimeType: "image/png",
+        size: 2048,
+      }],
+      null,
+      "2026-08-19T08:00:00.000Z",
+    );
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+
+    expect(packet.excerpts[0]?.attachments).toEqual([{
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "diagram.png",
+      mimeType: "image/png",
+      size: 2048,
+    }]);
+    const blocks = store.contextPackets.materialize(targetId, [packet.id]);
+    expect(blocks.map(({ content }) => content).join("")).not.toContain("secret-location");
+    expect(store.contextPackets.get(packet.id, targetId).excerpts)
+      .toEqual(packet.excerpts);
+    store.close();
+  });
+
+  it("splits an oversized whole-chat reference into ordered bounded blocks", () => {
+    const { store, sourceId, targetId } = fixture();
+    for (let index = 0; index < 20; index += 1) {
+      store.createMessage(
+        sourceId,
+        `${index}-${"detail ".repeat(1100)}`,
+        index % 2 === 0 ? "user" : "assistant",
+        [],
+        null,
+        `2026-08-19T08:00:${String(index).padStart(2, "0")}.000Z`,
+      );
+    }
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+    const blocks = store.contextPackets.materialize(targetId, [packet.id]);
+
+    expect(blocks.length).toBeGreaterThan(1);
+    expect(blocks.length).toBeLessThanOrEqual(3);
+    expect(new Set(blocks.map(({ packetId }) => packetId)).size).toBe(1);
+    expect(blocks.map(({ blockIndex }) => blockIndex))
+      .toEqual(blocks.map((_, index) => index));
+    for (const block of blocks) {
+      expect(block.blockCount).toBe(blocks.length);
+      expect(Buffer.byteLength(block.content, "utf8"))
+        .toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_BLOCK_BYTES);
+    }
+    store.close();
+  });
+
+  it("keeps the newest messages and reports what the budget omitted", () => {
+    const { store, sourceId, targetId } = fixture();
+    for (let index = 0; index < 30; index += 1) {
+      store.createMessage(
+        sourceId,
+        `${index}-${"detail ".repeat(1100)}`,
+        index % 2 === 0 ? "user" : "assistant",
+        [],
+        null,
+        `2026-08-19T08:00:${String(index).padStart(2, "0")}.000Z`,
+      );
+    }
+
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+
+    expect(packet.droppedMessageCount).toBeGreaterThan(0);
+    expect(packet.messageCount + packet.droppedMessageCount).toBe(30);
+    expect(packet.excerpts[packet.excerpts.length - 1]?.content)
+      .toContain("29-");
+    expect(Number(packet.excerpts[0]!.content.split("-")[0]))
+      .toBe(packet.droppedMessageCount);
+    store.close();
   });
 });

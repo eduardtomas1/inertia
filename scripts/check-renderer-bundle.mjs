@@ -39,11 +39,11 @@ const budgets = {
   // Measured closures: 810,794 / 620,226 bytes; retain <0.3 KiB headroom.
   // Project-scope tracking adds 301 workbench bytes (811,095 total), with
   // detached first load unchanged. See workspace-383/review.md evidence.
-  mainWorkbenchFirstLoadJavaScript: 793.6 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 795.6 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 607.3 * kibibyte,
+  detachedChatFirstLoadJavaScript: 609.3 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,

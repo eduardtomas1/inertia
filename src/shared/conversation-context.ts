@@ -1,13 +1,24 @@
 export const MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN = 2;
-export const MAX_CONVERSATION_CONTEXT_MESSAGES = 12;
-export const MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES = 4 * 1024;
-export const MAX_CONVERSATION_CONTEXT_TOTAL_BYTES = 12 * 1024;
+export const MAX_CONVERSATION_CONTEXT_MESSAGES = 2000;
+export const MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES = 8 * 1024;
+export const MAX_CONVERSATION_CONTEXT_TOTAL_BYTES = 176 * 1024;
 export const MAX_CONVERSATION_CONTEXT_NOTE_BYTES = 1024;
-export const MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES = 80;
+export const MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES = 2000;
+export const MAX_CONVERSATION_CONTEXT_BLOCK_BYTES = 64 * 1024;
+export const MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET = 3;
+export const MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE = 8;
 
 export type ConversationContextWorkspaceRelation =
   | "same-workspace"
   | "different-workspace";
+
+/** Media stays in its own chat; a packet carries only its durable identity. */
+export interface ConversationContextAttachmentReference {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
 
 export interface ConversationContextExcerpt {
   sourceMessageId: string;
@@ -16,6 +27,7 @@ export interface ConversationContextExcerpt {
   content: string;
   truncated: boolean;
   createdAt: string;
+  attachments?: ConversationContextAttachmentReference[];
 }
 
 export interface ConversationContextPacketSummary {
@@ -32,6 +44,7 @@ export interface ConversationContextPacketSummary {
   note: string | null;
   messageCount: number;
   characterCount: number;
+  droppedMessageCount: number;
   createdAt: string;
   consumedMessageId: string | null;
   consumedAt: string | null;
@@ -69,10 +82,12 @@ export interface AgentConversationContextRequest {
 /**
  * Privileged materialization carried only after opaque packet IDs have been
  * checked against the destination conversation. Renderers never author this
- * object directly.
+ * object directly. One packet may span several ordered blocks.
  */
 export interface MaterializedConversationContext {
   packetId: string;
   label: string;
   content: string;
+  blockIndex: number;
+  blockCount: number;
 }

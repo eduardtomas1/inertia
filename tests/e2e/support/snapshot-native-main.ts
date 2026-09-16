@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { app, BrowserWindow } from "electron";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { SnapshotService } from "../../../src/main/snapshot-service";
 
 app.disableHardwareAcceleration();
 const negative = process.argv.includes("--negative");
+const runFile = promisify(execFile);
 const timer = setTimeout(() => app.exit(2), 20_000);
 async function run(): Promise<void> {
   await app.whenReady();
@@ -39,9 +41,12 @@ async function run(): Promise<void> {
   });
   try {
     assert((await service.configure(true, "accelerator")).enabled);
+    const windowId = String(window.getNativeWindowHandle().readUInt32LE());
+    await runFile("xdotool", ["windowactivate", "--sync", windowId], { timeout: 3000, maxBuffer: 1024 });
+    const { stdout } = await runFile("xdotool", ["getactivewindow"], { timeout: 1000, maxBuffer: 1024 });
+    assert.equal(stdout.trim(), windowId, "The synthetic capture window must own the foreground");
     // Use an OS key event, not a test-only call to the shortcut callback.
-    setTimeout(() => execFile("xdotool", ["key", "--clearmodifiers", "ctrl+alt+s"], { timeout: 3000 }, (error) => { if (error) fail(error); }), 1000);
-    await captured;
+    await Promise.all([captured, runFile("xdotool", ["key", "--clearmodifiers", "ctrl+alt+s"], { timeout: 3000, maxBuffer: 1024 })]);
   } finally { await service.dispose(); window.destroy(); }
 }
 void run().then(() => { clearTimeout(timer); app.exit(0); }, (error: unknown) => { console.error(error); clearTimeout(timer); app.exit(1); });

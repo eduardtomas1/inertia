@@ -582,7 +582,8 @@ export function shouldCollapseSuccessfulWorkOnSettlement(input: {
     && input.status === "completed";
 }
 
-export const THINKING_LINE_INTERVAL_MS = 400;
+export const THINKING_LINE_INTERVAL_MS = 1100;
+export const THINKING_LINE_MIN_LENGTH = 12;
 
 interface ThinkingLine {
   current: ReasoningLine;
@@ -598,6 +599,11 @@ export function useThrottledReasoningLine(line: ReasoningLine): ThinkingLine {
   }));
   useEffect(() => {
     if (line.id === shown.current.id && line.text === shown.current.text) return;
+    if (
+      line.id !== shown.current.id
+      && line.text.trim().length < THINKING_LINE_MIN_LENGTH
+      && shown.current.text.trim().length > 0
+    ) return;
     const timer = window.setTimeout(() => {
       setShown((state) => ({
         current: line,
@@ -650,7 +656,7 @@ function ThinkingSummary({
   return (
     <>
       <span className="turn-thinking-pulse">
-        <Brain size={13} className="turn-thinking-icon" aria-hidden="true" />
+        <Brain size={16} className="turn-thinking-icon" aria-hidden="true" />
         <span className="turn-thinking-label" key={live ? "live" : "folded"}>
           {live
             ? "Thinking"

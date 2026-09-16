@@ -22,3 +22,11 @@ The composite test's aggregate timer was reproduced locally: consume 4,800 ms in
 - Earlier native Linux ARM64 evidence: three Add project scenarios and two background-content/motion scenarios passed; the fixture repair does not modify those product paths.
 - Final Node 22 `npm run check`: 854 files / 9,121 tests passed, with 144 platform skips; architecture, lineage, lint, types, themes, build and original bundle limits passed.
 - Hosted macOS x64 and the other required jobs must pass on the final commit before merge. Local execution uses macOS ARM64; it is not a substitute for the hosted native matrix.
+
+## CI follow-up: Add project entry animation
+
+Run `35117533968` passed Linux x64/ARM64, Windows x64/ARM64 and all Windows unit shards. macOS ARM64 failed only the Add project geometry case: the measured text origin moved 4.4398 px between placeholder and typed-text samples. The dialog enters with a scale transform, so these samples must compare its settled layout.
+
+A controlled native macOS ARM64 probe extends the existing entry animation to one second and waits before typing. The original test fails with a 4.4443 px difference. Waiting for the actual dialog animations to finish before the first measurement passes under the same probe. The probe's injected style and delay were removed; the final complete Add project spec passes all three scenarios. The focus-ring insets, icon separation, filtering and subpixel alignment assertions are unchanged. No product CSS, timeouts, or CI policy changed.
+
+After the animation-readiness correction, the full Node 22 gate passes again: 854 files / 9,121 tests, 144 expected platform skips, and all architecture, lineage, lint, types, themes, production build and original bundle limits. The unchanged provider/server source retains the prior 1,368-test portable result. Fresh hosted CI is required on the new commit before merge.

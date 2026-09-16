@@ -122,6 +122,10 @@ test("keeps the search placeholder and typed text clear of the focus frame", asy
     await expect(search).toBeFocused();
     const icon = dialog.locator(".add-project-search > svg");
     await expect(icon).toBeVisible();
+    // Compare both text origins after the dialog's entry scale has finished.
+    await expect.poll(() => dialog.evaluate((element) =>
+      element.getAnimations().every((animation) => animation.playState === "finished"),
+    )).toBe(true);
     // The focus ring is the frame the placeholder used to touch, so measure the
     // painted text origin against the ring the renderer actually resolved.
     const measure = async (): Promise<{

@@ -8527,6 +8527,33 @@ button.environment-row:focus-visible,
   font-size: max(calc(var(--ui-font-micro) - 1px + var(--platform-readability-adjustment)), 8px);
 }
 
+.composer-suggestion-chat { display: inline-flex; min-width: 0; align-items: center; gap: 5px; }
+.composer-suggestion-chat svg { flex: 0 0 auto; color: var(--text-muted); }
+
+.composer-context-preview, .composer-context-request {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  gap: 6px;
+}
+.composer-context-preview header, .composer-context-request header { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.composer-context-preview strong, .composer-context-request strong { overflow: hidden; color: var(--text); font-size: var(--ui-font-micro); text-overflow: ellipsis; white-space: nowrap; }
+.composer-context-preview small, .composer-context-request small { color: var(--text-muted); font-size: 8px; }
+.composer-context-preview ol { display: flex; max-height: 168px; flex-direction: column; margin: 0; padding: 0; overflow-y: auto; gap: 6px; list-style: none; }
+.composer-context-preview li { display: flex; flex-direction: column; gap: 2px; }
+.composer-context-preview li > span { color: var(--text-muted); font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.composer-context-preview p { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 8.5px; line-height: 1.45; }
+.composer-context-request label { display: flex; flex-direction: column; gap: 3px; }
+.composer-context-request label > span { color: var(--text-muted); font-size: 8px; }
+.composer-context-request select { min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-strong); color: var(--text); font-size: 8.5px; }
+.composer-context-request > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer-context-request button { padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-strong); color: var(--text); font-size: 8.5px; }
+.composer-context-request button:first-child { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+
 .provider-auth-dialog {
   display: grid;
   width: min(760px, 100%);

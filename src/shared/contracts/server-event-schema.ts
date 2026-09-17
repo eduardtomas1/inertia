@@ -16,7 +16,7 @@ import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
-import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
+import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 import { appKeybindings } from "./app-keybindings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
@@ -462,10 +462,12 @@ function approvalRequest(value: unknown): boolean {
     && arrayOf(value.availableDecisions, (entry) =>
       entry === "approve" || entry === "deny" || entry === "cancel");
 }
+function conversationContextAttachmentReference(value: unknown): boolean { return recordWithStrings(value, "id", "name", "mimeType") && integerField(value, "size") && (value.size as number) >= 1; }
 function conversationContextExcerpt(value: unknown): boolean {
   return recordWithStrings(value, "sourceMessageId", "role", "content", "createdAt") && nullableStringField(value, "sourceTurnId")
     && oneOf(value, "role", ["user", "assistant"]) && booleanField(value, "truncated") && (value.content as string).length > 0
-    && utf8Length(value.content as string) <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+    && utf8Length(value.content as string) <= MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES
+    && (value.attachments === undefined || (arrayOf(value.attachments, conversationContextAttachmentReference) && (value.attachments as unknown[]).length <= MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE && uniqueRecordField(value.attachments as unknown[], "id")));
 }
 function conversationContextPacketSummary(value: unknown): value is UnknownRecord {
   return recordWithStrings(value, "id", "sourceConversationId", "targetConversationId", "sourceProjectId", "targetProjectId", "sourceConversationTitle", "sourceProjectName", "sourceWorkspaceLabel", "targetWorkspaceLabel", "workspaceRelation", "createdAt", "sourceState")
@@ -473,7 +475,7 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
     && nullableStringField(value, "note") && (value.note === null || utf8Length(value.note as string) <= MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
     && nullableStringField(value, "consumedMessageId") && nullableStringField(value, "consumedAt")
     && integerField(value, "messageCount") && (value.messageCount as number) >= 1 && (value.messageCount as number) <= MAX_CONVERSATION_CONTEXT_MESSAGES
-    && integerField(value, "characterCount") && (value.characterCount as number) >= 1 && (value.characterCount as number) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES;
+    && integerField(value, "characterCount") && (value.characterCount as number) >= 1 && (value.characterCount as number) <= MAX_CONVERSATION_CONTEXT_TOTAL_BYTES && integerField(value, "droppedMessageCount") && (value.droppedMessageCount as number) >= 0;
 }
 function conversationContextPacket(value: unknown): boolean {
   if (!conversationContextPacketSummary(value) || !arrayOf(value.excerpts, conversationContextExcerpt)

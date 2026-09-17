@@ -80,6 +80,7 @@ function dropUnreleasedAgentThreadManagement(
   }
   database.exec(`
     DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
+    DROP TRIGGER IF EXISTS agent_context_requests_discard_with_conversation;
     DROP TABLE IF EXISTS agent_context_requests;
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;
@@ -1782,6 +1783,7 @@ describe("runtime migration catalog", () => {
       if (shape === "partial") {
         unreceipted.exec(`
           DROP TRIGGER conversation_context_packets_discard_source_drafts;
+          DROP TRIGGER agent_context_requests_discard_with_conversation;
           DROP TABLE agent_context_requests;
           DROP TABLE conversation_context_packets;
           CREATE TABLE conversation_context_packets (id TEXT PRIMARY KEY);
@@ -2132,6 +2134,7 @@ describe("runtime migration catalog", () => {
       { version: 74 },
       { version: 75 },
       { version: 76 },
+      { version: 77 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

@@ -89,10 +89,6 @@ export interface ComposerToolbarProps {
   attachmentImporting: boolean;
   onChooseAttachments: () => Promise<void>;
   imageInputUnavailableReason: string | null;
-  contextAvailable: boolean;
-  contextCount: number;
-  conversationContextHandoffEnabled: boolean;
-  onOpenContext: () => void;
   onRunAction: (action: ProjectAction) => void;
   skills: readonly AgentSkillSummary[];
   skillsCapability: AgentWorkflowSkillsCapability | null;
@@ -171,10 +167,6 @@ export function ComposerToolbar({
   attachmentImporting,
   onChooseAttachments,
   imageInputUnavailableReason,
-  contextAvailable,
-  contextCount,
-  conversationContextHandoffEnabled,
-  onOpenContext,
   onRunAction,
   skills,
   skillsCapability,
@@ -392,24 +384,6 @@ export function ComposerToolbar({
             />
             <span>Adding attachments…</span>
           </span>
-        )}
-        {conversationContextHandoffEnabled && (
-          <IconButton
-            label={contextCount > 0
-              ? `Add chat context, ${contextCount} selected`
-              : "Add context from another chat"}
-            onClick={onOpenContext}
-            disabled={
-              disabled
-              || running
-              || primaryAction === "submitting"
-              || !contextAvailable
-              || contextCount >= 2
-            }
-            className={contextCount > 0 ? "has-context" : undefined}
-          >
-            <MessagesSquare size={16} />
-          </IconButton>
         )}
         {promptPresetsEnabled && (
           <Suspense fallback={null}>

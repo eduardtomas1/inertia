@@ -159,7 +159,7 @@ describe("cohesive composer dock", () => {
     expect(queuedActionsSource).toContain('aria-label="Send queued message now"');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
     expect(inputSource).toContain("event.clipboardData.files.length > 0");
-    expect(inputSource).toContain('aria-label="Project files"');
+    expect(inputSource).toContain('"Chats and project files"');
     expect(commandMenuSource).toContain('aria-label="Composer commands"');
     expect(routeConfirmationSource).toContain('role="alertdialog"');
     expect(composerSource).not.toContain("documentAttachmentSendBoundary");

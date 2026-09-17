@@ -68,6 +68,8 @@ describe("activity group summaries", () => {
     expect(activityWorkKind(activity("patch", { kind: "tool", title: "File change" }))).toBe("edit");
     expect(activityWorkKind(activity("file", { kind: "file", title: "src/app.ts" }))).toBe("edit");
     expect(activityWorkKind(activity("mcp", { kind: "tool", title: "MCP · github/search_issues" }))).toBe("tool");
+    expect(activityWorkKind(activity("status", { kind: "status", title: "Warning: fallback used" }))).toBe("event");
+    expect(activityWorkKind(activity("error", { kind: "error", title: "Provider could not continue" }))).toBe("event");
   });
 
   it("names generic command rows by what they ran instead of the provider label", () => {
@@ -92,6 +94,8 @@ describe("activity group summaries", () => {
       command("f", "npm test", { status: "running" }),
       activity("g", { kind: "tool", title: "Edit" }),
       activity("h", { kind: "status", title: "Warning: fallback used" }),
+      activity("i", { kind: "tool", title: "MCP · github/search_issues" }),
+      activity("j", { kind: "error", title: "Provider could not continue", status: "failed" }),
     ]);
 
     expect(summary).toEqual({
@@ -100,9 +104,10 @@ describe("activity group summaries", () => {
       search: 1,
       edit: 1,
       tool: 1,
-      failed: 1,
+      failed: 2,
       warnings: 1,
       running: 1,
+      events: 2,
     });
     const parts = activitySummaryParts(summary);
     expect(parts.map(({ count, label, tone }) => [count, label, tone])).toEqual([
@@ -111,12 +116,20 @@ describe("activity group summaries", () => {
       [1, "search", "neutral"],
       [1, "edit", "neutral"],
       [1, "tool call", "neutral"],
-      [1, "failed", "failure"],
+      [2, "failed", "failure"],
       [1, "warning", "warning"],
     ]);
     expect(activitySummaryLabel(parts)).toBe(
-      "3 commands, 2 files read, 1 search, 1 edit, 1 tool call, 1 failed, 1 warning",
+      "3 commands, 2 files read, 1 search, 1 edit, 1 tool call, 2 failed, 1 warning",
     );
+    expect(activitySummaryLabel(activitySummaryParts(summarizeActivities([
+      command("failed-build", "ant compile", { status: "failed" }),
+      activity("provider-warning", { kind: "status", title: "Warning: fallback used" }),
+    ])))).toBe("1 command, 1 failed, 1 warning");
+    expect(activitySummaryLabel(activitySummaryParts(summarizeActivities([
+      activity("status-one", { kind: "status", title: "Connected" }),
+      activity("status-two", { kind: "status", title: "Reconnected" }),
+    ])))).toBe("2 updates");
   });
 
   it("keeps a bounded live window, folds settled groups, and reveals only the latest failure on request", () => {

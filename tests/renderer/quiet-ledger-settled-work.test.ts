@@ -349,7 +349,7 @@ describe("Quiet Ledger settled work summary", () => {
     const pinnedStart = html.indexOf('data-activity-group="activity-group:attention:rendered"');
     expect(pinnedStart).toBeGreaterThan(detailsEnd);
     expect(html).toContain('data-activity-group-state="folded"');
-    expect(html).toContain('aria-label="1 command, 1 tool call, 1 failed, 1 warning"');
+    expect(html).toContain('aria-label="1 command, 1 failed, 1 warning"');
     expect(html.indexOf("Warning: provider fallback used")).toBeGreaterThan(pinnedStart);
     expect(html.indexOf("Tests failed")).toBeGreaterThan(pinnedStart);
     expect(html.match(/data-folded="true"/g)).toHaveLength(2);

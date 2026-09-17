@@ -9,15 +9,15 @@ import type { AgentActivity } from "../../src/shared/contracts";
 const motionCss = readFileSync(
   new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const baseCss = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const groupCss = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const css = [motionCss, baseCss, groupCss].join("\n");
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
@@ -187,7 +187,7 @@ describe("Minimal Workstream activity lines", () => {
       .toContain("font-family: var(--font-mono)");
     expect(output).toContain("max-height: 160px");
     expect(output).toContain("grid-column: 2 / -1");
-    expect(css).not.toContain("text-transform: uppercase;\n}\n\n.turn-work-log .agent-activity");
+    expect(cssBlock(css, ".turn-work-log .agent-activity-state {")).toBe("");
     expect(motionCss).not.toContain(".agent-activity > .agent-activity-copy");
   });
 

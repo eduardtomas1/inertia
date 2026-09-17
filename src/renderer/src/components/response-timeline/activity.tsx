@@ -218,6 +218,7 @@ const WORK_KIND_ICONS: Record<ActivityWorkKind, typeof Terminal> = {
   search: Search,
   edit: Code2,
   tool: Wrench,
+  event: CircleDot,
 };
 
 export const ActivityRow = memo(function ActivityRow({

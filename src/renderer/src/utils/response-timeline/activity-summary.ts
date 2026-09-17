@@ -2,7 +2,7 @@ import type { AgentActivity } from "@shared/contracts";
 
 import { activityAttentionSeverity } from "./activity-attention";
 
-export type ActivityWorkKind = "command" | "read" | "search" | "edit" | "tool";
+export type ActivityWorkKind = "command" | "read" | "search" | "edit" | "tool" | "event";
 
 export const ACTIVITY_GROUP_LIVE_WINDOW = 4;
 
@@ -118,6 +118,13 @@ export function isGenericCommandTitle(title: string): boolean {
 export function activityWorkKind(
   activity: Pick<AgentActivity, "kind" | "title" | "detail">,
 ): ActivityWorkKind {
+  if (
+    activity.kind === "status"
+    || activity.kind === "error"
+    || activity.kind === "reasoning"
+  ) {
+    return "event";
+  }
   if (activity.kind === "file") return "edit";
   if (activity.kind === "command") {
     const command = activityCommandText(activity);
@@ -139,6 +146,7 @@ const WORK_KIND_VERBS: Record<ActivityWorkKind, readonly [string, string]> = {
   search: ["Searching", "Searched"],
   edit: ["Editing", "Edited"],
   tool: ["Calling", "Called"],
+  event: ["Updating", "Updated"],
 };
 
 export interface ActivityCommandLine {
@@ -172,6 +180,7 @@ export interface ActivityGroupSummary {
   failed: number;
   warnings: number;
   running: number;
+  events: number;
 }
 
 export function summarizeActivities(
@@ -186,9 +195,12 @@ export function summarizeActivities(
     failed: 0,
     warnings: 0,
     running: 0,
+    events: 0,
   };
   for (const activity of activities) {
-    summary[activityWorkKind(activity)] += 1;
+    const kind = activityWorkKind(activity);
+    if (kind === "event") summary.events += 1;
+    else summary[kind] += 1;
     const severity = activityAttentionSeverity(activity);
     if (severity === "failure") summary.failed += 1;
     if (severity === "warning") summary.warnings += 1;
@@ -219,7 +231,7 @@ const SUMMARY_PART_LABELS: ReadonlyArray<
 export function activitySummaryParts(
   summary: ActivityGroupSummary,
 ): ActivitySummaryPart[] {
-  return SUMMARY_PART_LABELS
+  const parts = SUMMARY_PART_LABELS
     .filter(([key]) => summary[key] > 0)
     .map(([key, singular, plural, tone]) => ({
       key,
@@ -227,6 +239,13 @@ export function activitySummaryParts(
       label: summary[key] === 1 ? singular : plural,
       tone,
     }));
+  if (parts.length > 0 || summary.events === 0) return parts;
+  return [{
+    key: "events",
+    count: summary.events,
+    label: summary.events === 1 ? "update" : "updates",
+    tone: "neutral",
+  }];
 }
 
 export function activitySummaryLabel(parts: readonly ActivitySummaryPart[]): string {

@@ -14,11 +14,11 @@ import type { AgentActivity } from "../../src/shared/contracts";
 const baseStyles = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const groupStyles = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/gu, "\n");
 const styles = [baseStyles, groupStyles].join("\n");
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),

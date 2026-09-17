@@ -549,7 +549,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain(">Stop</span></button>");
     expect(html.match(/data-activity-group=/g)).toHaveLength(2);
     expect(html).toContain(
-      'aria-label="4 commands, 1 file read, 1 edit, 1 tool call, 1 failed, 1 warning"',
+      'aria-label="4 commands, 1 file read, 1 edit, 1 failed, 1 warning"',
     );
     expect(html).toContain('data-activity-group-state="live"');
     expect(html.match(/data-folded="false"/g)).toHaveLength(4);

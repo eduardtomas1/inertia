@@ -11926,7 +11926,8 @@ button.sent-attachment-open:focus-visible {
 
 .turn-work-log > details.turn-thinking > summary {
   width: 100%;
-  gap: 7px;
+  min-height: 31px;
+  gap: 9px;
 }
 
 .turn-work-log > details.turn-thinking > summary svg.turn-thinking-icon {
@@ -11937,18 +11938,22 @@ button.sent-attachment-open:focus-visible {
 .turn-thinking-label {
   flex: 0 0 auto;
   color: inherit;
-  font-weight: 620;
+  font-size: calc(var(--ui-font-secondary) + 1.5px);
+  font-weight: 640;
+  letter-spacing: 0.005em;
 }
 
 .turn-thinking[data-thinking-state="folded"] .turn-thinking-label {
-  animation: turn-thinking-settle 180ms ease-out both;
+  animation: turn-thinking-settle 340ms ease-out both;
 }
 
 .turn-thinking-line {
   display: grid;
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--text-muted);
+  color: var(--text-soft);
+  font-size: calc(var(--ui-font-secondary) + 0.5px);
+  line-height: 1.5;
 }
 
 .turn-thinking-line > span {
@@ -11960,28 +11965,28 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-thinking-line > .is-entering {
-  animation: turn-thinking-line-in 150ms ease-out 60ms both;
+  animation: turn-thinking-line-in 420ms var(--motion-ease) 160ms both;
 }
 
 .turn-thinking-line > .is-leaving {
-  animation: turn-thinking-line-out 90ms ease-in forwards;
+  animation: turn-thinking-line-out 260ms ease-in forwards;
 }
 
 .turn-thinking-pulse {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--text-soft);
 }
 
 .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
   color: var(--text);
-  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.65) 38%, #000 50%, rgb(0 0 0 / 0.65) 62%);
-  mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.65) 38%, #000 50%, rgb(0 0 0 / 0.65) 62%);
+  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);
+  mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);
   -webkit-mask-size: 300% 100%;
   mask-size: 300% 100%;
-  animation: turn-thinking-sweep 1800ms var(--motion-ease-inout) infinite;
+  animation: turn-thinking-sweep 3400ms var(--motion-ease-inout) infinite;
 }
 
 .turn-work-log > details.turn-thinking > summary small.turn-thinking-elapsed {
@@ -12005,7 +12010,7 @@ button.sent-attachment-open:focus-visible {
 @keyframes turn-thinking-line-in {
   from {
     opacity: 0;
-    transform: translateX(-6px);
+    transform: translateX(-8px);
   }
 }
 

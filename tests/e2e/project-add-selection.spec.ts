@@ -109,3 +109,67 @@ test("keeps the chosen project scope after a cancelled or failed import", async 
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });
+
+test("keeps the search placeholder and typed text clear of the focus frame", async ({ browserName: _browserName }, testInfo) => {
+  const app = await createAppFixture({ name: "project-add-search-inset", initialState: "conversation" });
+  try {
+    await app.resizeWindow(1200, 800);
+    const page = app.page;
+    await page.getByRole("complementary", { name: "Project navigation", exact: true })
+      .getByRole("button", { name: "Add project", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+    const search = dialog.getByRole("textbox", { name: "Search project sources" });
+    await expect(search).toBeFocused();
+    const icon = dialog.locator(".add-project-search > svg");
+    await expect(icon).toBeVisible();
+    // Compare both text origins after the dialog's entry scale has finished.
+    await expect.poll(() => dialog.evaluate((element) =>
+      element.getAnimations().every((animation) => animation.playState === "finished"),
+    )).toBe(true);
+    // The focus ring is the frame the placeholder used to touch, so measure the
+    // painted text origin against the ring the renderer actually resolved.
+    const measure = async (): Promise<{
+      outlineStyle: string;
+      frameLeft: number;
+      frameRight: number;
+      textLeft: number;
+      textRight: number;
+    }> => await search.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      const ring = Number.parseFloat(styles.outlineWidth)
+        + Number.parseFloat(styles.outlineOffset);
+      return {
+        outlineStyle: styles.outlineStyle,
+        frameLeft: box.left - ring,
+        frameRight: box.right + ring,
+        textLeft: box.left
+          + Number.parseFloat(styles.borderLeftWidth)
+          + Number.parseFloat(styles.paddingLeft),
+        textRight: box.right
+          - Number.parseFloat(styles.borderRightWidth)
+          - Number.parseFloat(styles.paddingRight),
+      };
+    });
+
+    const placeholder = await measure();
+    expect(placeholder.outlineStyle).not.toBe("none");
+    expect(placeholder.textLeft - placeholder.frameLeft).toBeGreaterThanOrEqual(10);
+    expect(placeholder.frameRight - placeholder.textRight).toBeGreaterThanOrEqual(10);
+    const iconBox = await icon.boundingBox();
+    if (!iconBox) throw new Error("Expected the search icon to be laid out.");
+    expect(placeholder.textLeft).toBeGreaterThan(iconBox.x + iconBox.width);
+    expect(placeholder.frameLeft).toBeGreaterThan(iconBox.x + iconBox.width);
+
+    await search.fill("clone");
+    await expect(dialog.getByRole("button", { name: /Clone repository/u })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Local folder/u })).toHaveCount(0);
+    const typed = await measure();
+    expect(Math.abs(typed.textLeft - placeholder.textLeft)).toBeLessThan(1);
+    expect(typed.textLeft - typed.frameLeft).toBeGreaterThanOrEqual(10);
+    const inset = testInfo.outputPath("add-project-search-inset.png");
+    await dialog.screenshot({ path: inset });
+    await testInfo.attach("add-project-search-inset", { path: inset, contentType: "image/png" });
+    expect(app.rendererErrors).toEqual([]);
+  } finally { await app.close(); }
+});

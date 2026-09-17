@@ -123,8 +123,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
     await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
     await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
-    await expect(activeTurn.locator('[data-activity-visibility="recent"]')).toHaveCount(2);
-    await expect(activeTurn.getByRole("button", { name: "+1 previous tool call" })).toHaveCount(2);
+    await expect(activeTurn.getByRole("button", { name: "1 command, 1 tool call" })).toHaveAttribute("aria-expanded", "false");
+    await expect(activeTurn.locator('[data-activity-group-state="live"] [data-folded="false"]')).toHaveCount(2);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
     await expect(activeTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();

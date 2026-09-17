@@ -14,7 +14,11 @@ const baseCss = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
-const css = [motionCss, baseCss].join("\n");
+const groupCss = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
+  "utf8",
+);
+const css = [motionCss, baseCss, groupCss].join("\n");
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -56,7 +60,7 @@ function cssBlock(source: string, marker: string): string {
 }
 
 describe("Minimal Workstream activity lines", () => {
-  it("renders a semantic compact line with a bounded command preview and intentional disclosure", () => {
+  it("renders a semantic one-line row with an intentional output disclosure and no inline preview", () => {
     const html = renderToStaticMarkup(createElement(ActivityRow, {
       activity: activity(),
       visibility: "recent",
@@ -65,51 +69,50 @@ describe("Minimal Workstream activity lines", () => {
     expect(html).toContain('data-activity-kind="command"');
     expect(html).toContain('data-activity-severity="neutral"');
     expect(html).toContain('data-activity-visibility="recent"');
-    expect(html).toContain(
-      'title="Running focused renderer verification — npm test -- activity-lines"',
-    );
+    expect(html).toContain('data-activity-work="command"');
+    expect(html).toContain('title="Running focused renderer verification"');
     expect(html).toContain(
       '<span class="agent-activity-verb">Running</span>',
     );
     expect(html).toContain(
       '<span class="agent-activity-target"> focused renderer verification</span>',
     );
-    expect(html).toContain(
-      '<small class="agent-activity-detail-preview"><span class="visually-hidden">Technical output preview: </span>npm test -- activity-lines</small>',
-    );
-    expect(html).toContain("<details");
-    expect(html).toContain("Full command output");
-    expect(html).not.toContain("<pre>");
+    expect(html).not.toContain("agent-activity-detail-preview");
+    expect(html).not.toContain("npm test -- activity-lines");
+    expect(html).toContain('class="agent-activity-disclosure"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-label="Output: Running focused renderer verification"');
+    expect(html).not.toContain("<pre");
     expect(html).toContain("Working:");
     expect(html).toContain('data-activity-category="command"');
     expect(html).toContain('<span class="agent-activity-icon" aria-hidden="true">');
     expect(html).toContain("lucide-terminal");
   });
 
-  it("limits huge output to three preview lines without mounting closed full detail", () => {
+  it("names generic provider commands by the unwrapped command and never mounts closed output", () => {
     const html = renderToStaticMarkup(createElement(ActivityRow, {
       activity: activity({
+        title: "Command",
         detail: [
           "Command:",
-          "npm test",
+          "/bin/bash -lc 'cd /workspace && npm test'",
+          "",
           "Output:",
           "first result",
           "second result",
-          "third result",
         ].join("\n"),
         status: "failed",
       }),
     }));
 
-    expect(html).toContain("Command:\nnpm test\nOutput:");
-    expect(html).not.toContain(
-      '<small class="agent-activity-detail-preview"><span class="visually-hidden">Technical output preview: </span>Command:\nnpm test\nOutput:\nfirst result',
-    );
+    expect(html).toContain('title="Ran npm test"');
+    expect(html).toContain('<span class="agent-activity-verb">Ran</span>');
+    expect(html).toContain('<span class="agent-activity-target is-command"> npm test</span>');
+    expect(html).not.toContain("/bin/bash");
     expect(html).not.toContain("first result");
-    expect(html).not.toContain("third result");
-    expect(html).toContain("Full command output");
-    expect(html).toContain("Technical output preview:");
-    expect(html).not.toContain("<pre>");
+    expect(html).toContain('<span class="agent-activity-state" aria-hidden="true">Failed</span>');
+    expect(html).toContain("<span>Output</span>");
+    expect(html).not.toContain("<pre");
   });
 
   it("keeps completed work quiet while warning and error truth override a completed check", () => {
@@ -140,103 +143,95 @@ describe("Minimal Workstream activity lines", () => {
     expect(completed).toContain('data-activity-severity="neutral"');
     expect(completed).toContain("agent-activity is-completed");
     expect(completed).not.toContain("agent-activity is-running");
-    expect(completed).toContain("lucide-check");
+    expect(completed).toContain("lucide-terminal");
     expect(warning).toContain('data-activity-severity="warning"');
     expect(warning).toContain("Warning:");
     expect(warning).toContain("lucide-triangle-alert");
     expect(warning).toContain(
       '<span class="agent-activity-target">Unsupported option </span><span class="agent-activity-verb">skipped</span>',
     );
-    expect(warning).not.toContain("lucide-check");
     expect(error).toContain('data-activity-severity="failure"');
     expect(error).toContain("Failed:");
     expect(error).toContain("lucide-triangle-alert");
     expect(error).toContain(
       '<span class="agent-activity-target">Provider response </span><span class="agent-activity-verb">failed</span>',
     );
-    expect(error).not.toContain("lucide-check");
   });
 
-  it("uses a compact visual action row with safe title and detail truncation", () => {
-    const row = cssBlock(css, ".turn-work-log .agent-activity {");
-    const baseRow = cssBlock(baseCss, ".turn-work-log .agent-activity {");
-    const icon = cssBlock(css, ".agent-activity-icon {");
-    const rail = cssBlock(css, ".turn-activity-group {");
-    const title = cssBlock(css, ".turn-work-log .agent-activity-title {");
+  it("uses a compact single-line grid row with safe title and detail truncation", () => {
+    const row = cssBlock(groupCss, ".turn-activity-group .agent-activity {");
+    const icon = cssBlock(groupCss, ".turn-activity-group .agent-activity > .agent-activity-icon {");
+    const rail = cssBlock(groupCss, ".turn-activity-group-rows {");
+    const title = cssBlock(groupCss, ".turn-activity-group .agent-activity-title {");
     const targetAndDetail = cssBlock(
-      css,
-      ".turn-work-log .agent-activity-target,",
+      groupCss,
+      ".turn-activity-group .agent-activity-target,",
     );
+    const output = cssBlock(groupCss, ".turn-activity-group .agent-activity-output {");
 
-    expect(row).toContain("min-height: 28px");
-    expect(row).toContain("padding: 3px 5px");
-    expect(row).toContain("border-radius: 7px");
-    expect(baseRow).toContain("background: transparent");
-    expect(baseRow).toContain("font-size: var(--activity-row-font-size)");
-    expect(icon).toContain("width: 20px");
+    expect(row).toContain("min-height: 24px");
+    expect(row).toContain("grid-template-columns: 16px minmax(0, 1fr) auto auto");
+    expect(row).toContain("background: transparent");
+    expect(row).toContain("font-size: var(--activity-row-font-size)");
+    expect(icon).toContain("width: 16px");
     expect(icon).toContain("place-items: center");
+    expect(icon).toContain("box-shadow: none");
     expect(rail).toContain(
       "border-left: 1px solid color-mix(in srgb, var(--execution-rail-border) 62%, transparent)",
     );
     expect(title).toContain("min-width: 0");
-    expect(title).toContain("gap: 4px");
     expect(title).toContain("overflow: hidden");
     expect(targetAndDetail).toContain("text-overflow: ellipsis");
     expect(targetAndDetail).toContain("white-space: nowrap");
-    expect(cssBlock(css, ".turn-work-log .agent-activity-target {")).toContain(
-      "font-family: var(--font-mono)",
-    );
+    expect(cssBlock(groupCss, ".turn-activity-group .agent-activity-target.is-command {"))
+      .toContain("font-family: var(--font-mono)");
+    expect(output).toContain("max-height: 160px");
+    expect(output).toContain("grid-column: 2 / -1");
+    expect(css).not.toContain("text-transform: uppercase;\n}\n\n.turn-work-log .agent-activity");
+    expect(motionCss).not.toContain(".agent-activity > .agent-activity-copy");
   });
 
-  it("uses semantic warning/failure lines without card backgrounds or large alert rows", () => {
-    const important = cssBlock(
-      baseCss,
-      ".turn-work-log > .agent-activity.is-failed {",
-    );
+  it("uses semantic warning/failure color without card backgrounds or colored group rails", () => {
     const warning = cssBlock(
-      css,
-      '.turn-work-log .agent-activity[data-activity-severity="warning"] > .agent-activity-icon {',
+      groupCss,
+      '.turn-activity-group .agent-activity[data-activity-severity="warning"] > .agent-activity-icon,',
     );
     const failure = cssBlock(
-      css,
-      '.turn-work-log .agent-activity[data-activity-severity="failure"] > .agent-activity-icon {',
-    );
-    const completed = cssBlock(
-      css,
-      ".turn-work-log .agent-activity.is-completed > .agent-activity-icon",
+      groupCss,
+      '.turn-activity-group .agent-activity[data-activity-severity="failure"] > .agent-activity-icon,',
     );
 
-    expect(important).toContain("border: 0");
-    expect(important).toContain("border-radius: 0");
-    expect(important).toContain("background: transparent");
-    expect(important).not.toMatch(/padding:\s*[4-9]px|box-shadow/iu);
     expect(warning).toContain("color: var(--warning-accent)");
     expect(failure).toContain("color: var(--failure-accent)");
-    expect(completed).toContain("var(--success-accent)");
-    expect(completed).toContain("var(--execution-muted-text)");
-    expect(completed).toContain("animation: none");
+    expect(css).not.toContain(".turn-activity-group:has(");
+    expect(css).not.toMatch(/\.agent-activity[^{]*\{[^}]*box-shadow: 0/u);
   });
 
-  it("preserves adjacent grouping, expandable history, reduced motion, and command review details", () => {
-    const reducedMotion = css;
+  it("folds rows with one height-and-opacity motion, a live window, and reduced-motion fallbacks", () => {
+    const row = cssBlock(groupCss, ".turn-activity-group-row {");
+    const folded = cssBlock(groupCss, '.turn-activity-group-row[data-folded="true"] {');
+    const starting = cssBlock(groupCss, "@starting-style");
+    const reduced = cssBlock(groupCss, "@media (prefers-reduced-motion: reduce)");
 
     expect(activitySource).toContain(
       '<div className="turn-execution-stream" role="list" aria-label="Agent work transcript">',
     );
     expect(activitySource).toContain('className="turn-activity-group"');
     expect(activitySource).toContain("data-activity-group={entry.id}");
-    expect(activitySource).toContain("data-activity-group-expanded={expanded");
+    expect(activitySource).toContain("data-activity-group-expanded={expanded}");
     expect(activitySource).toContain("aria-expanded={expanded}");
-    expect(activitySource).toContain("previous tool");
-    expect(reducedMotion).toContain(
-      ".agent-activity-icon::after",
-    );
+    expect(activitySource).toContain("inert={rowFolded || undefined}");
     expect(activitySource).toContain('className="agent-activity-icon"');
-    expect(css).toContain("@keyframes activity-row-reveal");
-    expect(reducedMotion).toContain(
-      '> .agent-activity:not(:last-of-type)',
-    );
-    expect(reducedMotion).toContain("animation: none");
+    expect(row).toContain("grid-template-rows: 1fr");
+    expect(row).toContain("grid-template-rows 340ms var(--motion-ease)");
+    expect(folded).toContain("grid-template-rows: 0fr");
+    expect(folded).toContain("opacity: 0");
+    expect(starting).toContain("grid-template-rows: 0fr");
+    expect(reduced).toContain(".turn-activity-group-row,");
+    expect(reduced).toContain("transition: none");
+    expect(reduced).toContain("animation: none");
+    expect(css).not.toContain("@keyframes activity-row-reveal");
+    expect(css).not.toContain("beautiful-tool-row-enter");
     expect(requestCardSource).toContain('className="agent-request-command"');
     expect(requestCardSource).toContain(
       'request.detail && <p className="agent-request-detail">{request.detail}</p>',

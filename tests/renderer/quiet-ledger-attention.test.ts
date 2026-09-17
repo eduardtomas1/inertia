@@ -11,10 +11,15 @@ import {
 } from "../../src/renderer/src/utils/responseTimeline";
 import type { AgentActivity } from "../../src/shared/contracts";
 
-const styles = readFileSync(
+const baseStyles = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
 );
+const groupStyles = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
+  "utf8",
+);
+const styles = [baseStyles, groupStyles].join("\n");
 const activitySource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
   "utf8",
@@ -103,11 +108,10 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(implicitFailure).toContain('<span class="agent-activity-state" aria-hidden="true">Failed</span>');
     expect(implicitFailure).toContain("lucide-triangle-alert");
     expect(implicitFailure).toContain(
-      'title="Provider could not complete the request — Process exited with status 1.',
+      'title="Provider could not complete the request"',
     );
-    expect(implicitFailure).toContain("Technical output preview:");
-    expect(implicitFailure).toContain("Full command output");
-    expect(implicitFailure.match(/Process exited with status 1\./g)).toHaveLength(2);
+    expect(implicitFailure).toContain("<span>Output</span>");
+    expect(implicitFailure).not.toContain("Process exited with status 1.");
     expect(explicitFailure).not.toContain('class="agent-activity-state"');
     expect(explicitFailure).toContain('<span class="visually-hidden">Failed: </span>');
   });
@@ -134,18 +138,15 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(interrupted).toContain('data-activity-severity="warning"');
     expect(interrupted).toContain('<span class="visually-hidden">Interrupted: </span>');
     expect(interrupted).not.toContain('class="agent-activity-state"');
-    expect(interrupted).toContain("<span>Technical details</span>");
-    expect(interrupted).not.toContain("Technical output preview:");
-    expect(interrupted).not.toContain(
-      'title="Interrupted · npm test — Interrupted:',
-    );
-    expect(terminal).toContain("<span>Technical details</span>");
-    expect(terminal).not.toContain("Technical output preview:");
-    expect(terminal).not.toContain('title="The Codex App Server connection closed. — Reason:');
+    expect(interrupted).toContain("<span>Details</span>");
+    expect(interrupted).toContain('title="Interrupted · npm test"');
+    expect(interrupted).not.toContain("The Codex App Server connection closed.");
+    expect(terminal).toContain("<span>Details</span>");
+    expect(terminal).not.toContain("Reason: transport-closed");
     expect(terminal).not.toContain("system_prompt");
   });
 
-  it("keeps technical information in a native compact disclosure and neutral detail inline", () => {
+  it("keeps technical information behind a compact disclosure button and neutral detail inline", () => {
     const warning = renderToStaticMarkup(createElement(ActivityRow, {
       activity: activity({
         kind: "status",
@@ -164,50 +165,41 @@ describe("Quiet Ledger warning and failure attention", () => {
 
     expect(warning).toContain('data-activity-severity="warning"');
     expect(warning).toContain('<span class="agent-activity-state" aria-hidden="true">Warning</span>');
-    expect(warning).toContain('<details class="agent-activity-technical">');
-    expect(warning).toContain("<summary><span>Full output</span>");
-    expect(warning).not.toContain("<pre>");
+    expect(warning).toContain('class="agent-activity-disclosure"');
+    expect(warning).toContain('aria-label="Output: Fallback activated"');
+    expect(warning).not.toContain("<pre");
     expect(warning).not.toContain('role="alert"');
     expect(warning).not.toContain('aria-live="assertive"');
-    expect(activitySource).toContain("<summary {...anchorToggleHandlers}>");
+    expect(activitySource).toContain("{...anchorToggleHandlers}");
+    expect(activitySource).toContain("anchorToggleHandlers.onClick();");
     expect(activitySource).toContain("onBeforeToggle={onBeforeToggle}");
     expect(activitySource).toContain("onAfterToggle={onAfterToggle}");
 
     expect(neutral).toContain('data-activity-severity="neutral"');
     expect(neutral).toContain('<small class="agent-activity-detail">');
-    expect(neutral).not.toContain("agent-activity-technical");
+    expect(neutral).not.toContain("agent-activity-disclosure");
   });
 
   it("stays compact and transparent across semantic themes, scales, and narrow layouts", () => {
-    const row = cssBlock(".turn-work-log .agent-activity {");
-    const important = cssBlock(".turn-work-log .agent-activity.is-important {");
-    const importantSurface = cssBlock(".turn-work-log .agent-activity.is-important,");
-    const edge = cssBlock(".turn-work-log > .agent-activity.is-important {");
-    const disclosure = cssBlock(".turn-work-log .agent-activity-technical > summary {");
-    const technical = cssBlock(".turn-work-log .agent-activity-technical > pre {");
-    const narrowStart = styles.indexOf("@container response-transcript (max-width: 440px)");
-    const narrow = styles.slice(
-      narrowStart,
-      styles.indexOf("@media (max-width: 760px)", narrowStart),
-    );
+    const row = cssBlock(".turn-activity-group .agent-activity {");
+    const disclosure = cssBlock(".turn-activity-group .agent-activity-disclosure {");
+    const technical = cssBlock(".turn-activity-group .agent-activity-output {");
+    const narrow = cssBlock("@container response-transcript (max-width: 440px) {\n  .turn-activity-group-rows");
 
-    expect(row).toContain("min-height: 20px");
+    expect(row).toContain("min-height: 24px");
     expect(row).toContain("background: transparent");
-    expect(important).toContain("grid-template-columns: 10px minmax(0, 1fr)");
-    expect(importantSurface).toContain("border: 0");
-    expect(importantSurface).toContain("background: transparent");
-    expect(importantSurface).not.toContain("box-shadow");
-    expect(edge).toContain("border-inline-start: 1px solid");
-    expect(disclosure).toContain("min-height: 22px");
+    expect(row).toContain("border: 0");
+    expect(row).not.toContain("box-shadow");
+    expect(disclosure).toContain("min-height: 20px");
     expect(disclosure).toContain("font-size: var(--ui-font-micro)");
     expect(technical).toContain("max-height: 160px");
     expect(technical).toContain("border: 0");
     expect(technical).toContain("background: transparent");
-    expect(styles).toContain(".turn-work-log .agent-activity-technical > summary:focus-visible");
+    expect(styles).toContain(".turn-activity-group .agent-activity-disclosure:focus-visible");
     expect(styles).toContain(':root[data-theme="dark"]');
     expect(styles).toContain(':root[data-interface-scale="compact"]');
     expect(styles).toContain(':root[data-interface-scale="large"]');
-    expect(narrow).toContain(".turn-work-log .agent-activity-technical > pre");
+    expect(narrow).toContain(".turn-activity-group .agent-activity-output");
     expect(narrow).toContain("max-height: 120px");
   });
 });

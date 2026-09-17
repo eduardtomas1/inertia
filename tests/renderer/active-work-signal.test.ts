@@ -18,7 +18,11 @@ const supportingMotionCss = [
   new URL(`../../src/renderer/src/components/${fileName}`, import.meta.url),
   "utf8",
 )).join("\n");
-const css = `${baseCss}\n${exactMotionCssSource}\n${supportingMotionCss}`;
+const activityGroupCss = readFileSync(
+  new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
+  "utf8",
+);
+const css = `${baseCss}\n${exactMotionCssSource}\n${supportingMotionCss}\n${activityGroupCss}`;
 const timelineSource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
@@ -158,8 +162,8 @@ describe("Minimal Workstream active pixel signal", () => {
   });
 
   it("keeps running glyph motion scoped to the authoritative active region", () => {
-    expect(css).toContain(
-      "[data-active-work-region] .turn-work-log .agent-activity.is-running > .agent-activity-icon",
+    expect(activityGroupCss).toContain(
+      "[data-active-work-region] .turn-activity-group .agent-activity.is-running > .agent-activity-icon",
     );
     expect(css).not.toMatch(
       /^\.turn-work-log \.agent-activity\.is-running > svg\s*\{[^}]*animation:/mu,

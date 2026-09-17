@@ -311,7 +311,7 @@ describe("Quiet Ledger settled work summary", () => {
     }
   });
 
-  it("keeps a partial completed turn provider-scoped with important activity once beneath collapsed Details", () => {
+  it("keeps a partial completed turn provider-scoped with important activity folded once beneath collapsed Details", () => {
     const agentTurn = turn("rendered");
     const html = renderTurn(agentTurn, [
       activity("successful-read", agentTurn.id),
@@ -346,15 +346,18 @@ describe("Quiet Ledger settled work summary", () => {
     expect(details).not.toContain("Read source");
     expect(details).not.toContain("Warning: provider fallback used");
     expect(details).not.toContain("Tests failed");
-    expect(html.indexOf("Warning: provider fallback used")).toBeGreaterThan(detailsEnd);
-    expect(html.indexOf("Tests failed")).toBeGreaterThan(detailsEnd);
+    const pinnedStart = html.indexOf('data-activity-group="activity-group:attention:rendered"');
+    expect(pinnedStart).toBeGreaterThan(detailsEnd);
+    expect(html).toContain('data-activity-group-state="folded"');
+    expect(html).toContain('aria-label="1 command, 1 tool call, 1 failed, 1 warning"');
+    expect(html.indexOf("Warning: provider fallback used")).toBeGreaterThan(pinnedStart);
+    expect(html.indexOf("Tests failed")).toBeGreaterThan(pinnedStart);
+    expect(html.match(/data-folded="true"/g)).toHaveLength(2);
     expect(html.match(/data-activity-severity="warning"/g)).toHaveLength(1);
     expect(html.match(/data-activity-severity="failure"/g)).toHaveLength(1);
-    expect(html.match(/class="agent-activity-technical"/g)).toHaveLength(2);
-    expect(html).toContain("<summary><span>Full output</span>");
-    expect(html).toContain("<summary><span>Full command output</span>");
-    expect(html.match(/npm test exited with status 1\./g)).toHaveLength(2);
-    expect(html.match(/The provider ignored one optional capability\./g)).toHaveLength(2);
+    expect(html.match(/class="agent-activity-disclosure"/g)).toHaveLength(2);
+    expect(html).not.toContain("npm test exited with status 1.");
+    expect(html).not.toContain("The provider ignored one optional capability.");
     expect(html.indexOf('data-turn-layer="final-answer"'))
       .toBeGreaterThan(html.indexOf('data-turn-layer="agent-execution"'));
   });

@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -18,12 +19,14 @@ import {
   ChevronDown,
   CircleDot,
   Code2,
+  FileText,
   ListChecks,
   Search,
   Terminal,
   TriangleAlert,
   Wrench,
 } from "lucide-react";
+import "./ActivityGroup.css";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import clsx from "clsx";
@@ -34,16 +37,22 @@ import type {
 } from "@shared/contracts";
 import {
   activityAttentionSeverity,
+  activityCommandLine,
   activityDetailPresentation,
   activityExecutionCategory,
   activityNeedsAttention,
+  activitySummaryLabel,
+  activitySummaryParts,
+  activityWorkKind,
   buildTurnExecutionStream,
   formatElapsed,
   isInterruptedActivity,
-  resolveActivityGroupPresentation,
+  resolveActivityGroupWindow,
+  summarizeActivities,
   turnStatusLabel,
   workSummaryLabel,
   type ActivityAttentionSeverity,
+  type ActivityWorkKind,
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
@@ -203,6 +212,14 @@ function splitActivityTitle(
   };
 }
 
+const WORK_KIND_ICONS: Record<ActivityWorkKind, typeof Terminal> = {
+  command: Terminal,
+  read: FileText,
+  search: Search,
+  edit: Code2,
+  tool: Wrench,
+};
+
 export const ActivityRow = memo(function ActivityRow({
   activity,
   visibility,
@@ -215,6 +232,7 @@ export const ActivityRow = memo(function ActivityRow({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [detailExpanded, setDetailExpanded] = useState(false);
+  const outputId = useId();
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const interrupted = isInterruptedActivity(activity);
   const attentionSeverity = activityAttentionSeverity(activity);
@@ -222,40 +240,22 @@ export const ActivityRow = memo(function ActivityRow({
   const severity: ActivityLineSeverity = attentionSeverity ?? "neutral";
   const detailPresentation = activityDetailPresentation(activity);
   const executionCategory = activityExecutionCategory(activity);
+  const workKind = activityWorkKind(activity);
+  const commandLine = activityCommandLine(activity);
   const showDisclosure = Boolean(
     detailPresentation.full
     && (detailPresentation.expandable || needsAttention),
   );
-  // Transport diagnostics are deliberately opt-in. The public failure summary
-  // already lives in the row title; exit/signal/protocol detail belongs only
-  // behind the Technical details disclosure.
-  const showPreview = Boolean(
-    detailPresentation.preview
-    && showDisclosure
-    && activity.kind !== "error"
-    && !interrupted,
+  const showInlineDetail = Boolean(
+    detailPresentation.full && !showDisclosure && !needsAttention,
   );
-  const Icon = severity !== "neutral"
-    ? TriangleAlert
-    : activity.status === "completed"
-      ? Check
-      : executionCategory === "searching"
-        ? Search
-        : executionCategory === "coding"
-          ? Code2
-          : executionCategory === "command"
-            ? Terminal
-            : executionCategory === "tool"
-              ? Wrench
-              : CircleDot;
-  const fullLabel = [
-    activity.title,
-    showPreview ? detailPresentation.preview : null,
-  ].filter(Boolean).join(" — ");
-  const { leadingTarget, verb, trailingTarget } = splitActivityTitle(
-    activity.title,
-    severity,
-  );
+  const Icon = severity !== "neutral" ? TriangleAlert : WORK_KIND_ICONS[workKind];
+  const { leadingTarget, verb, trailingTarget } = commandLine
+    ? { leadingTarget: "", verb: commandLine.verb, trailingTarget: commandLine.target }
+    : splitActivityTitle(activity.title, severity);
+  const visibleTitle = commandLine
+    ? `${commandLine.verb} ${commandLine.target}`
+    : activity.title;
   const spokenState = interrupted
     ? "Interrupted"
     : severity === "failure"
@@ -264,9 +264,12 @@ export const ActivityRow = memo(function ActivityRow({
         ? "Warning"
         : turnStatusLabel(activity.status);
   const visibleState = attentionSeverity
-    && !activityTitleConveysSeverity(activity.title, attentionSeverity)
+    && !activityTitleConveysSeverity(visibleTitle, attentionSeverity)
     ? spokenState
     : null;
+  const disclosureLabel = activity.kind === "error" || interrupted
+    ? "Details"
+    : "Output";
   return (
     <div
       className={clsx(
@@ -274,65 +277,68 @@ export const ActivityRow = memo(function ActivityRow({
         `is-${activity.status}`,
         needsAttention && "is-important",
         showDisclosure && "has-technical-detail",
+        detailExpanded && "is-detail-open",
       )}
       data-activity-kind={activity.kind}
       data-activity-category={executionCategory}
+      data-activity-work={workKind}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
-      title={fullLabel}
+      title={visibleTitle}
     >
       <span className="agent-activity-icon" aria-hidden="true">
         <Icon size={12} />
       </span>
       <span className={clsx(
         "agent-activity-copy",
-        detailPresentation.full && !showPreview && !needsAttention && "has-detail",
-        showPreview && "has-preview",
+        showInlineDetail && "has-detail",
       )}>
         <span className="visually-hidden">{spokenState}: </span>
-        {visibleState && (
-          <span className="agent-activity-state" aria-hidden="true">{visibleState}</span>
-        )}
         <strong className="agent-activity-title">
           {leadingTarget && (
             <span className="agent-activity-target">{`${leadingTarget} `}</span>
           )}
           <span className="agent-activity-verb">{verb}</span>
           {trailingTarget && (
-            <span className="agent-activity-target">{` ${trailingTarget}`}</span>
+            <span className={clsx(
+              "agent-activity-target",
+              commandLine && "is-command",
+            )}>
+              {` ${trailingTarget}`}
+            </span>
           )}
         </strong>
-        {detailPresentation.full && !showPreview && !needsAttention && (
+        {showInlineDetail && (
           <small className="agent-activity-detail">
             <span className="visually-hidden"> — </span>
             {detailPresentation.full}
           </small>
         )}
-        {showPreview && (
-          <small className="agent-activity-detail-preview">
-            <span className="visually-hidden">Technical output preview: </span>
-            {detailPresentation.preview}
-          </small>
-        )}
       </span>
+      {visibleState && (
+        <span className="agent-activity-state" aria-hidden="true">{visibleState}</span>
+      )}
       {showDisclosure && (
-        <details
-          className="agent-activity-technical"
-          open={detailExpanded}
-          onToggle={(event) => setDetailExpanded(event.currentTarget.open)}
+        <button
+          type="button"
+          className="agent-activity-disclosure"
+          aria-expanded={detailExpanded}
+          aria-controls={detailExpanded ? outputId : undefined}
+          aria-label={`${disclosureLabel}: ${visibleTitle}`}
+          {...anchorToggleHandlers}
+          onClick={() => {
+            setDetailExpanded((current) => !current);
+            anchorToggleHandlers.onClick();
+          }}
         >
-          <summary {...anchorToggleHandlers}>
-            <span>
-              {activity.kind === "error" || interrupted
-                ? "Technical details"
-                : activity.kind === "command"
-                  ? "Full command output"
-                  : "Full output"}
-            </span>
-            <ChevronDown size={11} aria-hidden="true" />
-          </summary>
-          {detailExpanded && <pre>{detailPresentation.full}</pre>}
-        </details>
+          <span>{disclosureLabel}</span>
+          <ChevronDown size={11} aria-hidden="true" />
+        </button>
+      )}
+      {showDisclosure && detailExpanded && (
+        <pre className="agent-activity-output" id={outputId}>
+          {detailPresentation.full}
+        </pre>
       )}
     </div>
   );
@@ -459,61 +465,126 @@ export function useAnchoredDetailsToggle(
 
 export const ActivityGroup = memo(function ActivityGroup({
   entry,
+  settled = false,
+  revealLatestFailure = false,
   onBeforeToggle,
   onAfterToggle,
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "activity-group" }>;
+  settled?: boolean;
+  revealLatestFailure?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const { hiddenCount, visibleActivities } = resolveActivityGroupPresentation(
-    entry.activities,
-    expanded,
+  const rowsId = useId();
+  const summary = useMemo(
+    () => summarizeActivities(entry.activities),
+    [entry.activities],
   );
-  const containsAttention = entry.activities.some(activityNeedsAttention);
+  const containsAttention = summary.failed + summary.warnings > 0;
+  const folded = settled && summary.running === 0;
+  const mode = containsAttention ? "attention" : "calls";
+  if (entry.activities.length === 1) {
+    const [activity] = entry.activities;
+    return (
+      <div
+        className="turn-activity-group"
+        data-activity-group={entry.id}
+        data-activity-group-mode={mode}
+        data-activity-group-state="single"
+      >
+        <ActivityRow
+          activity={activity!}
+          visibility={activityNeedsAttention(activity!) ? "important" : "recent"}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+      </div>
+    );
+  }
+  const parts = activitySummaryParts(summary);
+  const rows = resolveActivityGroupWindow(entry.activities, {
+    expanded,
+    settled: folded,
+    revealLatestFailure,
+  });
   const toggle = (): void => {
     onBeforeToggle?.();
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
+  const MarkIcon = folded ? Check : CircleDot;
   return (
     <div
       className="turn-activity-group"
       data-activity-group={entry.id}
       data-activity-group-expanded={expanded}
-      data-activity-group-mode={containsAttention ? "attention" : "calls"}
+      data-activity-group-mode={mode}
+      data-activity-group-state={expanded ? "expanded" : folded ? "folded" : "live"}
     >
-      {visibleActivities.map((activity) => (
-        <ActivityRow
-          activity={activity}
-          visibility={activityNeedsAttention(activity) ? "important" : "recent"}
-          onBeforeToggle={onBeforeToggle}
-          onAfterToggle={onAfterToggle}
-          key={activity.id}
-        />
-      ))}
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          className="turn-activity-group-toggle"
-          aria-expanded={expanded}
-          onClick={toggle}
+      <button
+        type="button"
+        className="turn-activity-group-summary"
+        aria-expanded={expanded}
+        aria-controls={rowsId}
+        aria-label={activitySummaryLabel(parts)}
+        onClick={toggle}
+      >
+        <span
+          className="turn-activity-group-mark"
+          data-running={summary.running > 0}
+          aria-hidden="true"
         >
-          <ChevronDown size={12} aria-hidden="true" />
-          <span>
-            {expanded
-              ? "Show fewer tool calls"
-              : `+${hiddenCount} previous tool ${hiddenCount === 1 ? "call" : "calls"}`}
-          </span>
-        </button>
-      )}
+          <MarkIcon size={11} />
+        </span>
+        <span className="turn-activity-group-parts">
+          {parts.map((part) => (
+            <span
+              className="turn-activity-group-part"
+              data-tone={part.tone}
+              key={part.key}
+            >
+              <span className="turn-activity-group-count" key={part.count}>
+                {part.count}
+              </span>
+              {` ${part.label}`}
+            </span>
+          ))}
+        </span>
+        <ChevronDown
+          size={12}
+          className="turn-activity-group-chevron"
+          aria-hidden="true"
+        />
+      </button>
+      <div className="turn-activity-group-rows" id={rowsId}>
+        {rows.map(({ activity, folded: rowFolded }) => (
+          <div
+            className="turn-activity-group-row"
+            data-folded={rowFolded}
+            aria-hidden={rowFolded || undefined}
+            inert={rowFolded || undefined}
+            key={activity.id}
+          >
+            <div>
+              <ActivityRow
+                activity={activity}
+                visibility={activityNeedsAttention(activity) ? "important" : "recent"}
+                onBeforeToggle={onBeforeToggle}
+                onAfterToggle={onAfterToggle}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 });
 
 function ExecutionStream({
   entries,
+  live = false,
   projectRoot,
   projectId,
   conversationId,
@@ -523,6 +594,7 @@ function ExecutionStream({
   onAfterToggle,
 }: {
   entries: TurnExecutionStreamEntry[];
+  live?: boolean;
   projectRoot: string;
   projectId: string;
   conversationId: string;
@@ -532,9 +604,10 @@ function ExecutionStream({
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
   if (entries.length === 0) return null;
+  const lastIndex = entries.length - 1;
   return (
     <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
-      {entries.map((entry) => {
+      {entries.map((entry, index) => {
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
@@ -560,6 +633,7 @@ function ExecutionStream({
           <div role="listitem" key={entry.id}>
             <ActivityGroup
               entry={entry}
+              settled={!live || index < lastIndex}
               onBeforeToggle={onBeforeToggle}
               onAfterToggle={onAfterToggle}
             />
@@ -825,6 +899,26 @@ export function WorkLog({
     0,
   );
   const activeReasoning = includesReasoning && reasoningStreaming;
+  const { attentionGroup, failureDiagnostics } = useMemo(() => {
+    const diagnostics: AgentActivity[] = [];
+    const pinned: AgentActivity[] = [];
+    for (const activity of turn.importantActivities) {
+      (activity.kind === "error" && activity.status === "failed"
+        ? diagnostics
+        : pinned).push(activity);
+    }
+    return {
+      failureDiagnostics: diagnostics,
+      attentionGroup: pinned.length > 0
+        ? {
+            kind: "activity-group" as const,
+            id: `activity-group:attention:${turn.id}`,
+            createdAt: pinned[0]!.createdAt,
+            activities: pinned,
+          }
+        : null,
+    };
+  }, [turn.id, turn.importantActivities]);
   const reasoningLine = useMemo(
     () => latestReasoningLine(reasoningContent),
     [reasoningContent],
@@ -843,6 +937,7 @@ export function WorkLog({
       <div className="turn-work-log is-live">
         <ExecutionStream
           entries={stream}
+          live
           projectRoot={projectRoot}
           projectId={projectId}
           conversationId={conversationId}
@@ -972,23 +1067,23 @@ export function WorkLog({
           {summaryContent}
         </div>
       )}
-      {turn.importantActivities.map((activity) => (
-        activity.kind === "error" && activity.status === "failed" ? (
-          <Suspense fallback={null} key={activity.id}>
-            <FailureDiagnostics
-              turn={turn.agentTurn}
-              activity={activity}
-              anchor={[onBeforeToggle, onAfterToggle]}
-            />
-          </Suspense>
-        ) : (
-          <ActivityRow
+      {attentionGroup && (
+        <ActivityGroup
+          entry={attentionGroup}
+          settled
+          revealLatestFailure={status === "failed"}
+          onBeforeToggle={onBeforeToggle}
+          onAfterToggle={onAfterToggle}
+        />
+      )}
+      {failureDiagnostics.map((activity) => (
+        <Suspense fallback={null} key={activity.id}>
+          <FailureDiagnostics
+            turn={turn.agentTurn}
             activity={activity}
-            onBeforeToggle={onBeforeToggle}
-            onAfterToggle={onAfterToggle}
-            key={activity.id}
+            anchor={[onBeforeToggle, onAfterToggle]}
           />
-        )
+        </Suspense>
       ))}
     </div>
   );

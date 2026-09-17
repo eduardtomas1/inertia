@@ -207,27 +207,46 @@ describe("agent loading and trace DOM", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it("marks only user-revealed tool history for bounded stagger motion", () => {
+  it("keeps a bounded live window under one summary control that expands and folds the full history", () => {
     const activities = [
-      { ...activity("Read package metadata"), id: "activity-history-1" },
-      { ...activity("Inspect response timeline"), id: "activity-history-2" },
-      { ...activity("Run focused checks"), id: "activity-history-3" },
-    ];
+      "Read package metadata",
+      "Read response timeline",
+      "Grep activity rows",
+      "Inspect layers",
+      "Inspect viewport",
+      "Inspect motion",
+    ].map((title, index) => ({
+      ...activity(title),
+      id: `activity-history-${index + 1}`,
+    }));
     const { container } = renderState({ activities });
     const group = container.querySelector(".turn-activity-group");
+    const rows = () => [...(group?.querySelectorAll<HTMLElement>(".turn-activity-group-row") ?? [])];
+    const summary = screen.getByRole("button", {
+      name: "2 files read, 1 search, 3 tool calls",
+    });
 
-    expect(group).toHaveAttribute("data-activity-group-expanded", "false");
-    expect(group?.querySelectorAll(":scope > .agent-activity")).toHaveLength(1);
+    expect(group).toHaveAttribute("data-activity-group-state", "live");
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(rows()).toHaveLength(5);
+    expect(rows().filter((row) => row.dataset.folded === "false")).toHaveLength(4);
+    const folded = rows().find((row) => row.dataset.folded === "true");
+    expect(folded).toHaveAttribute("aria-hidden", "true");
+    expect(folded?.hasAttribute("inert")).toBe(true);
+    expect(screen.queryByText("package metadata")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", {
-      name: "+2 previous tool calls",
-    }));
+    fireEvent.click(summary);
 
     expect(group).toHaveAttribute("data-activity-group-expanded", "true");
-    const revealed = group?.querySelectorAll<HTMLElement>(":scope > .agent-activity:not(:last-of-type)");
-    expect(revealed).toHaveLength(2);
-    expect(revealed?.[0]?.getAttribute("style")).toBeNull();
-    expect(revealed?.[1]?.getAttribute("style")).toBeNull();
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    expect(rows()).toHaveLength(6);
+    expect(rows().every((row) => row.dataset.folded === "false")).toBe(true);
+    expect(rows().every((row) => row.getAttribute("style") === null)).toBe(true);
+
+    fireEvent.click(summary);
+
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(rows().filter((row) => row.dataset.folded === "false")).toHaveLength(4);
   });
 
   it("keeps historical reasoning collapsed without claiming current thought", () => {

@@ -309,6 +309,7 @@ describe("streamed agent text", () => {
       quietCycles = mounted && commits === commitsBefore ? quietCycles + 1 : 0;
     }
     expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
+    expect(quietCycles).toBe(3);
 
     for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
     commits = 0;

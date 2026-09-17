@@ -39,11 +39,14 @@ const budgets = {
   // Measured closures: 810,794 / 620,226 bytes; retain <0.3 KiB headroom.
   // Project-scope tracking adds 301 workbench bytes (811,095 total), with
   // detached first load unchanged. See workspace-383/review.md evidence.
-  mainWorkbenchFirstLoadJavaScript: 797.3 * kibibyte,
+  // Caret-aware skills, quota identity and bounded transcript navigation add
+  // 1,204 / 1,125 startup bytes; shared core is essentially unchanged. Keep ~0.2 KiB
+  // headroom per route. See chat-input-and-continuity/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 798.6 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 611.0 * kibibyte,
+  detachedChatFirstLoadJavaScript: 612.2 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -113,7 +116,7 @@ const budgets = {
   // 2,114,728 bytes retain 242 bytes of headroom; deferred caps stay separate.
   // Project-scope tracking adds 318 core bytes (2,115,046 total), leaving
   // 26 bytes under the revised cap. See workspace-383/review.md evidence.
-  coreJavaScript: 2_070.3 * kibibyte,
+  coreJavaScript: 2_070.6 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

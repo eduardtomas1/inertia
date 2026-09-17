@@ -2615,7 +2615,7 @@ button.environment-row:focus-visible,
 }
 
 /* Follow the raised input's own border, above the inset controls drawer. */
-.chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
+.composer[data-maximum-reasoning="true"] .composer-input-zone::after {
   position: absolute;
   z-index: 1;
   inset: -1px;
@@ -2647,7 +2647,7 @@ button.environment-row:focus-visible,
 }
 
 .app-shell[data-document-visible="false"]
-  .chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
   animation-play-state: paused;
 }
 
@@ -2657,7 +2657,7 @@ button.environment-row:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
     animation: none;
     background-position: 50% 50%;
   }

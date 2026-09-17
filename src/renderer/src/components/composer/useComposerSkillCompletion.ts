@@ -11,8 +11,19 @@ export function useComposerSkillCompletion(
   message: string,
   menuOpen: boolean,
 ) {
-  const skillQuery = /(?:^|\s)\$([\w.:-]*)$/u
-    .exec(message)?.[1].toLowerCase() ?? null;
+  const [selection, setSelection] = useState<{ value: string; start: number; end: number } | null>(null);
+  const [accepted, setAccepted] = useState<{ value: string; caret: number } | null>(null);
+  const caret = selection?.value === message ? selection.start : message.length;
+  const selectedText = selection?.value === message && selection.start !== selection.end;
+  const atAcceptedSkill = accepted?.value === message && accepted.caret === caret;
+  const skillQuery = selectedText || atAcceptedSkill ? null : /(?:^|\s)\$([\w.:-]*)$/u
+    .exec(message.slice(0, caret))?.[1].toLowerCase() ?? null;
+  const markSkillAccepted = (value: string, acceptedCaret: number): void => {
+    setAccepted({ value, caret: acceptedCaret });
+  };
+  const onSkillSelectionChange = (editor: HTMLTextAreaElement): void => {
+    setSelection({ value: editor.value, start: editor.selectionStart, end: editor.selectionEnd });
+  };
   const skillListboxId = `${useId()}-skills`;
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);
   const skillMatches = skillQuery === null
@@ -36,7 +47,9 @@ export function useComposerSkillCompletion(
   return {
     skillQuery,
     skillListboxId,
-    skillOpen: menuOpen && activeSkill !== null,
+    skillOpen: menuOpen,
+    onSkillSelectionChange,
+    markSkillAccepted,
     activeSkill,
     moveSkill,
   };

@@ -3,6 +3,10 @@
   margin: 1px 0 4px;
 }
 
+.turn-work-log.is-settled > .turn-activity-group {
+  margin: 2px 0;
+}
+
 .turn-activity-group-summary {
   display: flex;
   width: 100%;

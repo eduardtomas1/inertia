@@ -141,8 +141,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     expect(await activePixel.evaluate((element) =>
       getComputedStyle(element).animationName)).toBe("none");
     expect(await activeTurn.locator(".agent-activity.is-running svg")
-      .evaluate((element) => getComputedStyle(element).animationName))
-      .toBe("none");
+      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).animationName)))
+      .toEqual(["none", "none"]);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await verifyAgentExecutionStateSequence({
       activeTurn, conversationId: conversation.id,

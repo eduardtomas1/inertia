@@ -1,5 +1,5 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { Profiler, useState } from "react";
+import { Profiler, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -287,10 +287,12 @@ describe("streamed agent text", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { default: App } = await import("../../src/renderer/src/App");
     let commits = 0;
-    let flushRoot: () => void = () => undefined;
+    const rootFlush = { current: () => undefined as void };
     function RootFlusher({ children }: { children: React.ReactNode }): React.JSX.Element {
       const [, setTick] = useState(0);
-      flushRoot = () => setTick((tick) => tick + 1);
+      useLayoutEffect(() => {
+        rootFlush.current = () => setTick((tick) => tick + 1);
+      }, []);
       return <>{children}</>;
     }
     function CountedApp(): React.JSX.Element {
@@ -317,7 +319,7 @@ describe("streamed agent text", () => {
     expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
     expect(quietCycles).toBe(3);
 
-    act(() => flushRoot());
+    act(() => rootFlush.current());
     for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
     commits = 0;
     for (let index = 0; index < TOKENS; index += 1) {

@@ -401,10 +401,10 @@ function materializeContext(
   if ((context.reviewNotes?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many review notes.");
   }
-  if (
-    (context.conversationContexts?.length ?? 0)
-      > MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN
-  ) {
+  const conversationContextPacketIds = new Set(
+    (context.conversationContexts ?? []).map(({ packetId }) => packetId),
+  );
+  if (conversationContextPacketIds.size > MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
     throw new Error("Execution context contains too many chat context packets.");
   }
   const documentContextBytes = documents.reduce(

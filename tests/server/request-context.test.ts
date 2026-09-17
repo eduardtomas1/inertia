@@ -221,6 +221,8 @@ describe("bounded structured turn request context", () => {
           packetId: "11111111-1111-4111-8111-111111111111",
           label: "Chat context · Architecture notes · 1 message",
           content: packetContent,
+          blockIndex: 0,
+          blockCount: 1,
         }],
       },
     });

@@ -130,6 +130,7 @@ function contextPacket(
     note: null,
     messageCount: 1,
     characterCount: 42,
+    droppedMessageCount: 0,
     createdAt: current.createdAt,
     consumedMessageId,
     consumedAt: consumedMessageId ? current.updatedAt : null,

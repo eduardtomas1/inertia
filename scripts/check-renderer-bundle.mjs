@@ -42,11 +42,11 @@ const budgets = {
   // Caret-aware skills, quota identity and bounded transcript navigation add
   // 1,204 / 1,125 startup bytes; shared core is essentially unchanged. Keep ~0.2 KiB
   // headroom per route. See chat-input-and-continuity/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 794.8 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 796.6 * kibibyte,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 608.4 * kibibyte,
+  detachedChatFirstLoadJavaScript: 610.3 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,

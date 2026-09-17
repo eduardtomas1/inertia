@@ -637,6 +637,11 @@
       "version": 76,
       "name": "SupportNativeAntigravityProvider",
       "digest": "7eb7a38e35aa899896bb7f8990f9224c07f440440f03818012b18212a643413a"
+    },
+    {
+      "version": 77,
+      "name": "ReferenceWholeConversationContext",
+      "digest": "d50069eb10d1be55a9d8278908ccf65f79285efc325e8ce3d3121ab485b3d971"
     }
   ]
 }

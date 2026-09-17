@@ -1,5 +1,5 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { Profiler } from "react";
+import { Profiler, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -287,13 +287,19 @@ describe("streamed agent text", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { default: App } = await import("../../src/renderer/src/App");
     let commits = 0;
+    let flushRoot: () => void = () => undefined;
+    function RootFlusher({ children }: { children: React.ReactNode }): React.JSX.Element {
+      const [, setTick] = useState(0);
+      flushRoot = () => setTick((tick) => tick + 1);
+      return <>{children}</>;
+    }
     function CountedApp(): React.JSX.Element {
       counting.renders.App = (counting.renders.App ?? 0) + 1;
       return App();
     }
     const view = render(
       <Profiler id="app" onRender={() => { commits += 1; }}>
-        <CountedApp />
+        <RootFlusher><CountedApp /></RootFlusher>
       </Profiler>,
     );
     await waitFor(() => expect(
@@ -311,6 +317,7 @@ describe("streamed agent text", () => {
     expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
     expect(quietCycles).toBe(3);
 
+    act(() => flushRoot());
     for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
     commits = 0;
     for (let index = 0; index < TOKENS; index += 1) {

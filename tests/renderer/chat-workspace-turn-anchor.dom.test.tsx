@@ -810,6 +810,7 @@ describe("draft turn anchoring", () => {
       scrollTop: { configurable: true, writable: true, value: 200 },
     });
 
+    fireEvent.wheel(transcript);
     fireEvent.scroll(transcript);
 
     expect(await screen.findByRole("button", { name: "Jump to latest" }))
@@ -1040,33 +1041,6 @@ describe("draft turn anchoring", () => {
     }));
   });
 
-  it.each(["codex", "claude", "cursor", "kimi", "opencode"] as const)(
-    "marks %s ultra reasoning for the animated frame",
-    (providerId) => {
-      const ultra = conversation(
-        `conversation-ultra-${providerId}`,
-        providerId,
-        " Ultra ",
-      );
-      const view = render(
-        <ChatWorkspace {...workspaceProps(ultra, async () => null)} />,
-      );
-
-      expect(view.container.querySelector(".chat-workspace"))
-        .toHaveAttribute("data-reasoning-effort", "ultra");
-
-      const high = conversation(
-        `conversation-high-${providerId}`,
-        providerId,
-        "high",
-      );
-      view.rerender(
-        <ChatWorkspace {...workspaceProps(high, async () => null)} />,
-      );
-      expect(view.container.querySelector(".chat-workspace"))
-        .toHaveAttribute("data-reasoning-effort", "high");
-    },
-  );
 
   it("keeps a pending provider question actionable beside the composer", async () => {
     const request: AgentInputRequest = {

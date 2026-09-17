@@ -93,6 +93,17 @@ vi.mock("../../src/renderer/src/components/response-timeline/turn", async (impor
 });
 
 const TOKENS = 200;
+const COUNTED_SHELL = [
+  "App",
+  "AppLayout",
+  "Sidebar",
+  "WorkspaceHeader",
+  "WorkspaceScene",
+  "ChatWorkspace",
+  "Composer",
+  "ResponseTimeline",
+  "TurnTimeline",
+] as const;
 const projectId = "51515151-5151-4151-8151-515151515151";
 const conversationId = "52525252-5252-4252-8252-525252525252";
 const now = "2026-09-15T10:00:00.000Z";
@@ -288,9 +299,17 @@ describe("streamed agent text", () => {
     await waitFor(() => expect(
       view.container.querySelector(`[data-turn-id="${turn.id}"]`),
     ).not.toBeNull());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    });
+    let quietCycles = 0;
+    for (let cycle = 0; cycle < 200 && quietCycles < 3; cycle += 1) {
+      const commitsBefore = commits;
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      const mounted = COUNTED_SHELL.every((name) => (counting.renders[name] ?? 0) > 0);
+      quietCycles = mounted && commits === commitsBefore ? quietCycles + 1 : 0;
+    }
+    expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
+    expect(quietCycles).toBe(3);
 
     for (const name of Object.keys(counting.renders)) counting.renders[name] = 0;
     commits = 0;

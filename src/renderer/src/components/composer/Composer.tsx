@@ -985,6 +985,7 @@ export const Composer = memo(function Composer({
       textarea?.selectionStart ?? message.length,
       textarea?.selectionEnd ?? message.length,
     );
+    skillCompletion.markSkillAccepted(insertion.value, insertion.selectionStart);
     if (insertion.inserted) updateMessage(insertion.value);
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();

@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   renderHook,
@@ -103,6 +104,31 @@ describe("ComposerSkillsMenu", () => {
     } finally {
       localeLowercase.mockRestore();
     }
+  });
+
+  it("keeps suggestions closed after accepting a skill even when the caret selection event arrives late", () => {
+    const review = { ...skill(0), id: "skill-review", name: "review" };
+    const editor = (value: string, caret: number) => ({
+      value,
+      selectionStart: caret,
+      selectionEnd: caret,
+    }) as HTMLTextAreaElement;
+    const { result, rerender } = renderHook(
+      ({ message }) => useComposerSkillCompletion([review], message, true),
+      { initialProps: { message: "Use $rev for this change" } },
+    );
+    act(() => result.current.onSkillSelectionChange(editor("Use $rev for this change", 8)));
+    expect(result.current.skillQuery).toBe("rev");
+
+    act(() => result.current.markSkillAccepted("Use $review for this change", 11));
+    rerender({ message: "Use $review for this change" });
+    act(() => result.current.onSkillSelectionChange(editor("Use $review for this change", 11)));
+    expect(result.current.skillQuery).toBeNull();
+    expect(result.current.activeSkill).toBeNull();
+
+    rerender({ message: "Use $reviews for this change" });
+    act(() => result.current.onSkillSelectionChange(editor("Use $reviews for this change", 12)));
+    expect(result.current.skillQuery).toBe("reviews");
   });
 
   it("has no skills button, and only opens suggestions for a typed dollar query", () => {

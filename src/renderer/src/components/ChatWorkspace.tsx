@@ -1,3 +1,4 @@
+import { readTranscriptPosition, forgetTranscriptPosition } from "../utils/transcriptPosition";
 import {
   lazy,
   Suspense,
@@ -407,11 +408,11 @@ export function ChatWorkspace({
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
     conversationId,
-    initialTranscriptNavigation,
+    (id) => initialTranscriptNavigation(id, readTranscriptPosition(id)?.wasFollowing === false),
   );
   const activeNavigation = navigation.conversationId === conversationId
     ? navigation
-    : initialTranscriptNavigation(conversationId);
+    : initialTranscriptNavigation(conversationId, readTranscriptPosition(conversationId)?.wasFollowing === false);
   const navigationRef = useRef(activeNavigation);
   navigationRef.current = activeNavigation;
   const readerIntentRef = useRef(false);
@@ -581,6 +582,7 @@ export function ChatWorkspace({
     if (!conversationId) return;
     clearReaderIntent();
     clearPendingFinalAnswerNavigation();
+    forgetTranscriptPosition(conversationId);
     dispatchNavigation({
       type: "latest.requested",
       conversationId,
@@ -650,8 +652,11 @@ export function ChatWorkspace({
     dispatchNavigation({
       type: "conversation.changed",
       conversationId,
+      readingHistory: readTranscriptPosition(conversationId)?.wasFollowing === false,
     });
-    performScrollToLatest("auto");
+    if (readTranscriptPosition(conversationId)?.wasFollowing !== false) {
+      performScrollToLatest("auto");
+    }
   }, [
     clearPendingFinalAnswerNavigation,
     clearReaderIntent,
@@ -803,6 +808,7 @@ export function ChatWorkspace({
       context,
     );
     if (!acceptance) return null;
+    if (acceptance.disposition === "new-turn") forgetTranscriptPosition(acceptance.conversationId);
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
     dispatchNavigation({

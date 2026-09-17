@@ -15,7 +15,7 @@ export interface ComposerMenuController {
   menu: ComposerMenu | null;
   toggleMenu: (menu: ComposerMenu) => void;
   dismissMenu: (reason: "escape" | "selection" | "context-change") => void;
-  setMenuTrigger: (menu: ComposerMenu, node: HTMLButtonElement | null) => void;
+  setMenuTrigger: (menu: ComposerMenu, node: HTMLButtonElement | HTMLTextAreaElement | null) => void;
   setMenuPopover: (menu: ComposerMenu, node: HTMLDivElement | null) => void;
   moreSection: MoreSection | null;
   moreSubmenuSide: HorizontalSubmenuSide | null;
@@ -60,12 +60,12 @@ export function useComposerMenus(): ComposerMenuController {
     useRef(new Map<MoreSection, HTMLButtonElement>());
   const moreHoverTimerRef = useRef<number | null>(null);
   const moreSectionExplicitRef = useRef(false);
-  const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement>());
+  const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement | HTMLTextAreaElement>());
   const menuPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const setMenuTrigger = useCallback((
     name: ComposerMenu,
-    node: HTMLButtonElement | null,
+    node: HTMLButtonElement | HTMLTextAreaElement | null,
   ): void => {
     setDismissibleMenuTrigger(name, node);
     if (node) menuTriggerRefs.current.set(name, node);

@@ -1,3 +1,4 @@
+import { readContinuationHistory } from "./continuation-history";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
@@ -35,6 +36,11 @@ type TranscriptPersistenceContext = Pick<
 
 export class TranscriptRepository {
   constructor(private readonly context: TranscriptPersistenceContext) {}
+
+  continuationHistory(conversationId: string): ReturnType<typeof readContinuationHistory> {
+    this.context.requireConversation(conversationId);
+    return readContinuationHistory(this.context.database, conversationId);
+  }
 
   createMessage(
     conversationId: string,

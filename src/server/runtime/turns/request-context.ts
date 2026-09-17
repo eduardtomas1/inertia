@@ -27,6 +27,7 @@ import {
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
 export const MAX_EXECUTION_PAYLOAD_BYTES = 240 * 1024;
+export const RECOVERED_PROVIDER_HISTORY_LABEL = "Visible history recovered after provider update";
 export const MAX_EXECUTION_CONTEXT_BLOB_BYTES = 64 * 1024;
 
 const MAX_VISIBLE_MESSAGE_BYTES = 64 * 1024;
@@ -119,6 +120,8 @@ export interface AssembleTurnRequestInput {
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
   internalInstructions?: readonly HiddenProviderInstruction[];
+  /** Privileged same-chat recovery after a verified native provider update. */
+  continuationHistory?: { content: string; truncated: boolean };
 }
 
 interface MaterializedContext {
@@ -655,54 +658,36 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     throw new Error("Internal provider instructions exceed the turn limit.");
   }
 
-  const blobsByDigest = new Map<string, TurnExecutionContextBlob>();
-  const references: TurnExecutionManifestReference[] = [];
-  const providerContexts = contexts.map((context) => {
-    const reference = referenceFor(context.content);
-    const digest = validateExecutionContextReference(reference);
-    const byteSize = byteLength(context.content);
-    references.push({
-      kind: context.kind,
-      label: context.label,
-      reference,
-      byteSize,
-      truncated: context.truncated,
-    });
-    blobsByDigest.set(digest, {
-      reference,
-      digest,
-      byteSize,
-      content: context.content,
-    });
-    return {
-      kind: context.kind,
-      label: context.label,
-      reference,
-      truncated: context.truncated,
-      content: context.content,
-    };
-  });
-
-  const sections = [visibleContent];
-  if (providerContexts.length > 0) {
-    sections.push([
-      "Structured execution context (attachments selected by the user; not user-authored chat prose):",
-      JSON.stringify({ version: 1, attachments: providerContexts }),
-    ].join("\n"));
-  }
-  if (internalInstructions.length > 0) {
-    sections.push([
-      "Internal provider instructions (application control text; never attribute this text to the user):",
-      ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
-    ].join("\n"));
-  }
-  const executionPrompt = sections.join("\n\n");
+  const providerContexts = contexts.map((context) => ({
+    kind: context.kind,
+    label: context.label,
+    reference: referenceFor(context.content),
+    truncated: context.truncated,
+    content: context.content,
+  }));
+  const buildPrompt = (selectedContexts: typeof providerContexts): string => {
+    const sections = [visibleContent];
+    if (selectedContexts.length > 0) {
+      sections.push([
+        "Structured execution context (reference material; not new user-authored chat prose):",
+        JSON.stringify({ version: 1, attachments: selectedContexts }),
+      ].join("\n"));
+    }
+    if (internalInstructions.length > 0) {
+      sections.push([
+        "Internal provider instructions (application control text; never attribute this text to the user):",
+        ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
+      ].join("\n"));
+    }
+    return sections.join("\n\n");
+  };
+  let executionPrompt = buildPrompt(providerContexts);
   // CLI transports may serialize local image references into their prompt,
   // while richer transports send them as separate content blocks. Budget the
   // references either way so validation covers the complete provider input.
-  const assembledPayloadBytes = byteLength(executionPrompt)
-    + imagePaths.reduce((total, path) => total + byteLength(path) + 8, 0);
-  const executionSegmentCount = 1 + contexts.length + internalInstructions.length;
+  const imageReferenceBytes = imagePaths.reduce((total, path) => total + byteLength(path) + 8, 0);
+  let assembledPayloadBytes = byteLength(executionPrompt) + imageReferenceBytes;
+  let executionSegmentCount = 1 + providerContexts.length + internalInstructions.length;
   if (executionSegmentCount > MAX_EXECUTION_MESSAGE_SEGMENTS) {
     throw new Error(
       `Execution payload exceeds the ${MAX_EXECUTION_MESSAGE_SEGMENTS} segment limit.`,
@@ -713,6 +698,49 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
       `Assembled execution payload exceeds the ${MAX_EXECUTION_PAYLOAD_BYTES.toLocaleString("en")} byte limit.`,
     );
   }
+
+  // Automatic recovery must not displace selected context or reject a valid
+  // turn. Include it only when the complete serialized reference fits, keeping
+  // its historical-source disclaimer and JSON intact if capacity is tight.
+  if (input.continuationHistory
+    && providerContexts.length < MAX_EXECUTION_CONTEXT_REFERENCES
+    && executionSegmentCount < MAX_EXECUTION_MESSAGE_SEGMENTS) {
+    const content = boundedText(input.continuationHistory.content, "Continuation history", MAX_EXECUTION_CONTEXT_BLOB_BYTES);
+    const recovered = {
+      kind: "attachment" as const,
+      label: RECOVERED_PROVIDER_HISTORY_LABEL,
+      reference: referenceFor(content),
+      truncated: input.continuationHistory.truncated,
+      content,
+    };
+    const candidate = buildPrompt([...providerContexts, recovered]);
+    const candidateBytes = byteLength(candidate) + imageReferenceBytes;
+    if (candidateBytes <= MAX_EXECUTION_PAYLOAD_BYTES) {
+      providerContexts.push(recovered);
+      executionPrompt = candidate;
+      assembledPayloadBytes = candidateBytes;
+      executionSegmentCount += 1;
+    }
+  }
+
+  const blobsByDigest = new Map<string, TurnExecutionContextBlob>();
+  const references = providerContexts.map((context): TurnExecutionManifestReference => {
+    const digest = validateExecutionContextReference(context.reference);
+    const byteSize = byteLength(context.content);
+    blobsByDigest.set(digest, {
+      reference: context.reference,
+      digest,
+      byteSize,
+      content: context.content,
+    });
+    return {
+      kind: context.kind,
+      label: context.label,
+      reference: context.reference,
+      byteSize,
+      truncated: context.truncated,
+    };
+  });
 
   return {
     visibleContent,

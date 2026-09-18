@@ -1,9 +1,10 @@
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
+import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
 import type {
   AgentTurn,
   ChatMessage,
@@ -155,6 +156,30 @@ describe("accepted turn viewport anchoring", () => {
     );
     return { scrollElementRef, timelineElementRef };
   }
+
+  it("opens a virtualized chat at its latest turn and returns to a remembered reading position", () => {
+    const writes: unknown[] = [];
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value(this: HTMLElement, options: unknown) {
+        if (this.classList.contains("anchor-test-scroll")) writes.push(options);
+      },
+    });
+    try {
+      const first = renderTimeline(vi.fn(), vi.fn(), 16, "turn-none");
+      expect(first.scrollElementRef.current).not.toBeNull();
+      expect(writes[0]).toMatchObject({ top: Number.MAX_SAFE_INTEGER });
+      cleanup();
+
+      writes.length = 0;
+      rememberTranscriptPosition(conversationId, { rowId: null, viewportOffset: 0, scrollTop: 420, wasFollowing: false });
+      renderTimeline(vi.fn(), vi.fn(), 16, "turn-none");
+      expect(writes[0]).toMatchObject({ top: 420 });
+    } finally {
+      forgetTranscriptPosition(conversationId);
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    }
+  });
 
   it("places the exact accepted turn at a stable viewport offset", async () => {
     const frames: FrameRequestCallback[] = [];

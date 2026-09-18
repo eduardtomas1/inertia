@@ -500,6 +500,10 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     anchorTo: "end",
     followOnAppend: false,
     useAnimationFrameWithResizeObserver: true,
+    initialOffset: () => {
+      const saved = readTranscriptPosition(props.conversationId);
+      return saved && !saved.wasFollowing ? saved.scrollTop : Number.MAX_SAFE_INTEGER;
+    },
   });
   const initiallyFollowedConversation = useRef<string | null>(null);
   useEffect(() => { initiallyFollowedConversation.current = null; }, [props.conversationId]);

@@ -175,8 +175,8 @@ function readRuntimeCleanupReceipts(
     throw new Error("A runtime cleanup receipt identity is duplicated.");
   }
   return [...unique.values()].sort((left, right) => (
-    left.confirmedAt.localeCompare(right.confirmedAt)
-    || left.runtimeGenerationId.localeCompare(right.runtimeGenerationId)
+    left.confirmedAt.localeCompare(right.confirmedAt, "en")
+    || left.runtimeGenerationId.localeCompare(right.runtimeGenerationId, "en")
   ));
 }
 

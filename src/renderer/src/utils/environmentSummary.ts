@@ -449,8 +449,8 @@ export function buildEnvironmentSummary({
     conversations.map(({ projectId: ownerProjectId }) => ownerProjectId),
   );
   const sortedRuns = [...runs].sort((left, right) =>
-    right.startedAt.localeCompare(left.startedAt)
-    || right.id.localeCompare(left.id));
+    right.startedAt.localeCompare(left.startedAt, "en")
+    || right.id.localeCompare(left.id, "en"));
   let passiveRows = 0;
   const visibleRuns = connectionStatus === "online" ? sortedRuns.filter((run) => {
     if (run.canStop) return true;

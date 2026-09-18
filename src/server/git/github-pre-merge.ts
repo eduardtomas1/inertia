@@ -619,7 +619,7 @@ function affectedAreas(files: readonly GitPreMergeFile[]): GitPreMergeArea[] {
   for (const file of files) totals.set(file.area, (totals.get(file.area) ?? 0) + 1);
   return [...totals]
     .map(([name, count]) => ({ name, files: count }))
-    .sort((left, right) => right.files - left.files || left.name.localeCompare(right.name));
+    .sort((left, right) => right.files - left.files || left.name.localeCompare(right.name, "en"));
 }
 
 function isTestFile(path: string): boolean {

@@ -186,7 +186,7 @@ export class BackendProfileRepository {
         ...stored.probeAdmissionHighWater.filter(
           ({ modelId }) => modelId !== result.modelId,
         ),
-      ].sort((left, right) => left.modelId.localeCompare(right.modelId));
+      ].sort((left, right) => left.modelId.localeCompare(right.modelId, "en"));
       const results = [
         result,
         ...stored.probeResults.filter(({ modelId }) => modelId !== result.modelId),
@@ -328,7 +328,7 @@ function compareProbeRecency(
   right: BackendCompatibilityProbeResult,
 ): number {
   const timeDifference = Date.parse(right.checkedAt) - Date.parse(left.checkedAt);
-  return timeDifference || left.modelId.localeCompare(right.modelId);
+  return timeDifference || left.modelId.localeCompare(right.modelId, "en");
 }
 
 function trimProbeResults(

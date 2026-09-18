@@ -97,11 +97,11 @@ function compareTimestamped(
   left: { id: string; createdAt: string },
   right: { id: string; createdAt: string },
 ): number {
-  return timestamp(left.createdAt) - timestamp(right.createdAt) || left.id.localeCompare(right.id);
+  return timestamp(left.createdAt) - timestamp(right.createdAt) || left.id.localeCompare(right.id, "en");
 }
 
 function compareTurns(left: AgentTurn, right: AgentTurn): number {
-  return timestamp(left.requestedAt) - timestamp(right.requestedAt) || left.id.localeCompare(right.id);
+  return timestamp(left.requestedAt) - timestamp(right.requestedAt) || left.id.localeCompare(right.id, "en");
 }
 
 function latestReasoning(items: AgentReasoning[]): AgentReasoning | null {
@@ -336,7 +336,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     ...input.messages.filter((message) => message.role === "system" && message.turnId === null && message.compaction).map((message) => ({ kind: "compaction" as const, id: message.id, message })),
   ];
   const time = (item: ResponseTimelineItem): string => item.kind === "turn" ? item.turn.requestedAt : item.kind === "compaction" ? item.message.createdAt : "";
-  ordered.sort((left, right) => timestamp(time(left)) - timestamp(time(right)) || left.id.localeCompare(right.id));
+  ordered.sort((left, right) => timestamp(time(left)) - timestamp(time(right)) || left.id.localeCompare(right.id, "en"));
   return [
     ...(hasCompatibility
       ? [{

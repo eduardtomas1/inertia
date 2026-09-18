@@ -162,7 +162,7 @@ function validLegacyRecoveryAuthority(
     || new Set(runtimeGenerationIds).size !== runtimeGenerationIds.length
     || !runtimeGenerationIds.includes(authority.runtimeGenerationId)
     || [...runtimeGenerationIds]
-      .sort((left, right) => left.localeCompare(right))
+      .sort((left, right) => left.localeCompare(right, "en"))
       .some((runtimeGenerationId, index) => (
         runtimeGenerationId !== runtimeGenerationIds[index]
       ))
@@ -306,7 +306,7 @@ function runtimeProcessSessionTopology(
       entry.writerRoot ? String(entry.writerRoot.device) : null,
       entry.writerRoot ? String(entry.writerRoot.inode) : null,
     ];
-  }).sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+  }).sort((left, right) => String(left[0]).localeCompare(String(right[0]), "en"));
   return {
     sessions,
     writerNames,

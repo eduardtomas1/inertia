@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
+process.env.LANG = "en_US.UTF-8";
+process.env.LC_ALL = "en_US.UTF-8";
+process.env.TZ = "UTC";
+
 // Native Git, SQLite, and WebSocket fixtures contend heavily on hosted Windows.
 const isWindowsCi = process.platform === "win32" && process.env.CI === "true";
 const windowsRuntimeJobIntegrity: unknown = JSON.parse(readFileSync(resolve(
@@ -93,10 +97,10 @@ export default defineConfig({
         functions: 59,
         lines: 66,
         "src/renderer/**": {
-          statements: 33,
-          branches: 37,
-          functions: 29,
-          lines: 34.5,
+          statements: 78,
+          branches: 72.5,
+          functions: 73.5,
+          lines: 81,
         },
         "src/shared/private-connect/*.ts": {
           statements: 95,

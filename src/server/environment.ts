@@ -321,7 +321,7 @@ async function boundedNvmExecutableDirectories(
           if (left.components[index] === right.components[index]) continue;
           return left.components[index]! > right.components[index]! ? -1 : 1;
         }
-        return left.bin.localeCompare(right.bin);
+        return left.bin.localeCompare(right.bin, "en");
       })
       .slice(0, 32)
       .map(({ bin }) => bin);

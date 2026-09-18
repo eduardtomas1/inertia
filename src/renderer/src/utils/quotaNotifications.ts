@@ -153,7 +153,7 @@ function boundedWindows(
   return Object.fromEntries(
     Object.entries(windows)
       .sort(([, left], [, right]) =>
-        left.observedAt.localeCompare(right.observedAt))
+        left.observedAt.localeCompare(right.observedAt, "en"))
       .slice(-MAX_PERSISTED_WINDOWS),
   );
 }

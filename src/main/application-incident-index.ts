@@ -92,7 +92,7 @@ export class ApplicationIncidentIndex {
     this.prune();
     const matching = [...this.records.values()]
       .filter((record) => diagnosticMatches(record, query))
-      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id));
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id, "en"));
     const records = matching.slice(query.offset, query.offset + query.limit);
     return {
       records, total: matching.length,

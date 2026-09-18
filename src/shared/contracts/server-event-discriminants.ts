@@ -355,3 +355,5 @@ export function runtimeEventScopeMatches(
     : candidate.kind === "conversation-detail"
       && candidate.conversationId === conversationId;
 }
+
+export const unknownEventType = (_type: never): false => false;

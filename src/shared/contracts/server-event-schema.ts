@@ -2,7 +2,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
-import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
@@ -1014,7 +1014,6 @@ function conversationDetail(
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
 
-const unknownEventType = (_type: never): false => false;
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   const type = value.type as RuntimeMutationEvent["type"];

@@ -19,6 +19,8 @@ import {
 } from "../../node/runtime-owned-processes";
 import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
 
+const MAX_CLAUDE_STDERR_TAIL_CHARS = 4 * 1024;
+
 export interface ClaudeOwnedQueryDependencies {
   /** Test seam for the SDK-owned child process creation. */
   spawnProcess?: typeof spawn;
@@ -32,6 +34,7 @@ export interface ClaudeOwnedQueryProcess {
   readonly spawnClaudeCodeProcess: (options: SpawnOptions) => SpawnedProcess;
   readonly child: () => ChildProcessWithoutNullStreams | undefined;
   readonly transportError: () => Error | undefined;
+  readonly stderrTail: () => string;
   readonly waitForNaturalClose: (waitMs: number, signal?: AbortSignal) => Promise<boolean>;
   readonly requestTermination: (force: boolean) => void;
   readonly terminate: (force: boolean) => Promise<void>;
@@ -54,6 +57,7 @@ export function createClaudeOwnedQueryProcess(
   let child: ChildProcessWithoutNullStreams | undefined;
   let shutdownRequested = false;
   let transportError: Error | undefined;
+  let stderrTail = "";
   let childClosed: Promise<void> | undefined;
   let terminateOwnedProcessTree: ReturnType<
     typeof createOwnedProcessTreeTermination
@@ -96,7 +100,10 @@ export function createClaudeOwnedQueryProcess(
     ownedChild.stderr.on("error", () => {
       // Provider exit is reported by the SDK through the process events.
     });
-    ownedChild.stderr.resume();
+    ownedChild.stderr.setEncoding("utf8");
+    ownedChild.stderr.on("data", (chunk: string) => {
+      stderrTail = (stderrTail + chunk).slice(-MAX_CLAUDE_STDERR_TAIL_CHARS);
+    });
     terminateOwnedProcessTree = createOwnedProcessTreeTermination(
       ownedChild,
       subject,
@@ -148,6 +155,7 @@ export function createClaudeOwnedQueryProcess(
     spawnClaudeCodeProcess,
     child: () => child,
     transportError: () => transportError,
+    stderrTail: () => stderrTail,
     waitForNaturalClose: async (waitMs, signal) => {
       const ownedChild = child;
       if (!ownedChild) return true;

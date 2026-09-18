@@ -235,4 +235,50 @@ describe("installed Claude SDK owned transport", () => {
       await removePortableFixture(root);
     }
   });
+
+  it("keeps a bounded, sanitized stderr tail when Claude Code exits before answering", async () => {
+    const root = portableFixtureRoot("Claude stderr tail");
+    const child = fakeClaudeChild() as ReturnType<typeof fakeClaudeChild> & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough };
+    const input = createInterface({ input: child.stdin });
+    const exit = (): void => {
+      if (child.exitCode !== null) return;
+      Object.assign(child, { exitCode: 1 });
+      child.stdout.end();
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+    };
+    input.on("line", (line) => {
+      const message = JSON.parse(line) as { type: string; request_id: string };
+      if (message.type === "control_request") {
+        child.stdout.write(`${JSON.stringify({ type: "control_response", response: {
+          subtype: "success", request_id: message.request_id,
+          response: { commands: [], models: [], agents: [], account: {} },
+        } })}\n`);
+      } else if (message.type === "user") {
+        child.stderr.write(`${"early startup noise\n".repeat(1_000)}Invalid API key sk-ant-api03-${"a".repeat(40)} read from ${root}/settings.json\n`);
+        setImmediate(exit);
+      }
+    });
+    const harness = createClaudeAgentSdkHarness({
+      spawnProcess: vi.fn(() => child) as unknown as typeof spawn,
+      terminateProcessTree: vi.fn(async () => { exit(); return true; }),
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({ providerId: "claude", conversationId: "stderr-tail", cwd: root,
+        prompt: "Synthetic request", interactionMode: "build", access: "supervised" }),
+      executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+    });
+    try {
+      const result = await run.result;
+      expect(result).toMatchObject({ status: "failed", failure: { phase: "runtime" } });
+      const detail = result.failure?.technicalDetail ?? "";
+      expect(detail).toContain("Invalid API key [redacted] read from <workspace>/settings.json");
+      expect(detail).not.toContain("sk-ant");
+      expect(detail.length).toBeLessThanOrEqual(4 * 1024);
+    } finally {
+      input.close();
+      child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+      await removePortableFixture(root);
+    }
+  });
 });

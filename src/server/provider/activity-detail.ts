@@ -76,6 +76,7 @@ export function sanitizeProviderActivityDetail(
     )
     .replace(/\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}/gu, "[redacted]")
     .replace(
       /\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|system[_ -]?prompt|tokens?)\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu,
       "$1=[redacted]",

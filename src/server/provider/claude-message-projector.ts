@@ -22,6 +22,7 @@ import {
   isChildOwnedClaudeMessage as isChildOwned,
   isClaudeToolUseBlock as isToolUseBlock,
   projectClaudeRateLimitEvent,
+  QUIET_CLAUDE_SYSTEM_SUBTYPES,
   MAX_CLAUDE_TRACKED_MESSAGE_IDS as MAX_TRACKED_MESSAGE_IDS,
   MAX_CLAUDE_TRACKED_TEXT_ALIASES,
   safeClaudeNonNegativeNumber as safeNonNegativeNumber,
@@ -936,6 +937,7 @@ export class ClaudeMessageProjector {
     const eventType = discriminator(event?.type);
     const deltaType = discriminator(objectValue(event?.delta)?.type);
     const signature = [scope, type, subtype, state, eventType, deltaType].join(":");
+    if (type === "system" && QUIET_CLAUDE_SYSTEM_SUBTYPES.has(subtype)) return;
     if (this.unknownRuntimeMessages.has(signature)) return;
     this.unknownRuntimeMessages.add(signature);
     this.options.emitter.activity(

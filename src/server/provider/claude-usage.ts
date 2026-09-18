@@ -83,6 +83,22 @@ function usageBreakdown(value: unknown): UsageBreakdown {
   };
 }
 
+function modelUsageBreakdown(value: unknown): UsageBreakdown | null {
+  const entries = Object.values(objectValue(value) ?? {})
+    .map(objectValue)
+    .filter((entry): entry is Record<string, unknown> => entry !== undefined);
+  const total = (key: string): number | null =>
+    sumKnown(entries.map((entry) => tokenCount(entry[key])));
+  const breakdown = usageBreakdown({
+    input_tokens: total("inputTokens"),
+    cache_read_input_tokens: total("cacheReadInputTokens"),
+    cache_creation_input_tokens: total("cacheCreationInputTokens"),
+    output_tokens: total("outputTokens"),
+    output_tokens_details: { thinking_tokens: total("thinkingTokens") },
+  });
+  return (breakdown.totalTokens ?? 0) > 0 ? breakdown : null;
+}
+
 function lastIteration(value: unknown): Record<string, unknown> | undefined {
   const usage = objectValue(value);
   const iterations = Array.isArray(usage?.iterations) ? usage.iterations : [];
@@ -134,7 +150,9 @@ export function parseClaudeUsage(
   const result = objectValue(value) ?? {};
   const resultUsage = objectValue(result.usage);
   const contextUsage = objectValue(options.contextUsage);
-  const aggregate = usageBreakdown(resultUsage);
+  const mainLoop = usageBreakdown(resultUsage);
+  const modelTotals = modelUsageBreakdown(result.modelUsage);
+  const aggregate = modelTotals ?? mainLoop;
   const contextApiUsage = usageBreakdown(contextUsage?.apiUsage);
   const iteration = lastIteration(resultUsage);
   const iterationUsage = usageBreakdown(iteration);
@@ -142,7 +160,7 @@ export function parseClaudeUsage(
 
   const reportedContextTokens = tokenCount(contextUsage?.totalTokens);
   const singleTurnContextTokens = resultTurns === 1
-    ? aggregate.totalTokens
+    ? mainLoop.totalTokens
     : null;
   const usedTokens = reportedContextTokens
     ?? iterationUsage.totalTokens
@@ -163,7 +181,7 @@ export function parseClaudeUsage(
   const compactsAutomatically = typeof contextUsage?.isAutoCompactEnabled === "boolean"
     ? contextUsage.isAutoCompactEnabled
     : null;
-  const hasAggregateUsage = resultUsage !== undefined;
+  const hasAggregateUsage = resultUsage !== undefined || modelTotals !== null;
   const inputTokens = hasAggregateUsage
     ? aggregate.inputTokens
     : contextApiUsage.inputTokens;

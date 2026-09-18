@@ -185,6 +185,28 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
         else throw new Error("The background fixture expects function interval callbacks.");
       }, delay) });
     });
+    // This fixture measures renderer motion, not provider discovery. Project a
+    // fixed catalog into every snapshot so cold control-process discovery cannot
+    // remove the selected maximum while idle/focus measurements are running.
+    await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:/u, (socket) => {
+      socket.connectToServer().onMessage((message) => {
+        const frame = JSON.parse(String(message)) as ServerEvent;
+        const event = frame.type === "runtime.event" ? frame.event : frame;
+        if (event.type === "server.welcome" || event.type === "snapshot.updated") {
+          const provider = event.snapshot.providers.find(({ id }) => id === "codex");
+          if (provider) provider.models = [{
+            id: "background-model", label: "Background model", description: "Renderer motion fixture",
+            isDefault: true, inputModalities: ["text"],
+            reasoningOptions: [
+              { value: "high", label: "High", description: "High reasoning" },
+              { value: "ultra", label: "Maximum", description: "Maximum reasoning" },
+            ],
+            defaultReasoningEffort: "high",
+          }];
+        }
+        socket.send(JSON.stringify(frame));
+      });
+    });
     await page.reload();
     const focusSession = await page.context().newCDPSession(page);
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });
@@ -203,6 +225,7 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       await page.locator(".subagent-disclosure summary").click();
       await expect(page.locator(".subagent-disclosure")).toHaveAttribute("open", "");
     }
+    await expect(page.locator(".composer")).toHaveAttribute("data-maximum-reasoning", "true");
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);

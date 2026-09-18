@@ -127,6 +127,7 @@ test("opens Environment by default with reachable responsive geometry", async ({
         const usageDisclosure = environmentPanel.locator(
           ".environment-usage-section details > summary",
         );
+        await expect(environmentPanel.locator(".environment-usage-section details")).toHaveAttribute("open", "");
 
         if (theme === "dark") {
           const changes = environmentPanel.getByRole("button", { name: /Changes/u });
@@ -146,6 +147,11 @@ test("opens Environment by default with reachable responsive geometry", async ({
           await page.keyboard.press("Tab");
           await expect(usageDisclosure).toBeFocused();
           await page.keyboard.press("Tab");
+          const usageRefresh = environmentPanel.locator(".environment-usage-refresh:not(:disabled)");
+          if (await usageRefresh.count() > 0) {
+            await expect(usageRefresh).toBeFocused();
+            await page.keyboard.press("Tab");
+          }
           await expect(repository).toBeFocused();
         }
 

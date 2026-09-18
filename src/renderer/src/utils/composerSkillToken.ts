@@ -75,7 +75,10 @@ export function insertComposerSkillToken(
     ? replacementStart(value, selectionStart)
     : selectionStart;
   const before = value.slice(0, start);
-  const after = value.slice(selectionEnd);
+  const end = selectionStart === selectionEnd && start < selectionStart
+    ? selectionEnd + (/^[\w.:-]*/u.exec(value.slice(selectionEnd))?.[0].length ?? 0)
+    : selectionEnd;
+  const after = value.slice(end);
   const leading = before && !/\s$/u.test(before) ? " " : "";
   const trailing = after
     ? /^\s/u.test(after) ? "" : " "

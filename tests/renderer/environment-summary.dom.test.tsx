@@ -14,7 +14,7 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   prefetchWorkspaceTool: vi.fn(),
 }));
 
-import { EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
+import { ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
@@ -295,6 +295,7 @@ function EnvironmentFocusHarness(): React.JSX.Element {
 
 describe("Environment panel", () => {
   beforeEach(() => {
+    window.localStorage.removeItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY);
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
       media: "",
@@ -362,7 +363,7 @@ describe("Environment panel", () => {
     }));
     expect(actions.onOpenRunPreview).toHaveBeenCalledWith(summary.localServers[0]);
 
-    fireEvent.click(within(panel).getByText("Usage").closest("summary")!);
+    expect(within(panel).getByText("Usage").closest("details")).toHaveAttribute("open");
     expect(within(panel).getByText("Context window")).toBeVisible();
     expect(within(panel).getByText("64% left")).toBeVisible();
     expect(within(panel).getByText("Current")).toBeVisible();
@@ -542,6 +543,29 @@ describe("Environment panel", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
+  });
+
+  it("opens Usage by default and remembers when it is collapsed or reopened", () => {
+    const panel = () => <EnvironmentPanel summary={summary} workspaceToolsAvailable {...panelActions()} />;
+    const usage = () => screen.getByText("Usage").closest("details")!;
+    const first = render(panel());
+    expect(usage()).toHaveAttribute("open");
+    expect(within(usage()).getByText("Context window")).toBeVisible();
+
+    fireEvent.click(usage().querySelector("summary")!);
+    expect(usage()).not.toHaveAttribute("open");
+    expect(window.localStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY)).toBe("false");
+    first.unmount();
+
+    const second = render(panel());
+    expect(usage()).not.toHaveAttribute("open");
+    fireEvent.click(usage().querySelector("summary")!);
+    expect(usage()).toHaveAttribute("open");
+    expect(window.localStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY)).toBe("true");
+    second.unmount();
+
+    render(panel());
+    expect(usage()).toHaveAttribute("open");
   });
 
   it("shows current, stale, refreshing, and unavailable Usage without inventing quota", () => {

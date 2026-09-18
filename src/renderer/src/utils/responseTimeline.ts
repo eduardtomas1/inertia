@@ -5,12 +5,26 @@ export {
   buildTurnExecutionStream,
   isInterruptedActivity,
   isTranscriptActivity,
-  resolveActivityGroupPresentation,
   type ActivityAttentionSeverity,
   type ActivityDetailPresentation,
-  type ActivityGroupPresentation,
   type TurnExecutionStreamEntry,
 } from "./response-timeline/execution";
+export {
+  ACTIVITY_GROUP_LIVE_WINDOW,
+  activityCommandLine,
+  activitySummaryLabel,
+  activitySummaryParts,
+  activityWorkKind,
+  commandDisplayText,
+  latestFailureIndex,
+  resolveActivityGroupWindow,
+  summarizeActivities,
+  type ActivityCommandLine,
+  type ActivityGroupRowPresentation,
+  type ActivityGroupSummary,
+  type ActivitySummaryPart,
+  type ActivityWorkKind,
+} from "./response-timeline/activity-summary";
 export {
   buildResponseTimeline,
   shouldConsolidateSettledWorkIntoRunDetails,

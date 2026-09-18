@@ -421,7 +421,26 @@ describe("composer asynchronous ownership", () => {
     ));
   });
 
-  it("offers real skill matches and stays quiet for an unknown name", async () => {
+  it.each([
+    ["codex", "ultra"], ["claude", "max"], ["cursor", "high"],
+    ["kimi", "high"], ["opencode", "xhigh"], ["antigravity", "high"],
+  ] as const)("animates only the supported maximum on %s", (providerId, maximum) => {
+    const active = conversation(`maximum-${providerId}`);
+    active.providerId = providerId;
+    active.modelSelection = providerNativeModelSelection({ providerId, modelId: "provider-default", reasoningEffort: maximum });
+    const props = composerProps(active);
+    props.providers = [{ ...props.providers[0]!, id: providerId, models: [{
+      id: "native-model", label: "Native model", description: "", isDefault: true,
+      inputModalities: ["text"], defaultReasoningEffort: "low",
+      reasoningOptions: ["low", maximum].map((value) => ({ value, label: value, description: "" })),
+    }] }];
+    const view = render(<Composer {...props} />);
+    expect(screen.getByRole("region", { name: "Message composer" })).toHaveAttribute("data-maximum-reasoning", "true");
+    view.rerender(<Composer {...props} conversation={{ ...active, modelSelection: { ...active.modelSelection, reasoningEffort: "low" } }} />);
+    expect(screen.getByRole("region", { name: "Message composer" })).not.toHaveAttribute("data-maximum-reasoning");
+  });
+
+  it("offers real skill matches and explains an unknown name", async () => {
     const user = userEvent.setup();
     const availableSkills: AgentSkillSummary[] = [
       {
@@ -465,8 +484,7 @@ describe("composer asynchronous ownership", () => {
 
     await user.clear(textbox);
     await user.type(textbox, "$missing");
-    expect(screen.queryByRole("listbox", { name: "Skill suggestions" }))
-      .not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No skills match");
   });
 
   it("accepts visible skill completions from the editor without sending raw fragments", async () => {
@@ -533,6 +551,17 @@ describe("composer asynchronous ownership", () => {
     expect(screen.queryByRole("listbox", { name: "Skill suggestions" }))
       .not.toBeInTheDocument();
     expect(editor).toHaveValue("$sec");
+    expect(onSend).not.toHaveBeenCalled();
+
+    // Selecting in the middle of a draft replaces the whole partial token,
+    // including its suffix to the right of the caret, and preserves the prose.
+    fireEvent.change(editor, { target: { value: "Use $security-old for this review" } });
+    (editor as HTMLTextAreaElement).setSelectionRange(8, 8);
+    fireEvent.select(editor);
+    await screen.findByRole("listbox", { name: "Skill suggestions" });
+    fireEvent.keyDown(editor, { key: "Tab" });
+    expect(editor).toHaveValue("Use $security-review for this review");
+    expect(editor).toHaveFocus();
     expect(onSend).not.toHaveBeenCalled();
   });
 

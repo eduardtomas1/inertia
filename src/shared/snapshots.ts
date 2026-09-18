@@ -30,9 +30,18 @@ export interface SnapshotState {
   enabled: boolean;
   shortcut: "both-shift" | "accelerator";
   available: boolean;
-  permission: "granted" | "required";
+  permission: "granted" | "required" | "unverified";
   message: string | null;
 }
+
+export const SNAPSHOT_CAPTURE_PHASES = ["foreground", "accessibility", "screenshot", "verification", "encoding"] as const;
+export type SnapshotCapturePhase = (typeof SNAPSHOT_CAPTURE_PHASES)[number];
+export const SNAPSHOT_FAILURE_CATEGORIES = [
+  "accessibility-unavailable", "no-active-window", "permission-denied", "invalid-geometry", "native-failure", "incomplete", "changed", "large",
+] as const;
+export type SnapshotFailureCategory = (typeof SNAPSHOT_FAILURE_CATEGORIES)[number];
+export const SNAPSHOT_DIAGNOSTIC_CATEGORIES = [...SNAPSHOT_FAILURE_CATEGORIES, "timed-out"] as const;
+export interface SnapshotFailureDiagnostic { category: (typeof SNAPSHOT_DIAGNOSTIC_CATEGORIES)[number]; phase?: SnapshotCapturePhase }
 
 export function snapshotPlatformAvailable(platform: string, env: Record<string, string | undefined>): boolean {
   return platform === "darwin" || platform === "win32"

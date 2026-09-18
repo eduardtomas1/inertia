@@ -35,6 +35,9 @@ export function ConversationContextPacketStrip({
               <small>
                 {packet.sourceProjectName} · {packet.messageCount}{" "}
                 {packet.messageCount === 1 ? "message" : "messages"}
+                {packet.droppedMessageCount > 0
+                  ? ` · ${packet.droppedMessageCount} oldest omitted`
+                  : ""}
                 {packet.workspaceRelation === "different-workspace"
                   ? " · different workspace"
                   : ""}

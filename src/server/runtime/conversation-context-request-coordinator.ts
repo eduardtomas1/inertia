@@ -12,7 +12,7 @@ const MAX_PENDING_CONTEXT_SELECTIONS = 4;
 
 export interface ConversationContextSelection {
   sourceConversationId: string;
-  sourceMessageIds: readonly string[];
+  sourceMessageIds?: readonly string[];
   note?: string;
   acknowledgedWorkspaceDifference: boolean;
 }
@@ -204,7 +204,9 @@ export class ConversationContextRequestCoordinator {
       scope: pending.scope,
       selection: {
         ...input.selection,
-        sourceMessageIds: [...input.selection.sourceMessageIds],
+        ...(input.selection.sourceMessageIds
+          ? { sourceMessageIds: [...input.selection.sourceMessageIds] }
+          : {}),
       },
     });
     this.finish(input.requestId, {

@@ -355,3 +355,9 @@ export function runtimeEventScopeMatches(
     : candidate.kind === "conversation-detail"
       && candidate.conversationId === conversationId;
 }
+
+export const unknownEventType = (_type: never): false => false;
+
+export function uniqueRecordField(values: unknown[], key: string): boolean {
+  return new Set(values.map((value) => (value as Record<string, unknown>)[key])).size === values.length;
+}

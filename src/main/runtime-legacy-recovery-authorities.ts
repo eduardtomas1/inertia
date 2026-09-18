@@ -104,7 +104,7 @@ function parseAuthority(
         authority.runtimeGenerationId,
       )
       || [...authority.runtimeGenerationIds]
-        .sort((left, right) => left.localeCompare(right)).some(
+        .sort((left, right) => left.localeCompare(right, "en")).some(
         (runtimeGenerationId, index) => (
           runtimeGenerationId !== authority.runtimeGenerationIds?.[index]
         ),
@@ -275,7 +275,7 @@ function readAuthorities(
     throw new Error("A legacy runtime recovery authority identity is duplicated.");
   }
   return [...unique.values()].sort((left, right) =>
-    left.runtimeGenerationId.localeCompare(right.runtimeGenerationId));
+    left.runtimeGenerationId.localeCompare(right.runtimeGenerationId, "en"));
 }
 
 export class LegacyRuntimeRecoveryAuthorityJournal {

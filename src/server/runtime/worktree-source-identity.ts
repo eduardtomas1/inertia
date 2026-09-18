@@ -92,7 +92,7 @@ export async function withWorktreeSourceReservations<Result>(
     reservation,
   ] as const)).values()].sort((left, right) =>
     worktreeSourceIdentityKey(left.identity).localeCompare(
-      worktreeSourceIdentityKey(right.identity),
+      worktreeSourceIdentityKey(right.identity), "en",
     ));
   const runReserved = async (index: number): Promise<Result> => {
     const source = sources[index];

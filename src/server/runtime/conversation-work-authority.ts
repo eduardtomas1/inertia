@@ -86,7 +86,7 @@ export class ConversationWorkAuthority {
       if (!distinct.has(identity)) distinct.set(identity, workspace);
     }
     const ordered = [...distinct.entries()].sort(([left], [right]) =>
-      left.localeCompare(right));
+      left.localeCompare(right, "en"));
     const reservations = ordered.map(([, workspace], index) => ({
       id: `${reservationPrefix}:${index}`,
       workspace,

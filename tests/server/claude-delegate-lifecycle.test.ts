@@ -73,6 +73,43 @@ describe("Claude delegated lifecycle", () => {
     });
   });
 
+  it("keeps a resumed turn open past the empty result for a notification queued ahead of its prompt", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const promptUuid = "11111111-1111-4111-8111-111111111111";
+    const lifecycleFrame = (state: string) =>
+      ({ type: "command_lifecycle", command_uuid: promptUuid, state }) as unknown as SDKMessage;
+    const ack = { ...claudeSuccessResult(""), num_turns: 0 } as SDKMessage;
+    lifecycle.expectPrompt(promptUuid);
+
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "shell-1", status: "stopped" }));
+    lifecycle.observe(lifecycleFrame("queued"));
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: false });
+    lifecycle.observe(lifecycleFrame("started"));
+    expect(lifecycle.observe({
+      ...claudeSuccessResult("PONG", "completed"),
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toMatchObject({ kind: "result", result: { result: "PONG" } });
+
+    const refused = new ClaudeDelegateLifecycle();
+    refused.expectPrompt(promptUuid);
+    refused.observe(lifecycleFrame("queued"));
+    expect(refused.observe(ack)).toEqual({ turnEnded: false });
+    expect(refused.observe(lifecycleFrame("refused"))).toEqual({ turnEnded: true });
+    expect(refused.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
+
+    const legacy = new ClaudeDelegateLifecycle();
+    legacy.expectPrompt(promptUuid);
+    expect(legacy.observe(ack)).toEqual({ turnEnded: true });
+
+    const notification = new ClaudeDelegateLifecycle();
+    notification.expectPrompt(promptUuid);
+    expect(notification.observe({ ...(ack as object), origin: { kind: "task-notification" } } as SDKMessage))
+      .toEqual({ turnEnded: false });
+    expect(notification.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
+  });
+
   it("does not wedge on stale edge events or an idle event from before the result", () => {
     const lifecycle = new ClaudeDelegateLifecycle();
 

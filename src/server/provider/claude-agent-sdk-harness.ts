@@ -489,6 +489,7 @@ function startClaudeRun(
         throw error;
       }
       prompt.uuid = randomUUID();
+      delegateLifecycle.expectPrompt(prompt.uuid);
       if (!promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }

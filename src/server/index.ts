@@ -737,6 +737,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         workflows: agentWorkflows,
         providerTerminalResumes,
         providerInfo: () => providerInfo,
+        verifyProviderInstallation: async (providerId) => { if (providers.providerInstallationState(providerId) !== "current") await refreshProviderInfo(providerId).catch(() => undefined); },
         broadcast,
         broadcastSnapshot,
         send,

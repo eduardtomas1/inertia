@@ -81,6 +81,7 @@ export interface ProviderRunCoordinatorOptions {
   processEnvironment(): NodeJS.ProcessEnv | undefined;
   /** True while this provider's capability evidence is untrusted (#336). */
   evidenceUncertain?(providerId: ProviderId): boolean;
+  installationState?(providerId: ProviderId): "current" | "changed" | "unverified";
   capabilityAvailable(
     input: ProviderRunInput,
     capabilityId: ProviderCapabilityId,
@@ -260,7 +261,11 @@ export class ProviderRunCoordinator {
         "invalid_input",
         this.options.evidenceUncertain?.(providerId)
           ? `${PROVIDER_INFO[providerId].name} is paused because Inertia could not confirm that an earlier ${PROVIDER_INFO[providerId].name} process was cleaned up. Restart Inertia to continue.`
-          : `The exact provider installation does not attest '${unavailable}'.`,
+          : providerAdmissionRefusal(
+            PROVIDER_INFO[providerId].name,
+            this.options.installationState?.(providerId) ?? "current",
+            unavailable,
+          ),
       );
     }
     // Capability evidence is scoped to this exact run (#336). What was attested
@@ -1002,4 +1007,19 @@ export class ProviderRunCoordinator {
     if (timer) clearTimeout(timer);
     return settled;
   }
+}
+
+function providerAdmissionRefusal(
+  name: string,
+  installation: "current" | "changed" | "unverified",
+  capabilityId: ProviderCapabilityId,
+): string {
+  const next = "Open Settings > Providers and choose Refresh all providers, or restart Inertia.";
+  if (installation === "changed") {
+    return `${name} changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. ${next}`;
+  }
+  if (installation === "unverified") {
+    return `Inertia has not verified this ${name} installation yet. ${next}`;
+  }
+  return `The exact provider installation does not attest '${capabilityId}'.`;
 }

@@ -31,6 +31,7 @@ function dropUnreleasedAgentThreadManagement(
   removeProjectSettingsFromLegacyFixture(database);
   database.exec(`
     DROP TRIGGER IF EXISTS conversation_context_packets_discard_source_drafts;
+    DROP TRIGGER IF EXISTS agent_context_requests_discard_with_conversation;
     DROP TABLE IF EXISTS agent_context_requests;
     DROP TABLE IF EXISTS conversation_context_packets;
     DROP TABLE IF EXISTS agent_thread_operations;

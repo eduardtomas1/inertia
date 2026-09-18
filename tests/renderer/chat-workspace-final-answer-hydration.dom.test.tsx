@@ -14,6 +14,13 @@ import type {
   Project,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { createStreamingAgentStore } from "../../src/renderer/src/hooks/useStreamingAgentState";
+
+function streamingSource(text: string) {
+  const store = createStreamingAgentStore();
+  store.update([text, "", null]);
+  return store;
+}
 
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
@@ -198,8 +205,6 @@ function workspaceProps(
     plans: [],
     checkpoints: [],
     turnGitArtifacts: [],
-    streamingText: "",
-    streamingReasoning: "",
     usage: null,
     skills: [],
     skillsCapability: null,
@@ -368,7 +373,7 @@ describe("ChatWorkspace final-answer hydration", () => {
         latestTurnSummary={latestTurnSummary(runningTurn, "running")}
         turns={[runningTurn]}
         messages={messagesForTurn(runningTurn)}
-        streamingText={`${"earlier provider text ".repeat(20)}${beforeMarker} `}
+        streaming={streamingSource(`${"earlier provider text ".repeat(20)}${beforeMarker} `)}
       />,
     );
     await waitFor(() => expect(trace).toHaveBeenCalledWith(
@@ -382,7 +387,7 @@ describe("ChatWorkspace final-answer hydration", () => {
         latestTurnSummary={latestTurnSummary(runningTurn, "running")}
         turns={[runningTurn]}
         messages={messagesForTurn(runningTurn)}
-        streamingText={`${beforeMarker} ${awayMarker} pending unrelated content`}
+        streaming={streamingSource(`${beforeMarker} ${awayMarker} pending unrelated content`)}
       />,
     );
     await act(async () => Promise.resolve());
@@ -394,7 +399,7 @@ describe("ChatWorkspace final-answer hydration", () => {
         latestTurnSummary={latestTurnSummary(runningTurn, "running")}
         turns={[runningTurn]}
         messages={messagesForTurn(runningTurn)}
-        streamingText={`${beforeMarker} STREAM_PROVIDER_READER_ACTIVITY_10000_AWAY `}
+        streaming={streamingSource(`${beforeMarker} STREAM_PROVIDER_READER_ACTIVITY_10000_AWAY `)}
       />,
     );
     await act(async () => Promise.resolve());
@@ -406,7 +411,7 @@ describe("ChatWorkspace final-answer hydration", () => {
         latestTurnSummary={latestTurnSummary(runningTurn, "running")}
         turns={[runningTurn]}
         messages={messagesForTurn(runningTurn)}
-        streamingText={`${beforeMarker} ${awayMarker} `}
+        streaming={streamingSource(`${beforeMarker} ${awayMarker} `)}
       />,
     );
     await waitFor(() => expect(trace).toHaveBeenCalledWith(

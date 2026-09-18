@@ -1,3 +1,4 @@
+import { readContinuationHistory } from "./continuation-history";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
@@ -33,8 +34,21 @@ type TranscriptPersistenceContext = Pick<
   | "touchProject"
 >;
 
+function projectAttachments(
+  rows: ReadonlyArray<Pick<MessageRow, "attachments_json">>,
+): ChatAttachment[] {
+  return rows.flatMap((row) => rendererSafeAttachments(
+    parseAttachments(row.attachments_json),
+  ));
+}
+
 export class TranscriptRepository {
   constructor(private readonly context: TranscriptPersistenceContext) {}
+
+  continuationHistory(conversationId: string): ReturnType<typeof readContinuationHistory> {
+    this.context.requireConversation(conversationId);
+    return readContinuationHistory(this.context.database, conversationId);
+  }
 
   createMessage(
     conversationId: string,
@@ -275,10 +289,32 @@ export class TranscriptRepository {
           WHERE messages.conversation_id = ?
           ORDER BY messages.created_at ASC, messages.id ASC
         `).all(conversationId)) as Array<Pick<MessageRow, "attachments_json">>;
-    return rows
-      .flatMap((row) => rendererSafeAttachments(
-        parseAttachments(row.attachments_json),
-      ));
+    return projectAttachments(rows);
+  }
+
+  referencedAttachmentIds(candidateIds: readonly string[]): Set<string> {
+    const candidates = new Set(candidateIds);
+    if (candidates.size === 0) return new Set();
+    const rows = this.context.database.prepare(`
+      SELECT messages.attachments_json
+      FROM messages
+      WHERE messages.attachments_json <> '[]'
+        AND (
+          json_valid(messages.attachments_json) = 0
+          OR EXISTS (
+            SELECT 1
+            FROM json_tree(CASE
+              WHEN json_valid(messages.attachments_json)
+                THEN messages.attachments_json
+              ELSE '[]'
+            END) AS node
+            WHERE node.atom IN (SELECT value FROM json_each(?))
+          )
+        )
+    `).all(JSON.stringify([...candidates])) as Array<Pick<MessageRow, "attachments_json">>;
+    return new Set(projectAttachments(rows)
+      .map(({ id }) => id)
+      .filter((id) => candidates.has(id)));
   }
 
   messageSearchTarget(messageId: string): MessageSearchTarget | null {

@@ -10,6 +10,7 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
+  sameContinuationIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import type { RuntimeStore } from "../../database";
@@ -18,7 +19,7 @@ import type {
   ProviderActivityEvent,
 } from "../../provider/contracts";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
-import { assembleTurnRequest } from "./request-context";
+import { assembleTurnRequest, RECOVERED_PROVIDER_HISTORY_LABEL } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
@@ -130,19 +131,7 @@ export function resolveTurnRequest(
   const capabilityInstructions = hostToolBridgeAttested
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
     : [];
-  const assembled = assembleTurnRequest({
-    cwd: dependencies.store.conversationPath(conversation.id),
-    visibleContent: request.content,
-    interactionMode: conversation.interactionMode,
-    attachments,
-    imagePaths: request.imagePaths,
-    documentContexts: request.documentContexts,
-    context: request.context,
-    internalInstructions: [
-      ...capabilityInstructions,
-      ...(request.internalInstructions ?? []),
-    ],
-  });
+
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
       ?? exactProvider?.models[0]
@@ -207,6 +196,31 @@ export function resolveTurnRequest(
   if (continuation.action === "new-conversation-required") {
     throw new Error(continuation.reason);
   }
+  const assembled = assembleTurnRequest({
+    continuationHistory: route.providerId === "claude"
+      && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
+      && continuation.action === "start-session"
+      && (continuation.reasonCode === "provider-installation-changed"
+        || (conversation.providerSessionId === null
+          && latestTurn !== null
+          && sameContinuationIdentity(latestTurn.continuationIdentity, route.continuationIdentity)
+          && dependencies.store.turnExecutionManifest(latestTurn.id)?.references.some(
+            ({ label }) => label === RECOVERED_PROVIDER_HISTORY_LABEL,
+          )))
+      ? dependencies.store.continuationHistory(conversation.id)
+      : undefined,
+    cwd: dependencies.store.conversationPath(conversation.id),
+    visibleContent: request.content,
+    interactionMode: conversation.interactionMode,
+    attachments,
+    imagePaths: request.imagePaths,
+    documentContexts: request.documentContexts,
+    context: request.context,
+    internalInstructions: [
+      ...capabilityInstructions,
+      ...(request.internalInstructions ?? []),
+    ],
+  });
   const canResume = continuation.action === "resume-session";
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }

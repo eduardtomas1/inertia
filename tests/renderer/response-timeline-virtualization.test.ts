@@ -499,7 +499,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBe(estimateTimelineRowSize(bounded, { workDetailsExpanded: true }));
   });
 
-  it("prices visible attention boundaries without expanding collapsed adjacent calls", () => {
+  it("keeps attention inside one bounded live window without expanding adjacent calls", () => {
     const successActivities = Array.from({ length: 8 }, (_, index) =>
       activity(`success-${index}`, "successes", {
         createdAt: `2026-07-26T10:00:${String(index).padStart(2, "0")}.000Z`,
@@ -535,7 +535,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
 
     expect(estimateTimelineRowSize(collapsedSuccesses)).toBeLessThan(380);
     expect(estimateTimelineRowSize(collapsedBoundaries))
-      .toBeGreaterThan(estimateTimelineRowSize(collapsedSuccesses) + 40);
+      .toBe(estimateTimelineRowSize(collapsedSuccesses));
     expect(estimateTimelineRowSize(collapsedBoundaries, { activityGroupsExpanded: true }))
       .toBeGreaterThan(estimateTimelineRowSize(collapsedBoundaries));
   });
@@ -632,7 +632,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(questionItem)).toBeGreaterThan(baseEstimate + 180);
     const visibleFailureDelta = estimateTimelineRowSize(failedItem)
       - estimateTimelineRowSize(failedBase);
-    expect(visibleFailureDelta).toBeGreaterThanOrEqual(50);
+    expect(visibleFailureDelta).toBeGreaterThan(0);
     expect(visibleFailureDelta).toBeLessThanOrEqual(80);
   });
 

@@ -60,6 +60,7 @@ import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { cachedStatement } from "./persistence/statement-cache";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
 import {
@@ -905,8 +906,10 @@ export class RuntimeStore {
   }
 
   attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
+  referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.transcriptRepository.referencedAttachmentIds(candidateIds); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
+  continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);
@@ -1135,6 +1138,8 @@ export class RuntimeStore {
     return this.workspaceRunRepository.forConversation(conversationId);
   }
 
+  findWorkspaceRun(id: string): WorkspaceRun | null { return this.workspaceRunRepository.find(id); }
+  hasRecordedActiveWorkspaceRun(): boolean { return this.workspaceRunRepository.hasActive(); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
   hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }
@@ -1223,22 +1228,16 @@ export class RuntimeStore {
     return this.conversationRepository.path(conversationId);
   }
 
-  private requireProject(projectId: string): ProjectRow {
-    const project = this.database.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow | undefined;
-    if (!project) throw new RecordNotFoundError("Project not found.");
-    return project;
-  }
+  private requireProject(projectId: string): ProjectRow { return this.requireRow("projects", projectId, "Project not found."); }
 
-  private requireConversation(conversationId: string): ConversationRow {
-    const conversation = this.database.prepare("SELECT * FROM conversations WHERE id = ?").get(conversationId) as ConversationRow | undefined;
-    if (!conversation) throw new RecordNotFoundError("Conversation not found.");
-    return conversation;
-  }
+  private requireConversation(conversationId: string): ConversationRow { return this.requireRow("conversations", conversationId, "Conversation not found."); }
 
-  private requireAgentTurn(turnId: string): AgentTurnRow {
-    const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
-    if (!turn) throw new RecordNotFoundError("Agent turn not found.");
-    return turn;
+  private requireAgentTurn(turnId: string): AgentTurnRow { return this.requireRow("agent_turns", turnId, "Agent turn not found."); }
+
+  private requireRow<Row>(table: "projects" | "conversations" | "agent_turns", id: string, missing: string): Row {
+    const row = cachedStatement(this.database, `SELECT * FROM ${table} WHERE id = ?`).get(id) as Row | undefined;
+    if (!row) throw new RecordNotFoundError(missing);
+    return row;
   }
 
   recoverInterruptedRuns(): void {

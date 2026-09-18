@@ -179,14 +179,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
     databaseRecoveryActive: () => databaseRecoveryImportActive,
-    agentWorkActive: () => {
-      const snapshot = currentSnapshot();
-      return turns.activeConversationIds().length > 0
-        || isolatedRuns.activeCount() > 0
-        || snapshot.runs.some(
-          ({ status }) => status === "running" || status === "waiting",
-        );
-    },
+    agentWorkActive: () => turns.activeConversationIds().length > 0
+      || isolatedRuns.activeCount() > 0
+      || store.hasRecordedActiveWorkspaceRun(),
     terminalActivity: () => terminals.hasUpdateBlockingActivity(),
     providerMaintenanceActive: () => providerMaintenance.hasBlockingAuthority(),
     providerRefreshActive: () => activeProviderRefreshes > 0,
@@ -1002,7 +997,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }, conversationId, content, deviceId),
     respondToInput: createPrivateConnectInputResponder(pendingInputs, turns),
     stopRun: (conversationId, runId) => {
-      const run = currentSnapshot().runs.find((candidate) => candidate.id === runId);
+      const run = store.findWorkspaceRun(runId);
       if (!run || run.conversationId !== conversationId) return { stopped: false, alreadyStopped: false };
       if (run.status !== "running" && run.status !== "waiting") return { stopped: false, alreadyStopped: true };
       const stopped = isolatedRuns.stopConversation(conversationId) || turns.cancel(conversationId);
@@ -1151,12 +1146,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           }
           await projectIdentityRefresh;
           await artifactReconciliation;
-          const backgroundRunActive = currentSnapshot().runs.some(
-            ({ status }) => status === "running" || status === "waiting",
-          );
           if (
             turns.activeConversationIds().length > 0
-            || backgroundRunActive
+            || store.hasRecordedActiveWorkspaceRun()
             || providerMaintenance.activeOperations().length > 0
             || activeProviderRefreshes > 0
           ) {

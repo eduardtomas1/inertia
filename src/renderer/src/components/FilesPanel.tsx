@@ -326,6 +326,15 @@ export function FilesPanel({
     initialRect: { width: 720, height: 480 },
     getItemKey: (index) => index,
   });
+  const previewLineRef = useCallback((node: HTMLSpanElement | null) => {
+    if (!node) return;
+    const lineNumber = Number(node.dataset.sourceLine);
+    previewLineRefs.current.set(lineNumber, node);
+    if (virtualizedSourcePreview) sourceVirtualizer.measureElement(node);
+    return () => {
+      previewLineRefs.current.delete(lineNumber);
+    };
+  }, [sourceVirtualizer, virtualizedSourcePreview]);
   const renderedPreviewLines = virtualizedSourcePreview
     ? sourceVirtualizer.getVirtualItems().map((item) => ({
         lineNumber: item.index + 1,
@@ -1160,11 +1169,7 @@ export function FilesPanel({
                           data-source-line={lineNumber}
                           data-index={virtual?.index}
                           key={lineNumber}
-                          ref={(node) => {
-                            if (node) previewLineRefs.current.set(lineNumber, node);
-                            else previewLineRefs.current.delete(lineNumber);
-                            if (node && virtual) sourceVirtualizer.measureElement(node);
-                          }}
+                          ref={previewLineRef}
                           tabIndex={referenceStart ? -1 : undefined}
                           aria-label={referenceStart && selectedLocation
                             ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`

@@ -24,7 +24,7 @@
 .add-project-search {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 16px 20px;
   color: var(--text-muted);
 }
@@ -44,7 +44,7 @@
   outline-offset: 1px;
 }
 .add-project-search input {
-  padding: 0;
+  padding: 0 10px;
   border: 0;
   background: transparent;
 }

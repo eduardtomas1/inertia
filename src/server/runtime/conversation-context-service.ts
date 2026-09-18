@@ -13,7 +13,7 @@ import type {
 export interface ConversationContextPacketCreationRequest {
   sourceConversationId: string;
   targetConversationId: string;
-  sourceMessageIds: readonly string[];
+  sourceMessageIds?: readonly string[];
   note?: string;
   acknowledgedWorkspaceDifference: boolean;
 }

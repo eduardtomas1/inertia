@@ -83,11 +83,23 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await app.resizeWindow(760, 600); await app.expectNoViewportOverflow();
     await save("snapshots-compaction-compact-760x600");
     await tile.getByRole("button", { name: "Remove attachment snapshot.png" }).click(); await expect(tile).toHaveCount(0);
-    const settings = page.getByRole("button", { name: "Snapshots", exact: true }); await settings.click();
-    const setup = page.getByRole("dialog", { name: "Snapshots", exact: true }); await expect(setup).toBeVisible();
-    await expect(setup.getByRole("checkbox", { name: "Enable Snapshots" })).not.toBeChecked();
+    await expect(page.locator(".composer").getByRole("button", { name: "Snapshots", exact: true })).toHaveCount(0);
+    await app.resizeWindow(1100, 760);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const navigation = page.getByRole("complementary", { name: "Settings sections" });
+    const snapshots = navigation.getByRole("button", { name: "Snapshots", exact: true });
+    await snapshots.focus(); await snapshots.press("Enter");
+    const setup = page.getByRole("main", { name: "Settings", exact: true });
+    await expect(setup.getByRole("switch", { name: "Enable Snapshots" })).not.toBeChecked();
+    await expect(setup.getByRole("heading", { name: "Take a snapshot" })).toBeVisible();
+    await setup.getByRole("combobox", { name: "Capture shortcut" }).selectOption("accelerator");
+    await expect(setup.getByRole("combobox", { name: "Capture shortcut" })).toBeEnabled();
+    await app.expectNoViewportOverflow();
     await save(`snapshot-settings-privacy-${theme}`);
-    await page.keyboard.press("Escape"); await expect(settings).toBeFocused();
+    await page.reload();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Snapshots", exact: true }).click();
+    await expect(page.getByRole("combobox", { name: "Capture shortcut" })).toHaveValue("accelerator");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

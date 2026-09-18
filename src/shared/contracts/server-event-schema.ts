@@ -2,7 +2,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
-import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, unknownEventType } from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
@@ -68,9 +68,6 @@ function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownR
 }
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
-}
-function uniqueRecordField(values: unknown[], key: string): boolean {
-  return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
 }
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;

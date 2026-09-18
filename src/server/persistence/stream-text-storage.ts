@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 
+import { cachedStatement } from "./statement-cache";
+
 // Keep chunks below both the released code-point bound and migration 40's
 // NUL-safe UTF-8 byte bound. Iterating code points preserves surrogate pairs.
 export const STREAM_TEXT_CHUNK_MAX_CHARACTERS = 1_048_576;
@@ -93,10 +95,11 @@ export function appendMessageContentChunks(
 ): boolean {
   if (!delta) return true;
   return database.transaction(() => {
-    if (!database.prepare("SELECT 1 FROM messages WHERE id = ?").get(messageId)) {
+    if (!cachedStatement(database, "SELECT 1 FROM messages WHERE id = ?").get(messageId)) {
       return false;
     }
-    const insert = database.prepare(
+    const insert = cachedStatement(
+      database,
       "INSERT INTO message_content_chunks (message_id, content) VALUES (?, ?)",
     );
     for (const chunk of splitStreamTextChunks(delta)) {
@@ -113,10 +116,12 @@ export function appendReasoningContentChunks(
 ): boolean {
   if (!delta) return true;
   return database.transaction(() => {
-    if (!database.prepare(
+    if (!cachedStatement(
+      database,
       "SELECT 1 FROM agent_reasonings WHERE id = ?",
     ).get(reasoningId)) return false;
-    const insert = database.prepare(
+    const insert = cachedStatement(
+      database,
       "INSERT INTO reasoning_content_chunks (reasoning_id, content) VALUES (?, ?)",
     );
     for (const chunk of splitStreamTextChunks(delta)) {
@@ -171,11 +176,13 @@ export function replaceMessageContent(
 ): number {
   assertNormalizedStreamText(content);
   return database.transaction(() => {
-    const result = database.prepare(
+    const result = cachedStatement(
+      database,
       "UPDATE messages SET content = ? WHERE id = ?",
     ).run(content, messageId);
     if (result.changes === 1) {
-      database.prepare(
+      cachedStatement(
+        database,
         "DELETE FROM message_content_chunks WHERE message_id = ?",
       ).run(messageId);
     }
@@ -222,11 +229,13 @@ export function replaceReasoningContent(
 ): number {
   assertNormalizedStreamText(content);
   return database.transaction(() => {
-    const result = database.prepare(
+    const result = cachedStatement(
+      database,
       "UPDATE agent_reasonings SET content = ?, status = ? WHERE id = ?",
     ).run(content, status, reasoningId);
     if (result.changes === 1) {
-      database.prepare(
+      cachedStatement(
+        database,
         "DELETE FROM reasoning_content_chunks WHERE reasoning_id = ?",
       ).run(reasoningId);
     }

@@ -504,6 +504,66 @@ describe("nested source-control command scope", () => {
     );
   }, 30_000);
 
+  it("broadcasts a conversation diff only when review metadata changes", async () => {
+    const repository = mkdtempSync(join(tmpdir(), "inertia-diff-broadcast-"));
+    roots.push(repository);
+    initializeRepository(repository);
+    writeFileSync(join(repository, "README.md"), "changed for review\n");
+    const conversationId = crypto.randomUUID();
+    const broker = secureFiles();
+    const authorities = new SecureFileAuthorityRegistry(broker);
+    const socket = { readyState: WebSocket.OPEN } as WebSocket;
+    const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(repository);
+    const reconcileReviewTargets = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const broadcastSnapshot = vi.fn();
+    const send = vi.fn();
+    const handler = createSourceControlCommandHandler({
+      workspacePath: vi.fn(() => repository),
+      secureFiles: broker,
+      secureFileAuthorities: authorities,
+      store: { reviewNotesFor: vi.fn(() => []), reconcileReviewTargets },
+      send,
+      broadcastSnapshot,
+    } as unknown as SourceControlCommandDependencies);
+    const diff = async () => {
+      const requestId = crypto.randomUUID();
+      const authorityRef = await authorities.issue(
+        socket,
+        "git-repository",
+        [projectId, conversationId, repository, ".", metadataMarkerIdentity],
+        await broker.authorizeRoot(repository),
+      );
+      await expect(handler(socket, clientCommandSchema.parse({
+        type: "git.diff",
+        requestId,
+        payload: {
+          projectId,
+          conversationId,
+          authorityRef,
+          ignoreWhitespace: false,
+          commitReview: true,
+        },
+      }))).resolves.toBe("handled");
+      const result = send.mock.calls.find(
+        ([, event]) => event.requestId === requestId,
+      )?.[1];
+      expect(result).toMatchObject({
+        type: "request.result",
+        result: { kind: "git.diff" },
+      });
+    };
+
+    await diff();
+    expect(reconcileReviewTargets).toHaveBeenCalledOnce();
+    expect(broadcastSnapshot).not.toHaveBeenCalled();
+
+    await diff();
+    expect(reconcileReviewTargets).toHaveBeenCalledTimes(2);
+    expect(broadcastSnapshot).toHaveBeenCalledOnce();
+  }, 30_000);
+
   it("commits in the selected nested repository while reserving its owning workspace", async () => {
     const { workspace, repository } = workspaceWithNestedRepository();
     writeFileSync(join(repository, "README.md"), "after\n");

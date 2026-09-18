@@ -93,6 +93,7 @@ function rect(top: number, height: number): DOMRect {
 }
 
 afterEach(() => {
+  forgetTranscriptPosition(conversationId);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -1330,5 +1331,86 @@ describe("completed answer positioning", () => {
       expect(positioned, mismatch).not.toHaveBeenCalled();
       view.unmount();
     }
+  });
+});
+
+describe("timeline keyboard navigation", () => {
+  it("binds Alt navigation once and follows the latest timeline", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const attachScrollElement = (node: HTMLDivElement | null): void => {
+      scrollElementRef.current = node;
+      if (!node) return;
+      vi.spyOn(node, "addEventListener");
+      vi.spyOn(node, "removeEventListener");
+    };
+    const scene = (count: number): React.JSX.Element => (
+      <div ref={attachScrollElement}>
+        <div ref={timelineElementRef}>
+          <ResponseTimeline
+            turns={Array.from({ length: count }, (_, index) => turn(index + 1))}
+            messages={Array.from({ length: count }, (_, index) => message(index + 1))}
+            activities={[]}
+            reasonings={[]}
+            plans={[]}
+            checkpoints={[]}
+            projectRoot="/workspace"
+            projectId="project-1"
+            conversationId={conversationId}
+            streamingText=""
+            streamingReasoning=""
+            approvals={[]}
+            inputRequests={[]}
+            showTimestamps={false}
+            showThinking={false}
+            defaultCodeWrap={false}
+            autoCollapseWorkLog
+            showChangedFileSummaries={false}
+            checkpointRestoreDisabled={false}
+            turnAnchorId={null}
+            scrollElementRef={scrollElementRef}
+            timelineElementRef={timelineElementRef}
+            onRespondToApproval={async () => undefined}
+            onRespondToInput={async () => undefined}
+            onRevertCheckpoint={() => undefined}
+            onOpenTurnDiff={() => undefined}
+            onCompareTurnArtifacts={() => undefined}
+            onOpenTurnFile={() => undefined}
+            onStop={() => undefined}
+          />
+        </div>
+      </div>
+    );
+    const view = render(scene(1));
+    const scrollElement = scrollElementRef.current!;
+    const keydownCalls = (
+      method: "addEventListener" | "removeEventListener",
+    ): number => vi.mocked(scrollElement[method]).mock.calls
+      .filter(([type]) => type === "keydown").length;
+
+    expect(keydownCalls("addEventListener")).toBe(1);
+    view.rerender(scene(2));
+    view.rerender(scene(3));
+    expect(keydownCalls("addEventListener")).toBe(1);
+    expect(keydownCalls("removeEventListener")).toBe(0);
+
+    expect(fireEvent.keyDown(scrollElement, { altKey: true, key: "Home" }))
+      .toBe(false);
+    await act(async () => {
+      frames.shift()?.(performance.now());
+    });
+
+    expect(scrollIntoView.mock.contexts[0])
+      .toHaveAttribute("data-turn-request-context", "turn-3");
+    view.unmount();
+    expect(keydownCalls("removeEventListener")).toBe(1);
   });
 });

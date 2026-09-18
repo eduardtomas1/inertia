@@ -176,4 +176,23 @@ describe("TurnTimeoutCoordinator", () => {
     ]);
     expect(runtime.cancellations()).toBe(1);
   });
+
+  it("reads the durable turn status once per activity", () => {
+    for (const current of ["running", "waiting-for-input"] as const) {
+      const status = vi.fn((): AgentTurnStatus => current);
+      const coordinator = new TurnTimeoutCoordinator({
+        scheduler: new FakeScheduler(),
+        inactivityMs: 1_000,
+        maxLifetimeMs: 10_000,
+        status,
+        cancel: vi.fn(),
+        fail: vi.fn(),
+        reportIncident: vi.fn(),
+      });
+
+      coordinator.activity(activeTurn());
+
+      expect(status).toHaveBeenCalledOnce();
+    }
+  });
 });

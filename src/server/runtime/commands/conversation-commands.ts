@@ -686,9 +686,8 @@ export function createConversationCommandHandler(
             });
           }
           try {
-            const referencedAttachmentIds = new Set(
-              dependencies.store.attachments().map(({ id }) => id),
-            );
+            const referencedAttachmentIds = dependencies.store
+              .referencedAttachmentIds(attachmentIds);
             await dependencies.conversationAttachments.release(
               attachmentIds.filter((attachmentId) =>
                 !referencedAttachmentIds.has(attachmentId)),

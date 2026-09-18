@@ -98,9 +98,14 @@ export class WorkspaceRunRepository {
   }
 
   get(id: string): WorkspaceRun {
+    const run = this.find(id);
+    if (!run) throw new RecordNotFoundError("Workspace activity not found.");
+    return run;
+  }
+
+  find(id: string): WorkspaceRun | null {
     const row = this.context.database.prepare("SELECT * FROM workspace_runs WHERE id = ?").get(id) as WorkspaceRunRow | undefined;
-    if (!row) throw new RecordNotFoundError("Workspace activity not found.");
-    return workspaceRunFromRow(row);
+    return row ? workspaceRunFromRow(row) : null;
   }
 
   forConversation(conversationId: string): WorkspaceRun[] {
@@ -111,6 +116,15 @@ export class WorkspaceRunRepository {
       ORDER BY started_at DESC, id ASC
       LIMIT 200
     `).all(conversationId) as WorkspaceRunRow[]).map(workspaceRunFromRow);
+  }
+
+  hasActive(): boolean {
+    return Boolean(this.context.database.prepare(`
+      SELECT 1
+      FROM workspace_runs
+      WHERE status IN ('running', 'waiting')
+      LIMIT 1
+    `).get());
   }
 
   hasActiveForProject(projectId: string): boolean {

@@ -171,4 +171,59 @@ describe("FilesPanel language presentation", () => {
     expect(totalHeight).toBeGreaterThan(1_048_577 * 17);
     expect(totalHeight).toBeLessThanOrEqual(1_048_577 * 21);
   });
+
+  it("measures virtualized preview lines on mount instead of on every render", () => {
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.classList.contains("file-preview-line") ? 21 : 0;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("file-preview-code") ? 480 : 0;
+      });
+    const dense = "\n".repeat(1_048_576);
+    const panel = (content: string, digest: string): React.JSX.Element => (
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={[{ path: "dense.txt", kind: "file" }]}
+        preview={{
+          path: "dense.txt",
+          content,
+          truncated: false,
+          language: "text",
+          contentDigest: digest.repeat(64),
+          modifiedAt: "2026-08-14T10:00:00.000Z",
+        }}
+        selectedPath="dense.txt"
+        onSelectFile={vi.fn()}
+        onLoadEntries={vi.fn()}
+      />
+    );
+    const lineMeasurements = (): HTMLElement[] => measure.mock.contexts
+      .filter((element): element is HTMLElement => element instanceof HTMLElement
+        && element.classList.contains("file-preview-line"));
+    const view = render(panel("short\nfile", "a"));
+    view.rerender(panel(dense, "b"));
+
+    const lines = [...view.container.querySelectorAll<HTMLElement>(".file-preview-line")];
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.every((line) => lineMeasurements().includes(line))).toBe(true);
+    const measurements = lineMeasurements().length;
+    view.rerender(panel(dense, "b"));
+    view.rerender(panel(dense, "b"));
+    const rerenderMeasurements = lineMeasurements().length;
+    measure.mockRestore();
+    expect(rerenderMeasurements).toBe(measurements);
+  });
 });

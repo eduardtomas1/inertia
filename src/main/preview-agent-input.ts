@@ -3,7 +3,7 @@ import type { WebContents } from "electron";
 import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-guard.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
-import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock } from "./preview-agent-boundary.js";
+import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock, releaseAgentPageDebugger } from "./preview-agent-boundary.js";
 
 export {
   agentPageHasUnguardedNestedContent,
@@ -203,6 +203,7 @@ interface AgentFileChooserBlock {
 }
 
 const fileChooserBlocks = new WeakMap<WebContents, AgentFileChooserBlock>();
+let fileChooserGeneration = 0;
 
 function agentFileChooserBlock(contents: WebContents): AgentFileChooserBlock {
   const existing = fileChooserBlocks.get(contents);
@@ -212,7 +213,9 @@ function agentFileChooserBlock(contents: WebContents): AgentFileChooserBlock {
     ready: installAgentFileChooserBlock(contents),
   };
   fileChooserBlocks.set(contents, state);
-  void state.ready.catch(() => undefined);
+  void state.ready.catch(() => {
+    if (fileChooserBlocks.get(contents) === state) fileChooserBlocks.delete(contents);
+  });
   return state;
 }
 
@@ -220,10 +223,16 @@ export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void
   return agentFileChooserBlock(contents).ready;
 }
 
+export function resetAgentFileChooserBlock(contents: WebContents): void {
+  fileChooserBlocks.delete(contents);
+  releaseAgentPageDebugger(contents);
+}
+
 export async function beginAgentFileChooserBlock(contents: WebContents): Promise<number> {
   const state = agentFileChooserBlock(contents);
   await state.ready;
-  state.generation += 1;
+  fileChooserGeneration += 1;
+  state.generation = fileChooserGeneration;
   const generation = state.generation;
   await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
     enabled: true,

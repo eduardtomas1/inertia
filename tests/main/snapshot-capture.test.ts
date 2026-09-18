@@ -2,9 +2,19 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SnapshotElement } from "../../src/main/snapshot-accessibility";
-const native = vi.hoisted(() => ({ foreground: vi.fn(), screenshot: vi.fn() }));
-vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground }, screenshot: native.screenshot } }));
-import { captureForegroundSnapshot } from "../../src/main/snapshot-capture-worker";
+const native = vi.hoisted(() => {
+  class XA11yError extends Error {}
+  return { x11: vi.fn(), foreground: vi.fn(), screenshot: vi.fn(), errors: {
+    AccessibilityNotEnabledError: class extends XA11yError {}, PermissionDeniedError: class extends XA11yError {},
+    SelectorNotMatchedError: class extends XA11yError {}, PlatformError: class extends XA11yError {},
+  } };
+});
+vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground, byPid: native.foreground }, screenshot: native.screenshot, ...native.errors } }));
+vi.mock("../../src/main/snapshot-x11-foreground", () => ({ readX11Foreground: native.x11, matchesX11Bounds: (bounds: unknown) => Boolean(bounds), SnapshotX11ForegroundError: class extends Error {} }));
+import { captureForegroundSnapshot, SnapshotCaptureFailure, snapshotFailureCategory } from "../../src/main/snapshot-capture-worker";
+import { SnapshotGeometryError } from "../../src/main/snapshot-accessibility";
+import type { SnapshotCapturePhase, SnapshotFailureCategory } from "../../src/shared/snapshots";
+const { AccessibilityNotEnabledError, PermissionDeniedError, SelectorNotMatchedError, PlatformError } = native.errors;
 
 function field(bounds = { x: 60, y: 60, width: 20, height: 20 }): SnapshotElement {
   return { role: "text_field", name: "Editable note", value: "fixture-masked-text", raw: {}, bounds, children: async () => [] };
@@ -19,6 +29,7 @@ function foreground(name = "Review window", fields: SnapshotElement[] = [field()
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window" });
   native.foreground.mockResolvedValue(foreground());
   native.screenshot.mockResolvedValue({ width: 100, height: 100, pixels: Buffer.alloc(100 * 100 * 4, 255) });
 });
@@ -100,5 +111,103 @@ describe("foreground snapshot pixels and context", () => {
       if (prior) Object.defineProperty(process, "parentPort", prior);
       else Reflect.deleteProperty(process, "parentPort");
     }
+  });
+});
+
+describe("foreground snapshot failure categories", () => {
+  it.each([
+    [new AccessibilityNotEnabledError("empty tree"), "foreground", "accessibility-unavailable"],
+    [new AccessibilityNotEnabledError("empty tree"), "verification", "accessibility-unavailable"],
+    [new SelectorNotMatchedError("no foreground app"), "foreground", "no-active-window"],
+    [new SelectorNotMatchedError("stale element"), "accessibility", "changed"],
+    [new SnapshotCaptureFailure("no-active-window"), "foreground", "no-active-window"],
+    [new SnapshotCaptureFailure("no-active-window"), "verification", "changed"],
+    [new PermissionDeniedError("denied"), "screenshot", "permission-denied"],
+    [new SnapshotGeometryError("A protected field could not be located safely."), "accessibility", "invalid-geometry"],
+    [new SnapshotCaptureFailure("invalid-geometry"), "foreground", "invalid-geometry"],
+    [new PlatformError("capture failed"), "screenshot", "native-failure"],
+    [new Error("raw native detail"), "encoding", "native-failure"],
+    ["not an error", "foreground", "native-failure"],
+    [new SnapshotCaptureFailure("incomplete"), "accessibility", "incomplete"],
+    [new SnapshotCaptureFailure("changed"), "verification", "changed"],
+    [new SnapshotCaptureFailure("large"), "encoding", "large"],
+  ] as const)("maps %o during %s to %s", (error, phase, category) => {
+    expect(snapshotFailureCategory(error, phase as SnapshotCapturePhase)).toBe(category as SnapshotFailureCategory);
+  });
+
+  it("reports zero active windows after a bounded retry without taking pixels", async () => {
+    const app = foreground();
+    const inactive = { ...app.asElement(), active: false, name: "Not the foreground window" };
+    native.foreground.mockResolvedValue({ ...app, asElement: () => inactive, children: async () => [inactive] });
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground", message: "no-active-window" });
+    expect(native.foreground).toHaveBeenCalledTimes(3);
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("reports an empty accessibility tree during traversal without taking pixels", async () => {
+    const app = foreground();
+    const window = { ...app.asElement(), children: async () => { throw new AccessibilityNotEnabledError("Chromium exposes an empty tree"); } };
+    native.foreground.mockResolvedValue({ ...app, asElement: () => window, children: async () => [window] });
+    const failure = await captureForegroundSnapshot().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SnapshotCaptureFailure);
+    expect(failure).toMatchObject({ category: "accessibility-unavailable", phase: "accessibility" });
+    expect(JSON.stringify(failure)).not.toContain("Chromium");
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("retries accessibility startup from a fresh foreground identity and keeps masking", async () => {
+    native.foreground.mockRejectedValueOnce(new AccessibilityNotEnabledError("not ready")).mockResolvedValue(foreground());
+    const result = await captureForegroundSnapshot();
+    expect(native.foreground).toHaveBeenCalledTimes(5);
+    const canvas = createCanvas(100, 100); const ctx = canvas.getContext("2d");
+    ctx.drawImage(await loadImage(result.png), 0, 0);
+    expect([...ctx.getImageData(15, 15, 1, 1).data]).toEqual([36, 36, 36, 255]);
+    expect(JSON.stringify(result.source)).not.toContain("fixture-masked-text");
+  });
+
+  it("does not retry a retryable category after its pixels were discarded for a changed window", async () => {
+    native.foreground.mockResolvedValueOnce(foreground()).mockResolvedValueOnce(foreground()).mockRejectedValue(new SelectorNotMatchedError("gone"));
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "changed", phase: "verification" });
+    expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["permission-denied", "foreground", () => { native.foreground.mockRejectedValue(new PermissionDeniedError("denied")); }],
+    ["invalid-geometry", "foreground", () => { const flat = { ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } }; native.foreground.mockResolvedValue({ ...foreground(), asElement: () => flat, children: async () => [flat] }); }],
+    ["invalid-geometry", "accessibility", () => { native.foreground.mockResolvedValue(foreground("Review window", [{ ...field(), bounds: null }])); }],
+    ["native-failure", "screenshot", () => { native.screenshot.mockRejectedValue(new PlatformError("capture failed")); }],
+    ["native-failure", "screenshot", () => { native.screenshot.mockResolvedValue({ width: 0, height: 0, pixels: Buffer.alloc(0) }); }],
+  ] as const)("fails closed with %s during %s without retrying", async (category, phase, arrange) => {
+    arrange();
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category, phase });
+    expect(native.foreground.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+});
+
+
+describe.runIf(process.platform === "linux")("X11 foreground identity", () => {
+  it("captures one exact named window when Chromium omits AT-SPI ACTIVE", async () => {
+    const app = foreground();
+    native.foreground.mockResolvedValue({ ...app, children: async () => [{ ...app.asElement(), active: false }] });
+    await expect(captureForegroundSnapshot()).resolves.toMatchObject({ ok: true });
+    expect(native.foreground).toHaveBeenCalledWith(123, { timeout: 0 });
+  });
+  it("refuses duplicate named windows rather than guessing which tree masks the pixels", async () => {
+    const app = foreground();
+    native.foreground.mockResolvedValue({ ...app, children: async () => [app.asElement(), { ...app.asElement(), stableId: "other" }] });
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window" });
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+  it("discards pixels on a same-title same-process native window switch", async () => {
+    native.x11.mockReturnValueOnce({ id: 100, pid: 123, name: "Review window" })
+      .mockReturnValueOnce({ id: 100, pid: 123, name: "Review window" })
+      .mockReturnValue({ id: 101, pid: 123, name: "Review window" });
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "changed", phase: "verification" });
+    expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it("reports missing AT-SPI access when X11 proves a foreground process exists", async () => {
+    native.foreground.mockRejectedValue(new SelectorNotMatchedError("unregistered app"));
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "accessibility-unavailable" });
+    expect(native.screenshot).not.toHaveBeenCalled();
   });
 });

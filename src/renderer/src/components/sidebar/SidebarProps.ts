@@ -22,6 +22,8 @@ export interface SidebarProps {
   onViewChange: (view: AppView) => void;
   onOpenHome: () => void;
   onImportProject: () => void;
+  projectScopeId: string | null;
+  onProjectScopeChange: (projectId: string | null) => void;
   onSelectConversation: (conversation: Conversation) => void;
   detachedConversationIds?: ReadonlySet<string>;
   detachedChatLimitReached?: boolean;

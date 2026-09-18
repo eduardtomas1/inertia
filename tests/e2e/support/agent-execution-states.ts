@@ -33,8 +33,9 @@ export async function verifyAgentExecutionStateSequence(input: {
   await input.publish({ type: "agent.activity", activity: searchActivity });
   await expect(input.activeTurn.locator('[data-active-agent-phase="searching"]'))
     .toBeVisible();
-  await expect(input.activeTurn.locator('[data-activity-category="searching"]'))
-    .toContainText("Search release documentation");
+  await expect(input.activeTurn.locator('[data-activity-category="searching"]', {
+    hasText: "Search release documentation",
+  })).toBeVisible();
   await input.capture("active-search-dark", input.activeTurn);
 
   await input.publish({
@@ -51,8 +52,9 @@ export async function verifyAgentExecutionStateSequence(input: {
   await input.publish({ type: "agent.activity", activity: codingActivity });
   await expect(input.activeTurn.locator('[data-active-agent-phase="coding"]'))
     .toBeVisible();
-  await expect(input.activeTurn.locator('[data-activity-category="coding"]'))
-    .toContainText("Edit response timeline");
+  await expect(input.activeTurn.locator('[data-activity-category="coding"]', {
+    hasText: "Edit response timeline",
+  })).toBeVisible();
   await input.capture("active-coding-dark", input.activeTurn);
 
   await input.publish({

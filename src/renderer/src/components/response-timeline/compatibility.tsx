@@ -99,7 +99,15 @@ function CompatibilityDisclosure({
                 <SentMessageAttachmentList attachments={message.attachments} />
               </article>
             ))}
-            {compatibility.activities.map((activity) => <ActivityRow key={activity.id} activity={activity} />)}
+            {compatibility.activities.map((activity) => (
+              <div
+                className="turn-activity-group"
+                data-activity-group-state="single"
+                key={activity.id}
+              >
+                <ActivityRow activity={activity} />
+              </div>
+            ))}
             {compatibility.reasonings.map((reasoning) => (
               <div className="turn-reasoning-detail" key={reasoning.id}>
                 <span><BrainCircuit size={13} aria-hidden="true" />Recovered reasoning</span>

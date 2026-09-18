@@ -123,8 +123,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
     await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
     await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
-    await expect(activeTurn.locator('[data-activity-visibility="recent"]')).toHaveCount(2);
-    await expect(activeTurn.getByRole("button", { name: "+1 previous tool call" })).toHaveCount(2);
+    await expect(activeTurn.getByRole("button", { name: "1 command, 1 tool call" })).toHaveAttribute("aria-expanded", "false");
+    await expect(activeTurn.locator('[data-activity-group-state="live"] [data-folded="false"]')).toHaveCount(2);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator(".turn-working-elapsed")).toHaveAttribute("aria-live", "off");
     await expect(activeTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
@@ -141,8 +141,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     expect(await activePixel.evaluate((element) =>
       getComputedStyle(element).animationName)).toBe("none");
     expect(await activeTurn.locator(".agent-activity.is-running svg")
-      .evaluate((element) => getComputedStyle(element).animationName))
-      .toBe("none");
+      .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).animationName)))
+      .toEqual(["none", "none"]);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await verifyAgentExecutionStateSequence({
       activeTurn, conversationId: conversation.id,

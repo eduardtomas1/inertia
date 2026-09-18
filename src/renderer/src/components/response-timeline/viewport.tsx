@@ -1,3 +1,4 @@
+import { readTranscriptPosition, rememberTranscriptPosition, type TranscriptPosition } from "../../utils/transcriptPosition";
 import {
   memo,
   useCallback,
@@ -502,16 +503,24 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     useAnimationFrameWithResizeObserver: true,
   });
   const initiallyFollowedConversation = useRef<string | null>(null);
+  useEffect(() => { initiallyFollowedConversation.current = null; }, [props.conversationId]);
   useEffect(() => {
-    if (!virtualized || timeline.length === 0) return;
+    if (props.detailLoading || timeline.length === 0) return;
     if (initiallyFollowedConversation.current === props.conversationId) return;
     initiallyFollowedConversation.current = props.conversationId;
-    virtualizer.scrollToIndex(timeline.length - 1, {
-      align: "end",
-      behavior: "auto",
-    });
+    const saved = readTranscriptPosition(props.conversationId);
+    const scroll = props.scrollElementRef?.current;
+    if (saved && !saved.wasFollowing && scroll) {
+      scroll.scrollTop = saved.scrollTop;
+      pendingLayoutAnchor.current = saved;
+      restoreLayoutAnchorRef.current();
+    } else if (virtualized) {
+      virtualizer.scrollToIndex(timeline.length - 1, { align: "end", behavior: "auto" });
+    }
   }, [
     props.conversationId,
+    props.detailLoading,
+    props.scrollElementRef,
     timeline.length,
     virtualized,
     virtualizer,
@@ -801,31 +810,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    const wasFollowing = shouldFollowTimeline(
-      scrollElement.scrollTop,
-      scrollElement.clientHeight,
-      scrollElement.scrollHeight,
-    );
-    const viewportTop = scrollElement.getBoundingClientRect().top;
-    const anchor = wasFollowing
-      ? null
-      : [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
-          .find((row) => row.getBoundingClientRect().bottom > viewportTop + 8) ?? null;
-    pendingLayoutAnchor.current = {
-      rowId: anchor?.dataset.responseRowId ?? null,
-      viewportOffset: anchor
-        ? anchor.getBoundingClientRect().top - viewportTop
-        : 0,
-      wasFollowing,
-    };
+    pendingLayoutAnchor.current = captureTranscriptPosition(root, scrollElement);
   };
   restoreLayoutAnchorRef.current = () => {
     const layoutAnchor = pendingLayoutAnchor.current;
     if (!layoutAnchor || cancelLayoutAnchorRestoration.current) return;
-    if (!virtualized) {
-      pendingLayoutAnchor.current = null;
-      return;
-    }
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) {
@@ -837,7 +826,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       ? -1
       : timeline.findIndex((item) => item.id === rowId);
     layoutAnchorActive.current = true;
-    virtualizer.measure();
+    if (virtualized) virtualizer.measure();
 
     let cancelled = false;
     let attempts = 0;
@@ -875,7 +864,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       }
       const row = anchorRow;
       if (!row) {
-        if (anchorIndex >= 0 && attempts % 4 === 0) {
+        if (virtualized && anchorIndex >= 0 && attempts % 4 === 0) {
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
         }
         attempts += 1;
@@ -932,9 +921,23 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     estimateLayout,
     virtualized,
   ]);
-  useEffect(() => () => {
+  useLayoutEffect(() => () => {
     cancelLayoutAnchorRestoration.current?.();
-  }, []);
+    pendingLayoutAnchor.current = null;
+  }, [props.conversationId]);
+
+  useEffect(() => {
+    if (props.detailLoading || timeline.length === 0) return;
+    const scroll = props.scrollElementRef?.current;
+    const root = props.timelineElementRef?.current;
+    if (!scroll || !root) return;
+    const remember = (): void => {
+      if (layoutAnchorActive.current || turnAnchorActive.current) return;
+      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll));
+    };
+    scroll.addEventListener("scroll", remember, { passive: true });
+    return () => scroll.removeEventListener("scroll", remember);
+  }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
     const scrollElement = props.scrollElementRef?.current;
@@ -1211,3 +1214,16 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
 
 export const ResponseTimeline = memo(ResponseTimelineView);
 ResponseTimeline.displayName = "ResponseTimeline";
+
+function captureTranscriptPosition(root: HTMLElement, scroll: HTMLElement): TranscriptPosition {
+  const wasFollowing = shouldFollowTimeline(scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
+  const top = scroll.getBoundingClientRect().top;
+  const row = wasFollowing ? undefined : [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
+    .find((element) => element.getBoundingClientRect().bottom > top + 8);
+  return {
+    rowId: row?.dataset.responseRowId ?? null,
+    viewportOffset: row ? row.getBoundingClientRect().top - top : 0,
+    scrollTop: scroll.scrollTop,
+    wasFollowing,
+  };
+}

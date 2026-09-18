@@ -68,14 +68,15 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   });
 
   const historyButton = activeTurn.getByRole("button", {
-    name: /\+\d+ previous tool calls/u,
+    name: "1 command, 1 edit, 320 tool calls",
   });
   await expect(historyButton).toBeVisible();
+  await expect(historyButton).toHaveAttribute("aria-expanded", "false");
   const patchRows = activeTurn.locator(".agent-activity", {
     hasText: "Patch updated",
   });
-  await expect(patchRows).toHaveCount(1);
-  await expect(patchRows.locator(".lucide-check")).toHaveCount(1);
+  await expect(patchRows).toHaveCount(5);
+  await expect(patchRows.locator(".lucide-wrench")).toHaveCount(5);
   await expect.poll(() => patchRows.evaluateAll((rows) => {
     const animations = new Set<Animation>();
     for (const row of rows) {
@@ -117,9 +118,9 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   expect(evidence).toMatchObject({
     durablePatchRows: 320,
     durableRunningPatchRows: 0,
-    mountedPatchRows: 1,
+    mountedPatchRows: 5,
     runningPatchRows: 0,
-    completedPatchRows: 1,
+    completedPatchRows: 5,
     activePatchAnimationCount: 0,
   });
 

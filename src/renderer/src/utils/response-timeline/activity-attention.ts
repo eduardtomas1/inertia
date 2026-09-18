@@ -17,6 +17,25 @@ function titleOrBoundedDetailMatches(
     );
 }
 
+function warningDetailMatches(
+  activity: Pick<AgentActivity, "kind" | "title" | "detail">,
+): boolean {
+  if (WARNING_PATTERN.test(activity.title)) return true;
+  if (activity.detail === null) return false;
+  if (
+    activity.kind !== "command"
+    && activity.kind !== "tool"
+    && activity.kind !== "file"
+  ) {
+    return WARNING_PATTERN.test(activity.detail.slice(0, ATTENTION_DETAIL_SCAN_CHARS));
+  }
+  const errorStart = activity.detail.search(/(?:^|\n)Error:\n/u);
+  return errorStart >= 0
+    && WARNING_PATTERN.test(
+      activity.detail.slice(errorStart, errorStart + ATTENTION_DETAIL_SCAN_CHARS),
+    );
+}
+
 export function isInterruptedActivity(
   activity: Pick<AgentActivity, "title" | "detail" | "status">,
 ): boolean {
@@ -33,7 +52,7 @@ export function activityAttentionSeverity(
     ? "warning"
     : activity.status === "failed" || activity.kind === "error"
       ? "failure"
-      : titleOrBoundedDetailMatches(activity, WARNING_PATTERN)
+      : warningDetailMatches(activity)
         ? "warning"
         : null;
   attentionCache.set(activity, severity);

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PreviewAgentTarget } from "../../src/main/preview-agent-page";
 
 const electronState = vi.hoisted(() => ({
+  stalledCommands: [] as Array<(method: string, params?: Record<string, unknown>) => boolean>,
   interactionTimeline: [] as string[],
   viewOptions: [] as Array<Record<string, unknown>>,
   contents: [] as Array<{
@@ -115,6 +116,7 @@ vi.mock("electron", () => {
     private url = "";
     private title = "";
     private destroyed = false;
+    private mainFrameId = "main";
     private readonly debuggerMessageHandlers: Array<(
       event: unknown,
       method: string,
@@ -132,11 +134,41 @@ vi.mock("electron", () => {
       ) => void) => {
         if (name === "message") this.debuggerMessageHandlers.push(handler);
       }),
+      removeListener: vi.fn((name: string, handler: (
+        event: unknown,
+        method: string,
+        params: Record<string, unknown>,
+      ) => void) => {
+        const index = name === "message" ? this.debuggerMessageHandlers.indexOf(handler) : -1;
+        if (index >= 0) this.debuggerMessageHandlers.splice(index, 1);
+      }),
       emitMessage: (method: string, params: Record<string, unknown>): void => {
-        for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
+        const frame = params.frame as { id?: unknown; parentId?: unknown } | undefined;
+        if (method === "Page.frameNavigated" && typeof frame?.id === "string" && frame.parentId === undefined) {
+          this.mainFrameId = frame.id;
+        }
+        for (const handler of this.debuggerMessageHandlers.slice()) handler({}, method, params);
       },
-      sendCommand: vi.fn(async (method: string) => {
+      sendCommand: vi.fn(async (method: string, params?: Record<string, unknown>) => {
+        const stalled = electronState.stalledCommands.findIndex((matches) => matches(method, params));
+        if (stalled >= 0) {
+          electronState.stalledCommands.splice(stalled, 1);
+          return await new Promise<never>(() => undefined);
+        }
+        if (method === "Runtime.enable") {
+          this.debugger.emitMessage("Runtime.executionContextCreated", {
+            context: {
+              id: 7,
+              name: "Electron Isolated Context",
+              auxData: { frameId: this.mainFrameId, isDefault: false, type: "isolated" },
+            },
+          });
+          return undefined;
+        }
         if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
+        if (method === "Runtime.evaluate" && params?.contextId === 7) {
+          return { result: { type: "boolean", value: true } };
+        }
         if (method === "Runtime.evaluate") {
           return { result: { type: "object", subtype: "array", objectId: "boundary-hosts" } };
         }
@@ -211,6 +243,8 @@ vi.mock("electron", () => {
   class FakeWebContentsView {
     readonly webContents: FakeWebContents;
     bounds = { x: 0, y: 0, width: 0, height: 0 };
+    visible = true;
+    readonly visibilityChanges: boolean[] = [];
     constructor(options: Record<string, unknown>) {
       electronState.viewOptions.push(options);
       const preferences = options.webPreferences as { partition?: string } | undefined;
@@ -226,6 +260,11 @@ vi.mock("electron", () => {
       );
     }
     getBounds(): typeof this.bounds { return this.bounds; }
+    getVisible(): boolean { return this.visible; }
+    setVisible(visible: boolean): void {
+      this.visible = visible;
+      this.visibilityChanges.push(visible);
+    }
     setBackgroundColor(): void {}
   }
 
@@ -294,12 +333,14 @@ function harness() {
     webContents: { isDestroyed: () => false, send: vi.fn() },
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
+  const recordOperationFailure = vi.fn();
   const broker = new PreviewBroker({
     getWindow: () => window as never,
     openExternal: vi.fn(async () => undefined),
     stateChannel: "preview-state",
+    recordOperationFailure,
   });
-  return { broker, children, window };
+  return { broker, children, recordOperationFailure, window };
 }
 
 describe("agent-owned native Browser", () => {
@@ -1966,7 +2007,7 @@ describe("agent-owned native Browser", () => {
       await expect(stalled).resolves.toMatchObject({
         ok: false,
         code: "unavailable",
-        message: "The Browser page stopped responding.",
+        message: "The Browser page did not respond during the page snapshot within 15 seconds. Reload the page or open it in a new Browser tab, then try again.",
       });
       await expect(queued).resolves.toMatchObject({ ok: true });
     } finally {
@@ -2137,5 +2178,204 @@ describe("agent-owned native Browser", () => {
     }
     await expect(broker.perform(conversationId, { action: "tab-open" }))
       .resolves.toMatchObject({ ok: false, code: "too-large" });
+  });
+});
+
+function stalledPhaseMessage(description: string): string {
+  return `The Browser page did not respond during ${description} within 15 seconds. Reload the page or open it in a new Browser tab, then try again.`;
+}
+
+function never(): Promise<never> {
+  return new Promise<never>(() => undefined);
+}
+
+type HarnessContents = (typeof electronState.contents)[number];
+
+function lifecycleStates(contents: HarnessContents): unknown[] {
+  return contents.debugger.sendCommand.mock.calls
+    .filter(([method]) => method === "Page.setWebLifecycleState")
+    .map(([, params]) => params?.state);
+}
+
+function inputIsCaptureLocked(contents: HarnessContents): boolean {
+  const event = { preventDefault: vi.fn() };
+  contents.emit("before-mouse-event", event, { type: "mouseMove", x: 1, y: 1 });
+  return event.preventDefault.mock.calls.length > 0;
+}
+
+describe("Browser evidence phase timeouts", () => {
+  const cases: Array<{
+    phase: string;
+    description: string;
+    action: "snapshot" | "screenshot";
+    stall: (contents: HarnessContents) => void;
+  }> = [
+    { phase: "privacy-guard", description: "privacy guard setup", action: "snapshot",
+      stall: () => { pageTools.installAgentPagePrivacyGuard.mockImplementationOnce(never); } },
+    { phase: "page-freeze", description: "the evidence freeze", action: "snapshot",
+      stall: () => { electronState.stalledCommands.push((method) => method === "Runtime.enable"); } },
+    { phase: "privacy-check", description: "the page privacy check", action: "snapshot",
+      stall: () => { pageTools.agentPageHasSensitiveEvidence.mockImplementationOnce(never); } },
+    { phase: "nested-content-check", description: "the nested-content check", action: "snapshot",
+      stall: () => { electronState.stalledCommands.push((method) => method === "Page.createIsolatedWorld"); } },
+    { phase: "page-snapshot", description: "the page snapshot", action: "snapshot",
+      stall: () => { pageTools.semanticPageSnapshot.mockImplementationOnce(never); } },
+    { phase: "privacy-check", description: "the page privacy check", action: "screenshot",
+      stall: () => { pageTools.agentPageHasSensitiveScreenshotEvidence.mockImplementationOnce(never); } },
+    { phase: "screenshot-capture", description: "screenshot capture", action: "screenshot",
+      stall: (contents) => { contents.capturePage.mockImplementationOnce(never); } },
+    { phase: "page-resume", description: "page resume after evidence capture", action: "screenshot",
+      stall: () => {
+        electronState.stalledCommands.push((method, params) => (
+          method === "Page.setWebLifecycleState" && params?.state === "active"
+        ));
+      } },
+  ];
+
+  it.each(cases)("names a stalled $phase phase during $action and keeps later work usable", async ({
+    phase, description, action, stall,
+  }) => {
+    const contentsOffset = electronState.contents.length;
+    const { broker, recordOperationFailure } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    vi.useFakeTimers();
+    try {
+      stall(contents);
+      const stalled = broker.perform(conversationId, { action });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(stalled).resolves.toEqual({
+        ok: false,
+        code: "unavailable",
+        message: stalledPhaseMessage(description),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(recordOperationFailure.mock.calls).toEqual([[{ phase, category: "timeout" }]]);
+    expect(lifecycleStates(contents).at(-1) ?? "active").toBe("active");
+    expect(inputIsCaptureLocked(contents)).toBe(false);
+
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, {
+      action: "tab-open",
+      url: "http://127.0.0.1:3000/fresh",
+    })).resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(lifecycleStates(contents).at(-1)).toBe("active");
+    expect(recordOperationFailure).toHaveBeenCalledOnce();
+  });
+
+  it("resets a stalled security debugger setup so the same tab and fresh tabs recover", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker, recordOperationFailure } = harness();
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    await expect(broker.perform(conversationId, { action: "tabs" }))
+      .resolves.toMatchObject({ ok: true });
+    const contents = electronState.contents[contentsOffset]!;
+    vi.useFakeTimers();
+    try {
+      electronState.stalledCommands.push((method) => method === "Page.enable");
+      const stalled = broker.perform(conversationId, {
+        action: "navigate",
+        url: "http://127.0.0.1:3000/",
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(stalled).resolves.toEqual({
+        ok: false,
+        code: "unavailable",
+        message: stalledPhaseMessage("Browser security setup"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(recordOperationFailure.mock.calls).toEqual([[{ phase: "security-setup", category: "timeout" }]]);
+    expect(contents.debugger.isAttached()).toBe(false);
+
+    await expect(broker.perform(conversationId, {
+      action: "navigate",
+      url: "http://127.0.0.1:3000/",
+    })).resolves.toMatchObject({ ok: true });
+    expect(contents.debugger.isAttached()).toBe(true);
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, {
+      action: "tab-open",
+      url: "http://127.0.0.1:3000/fresh",
+    })).resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+  });
+
+  it("records a failed evidence phase without page content and ignores cancellation", async () => {
+    const { broker, recordOperationFailure } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.agentPageHasSensitiveEvidence.mockRejectedValueOnce(
+      new Error("The Browser privacy guard is unavailable."),
+    );
+    await expect(broker.perform(conversationId, { action: "snapshot" })).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+      message: "The Browser privacy guard is unavailable.",
+    });
+    expect(recordOperationFailure.mock.calls).toEqual([[{ phase: "privacy-check", category: "failed" }]]);
+
+    let snapshotStarted = (): void => undefined;
+    const started = new Promise<void>((resolve) => { snapshotStarted = resolve; });
+    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
+      snapshotStarted();
+      return await never();
+    });
+    const controller = new AbortController();
+    const cancelled = broker.perform(conversationId, { action: "snapshot" }, controller.signal);
+    await started;
+    controller.abort();
+    await expect(cancelled).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    expect(recordOperationFailure).toHaveBeenCalledOnce();
+  });
+
+  it("re-shows only a Browser tab the broker is displaying after evidence capture", async () => {
+    const { broker, children } = harness();
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId,
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+    });
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const view = children[0] as unknown as { visibilityChanges: boolean[] };
+
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(view.visibilityChanges).toEqual([false, true]);
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(view.visibilityChanges).toEqual([false, true, false, true]);
+
+    broker.setBounds({ ownerId: "primary", contextId: conversationId, connectionId, bounds: null });
+    await expect(broker.perform(conversationId, { action: "snapshot" }))
+      .resolves.toMatchObject({ ok: true });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(view.visibilityChanges).toEqual([false, true, false, true]);
   });
 });

@@ -92,41 +92,6 @@ export type TurnExecutionStreamEntry =
       activities: AgentActivity[];
     };
 
-export interface ActivityGroupPresentation {
-  visibleActivities: AgentActivity[];
-  hiddenCount: number;
-}
-
-/**
- * Keeps attention rows and the newest meaningful call visible when collapsed.
- * Expanded rows retain their authoritative created-time order.
- */
-export function resolveActivityGroupPresentation(
-  activities: AgentActivity[],
-  expanded: boolean,
-): ActivityGroupPresentation {
-  let newestMeaningfulId: string | null = null;
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const candidate = activities[index]!;
-    if (!activityNeedsAttention(candidate)) {
-      newestMeaningfulId = candidate.id;
-      break;
-    }
-  }
-  const alwaysVisible = new Set(activities
-    .filter((activity) =>
-      activity.id === newestMeaningfulId
-      || activityNeedsAttention(activity))
-    .map(({ id }) => id));
-  const hiddenCount = activities.filter(({ id }) => !alwaysVisible.has(id)).length;
-  return {
-    visibleActivities: expanded
-      ? activities
-      : activities.filter(({ id }) => alwaysVisible.has(id)),
-    hiddenCount,
-  };
-}
-
 interface BuildTurnExecutionStreamOptions {
   liveContent?: string;
   includeImportantActivities?: boolean;
@@ -134,7 +99,7 @@ interface BuildTurnExecutionStreamOptions {
 
 /**
  * Builds the visible provider transcript in event order. Only adjacent work
- * entries are grouped; commentary and attention rows always break a group.
+ * entries are grouped; commentary and follow-ups always break a group.
  */
 export function buildTurnExecutionStream(
   turn: Pick<
@@ -227,12 +192,7 @@ export function buildTurnExecutionStream(
       continue;
     }
     const previous = stream.at(-1);
-    const needsAttention = activityNeedsAttention(item.activity);
-    if (
-      !needsAttention
-      && previous?.kind === "activity-group"
-      && previous.activities.every((activity) => !activityNeedsAttention(activity))
-    ) {
+    if (previous?.kind === "activity-group") {
       previous.activities.push(item.activity);
       continue;
     }

@@ -116,7 +116,7 @@ describe("transcript new-turn navigation", () => {
     })).toBe(reading);
   });
 
-  it("lets a followed transcript observe programmatic movement into history", () => {
+  it("keeps following when delayed hydration or measurement generates a scroll", () => {
     expect(transcriptNavigationReducer({
       mode: "follow-latest",
       conversationId: "conversation-1",
@@ -126,7 +126,7 @@ describe("transcript new-turn navigation", () => {
       followsLatest: false,
       intentional: false,
     })).toEqual({
-      mode: "reading-history",
+      mode: "follow-latest",
       conversationId: "conversation-1",
     });
   });

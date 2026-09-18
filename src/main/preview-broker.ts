@@ -21,9 +21,10 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageActivationFailureMessage, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationFailureMessage, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, resetAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
+import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, type PreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
 import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
 import { PreviewContextRegistry } from "./preview-lifecycle.js";
@@ -61,6 +62,7 @@ interface PreviewBrokerOptions {
   openExternal: (url: string) => Promise<void>;
   stateChannel: string;
   registerHealthRenderer?(contents: WebContents): () => void;
+  recordOperationFailure?(failure: PreviewAgentOperationFailure): void;
   partitionPrefix?: string;
 }
 const MAX_BROWSER_TABS = 8;
@@ -228,7 +230,7 @@ export class PreviewBroker {
           const resolved = await this.#approvals.resolve(request, identity, slot, async (tab, ref) => {
             const contents = tab.view.webContents;
             await this.#prepareAgentPage(contents, signal);
-            return await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal });
+            return await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" });
           }, signal);
           if (typeof resolved === "string") return this.#success(slot, resolved);
           const command = "command" in resolved ? resolved.command : resolved;
@@ -417,11 +419,11 @@ export class PreviewBroker {
     contents: PreviewTab["view"]["webContents"],
     operation: () => Promise<Result>,
     options: {
+      phase: PreviewAgentOperationPhase;
       signal?: AbortSignal;
       cancel?: () => void;
       lateSuccess?: (value: Result) => void;
-      timeoutMessage?: string;
-    } = {},
+    },
   ): Promise<Result> {
     stopForAbort(options.signal);
     if (contents.isDestroyed()) {
@@ -457,16 +459,24 @@ export class PreviewBroker {
       const onDestroyed = (): void => fail(
         new Error("The active Browser tab was closed during the operation."),
       );
-      const timeout = setTimeout(() => fail(
-        new Error(options.timeoutMessage ?? "The Browser page stopped responding."),
-        true,
-      ), PREVIEW_RENDERER_OPERATION_TIMEOUT_MS);
+      const timeout = setTimeout(() => {
+        this.options.recordOperationFailure?.({ phase: options.phase, category: "timeout" });
+        fail(
+          new Error(previewAgentPhaseTimeoutMessage(options.phase, PREVIEW_RENDERER_OPERATION_TIMEOUT_MS)),
+          true,
+        );
+      }, PREVIEW_RENDERER_OPERATION_TIMEOUT_MS);
       timeout.unref();
       contents.once("destroyed", onDestroyed);
       options.signal?.addEventListener("abort", onAbort, { once: true });
-      Promise.resolve().then(operation).then(succeed, (error: unknown) => fail(
-        error instanceof Error ? error : new Error("The Browser renderer operation failed."),
-      ));
+      Promise.resolve().then(operation).then(succeed, (error: unknown) => {
+        if (!settled
+          && !(error instanceof AgentBrowserRefusal)
+          && !(error instanceof Error && error.message === "browser-action-cancelled")) {
+          this.options.recordOperationFailure?.({ phase: options.phase, category: "failed" });
+        }
+        fail(error instanceof Error ? error : new Error("The Browser renderer operation failed."));
+      });
     });
   }
 
@@ -578,6 +588,7 @@ export class PreviewBroker {
       sensitiveDocument: async (contents) => await this.#rendererOperation(
         contents,
         () => agentPageHasSensitiveEvidence(contents),
+        { phase: "privacy-check" },
       ),
     });
     slot = {
@@ -760,29 +771,25 @@ export class PreviewBroker {
     let text = "";
     let capturedState: AgentBrowserState | null = null;
     try {
-      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal, phase: "page-freeze" });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal, phase: "privacy-check" })) {
         return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
       }
-      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal, phase: "nested-content-check" })) {
         return failure("invalid", "Page evidence is unavailable for nested page content.");
       }
       text = await this.#rendererOperation(contents, () => semanticPageSnapshot(contents), {
         signal,
+        phase: "page-snapshot",
       });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
-      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) return failure("invalid", "Page evidence is unavailable for nested page content.");
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal, phase: "privacy-check" })) return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal, phase: "nested-content-check" })) return failure("invalid", "Page evidence is unavailable for nested page content.");
       stopForAbort(signal);
       this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
       capturedState = this.#agentState(slot);
     } finally {
       try {
-        if (!contents.isDestroyed()) {
-          await this.#rendererOperation(
-            contents,
-            () => setAgentPageFrozen(contents, false),
-          );
-        }
+        await this.#resumeAgentPage(slot, tab);
       } finally {
         this.#captureLocked.delete(contents);
       }
@@ -809,30 +816,25 @@ export class PreviewBroker {
     let capturedUrl = "";
     let capturedState: AgentBrowserState | null = null;
     try {
-      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal, phase: "page-freeze" });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal, phase: "privacy-check" })) {
         return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
-      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal, phase: "nested-content-check" })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
       }
-      image = await this.#rendererOperation(contents, () => contents.capturePage(), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+      image = await this.#rendererOperation(contents, () => contents.capturePage(), { signal, phase: "screenshot-capture" });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal, phase: "privacy-check" })) {
         return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
-      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal, phase: "nested-content-check" })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
       }
       capturedUrl = contents.getURL();
       capturedState = this.#agentState(slot);
     } finally {
       try {
-        if (!contents.isDestroyed()) {
-          await this.#rendererOperation(
-            contents,
-            () => setAgentPageFrozen(contents, false),
-          );
-        }
+        await this.#resumeAgentPage(slot, tab);
       } finally {
         this.#captureLocked.delete(contents);
       }
@@ -916,7 +918,7 @@ export class PreviewBroker {
     const located = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref),
-      { signal },
+      { signal, phase: "element-lookup" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
@@ -932,13 +934,13 @@ export class PreviewBroker {
     await this.#rendererOperation(
       contents,
       () => showAgentPageCursor(contents, cursorX, cursorY, "Agent click"),
-      { signal },
+      { signal, phase: "page-cursor" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     const revalidated = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref),
-      { signal },
+      { signal, phase: "element-lookup" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     x = revalidated.x;
@@ -955,7 +957,7 @@ export class PreviewBroker {
         const finalTarget = await this.#rendererOperation(
           contents,
           () => hoverAgentPageRef(contents, ref, x!, y!, signal),
-          { signal },
+          { signal, phase: "page-hover" },
         );
         if (slot.boundsGeneration !== boundsGeneration) {
           throw new AgentBrowserRefusal(changedGeometry());
@@ -1006,7 +1008,7 @@ export class PreviewBroker {
     const located = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref),
-      { signal },
+      { signal, phase: "element-lookup" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     let x = located.x;
@@ -1023,13 +1025,13 @@ export class PreviewBroker {
     await this.#rendererOperation(
       contents,
       () => showAgentPageCursor(contents, cursorX, cursorY, "Agent typing"),
-      { signal },
+      { signal, phase: "page-cursor" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     const revalidated = await this.#rendererOperation(
       contents,
       () => locateAgentPageRef(contents, ref),
-      { signal },
+      { signal, phase: "element-lookup" },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
     x = revalidated.x;
@@ -1047,7 +1049,7 @@ export class PreviewBroker {
         const finalTarget = await this.#rendererOperation(
           contents,
           () => locateAgentPageRef(contents, ref, true, replace),
-          { signal },
+          { signal, phase: "element-lookup" },
         );
         if (slot.boundsGeneration !== boundsGeneration) {
           throw new AgentBrowserRefusal(changedGeometry());
@@ -1072,13 +1074,13 @@ export class PreviewBroker {
         const stillFocused = await this.#rendererOperation(
           contents,
           () => agentPageRefHasFocus(contents, ref),
-          { signal },
+          { signal, phase: "element-lookup" },
         );
         if (!stillFocused) throw new AgentBrowserRefusal(failure(
           "not-found",
           "That page element lost focus before typing. Inspect the page again for current refs.",
         ));
-        if (validate) validate(await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal }));
+        if (validate) validate(await this.#rendererOperation(contents, () => locateAgentPageRef(contents, ref), { signal, phase: "element-lookup" }));
         await contents.insertText(text);
       }, signal);
     } catch (error) {
@@ -1101,7 +1103,7 @@ export class PreviewBroker {
           contents,
           key,
           async (operation) => {
-            const result = await this.#rendererOperation(contents, operation, { signal });
+            const result = await this.#rendererOperation(contents, operation, { signal, phase: "key-activation" });
             validate?.();
             return result;
           },
@@ -1149,15 +1151,26 @@ export class PreviewBroker {
     signal?: AbortSignal,
     validate?: BrowserApprovalGuard,
   ): Promise<void> {
-    await this.#rendererOperation(contents, () => ensureAgentFileChooserBlock(contents), { signal });
+    await this.#ensureSecurityDebugger(contents, signal);
     await this.#rendererOperation(
       contents,
       async () => { validate?.(); await contents.loadURL(url); settleAgentPageDebuggerBootstrap(contents); },
       {
         signal,
+        phase: "page-load",
         cancel: () => contents.stop(),
-        timeoutMessage: "The Browser page did not finish loading.",
       },
+    );
+  }
+
+  async #ensureSecurityDebugger(
+    contents: PreviewTab["view"]["webContents"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.#rendererOperation(
+      contents,
+      () => ensureAgentFileChooserBlock(contents),
+      { signal, phase: "security-setup", cancel: () => resetAgentFileChooserBlock(contents) },
     );
   }
 
@@ -1165,16 +1178,34 @@ export class PreviewBroker {
     contents: PreviewTab["view"]["webContents"],
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.#rendererOperation(
-      contents,
-      () => ensureAgentFileChooserBlock(contents),
-      { signal },
-    );
+    await this.#ensureSecurityDebugger(contents, signal);
     await this.#rendererOperation(
       contents,
       () => installAgentPagePrivacyGuard(contents),
-      { signal },
+      { signal, phase: "privacy-guard" },
     );
+  }
+
+  async #resumeAgentPage(slot: PreviewSlot, tab: PreviewTab): Promise<void> {
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed()) return;
+    await this.#rendererOperation(
+      contents,
+      () => setAgentPageFrozen(contents, false),
+      { phase: "page-resume" },
+    );
+    const bounds = slot.bounds;
+    if (
+      contents.isDestroyed()
+      || slot.tabs.get(tab.id) !== tab
+      || slot.activeTabId !== tab.id
+      || !bounds
+      || bounds.width <= 0
+      || bounds.height <= 0
+      || !tab.view.getVisible()
+    ) return;
+    tab.view.setVisible(false);
+    tab.view.setVisible(true);
   }
 
 
@@ -1184,23 +1215,24 @@ export class PreviewBroker {
     const chooserGeneration = await this.#rendererOperation(
       contents,
       () => beginAgentFileChooserBlock(contents),
-      { signal, lateSuccess: (generation) => { void releaseAgentFileChooserBlock(contents, generation).catch(() => undefined); } },
+      { signal, phase: "input-guard", lateSuccess: (generation) => { void releaseAgentFileChooserBlock(contents, generation).catch(() => undefined); } },
     );
     try {
       await this.#rendererOperation(
         contents,
         () => setAgentPageInputGuard(contents, true, expectedClickRef),
-        { signal },
+        { signal, phase: "input-guard" },
       );
       beginAgentPageInputRefusalCapture(contents);
       await settleAgentPageInput(contents, dispatch, signal);
-      const isolated = await this.#rendererOperation(contents, () => agentPageInputRefusal(contents), { signal });
+      const isolated = await this.#rendererOperation(contents, () => agentPageInputRefusal(contents), { signal, phase: "input-guard" });
       return capturedAgentPageInputRefusal(contents) ?? isolated;
     } finally {
       if (!contents.isDestroyed()) {
         await this.#rendererOperation(
           contents,
           () => setAgentPageInputGuard(contents, false),
+          { phase: "input-guard" },
         ).catch(() => undefined);
         void releaseAgentFileChooserBlock(contents, chooserGeneration).catch(() => undefined);
       }

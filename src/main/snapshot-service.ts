@@ -1,7 +1,10 @@
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, globalShortcut, systemPreferences, utilityProcess, type UtilityProcess } from "electron";
-import { SNAPSHOT_MAX_IMAGE_BYTES, snapshotPlatformAvailable, snapshotSourceSchema, type SnapshotSource, type SnapshotState } from "../shared/snapshots.js";
+import {
+  SNAPSHOT_CAPTURE_PHASES, SNAPSHOT_FAILURE_CATEGORIES, SNAPSHOT_MAX_IMAGE_BYTES, snapshotPlatformAvailable, snapshotSourceSchema,
+  type SnapshotFailureCategory, type SnapshotFailureDiagnostic, type SnapshotSource, type SnapshotState,
+} from "../shared/snapshots.js";
 
 export function snapshotWorkerEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
@@ -15,6 +18,23 @@ export function snapshotWorkerEnvironment(env: NodeJS.ProcessEnv): NodeJS.Proces
 }
 
 export class SnapshotError extends Error {}
+
+export function snapshotFailureMessage(category: SnapshotFailureCategory, platform: NodeJS.Platform = process.platform): string {
+  switch (category) {
+    case "accessibility-unavailable": return platform === "linux"
+      ? "This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing. Chromium and Electron apps on Linux need their accessibility bridge: restart the app with `--force-renderer-accessibility` or with `ACCESSIBILITY_ENABLED=1` set, then try again."
+      : "This app is not exposing its accessibility tree, so Inertia cannot find fields to mask and captured nothing. Wait for the app to finish loading, then try again.";
+    case "no-active-window": return "Inertia could not identify one active window to capture. Click the window you want to share so it has focus, then press the shortcut again.";
+    case "permission-denied": return platform === "darwin"
+      ? "macOS denied access to this window. Allow Inertia in Accessibility and Screen Recording, then try again."
+      : "The system denied access to this window's accessibility data, so nothing was captured. Check that accessibility support is turned on for your desktop session, then try again.";
+    case "invalid-geometry": return "This window or one of its fields reported an invalid position, so nothing was captured to keep protected fields masked. Try again after the window finishes loading or resizing.";
+    case "incomplete": return "This window has too much accessibility content to capture safely.";
+    case "changed": return "The foreground window changed. Try the snapshot again.";
+    case "large": return "This snapshot exceeds the attachment limit.";
+    case "native-failure": return "The window could not be captured because a system capture step failed. Try again, or choose another window.";
+  }
+}
 
 export interface SnapshotWorkerResult { png: Buffer; source: SnapshotSource }
 const ACCELERATOR = "CommandOrControl+Alt+S";
@@ -33,14 +53,18 @@ export class SnapshotService {
   private disposed = false;
   private disposalStarted = false;
   private readonly exited = new WeakSet<UtilityProcess>();
-  constructor(private readonly onCapture: () => Promise<void>) {}
+  constructor(
+    private readonly onCapture: () => Promise<void>,
+    private readonly onFailure: (diagnostic: SnapshotFailureDiagnostic) => void = () => undefined,
+  ) {}
 
   // Capture failures can disable the service without ending its reporting lifetime.
   isDisposing(): boolean { return this.disposalStarted; }
 
   state(): SnapshotState {
     const available = snapshotPlatformAvailable(process.platform, process.env);
-    const permission = process.platform !== "darwin" || (systemPreferences.isTrustedAccessibilityClient(false) && systemPreferences.getMediaAccessStatus("screen") === "granted") ? "granted" : "required";
+    const permission = process.platform !== "darwin" ? "unverified"
+      : systemPreferences.isTrustedAccessibilityClient(false) && systemPreferences.getMediaAccessStatus("screen") === "granted" ? "granted" : "required";
     return { enabled: this.enabled, shortcut: this.shortcut, available, permission,
       message: !available ? "Snapshots requires macOS, Windows, or a Linux X11 desktop with accessibility support." : this.message };
   }
@@ -63,7 +87,7 @@ export class SnapshotService {
     if (!enabled || this.disposed || generation !== this.captureGeneration) return this.state();
     const state = this.state();
     if (!state.available) return state;
-    if (state.permission !== "granted") {
+    if (state.permission === "required") {
       this.message = "Allow Inertia in Accessibility and Screen Recording, then enable Snapshots again.";
       return this.state();
     }
@@ -131,7 +155,10 @@ export class SnapshotService {
         };
         const abort = (): void => stop("Snapshot cancelled.");
         this.cancelCapture = () => { abort(); return exited; };
-        const timer = setTimeout(() => stop("Snapshot capture timed out."), 10_000);
+        const timer = setTimeout(() => {
+          if (!result && !error) this.onFailure({ category: "timed-out" });
+          stop("Snapshot capture timed out.");
+        }, 10_000);
         signal?.addEventListener("abort", abort, { once: true });
         child.on("message", (value: unknown) => {
           if (result || error || !value || typeof value !== "object") return;
@@ -140,7 +167,10 @@ export class SnapshotService {
           if (data.ok === true && parsed.success && data.png instanceof Uint8Array && data.png.length > 8 && data.png.length <= SNAPSHOT_MAX_IMAGE_BYTES) {
             result = { source: parsed.data, png: Buffer.from(data.png) };
           } else {
-            error = new SnapshotError(data.code === "incomplete" ? "This window has too much accessibility content to capture safely." : data.code === "changed" ? "The foreground window changed. Try the snapshot again." : data.code === "large" ? "This snapshot exceeds the attachment limit." : "The window could not be captured. Check screen and accessibility permissions and try again.");
+            const category = SNAPSHOT_FAILURE_CATEGORIES.find((value) => data.ok === false && value === data.code) ?? "native-failure";
+            const phase = SNAPSHOT_CAPTURE_PHASES.find((value) => value === data.phase);
+            this.onFailure(phase ? { category, phase } : { category });
+            error = new SnapshotError(snapshotFailureMessage(category));
           }
           try { child.postMessage("received"); } catch { stop("Snapshot capture stopped before completing."); }
         });
@@ -149,8 +179,12 @@ export class SnapshotService {
           signal?.removeEventListener("abort", abort);
           if (this.captureChild === child) { this.captureChild = null; this.cancelCapture = null; }
           confirmExit();
-          if (code === 0 && result && !error) resolve(result);
-          else reject(error ?? new SnapshotError("Snapshot capture stopped before completing."));
+          if (code === 0 && result && !error) { resolve(result); return; }
+          if (!result && !error && !this.disposed) {
+            this.onFailure({ category: "native-failure" });
+            error = new SnapshotError(snapshotFailureMessage("native-failure"));
+          }
+          reject(error ?? new SnapshotError("Snapshot capture stopped before completing."));
         });
         child.once("spawn", () => {
           if (error) { child.kill(); return; }

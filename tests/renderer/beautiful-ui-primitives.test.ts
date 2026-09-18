@@ -65,7 +65,7 @@ describe("Beautiful UI primitive adaptations", () => {
   });
 
   it("animates project references and slash commands as prompt actions", () => {
-    expect(composerSource).toContain('aria-label="Project files"');
+    expect(composerSource).toContain('"Chats and project files"');
     expect(commandMenuSource).toContain('aria-label="Composer commands"');
     expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
@@ -105,7 +105,7 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(subagentSource).toContain('className="subagent-state-pill"');
     expect(subagentSource).toContain('className="subagent-detail-reveal"');
 
-    expect(styles).toContain("beautiful-tool-row-enter 300ms cubic-bezier(0.23, 1, 0.32, 1)");
+    expect(activitySource).toContain('import "./ActivityGroup.css";');
     expect(styles).toContain("beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1)");
     expect(styles).toContain("beautiful-spin 1.1s linear infinite");
     expect(styles).toContain('.subagent-status-mark[data-live="true"]::after');

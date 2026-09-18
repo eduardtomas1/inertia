@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
+import { forgetTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
 import type {
   AgentTurn,
   ChatMessage,
@@ -92,6 +93,7 @@ function rect(top: number, height: number): DOMRect {
 }
 
 afterEach(() => {
+  forgetTranscriptPosition(conversationId);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

@@ -27,6 +27,7 @@ import {
   type TurnTimerScheduler,
 } from "../../src/server/runtime/turns/turn-controller";
 import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
+import { SerializedRuntimeEvent } from "../../src/server/serialized-runtime-event";
 import {
   TurnStreamCoalescer,
   type StreamDeltaFlush,
@@ -635,7 +636,7 @@ describe("TurnController coalesced streaming", () => {
     const deliveries = new Map<string, ServerEvent[]>();
     const hub = new RuntimeSyncHub<string>((socket, event) => {
       const events = deliveries.get(socket) ?? [];
-      events.push(event);
+      events.push(event instanceof SerializedRuntimeEvent ? event.event : event);
       deliveries.set(socket, events);
     });
     let runtime!: ControllerRuntime;

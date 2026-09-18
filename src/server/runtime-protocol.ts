@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream";
 import WebSocket, { type RawData } from "ws";
 
 import { clientCommandSchema, type ClientCommand, type ServerEvent } from "../shared/contracts";
+import { SerializedRuntimeEvent, type EncodedRuntimeEvent } from "./serialized-runtime-event";
 
 /**
  * A temporary backlog above this watermark is expected when hydrating a long
@@ -104,22 +105,24 @@ function requestIdFrom(value: unknown): string {
 
 export function sendRuntimeEvent(
   socket: WebSocket,
-  event: ServerEvent,
+  event: ServerEvent | SerializedRuntimeEvent,
   onSent?: (sent: boolean) => void,
 ): void {
   if (socket.readyState !== WebSocket.OPEN) {
     onSent?.(false);
     return;
   }
-  let serialized: string;
+  let encoded: EncodedRuntimeEvent;
   try {
-    serialized = JSON.stringify(event);
+    encoded = (event instanceof SerializedRuntimeEvent
+      ? event
+      : new SerializedRuntimeEvent(event)).encode();
   } catch {
     terminateSocket(socket);
     onSent?.(false);
     return;
   }
-  const eventBytes = Buffer.byteLength(serialized, "utf8");
+  const { text: serialized, bytes: eventBytes } = encoded;
   if (
     eventBytes > MAX_QUEUED_RUNTIME_EVENT_BYTES
     || socket.bufferedAmount

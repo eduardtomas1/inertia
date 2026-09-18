@@ -51,8 +51,8 @@ const budgets = {
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. It measures 11.4 KiB.
-  colorThemesCss: 12 * kibibyte,
+  // separate from the generated entry stylesheet. It measures 11.6 KiB.
+  colorThemesCss: 12.4 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,

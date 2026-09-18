@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -363,9 +364,12 @@ describe("Environment panel", () => {
     }));
     expect(actions.onOpenRunPreview).toHaveBeenCalledWith(summary.localServers[0]);
 
-    expect(within(panel).getByText("Usage").closest("details")).toHaveAttribute("open");
-    expect(within(panel).getByText("Context window")).toBeVisible();
-    expect(within(panel).getByText("64% left")).toBeVisible();
+    const usageSummary = within(panel).getByText("Usage").closest("summary")!;
+    expect(usageSummary.closest("details")).toHaveAttribute("open");
+    expect(within(usageSummary).getByLabelText(/Tightest provider limit, .+: 64% left/u)).toHaveTextContent("64% left");
+    expect(usageSummary).not.toHaveTextContent("72%");
+    expect(within(panel).queryByText("Context window")).not.toBeInTheDocument();
+    expect(within(panel).getAllByText("64% left")).toHaveLength(2);
     expect(within(panel).getByText("Current")).toBeVisible();
     expect(within(panel).getByText("reference.png")).toBeVisible();
     expect(within(panel).getByText("requirements.pdf")).toBeVisible();
@@ -550,7 +554,7 @@ describe("Environment panel", () => {
     const usage = () => screen.getByText("Usage").closest("details")!;
     const first = render(panel());
     expect(usage()).toHaveAttribute("open");
-    expect(within(usage()).getByText("Context window")).toBeVisible();
+    expect(within(usage()).getByText("Codex")).toBeVisible();
 
     fireEvent.click(usage().querySelector("summary")!);
     expect(usage()).not.toHaveAttribute("open");
@@ -565,6 +569,15 @@ describe("Environment panel", () => {
     second.unmount();
 
     render(panel());
+    expect(usage()).toHaveAttribute("open");
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, newValue: "false" }));
+    });
+    expect(usage()).not.toHaveAttribute("open");
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, newValue: "true" }));
+    });
     expect(usage()).toHaveAttribute("open");
   });
 
@@ -657,6 +670,7 @@ describe("Environment panel", () => {
     );
     expect(within(openUsage()).getByText("Unavailable for this backend"))
       .toBeVisible();
+    expect(openUsage().querySelector("summary")).toHaveTextContent("Not shared");
     expect(within(openUsage()).queryByRole("button", { name: "Refresh usage" }))
       .not.toBeInTheDocument();
 

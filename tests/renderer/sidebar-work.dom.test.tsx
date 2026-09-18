@@ -3,6 +3,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
+import type { SidebarProps } from "../../src/renderer/src/components/sidebar/SidebarProps";
+import { useProjectScope } from "../../src/renderer/src/hooks/useProjectScope";
 import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
 import type {
   AppSnapshot,
@@ -112,6 +114,14 @@ function dismissedRun(conversation: ConversationShell): WorkspaceRun {
   };
 }
 
+function ScopedSidebar({
+  collapsed = false,
+  ...props
+}: Omit<SidebarProps, "projectScopeId" | "onProjectScopeChange"> & { collapsed?: boolean }) {
+  const [projectScopeId, setProjectScopeId] = useProjectScope(props.snapshot);
+  return collapsed ? null : <Sidebar {...props} projectScopeId={projectScopeId} onProjectScopeChange={setProjectScopeId} />;
+}
+
 function renderSidebar(
   conversations: ConversationShell[],
   onSelectConversation = vi.fn(),
@@ -166,7 +176,7 @@ function renderSidebar(
   };
   const initialSnapshot = snapshot(conversations, runs, options.projects);
   const view = render(
-    <Sidebar
+    <ScopedSidebar
       snapshot={{
         ...initialSnapshot,
         settings: {
@@ -185,8 +195,8 @@ function renderSidebar(
     onClose,
     onViewChange,
     onOpenHome,
-    rerenderSnapshot(nextSnapshot: AppSnapshot) {
-      view.rerender(<Sidebar snapshot={nextSnapshot} {...sidebarProps} />);
+    rerenderSnapshot(nextSnapshot: AppSnapshot, collapsed = false) {
+      view.rerender(<ScopedSidebar snapshot={nextSnapshot} collapsed={collapsed} {...sidebarProps} />);
     },
     ...view,
   };
@@ -1410,5 +1420,100 @@ describe("compact Work sidebar", () => {
     view.unmount();
     renderSidebar([approval]);
     expect(document.querySelector('[data-work-status="approval"]')).not.toHaveAttribute("data-work-arrival");
+  });
+
+  function scopeTo(name: string): HTMLElement {
+    const scope = screen.getByRole("button", { name: "Filter work by project" });
+    fireEvent.click(scope);
+    fireEvent.click(screen.getByRole("option", { name }));
+    expect(scope).toHaveTextContent(name);
+    return scope;
+  }
+
+  function otherProject(id: string, name: string): Project {
+    return {
+      ...project,
+      id,
+      name,
+      path: `/workspace/${id}`,
+      normalizedPath: `/workspace/${id}`,
+      repositoryIdentity: null,
+      repositoryRoot: null,
+      repositoryRelativePath: ".",
+    };
+  }
+
+  it("scopes Work to a newly created project once it becomes active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const studioThread = conversation("studio-thread", "Polish studio", new Date(2026, 7, 11, 9));
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([studioThread]);
+    const scope = scopeTo("Studio");
+
+    view.rerenderSnapshot({
+      ...snapshot([studioThread], [], [project, launchpad]),
+      activeProjectId: launchpad.id,
+      activeConversationId: null,
+    });
+
+    expect(scope).toHaveTextContent("Launchpad");
+    expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
+    expect(screen.getByText("No work yet")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
+  });
+
+  it("keeps the chosen scope when no newly created project becomes active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const studioThread = conversation("studio-thread", "Polish studio", new Date(2026, 7, 11, 9));
+    const runtime = otherProject("project-runtime", "Runtime");
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([studioThread], vi.fn(), [], { projects: [project, runtime] });
+    expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("All projects");
+    const scope = scopeTo("Studio");
+
+    view.rerenderSnapshot(snapshot([studioThread], [], [project, runtime]));
+    expect(scope).toHaveTextContent("Studio");
+
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime]), activeProjectId: runtime.id });
+    expect(scope).toHaveTextContent("Studio");
+
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime, launchpad]), activeProjectId: runtime.id });
+    expect(scope).toHaveTextContent("Studio");
+    expect(screen.getByText("Polish studio")).toBeInTheDocument();
+
+    scopeTo("All projects");
+    view.rerenderSnapshot({ ...snapshot([studioThread], [], [project, runtime, launchpad]), activeProjectId: launchpad.id });
+    expect(scope).toHaveTextContent("All projects");
+  });
+
+  it("keeps the scope while collapsed and selects a project created before reopening", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const studioThread = conversation("studio-thread", "Polish studio", new Date(2026, 7, 11, 9));
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([studioThread]);
+    scopeTo("Studio");
+
+    view.rerenderSnapshot(snapshot([studioThread]), true);
+    expect(screen.queryByRole("button", { name: "Filter work by project" })).not.toBeInTheDocument();
+    view.rerenderSnapshot(snapshot([studioThread]));
+    expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("Studio");
+
+    const created = {
+      ...snapshot([studioThread], [], [project, launchpad]),
+      activeProjectId: launchpad.id,
+      activeConversationId: null,
+    };
+    view.rerenderSnapshot(snapshot([studioThread]), true);
+    view.rerenderSnapshot(created, true);
+    view.rerenderSnapshot(created);
+
+    expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("Launchpad");
+    expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
   });
 });

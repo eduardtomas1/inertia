@@ -305,6 +305,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(usageDestination).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("main", { name: "Usage" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
+  const usageSections = page.getByRole("group", { name: "Usage section" });
+  await expect(usageSections).toHaveCSS("display", "flex");
+  await expect(usageSections.getByRole("button", { name: "History", exact: true })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const environmentSummary = page.getByRole("dialog", { name: "Environment summary" });
   if (await environmentSummary.isVisible()) {
     await page.getByRole("button", { name: "Close environment summary" }).click();

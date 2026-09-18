@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { insertComposerSkillToken } from "../../src/renderer/src/utils/composerSkillToken";
 
 describe("insertComposerSkillToken", () => {
+  it("completes the whole token at a caret in the middle without swallowing following text", () => {
+    expect(insertComposerSkillToken("Use $secur then check", "security-review", 7, 7).value)
+      .toBe("Use $security-review then check");
+  });
+
   it("inserts a canonical invocation at the caret with readable spacing", () => {
     expect(insertComposerSkillToken("Review this", "security-review", 7, 7))
       .toEqual({

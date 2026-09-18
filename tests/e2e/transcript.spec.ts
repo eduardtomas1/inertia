@@ -249,6 +249,12 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     }
 
     const transcript = page.getByLabel("Thread transcript");
+    const scrollToMiddle = async (): Promise<void> => {
+      await transcript.hover();
+      const delta = await transcript.evaluate((element) =>
+        Math.floor((element.scrollHeight - element.clientHeight) / 2) - element.scrollTop);
+      await page.mouse.wheel(0, delta);
+    };
     const virtualWindow = transcript.getByRole("feed", { name: "120 conversation turns" });
     await expect(virtualWindow).toBeVisible();
     await expect.poll(() => virtualWindow.locator(".response-virtual-item").count()).toBeLessThan(24);
@@ -331,9 +337,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     expect(separation).not.toBeNull();
     expect(separation?.minimapRight ?? 0).toBeLessThanOrEqual((separation?.turnLeft ?? 0) + 1);
 
-    await transcript.evaluate((element) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-    });
+    await scrollToMiddle();
     await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
     await expect.poll(() => virtualWindow.locator(".response-virtual-item").count()).toBeLessThan(24);
     await page.waitForTimeout(500);
@@ -360,9 +364,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
         : null;
     }, summarySelector);
     const expectExpansionAnchored = async (summarySelector: string): Promise<void> => {
-      await transcript.evaluate((element) => {
-        element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      });
+      await scrollToMiddle();
       await page.waitForTimeout(250);
       let probe = await expansionProbe(summarySelector);
       expect(probe).not.toBeNull();
@@ -389,9 +391,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       selector: string,
       expectedExpandedContent?: string,
     ): Promise<void> => {
-      await transcript.evaluate((element) => {
-        element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      });
+      await scrollToMiddle();
       await page.waitForTimeout(250);
       const probe = await expansionProbe(selector);
       expect(probe).not.toBeNull();
@@ -435,9 +435,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await page.keyboard.press("Alt+g");
     await expect(page.locator('[data-turn-jump-target="artifact"]:focus')).toHaveCount(1);
 
-    await transcript.evaluate((element) => {
-      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-    });
+    await scrollToMiddle();
     await page.waitForTimeout(250);
     const captureReaderAnchor = () => page.evaluate(() => {
       const viewport = document.querySelector<HTMLElement>(".message-scroll")?.getBoundingClientRect();
@@ -538,9 +536,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       else await expect(scenarioTools).toBeHidden();
 
       const scenarioTranscript = page.getByLabel("Thread transcript");
-      await scenarioTranscript.evaluate((element) => {
-        element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-      });
+      await scrollToMiddle();
       await page.waitForTimeout(350);
       await expect.poll(() => scenarioTranscript.locator(".response-virtual-item").count()).toBeLessThan(24);
       await expect.poll(() => page.evaluate(() => {

@@ -2,6 +2,20 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.57 — 2026-09-15
+
+This is the first published release after 0.0.55. It includes all of the workspace,
+Antigravity, Git, recovery and dependency changes listed under 0.0.56 below;
+0.0.56 was held during release certification and was never published.
+
+- Fix a macOS cleanup race when a recorded descendant exits just before it can
+  be stopped. An exact kernel identity check recognizes the exited process
+  while surviving descendants still require complete cleanup. This avoids an
+  unnecessary recovery lock in that case without weakening process ownership.
+- Normalize Windows certification paths and wait for the welcome guide's
+  opening animation before measuring its geometry. Native package, shutdown,
+  containment and installed-upgrade checks remain required on all six targets.
+
 ## 0.0.56 — 2026-09-14
 
 ### A clearer workspace

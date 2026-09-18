@@ -92,8 +92,11 @@ describe("Quiet Ledger responsive transcript", () => {
     const details = cssBlock(compact, ".turn-run-details > div");
     const elapsed = cssBlock(compact, ".turn-working-elapsed");
     const activity = cssBlock(
-      css,
-      ".turn-work-log .agent-activity-target,",
+      readFileSync(
+        new URL("../../src/renderer/src/components/response-timeline/ActivityGroup.css", import.meta.url),
+        "utf8",
+      ),
+      ".turn-activity-group .agent-activity-target,",
     );
     const requestCard = cssBlock(css, "@container (max-width: 420px)");
 

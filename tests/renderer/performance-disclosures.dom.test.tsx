@@ -144,11 +144,12 @@ describe("historical execution disclosure performance", () => {
     expect(screen.getByTitle(/^Ran performance fixture/u)).toBeTruthy();
     expect(document.body.textContent).not.toContain("UNMOUNTED_SENTINEL");
 
-    const summary = screen.getByText("Full command output");
-    const disclosure = summary.closest("details");
-    if (!disclosure) throw new Error("Expected the command disclosure.");
-    disclosure.open = true;
-    fireEvent(disclosure, new Event("toggle"));
+    const disclosure = screen.getByRole("button", {
+      name: "Output: Ran performance fixture",
+    });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
 
     expect(document.body.textContent).toContain("UNMOUNTED_SENTINEL");
   });

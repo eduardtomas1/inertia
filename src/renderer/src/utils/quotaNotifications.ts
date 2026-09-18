@@ -9,6 +9,7 @@ export const QUOTA_NOTIFICATION_STORAGE_KEY =
   "inertia:provider-quota-notifications:v1";
 
 const MAX_PERSISTED_WINDOWS = 64;
+const UNKNOWN_RESET = "provider-reset-unavailable";
 const FIVE_HOURS_MINUTES = 300;
 const WEEK_MINUTES = 10_080;
 
@@ -131,7 +132,7 @@ function authoritativeQuota(
 function resetIdentity(limit: ProviderRateLimit): string {
   return validTimestamp(limit.resetsAt)
     ? new Date(limit.resetsAt).toISOString()
-    : "provider-reset-unavailable";
+    : UNKNOWN_RESET;
 }
 
 function crossedThreshold(
@@ -177,15 +178,24 @@ export function evaluateQuotaNotifications(
       if (!windowLabel || !validPercent(limit.remainingPercent)) continue;
 
       const key = `${provider.id}:builtin:${limit.id}`;
-      const identity = resetIdentity(limit);
+      const reportedIdentity = resetIdentity(limit);
       const prior = nextWindows[key];
-      const resetChanged = prior?.resetIdentity !== identity;
+      // Startup/session metadata may omit a reset time that the account probe
+      // supplies later. Missing metadata is not evidence of a new quota window.
+      let identity = reportedIdentity === UNKNOWN_RESET
+        ? prior?.resetIdentity ?? UNKNOWN_RESET
+        : reportedIdentity;
+      const resetChanged = prior !== undefined
+        && prior.resetIdentity !== UNKNOWN_RESET
+        && reportedIdentity !== UNKNOWN_RESET
+        && prior.resetIdentity !== reportedIdentity;
       const inferredReset = Boolean(
         prior
-        && identity === "provider-reset-unavailable"
+        && reportedIdentity === UNKNOWN_RESET
         && limit.remainingPercent > 25
         && limit.remainingPercent > prior.remainingPercent,
       );
+      if (inferredReset) identity = UNKNOWN_RESET;
       const activePrior = resetChanged || inferredReset ? undefined : prior;
       const threshold = crossedThreshold(
         activePrior?.remainingPercent ?? null,

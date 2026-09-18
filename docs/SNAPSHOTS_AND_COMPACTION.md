@@ -1,18 +1,24 @@
 # Snapshots and compaction receipts
 
-Snapshots is experimental. Open **Snapshots** in the composer toolbar and enable capture. On macOS and
+Snapshots is experimental. Open **Settings → Snapshots** and enable capture. Return to your chat and focus its message box before switching to the window you want to share. On macOS and
 Windows, press both physical Shift keys together while another application is
 foreground. You can instead select Cmd+Option+S on macOS or Ctrl+Alt+S on Windows.
 Linux X11 uses Ctrl+Alt+S. The selected chat receives a removable screenshot tile
 with the application and window names. Open it to inspect the image or its
 accessibility data before sending. Capture does not send a message automatically.
 
-macOS requires Accessibility and Screen Recording permission; the setup dialog
+macOS requires Accessibility and Screen Recording permission; the Snapshots settings page
 opens the relevant system settings only after an explicit click. Snapshots starts
 disabled and saves the chosen setting locally. Linux requires an X11 desktop and
-working AT-SPI accessibility. Wayland is reported as unavailable because reliable
+working AT-SPI accessibility. Inertia matches the X11 foreground process, window title, and geometry to one accessibility window, including Chromium windows that omit the accessibility active-window flag. Wayland is reported as unavailable because reliable
 foreground-window cropping is not available through the selected native backend.
 Applications that omit accessibility information can provide incomplete context.
+On Linux, Chromium and Electron apps can expose an empty accessibility tree until
+their accessibility bridge is enabled. Snapshots refuses to capture such a window,
+because it cannot locate fields to mask, and suggests restarting the app with
+`--force-renderer-accessibility` or `ACCESSIBILITY_ENABLED=1`. Only macOS has an
+app-level permission that Inertia can check. Elsewhere access is established per
+window at capture time, so the permission state is reported as unverified.
 
 The capture worker reads the current window once. It masks detected editable
 controls and protected fields in the image and omits their text and descendants
@@ -22,6 +28,15 @@ which can include overlapping windows outside that accessibility tree. Review th
 attachment before sending it. A changed foreground identity, an
 incomplete protected-field scan, changed protected-field geometry across the
 screenshot, timeout, or oversized image fails the capture.
+Failures keep a fixed category across the worker boundary: target accessibility
+unavailable, no identifiable active window, an actual permission denial, invalid
+protected geometry, or a native capture failure. Each has its own message, and
+only a typed denial from the native backend is reported as a permission problem.
+An unavailable accessibility tree or missing active window is retried twice,
+250 ms apart, within the first second. Each retry repeats the full
+foreground-identity and masking checks. The runtime log records only the capture
+phase and category, never window titles, accessibility text, pixels, raw
+exceptions or identifiers.
 Only the two Shift modifiers are sampled for the default shortcut; no typed text
 or general keyboard events are recorded. There is no continuous screen capture.
 
@@ -70,8 +85,8 @@ Source was inspected at T3 Code revision
   and compaction change
   [`c5ba51d629b3813182cf3e161cc3f23b1e541dc3`](https://github.com/pingdotgg/t3code/commit/c5ba51d629b3813182cf3e161cc3f23b1e541dc3).
 
-Inertia uses the same pinned native packages (`@crowecawcaw/xa11y` 0.13.0 and
-`ffi-rs` 1.3.2), included in generated third-party notices and native/package
+Inertia currently uses the pinned native packages (`@crowecawcaw/xa11y` 0.14.0 and
+`ffi-rs` 1.3.7), included in generated third-party notices and native/package
 verification. The UI follows the compact preview and separator treatment using
 Inertia's existing attachment modal, composer, timeline and focus rules. Arrival
 uses a short composer animation that is disabled under reduced motion. Desktop

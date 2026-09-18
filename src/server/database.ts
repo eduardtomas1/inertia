@@ -907,6 +907,7 @@ export class RuntimeStore {
   attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
+  continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }
 
   upsertAgentPlan(plan: AgentPlan): void {
     this.executionLedgerRepository.upsertAgentPlan(plan);

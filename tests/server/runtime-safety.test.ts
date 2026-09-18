@@ -170,7 +170,7 @@ describe("runtime recovery safety command boundary", () => {
       expect((unchanged.prepare(`
         SELECT sql FROM sqlite_master
         WHERE type = 'table' AND name = 'model_backend_profiles'
-      `).pluck().get() as string)).toContain("'gemini-acp'");
+      `).pluck().get() as string)).toContain("'antigravity-cli'");
       unchanged.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

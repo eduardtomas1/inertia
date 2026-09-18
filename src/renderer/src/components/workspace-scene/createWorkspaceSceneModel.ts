@@ -342,7 +342,7 @@ export function createWorkspaceSceneModel({
     const candidates = [...snapshotConversations].sort((left, right) => {
       if (left.id === persistedConversation?.id) return -1;
       if (right.id === persistedConversation?.id) return 1;
-      return right.updatedAt.localeCompare(left.updatedAt);
+      return right.updatedAt.localeCompare(left.updatedAt, "en");
     });
     for (const candidate of candidates) {
       const candidateProject = projectById.get(candidate.projectId);

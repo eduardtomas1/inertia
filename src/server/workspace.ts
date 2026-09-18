@@ -984,7 +984,7 @@ export function identifyPreviewScripts(
     )
     .map((script) => ({ script, match: previewScore(script) }))
     .filter((item): item is { script: PackageScript; match: { score: number; reason: string } } => item.match !== null)
-    .sort((left, right) => right.match.score - left.match.score || left.script.name.localeCompare(right.script.name))
+    .sort((left, right) => right.match.score - left.match.score || left.script.name.localeCompare(right.script.name, "en"))
     .slice(0, 12)
     .map(({ script, match }) => ({
       ...script,

@@ -16,7 +16,7 @@ function descendingTimestamp(
   const rightTime = Date.parse(right.startedAt ?? right.updatedAt ?? "");
   return (Number.isFinite(rightTime) ? rightTime : 0)
     - (Number.isFinite(leftTime) ? leftTime : 0)
-    || left.id.localeCompare(right.id);
+    || left.id.localeCompare(right.id, "en");
 }
 
 /**

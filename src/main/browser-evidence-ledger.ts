@@ -79,7 +79,7 @@ function compareOccurrence(
   left: BrowserEvidenceEntry,
   right: BrowserEvidenceEntry,
 ): number {
-  return left.occurredAt.localeCompare(right.occurredAt)
+  return left.occurredAt.localeCompare(right.occurredAt, "en")
     || left.sequence - right.sequence;
 }
 
@@ -236,12 +236,12 @@ export class BrowserEvidenceLedger {
         ?? entry.sequence;
       if (
         (
-          entry.occurredAt.localeCompare(occurredAt)
+          entry.occurredAt.localeCompare(occurredAt, "en")
           || entryOccurrenceSequence - occurrenceSequence
         ) < 0
         && (
           !adjacent
-          || adjacent.occurredAt.localeCompare(entry.occurredAt) < 0
+          || adjacent.occurredAt.localeCompare(entry.occurredAt, "en") < 0
           || (
             adjacent.occurredAt === entry.occurredAt
             && (this.#lastOccurrenceSequence.get(adjacent.id) ?? adjacent.sequence)

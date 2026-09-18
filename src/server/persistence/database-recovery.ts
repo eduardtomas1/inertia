@@ -615,7 +615,7 @@ function listValidatedBackups(databasePath: string): {
   }
   valid.sort((left, right) =>
     right.modifiedAt - left.modifiedAt
-    || right.filename.localeCompare(left.filename));
+    || right.filename.localeCompare(left.filename, "en"));
   return { invalid, unsupported, valid };
 }
 
@@ -642,7 +642,7 @@ function listBackupMetadata(databasePath: string): ValidatedBackup[] {
   }
   backups.sort((left, right) =>
     right.modifiedAt - left.modifiedAt
-    || right.filename.localeCompare(left.filename));
+    || right.filename.localeCompare(left.filename, "en"));
   return backups;
 }
 

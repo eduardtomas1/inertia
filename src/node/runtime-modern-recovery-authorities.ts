@@ -227,7 +227,7 @@ function parseSnapshot(value: unknown): ModernDarwinRecoverySnapshot | null {
     if (records.some((record) => record === null)) return null;
     const sortedRecords = (records as Readonly<Record<string, unknown>>[])
       .sort((left, right) => String(left.ownershipId)
-        .localeCompare(String(right.ownershipId)));
+        .localeCompare(String(right.ownershipId), "en"));
     if (new Set(sortedRecords.map((record) => record.ownershipId)).size
       !== sortedRecords.length) return null;
     generations.push({
@@ -241,7 +241,7 @@ function parseSnapshot(value: unknown): ModernDarwinRecoverySnapshot | null {
     });
   }
   generations.sort((left, right) => left.lease.runtimeGenerationId
-    .localeCompare(right.lease.runtimeGenerationId));
+    .localeCompare(right.lease.runtimeGenerationId, "en"));
   if (new Set(generations.map(({ lease }) => lease.runtimeGenerationId)).size
     !== generations.length) return null;
   return {
@@ -397,7 +397,7 @@ function captureTargetSnapshot(
       containment: null,
       records: (records as Readonly<Record<string, unknown>>[])
         .sort((left, right) => String(left.ownershipId)
-          .localeCompare(String(right.ownershipId))),
+          .localeCompare(String(right.ownershipId), "en")),
     });
   }
   return parseSnapshot({ platform: "darwin", systemBootId, generations });

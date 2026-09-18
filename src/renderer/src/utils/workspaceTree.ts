@@ -13,7 +13,7 @@ export type WorkspaceTreeKeyboardAction =
   | { type: "open"; path: string }
   | { type: "none" };
 
-const workspacePathCollator = new Intl.Collator(undefined, {
+const workspacePathCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
 });

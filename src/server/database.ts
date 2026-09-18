@@ -1226,22 +1226,16 @@ export class RuntimeStore {
     return this.conversationRepository.path(conversationId);
   }
 
-  private requireProject(projectId: string): ProjectRow {
-    const project = this.database.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as ProjectRow | undefined;
-    if (!project) throw new RecordNotFoundError("Project not found.");
-    return project;
-  }
+  private requireProject(projectId: string): ProjectRow { return this.requireRow("projects", projectId, "Project not found."); }
 
-  private requireConversation(conversationId: string): ConversationRow {
-    const conversation = this.database.prepare("SELECT * FROM conversations WHERE id = ?").get(conversationId) as ConversationRow | undefined;
-    if (!conversation) throw new RecordNotFoundError("Conversation not found.");
-    return conversation;
-  }
+  private requireConversation(conversationId: string): ConversationRow { return this.requireRow("conversations", conversationId, "Conversation not found."); }
 
-  private requireAgentTurn(turnId: string): AgentTurnRow {
-    const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
-    if (!turn) throw new RecordNotFoundError("Agent turn not found.");
-    return turn;
+  private requireAgentTurn(turnId: string): AgentTurnRow { return this.requireRow("agent_turns", turnId, "Agent turn not found."); }
+
+  private requireRow<Row>(table: "projects" | "conversations" | "agent_turns", id: string, missing: string): Row {
+    const row = this.database.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Row | undefined;
+    if (!row) throw new RecordNotFoundError(missing);
+    return row;
   }
 
   recoverInterruptedRuns(): void {

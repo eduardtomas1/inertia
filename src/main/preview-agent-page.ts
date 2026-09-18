@@ -7,6 +7,7 @@ import {
   MAX_BROWSER_EVIDENCE_TEXT_CHARS,
 } from "../shared/browser-evidence.js";
 import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
+import { agentPageIsFrozen, evaluateInFrozenAgentPage } from "./preview-agent-boundary.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
 // credential identity; the untrusted page cannot read or mutate its state.
@@ -129,6 +130,7 @@ function target(value: unknown): PreviewAgentTarget {
 }
 
 async function execute(contents: WebContents, code: string): Promise<unknown> {
+  if (agentPageIsFrozen(contents)) return await evaluateInFrozenAgentPage(contents, code);
   return await contents.executeJavaScriptInIsolatedWorld(
     AGENT_BROWSER_WORLD_ID,
     [{ code }],

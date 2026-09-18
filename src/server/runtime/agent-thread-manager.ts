@@ -142,7 +142,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
   },
   {
     name: "inertia_request_context",
-    description: "Ask the user to share bounded context from another Inertia chat. The optional sourceConversationId can only preselect one existing chat; it never reveals content. Inertia opens a chooser where the user selects the exact visible messages and confirms cross-workspace sharing. The result contains only that bounded, defense-in-depth-redacted selection and its provenance. Do not supply message IDs.",
+    description: "Ask the user to share bounded context from another Inertia chat. The optional sourceConversationId can only preselect one existing chat; it never reveals content. Inertia asks the user to approve the share and to confirm cross-workspace sharing before any content is read. The result contains only that bounded, defense-in-depth-redacted transcript and its provenance, may arrive as several ordered blocks, and reports how many oldest messages fell outside the budget. Attachments appear as identifiers only, never file paths or bytes. Do not supply message IDs.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

@@ -32,6 +32,7 @@ import type { useConversationProjection } from "../../hooks/useConversationProje
 import type { useDesktopTools } from "../../hooks/useDesktopTools";
 import type { useInertiaConnection } from "../../hooks/useInertiaConnection";
 import type { useProviderMaintenance } from "../../hooks/useProviderMaintenance";
+import { EMPTY_STREAMING_AGENT_SOURCE } from "../../hooks/useStreamingAgentState";
 import {
   ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
@@ -118,9 +119,7 @@ export function visibleChatProjection(
     ConversationProjection,
     | "conversation"
     | "detail"
-    | "streamingText"
-    | "streamingReasoning"
-    | "streamingChannel"
+    | "streaming"
     | "terminalProjections"
     | "usage"
   >,
@@ -134,9 +133,9 @@ export function visibleChatProjection(
   );
   return {
     detailLoading: projectionOwned && detailLoading,
-    streamingText: projectionOwned ? projection.streamingText : "",
-    streamingReasoning: projectionOwned ? projection.streamingReasoning : "",
-    streamingChannel: projectionOwned ? projection.streamingChannel : null,
+    streaming: projectionOwned
+      ? projection.streaming
+      : EMPTY_STREAMING_AGENT_SOURCE,
     terminalProjections: projectionOwned ? projection.terminalProjections : {},
     usage: projection.usage?.conversationId === conversation?.id
       ? projection.usage
@@ -602,9 +601,7 @@ export function createWorkspaceSceneModel({
       plans: projection.plans,
       checkpoints: projection.checkpoints,
       turnGitArtifacts: projection.turnGitArtifacts,
-      streamingText: chatProjection.streamingText,
-      streamingReasoning: chatProjection.streamingReasoning,
-      streamingChannel: chatProjection.streamingChannel,
+      streaming: chatProjection.streaming,
       terminalProjections: chatProjection.terminalProjections,
       usage: chatProjection.usage,
       skills: currentWorkflow?.skills ?? [],

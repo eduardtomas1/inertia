@@ -31,7 +31,12 @@ export const loadMascotSettings = createSurfaceLoader(async () => ({
   default: (await import("./MascotSettings")).MascotSettings,
 }));
 
+export const loadSnapshotSettings = createSurfaceLoader(async () => ({
+  default: (await import("./SnapshotSettings")).SnapshotSettings,
+}));
+
 export function prefetchSettingsSection(section: string): void {
+  if (section === "snapshots") void loadSnapshotSettings();
   if (section === "projects") void loadProjectSettings();
   if (section === "diagnostics") void loadDiagnosticsSettings();
   if (section === "providers" || section === "archive") {

@@ -56,12 +56,11 @@ test.afterAll(async () => {
 
 async function moveIntoHistory(pane: Locator): Promise<ReaderAnchor> {
   const transcript = pane.getByLabel("Thread transcript");
-  await transcript.evaluate((element) => {
-    element.scrollTop = Math.floor(
-      (element.scrollHeight - element.clientHeight) * 0.42,
-    );
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
+  const distance = await transcript.evaluate((element) =>
+    (element.scrollHeight - element.clientHeight) * 0.58);
+  // Express reader intent: hydration/virtualizer scrolls must keep following.
+  await transcript.hover();
+  await page.mouse.wheel(0, -distance);
   await expect(pane.getByRole("button", { name: "Jump to latest" }))
     .toBeVisible();
   await page.waitForTimeout(250);

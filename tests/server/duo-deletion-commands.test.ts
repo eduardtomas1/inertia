@@ -99,6 +99,7 @@ function conversationDependencies(
   return {
     store: {
       attachments: vi.fn(() => []),
+      referencedAttachmentIds: vi.fn(() => new Set<string>()),
       providerRunOwnership: { forConversation: vi.fn(() => []) },
       contextPackets: { targetConversationIdsForSource: vi.fn(() => []) },
       ...store,
@@ -139,6 +140,7 @@ function projectDependencies(
       project: vi.fn(() => ({ id: projectId, path: "/workspace" }) as never),
       conversationWork,
       attachments: vi.fn(() => []),
+      referencedAttachmentIds: vi.fn(() => new Set<string>()),
       ...store,
     } as RuntimeStore,
     conversationAttachments: {
@@ -227,11 +229,10 @@ describe("Duo deletion command preflights", () => {
       shellSnapshot: vi.fn(() => ({
         conversations: [conversation],
       }) as AppSnapshot),
-      attachments: vi.fn((selectedConversationId?: string) => (
-        selectedConversationId
-          ? [{ id: attachmentId }, { id: sharedAttachmentId }]
-          : [{ id: sharedAttachmentId }]
+      attachments: vi.fn(() => (
+        [{ id: attachmentId }, { id: sharedAttachmentId }]
       ) as never),
+      referencedAttachmentIds: vi.fn(() => new Set([sharedAttachmentId])),
       deleteConversation,
     };
     const dependencies = conversationDependencies(store);
@@ -267,6 +268,11 @@ describe("Duo deletion command preflights", () => {
       vi.mocked(store.attachments!).mock.invocationCallOrder[0]!,
     );
     expect(deleteConversation).toHaveBeenCalledWith(conversationId);
+    expect(deleteConversation).toHaveBeenCalledBefore(
+      vi.mocked(store.referencedAttachmentIds!),
+    );
+    expect(store.referencedAttachmentIds)
+      .toHaveBeenCalledWith([attachmentId, sharedAttachmentId]);
     expect(dependencies.conversationAttachments.release)
       .toHaveBeenCalledWith([attachmentId]);
     expect(dependencies.rememberDeletedConversation).toHaveBeenCalledWith(
@@ -476,11 +482,10 @@ describe("Duo deletion command preflights", () => {
       shellSnapshot: vi.fn(() => ({
         conversations: [conversation],
       }) as AppSnapshot),
-      attachments: vi.fn((selectedConversationId?: string) => (
-        selectedConversationId
-          ? [{ id: removedAttachmentId }, { id: sharedAttachmentId }]
-          : [{ id: sharedAttachmentId }]
+      attachments: vi.fn(() => (
+        [{ id: removedAttachmentId }, { id: sharedAttachmentId }]
       ) as never),
+      referencedAttachmentIds: vi.fn(() => new Set([sharedAttachmentId])),
       removeProject,
     };
     const dependencies = projectDependencies(store);
@@ -491,6 +496,11 @@ describe("Duo deletion command preflights", () => {
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledBefore(removeProject);
     expect(removeProject).toHaveBeenCalledWith(projectId);
+    expect(removeProject).toHaveBeenCalledBefore(
+      vi.mocked(store.referencedAttachmentIds!),
+    );
+    expect(store.referencedAttachmentIds)
+      .toHaveBeenCalledWith([removedAttachmentId, sharedAttachmentId]);
     expect(dependencies.conversationAttachments.release)
       .toHaveBeenCalledWith([removedAttachmentId]);
     expect(removeProject).toHaveBeenCalledBefore(

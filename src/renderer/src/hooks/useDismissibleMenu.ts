@@ -16,18 +16,18 @@ export function useDismissibleMenu<Menu extends string>(): {
   menu: Menu | null;
   toggleMenu: (menu: Menu) => void;
   dismissMenu: (reason: Exclude<DismissibleMenuAction<Menu>["type"], "toggle" | "inside-pointer" | "outside-pointer">) => void;
-  setMenuTrigger: (menu: Menu, node: HTMLButtonElement | null) => void;
+  setMenuTrigger: (menu: Menu, node: HTMLButtonElement | HTMLTextAreaElement | null) => void;
   setMenuPopover: (menu: Menu, node: HTMLDivElement | null) => void;
 } {
   const [menu, dispatch] = useReducer(dismissibleMenuTransition<Menu>, null);
   const menuRef = useRef<Menu | null>(null);
   const focusGeneration = useRef(0);
   const pendingFocusCleanup = useRef<(() => void) | null>(null);
-  const triggers = useRef(new Map<Menu, HTMLButtonElement>());
+  const triggers = useRef(new Map<Menu, HTMLButtonElement | HTMLTextAreaElement>());
   const popovers = useRef(new Map<Menu, HTMLDivElement>());
   menuRef.current = menu;
 
-  const setMenuTrigger = useCallback((name: Menu, node: HTMLButtonElement | null) => {
+  const setMenuTrigger = useCallback((name: Menu, node: HTMLButtonElement | HTMLTextAreaElement | null) => {
     if (node) triggers.current.set(name, node);
     else triggers.current.delete(name);
   }, []);

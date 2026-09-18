@@ -1,0 +1,419 @@
+.turn-activity-group {
+  min-width: 0;
+  margin: 1px 0 4px;
+}
+
+.turn-work-log.is-settled > .turn-activity-group {
+  margin: 2px 0;
+}
+
+.turn-activity-group-summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-small);
+  color: var(--execution-muted-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--activity-row-font-size);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.turn-activity-group-summary:hover {
+  color: var(--execution-text);
+  background: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+}
+
+.turn-activity-group-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.turn-activity-group-mark {
+  position: relative;
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--execution-muted-text);
+  transition: color 200ms ease;
+}
+
+.turn-activity-group-mark svg {
+  width: 11px;
+  height: 11px;
+}
+
+.turn-activity-group[data-activity-group-state="folded"] .turn-activity-group-mark {
+  color: color-mix(in srgb, var(--success-accent) 60%, var(--execution-muted-text));
+}
+
+.turn-activity-group-mark[data-running="true"] {
+  color: var(--active-work-accent);
+}
+
+.turn-activity-group-mark[data-running="true"]::after {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  content: "";
+  animation: activity-group-spin 900ms linear infinite;
+}
+
+.turn-activity-group-parts {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.turn-activity-group-part {
+  flex: 0 0 auto;
+}
+
+.turn-activity-group-part + .turn-activity-group-part::before {
+  margin: 0 6px;
+  color: var(--execution-separator);
+  content: "·";
+}
+
+.turn-activity-group-part[data-tone="failure"] {
+  color: var(--failure-accent);
+}
+
+.turn-activity-group-part[data-tone="warning"] {
+  color: var(--warning-accent);
+}
+
+.turn-activity-group-count {
+  display: inline-block;
+  color: var(--execution-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+}
+
+.turn-activity-group-part:is([data-tone="failure"], [data-tone="warning"]) .turn-activity-group-count {
+  color: inherit;
+}
+
+.turn-activity-group[data-activity-group-state="live"] .turn-activity-group-count {
+  animation: activity-group-count-in 320ms var(--motion-ease) both;
+}
+
+.turn-activity-group-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--execution-muted-text);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 300ms var(--motion-ease);
+}
+
+.turn-activity-group-summary:is(:hover, :focus-visible, [aria-expanded="true"]) .turn-activity-group-chevron,
+.turn-activity-group[data-activity-group-state="folded"] .turn-activity-group-chevron {
+  opacity: 1;
+}
+
+.turn-activity-group-summary[aria-expanded="true"] .turn-activity-group-chevron {
+  transform: rotate(180deg);
+}
+
+.turn-activity-group-rows {
+  min-width: 0;
+  margin-left: 11px;
+  padding-left: 11px;
+  border-left: 1px solid color-mix(in srgb, var(--execution-rail-border) 62%, transparent);
+}
+
+.turn-activity-group-row {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 340ms var(--motion-ease),
+    opacity 220ms var(--motion-ease);
+}
+
+.turn-activity-group-row > div {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.turn-activity-group-row > div > .agent-activity {
+  transform: none;
+  transition: transform 340ms var(--motion-ease);
+}
+
+.turn-activity-group-row[data-folded="true"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 360ms cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 180ms var(--motion-ease);
+}
+
+.turn-activity-group-row[data-folded="true"] > div > .agent-activity {
+  transform: translateY(-6px);
+}
+
+@starting-style {
+  .turn-activity-group-row {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+
+  .turn-activity-group-row > div > .agent-activity {
+    transform: translateY(5px);
+  }
+}
+
+.turn-activity-group .agent-activity {
+  display: grid;
+  min-width: 0;
+  min-height: 24px;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 7px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-small);
+  color: var(--execution-muted-text);
+  background: transparent;
+  font-size: var(--activity-row-font-size);
+  line-height: 1.35;
+}
+
+.turn-activity-group .agent-activity > .agent-activity-icon {
+  position: relative;
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--execution-muted-text);
+  background: transparent;
+  box-shadow: none;
+}
+
+.turn-activity-group .agent-activity-icon svg {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  color: inherit;
+  animation: none;
+}
+
+[data-active-work-region] .turn-activity-group .agent-activity.is-running > .agent-activity-icon {
+  color: var(--active-work-accent);
+}
+
+.turn-activity-group .agent-activity[data-activity-severity="warning"] > .agent-activity-icon,
+.turn-activity-group .agent-activity[data-activity-severity="warning"] .agent-activity-verb,
+.turn-activity-group .agent-activity[data-activity-severity="warning"] .agent-activity-state {
+  color: var(--warning-accent);
+}
+
+.turn-activity-group .agent-activity[data-activity-severity="failure"] > .agent-activity-icon,
+.turn-activity-group .agent-activity[data-activity-severity="failure"] .agent-activity-verb,
+.turn-activity-group .agent-activity[data-activity-severity="failure"] .agent-activity-state {
+  color: var(--failure-accent);
+}
+
+.turn-activity-group .agent-activity-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.turn-activity-group .agent-activity-title {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+  font-weight: inherit;
+  white-space: nowrap;
+}
+
+.turn-activity-group .agent-activity-copy.has-detail .agent-activity-title {
+  max-width: 64%;
+}
+
+.turn-activity-group .agent-activity-verb {
+  flex: 0 0 auto;
+  color: var(--execution-text);
+  font-weight: 600;
+}
+
+.turn-activity-group .agent-activity-target,
+.turn-activity-group .agent-activity-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--execution-muted-text);
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-activity-group .agent-activity-target.is-command {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.turn-activity-group .agent-activity-detail {
+  flex: 1 1 auto;
+}
+
+.turn-activity-group .agent-activity-detail::before {
+  margin: 0 7px;
+  color: var(--execution-separator);
+  content: "·";
+}
+
+.turn-activity-group .agent-activity-state {
+  color: var(--execution-muted-text);
+  font-size: var(--ui-font-micro);
+  font-weight: 600;
+}
+
+.turn-activity-group .agent-activity-disclosure {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0 5px;
+  border: 0;
+  border-radius: var(--radius-small);
+  color: var(--execution-muted-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--ui-font-micro);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.turn-activity-group .agent-activity:hover .agent-activity-disclosure,
+.turn-activity-group .agent-activity.is-important .agent-activity-disclosure,
+.turn-activity-group .agent-activity-disclosure:is(:focus-visible, [aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.turn-activity-group .agent-activity-disclosure:hover {
+  color: var(--execution-text);
+  background: var(--surface-hover);
+}
+
+.turn-activity-group .agent-activity-disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.turn-activity-group .agent-activity-disclosure svg {
+  transition: transform 300ms var(--motion-ease);
+}
+
+.turn-activity-group .agent-activity-disclosure[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.turn-activity-group .agent-activity-output {
+  max-height: 160px;
+  grid-column: 2 / -1;
+  margin: 1px 0 5px;
+  padding: 4px 8px;
+  overflow: auto;
+  border: 0;
+  border-inline-start: 1px solid color-mix(in srgb, var(--execution-rail-border) 78%, transparent);
+  border-radius: 0;
+  color: var(--execution-muted-text);
+  background: transparent;
+  font: var(--ui-font-micro)/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@container response-transcript (max-width: 440px) {
+  .turn-activity-group-rows {
+    margin-left: 7px;
+    padding-left: 9px;
+  }
+
+  .turn-activity-group .agent-activity-output {
+    max-height: 120px;
+  }
+
+  .turn-activity-group .agent-activity-disclosure > span {
+    display: none;
+  }
+}
+
+@keyframes activity-group-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes activity-group-count-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app-shell[data-document-visible="false"] .turn-activity-group-mark[data-running="true"]::after {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-activity-group-row,
+  .turn-activity-group-row > div > .agent-activity,
+  .turn-activity-group-summary,
+  .turn-activity-group-mark,
+  .turn-activity-group-chevron,
+  .turn-activity-group .agent-activity-disclosure,
+  .turn-activity-group .agent-activity-disclosure svg {
+    transition: none;
+  }
+
+  .turn-activity-group[data-activity-group-state="live"] .turn-activity-group-count,
+  .turn-activity-group-mark[data-running="true"]::after {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .turn-activity-group-mark,
+  .turn-activity-group .agent-activity-icon {
+    color: CanvasText;
+    forced-color-adjust: auto;
+  }
+}

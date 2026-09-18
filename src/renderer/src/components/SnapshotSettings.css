@@ -1,0 +1,7 @@
+.snapshot-settings { display: grid; gap: 24px; padding: 24px; }
+.snapshot-settings select { max-width: 50%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface); color: var(--text); }
+.snapshot-instructions { margin: 0; padding-left: 22px; list-style: decimal; line-height: 1.7; }
+.snapshot-instructions li + li { margin-top: 8px; }
+.snapshot-permission-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.snapshot-settings-error { padding: 9px 12px; border-radius: var(--radius-medium); color: var(--danger); background: var(--danger-soft); }
+.snapshot-settings code { overflow-wrap: anywhere; }

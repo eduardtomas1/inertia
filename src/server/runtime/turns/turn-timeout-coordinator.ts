@@ -43,12 +43,13 @@ export class TurnTimeoutCoordinator {
 
   /** Human approval/input time does not count as provider inactivity. */
   activity(active: ActiveTurn): void {
-    this.stopObservation(active, active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active)) ? "ended" : "recovered");
+    const ended = active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active));
+    this.stopObservation(active, ended ? "ended" : "recovered");
     if (active.timeoutTimer !== null) {
       this.options.scheduler.clearTimeout(active.timeoutTimer);
       active.timeoutTimer = null;
     }
-    if (active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active))) {
+    if (ended) {
       return;
     }
     if (this.options.reportIncident) {

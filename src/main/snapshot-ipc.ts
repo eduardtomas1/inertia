@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import { attachmentImportDocumentFromEvent, type AttachmentImportDocument, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import { SnapshotError, SnapshotService } from "./snapshot-service.js";
+import type { SnapshotFailureDiagnostic } from "../shared/snapshots.js";
 import { privacySafeAttachmentImportError } from "./attachment-selection-import.js";
 import { clearSnapshotPreferences, readSnapshotPreferences, writeSnapshotPreferences, type SnapshotPreferences } from "./snapshot-preferences.js";
 
@@ -20,6 +21,7 @@ export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
   registry(): AttachmentRegistry;
   imports: RendererAttachmentImportCoordinator;
+  onFailure?: (diagnostic: SnapshotFailureDiagnostic) => void;
 }): SnapshotService {
   let target: { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string } | null = null;
   let operation = false;
@@ -100,7 +102,7 @@ export function registerSnapshotIpc(options: {
       operation = false;
       cancelCapture = null;
     }
-  });
+  }, options.onFailure);
   const revoke = (): Promise<PromiseSettledResult<void>[]> => {
     generation += 1;
     captureEnabled = false;

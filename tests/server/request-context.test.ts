@@ -14,6 +14,8 @@ import { snapshotFixture } from "../helpers/snapshot-fixture";
 import {
   BUILD_MODE_INSTRUCTION,
   MAX_EXECUTION_PAYLOAD_BYTES,
+  RECOVERED_PROVIDER_HISTORY_LABEL,
+  type AssembleTurnRequestInput,
   assembleTurnRequest,
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
@@ -219,6 +221,8 @@ describe("bounded structured turn request context", () => {
           packetId: "11111111-1111-4111-8111-111111111111",
           label: "Chat context · Architecture notes · 1 message",
           content: packetContent,
+          blockIndex: 0,
+          blockCount: 1,
         }],
       },
     });
@@ -396,5 +400,70 @@ describe("bounded structured turn request context", () => {
       assembledPayloadBytes: 1,
       references: [],
     })).toThrow(/totals do not match/u);
+  });
+});
+
+describe("automatic recovery respects the selected request's capacity", () => {
+  const continuationHistory = {
+    content: JSON.stringify({ source: "Historical reference only", messages: [{ role: "user", content: 'Keep café 🚀 and "quoted" text.\n' }] }),
+    truncated: true,
+  };
+
+  it("preserves all 32 selected references when recovery has no reference slot", async () => {
+    const cwd = await workspace();
+    await writeFile(join(cwd, "source.ts"), "export const answer = 42;");
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Review my selections.",
+      context: {
+        fileReferences: Array.from({ length: 16 }, () => ({ path: "source.ts" })),
+        diffSelections: Array.from({ length: 8 }, () => ({ path: "source.ts", hunkHeader: "@@ -1 +1 @@", content: "+answer = 42", selectedLineCount: 1 })),
+        terminalContexts: Array.from({ length: 8 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Tests", lineStart: 1, lineEnd: 1, content: `output-${i}` })),
+      },
+    };
+    const selected = assembleTurnRequest(request);
+    expect(selected.persistence.manifest.contextReferenceCount).toBe(32);
+    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(selected);
+  });
+
+  it("preserves all 48 execution segments when recovery has no segment slot", async () => {
+    const request: AssembleTurnRequestInput = {
+      cwd: await workspace(), visibleContent: "Continue.",
+      internalInstructions: Array.from({ length: 47 }, (_, i) => ({ label: `control-${i}`, text: "Keep the sandbox." })),
+    };
+    const selected = assembleTurnRequest(request);
+    expect(selected.persistence.manifest.executionSegmentCount).toBe(48);
+    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(selected);
+    expect(() => assembleTurnRequest({ ...request, continuationHistory, internalInstructions: [...request.internalInstructions!, { label: "extra", text: "Control" }] })).toThrow(/segment limit/u);
+  });
+
+  it("counts escaped UTF-8 history, framing, instructions and image paths at the exact byte limit", async () => {
+    const cwd = await workspace();
+    const imagePath = join(cwd, "capture.png");
+    await writeFile(imagePath, "image-fixture");
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "x", imagePaths: [imagePath], interactionMode: "build",
+      internalInstructions: [{ label: "safety", text: "Keep the existing sandbox." }],
+      context: {
+        terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: '\\"\n🚀'.repeat(6_000) })),
+      },
+    };
+    const initial = assembleTurnRequest({ ...request, continuationHistory });
+    const padding = MAX_EXECUTION_PAYLOAD_BYTES - initial.persistence.manifest.assembledPayloadBytes;
+    request.visibleContent += "x".repeat(padding);
+    const exact = assembleTurnRequest({ ...request, continuationHistory });
+    expect(exact.persistence.manifest.assembledPayloadBytes).toBe(MAX_EXECUTION_PAYLOAD_BYTES);
+    expect(exact.persistence.manifest.references.at(-1)).toMatchObject({ label: RECOVERED_PROVIDER_HISTORY_LABEL, truncated: true });
+    expect(exact.persistence.blobs.at(-1)?.content).toBe(continuationHistory.content);
+    expect(exact.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(exact.executionPrompt) + Buffer.byteLength(realpathSync(imagePath)) + 8);
+
+    // One more visible byte still fits the selected request, but history no longer fits.
+    request.visibleContent += "x";
+    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(assembleTurnRequest(request));
+
+    const selected = assembleTurnRequest(request);
+    request.visibleContent += "x".repeat(MAX_EXECUTION_PAYLOAD_BYTES - selected.persistence.manifest.assembledPayloadBytes);
+    expect(assembleTurnRequest({ ...request, continuationHistory })).toEqual(assembleTurnRequest(request));
+    request.visibleContent += "x";
+    expect(() => assembleTurnRequest({ ...request, continuationHistory })).toThrow(/Assembled execution payload exceeds/u);
   });
 });

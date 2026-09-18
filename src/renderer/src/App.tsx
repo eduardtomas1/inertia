@@ -28,6 +28,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
+import { usePlanSteps } from "./hooks/usePlanSteps";
 import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
 import { agentWorkflowRouteIdentity, agentWorkflowTargetConversation, useAgentWorkflows } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
@@ -60,7 +61,6 @@ import {
 } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
-import { planFromText } from "./utils/planFromText";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
 import type { SplitDropZone } from "./utils/splitConversation";
@@ -267,7 +267,6 @@ export default function App(): React.JSX.Element {
     refreshDetail,
     messages,
     plans,
-    streamingText,
   } = conversationProjection;
   const authProvider = useMemo(
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
@@ -279,29 +278,12 @@ export default function App(): React.JSX.Element {
       : null,
     [connection.snapshot?.runs, conversation],
   );
-  const latestAssistantContent = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index]!;
-      if (message.role === "assistant") return message.content;
-    }
-    return "";
-  }, [messages]);
-  const planSteps = useMemo(() => {
-    const latestPlan = plans.at(-1);
-    if (latestPlan) {
-      return latestPlan.steps.map((step, index) => ({
-        id: `native-${index}`,
-        title: step.step,
-        status: step.status === "inProgress" ? "in-progress" as const : step.status,
-      }));
-    }
-    return planFromText(latestAssistantContent, conversation?.status ?? "idle", streamingText);
-  }, [
-    conversation?.status,
-    latestAssistantContent,
+  const planSteps = usePlanSteps(
     plans,
-    streamingText,
-  ]);
+    messages,
+    conversation?.status ?? "idle",
+    conversationProjection.streaming,
+  );
 
   const {
     run,

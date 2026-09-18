@@ -1,10 +1,4 @@
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacketSummary,
@@ -16,39 +10,27 @@ import type {
 } from "../conversation-context/types";
 import { ConversationContextPacketStrip } from "../conversation-context/ConversationContextPacketStrip";
 
-const ConversationContextDialog = lazy(async () => ({
-  default: (await import("../conversation-context/ConversationContextDialog"))
-    .ConversationContextDialog,
+const PreviewCard = lazy(async () => ({
+  default: (await import("./ComposerConversationContextCards"))
+    .ConversationContextPreviewCard,
 }));
-type ContextDialogState =
-  | { kind: "create" }
-  | { kind: "preview"; packetId: string }
-  | null;
+const RequestCard = lazy(async () => ({
+  default: (await import("./ComposerConversationContextCards"))
+    .ConversationContextRequestCard,
+}));
 
 export interface ComposerConversationContextController {
   contextPacketIds: string[];
   draftContextPackets: ConversationContextPacketSummary[];
-  dialog: ContextDialogState;
-  closeDialog(): void;
-  openCreate(): void;
-  openPreview(packetId: string): void;
+  enabled: boolean;
+  canReferenceChat: boolean;
+  referencing: boolean;
+  error: string | null;
+  previewPacketId: string | null;
+  referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
+  togglePreview(packetId: string): void;
+  dismissError(): void;
   remove(packetId: string): Promise<void>;
-}
-
-export function composerConversationContextToolbarProps(
-  controller: ComposerConversationContextController,
-  sourceCount: number,
-  commandEnabled: boolean,
-  handoffEnabled: boolean,
-) {
-  return {
-    contextAvailable: handoffEnabled && commandEnabled && sourceCount > 0
-      && controller.draftContextPackets.length
-        < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
-    contextCount: controller.draftContextPackets.length,
-    conversationContextHandoffEnabled: handoffEnabled,
-    onOpenContext: controller.openCreate,
-  };
 }
 
 export function useComposerConversationContext(input: {
@@ -58,10 +40,13 @@ export function useComposerConversationContext(input: {
   onCommand?: ConversationContextCommandRunner;
 }): ComposerConversationContextController {
   const { contextPackets, conversationId, enabled, onCommand } = input;
-  const [dialog, setDialog] = useState<ContextDialogState>(null);
+  const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
+  const [referencing, setReferencing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDialog(null);
+    setPreviewPacketId(null);
+    setError(null);
   }, [conversationId, enabled]);
 
   const draftContextPackets = useMemo(
@@ -75,25 +60,65 @@ export function useComposerConversationContext(input: {
     () => draftContextPackets.map(({ id }) => id),
     [draftContextPackets],
   );
+
   const remove = async (packetId: string): Promise<void> => {
     if (!enabled || !onCommand) return;
+    setPreviewPacketId((current) => current === packetId ? null : current);
     await onCommand("conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId, targetConversationId: conversationId },
     });
   };
 
+  const referenceChat = async (
+    source: ConversationContextSourceOption,
+  ): Promise<boolean> => {
+    if (!enabled || !onCommand || referencing) return false;
+    if (draftContextPackets.length >= MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
+      setError("Send or remove a referenced chat before adding another.");
+      return false;
+    }
+    setReferencing(true);
+    setError(null);
+    try {
+      const event = await onCommand("conversation.context.create", {
+        type: "conversation.context.create",
+        payload: {
+          sourceConversationId: source.conversationId,
+          targetConversationId: conversationId,
+          acknowledgedWorkspaceDifference:
+            source.workspaceRelation === "different-workspace",
+        },
+      });
+      if (event.type !== "request.result") {
+        setError(`${source.conversationTitle} could not be referenced.`);
+        return false;
+      }
+      return true;
+    } catch {
+      setError(`${source.conversationTitle} could not be referenced.`);
+      return false;
+    } finally {
+      setReferencing(false);
+    }
+  };
+
   return {
     contextPacketIds,
     draftContextPackets,
-    dialog,
-    closeDialog: () => setDialog(null),
-    openCreate: () => {
-      if (enabled) setDialog({ kind: "create" });
+    enabled,
+    canReferenceChat: enabled
+      && Boolean(onCommand)
+      && draftContextPackets.length < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+    referencing,
+    error,
+    previewPacketId,
+    referenceChat,
+    togglePreview: (packetId) => {
+      if (!enabled) return;
+      setPreviewPacketId((current) => current === packetId ? null : packetId);
     },
-    openPreview: (packetId) => {
-      if (enabled) setDialog({ kind: "preview", packetId });
-    },
+    dismissError: () => setError(null),
     remove,
   };
 }
@@ -105,44 +130,60 @@ export function ComposerConversationContextStrip({
   controller: ComposerConversationContextController;
   disabled: boolean;
 }): React.JSX.Element | null {
+  if (!controller.enabled) return null;
   return (
-    <ConversationContextPacketStrip
-      packets={controller.draftContextPackets}
-      disabled={disabled}
-      onPreview={controller.openPreview}
-      onRemove={(packetId) => {
-        void controller.remove(packetId).catch(() => undefined);
-      }}
-    />
+    <>
+      <ConversationContextPacketStrip
+        packets={controller.draftContextPackets}
+        disabled={disabled}
+        onPreview={controller.togglePreview}
+        onRemove={(packetId) => {
+          void controller.remove(packetId).catch(() => undefined);
+        }}
+      />
+      {controller.error && (
+        <p className="composer-limit-warning" role="alert">
+          {controller.error}
+        </p>
+      )}
+    </>
   );
 }
 
-export function ComposerConversationContextDialog({
+export function ComposerConversationContextPreview({
   controller,
   targetConversationId,
-  sources,
-  agentRequest,
   onCommand,
 }: {
   controller: ComposerConversationContextController;
   targetConversationId: string;
-  sources: readonly ConversationContextSourceOption[];
-  agentRequest: AgentConversationContextRequest | null;
   onCommand?: ConversationContextCommandRunner;
 }): React.JSX.Element | null {
-  if ((!controller.dialog && !agentRequest) || !onCommand) return null;
+  if (!controller.previewPacketId || !onCommand) return null;
   return (
     <Suspense fallback={null}>
-      <ConversationContextDialog
+      <PreviewCard
+        packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
-        sources={sources}
-        previewPacketId={controller.dialog?.kind === "preview"
-          ? controller.dialog.packetId
-          : null}
-        agentRequest={agentRequest}
         onCommand={onCommand}
-        onClose={agentRequest ? () => undefined : controller.closeDialog}
       />
+    </Suspense>
+  );
+}
+
+export function ComposerConversationContextRequestCard({
+  request,
+  sources,
+  onCommand,
+}: {
+  request: AgentConversationContextRequest | null;
+  sources: readonly ConversationContextSourceOption[];
+  onCommand?: ConversationContextCommandRunner;
+}): React.JSX.Element | null {
+  if (!request || !onCommand) return null;
+  return (
+    <Suspense fallback={null}>
+      <RequestCard request={request} sources={sources} onCommand={onCommand} />
     </Suspense>
   );
 }

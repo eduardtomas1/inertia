@@ -1,5 +1,7 @@
 import { SNAPSHOT_MAX_NODES, SNAPSHOT_MAX_TEXT, type SnapshotNode, type SnapshotRect } from "../shared/snapshots.js";
 
+export class SnapshotGeometryError extends Error {}
+
 export interface SnapshotElement {
   role: string; name: string | null; value: string | null;
   bounds: SnapshotRect | null; raw: Record<string, unknown>;
@@ -28,7 +30,7 @@ export async function readSnapshotAccessibility(root: SnapshotElement, shouldCon
     visited += 1;
     if (element.bounds && (!Object.values(element.bounds).every(Number.isFinite)
       || element.bounds.width < 0 || element.bounds.height < 0)) {
-      throw new Error("A field could not be located safely.");
+      throw new SnapshotGeometryError("A field could not be located safely.");
     }
     const role = element.role.slice(0, 80);
     // UIA does not expose IsPassword through xa11y's public snapshot API.
@@ -38,7 +40,7 @@ export async function readSnapshotAccessibility(root: SnapshotElement, shouldCon
       || /password|passcode|api[ _-]?key|access[ _-]?token|secret[ _-]?key/iu.test(element.name ?? "");
     if (protectedField) {
       if (element.bounds) redactions.push(element.bounds);
-      else throw new Error("A protected field could not be located safely.");
+      else throw new SnapshotGeometryError("A protected field could not be located safely.");
       if (nodes.length < SNAPSHOT_MAX_NODES) nodes.push({ depth, role, redacted: true, bounds: element.bounds });
       else truncated = true;
       return;

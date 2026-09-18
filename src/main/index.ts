@@ -210,6 +210,7 @@ const previewBroker = new PreviewBroker({
   registerHealthRenderer: (contents) => (
     appHealthRegistry.registerRenderer(contents)
   ),
+  recordOperationFailure: (failure) => runtimeDiagnostics?.record("browser.operation-failure", { ...failure }),
   partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
 });
 let windowThemePreference: WindowThemePreference = "system";
@@ -570,6 +571,7 @@ function registerIpcHandlers(): void {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
     }, registry: attachmentRegistry, imports: rendererAttachmentImports,
+    onFailure: (diagnostic) => runtimeDiagnostics?.record("snapshot.failure", { ...diagnostic }),
   });
 
   registerAttachmentSelectionIpc({

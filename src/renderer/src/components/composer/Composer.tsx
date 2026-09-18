@@ -1,3 +1,4 @@
+import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
@@ -43,7 +44,7 @@ import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
-import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
+import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
@@ -175,12 +176,17 @@ export const Composer = memo(function Composer({
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null);
-  useNativePreviewSuspension(conversationContext.dialog !== null || agentContextRequest !== null);
+  useNativePreviewSuspension(conversationContext.previewPacketId !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
+  const { setMenuTrigger } = menuController;
+  useLayoutEffect(() => {
+    setMenuTrigger("skills", textareaRef.current);
+    return () => setMenuTrigger("skills", null);
+  }, [setMenuTrigger]);
   const slashMatch = /^\/(\w*)$/u.exec(message.trim());
   const dismissCommandSurface = useCallback((
     reason: "action" | "escape" | "outside" | "owner-change",
@@ -251,7 +257,7 @@ export const Composer = memo(function Composer({
     readDraft: () => draftValueRef.current,
     readState: () => ({
       attachmentCount: attachmentsRef.current.length,
-      conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
+      conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.previewPacketId !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
       mutationInFlight: attachmentImportingRef.current || submittingRef.current
         || stopClaimRef.current !== null
@@ -979,6 +985,7 @@ export const Composer = memo(function Composer({
       textarea?.selectionStart ?? message.length,
       textarea?.selectionEnd ?? message.length,
     );
+    skillCompletion.markSkillAccepted(insertion.value, insertion.selectionStart);
     if (insertion.inserted) updateMessage(insertion.value);
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -1017,6 +1024,7 @@ export const Composer = memo(function Composer({
         )}
         aria-label="Message composer"
         aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
+        data-maximum-reasoning={isMaximumReasoning(selectedModel, selectedReasoning) ? "true" : undefined}
         data-primary-action={primaryAction}
         data-disabled={disabled || conversationUpdatePending}
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
@@ -1044,7 +1052,13 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        {conversationContextHandoffEnabled && <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />}
+        {conversationContextHandoffEnabled && (
+          <>
+            <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
+            <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
+            <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
+          </>
+        )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
           routeReadiness={routeReadiness}
@@ -1121,7 +1135,9 @@ export const Composer = memo(function Composer({
           messageFits={messageFits}
           mentionMatch={mentionMatch}
           mentionResults={mentionResults}
+          chatSuggestions={conversationContext.canReferenceChat ? contextSources : []}
           onAddFileReference={addFileReference}
+          onReferenceChat={(source) => { void conversationContext.referenceChat(source); }}
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}
@@ -1151,7 +1167,6 @@ export const Composer = memo(function Composer({
           attachmentCount={attachments.length}
           attachmentImporting={attachmentImporting}
           onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
-          {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand), conversationContextHandoffEnabled)}
           onRunAction={onRunAction}
           skills={skills}
           skillsCapability={skillsCapability}
@@ -1228,7 +1243,6 @@ export const Composer = memo(function Composer({
           onSubmit={submit}
           onStop={stop}
         />
-        {conversationContextHandoffEnabled && <ComposerConversationContextDialog controller={conversationContext} targetConversationId={conversation.id} sources={contextSources} agentRequest={agentContextRequest} onCommand={onConversationContextCommand} />}
       </section>
     </div>
   );

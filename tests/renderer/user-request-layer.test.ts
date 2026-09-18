@@ -254,6 +254,7 @@ describe("Quiet Ledger user request layer", () => {
         note: null,
         messageCount: 2,
         characterCount: 128,
+        droppedMessageCount: 0,
         createdAt: requestedAt,
         consumedMessageId: "user-1",
         consumedAt: requestedAt,

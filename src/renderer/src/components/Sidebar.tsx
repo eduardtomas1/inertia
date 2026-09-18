@@ -164,9 +164,10 @@ function SidebarView({
   onSetProjectGitRepositoryLimit,
   onRemoveProject,
   appUpdate,
+  projectScopeId,
+  onProjectScopeChange,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
-  const [projectScopeId, setProjectScopeId] = useState<string | null>(null);
   const {
     menu,
     toggleMenu,
@@ -923,7 +924,7 @@ function SidebarView({
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
-        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={setProjectScopeId} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
+        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
           setMenuTrigger(`:${project.id}`, trigger);
           toggleMenu(`:${project.id}`);
         }} />

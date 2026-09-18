@@ -175,9 +175,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await expect(composer.getByRole("button", {
       name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
     })).toBeEnabled();
-    await expect(composer.getByRole("button", { name: "Snapshots. Antigravity can't read images in Inertia.", exact: true }))
-      .toBeDisabled();
-    await expect(composer.getByRole("button", { name: "Snapshots", exact: true })).toHaveCount(0);
+    await expect(composer.getByRole("button", { name: /^Snapshots(?:\.|$)/u })).toHaveCount(0);
     await page.getByRole("button", { name: /^Choose model\./u }).click();
     const chooser = page.getByRole("dialog", { name: "Choose model" });
     const source = chooser.getByRole("button", { name: /^Antigravity, \d+ models?$/u });

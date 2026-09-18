@@ -6,13 +6,11 @@ import type {
   ResponseDensity,
 } from "@shared/contracts";
 import {
-  activityDetailPresentation,
   buildTurnExecutionStream,
   isTranscriptActivity,
-  MAX_ACTIVITY_DETAIL_PREVIEW_LINES,
-  resolveActivityGroupPresentation,
   type TurnExecutionStreamEntry,
 } from "./execution";
+import { ACTIVITY_GROUP_LIVE_WINDOW, latestFailureIndex } from "./activity-summary";
 import {
   shouldConsolidateSettledWorkIntoRunDetails,
   type ResponseTimelineItem,
@@ -376,20 +374,15 @@ function estimateInputRequestHeight(
 function estimateActivityGroupHeight(
   activities: AgentActivity[],
   expanded: boolean,
+  windowed = false,
 ): number {
-  const presentation = resolveActivityGroupPresentation(activities, expanded);
-  const detailHeight = presentation.visibleActivities.reduce((total, activity) => {
-    const detail = activityDetailPresentation(activity);
-    if (!detail.expandable || !detail.preview) return total;
-    const previewLines = Math.min(
-      MAX_ACTIVITY_DETAIL_PREVIEW_LINES,
-      detail.preview.split("\n").length,
-    );
-    return total + previewLines * 18 + 23;
-  }, 0);
-  return presentation.visibleActivities.length * 27
-    + (presentation.hiddenCount > 0 ? 23 : 0)
-    + detailHeight;
+  if (activities.length === 0) return 0;
+  if (activities.length === 1) return 27;
+  if (expanded) return 28 + activities.length * 26;
+  const live = windowed || activities.some(({ status }) => status === "running");
+  return 28 + (live
+    ? Math.min(ACTIVITY_GROUP_LIVE_WINDOW, activities.length) * 26
+    : 0);
 }
 
 function estimateExpandedWorkHeight(
@@ -474,10 +467,11 @@ function estimateTurnRowSize(
       .filter((entry): entry is Extract<TurnExecutionStreamEntry, { kind: "activity-group" }> =>
         entry.kind === "activity-group")
     : [];
-  const collapsedActivityHeight = activeActivityGroups.reduce((total, entry) =>
+  const collapsedActivityHeight = activeActivityGroups.reduce((total, entry, index) =>
     total + estimateActivityGroupHeight(
       entry.activities,
       options.activityGroupsExpanded === true,
+      index === activeActivityGroups.length - 1,
     ), 0);
   const activeCommentaryHeight = turn.commentaryMessages.reduce((total, message) =>
     total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
@@ -485,10 +479,16 @@ function estimateTurnRowSize(
     total + 27 + estimatedWrappedLines(message.content, answerColumns - 6) * 18, 0);
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
-  // Attention rows use the same bounded preview/disclosure geometry as their
-  // rendered ActivityRow instead of a generic status-row approximation.
-  const importantHeight = turn.importantActivities.reduce((total, activity) =>
-    total + estimateActivityGroupHeight([activity], true), 0);
+  const importantHeight = estimateActivityGroupHeight(
+    turn.importantActivities,
+    false,
+  ) + (
+    turn.agentTurn.status === "failed"
+    && turn.importantActivities.length > 1
+    && latestFailureIndex(turn.importantActivities) >= 0
+      ? 26
+      : 0
+  );
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
   const executionHeight = turn.isActive
     ? 43

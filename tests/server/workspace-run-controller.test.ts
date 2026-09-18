@@ -186,6 +186,28 @@ describe("workspace run controller", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("answers workspace run presence and activity without a snapshot", async () => {
+    const { store, project } = await fixture();
+    try {
+      expect(store.hasRecordedActiveWorkspaceRun()).toBe(false);
+      expect(store.findWorkspaceRun("missing-run")).toBeNull();
+      const run = store.createWorkspaceRun({
+        kind: "service",
+        projectId: project.id,
+        conversationId: null,
+        label: "preview",
+        detail: null,
+        status: "waiting",
+        port: null,
+      });
+
+      expect(store.findWorkspaceRun(run.id)).toEqual(store.workspaceRun(run.id));
+      expect(store.hasRecordedActiveWorkspaceRun()).toBe(true);
+      store.updateWorkspaceRun(run.id, { status: "succeeded" });
+      expect(store.hasRecordedActiveWorkspaceRun()).toBe(false);
+    } finally { store.close(); }
+  });
+
   it("classifies checks and services and extracts safe local service ports", () => {
     expect(workspaceActionKind("test", "vitest run", false)).toBe("check");
     expect(workspaceActionKind("web", "vite dev", false)).toBe("service");

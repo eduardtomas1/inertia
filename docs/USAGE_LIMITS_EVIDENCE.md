@@ -182,3 +182,69 @@ Native Claude verification includes the separately reviewed #354 teardown fixes:
 normal EOF, partial metadata completion, cancellation during close, exact one-close
 behavior and confirmed process-tree ownership. The usage adapter releases ordinary
 operation failures and quarantines only unconfirmed ownership or failed exact release.
+
+## Compact Limits rows and composer quota (2026-09-15)
+
+Limits now shows one row per provider. Each reported window has a meter, the
+remaining percentage and a countdown; equivalent accounts use the existing
+`usagePools` average. A dot, the meter and the number carry the health tone.
+Accounts open under a disclosure in the same columns and stay inert while
+collapsed. The averages explanation sits behind an info control, and a skeleton
+replaces the loading sentence during the first read. Entry, fill and disclosure
+motion runs only under `prefers-reduced-motion: no-preference`. Account details,
+hub setup and the reset confirmation flow are unchanged.
+
+The composer usage popover shows context as a larger ring and quota with the
+Limits health tones; the trigger itself still shows only the context ring. A
+line names another ready, fully reported account of the same provider with more
+room than the selected route's tightest window, with the reading's age after five
+minutes. The Environment panel's Usage section opens by default and remembers a
+collapse or reopen in the renderer's optional layout storage. It reads `usage.limits.get` with `refresh: false`, which returns the
+runtime's in-memory snapshot; it never refreshes providers. It loads with the
+deferred Limits module.
+
+The History/Limits switch and the popover's **All provider limits** button were
+styled only by the lazily loaded Limits stylesheet. On a first visit, History
+showed unstyled adjacent buttons until Limits loaded. Their rules now live in
+`UsageView.css` and `styles.css`; a stylesheet test and the Usage E2E (computed
+`display: flex` before Limits is opened) cover it.
+
+Verification used macOS ARM64 and Node 22.23.2 on `70db1278`, main with #390 merged in:
+
+- `npm run check`: passed. **849 files / 9,039 tests passed**, 16 files / 140
+  tests skipped, and the real renderer bundle gate passed.
+- `npx playwright test tests/e2e/usage-limits.spec.ts tests/e2e/usage.spec.ts
+  tests/e2e/usage-popover-placement.spec.ts --project=display-sensitive --workers=1`:
+  **3 passed in 21.8 seconds**, with no renderer errors. `npx playwright test
+  tests/e2e/layout.spec.ts --workers=1`: **6 passed**, including the default-open
+  Usage section and its keyboard order.
+- Providers, hub, accounts and reset credits are the existing synthetic fixtures.
+  No real provider CLI ran and no reset credit was redeemed. Native Windows and
+  Linux rendering was not exercised locally.
+
+| JavaScript and CSS scope | Baseline bytes | Feature bytes | Change | New ceiling |
+| --- | ---: | ---: | ---: | ---: |
+| Deferred Limits closure | 17592 | 19943 | +2351 | 19.7 KiB |
+| Main workbench first load | 811733 | 812457 | +724 | 793.6 KiB |
+| Detached chat first load | 620979 | 621674 | +695 | 607.3 KiB |
+| Core | 2115689 | 2116504 | +815 | 2,067.1 KiB |
+| Entry CSS | 348591 | 350894 | +2303 | unchanged 346 KiB |
+
+Budgets are re-measured on `70fe3cc5`, main with #401 and #403.
+The first-load growth is the quota tone, the lazy hint boundary and the
+remembered Usage section; the hint's logic stays in the deferred Limits closure. Measurements are
+in [the renderer evidence](pr-evidence/limits-strip-composer-quota-renderer-bundle.json).
+The earlier manifest and screenshots remain the original feature snapshot.
+
+- [Light rows with Codex accounts open](screenshots/limits-strip-light.png)
+- [Dark rows](screenshots/limits-strip-dark.png)
+- [Account details and reset action](screenshots/limits-strip-account-details.png)
+- [Narrow layout](screenshots/limits-strip-narrow.png)
+- [Composer popover with a low weekly window and a roomier account](screenshots/composer-usage-quota.png)
+
+Comparison captures from the same fixtures, with `3baeaef3` as the before state:
+
+- [Composer popover and Environment Usage before](screenshots/composer-usage-before.png)
+  and [after](screenshots/composer-usage-after.png), taken when the popover first opens.
+- [Usage switch before](screenshots/usage-switch-before.png), cropped to the header
+  on a first visit with Limits never opened, and [after](screenshots/usage-switch-after.png).

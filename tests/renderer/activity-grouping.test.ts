@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { ActivityGroup } from "../../src/renderer/src/components/ResponseTimeline";
 import {
   buildTurnExecutionStream,
-  resolveActivityGroupPresentation,
   type TurnExecutionStreamEntry,
 } from "../../src/renderer/src/utils/responseTimeline";
 import type {
@@ -75,7 +74,7 @@ function groupEntry(
 }
 
 describe("Minimal Workstream adjacent call grouping", () => {
-  it("preserves created-time order and breaks on commentary, warnings, and failures", () => {
+  it("preserves created-time order and breaks only on commentary so attention stays in its group", () => {
     const activities = [
       activity("after-failure", 9),
       activity("old-success", 1),
@@ -109,79 +108,67 @@ describe("Minimal Workstream adjacent call grouping", () => {
           : entry.activities.map(({ id }) => id).join(","))).toEqual([
       "old-success,new-success",
       "commentary:commentary",
-      "after-commentary",
-      "warning",
-      "after-boundary-old,after-boundary-new",
-      "failure",
-      "after-failure",
+      "after-commentary,warning,after-boundary-old,after-boundary-new,failure,after-failure",
     ]);
   });
 
-  it("keeps attention and the newest meaningful call visible, then expands in original order", () => {
-    const activities = [
-      activity("old-success", 1),
-      activity("warning", 2, {
-        kind: "status",
-        title: "Unsupported option skipped",
-      }),
-      activity("new-success", 3),
-      activity("failure", 4, {
-        title: "Verification failed",
-        status: "failed",
-      }),
-    ];
-
-    expect(resolveActivityGroupPresentation(activities, false)).toMatchObject({
-      visibleActivities: [
-        { id: "warning" },
-        { id: "new-success" },
-        { id: "failure" },
-      ],
-      hiddenCount: 1,
-    });
-    expect(resolveActivityGroupPresentation(activities, true)).toEqual({
-      visibleActivities: activities,
-      hiddenCount: 1,
-    });
-  });
-
-  it("renders keyboard-native singular/plural collapsed controls and attention outside collapse", () => {
-    const singular = renderToStaticMarkup(createElement(ActivityGroup, {
+  it("renders multi-call groups as one summary control over a live window and single calls as plain rows", () => {
+    const live = renderToStaticMarkup(createElement(ActivityGroup, {
       entry: groupEntry([
-        activity("old", 1),
-        activity("new", 2),
-      ]),
-    }));
-    const plural = renderToStaticMarkup(createElement(ActivityGroup, {
-      entry: groupEntry([
-        activity("old-one", 1),
-        activity("old-two", 2),
-        activity("newest", 3),
+        activity("read-one", 1, { kind: "tool", title: "Read" }),
+        activity("read-two", 2, { kind: "tool", title: "Read" }),
+        activity("search", 3, { kind: "tool", title: "Grep" }),
+        activity("verify", 4, {
+          kind: "command",
+          title: "Command",
+          detail: "Command:\n/bin/bash -lc 'npm test'",
+          status: "failed",
+        }),
+        activity("current", 5, {
+          kind: "command",
+          title: "Command",
+          detail: "Command:\n/bin/bash -lc 'ant compile'",
+          status: "running",
+        }),
       ]),
       onBeforeToggle: vi.fn(),
       onAfterToggle: vi.fn(),
     }));
-    const attention = renderToStaticMarkup(createElement(ActivityGroup, {
+    const settled = renderToStaticMarkup(createElement(ActivityGroup, {
+      entry: groupEntry([
+        activity("old", 1),
+        activity("new", 2),
+      ]),
+      settled: true,
+    }));
+    const single = renderToStaticMarkup(createElement(ActivityGroup, {
       entry: groupEntry([
         activity("failure", 4, {
           title: "Verification failed",
           status: "failed",
         }),
       ]),
+      settled: true,
     }));
 
-    expect(singular).toContain('data-activity-group-mode="calls"');
-    expect(singular).toContain('aria-expanded="false"');
-    expect(singular).toContain("+1 previous tool call");
-    expect(singular).not.toContain(">old<");
-    expect(singular).toContain(">new<");
-    expect(plural).toContain("+2 previous tool calls");
-    expect(plural).not.toContain(">old-one<");
-    expect(plural).not.toContain(">old-two<");
-    expect(plural).toContain(">newest<");
-    expect(attention).toContain('data-activity-group-mode="attention"');
-    expect(attention).toContain("Verification");
-    expect(attention).not.toContain("previous tool");
+    expect(live).toContain('data-activity-group-mode="attention"');
+    expect(live).toContain('data-activity-group-state="live"');
+    expect(live).toContain('aria-expanded="false"');
+    expect(live).toContain('aria-label="2 commands, 2 files read, 1 search, 1 failed"');
+    expect(live).toContain('class="turn-activity-group-summary"');
+    expect(live).toContain('data-running="true"');
+    expect(live.match(/data-folded="false"/g)).toHaveLength(4);
+    expect(live.match(/data-folded="true"/g)).toHaveLength(1);
+    expect(live).toContain(">Running</span>");
+    expect(live).toContain(" ant compile</span>");
+    expect(settled).toContain('data-activity-group-state="folded"');
+    expect(settled).toContain('aria-label="2 tool calls"');
+    expect(settled.match(/data-folded="true"/g)).toHaveLength(2);
+    expect(settled).toContain('aria-hidden="true"');
+    expect(single).toContain('data-activity-group-state="single"');
+    expect(single).toContain('data-activity-group-mode="attention"');
+    expect(single).toContain("Verification");
+    expect(single).not.toContain("turn-activity-group-summary");
   });
 
   it("keeps expansion wired through the shared scroll-anchor restoration path", () => {

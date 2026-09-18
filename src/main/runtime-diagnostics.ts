@@ -1,5 +1,6 @@
 import { parseRuntimeOwnedProcessDiagnostic, type RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
 import { parseRuntimeFailureDiagnosticMessage } from "../node/runtime-failure-diagnostic.js";
+import { isPreviewAgentFailureCategory, isPreviewAgentOperationPhase } from "./preview-agent-phase.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -49,10 +50,13 @@ import {
   "../shared/lifecycle-build-metadata.js";
 import { isRuntimeStartupBlockerCode } from
   "../shared/runtime-startup-diagnostics.js";
+import { SNAPSHOT_CAPTURE_PHASES, SNAPSHOT_DIAGNOSTIC_CATEGORIES } from
+  "../shared/snapshots.js";
 
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 const DEFAULT_MAX_FILES = 4;
 const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const RECORD_PRUNE_INTERVAL_MS = 5 * 60 * 1_000;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const LOG_FILE_PATTERN = /^runtime(?:\.\d+)?\.log$/u;
@@ -79,12 +83,14 @@ const DETACHED_DRAFT_OUTCOMES = [
 export type RuntimeDiagnosticEvent =
   | "app.start"
   | "app.stop"
+  | "browser.operation-failure"
   | "detached-draft.recovery"
   | "logs.reveal"
   | "report.copy"
   | "runtime.failure"
   | "runtime.restart-requested"
-  | "runtime.state";
+  | "runtime.state"
+  | "snapshot.failure";
 
 export interface RuntimeDiagnosticsOptions {
   maxFileBytes?: number;
@@ -120,6 +126,10 @@ type DiagnosticFields = Readonly<Record<string, unknown>>;
 
 export function runtimeDiagnosticsDirectory(userDataDirectory: string): string {
   return resolve(userDataDirectory, "logs", "runtime");
+}
+
+function allowlisted<T extends string>(values: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (values as readonly string[]).includes(value);
 }
 
 function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
@@ -236,12 +246,14 @@ function parseDiagnosticRecord(
     || ![
       "app.start",
       "app.stop",
+      "browser.operation-failure",
       "detached-draft.recovery",
       "logs.reveal",
       "report.copy",
       "runtime.failure",
       "runtime.restart-requested",
       "runtime.state",
+      "snapshot.failure",
     ].includes(record.event)
     || typeof record.recordDigest !== "string"
     || !DIAGNOSTIC_DIGEST_PATTERN.test(record.recordDigest)
@@ -265,8 +277,11 @@ function parseDiagnosticRecord(
     "outcome",
     "evidencePreserved",
   ];
-  const allowedKeys = record.event === "detached-draft.recovery"
+  const allowedKeys = record.event === "browser.operation-failure"
+    ? [...baseKeys, "phase", "category"]
+    : record.event === "detached-draft.recovery"
     ? detachedDraftKeys
+    : record.event === "snapshot.failure" ? [...baseKeys, "phase", "category"]
     : record.event === "runtime.failure" || record.event === "runtime.state"
       ? runtimeKeys
       : record.event === "runtime.restart-requested"
@@ -287,6 +302,17 @@ function parseDiagnosticRecord(
       })) return null;
     }
     return record;
+  }
+
+  if (record.event === "snapshot.failure") {
+    return allowlisted(SNAPSHOT_DIAGNOSTIC_CATEGORIES, record.category)
+      && (record.phase === undefined || allowlisted(SNAPSHOT_CAPTURE_PHASES, record.phase)) ? record : null;
+  }
+
+  if (record.event === "browser.operation-failure") {
+    return isPreviewAgentOperationPhase(record.phase) && isPreviewAgentFailureCategory(record.category)
+      ? record
+      : null;
   }
 
   if (record.event === "detached-draft.recovery") {
@@ -340,6 +366,8 @@ export class RuntimeDiagnostics {
   private readonly maxFileBytes: number;
   private readonly maxFiles: number;
   private readonly retentionMs: number;
+  private readonly recordPruneIntervalMs: number;
+  private lastRecordPruneAt: number | null = null;
   private readonly now: () => number;
   private readonly write: NonNullable<RuntimeDiagnosticsOptions["write"]>;
   private readonly incidents: ApplicationIncidentIndex;
@@ -350,6 +378,7 @@ export class RuntimeDiagnostics {
     this.maxFileBytes = Math.max(256, Math.min(options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES, 4 * 1024 * 1024));
     this.maxFiles = Math.max(2, Math.min(Math.trunc(options.maxFiles ?? DEFAULT_MAX_FILES), 10));
     this.retentionMs = Math.max(1_000, Math.min(options.retentionMs ?? DEFAULT_RETENTION_MS, 30 * 24 * 60 * 60 * 1_000));
+    this.recordPruneIntervalMs = Math.min(RECORD_PRUNE_INTERVAL_MS, this.retentionMs);
     this.now = options.now ?? Date.now;
     this.write = options.write ?? ((descriptor, buffer, offset, length) =>
       writeSync(descriptor, buffer, offset, length));
@@ -366,7 +395,7 @@ export class RuntimeDiagnostics {
         return records;
       },
       append: (incident) => {
-        this.ensureDirectory();
+        this.revalidateDirectory(false);
         const line = serializeDiagnosticRecord({
           schemaVersion: 2, event: "application.incident", at: incident.at, incident,
         });
@@ -388,20 +417,24 @@ export class RuntimeDiagnostics {
   setIncidentRuntimeReady(ready: boolean, generationHash: string | null = null): void { this.incidents.setRuntime(ready, generationHash); }
 
   ensureDirectory(): string {
+    return this.revalidateDirectory(true);
+  }
+
+  private revalidateDirectory(forceRecordPrune: boolean): string {
     mkdirSync(this.directory, { recursive: true, mode: DIRECTORY_MODE });
     const directory = lstatSync(this.directory);
     if (!directory.isDirectory() || directory.isSymbolicLink()) {
       throw new Error("The runtime diagnostics path is not a local directory.");
     }
     chmodSync(this.directory, DIRECTORY_MODE);
-    this.pruneExpired();
+    this.pruneExpired(forceRecordPrune);
     return this.directory;
   }
 
   record(event: RuntimeDiagnosticEvent, fields: DiagnosticFields = {}): void {
     try {
       if (event === "app.stop") this.flushIncidents();
-      this.ensureDirectory();
+      this.revalidateDirectory(false);
       const entry: Record<string, string | number | boolean> = {
         schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
         at: new Date(this.now()).toISOString(),
@@ -427,6 +460,11 @@ export class RuntimeDiagnostics {
           ...(fields.probe !== undefined ? { probe: fields.probe } : {}),
         });
         if (fields.reason === "owned-process-tainted" && diagnostic) Object.assign(entry, diagnostic);
+      }
+      if (event === "browser.operation-failure") {
+        if (!isPreviewAgentOperationPhase(fields.phase) || !isPreviewAgentFailureCategory(fields.category)) return;
+        entry.phase = fields.phase;
+        entry.category = fields.category;
       }
       if (event === "runtime.failure" || event === "runtime.state") {
         if (phase) entry.phase = phase;
@@ -456,6 +494,11 @@ export class RuntimeDiagnostics {
         event === "detached-draft.recovery"
         && typeof fields.evidencePreserved === "boolean"
       ) entry.evidencePreserved = fields.evidencePreserved;
+      if (event === "snapshot.failure") {
+        if (!allowlisted(SNAPSHOT_DIAGNOSTIC_CATEGORIES, fields.category)) return;
+        if (allowlisted(SNAPSHOT_CAPTURE_PHASES, fields.phase)) entry.phase = fields.phase;
+        entry.category = fields.category;
+      }
       if (message) entry.message = message;
 
       let line = serializeDiagnosticRecord(entry);
@@ -471,7 +514,7 @@ export class RuntimeDiagnostics {
         });
       }
       this.rotateIfNeeded(Buffer.byteLength(line));
-      this.append(line);
+      this.append(line, event !== "runtime.state");
     } catch {
       // Diagnostics are best effort and must never affect application startup.
     }
@@ -678,7 +721,7 @@ export class RuntimeDiagnostics {
           }
           const event = value.event as RuntimeDiagnosticEvent;
           const at = value.at as string;
-          const lifecycleEvent = event !== "detached-draft.recovery";
+          const lifecycleEvent = event !== "detached-draft.recovery" && event !== "snapshot.failure";
           const fields = [
             event === "runtime.restart-requested" ? `reason=${value.reason}` : null,
             event === "runtime.restart-requested" && value.stage !== undefined ? `stage=${value.stage}` : null,
@@ -698,6 +741,9 @@ export class RuntimeDiagnostics {
               : null,
             lifecycleEvent && typeof value.restartScheduled === "boolean"
               ? `scheduled=${value.restartScheduled ? "yes" : "no"}`
+              : null,
+            event === "browser.operation-failure" && isPreviewAgentFailureCategory(value.category)
+              ? `category=${value.category}`
               : null,
             event === "detached-draft.recovery"
               && typeof value.reason === "string"
@@ -722,6 +768,8 @@ export class RuntimeDiagnostics {
               && typeof value.evidencePreserved === "boolean"
               ? `evidence=${value.evidencePreserved ? "preserved" : "unavailable"}`
               : null,
+            event === "snapshot.failure" && value.phase !== undefined ? `phase=${value.phase}` : null,
+            event === "snapshot.failure" ? `category=${value.category}` : null,
             event === "runtime.failure"
               ? runtimeFailureSummary(value.message)
               : null,
@@ -738,7 +786,7 @@ export class RuntimeDiagnostics {
     return events;
   }
 
-  private append(line: string): void {
+  private append(line: string, durable = true): void {
     const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
     const descriptor = openSync(
       this.activePath,
@@ -761,7 +809,7 @@ export class RuntimeDiagnostics {
         }
         offset += Math.min(written, bytes.length - offset);
       }
-      fsyncSync(descriptor);
+      if (durable) fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
     }
@@ -799,8 +847,13 @@ export class RuntimeDiagnostics {
     }
   }
 
-  private pruneExpired(): void {
-    const cutoff = this.now() - this.retentionMs;
+  private pruneExpired(forceRecordPrune: boolean): void {
+    const now = this.now();
+    const cutoff = now - this.retentionMs;
+    const pruneRecords = forceRecordPrune
+      || this.lastRecordPruneAt === null
+      || Math.abs(now - this.lastRecordPruneAt) >= this.recordPruneIntervalMs;
+    if (pruneRecords) this.lastRecordPruneAt = now;
     for (const name of readdirSync(this.directory)) {
       if (!LOG_FILE_PATTERN.test(name)) continue;
       const path = join(this.directory, name);
@@ -814,7 +867,7 @@ export class RuntimeDiagnostics {
         unlinkSync(path);
         continue;
       }
-      this.pruneExpiredRecords(path, metadata, cutoff);
+      if (pruneRecords) this.pruneExpiredRecords(path, metadata, cutoff);
     }
   }
 

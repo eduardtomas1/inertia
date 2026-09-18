@@ -11,7 +11,7 @@ export type TranscriptNavigationState =
   | { mode: "follow-turn"; conversationId: string; turnId: string };
 
 export type TranscriptNavigationAction =
-  | { type: "conversation.changed"; conversationId: string | null }
+  | { type: "conversation.changed"; conversationId: string | null; readingHistory?: boolean }
   | {
       type: "message.accepted";
       acceptance: TranscriptMessageSendAcceptance;
@@ -29,8 +29,9 @@ export type TranscriptNavigationAction =
 
 export function initialTranscriptNavigation(
   conversationId: string | null,
+  readingHistory = false,
 ): TranscriptNavigationState {
-  return { mode: "follow-latest", conversationId };
+  return { mode: readingHistory ? "reading-history" : "follow-latest", conversationId };
 }
 
 export function transcriptNavigationReducer(
@@ -41,7 +42,7 @@ export function transcriptNavigationReducer(
     case "conversation.changed":
       return state.conversationId === action.conversationId
         ? state
-        : initialTranscriptNavigation(action.conversationId);
+        : initialTranscriptNavigation(action.conversationId, action.readingHistory);
     case "message.accepted": {
       const { acceptance } = action;
       if (
@@ -86,7 +87,9 @@ export function transcriptNavigationReducer(
         : state;
     case "reader.scrolled":
       if (action.conversationId !== state.conversationId) return state;
-      if (!action.intentional && state.mode !== "follow-latest") return state;
+      // Virtualizer measurement and delayed history hydration can scroll a
+      // following view before its bottom exists. Only reader intent releases it.
+      if (!action.intentional) return state;
       return action.followsLatest
         ? { mode: "follow-latest", conversationId: action.conversationId }
         : { mode: "reading-history", conversationId: action.conversationId };

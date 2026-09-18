@@ -14,6 +14,10 @@ import {
 import {
   draftWorkspaceToolsUnavailableReason,
 } from "../../src/renderer/src/utils/draftWorkspaceAvailability";
+import {
+  createStreamingAgentStore,
+  EMPTY_STREAMING_AGENT_SOURCE,
+} from "../../src/renderer/src/hooks/useStreamingAgentState";
 
 const appSource = readFileSync(
   new URL("../../src/renderer/src/App.tsx", import.meta.url),
@@ -234,18 +238,14 @@ describe("global chat draft visibility", () => {
         conversation: detail,
         contextPackets: [contextPacket],
       } as never,
-      streamingText: "stale answer",
-      streamingReasoning: "stale reasoning",
-      streamingChannel: "reasoning",
+      streaming: createStreamingAgentStore(),
       terminalProjections: { stale: {} } as never,
       usage: usage as never,
     }, true);
 
     expect(projection).toEqual({
       detailLoading: false,
-      streamingText: "",
-      streamingReasoning: "",
-      streamingChannel: null,
+      streaming: EMPTY_STREAMING_AGENT_SOURCE,
       terminalProjections: {},
       usage: null,
       contextPackets: [],
@@ -256,23 +256,20 @@ describe("global chat draft visibility", () => {
     const contextPackets = [{ id: "draft-context" }];
     const usage = { conversationId: draft.id };
     const terminalProjections = { current: {} };
+    const streaming = createStreamingAgentStore();
     const projection = visibleChatProjection(draft as never, {
       conversation: draft as never,
       detail: {
         conversation: draft,
         contextPackets,
       } as never,
-      streamingText: "current answer",
-      streamingReasoning: "current reasoning",
-      streamingChannel: "reasoning",
+      streaming,
       terminalProjections: terminalProjections as never,
       usage: usage as never,
     }, true);
 
     expect(projection.detailLoading).toBe(true);
-    expect(projection.streamingText).toBe("current answer");
-    expect(projection.streamingReasoning).toBe("current reasoning");
-    expect(projection.streamingChannel).toBe("reasoning");
+    expect(projection.streaming).toBe(streaming);
     expect(projection.terminalProjections).toBe(terminalProjections);
     expect(projection.usage).toBe(usage);
     expect(projection.contextPackets).toBe(contextPackets);
@@ -280,21 +277,19 @@ describe("global chat draft visibility", () => {
 
   it("keeps live scalars but rejects detail context with mixed ownership", () => {
     const usage = { conversationId: draft.id };
+    const streaming = createStreamingAgentStore();
     const projection = visibleChatProjection(draft as never, {
       conversation: draft as never,
       detail: {
         conversation: detail,
         contextPackets: [{ id: "stale-context" }],
       } as never,
-      streamingText: "draft answer",
-      streamingReasoning: "draft reasoning",
-      streamingChannel: "text",
+      streaming,
       terminalProjections: { draft: {} } as never,
       usage: usage as never,
     }, false);
 
-    expect(projection.streamingText).toBe("draft answer");
-    expect(projection.streamingReasoning).toBe("draft reasoning");
+    expect(projection.streaming).toBe(streaming);
     expect(projection.usage).toBe(usage);
     expect(projection.contextPackets).toEqual([]);
   });

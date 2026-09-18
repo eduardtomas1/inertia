@@ -123,7 +123,7 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("chooses, previews, and preserves bounded cross-chat provenance", async ({
+test("references a whole chat from the composer and preserves its provenance", async ({
   browserName: _browserName,
 }, testInfo) => {
   const { electronApp, page, rendererErrors, resizeWindow } = app;
@@ -136,29 +136,34 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
   await resizeWindow(1280, 820);
   await expect(page.getByText("Context from Architecture decisions"))
     .toBeVisible();
-  await page.getByRole("button", { name: "Add context from another chat" })
-    .click();
-  const dialog = page.getByRole("dialog", {
-    name: "Bring context from another chat",
+
+  const editor = page.getByRole("textbox", { name: "Message" });
+  await editor.click();
+  await editor.fill("@Architecture");
+  const suggestions = page.getByRole("listbox", {
+    name: "Chats and project files",
   });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByText(
-    "Redaction is a safeguard, not a guarantee. Review every excerpt.",
-  )).toBeVisible();
-  await expect(dialog.getByText(
+  await expect(suggestions).toBeVisible();
+  await expect(suggestions.getByText("Reference a chat")).toBeVisible();
+  await capture("conversation-context-mention-1280x820");
+
+  await suggestions.getByRole("option", { name: /Architecture decisions/u })
+    .click();
+
+  const chip = page.getByRole("button", {
+    name: /From Architecture decisions/u,
+  });
+  await expect(chip).toBeVisible();
+  await expect(editor).toHaveValue("");
+
+  await chip.click();
+  const preview = page.getByRole("region", { name: "Shared chat context" });
+  await expect(preview).toBeVisible();
+  await expect(preview.getByText(
     "Carry only this reviewed retry decision into the implementation chat.",
   )).toBeVisible();
 
-  await dialog.getByRole("button", {
-    name: /Carry only this reviewed retry decision/u,
-  }).click();
-  await expect(dialog.getByLabel("Context preview").getByText(
-    "Carry only this reviewed retry decision into the implementation chat.",
-  )).toBeVisible();
-
-  const selectedCheck = dialog.locator('.c-x[aria-pressed="true"] .c-xk');
-  const search = dialog.getByRole("searchbox");
-  const note = dialog.getByPlaceholder("Optional context note");
+  const excerpt = preview.locator("p").first();
   for (const appearance of THEME_CASES) {
     await page.locator("html").evaluate((element, nextAppearance) => {
       const root = element as HTMLElement;
@@ -166,24 +171,19 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
       root.dataset.colorTheme = nextAppearance.colorTheme;
       root.style.colorScheme = nextAppearance.theme;
     }, appearance);
-    const metrics = await Promise.all([selectedCheck, search, note].map(
-      async (target) => target.evaluate((element) => {
-        const styles = getComputedStyle(element);
-        return {
-          color: styles.color,
-          background: styles.backgroundColor,
-        };
-      }),
-    ));
-    for (const [surface, metric] of ["selected checkmark", "search input", "note input"]
-      .map((surface, index) => [surface, metrics[index]!] as const)) {
-      expect(metric.background, `${appearance.colorTheme} ${appearance.theme} ${surface} fill`)
-        .not.toBe("rgba(0, 0, 0, 0)");
-      expect(
-        contrastRatio(metric.color, metric.background),
-        `${appearance.colorTheme} ${appearance.theme} ${surface}`,
-      ).toBeGreaterThanOrEqual(4.5);
-    }
+    const metric = await excerpt.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      const surface = getComputedStyle(element.closest("section")!);
+      return { color: styles.color, background: surface.backgroundColor };
+    });
+    expect(
+      metric.background,
+      `${appearance.colorTheme} ${appearance.theme} preview fill`,
+    ).not.toBe("rgba(0, 0, 0, 0)");
+    expect(
+      contrastRatio(metric.color, metric.background),
+      `${appearance.colorTheme} ${appearance.theme} preview excerpt`,
+    ).toBeGreaterThanOrEqual(4.5);
   }
   await page.locator("html").evaluate((element) => {
     const root = element as HTMLElement;
@@ -191,14 +191,14 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
     root.dataset.colorTheme = "inertia";
     root.style.colorScheme = "light";
   });
-  await capture("conversation-context-default-1280x820");
+  await capture("conversation-context-preview-1280x820");
 
   await electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.25);
   });
   await page.waitForTimeout(200);
-  await expect(dialog).toBeInViewport();
-  const boundsAt125 = await dialog.boundingBox();
+  await expect(preview).toBeInViewport();
+  const boundsAt125 = await preview.boundingBox();
   const viewportAt125 = await page.evaluate(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
@@ -214,20 +214,13 @@ test("chooses, previews, and preserves bounded cross-chat provenance", async ({
     BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1);
   });
   await resizeWindow(600, 760);
-  await expect(dialog.getByLabel("Context preview")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Attach context" }))
-    .toBeVisible();
+  await expect(chip).toBeVisible();
   await capture("conversation-context-narrow-600x760");
 
   await page.emulateMedia({ forcedColors: "active" });
-  await expect(dialog).toBeVisible();
-  expect(await dialog.locator(".c-x").first().evaluate((element) =>
-    getComputedStyle(element).borderTopStyle)).not.toBe("none");
+  await expect(chip).toBeVisible();
   await page.emulateMedia({ forcedColors: "none" });
 
-  await dialog.getByRole("button", { name: "Attach context" }).click();
-  await expect(page.getByRole("button", { name: /From Architecture decisions/u }))
-    .toBeVisible();
   await capture("conversation-context-attached-provenance");
   expect(rendererErrors).toEqual([]);
   expect(sourceConversationId).not.toBe("");

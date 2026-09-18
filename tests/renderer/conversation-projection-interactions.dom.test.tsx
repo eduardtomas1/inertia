@@ -381,7 +381,7 @@ describe("useConversationProjection pending interactions", () => {
 
     await waitFor(() => {
       expect(hook.result.current.messages).toEqual([followUp]);
-      expect(hook.result.current.streamingText)
+      expect(hook.result.current.streaming.getSnapshot()[0])
         .toBe("I am checking the current implementation.");
     });
     expect(request.mock.calls.filter(([command]) =>
@@ -585,7 +585,7 @@ describe("useConversationProjection pending interactions", () => {
       text: "Visible before reconnect.",
     });
     hook.rerender({ status: "offline" });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     source.emit({
       type: "server.welcome",
       protocolVersion: 1,
@@ -598,7 +598,7 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.messages).toEqual([persistedMessage]);
-    expect(hook.result.current.streamingText)
+    expect(hook.result.current.streaming.getSnapshot()[0])
       .toBe("Visible before reconnect.");
     expect(hook.result.current.pendingApprovals).toEqual([pendingApproval]);
 
@@ -631,7 +631,7 @@ describe("useConversationProjection pending interactions", () => {
 
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.messages).toEqual([persistedMessage]);
-    expect(hook.result.current.streamingText)
+    expect(hook.result.current.streaming.getSnapshot()[0])
       .toBe(" Visible after reconnect.");
   });
 
@@ -722,7 +722,7 @@ describe("useConversationProjection pending interactions", () => {
         latestSequence: 8,
       },
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     source.emit({
       type: "agent.text",
       conversationId: primaryId,
@@ -738,12 +738,12 @@ describe("useConversationProjection pending interactions", () => {
       text: reasoningDelta,
     });
 
-    expect(hook.result.current.streamingText).toHaveLength(500_000);
-    expect(hook.result.current.streamingText.endsWith(textDelta)).toBe(true);
-    expect(hook.result.current.streamingReasoning).toHaveLength(500_000);
-    expect(hook.result.current.streamingReasoning.endsWith(reasoningDelta))
+    expect(hook.result.current.streaming.getSnapshot()[0]).toHaveLength(500_000);
+    expect(hook.result.current.streaming.getSnapshot()[0].endsWith(textDelta)).toBe(true);
+    expect(hook.result.current.streaming.getSnapshot()[1]).toHaveLength(500_000);
+    expect(hook.result.current.streaming.getSnapshot()[1].endsWith(reasoningDelta))
       .toBe(true);
-    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
 
     hook.rerender({ status: "online" });
     await waitFor(() => expect(detailLoads).toBe(2));
@@ -752,9 +752,9 @@ describe("useConversationProjection pending interactions", () => {
       await Promise.resolve();
     });
 
-    expect(hook.result.current.streamingText).toBe(textDelta);
-    expect(hook.result.current.streamingReasoning).toBe(reasoningDelta);
-    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe(textDelta);
+    expect(hook.result.current.streaming.getSnapshot()[1]).toBe(reasoningDelta);
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
 
     act(() => source.emit({
       type: "agent.text",
@@ -763,7 +763,7 @@ describe("useConversationProjection pending interactions", () => {
       turnId: `${primaryId}-turn`,
       text: "latest text",
     }));
-    expect(hook.result.current.streamingChannel).toBe("text");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
   });
 
   it("scopes live phase authority to the current provider segment", async () => {
@@ -825,7 +825,7 @@ describe("useConversationProjection pending interactions", () => {
     });
 
     emitReasoning("Reasoning before a tool.");
-    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
     source.emit({
       type: "agent.activity",
       activity: {
@@ -838,10 +838,10 @@ describe("useConversationProjection pending interactions", () => {
         createdAt: "2026-08-12T12:00:01.000Z",
       },
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
 
     emitText("Text before a completed activity.");
-    expect(hook.result.current.streamingChannel).toBe("text");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
     source.emit({
       type: "agent.activity",
       activity: {
@@ -854,7 +854,7 @@ describe("useConversationProjection pending interactions", () => {
         createdAt: "2026-08-12T12:00:01.000Z",
       },
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
 
     emitReasoning("Reasoning before a plan.");
     source.emit({
@@ -865,7 +865,7 @@ describe("useConversationProjection pending interactions", () => {
         steps: [{ step: "Verify segment ownership", status: "inProgress" }],
       },
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
 
     emitText("Commentary before persistence.");
     source.emit({
@@ -880,34 +880,34 @@ describe("useConversationProjection pending interactions", () => {
         createdAt: "2026-08-12T12:00:02.000Z",
       },
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
 
     emitReasoning("Reasoning before approval.");
     source.emit({ type: "agent.approval.requested", request: approval(primaryId) });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     source.emit({
       type: "agent.approval.resolved",
       ...owner,
       requestId: approval(primaryId).id,
       decision: "approve",
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     emitText("Provider resumed after approval.");
-    expect(hook.result.current.streamingChannel).toBe("text");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
 
     source.emit({
       type: "agent.input.requested",
       request: inputRequest(primaryId),
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     source.emit({
       type: "agent.input.resolved",
       ...owner,
       requestId: inputRequest(primaryId).id,
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     emitReasoning("Provider resumed after input.");
-    expect(hook.result.current.streamingChannel).toBe("reasoning");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
 
     source.emit({
       type: "agent.completed",
@@ -915,7 +915,7 @@ describe("useConversationProjection pending interactions", () => {
       status: "completed",
       terminalReason: "provider-completed",
     });
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
   });
 
   it("keeps streaming text when fresh hydration replays the current plan", async () => {
@@ -1006,17 +1006,17 @@ describe("useConversationProjection pending interactions", () => {
       },
     });
 
-    expect(hook.result.current.streamingText)
+    expect(hook.result.current.streaming.getSnapshot()[0])
       .toBe("Visible through plan hydration.");
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     expect(onOpenPlan).not.toHaveBeenCalled();
 
     hook.rerender({ status: "online" });
     await waitFor(() => expect(detailLoads).toBe(2));
     expect(hook.result.current.detailState?.state).toBe("ready");
-    expect(hook.result.current.streamingText)
+    expect(hook.result.current.streaming.getSnapshot()[0])
       .toBe("Visible through plan hydration.");
-    expect(hook.result.current.streamingChannel).toBeNull();
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
 
     source.emit({
       type: "agent.plan.updated",
@@ -1025,7 +1025,7 @@ describe("useConversationProjection pending interactions", () => {
         explanation: "This plan really changed after synchronization.",
       },
     });
-    expect(hook.result.current.streamingText).toBe("");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("");
     expect(onOpenPlan).toHaveBeenCalledWith(primaryId);
   });
 
@@ -1209,7 +1209,7 @@ describe("useConversationProjection pending interactions", () => {
         turnId: turn.id,
         text: "Provider output before settlement.",
       });
-      expect(hook.result.current.streamingChannel).toBe("text");
+      expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
       const staleTerminalAssistantMessage: ChatMessage = {
         id: "stale-turn-terminal-message",
         conversationId: primaryId,
@@ -1229,7 +1229,7 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.messages).toContainEqual(
         staleTerminalAssistantMessage,
       );
-      expect(hook.result.current.streamingChannel).toBe("text");
+      expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
       expect(hook.result.current.turns.find(({ id }) => id === staleTurn.id)?.status)
         .toBe("running");
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
@@ -1242,7 +1242,7 @@ describe("useConversationProjection pending interactions", () => {
       expect(onTerminal).not.toHaveBeenCalled();
       source.emit(scenario.event);
 
-      expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
       expect(hook.result.current.terminalProjections[`${turn.runId}\0${turn.id}`]
         ?.terminalAssistantMessageId).toBe(
         scenario.exactTerminalAssistantMessageId,
@@ -1286,7 +1286,7 @@ describe("useConversationProjection pending interactions", () => {
       expect(hook.result.current.detailState?.state).toBe("ready");
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)?.status)
         .toBe(scenario.status);
-      expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
       expect(hook.result.current.conversation?.status)
         .toBe(scenario.exactConversationStatus);
 
@@ -1425,7 +1425,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.detail).not.toBeNull();
     expect(hook.result.current.messages).toEqual([terminalAssistantMessage]);
-    expect(hook.result.current.streamingText)
+    expect(hook.result.current.streaming.getSnapshot()[0])
       .toBe("The final answer remains visible.");
 
     authoritativeMessages = [terminalAssistantMessage];
@@ -1436,7 +1436,7 @@ describe("useConversationProjection pending interactions", () => {
 
     await waitFor(() => {
       expect(detailLoads).toBe(3);
-      expect(hook.result.current.streamingText).toBe("");
+      expect(hook.result.current.streaming.getSnapshot()[0]).toBe("");
       expect(hook.result.current.messages).toEqual(authoritativeMessages);
     });
   });
@@ -1623,7 +1623,7 @@ describe("useConversationProjection pending interactions", () => {
       turnId: turn.id,
       text: "Stale live suffix.",
     });
-    expect(hook.result.current.streamingText).toBe("Stale live suffix.");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("Stale live suffix.");
 
     source.emit({
       type: "agent.text.replaced",
@@ -1633,7 +1633,7 @@ describe("useConversationProjection pending interactions", () => {
       message: canonical,
     });
 
-    expect(hook.result.current.streamingText).toBe("");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("");
     expect(hook.result.current.messages).toEqual([userMessage, canonical]);
 
     source.emit({
@@ -1643,7 +1643,7 @@ describe("useConversationProjection pending interactions", () => {
       turnId: turn.id,
       text: " Fresh suffix.",
     });
-    expect(hook.result.current.streamingText).toBe(" Fresh suffix.");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe(" Fresh suffix.");
 
     authoritativeMessages = [userMessage, canonical];
     source.emit({
@@ -1654,7 +1654,7 @@ describe("useConversationProjection pending interactions", () => {
       expect(request.mock.calls.filter(([command]) =>
         command.type === "conversation.detail.load")).toHaveLength(2);
       expect(hook.result.current.messages).toEqual([userMessage, canonical]);
-      expect(hook.result.current.streamingText).toBe(" Fresh suffix.");
+      expect(hook.result.current.streaming.getSnapshot()[0]).toBe(" Fresh suffix.");
     });
   });
 
@@ -1695,7 +1695,7 @@ describe("useConversationProjection pending interactions", () => {
       message: olderCanonical,
     });
 
-    expect(hook.result.current.streamingText).toBe("New turn text");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("New turn text");
     expect(hook.result.current.messages).toContainEqual(olderCanonical);
   });
 

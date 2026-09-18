@@ -475,7 +475,7 @@ describe("authoritative response timeline", () => {
     expect(settledHtml).toContain('data-terminal-answer-id="assistant-settled"');
   });
 
-  it("interleaves commentary with adjacent compact call groups and keeps secondary work in Details", () => {
+  it("interleaves commentary with adjacent call groups, a bounded live window, and secondary work in Details", () => {
     const turn = agentTurn("turn-active-rail", "user-active-rail", {
       status: "running",
       completedAt: null,
@@ -547,14 +547,19 @@ describe("authoritative response timeline", () => {
     expect(html).toContain('data-work-identity-source="persisted-model-selection"');
     expect(html).toContain('aria-label="Stop Codex · Codex App Server run"');
     expect(html).toContain(">Stop</span></button>");
-    expect(html.match(/data-activity-group=/g)).toHaveLength(5);
-    expect(html).toContain("+3 previous tool calls");
-    expect(html.indexOf("Completed command")).toBeLessThan(html.indexOf("+3 previous tool calls"));
+    expect(html.match(/data-activity-group=/g)).toHaveLength(2);
+    expect(html).toContain(
+      'aria-label="4 commands, 1 file read, 1 edit, 1 failed, 1 warning"',
+    );
+    expect(html).toContain('data-activity-group-state="live"');
+    expect(html.match(/data-folded="false"/g)).toHaveLength(4);
+    expect(html.match(/data-folded="true"/g)).toHaveLength(1);
+    expect(html).not.toContain("Read source");
     expect(html).toContain("Inspect package");
     expect(html).toContain("Checking the existing presentation.");
     expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));
-    expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Build failed"));
-    expect(html.indexOf("+3 previous tool calls")).toBeLessThan(html.indexOf("Build failed"));
+    expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Completed command"));
+    expect(html.indexOf("Completed command")).toBeLessThan(html.indexOf("Build failed"));
     expect(html.indexOf("Build failed")).toBeLessThan(html.indexOf("Unsupported option skipped"));
     expect(html.indexOf("Unsupported option skipped"))
       .toBeLessThan(html.lastIndexOf("Run tests"));

@@ -66,6 +66,7 @@ describe("conversation context contract boundary", () => {
       note: null,
       messageCount: 1,
       characterCount: content.length,
+      droppedMessageCount: 0,
       createdAt: "2026-08-19T09:00:00.000Z",
       consumedMessageId: null,
       consumedAt: null,

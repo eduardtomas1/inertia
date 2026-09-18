@@ -573,9 +573,7 @@ export default function DetachedChatApp({
             plans={projection.plans}
             checkpoints={projection.checkpoints}
             turnGitArtifacts={projection.turnGitArtifacts}
-            streamingText={projection.streamingText}
-            streamingReasoning={projection.streamingReasoning}
-            streamingChannel={projection.streamingChannel}
+            streaming={projection.streaming}
             terminalProjections={projection.terminalProjections}
             usage={projection.usage}
             skills={workflowState?.skills ?? []}

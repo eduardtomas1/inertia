@@ -11,7 +11,6 @@ import {
 const css = [
   "../../src/renderer/src/styles.css",
   "../../src/renderer/public/color-themes.css",
-  "../../src/renderer/src/components/conversation-context/ConversationContextDialog.css",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
   .join("\n")
   .replace(/\r\n?/gu, "\n");
@@ -271,12 +270,11 @@ describe("visual contrast system", () => {
     expect(css).not.toMatch(
       /var\(--(?:accent-contrast|attention-state|input-bg|success-text)(?:[,)]|\s)/u,
     );
-    expect(cssBlock(".c-xk")).toContain("color: var(--accent-text)");
-    expect(cssBlock(".c-s input")).toContain("border: 1px solid var(--interactive-border)");
-    expect(cssBlock(".c-s input")).toContain("background: var(--surface-strong)");
-    expect(cssBlock(".c-p textarea")).toContain("background: var(--surface-strong)");
     expect(css).toMatch(
-      /\.c-w > aside:first-child > button:hover small,[\s\S]*?color:\s*var\(--text-muted\)/u,
+      /\.composer-context-request button:first-child\s*\{[^}]*color:\s*var\(--accent-text\)/u,
+    );
+    expect(css).toMatch(
+      /\.composer-context-request select\s*\{[^}]*background:\s*var\(--surface-strong\)/u,
     );
     expect(cssBlock(".private-connect-indicator.is-active"))
       .toContain("color: var(--success-accent)");
@@ -442,22 +440,22 @@ describe("visual contrast system", () => {
     );
   });
 
-  it("animates only active ultra composer frames and honors reduced motion", () => {
+  it("animates only maximum reasoning composer frames and honors reduced motion", () => {
     const ultraFrame = cssBlock(
-      '.chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after',
+      '.composer[data-maximum-reasoning="true"] .composer-input-zone::after',
     );
     expect(ultraFrame).toContain("pointer-events: none");
     expect(ultraFrame).toContain("animation: ultra-reasoning-frame-flow 6s linear infinite");
     expect(ultraFrame).toContain("mask-composite: exclude");
     expect(ultraFrame).toContain("border-radius: inherit");
     expect(css).not.toMatch(
-      /\.chat-workspace\[data-reasoning-effort="ultra"\](?: \.composer)?::after/u,
+      /\.composer\[data-maximum-reasoning="true"\](?: \.composer)?::after/u,
     );
     expect(css).toMatch(
-      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer-input-zone::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\] \.composer-input-zone::after\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-workspace\[data-reasoning-effort="ultra"\] \.composer-input-zone::after\s*\{[^}]*animation:\s*none;/u,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] \.composer-input-zone::after\s*\{[^}]*animation:\s*none;/u,
     );
   });
 });

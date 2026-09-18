@@ -9,6 +9,7 @@ import {
   hasUnguardedAgentPageContent,
   installAgentFileChooserBlock,
   releaseAgentFileChooserBlock,
+  resetAgentFileChooserBlock,
   settleAgentPageInput,
 } from "../../src/main/preview-agent-input";
 
@@ -246,6 +247,7 @@ describe("agent Browser file chooser boundary", () => {
           detach: vi.fn(() => { attached = false; }),
           isAttached: vi.fn(() => attached),
           on: vi.fn(),
+          removeListener: vi.fn(),
           sendCommand,
         },
         getURL: () => "http://127.0.0.1:3000/",
@@ -284,11 +286,27 @@ describe("agent Browser file chooser boundary", () => {
 
     await releaseAgentFileChooserBlock(contents as never, first);
 
-    expect(first).toBe(1);
-    expect(second).toBe(2);
+    expect(second).toBeGreaterThan(first);
     expect(sendCommand).not.toHaveBeenLastCalledWith(
       "Page.setInterceptFileChooserDialog",
       { enabled: false },
+    );
+  });
+
+  it("does not let a release from before a debugger reset disable the new agent action", async () => {
+    const { contents, sendCommand } = chooserContents();
+    const stale = await beginAgentFileChooserBlock(contents as never);
+    resetAgentFileChooserBlock(contents as never);
+    expect(contents.debugger.detach).toHaveBeenCalledOnce();
+    const current = await beginAgentFileChooserBlock(contents as never);
+
+    await releaseAgentFileChooserBlock(contents as never, stale);
+
+    expect(current).not.toBe(stale);
+    expect(contents.debugger.attach).toHaveBeenCalledTimes(2);
+    expect(sendCommand).toHaveBeenLastCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: true, cancel: true },
     );
   });
 });

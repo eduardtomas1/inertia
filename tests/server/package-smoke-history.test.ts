@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
 const discoveryFixture = vi.hoisted(() => ({ directory: "" }));
@@ -196,7 +196,7 @@ console.log("Logged in using ChatGPT");
     baselinePath: join(root, "upgrade-history.json") };
 }
 
-it("reopens history, switches speed, compacts, resumes, and persists every completed turn", async () => {
+async function seedHistory() {
   const f = await fixture();
   const smoke = await modules();
   const predecessor = await f.launch();
@@ -224,57 +224,78 @@ it("reopens history, switches speed, compacts, resumes, and persists every compl
   const unchangedBaseline = await readFile(f.baselinePath);
   expect(await smoke.readHistoryBaseline(f.baselinePath)).toEqual(baseline);
 
-  const candidate = await f.launch();
-  // The ordinary image smoke writes a different fixed-ID fixture. It cannot
-  // repair the independently identified historical attachment being asserted.
-  await writeFile(image, Buffer.concat([bytes, Buffer.from("candidate")]));
-  await candidate.runPackageSmokeImage!(image, join(f.root, "new-image-result.json"));
-  const newProof = await smoke.runPackagedHistorySmoke({
-    websocketUrl: candidate.websocketUrl, workspaceDirectory: f.workspaceDirectory, baseline,
+  return { f, smoke, oldProof, image, bytes, baseline, unchangedBaseline };
+}
+
+describe("installed history across runtime restarts", () => {
+  let seeded: Awaited<ReturnType<typeof seedHistory>>;
+  // Seed each scenario independently. A predecessor launch, an upgrade and a
+  // damaged-history reopen must not share one aggregate 15-second test timer.
+  // Each real history operation retains its own unchanged 8-second deadline.
+  beforeEach(async () => { seeded = await seedHistory(); });
+
+  it("reopens history, switches speed, compacts, resumes, and persists every completed turn", async () => {
+    const { f, smoke, oldProof, image, bytes, baseline, unchangedBaseline } = seeded;
+    const candidate = await f.launch();
+    // The ordinary image smoke writes a different fixed-ID fixture. It cannot
+    // repair the independently identified historical attachment being asserted.
+    await writeFile(image, Buffer.concat([bytes, Buffer.from("candidate")]));
+    await candidate.runPackageSmokeImage!(image, join(f.root, "new-image-result.json"));
+    const newProof = await smoke.runPackagedHistorySmoke({
+      websocketUrl: candidate.websocketUrl, workspaceDirectory: f.workspaceDirectory, baseline,
+    });
+    await f.close(candidate);
+    await smoke.assertHistoryAfterShutdown(f.root, newProof, baseline);
+    expect(newProof.agentTurns[0]!.id).not.toBe(oldProof.agentTurns[0]!.id);
+    expect(newProof.agentTurns).toHaveLength(4);
+    expect(newProof.agentTurns.map((turn) =>
+      turn.modelSelection.providerOptions.fastMode ?? null))
+      .toEqual(["priority", null, "priority", "priority"]);
+    expect(new Set(newProof.agentTurns.flatMap((turn) => [
+      turn.providerSessionBefore,
+      turn.providerSessionAfter,
+    ]).filter(Boolean))).toEqual(new Set([
+      newProof.agentTurns[0]!.providerSessionAfter,
+    ]));
+    expect(newProof.messages[1]!.content)
+      .toMatch(/^Completed package-smoke-candidate-fast:/u);
+    expect(newProof.messages.at(-1)!.content)
+      .toMatch(/^Completed package-smoke-candidate-fast:/u);
+    expect(await readFile(f.baselinePath)).toEqual(unchangedBaseline);
+
+    const db = new DatabaseSync(f.databasePath, { readOnly: true });
+    try {
+      expect(db.prepare("SELECT COUNT(*) AS count FROM agent_turns").get()).toEqual({ count: 5 });
+    } finally { db.close(); }
   });
-  await f.close(candidate);
-  await smoke.assertHistoryAfterShutdown(f.root, newProof, baseline);
-  expect(newProof.agentTurns[0]!.id).not.toBe(oldProof.agentTurns[0]!.id);
-  expect(newProof.agentTurns).toHaveLength(4);
-  expect(newProof.agentTurns.map((turn) =>
-    turn.modelSelection.providerOptions.fastMode ?? null))
-    .toEqual(["priority", null, "priority", "priority"]);
-  expect(new Set(newProof.agentTurns.flatMap((turn) => [
-    turn.providerSessionBefore,
-    turn.providerSessionAfter,
-  ]).filter(Boolean))).toEqual(new Set([
-    newProof.agentTurns[0]!.providerSessionAfter,
-  ]));
-  expect(newProof.messages[1]!.content)
-    .toMatch(/^Completed package-smoke-candidate-fast:/u);
-  expect(newProof.messages.at(-1)!.content)
-    .toMatch(/^Completed package-smoke-candidate-fast:/u);
-  expect(await readFile(f.baselinePath)).toEqual(unchangedBaseline);
 
-  const db = new DatabaseSync(f.databasePath);
-  const oldMessage = baseline.messages[0]!;
-  const replacement = "same identity, damaged historical content";
-  try { db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(replacement, oldMessage.id); }
-  finally { db.close(); }
-  await expect(smoke.assertHistoryAfterShutdown(f.root, newProof, baseline))
-    .rejects.toThrow("Saved message/content/attachments");
-  const damaged = await f.launch();
-  await expect(smoke.runPackagedHistorySmoke({
-    websocketUrl: damaged.websocketUrl, workspaceDirectory: f.workspaceDirectory, baseline,
-  })).rejects.toThrow("Historical saved message/content/attachment changed");
-  await f.close(damaged);
-  const readDb = new DatabaseSync(f.databasePath, { readOnly: true });
-  try {
-    expect(readDb.prepare("SELECT COUNT(*) AS count FROM agent_turns").get()).toEqual({ count: 5 });
-  }
-  finally { readDb.close(); }
+  it("rejects damaged saved history before admitting another turn and detects attachment damage", async () => {
+    const { f, smoke, oldProof, bytes, baseline } = seeded;
+    const db = new DatabaseSync(f.databasePath);
+    const oldMessage = baseline.messages[0]!;
+    const replacement = "same identity, damaged historical content";
+    try { db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(replacement, oldMessage.id); }
+    finally { db.close(); }
+    await expect(smoke.assertHistoryAfterShutdown(f.root, oldProof, baseline))
+      .rejects.toThrow("Saved message/content/attachments");
+    const damaged = await f.launch();
+    await expect(smoke.runPackagedHistorySmoke({
+      websocketUrl: damaged.websocketUrl, workspaceDirectory: f.workspaceDirectory, baseline,
+    })).rejects.toThrow("Historical saved message/content/attachment changed");
+    await f.close(damaged);
+    const readDb = new DatabaseSync(f.databasePath, { readOnly: true });
+    try {
+      expect(readDb.prepare("SELECT COUNT(*) AS count FROM agent_turns").get()).toEqual({ count: baseline.agentTurns.length });
+    }
+    finally { readDb.close(); }
 
-  const attachmentPath = join(f.root, "data", "conversation-attachments", baseline.attachment.id,
-    `${baseline.attachment.id}.png`);
-  await writeFile(attachmentPath, Buffer.alloc(bytes.length));
-  await expect(smoke.assertHistoryAttachment(f.root, baseline)).rejects.toThrow("Historical attachment bytes");
-  await rm(attachmentPath);
-  await expect(smoke.assertHistoryAttachment(f.root, baseline)).rejects.toThrow();
+    const attachmentPath = join(f.root, "data", "conversation-attachments", baseline.attachment.id,
+      `${baseline.attachment.id}.png`);
+    await writeFile(attachmentPath, Buffer.alloc(bytes.length));
+    await expect(smoke.assertHistoryAttachment(f.root, baseline)).rejects.toThrow("Historical attachment bytes");
+    await rm(attachmentPath);
+    await expect(smoke.assertHistoryAttachment(f.root, baseline)).rejects.toThrow();
+  });
 });
 
 it("rejects READY-only, failed, misowned and fabricated terminal responses", async () => {

@@ -56,7 +56,8 @@ const conversationContextSelectionFields = {
   sourceMessageIds: z.array(z.string().uuid())
     .min(1)
     .max(MAX_CONVERSATION_CONTEXT_MESSAGES)
-    .refine((ids) => new Set(ids).size === ids.length),
+    .refine((ids) => new Set(ids).size === ids.length)
+    .optional(),
   note: z.string().trim().min(1).max(MAX_CONVERSATION_CONTEXT_NOTE_BYTES)
     .refine(
       (value) => new TextEncoder().encode(value).byteLength

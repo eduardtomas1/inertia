@@ -48,7 +48,7 @@ export function normalizePrivateConnectRuntimeGrants(
     });
   }
   return [...byProject.values()]
-    .sort((left, right) => left.projectId.localeCompare(right.projectId))
+    .sort((left, right) => left.projectId.localeCompare(right.projectId, "en"))
     .slice(0, PRIVATE_CONNECT_RUNTIME_GRANT_LIMITS.projects);
 }
 

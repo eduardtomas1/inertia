@@ -2,7 +2,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
-import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
@@ -68,9 +68,6 @@ function recordWithStrings(value: unknown, ...keys: string[]): value is UnknownR
 }
 function arrayOf(value: unknown, validate: (entry: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(validate);
-}
-function uniqueRecordField(values: unknown[], key: string): boolean {
-  return new Set(values.map((value) => (value as UnknownRecord)[key])).size === values.length;
 }
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
@@ -1018,7 +1015,8 @@ function conversationDetail(
 
 function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   if (!record(value) || typeof value.type !== "string") return false;
-  switch (value.type) {
+  const type = value.type as RuntimeMutationEvent["type"];
+  switch (type) {
     case "snapshot.updated":
       return appSnapshot(value.snapshot);
     case "conversation.shell.updated": {
@@ -1088,7 +1086,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       && optionalNullableStringField(value, "terminalAssistantMessageId")
       && optionalTerminalAssistantMessage(value);
     default:
-      return false;
+      return unknownEventType(type);
   }
 }
 import { issueReportSchema } from "../issue-report";
@@ -1164,7 +1162,8 @@ function requestResult(value: unknown): value is RequestResult {
 
 function isServerEvent(value: unknown): value is ServerEvent {
   if (!record(value) || typeof value.type !== "string") return false;
-  switch (value.type) {
+  const type = value.type as Exclude<ServerEvent["type"], RuntimeMutationEvent["type"]>;
+  switch (type) {
     case "conversation.message.focus":
       return messageSearchTargetSchema.safeParse(value.target).success;
     case "server.welcome":
@@ -1217,7 +1216,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case "terminal.exit":
       return stringField(value, "terminalId") && Number.isInteger(value.exitCode);
     default:
-      return runtimeMutationEvent(value);
+      return unknownEventType(type) || runtimeMutationEvent(value);
   }
 }
 

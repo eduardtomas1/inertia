@@ -124,6 +124,6 @@ function parseProbeState(value: unknown): {
     probeResults: collection.results,
     probeAdmissionHighWater: [...highWater]
       .map(([modelId, admissionSequence]) => ({ modelId, admissionSequence }))
-      .sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      .sort((left, right) => left.modelId.localeCompare(right.modelId, "en")),
   };
 }

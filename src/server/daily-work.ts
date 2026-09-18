@@ -348,14 +348,14 @@ export function projectDailyWork(
   }
   summaries.sort((left, right) => Date.parse(right.lastActivityAt)
     - Date.parse(left.lastActivityAt)
-    || left.conversationId.localeCompare(right.conversationId));
+    || left.conversationId.localeCompare(right.conversationId, "en"));
   const providers = [...providerBuckets.values()]
     .map(providerSummary)
     .sort((left, right) => (right.processedTokens.value ?? -1)
       - (left.processedTokens.value ?? -1)
       || (right.runtime.value ?? -1) - (left.runtime.value ?? -1)
       || right.turnCount - left.turnCount
-      || left.providerId.localeCompare(right.providerId));
+      || left.providerId.localeCompare(right.providerId, "en"));
 
   return {
     generatedAt,

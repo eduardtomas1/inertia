@@ -44,8 +44,8 @@ export function classicSidebarSearch(
   for (const current of activeByProject.values()) {
     current.sort((left, right) => (
       Number(Boolean(right.pinnedAt)) - Number(Boolean(left.pinnedAt))
-      || (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "")
-      || right.updatedAt.localeCompare(left.updatedAt)
+      || (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "", "en")
+      || right.updatedAt.localeCompare(left.updatedAt, "en")
     ));
   }
 
@@ -128,7 +128,7 @@ export function buildLogicalProjectGroups(
   }
   return [...groups.entries()]
     .map(([key, members]) => {
-      const projects = [...members].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+      const projects = [...members].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt, "en") || a.id.localeCompare(b.id, "en"));
       const representative = projects[0]!;
       const repositoryName = representative.repositoryRoot?.split("/").filter(Boolean).at(-1);
       return {
@@ -137,7 +137,7 @@ export function buildLogicalProjectGroups(
         projects,
       };
     })
-    .sort((a, b) => b.projects[0]!.updatedAt.localeCompare(a.projects[0]!.updatedAt) || a.key.localeCompare(b.key));
+    .sort((a, b) => b.projects[0]!.updatedAt.localeCompare(a.projects[0]!.updatedAt, "en") || a.key.localeCompare(b.key, "en"));
 }
 
 export function hasUnreadCompletion(conversation: Conversation, activeConversationId: string | null): boolean {
@@ -250,10 +250,10 @@ export function sortSidebarThreadViews(
       || (
         a.status === "working" && b.status === "working"
           ? (b.run?.startedAt ?? b.conversation.createdAt)
-              .localeCompare(a.run?.startedAt ?? a.conversation.createdAt)
-          : b.conversation.updatedAt.localeCompare(a.conversation.updatedAt)
+              .localeCompare(a.run?.startedAt ?? a.conversation.createdAt, "en")
+          : b.conversation.updatedAt.localeCompare(a.conversation.updatedAt, "en")
       )
-      || a.conversation.id.localeCompare(b.conversation.id)
+      || a.conversation.id.localeCompare(b.conversation.id, "en")
     ));
 }
 

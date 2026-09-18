@@ -1,3 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+import { buildSync } from "esbuild";
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceEntry } from "../../src/shared/contracts";
@@ -69,6 +75,47 @@ describe("workspace tree model", () => {
       entry("file2.ts", "file"),
       entry("file10.ts", "file"),
     ]);
+  });
+
+  it("orders a file tree identically whatever the process default locale is", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-workspace-tree-locale-"));
+    try {
+      buildSync({
+        entryPoints: [resolve("src/renderer/src/utils/workspaceTree.ts")],
+        outfile: join(directory, "workspace-tree.mjs"),
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        logLevel: "silent",
+      });
+      const script = join(directory, "order.mjs");
+      writeFileSync(script, [
+        "import { sortWorkspaceEntries } from \"./workspace-tree.mjs\";",
+        "const names = [\"zeta.ts\", \"\u00e4pple.ts\", \"apple.ts\", \"yak.ts\", \"ice.ts\", \"jam.ts\", \"file10.ts\", \"file2.ts\", \"src\"];",
+        "const entries = names.map((path) => ({ path, kind: path === \"src\" ? \"directory\" : \"file\" }));",
+        "process.stdout.write(JSON.stringify({",
+        "  locale: new Intl.Collator().resolvedOptions().locale,",
+        "  order: sortWorkspaceEntries(entries).map(({ path }) => path),",
+        "}));",
+      ].join("\n"));
+      const runs = ["en_US.UTF-8", "sv_SE.UTF-8", "lt_LT.UTF-8", "tr_TR.UTF-8"].map((locale) => JSON.parse(
+        execFileSync(process.execPath, [script], {
+          encoding: "utf8",
+          env: { ...process.env, LANG: locale, LC_ALL: locale },
+        }),
+      ) as { locale: string; order: string[] });
+
+      for (const run of runs) {
+        expect(run.order).toEqual([
+          "src", "apple.ts", "\u00e4pple.ts", "file2.ts", "file10.ts", "ice.ts", "jam.ts", "yak.ts", "zeta.ts",
+        ]);
+      }
+      if (process.platform !== "win32") {
+        expect(runs.map(({ locale }) => locale)).toEqual(["en-US", "sv-SE", "lt-LT", "tr-TR"]);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("flattens only expanded direct-child pages and ignores misplaced entries", () => {

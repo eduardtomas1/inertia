@@ -5,6 +5,7 @@ import {
   type AgentPlan,
   type AppSnapshot,
   type RuntimeMutationEvent,
+  type RuntimeSequencedFrame,
   type RuntimeSyncCursor,
   type ServerEvent,
 } from "../../shared/contracts";
@@ -13,6 +14,7 @@ import {
   type RuntimeDetailSubscription,
   type RuntimeResumeRequest,
 } from "../runtime-sequencing";
+import { SerializedRuntimeEvent } from "../serialized-runtime-event";
 import {
   projectDetachedChatInputRequest,
   projectDetachedChatSnapshot,
@@ -57,7 +59,11 @@ export class RuntimeSyncHub<Socket> {
   private readonly pendingMessageFocus = new Map<string, PendingMessageFocus>();
 
   constructor(
-    private readonly send: (socket: Socket, event: ServerEvent, onSent?: (sent: boolean) => void) => void,
+    private readonly send: (
+      socket: Socket,
+      event: ServerEvent | SerializedRuntimeEvent,
+      onSent?: (sent: boolean) => void,
+    ) => void,
     private readonly sequencer = new RuntimeSequencer(),
   ) {}
 
@@ -275,16 +281,19 @@ export class RuntimeSyncHub<Socket> {
   private broadcastCommitted(
     createEvent: (sync: RuntimeSyncCursor) => RuntimeMutationEvent,
   ): void {
-    const frame = this.sequencer.commit(createEvent);
+    const committed = this.sequencer.commit(createEvent);
+    const payloads = new Map<RuntimeSequencedFrame, SerializedRuntimeEvent>([
+      [committed.event, committed],
+    ]);
     for (const [socket, subscription] of this.clients) {
-      this.send(
-        socket,
-        projectRuntimeFrameForAuthority(
-          frame,
-          subscription,
-          subscription.authority,
-        ),
+      const frame = projectRuntimeFrameForAuthority(
+        committed.event,
+        subscription,
+        subscription.authority,
       );
+      const payload = payloads.get(frame) ?? new SerializedRuntimeEvent(frame);
+      payloads.set(frame, payload);
+      this.send(socket, payload);
     }
   }
 }

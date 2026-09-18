@@ -6,7 +6,7 @@ import type {
 } from "../../shared/contracts";
 import { defaultSettings } from "../../shared/contracts/app";
 import type { RuntimeDetailSubscription } from "../runtime-sequencing";
-import { projectRuntimeFrame } from "../runtime-sequencing";
+import { projectRuntimeFrame, runtimeCursorFrame } from "../runtime-sequencing";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
 
 function projectedSettings(settings: AppSettings): AppSettings {
@@ -98,7 +98,7 @@ export function projectRuntimeFrameForAuthority(
     frame.scope.kind === "conversation-detail"
     && frame.scope.conversationId !== authority.conversationId
   ) {
-    return { type: "runtime.cursor", sync: frame.sync };
+    return runtimeCursorFrame(frame);
   }
 
   switch (frame.event.type) {
@@ -124,7 +124,7 @@ export function projectRuntimeFrameForAuthority(
               ),
             },
           }
-        : { type: "runtime.cursor", sync: frame.sync };
+        : runtimeCursorFrame(frame);
     case "agent.input.requested": {
       const request = projectDetachedChatInputRequest(
         frame.event.request,
@@ -140,7 +140,7 @@ export function projectRuntimeFrameForAuthority(
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":
-      return { type: "runtime.cursor", sync: frame.sync };
+      return runtimeCursorFrame(frame);
     default:
       return frame;
   }

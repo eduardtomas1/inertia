@@ -32,6 +32,7 @@ import {
   type ClaudeCommandLifecycleMessage,
 } from "./claude-message-projector-support";
 import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlation";
+import { isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
 
 export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
@@ -460,7 +461,7 @@ export class ClaudeMessageProjector {
       contextWindowOverride: this.options.contextWindowOverride,
       contextUsage: this.options.contextUsage(),
     });
-    if (usage) this.options.emitter.rich({ type: "usage", usage });
+    if (usage && !isClaudeQueuedCompletionAck(message)) this.options.emitter.rich({ type: "usage", usage });
     for (const denial of message.permission_denials ?? []) {
       this.observePermissionDenial({
         tool_name: denial.tool_name,

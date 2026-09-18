@@ -19,6 +19,7 @@ import {
 import { CappedProviderBuffer } from "../../src/server/provider/io";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
+  claudeBackgroundTasks,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -827,6 +828,24 @@ describe("Claude Agent SDK message projection", () => {
         technicalDetail: limitNotice,
       },
     });
+  });
+
+  it("keeps the resumed answer when queued delegate completions send an empty result first", async () => {
+    const { events, result } = await run([
+      claudeBackgroundTasks(["agent-1", "agent-2"]),
+      assistantMessage({ uuid: "assistant-started", apiMessageId: "api-started", content: [{ type: "text", text: "Started. " }] }),
+      claudeSuccessResult("Started. ", "completed"),
+      claudeBackgroundTasks([]),
+      claudeSystem("task_notification", { task_id: "agent-1", status: "completed" }),
+      claudeSystem("task_notification", { task_id: "agent-2", status: "completed" }),
+      sdkMessage({ ...claudeSuccessResult(""), num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 } }),
+      assistantMessage({ uuid: "assistant-final", apiMessageId: "api-final", content: [{ type: "text", text: "Both delegates finished." }] }),
+      claudeSuccessResult("Both delegates finished.", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Both delegates finished." });
+    expect(events.filter((event) => event.type === "extension" && event.event.type === "usage")
+      .every((event) => event.type === "extension" && event.event.type === "usage" && event.event.usage.totalProcessedTokens !== 0)).toBe(true);
   });
 
   it("explains API error results that arrive without a typed assistant error", async () => {

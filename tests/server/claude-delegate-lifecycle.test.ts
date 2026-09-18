@@ -1,3 +1,4 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 
 import { ClaudeDelegateLifecycle } from "../../src/server/provider/claude-delegate-lifecycle";
@@ -48,6 +49,27 @@ describe("Claude delegated lifecycle", () => {
         result: "Delegate result received",
         terminal_reason: "completed",
       },
+    });
+  });
+
+  it("waits past the empty result Claude sends for each queued background completion", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const ack = { ...claudeSuccessResult(""), num_turns: 0 } as SDKMessage;
+
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: true });
+    lifecycle.dispose();
+
+    lifecycle.observe(claudeBackgroundTasks(["agent-1", "agent-2"]));
+    expect(lifecycle.observe(claudeSuccessResult("Started", "completed"))).toEqual({ turnEnded: false });
+    lifecycle.observe(claudeBackgroundTasks([]));
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "agent-1", status: "completed" }));
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "agent-2", status: "completed" }));
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: false });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
+    expect(lifecycle.observe(claudeSuccessResult("Both delegates finished", "completed"))).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toMatchObject({
+      kind: "result",
+      result: { result: "Both delegates finished", num_turns: 1 },
     });
   });
 

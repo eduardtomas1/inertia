@@ -6,6 +6,7 @@ import {
   type PermissionResult,
   type Query,
   type SDKMessage,
+  type SDKStartupFailureReason,
   type SDKUserMessage,
   type TerminalReason,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -37,7 +38,7 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
@@ -59,6 +60,7 @@ import {
 } from "./claude-skill-operation";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
+import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeStartupFailure } from "./claude-startup-failure";
 import {
   readClaudeContextUsage,
 } from "./claude-usage";
@@ -709,6 +711,7 @@ function startClaudeRun(
           if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
+              if (isClaudeQueuedCompletionAck(message)) continue;
               throw new Error(
                 "Claude returned a successful result without correlating an accepted follow-up.",
               );
@@ -776,9 +779,10 @@ function startClaudeRun(
       }
       const finalMessage = completion.result;
       if (finalMessage.subtype !== "success" || finalMessage.is_error) {
+        const startupFailure = claudeStartupFailure(finalMessage);
         const resultReason = finalMessage.subtype === "success"
           ? finalMessage.terminal_reason ?? "api_error"
-          : finalMessage.subtype;
+          : startupFailure?.reason ?? finalMessage.subtype;
         const technicalDetail = sanitizeProviderActivityDetail(
           (finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
             .filter((value): value is string => typeof value === "string")
@@ -791,6 +795,7 @@ function startClaudeRun(
         const projectedFailure = messageProjector.preferredFailure();
         const error = routeFailure(
           projectedFailure?.message
+            ?? startupFailure?.message
             ?? claudeResultFailure(resultReason),
         );
         return finishResult(
@@ -1085,7 +1090,8 @@ function claudeLifecycleFailure(
 function claudeResultFailure(
   reason:
     | Exclude<Extract<SDKMessage, { type: "result" }>["subtype"], "success">
-    | TerminalReason,
+    | TerminalReason
+    | SDKStartupFailureReason,
 ): string {
   switch (reason) {
     case "prompt_too_long":
@@ -1172,7 +1178,7 @@ export function claudeSupportsThinkingDisplay(
 function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
 ): NodeJS.ProcessEnv {
-  return { ...CLAUDE_SUBAGENT_LIMITS, ...(environment ?? process.env) };
+  return { ...CLAUDE_SUBAGENT_LIMITS, ...CLAUDE_STARTUP_FAILURE_RESULTS, ...(environment ?? process.env) };
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

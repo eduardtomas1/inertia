@@ -34,6 +34,9 @@ export class ClaudeDelegateLifecycle {
     hasLiveTaskTrace = false,
   ): { turnEnded: boolean } {
     if (message.type === "result") {
+      if (this.latestResult && isClaudeQueuedCompletionAck(message)) {
+        return { turnEnded: false };
+      }
       const candidate = {
         message,
         deferred: isDeferredResult(
@@ -151,4 +154,11 @@ function isDeferredResult(
   // result provisional regardless of terminal_reason. A later parent result
   // replaces it after the exact delegated-work terminal edge.
   return hadLiveDelegatedWork;
+}
+
+export function isClaudeQueuedCompletionAck(result: SDKResultMessage): boolean {
+  return result.subtype === "success"
+    && !result.is_error
+    && result.num_turns === 0
+    && result.result === "";
 }

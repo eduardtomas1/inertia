@@ -12,6 +12,7 @@ import {
   MASCOT_SPRITE_LABELS, MASCOT_SPRITE_MAX_BYTES, MASCOT_SPRITE_SIZE, MASCOT_SPRITE_STATES,
   type MascotSprites, type MascotSpriteState,
 } from "../shared/mascot-sprites.js";
+import { MASCOT_SPRITE_NOTES } from "../shared/mascot-sprite-guide.js";
 import { decodedImageMatches, inspectImageMetadata } from "./attachment-image-validation.js";
 
 const FORMATS = {
@@ -28,13 +29,6 @@ export interface MascotSpriteFile {
 export interface MascotSpriteSet { id: string; files: MascotSpriteFile[] }
 
 const DEFAULT_STILLS: Record<MascotSpriteState, string> = { idle, thinking, working, idea, pickup };
-const STATE_NOTES: Record<MascotSpriteState, string> = {
-  idle: "Ready, or the latest chat stopped without finishing.",
-  thinking: "Queued, starting, retrying, or waiting for your answer or approval.",
-  working: "An agent is running, delegating, or stopping.",
-  idea: "Plays once for about 3 seconds when work finishes.",
-  pickup: "Shown while you drag the mascot.",
-};
 const PNG_CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 const ADAM7 = [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] as const;
 const SIZE_LABEL = `${MASCOT_SPRITE_SIZE} × ${MASCOT_SPRITE_SIZE} pixels`;
@@ -223,7 +217,7 @@ export function mascotSpriteTemplate() {
       animation: `Optional animated WebP or GIF, exactly ${SIZE_LABEL}, up to 256 frames. It loops while the state is active.`,
     },
     states: MASCOT_SPRITE_STATES.map((state) => ({
-      state, label: MASCOT_SPRITE_LABELS[state], shows: STATE_NOTES[state], still: `${state}.png`, animation: [`${state}.webp`, `${state}.gif`],
+      state, label: MASCOT_SPRITE_LABELS[state], shows: MASCOT_SPRITE_NOTES[state], still: `${state}.png`, animation: [`${state}.webp`, `${state}.gif`],
     })),
   };
 }
@@ -239,7 +233,7 @@ export function mascotSpriteReadme(): string {
     `Required: ${MASCOT_SPRITE_STATES.length} still images, one per state.`,
     `Format: PNG, exactly ${SIZE_LABEL}, a single frame, up to ${BYTES_LABEL} each.`,
     "",
-    ...MASCOT_SPRITE_STATES.map((state) => `${`${state}.png`.padEnd(width)}${MASCOT_SPRITE_LABELS[state]}: ${STATE_NOTES[state]}`),
+    ...MASCOT_SPRITE_STATES.map((state) => `${`${state}.png`.padEnd(width)}${MASCOT_SPRITE_LABELS[state]}: ${MASCOT_SPRITE_NOTES[state]}`),
     "",
     "Optional: an animation for any state, saved next to its still with the same name as an animated WebP or GIF",
     `(for example idle.webp), exactly ${SIZE_LABEL}, up to ${BYTES_LABEL}. A state without one shows its still image.`,

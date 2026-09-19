@@ -19,6 +19,8 @@ import {
 } from "../../node/runtime-owned-processes";
 import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
 
+const MAX_CLAUDE_STDERR_TAIL_CHARS = 4 * 1024;
+
 export interface ClaudeOwnedQueryDependencies {
   /** Test seam for the SDK-owned child process creation. */
   spawnProcess?: typeof spawn;
@@ -32,6 +34,7 @@ export interface ClaudeOwnedQueryProcess {
   readonly spawnClaudeCodeProcess: (options: SpawnOptions) => SpawnedProcess;
   readonly child: () => ChildProcessWithoutNullStreams | undefined;
   readonly transportError: () => Error | undefined;
+  readonly stderrTail: () => string;
   readonly waitForNaturalClose: (waitMs: number, signal?: AbortSignal) => Promise<boolean>;
   readonly requestTermination: (force: boolean) => void;
   readonly terminate: (force: boolean) => Promise<void>;
@@ -54,6 +57,8 @@ export function createClaudeOwnedQueryProcess(
   let child: ChildProcessWithoutNullStreams | undefined;
   let shutdownRequested = false;
   let transportError: Error | undefined;
+  let stderrTail = "";
+  let discardingStderrLine = false;
   let childClosed: Promise<void> | undefined;
   let terminateOwnedProcessTree: ReturnType<
     typeof createOwnedProcessTreeTermination
@@ -96,7 +101,27 @@ export function createClaudeOwnedQueryProcess(
     ownedChild.stderr.on("error", () => {
       // Provider exit is reported by the SDK through the process events.
     });
-    ownedChild.stderr.resume();
+    ownedChild.stderr.setEncoding("utf8");
+    ownedChild.stderr.on("data", (chunk: string) => {
+      // A pipe chunk need not start a line. Once an overlong line loses its
+      // prefix, discard its continuation too: a credential suffix cannot be
+      // recognized by either exact-value or prefix-based redaction.
+      if (discardingStderrLine) {
+        const newline = chunk.indexOf("\n");
+        if (newline < 0) return;
+        chunk = chunk.slice(newline + 1);
+        discardingStderrLine = false;
+      }
+      const combined = stderrTail + chunk;
+      if (combined.length <= MAX_CLAUDE_STDERR_TAIL_CHARS) {
+        stderrTail = combined;
+        return;
+      }
+      const kept = combined.slice(-MAX_CLAUDE_STDERR_TAIL_CHARS);
+      const firstWholeLine = kept.indexOf("\n");
+      stderrTail = firstWholeLine >= 0 ? kept.slice(firstWholeLine + 1) : "";
+      discardingStderrLine = firstWholeLine < 0;
+    });
     terminateOwnedProcessTree = createOwnedProcessTreeTermination(
       ownedChild,
       subject,
@@ -148,6 +173,7 @@ export function createClaudeOwnedQueryProcess(
     spawnClaudeCodeProcess,
     child: () => child,
     transportError: () => transportError,
+    stderrTail: () => stderrTail,
     waitForNaturalClose: async (waitMs, signal) => {
       const ownedChild = child;
       if (!ownedChild) return true;

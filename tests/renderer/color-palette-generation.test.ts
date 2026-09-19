@@ -17,6 +17,7 @@ import {
   buildPaletteTokens,
 } from "../../scripts/color-theme-spec.mjs";
 import {
+  buildSwatchTokens,
   renderFiles,
   windowBackground,
 } from "../../scripts/generate-color-themes.mjs";
@@ -69,6 +70,13 @@ describe("generated color palettes", () => {
       expect(repoFile(path), `${path} is stale; run npm run generate:color-themes`)
         .toBe(expected);
     }
+  });
+
+  it.each(cases)("uses the same %s %s message-action color in previews and the chat", (family, appearance) => {
+    const tokens = palette(family, appearance);
+    const preview = Object.fromEntries(buildSwatchTokens(family, appearance));
+    expect(tokens["message-action"]).toMatch(/^#[0-9a-f]{6}$/u);
+    expect(preview["theme-preview-message-action"]).toBe(tokens["message-action"]);
   });
 
   it("covers exactly the shipped color theme identities", () => {

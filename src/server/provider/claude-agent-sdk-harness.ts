@@ -6,12 +6,16 @@ import {
   type PermissionResult,
   type Query,
   type SDKMessage,
+  type SDKStartupFailureReason,
   type SDKUserMessage,
+  type TerminalReason,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import {
+  launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  redactExactCredentials,
   sanitizeProviderActivityDetail,
 } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
@@ -36,7 +40,7 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
@@ -58,6 +62,7 @@ import {
 } from "./claude-skill-operation";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
+import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeStartupFailure } from "./claude-startup-failure";
 import {
   readClaudeContextUsage,
 } from "./claude-usage";
@@ -372,7 +377,7 @@ function startClaudeRun(
       return deny("The proposed plan was returned to the user for review.");
     }
 
-    if (options.input.access === "full") {
+    if (options.input.access === "full" && options.input.interactionMode !== "plan") {
       return { behavior: "allow", updatedInput: toolInput };
     }
     const approvalTitle = callbackOptions.title
@@ -445,6 +450,7 @@ function startClaudeRun(
   emitter.status("starting");
   const usesNativeAnthropic = options.input.backendProfile.id
     === NATIVE_ANTHROPIC_PROFILE_ID;
+  const launchCredentials = launchCredentialValues(claudeRunEnvironment(options.environment));
   const routeFailure = (error: string): string => usesNativeAnthropic
     ? error
     : providerFailureMessage(
@@ -486,6 +492,7 @@ function startClaudeRun(
         throw error;
       }
       prompt.uuid = randomUUID();
+      delegateLifecycle.expectPrompt(prompt.uuid);
       if (!promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }
@@ -538,6 +545,7 @@ function startClaudeRun(
           // here would let a repository's .claude/settings.json install hooks
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
+          systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           ...(supportsFastMode
             ? {
@@ -707,6 +715,7 @@ function startClaudeRun(
           if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
+              if (isClaudeQueuedCompletionAck(message)) continue;
               throw new Error(
                 "Claude returned a successful result without correlating an accepted follow-up.",
               );
@@ -773,11 +782,15 @@ function startClaudeRun(
         );
       }
       const finalMessage = completion.result;
-      if (finalMessage.subtype !== "success") {
+      if (finalMessage.subtype !== "success" || finalMessage.is_error) {
+        const startupFailure = claudeStartupFailure(finalMessage);
+        const resultReason = finalMessage.subtype === "success"
+          ? finalMessage.terminal_reason ?? "api_error"
+          : startupFailure?.reason ?? finalMessage.subtype;
         const technicalDetail = sanitizeProviderActivityDetail(
-          finalMessage.errors
+          redactExactCredentials((finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
             .filter((value): value is string => typeof value === "string")
-            .join("\n"),
+            .join("\n"), launchCredentials),
           {
             workspaceRoot: options.input.cwd,
             maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -786,7 +799,8 @@ function startClaudeRun(
         const projectedFailure = messageProjector.preferredFailure();
         const error = routeFailure(
           projectedFailure?.message
-            ?? claudeResultFailure(finalMessage.subtype),
+            ?? startupFailure?.message
+            ?? claudeResultFailure(resultReason),
         );
         return finishResult(
           "failed",
@@ -799,7 +813,7 @@ function startClaudeRun(
               }
             : claudeFailure(
                 error,
-                `result/${finalMessage.subtype}`,
+                `result/${resultReason}`,
                 technicalDetail ?? undefined,
               ),
         );
@@ -821,11 +835,14 @@ function startClaudeRun(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
       );
       const message = routeFailure(rawError);
-      return finishResult(
-        "failed",
-        message,
-        claudeRuntimeFailure(rawError, message),
-      );
+      const technicalDetail = sanitizeProviderActivityDetail(redactExactCredentials(ownedProcess.stderrTail(), launchCredentials), {
+        workspaceRoot: options.input.cwd,
+        maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+      });
+      return finishResult("failed", message, {
+        ...claudeRuntimeFailure(rawError, message),
+        ...(technicalDetail ? { technicalDetail } : {}),
+      });
     } finally {
       acceptingFollowUps = false;
       hostToolRuntime?.settle();
@@ -1062,9 +1079,15 @@ function planSteps(markdown: string): AgentPlanStep[] {
 }
 
 function claudeLifecycleFailure(
-  reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed",
+  reason: Extract<ClaudeDelegateCompletion, { kind: "incomplete" }>["reason"],
 ): string {
   switch (reason) {
+    case "prompt-refused":
+      return "Claude refused the request before returning an answer.";
+    case "prompt-cancelled":
+      return "Claude cancelled the request before returning an answer.";
+    case "prompt-discarded":
+      return "Claude discarded the request before returning an answer.";
     case "delegates-abandoned":
       return "Claude Agent SDK exited while delegated work was still running.";
     case "parent-not-resumed":
@@ -1075,20 +1098,22 @@ function claudeLifecycleFailure(
 }
 
 function claudeResultFailure(
-  subtype: Exclude<
-    Extract<SDKMessage, { type: "result" }>["subtype"],
-    "success"
-  >,
+  reason:
+    | Exclude<Extract<SDKMessage, { type: "result" }>["subtype"], "success">
+    | TerminalReason
+    | SDKStartupFailureReason,
 ): string {
-  switch (subtype) {
-    case "error_during_execution":
-      return "Claude could not complete the request.";
+  switch (reason) {
+    case "prompt_too_long":
+      return "This chat is too long for Claude's context. Compact it or start a new chat.";
     case "error_max_turns":
       return "Claude reached the maximum number of agent turns.";
     case "error_max_budget_usd":
       return "Claude reached the configured spending limit.";
     case "error_max_structured_output_retries":
       return "Claude could not produce a valid structured response.";
+    default:
+      return "Claude could not complete the request.";
   }
 }
 
@@ -1163,7 +1188,7 @@ export function claudeSupportsThinkingDisplay(
 function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
 ): NodeJS.ProcessEnv {
-  return { ...CLAUDE_SUBAGENT_LIMITS, ...(environment ?? process.env) };
+  return { ...CLAUDE_SUBAGENT_LIMITS, ...CLAUDE_STARTUP_FAILURE_RESULTS, ...(environment ?? process.env) };
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

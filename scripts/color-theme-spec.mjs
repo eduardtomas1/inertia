@@ -250,6 +250,11 @@ export function buildPaletteTokens(family, appearance) {
     })],
     ["accent-text", accentText],
     ["accent-strong", accentStrong],
+    ["message-action", oklchToHex({
+      l: arch.accentL,
+      c: arch.accentChroma * 0.9,
+      h: (spec.accentHue + 50) % 360,
+    })],
     ["code-surface", codeSurface],
     ["code-header-surface", neutral(arch.codeHeaderL)],
     ["code-border", rgba(text, arch.codeBorderAlpha)],

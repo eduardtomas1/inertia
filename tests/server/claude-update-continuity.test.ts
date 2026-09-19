@@ -52,6 +52,43 @@ async function fixture() {
 }
 
 describe("Claude update continuity", () => {
+  it("recovers text after NULs in stored and streamed messages through the provider prompt", async () => {
+    const f = await fixture();
+    const answer = f.store.createMessage(f.conversation.id, "Before\0 preserve the first requirement. ", "assistant");
+    f.store.appendMessageContent(answer.id, "Next\0 preserve the second requirement.");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });
+    const history = f.store.continuationHistory(f.conversation.id);
+    expect(history.truncated).toBe(false);
+    const resolved = f.resolve();
+    const input = resolved.adopt(f.store.beginAgentTurn(resolved.input)).active.providerInput;
+    expect(input.prompt).toContain("preserve the first requirement");
+    expect(input.prompt).toContain("preserve the second requirement");
+    expect(input.prompt).not.toContain("\\u0000");
+  });
+
+  it.each([false, true])("drops partial credentials at the byte boundary before redaction (streamed: %s)", async (streamed) => {
+    const f = await fixture();
+    const prefix = "OPENAI_API_KEY=synthetic-credential ".repeat(100);
+    const body = prefix + " ".repeat(8189 - prefix.length) + "sk-" + "Q".repeat(50);
+    const message = f.store.createMessage(f.conversation.id, streamed ? "" : body, "assistant");
+    if (streamed) f.store.appendMessageContent(message.id, body);
+    const history = f.store.continuationHistory(f.conversation.id);
+    expect(history.truncated).toBe(true);
+    expect(history.content).not.toContain("sk-");
+    expect(history.content).not.toContain("synthetic-credential");
+    expect(history.content).toContain("[redacted]");
+  });
+
+  it("joins small chunks before redacting and retains text beyond the old 32-chunk cap", async () => {
+    const f = await fixture();
+    const answer = f.store.createMessage(f.conversation.id, "", "assistant");
+    for (const text of "Start OPENAI_API_KEY=synthetic-credential End 😀") f.store.appendMessageContent(answer.id, text);
+    const history = f.store.continuationHistory(f.conversation.id);
+    expect(history.truncated).toBe(false);
+    expect(history.content).toContain("Start [redacted] End 😀");
+    expect(history.content).not.toContain("synthetic-credential");
+  });
+
   it("recovers bounded visible context without reusing an invalidated native session", async () => {
     const f = await fixture();
     f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });

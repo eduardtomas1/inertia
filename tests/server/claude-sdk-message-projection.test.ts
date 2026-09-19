@@ -19,6 +19,7 @@ import {
 import { CappedProviderBuffer } from "../../src/server/provider/io";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
+  claudeBackgroundTasks,
   claudeSuccessResult,
   claudeSystem,
   fixtureClaudeQuery,
@@ -223,6 +224,21 @@ describe("Claude Agent SDK message projection", () => {
       event.type === "text" ? [event.text] : [])).not.toContain(
       "must not be projected",
     );
+  });
+
+  it("keeps repository state notices quiet while still flagging other unknown system updates", async () => {
+    const { events, result } = await run([
+      claudeSystem("vcs_state_changed", { branch: "feature" }),
+      claudeSystem("code_change_published", { url: "https://example.test/pull/1" }),
+      claudeSystem("future_system_notice"),
+      claudeSuccessResult("Done", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Done" });
+    const notices = events.filter((event) =>
+      event.type === "activity" && event.label === "Claude sent an unsupported SDK update");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ detail: expect.stringContaining("Subtype: future_system_notice") });
   });
 
   it("reconciles delta and snapshot blocks by API message identity", async () => {
@@ -784,6 +800,79 @@ describe("Claude Agent SDK message projection", () => {
       },
     });
     expect(result.failure?.technicalDetail).not.toContain("/home/etomas");
+  });
+
+  it("fails the turn when a successful result reports an API error", async () => {
+    const limitNotice = "You've hit your session limit · resets 5pm";
+    const { result } = await run([
+      assistantMessage({
+        uuid: "assistant-session-limit",
+        apiMessageId: "api-session-limit",
+        content: [{ type: "text", text: limitNotice }],
+        error: "rate_limit",
+      }),
+      sdkMessage({
+        ...claudeSuccessResult(limitNotice),
+        is_error: true,
+        terminal_reason: "api_error",
+      }),
+    ]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "Claude reached an account rate limit.",
+      failure: {
+        message: "Claude reached an account rate limit.",
+        terminalEvent: "assistant/rate_limit",
+        activityId: "assistant-session-limit",
+        technicalDetail: limitNotice,
+      },
+    });
+  });
+
+  it("keeps the resumed answer when queued delegate completions send an empty result first", async () => {
+    const { events, result } = await run([
+      claudeBackgroundTasks(["agent-1", "agent-2"]),
+      assistantMessage({ uuid: "assistant-started", apiMessageId: "api-started", content: [{ type: "text", text: "Started. " }] }),
+      claudeSuccessResult("Started. ", "completed"),
+      claudeBackgroundTasks([]),
+      claudeSystem("task_notification", { task_id: "agent-1", status: "completed" }),
+      claudeSystem("task_notification", { task_id: "agent-2", status: "completed" }),
+      sdkMessage({ ...claudeSuccessResult(""), num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 } }),
+      assistantMessage({ uuid: "assistant-final", apiMessageId: "api-final", content: [{ type: "text", text: "Both delegates finished." }] }),
+      claudeSuccessResult("Both delegates finished.", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Both delegates finished." });
+    expect(events.filter((event) => event.type === "extension" && event.event.type === "usage")
+      .every((event) => event.type === "extension" && event.event.type === "usage" && event.event.usage.totalProcessedTokens !== 0)).toBe(true);
+  });
+
+  it("explains API error results that arrive without a typed assistant error", async () => {
+    const { result } = await run([
+      sdkMessage({
+        ...claudeSuccessResult("Prompt is too long"),
+        is_error: true,
+        terminal_reason: "prompt_too_long",
+      }),
+    ]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "This chat is too long for Claude's context. Compact it or start a new chat.",
+      failure: {
+        terminalEvent: "result/prompt_too_long",
+        technicalDetail: "Prompt is too long",
+      },
+    });
+    const { result: unclassified } = await run([
+      sdkMessage({ ...claudeSuccessResult("Overloaded"), is_error: true }),
+    ]);
+    expect(unclassified).toMatchObject({
+      status: "failed",
+      error: "Claude could not complete the request.",
+      failure: { terminalEvent: "result/api_error" },
+    });
   });
 
   it("surfaces authentication guidance and fallback explanations", async () => {

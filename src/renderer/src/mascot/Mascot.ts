@@ -40,15 +40,17 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const dragging = Boolean(snapshot.dragging);
     const animated = moving && !dragging
       && !settled && (status.activeCount > 0 || status.phase === "completed");
-    const src = mascotAssets[mascotArtwork(status.phase)][animated ? "animation" : "poster"];
+    const artwork = snapshot.sprites?.files ?? mascotAssets;
+    const src = artwork[mascotArtwork(status.phase)][animated ? "animation" : "poster"];
     if (image.getAttribute("src") !== src) image.setAttribute("src", src);
     image.dataset.animated = String(animated);
-    const pickup = mascotAssets.pickup[moving && dragging ? "animation" : "poster"];
+    const pickup = artwork.pickup[moving && dragging ? "animation" : "poster"];
     if (pickupImage.getAttribute("src") !== pickup) pickupImage.setAttribute("src", pickup);
     pickupImage.dataset.animated = String(moving && dragging);
     main.dataset.dragging = String(dragging);
     main.dataset.motion = String(moving);
     main.dataset.placement = snapshot.placement ?? "manual";
+    main.dataset.sprites = snapshot.sprites ? "custom" : "default";
     main.dataset.phase = status.phase;
     label.textContent = MASCOT_LABELS[status.phase];
     button.disabled = !status.conversationId;

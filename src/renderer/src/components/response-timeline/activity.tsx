@@ -2,14 +2,12 @@ import {
   memo,
   lazy,
   Suspense,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
   Brain,
@@ -434,31 +432,16 @@ export function useAnchoredDetailsToggle(
   onBeforeToggle?: () => void,
   onAfterToggle?: () => void,
 ): {
-  onPointerDownCapture: () => void;
-  onPointerCancelCapture: () => void;
-  onKeyDownCapture: (event: ReactKeyboardEvent<HTMLElement>) => void;
   onClickCapture: () => void;
   onClick: () => void;
 } {
-  const prepared = useRef(false);
-  const prepare = useCallback(() => {
-    if (prepared.current) return;
-    prepared.current = true;
-    onBeforeToggle?.();
-  }, [onBeforeToggle]);
   return {
-    onPointerDownCapture: prepare,
-    onPointerCancelCapture: () => {
-      prepared.current = false;
-    },
-    onKeyDownCapture: (event) => {
-      if (event.key === "Enter" || event.key === " ") prepare();
-    },
-    onClickCapture: prepare,
+    // Claim navigation before the native toggle, but after pointer release.
+    // Doing this on press can move the summary out from under the pointer.
+    onClickCapture: () => onBeforeToggle?.(),
     onClick: () => {
       window.requestAnimationFrame(() => {
         onAfterToggle?.();
-        prepared.current = false;
       });
     },
   };
@@ -478,6 +461,7 @@ export const ActivityGroup = memo(function ActivityGroup({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [expandRunning, setExpandRunning] = useState(false);
   const rowsId = useId();
   const summary = useMemo(
     () => summarizeActivities(entry.activities),
@@ -509,7 +493,9 @@ export const ActivityGroup = memo(function ActivityGroup({
     expanded,
     settled: folded,
     revealLatestFailure,
+    expandRunning,
   });
+  const hiddenRunning = summary.running - rows.filter(({ activity, folded: hidden }) => !hidden && activity.status === "running").length;
   const toggle = (): void => {
     onBeforeToggle?.();
     setExpanded((current) => !current);
@@ -559,6 +545,21 @@ export const ActivityGroup = memo(function ActivityGroup({
           aria-hidden="true"
         />
       </button>
+      {!expanded && (hiddenRunning > 0 || (expandRunning && summary.running > 0)) && (
+        <button
+          type="button"
+          className="turn-activity-group-summary"
+          aria-expanded={expandRunning}
+          aria-controls={rowsId}
+          onClick={() => {
+            onBeforeToggle?.();
+            setExpandRunning((current) => !current);
+            window.requestAnimationFrame(() => onAfterToggle?.());
+          }}
+        >
+          {expandRunning ? "Show fewer running operations" : `Show ${hiddenRunning} more running ${hiddenRunning === 1 ? "operation" : "operations"}`}
+        </button>
+      )}
       <div className="turn-activity-group-rows" id={rowsId}>
         {rows.map(({ activity, folded: rowFolded }) => (
           <div

@@ -3,11 +3,15 @@ import type {
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
+import { claudeCommandLifecycleMessage, claudeObjectValue } from "./claude-message-projector-support";
+
 export type ClaudeDelegateCompletion =
   | { kind: "result"; result: SDKResultMessage }
   | {
       kind: "incomplete";
-      reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed";
+      reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed"
+        | "prompt-refused" | "prompt-cancelled" | "prompt-discarded";
     };
 
 /**
@@ -28,12 +32,42 @@ export class ClaudeDelegateLifecycle {
       }
     | undefined;
   private endedAtAuthoritativeIdle = false;
+  private promptUuid: string | null = null;
+  private promptPending = false;
+  private promptFailure: "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | undefined;
+
+  expectPrompt(uuid: string): void {
+    this.promptUuid = uuid;
+  }
 
   observe(
     message: SDKMessage,
     hasLiveTaskTrace = false,
   ): { turnEnded: boolean } {
+    const command = claudeCommandLifecycleMessage(message);
+    if (command) {
+      if (command.command_uuid !== this.promptUuid) return { turnEnded: false };
+      this.promptPending = command.state === "queued" || command.state === "started";
+      if (command.state === "refused" || command.state === "cancelled" || command.state === "discarded") {
+        this.promptFailure = `prompt-${command.state}`;
+        return { turnEnded: true };
+      }
+      return { turnEnded: false };
+    }
+
     if (message.type === "result") {
+      const answersPrompt = claudeResultUserMessageIds(message).includes(this.promptUuid ?? "");
+      const answersNotification = claudeObjectValue(
+        (message as { origin?: unknown }).origin,
+      )?.kind === "task-notification";
+      if (
+        (isClaudeQueuedCompletionAck(message) && (this.latestResult || (this.promptPending && !answersPrompt)))
+        || (!this.latestResult && answersNotification && !answersPrompt)
+      ) {
+        // This result belongs to queued background work, never to the prompt.
+        // EOF or a refused command cannot turn it into a successful answer.
+        return { turnEnded: false };
+      }
       const candidate = {
         message,
         deferred: isDeferredResult(
@@ -92,6 +126,7 @@ export class ClaudeDelegateLifecycle {
   }
 
   complete(): ClaudeDelegateCompletion {
+    if (this.promptFailure) return { kind: "incomplete", reason: this.promptFailure };
     const candidate = this.latestResult;
     if (!candidate) {
       return { kind: "incomplete", reason: "missing-result" };
@@ -110,6 +145,9 @@ export class ClaudeDelegateLifecycle {
     this.observedBackgroundTaskLevel = false;
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
+    this.promptPending = false;
+    this.promptUuid = null;
+    this.promptFailure = undefined;
   }
 
   hasProvisionalResult(): boolean {
@@ -132,9 +170,9 @@ export class ClaudeDelegateLifecycle {
   }
 
   private canEndTurn(): boolean {
-    return this.liveBackgroundTaskIds.size === 0
+    return this.promptFailure !== undefined || (this.liveBackgroundTaskIds.size === 0
       && this.latestResult !== undefined
-      && !this.latestResult.deferred;
+      && !this.latestResult.deferred);
   }
 }
 
@@ -151,4 +189,11 @@ function isDeferredResult(
   // result provisional regardless of terminal_reason. A later parent result
   // replaces it after the exact delegated-work terminal edge.
   return hadLiveDelegatedWork;
+}
+
+export function isClaudeQueuedCompletionAck(result: SDKResultMessage): boolean {
+  return result.subtype === "success"
+    && !result.is_error
+    && result.num_turns === 0
+    && result.result === "";
 }

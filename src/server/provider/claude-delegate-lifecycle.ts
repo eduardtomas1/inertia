@@ -10,7 +10,8 @@ export type ClaudeDelegateCompletion =
   | { kind: "result"; result: SDKResultMessage }
   | {
       kind: "incomplete";
-      reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed";
+      reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed"
+        | "prompt-refused" | "prompt-cancelled" | "prompt-discarded";
     };
 
 /**
@@ -33,7 +34,7 @@ export class ClaudeDelegateLifecycle {
   private endedAtAuthoritativeIdle = false;
   private promptUuid: string | null = null;
   private promptPending = false;
-  private skippedAck: SDKResultMessage | undefined;
+  private promptFailure: "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | undefined;
 
   expectPrompt(uuid: string): void {
     this.promptUuid = uuid;
@@ -47,11 +48,11 @@ export class ClaudeDelegateLifecycle {
     if (command) {
       if (command.command_uuid !== this.promptUuid) return { turnEnded: false };
       this.promptPending = command.state === "queued" || command.state === "started";
-      if (this.promptPending || this.latestResult || !this.skippedAck) {
-        return { turnEnded: false };
+      if (command.state === "refused" || command.state === "cancelled" || command.state === "discarded") {
+        this.promptFailure = `prompt-${command.state}`;
+        return { turnEnded: true };
       }
-      this.latestResult = { message: this.skippedAck, deferred: false };
-      return { turnEnded: this.canEndTurn() };
+      return { turnEnded: false };
     }
 
     if (message.type === "result") {
@@ -63,7 +64,8 @@ export class ClaudeDelegateLifecycle {
         (isClaudeQueuedCompletionAck(message) && (this.latestResult || (this.promptPending && !answersPrompt)))
         || (!this.latestResult && answersNotification && !answersPrompt)
       ) {
-        this.skippedAck ??= message;
+        // This result belongs to queued background work, never to the prompt.
+        // EOF or a refused command cannot turn it into a successful answer.
         return { turnEnded: false };
       }
       const candidate = {
@@ -124,8 +126,8 @@ export class ClaudeDelegateLifecycle {
   }
 
   complete(): ClaudeDelegateCompletion {
-    const candidate = this.latestResult
-      ?? (this.skippedAck ? { message: this.skippedAck, deferred: false } : undefined);
+    if (this.promptFailure) return { kind: "incomplete", reason: this.promptFailure };
+    const candidate = this.latestResult;
     if (!candidate) {
       return { kind: "incomplete", reason: "missing-result" };
     }
@@ -144,7 +146,8 @@ export class ClaudeDelegateLifecycle {
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
     this.promptPending = false;
-    this.skippedAck = undefined;
+    this.promptUuid = null;
+    this.promptFailure = undefined;
   }
 
   hasProvisionalResult(): boolean {
@@ -167,9 +170,9 @@ export class ClaudeDelegateLifecycle {
   }
 
   private canEndTurn(): boolean {
-    return this.liveBackgroundTaskIds.size === 0
+    return this.promptFailure !== undefined || (this.liveBackgroundTaskIds.size === 0
       && this.latestResult !== undefined
-      && !this.latestResult.deferred;
+      && !this.latestResult.deferred);
   }
 }
 

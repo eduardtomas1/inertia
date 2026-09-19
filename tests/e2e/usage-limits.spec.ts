@@ -7,6 +7,8 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
 
+const quotaObservedAt = Date.now();
+const quotaResetEpoch = Math.floor(quotaObservedAt / 1000);
 const nativeSource = `
 if (process.argv[2] === "--help") { process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n"); process.exit(0); }
 const send = (id, result) => process.stdout.write(JSON.stringify({ id, result }) + "\\n");
@@ -15,7 +17,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   if (message.method === "initialize") send(message.id, { userAgent: "usage-limits-fixture" });
   if (message.method === "config/read") send(message.id, { config: { cli_auth_credentials_store: "file" } });
   if (message.method === "account/read") send(message.id, { account: { type: "chatgpt", email: "work@example.test", planType: "pro" } });
-  if (message.method === "account/rateLimits/read") send(message.id, { rateLimits: { limitId: "codex", primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: Math.floor(Date.now()/1000)+5400 }, secondary: { usedPercent: 77, windowDurationMins: 10080, resetsAt: Math.floor(Date.now()/1000)+172800 } }, rateLimitResetCredits: { availableCount: 2, credits: null } });
+  if (message.method === "account/rateLimits/read") send(message.id, { rateLimits: { limitId: "codex", primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: ${quotaResetEpoch}+5400 }, secondary: { usedPercent: 77, windowDurationMins: 10080, resetsAt: ${quotaResetEpoch}+172800 } }, rateLimitResetCredits: { availableCount: 2, credits: null } });
   if (message.method === "model/list") send(message.id, { data: [{ model: "fixture-model", displayName: "Fixture model", isDefault: true, inputModalities: ["text"], supportedReasoningEfforts: [], defaultReasoningEffort: "medium" }], nextCursor: null });
   if (message.method === "account/rateLimitResetCredit/consume") send(message.id, { outcome: "nothingToReset" });
 });
@@ -45,9 +47,9 @@ test("inspects pooled accounts, private details and composer limits in light, da
     }
     let text = ""; for await (const chunk of request) text += String(chunk);
     const body = JSON.parse(text) as { url: string; auth_index: string };
-    const reset = Math.floor(Date.now()/1000);
-    const value = body.url.endsWith("rate-limit-reset-credits") ? { credits: [{ id: `fixture-${body.auth_index}-credit`, status: "available", reset_type: "codex_rate_limits", expires_at: new Date(Date.now()+86400000*20).toISOString() }] }
-      : body.auth_index === "claude" ? { five_hour: { utilization: 10, resets_at: new Date(Date.now()+3600000).toISOString() }, seven_day: { utilization: 53, resets_at: new Date(Date.now()+86400000*4).toISOString() } }
+    const reset = quotaResetEpoch;
+    const value = body.url.endsWith("rate-limit-reset-credits") ? { credits: [{ id: `fixture-${body.auth_index}-credit`, status: "available", reset_type: "codex_rate_limits", expires_at: new Date(quotaObservedAt+86400000*20).toISOString() }] }
+      : body.auth_index === "claude" ? { five_hour: { utilization: 10, resets_at: new Date(quotaObservedAt+3600000).toISOString() }, seven_day: { utilization: 53, resets_at: new Date(quotaObservedAt+86400000*4).toISOString() } }
         : { plan_type: "pro", rate_limit: { primary_window: { used_percent: body.auth_index === "local" ? 42 : 9, limit_window_seconds: 18000, reset_at: reset+5400 }, secondary_window: { used_percent: body.auth_index === "local" ? 77 : 25, limit_window_seconds: 604800, reset_at: reset+172800 } } };
     response.end(JSON.stringify({ status_code: 200, body: JSON.stringify(value) }));
     })().catch(() => { response.statusCode = 500; response.end("{}"); });
@@ -97,7 +99,10 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await expect(page.getByRole("region", { name: "Codex limits", exact: true }).locator("h3")).toContainText("2 accounts");
   await page.locator(".limits-sources summary").click();
   const capture = async (name: string): Promise<void> => { const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path, animations: "disabled" }); await testInfo.attach(name, { path, contentType: "image/png" }); };
-  for (const button of await page.getByRole("button", { name: /^Dismiss .* quota notice$/ }).all()) await button.click();
+  // These notices expire after ten seconds. Waiting for their normal removal
+  // avoids clicking a stale notice while the account-layout fixture settles.
+  await expect(page.getByRole("button", { name: /^Dismiss .* quota notice$/ }))
+    .toHaveCount(0, { timeout: 35_000 });
   const codex = page.getByRole("region", { name: "Codex limits", exact: true });
   await expect(codex.locator(".limits-strip-accounts")).toHaveAttribute("inert", "");
   await codex.getByRole("button", { name: "Show Codex accounts", exact: true }).click();

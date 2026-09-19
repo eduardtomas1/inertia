@@ -1,9 +1,11 @@
 import type Database from "better-sqlite3";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
+import { readBoundedMessageText } from "./bounded-message-text";
 
 const MESSAGE_LIMIT = 24;
 const MESSAGE_BYTES = 4_096;
+const SOURCE_BYTES = 2 * MESSAGE_BYTES;
 const HISTORY_BYTES = 40 * 1_024;
 
 /** Only visible prose from this conversation, never files, attachments, tools,
@@ -13,32 +15,25 @@ export function readContinuationHistory(database: Database.Database, conversatio
   truncated: boolean;
 } {
   const rows = database.prepare(`
-    SELECT id, role, substr(content, 1, ?) AS content
+    SELECT id, role, COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
     FROM messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant')
     ORDER BY created_at DESC, id DESC LIMIT ?
-  `).all(MESSAGE_BYTES + 1, conversationId, MESSAGE_LIMIT + 1) as {
-    id: string; role: string; content: string;
+  `).all(SOURCE_BYTES + 1, conversationId, MESSAGE_LIMIT + 1) as {
+    id: string; role: string; content: Buffer;
   }[];
   let truncated = rows.length > MESSAGE_LIMIT;
   const chunks = database.prepare(`
-    SELECT substr(content, 1, ?) AS content
-    FROM message_content_chunks WHERE message_id = ? ORDER BY sequence LIMIT 33
+    SELECT substr(CAST(content AS BLOB), 1, ?) AS content
+    FROM message_content_chunks WHERE message_id = ? ORDER BY sequence LIMIT ?
   `);
   const messages = rows.slice(0, MESSAGE_LIMIT).map((row) => {
-    let text = row.content;
-    let chunkCount = 0;
-    let messageTruncated = false;
-    for (const chunk of chunks.iterate(MESSAGE_BYTES + 1, row.id) as Iterable<{ content: string }>) {
-      if (text.length > MESSAGE_BYTES || chunkCount++ >= 32) {
-        messageTruncated = true;
-        break;
-      }
-      text += chunk.content;
-    }
-    const scrubbed = boundedSubagentText(text, text.length) ?? "";
+    const text = readBoundedMessageText(row.content, () => chunks.iterate(
+      SOURCE_BYTES + 1, row.id, SOURCE_BYTES + 1,
+    ) as Iterable<{ content: Buffer }>, SOURCE_BYTES);
+    const scrubbed = boundedSubagentText(text.content, text.content.length) ?? "";
     const bounded = truncateUtf8(neutralizeUntrustedAgentText(scrubbed), MESSAGE_BYTES);
-    const shortened = messageTruncated || bounded.truncated || Buffer.byteLength(text, "utf8") > MESSAGE_BYTES;
+    const shortened = text.truncated || bounded.truncated;
     truncated ||= shortened;
     return { role: row.role, content: bounded.text, truncated: shortened };
   }).reverse();

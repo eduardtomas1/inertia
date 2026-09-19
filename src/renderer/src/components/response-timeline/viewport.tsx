@@ -943,20 +943,38 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     return () => scroll.removeEventListener("scroll", remember);
   }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
+  const beginReaderTimelineNavigation = useCallback((): void => {
+    cancelFinalAnswerAnchor();
+    onReaderNavigationIntent?.();
+  }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
+
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
+    // Disclosures are deliberate history navigation. Claim it before their
+    // resize can let the parent follow-latest observer reclaim the viewport.
+    beginReaderTimelineNavigation();
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    const viewportTop = scrollElement.getBoundingClientRect().top;
+    const viewport = scrollElement.getBoundingClientRect();
+    const viewportTop = viewport.top;
     const rows = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")];
     const sourceIndex = rows.findIndex((row) => row.dataset.responseRowId === sourceTurnId);
     const rowsAfterSource = sourceIndex >= 0 ? rows.slice(sourceIndex + 1) : rows;
-    const anchor = rowsAfterSource.find((row) => row.getBoundingClientRect().top >= viewportTop + 8)
-      ?? rowsAfterSource.find((row) => row.getBoundingClientRect().bottom > viewportTop + 8)
-      ?? rows.find((row) => row.getBoundingClientRect().top >= viewportTop + 8)
-      ?? rows.find((row) => row.getBoundingClientRect().bottom > viewportTop + 8);
-    if (!anchor?.dataset.responseRowId) return;
+    const visible = (row: HTMLElement): boolean => {
+      const bounds = row.getBoundingClientRect();
+      return bounds.top < viewport.bottom - 8 && bounds.bottom > viewportTop + 8;
+    };
     const source = sourceIndex >= 0 ? rows[sourceIndex] : undefined;
+    // A tall source must retain the disclosure the reader just opened, even
+    // when a following row is visible. Following that row evicts the control.
+    // Otherwise preserve a visible following row, never an overscanned one.
+    const anchor = source && visible(source) && source.getBoundingClientRect().height > viewport.height
+      ? source
+      : rowsAfterSource.find((row) => visible(row) && row.getBoundingClientRect().top >= viewportTop + 8)
+      ?? rowsAfterSource.find(visible)
+      ?? rows.find((row) => visible(row) && row.getBoundingClientRect().top >= viewportTop + 8)
+      ?? rows.find(visible);
+    if (!anchor?.dataset.responseRowId) return;
     const capturedAnchor: ExpansionAnchor = {
       sequence: nextExpansionAnchorSequence.current += 1,
       sourceTurnId,
@@ -966,7 +984,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     };
     pendingAnchors.current.set(sourceTurnId, capturedAnchor);
     manuallyAdjustedRows.current.add(sourceTurnId);
-  }, [props.scrollElementRef, props.timelineElementRef]);
+  }, [beginReaderTimelineNavigation, props.scrollElementRef, props.timelineElementRef]);
 
   const restoreExpansionAnchor = useCallback((sourceTurnId: string): void => {
     const anchor = pendingAnchors.current.get(sourceTurnId);
@@ -1114,11 +1132,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     virtualized,
     virtualizer,
   ]);
-
-  const beginReaderTimelineNavigation = useCallback((): void => {
-    cancelFinalAnswerAnchor();
-    onReaderNavigationIntent?.();
-  }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
   useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem);
 

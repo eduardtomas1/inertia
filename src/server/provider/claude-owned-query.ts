@@ -102,7 +102,14 @@ export function createClaudeOwnedQueryProcess(
     });
     ownedChild.stderr.setEncoding("utf8");
     ownedChild.stderr.on("data", (chunk: string) => {
-      stderrTail = (stderrTail + chunk).slice(-MAX_CLAUDE_STDERR_TAIL_CHARS);
+      const combined = stderrTail + chunk;
+      if (combined.length <= MAX_CLAUDE_STDERR_TAIL_CHARS) {
+        stderrTail = combined;
+        return;
+      }
+      const kept = combined.slice(-MAX_CLAUDE_STDERR_TAIL_CHARS);
+      const firstWholeLine = kept.indexOf("\n");
+      stderrTail = firstWholeLine >= 0 ? kept.slice(firstWholeLine + 1) : "";
     });
     terminateOwnedProcessTree = createOwnedProcessTreeTermination(
       ownedChild,

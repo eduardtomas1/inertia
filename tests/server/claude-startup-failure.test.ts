@@ -36,7 +36,7 @@ describe("Claude startup failures", () => {
             usage: { input_tokens: 0, output_tokens: 0 },
             modelUsage: {},
             permission_denials: [],
-            errors: [`Invalid proxy URL in HTTPS_PROXY read from ${root}/proxy.env. Fix or unset HTTPS_PROXY.`],
+            errors: [`Invalid proxy URL in HTTPS_PROXY read from ${root}/proxy.env with credential opaque-proxy-credential-99. Fix or unset HTTPS_PROXY.`],
             startup_failure_reason: "proxy_invalid",
           } as unknown as SDKMessage;
         })());
@@ -52,7 +52,7 @@ describe("Claude startup failures", () => {
         access: "supervised",
       }),
       executable: process.execPath,
-      environment: { HTTPS_PROXY: "invalid" },
+      environment: { HTTPS_PROXY: "invalid", ANTHROPIC_AUTH_TOKEN: "opaque-proxy-credential-99" },
       providerNativeToolsAvailable: true,
     });
 
@@ -61,7 +61,7 @@ describe("Claude startup failures", () => {
       error: "Claude Code's proxy setting isn't a valid URL. Fix it, then try again.",
       failure: {
         terminalEvent: "result/proxy_invalid",
-        technicalDetail: "Invalid proxy URL in HTTPS_PROXY read from <workspace>/proxy.env. Fix or unset HTTPS_PROXY.",
+        technicalDetail: "Invalid proxy URL in HTTPS_PROXY read from <workspace>/proxy.env with credential [redacted]. Fix or unset HTTPS_PROXY.",
       },
     });
     expect(capturedOptions?.env).toMatchObject({

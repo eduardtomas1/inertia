@@ -56,6 +56,19 @@ export function boundProviderActivityDetail(
  * boundary. This deliberately reuses the subagent secret scrubber because
  * both payloads can originate in tool output.
  */
+const CREDENTIAL_ENVIRONMENT_KEY = /(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$/iu;
+
+export function launchCredentialValues(environment: NodeJS.ProcessEnv): string[] {
+  return [...new Set(Object.entries(environment)
+    .filter(([key, value]) => CREDENTIAL_ENVIRONMENT_KEY.test(key) && typeof value === "string" && value.length >= 8)
+    .map(([, value]) => value as string))]
+    .sort((left, right) => right.length - left.length);
+}
+
+export function redactExactCredentials(value: string, credentials: readonly string[]): string {
+  return credentials.reduce((text, credential) => text.replaceAll(credential, "[redacted]"), value);
+}
+
 export function sanitizeProviderActivityDetail(
   value: unknown,
   options: {

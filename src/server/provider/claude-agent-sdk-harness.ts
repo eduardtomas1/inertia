@@ -13,7 +13,9 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import {
+  launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+  redactExactCredentials,
   sanitizeProviderActivityDetail,
 } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
@@ -448,6 +450,7 @@ function startClaudeRun(
   emitter.status("starting");
   const usesNativeAnthropic = options.input.backendProfile.id
     === NATIVE_ANTHROPIC_PROFILE_ID;
+  const launchCredentials = launchCredentialValues(claudeRunEnvironment(options.environment));
   const routeFailure = (error: string): string => usesNativeAnthropic
     ? error
     : providerFailureMessage(
@@ -785,9 +788,9 @@ function startClaudeRun(
           ? finalMessage.terminal_reason ?? "api_error"
           : startupFailure?.reason ?? finalMessage.subtype;
         const technicalDetail = sanitizeProviderActivityDetail(
-          (finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
+          redactExactCredentials((finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
             .filter((value): value is string => typeof value === "string")
-            .join("\n"),
+            .join("\n"), launchCredentials),
           {
             workspaceRoot: options.input.cwd,
             maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -832,7 +835,7 @@ function startClaudeRun(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
       );
       const message = routeFailure(rawError);
-      const technicalDetail = sanitizeProviderActivityDetail(ownedProcess.stderrTail(), {
+      const technicalDetail = sanitizeProviderActivityDetail(redactExactCredentials(ownedProcess.stderrTail(), launchCredentials), {
         workspaceRoot: options.input.cwd,
         maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
       });

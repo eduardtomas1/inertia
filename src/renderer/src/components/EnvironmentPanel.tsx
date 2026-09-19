@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -197,6 +198,13 @@ export function EnvironmentPanel({
   const panelId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const [usageOpen, setUsageOpen] = useState(() => layoutStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY) !== "false");
+  useEffect(() => {
+    const syncUsageOpen = (event: StorageEvent): void => {
+      if (event.key === ENVIRONMENT_USAGE_OPEN_STORAGE_KEY) setUsageOpen(event.newValue !== "false");
+    };
+    window.addEventListener("storage", syncUsageOpen);
+    return () => window.removeEventListener("storage", syncUsageOpen);
+  }, []);
   const pendingActionFocusRef = useRef<{
     runId: string;
     row: HTMLLIElement | null;
@@ -305,13 +313,22 @@ export function EnvironmentPanel({
     action(run);
   };
 
-  const usageSummaryLabel = summary.usage
-    ? summary.usage.context.remainingPercent !== null
-      ? summary.usage.context.valueLabel
-      : summary.usage.quota.freshness === "refreshing"
-        ? "Refreshing"
-        : "Unavailable"
-    : "Unavailable";
+  const tightestLimit = summary.usage?.quota.limits.reduce<
+    NonNullable<typeof summary.usage>["quota"]["limits"][number] | null
+  >((lowest, limit) => (lowest === null || limit.remainingPercent < lowest.remainingPercent ? limit : lowest), null) ?? null;
+  const usageFreshnessQualifier = summary.usage?.quota.freshness === "stale"
+    ? " · stale"
+    : summary.usage?.quota.freshness === "refreshing" ? " · refreshing" : "";
+  const usageSummaryLabel = tightestLimit
+    ? `${Math.round(tightestLimit.remainingPercent)}% left${usageFreshnessQualifier}`
+    : summary.usage?.quota.freshness === "refreshing"
+      ? "Refreshing"
+      : summary.usage?.quota.source === "isolated"
+        ? "Not shared"
+        : "Unavailable";
+  const usageSummaryDescription = tightestLimit
+    ? `Tightest provider limit, ${tightestLimit.label}: ${Math.round(tightestLimit.remainingPercent)}% left${usageFreshnessQualifier ? `, ${usageFreshnessQualifier.slice(3)}` : ""}`
+    : `Provider limits: ${usageSummaryLabel}`;
 
   return (
     <section
@@ -574,7 +591,10 @@ export function EnvironmentPanel({
                 <RefreshCw size={14} aria-hidden="true" />
               )}
               <span>Usage</span>
-              <small aria-label={summary.usage?.context.accessibleLabel}>
+              <small
+                aria-label={usageSummaryDescription}
+                data-tone={tightestLimit ? usageLimitTone(tightestLimit.remainingPercent) : undefined}
+              >
                 {usageSummaryLabel}
               </small>
               <ChevronDown className="environment-disclosure-chevron" size={13} aria-hidden="true" />
@@ -582,12 +602,8 @@ export function EnvironmentPanel({
             <div className="environment-disclosure-content is-usage">
               {summary.usage ? (
                 <>
-                  <div className="environment-usage-context">
-                    <span><strong>{summary.usage.providerLabel}</strong><small>Context window</small></span>
-                    <b>{summary.usage.context.valueLabel}</b>
-                  </div>
                   <div className="environment-usage-quota-state">
-                    <span>Provider limits</span>
+                    <span title={summary.usage.providerLabel}>{summary.usage.providerLabel}</span>
                     <small className={`is-${summary.usage.quota.freshness}`}>
                       {summary.usage.quota.source === "isolated"
                         ? "Unavailable for this backend"
@@ -601,7 +617,7 @@ export function EnvironmentPanel({
                         return (
                           <li key={limit.id}>
                             <span>{limit.label}{windowLabel ? <small>{windowLabel}</small> : null}</span>
-                            <b>{limit.remainingPercent}% left</b>
+                            <b data-tone={usageLimitTone(limit.remainingPercent)}>{Math.round(limit.remainingPercent)}% left</b>
                           </li>
                         );
                       })}
@@ -707,4 +723,8 @@ export function EnvironmentPanel({
       </div>
     </section>
   );
+}
+
+function usageLimitTone(remainingPercent: number): "critical" | "low" | undefined {
+  return remainingPercent < 20 ? "critical" : remainingPercent < 50 ? "low" : undefined;
 }

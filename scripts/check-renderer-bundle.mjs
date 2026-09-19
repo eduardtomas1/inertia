@@ -51,8 +51,8 @@ const budgets = {
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. It measures 11.4 KiB.
-  colorThemesCss: 12 * kibibyte,
+  // separate from the generated entry stylesheet. It measures 11.6 KiB.
+  colorThemesCss: 12.4 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
@@ -116,7 +116,7 @@ const budgets = {
   // 2,114,728 bytes retain 242 bytes of headroom; deferred caps stay separate.
   // Project-scope tracking adds 318 core bytes (2,115,046 total), leaving
   // 26 bytes under the revised cap. See workspace-383/review.md evidence.
-  coreJavaScript: 2_067.1 * kibibyte,
+  coreJavaScript: 2_067.5 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

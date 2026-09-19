@@ -23,6 +23,7 @@
   --accent-soft: #dfe0fc;
   --accent-text: #fdfdff;
   --accent-strong: #380f9d;
+  --message-action: #8e0e82;
   --danger: #96423c;
   --danger-soft: #f5dad7;
   --warning: #81520f;
@@ -265,6 +266,7 @@
   --accent-soft: #202036;
   --accent-text: #090912;
   --accent-strong: #bfc1fc;
+  --message-action: #dd8fd0;
   --danger: #ea9088;
   --danger-soft: #2f1a18;
   --warning: #d9a05a;
@@ -305,7 +307,7 @@
     0 2px 9px -5px rgba(0, 0, 0, 0.88);
   --selected-surface: color-mix(in srgb, var(--surface-hover) 88%, var(--accent-soft));
   --selected-surface-strong: color-mix(in srgb, var(--surface-hover) 74%, var(--accent-soft));
-  --user-request-tint: color-mix(in srgb, var(--surface-muted) 94%, var(--accent-soft));
+  --user-request-tint: color-mix(in srgb, var(--surface-muted) 62%, var(--accent-soft));
   --surface-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='0.32'/%3E%3C/svg%3E");
   --surface-grain-size: 140px 140px;
   --ultra-sweep: #82c8ef;
@@ -2140,7 +2142,6 @@ button.environment-row:focus-visible,
 .environment-disclosure-actions.is-repositories > section > header > span,
 .environment-run-list > li > span,
 .environment-plain-list > li > span,
-.environment-usage-context > span,
 .environment-usage-limits > li > span {
   display: grid;
   min-width: 0;
@@ -2149,8 +2150,7 @@ button.environment-row:focus-visible,
 
 .environment-disclosure-content.is-repositories strong,
 .environment-disclosure-actions.is-repositories strong,
-.environment-run-list strong,
-.environment-usage-context strong {
+.environment-run-list strong {
   overflow: hidden;
   color: var(--text-soft);
   font-size: var(--ui-font-secondary);
@@ -2163,7 +2163,6 @@ button.environment-row:focus-visible,
 .environment-disclosure-actions.is-repositories small,
 .environment-run-list small,
 .environment-plain-list small,
-.environment-usage-context small,
 .environment-usage-limits small {
   overflow: hidden;
   color: var(--text-muted);
@@ -2257,7 +2256,6 @@ button.environment-row:focus-visible,
   outline-offset: -2px;
 }
 
-.environment-usage-context,
 .environment-usage-quota-state,
 .environment-usage-limits > li {
   display: flex;
@@ -2271,7 +2269,6 @@ button.environment-row:focus-visible,
   font-size: var(--ui-font-secondary);
 }
 
-.environment-usage-context > b,
 .environment-usage-limits b {
   flex: 0 0 auto;
   color: var(--text-soft);
@@ -2293,6 +2290,28 @@ button.environment-row:focus-visible,
 
 .environment-usage-quota-state small.is-unavailable {
   color: var(--text-muted);
+}
+
+.environment-usage-quota-state:first-child {
+  border-top: 0;
+}
+
+.environment-usage-quota-state > span {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-usage-section .environment-disclosure > summary > small[data-tone="low"],
+.environment-usage-limits b[data-tone="low"] {
+  color: var(--warning);
+}
+
+.environment-usage-section .environment-disclosure > summary > small[data-tone="critical"],
+.environment-usage-limits b[data-tone="critical"] {
+  color: var(--danger);
 }
 
 .environment-usage-refresh {
@@ -12444,9 +12463,10 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-meta .turn-action:hover,
-.turn-run-details-toggle:hover {
-  color: var(--quiet-secondary);
-  background: var(--surface-hover);
+.turn-run-details-toggle:hover,
+.turn-run-details-toggle[aria-expanded="true"] {
+  color: var(--message-action);
+  background: color-mix(in srgb, var(--message-action) 10%, transparent);
 }
 
 .turn-run-details-toggle:focus-visible {

@@ -28,7 +28,7 @@ for (const appearance of PALETTE_APPEARANCES) {
         await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
         await expect(page.locator("html")).toHaveAttribute("data-color-theme", family.id);
         const palette = Object.fromEntries(buildPaletteTokens(family.id, appearance));
-        const roles = ["app-bg", "sidebar-bg", "surface", "text", "accent", "terminal-bg"];
+        const roles = ["app-bg", "sidebar-bg", "surface", "text", "accent", "message-action", "terminal-bg"];
         await expect.poll(() => page.locator("html").evaluate((element, names) => {
           const styles = getComputedStyle(element);
           return Object.fromEntries(names.map((name) => [name, styles.getPropertyValue(`--${name}`).trim()]));

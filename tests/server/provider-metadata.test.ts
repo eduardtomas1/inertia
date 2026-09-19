@@ -52,6 +52,24 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it("loads and retries the Antigravity catalog independently of its ready installation", async () => {
+    const read = vi.fn(async () => ({ models: [model("gemini-test-high")] }));
+    const cache = new ProviderMetadataCache({ read });
+    const metadata = await cache.metadata("antigravity", resolve("agy"), {}, workspacePath);
+    expect(read).toHaveBeenCalledOnce();
+    expect(metadata.models.map(({ id }) => id)).toEqual(["gemini-test-high"]);
+    expect(metadata.metadataState.models.freshness).toBe("fresh");
+    expect(metadata.metadataState.rateLimits.freshness).toBe("unavailable");
+
+    read.mockRejectedValueOnce(new Error("Catalog temporarily unavailable"));
+    const stale = await cache.metadata("antigravity", resolve("agy"), {}, workspacePath, { force: true });
+    expect(stale.models).toEqual(metadata.models);
+    expect(stale.metadataState.models.freshness).toBe("stale");
+    const retried = await cache.metadata("antigravity", resolve("agy"), {}, workspacePath);
+    expect(retried.metadataState.models.freshness).toBe("fresh");
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     { label: "null", response: null },
     { label: "absent availability", response: {} },

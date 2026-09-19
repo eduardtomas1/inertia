@@ -188,6 +188,11 @@ describe("provider capability manifests", () => {
     expect(capability(kimi, "maintenance-update").support)
       .toBe("unavailable");
 
+    const antigravity = manifest("antigravity-cli");
+    expect(capability(antigravity, "model-discovery").support).toBe("native");
+    expect(capability(antigravity, "auth-state-discovery").support).toBe("unavailable");
+    expect(capability(antigravity, "images").support).toBe("unavailable");
+
     const openCode = manifest("opencode-sdk");
     expect(capability(openCode, "images").support).toBe("negotiated");
     expect(capability(openCode, "provider-owned-server").support).toBe("native");

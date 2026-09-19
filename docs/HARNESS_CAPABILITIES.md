@@ -89,9 +89,14 @@ prints a sign-in URL and waits, while stream-json input fails fast with
 invocation carries a prompt flag.
 
 Detection runs only `agy --version` and requires the selected executable to be
-named `agy` or `antigravity`. Inertia never probes sign-in, never runs
-`agy models`, and never reads or writes Antigravity settings, MCP
-configuration, or state under `~/.gemini/antigravity-cli/`. Sign-in belongs to
+named `agy` or `antigravity`. Model discovery runs that same executable's
+documented `agy models` command with closed stdin, a six-second deadline,
+a bounded stdout-only catalog parser, and confirmed process-tree cleanup.
+Only returned model slugs and labels are advertised; the listing does not
+establish a default, reasoning options, image support, or context windows.
+Failed or malformed reads retain the last catalog as stale and retry on refresh.
+Inertia never probes sign-in or directly reads or writes Antigravity settings,
+MCP configuration, or state under `~/.gemini/antigravity-cli/`. Sign-in belongs to
 Antigravity. When a turn reports that authentication is required, Inertia stops
 the process and shows Connect. Connect opens interactive `agy` inside
 Inertia's visible terminal, and only when the user clicks it. Inertia does not
@@ -107,7 +112,7 @@ open a browser, read sign-in codes, or store tokens for Antigravity.
 | Model and effort | `--model` for safe identifiers, `--effort low\|medium\|high` |
 
 Structured questions, Inertia-mediated approvals, image input, Inertia host
-tools, explicit compaction, reasoning text, and model catalogs are unavailable
+tools, explicit compaction, and reasoning text are unavailable
 in this harness and are declared that way in its capability manifest. A
 `step_update` text delta becomes assistant text, a `step_update` with a tool
 name becomes tool activity keyed by its step index, `conversation_id` becomes

@@ -928,7 +928,7 @@ describe("production provider lifecycle conformance", () => {
       expect(() => controlled.manager.run({
         ...input,
         sessionId: "session-from-stale-installation",
-      })).toThrow(/does not attest 'text-streaming'/u);
+      })).toThrow(/Inertia has not verified this .+ installation yet\./u);
     },
   );
 

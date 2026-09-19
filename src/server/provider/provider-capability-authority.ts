@@ -154,6 +154,17 @@ export class ProviderCapabilityAuthority {
     this.protocolVerifiedInstallations.delete(providerId);
   }
 
+  installationState(providerId: ProviderId): "current" | "changed" | "unverified" {
+    const evidence = this.protocolVerifiedInstallations.get(providerId);
+    if (!evidence) return "unverified";
+    const executable = this.options.resolvedExecutable(providerId);
+    return executable === evidence.executable
+      && this.options.installationFingerprint(providerId, executable, evidence.version)
+        === evidence.installationFingerprint
+      ? "current"
+      : "changed";
+  }
+
   installationFingerprint(providerId: ProviderId): string | null {
     return this.protocolVerifiedInstallations.get(providerId)
       ?.installationFingerprint ?? null;

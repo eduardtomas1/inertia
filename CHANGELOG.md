@@ -2,6 +2,79 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.58 — Unreleased
+
+### Capture and share context
+
+- Restore experimental Snapshots capture on Linux X11 for Chromium windows
+  whose accessibility tree omits the active-window flag. Capture still requires
+  one matching foreground window, usable accessibility information and private
+  field masking. Configure enablement, shortcuts and permissions in the new
+  **Settings → Snapshots** page; the composer camera button is removed.
+- Browser evidence checks keep responding while a page is frozen. Capture
+  failures explain their cause, and resuming restores the displayed tab.
+- Reference a whole chat from the composer. Bounded previews and receipts show
+  the context actually shared, cross-workspace sharing requires consent, and a
+  failed share preserves the draft. Sending waits for pending context creation.
+- Invoke skills with `$` instead of a separate Skills button. Suggestions follow
+  the current token, support keyboard selection and stay closed after accepting
+  a completion.
+
+### More reliable conversations and providers
+
+- Keep Claude turns open through background acknowledgements, report discarded
+  prompts and API errors promptly, and include subagent usage in run totals.
+  Claude uses its coding system prompt and preserves plan-mode write approvals.
+- When a Claude update invalidates a saved session, supported recovery can carry
+  a bounded, redacted excerpt of visible chat history into the replacement
+  session. Recovery respects remaining request capacity; it does not restore
+  hidden provider state or silently include attachments and tool output.
+- Re-verify a provider after its local CLI changes, including when an update
+  moves the executable. Concurrent sends share verification, and failed checks
+  prevent a turn from starting with stale installation evidence.
+- Load Antigravity model choices from the selected local CLI's catalog. A
+  connected provider can now populate the model chooser without invented model
+  capabilities; failed refreshes retain clearly marked cached information.
+- Remember low-quota notices across reloads, while still notifying for a new
+  threshold or reset. Apply the maximum-reasoning animation to each provider's
+  highest supported reasoning setting and honor reduced motion.
+
+### A calmer workspace
+
+- Return to a chat's remembered reading position, or its latest turn when no
+  position is saved. Opening overlays and expanding command details preserve
+  the surrounding transcript position.
+- Fold adjacent command activity into compact summaries with expandable
+  details, while keeping unfinished operations visible. The Thinking strip
+  gives readable sentences more time on screen.
+- See compact provider Limits, account quota in the composer and account limits
+  in Environment Usage. Stale and unavailable quota information stays explicit;
+  opening Limits immediately transfers keyboard focus and Escape handling.
+- Let color themes extend into the chat, composer and message actions. Newly
+  added projects become the active sidebar scope for the next chat.
+- Customize the desktop mascot with validated sprite sets. Export a template,
+  preview imported artwork, then apply or discard it from Settings.
+
+### Performance and upgrades
+
+- Keep streamed tokens from re-rendering the app shell and reduce repeated
+  runtime snapshots, database reads, frame encoding and diagnostic pruning.
+  Timeline navigation and file previews also avoid unnecessary listener changes.
+- Upgrade very large legacy profiles through a bounded fallback for migration
+  18, preserving the released migration's associations and transactional
+  rollback. This resolves the large-profile upgrade limitation listed for
+  0.0.56 below.
+- Update Claude Agent SDK to 0.3.276, React Virtual to 3.14.13, Lucide to 1.46.0,
+  Tailwind Merge to 3.7.0 and Zod to 4.6.5, with refreshed third-party notices.
+
+### Platform notes
+
+- Linux Snapshots requires X11 and working AT-SPI accessibility; Wayland capture
+  remains unavailable. Antigravity remains a text-only provider in Inertia.
+- Windows and macOS retain manual installation while release signing is
+  unavailable. Linux installations still on 0.0.52 need one manual upgrade,
+  preserving the existing profile.
+
 ## 0.0.57 — 2026-09-15
 
 This is the first published release after 0.0.55. It includes all of the workspace,

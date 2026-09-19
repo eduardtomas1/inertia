@@ -139,5 +139,13 @@
     "coreJavaScript": 440,
     "deferredPdfJavaScript": 0,
     "deferredPdfWorker": 0
+  },
+  "windowsCheckout": {
+    "coreAutoCRLF": true,
+    "beforeBytes": 12330,
+    "beforeCRLFSequences": 412,
+    "afterBytes": 11918,
+    "afterCRLFSequences": 0,
+    "unchangedBudgetBytes": 12288
   }
 }

@@ -15,3 +15,9 @@ Validation on Node 22.23.2/macOS ARM64:
 - Inspected native Ocean light and compact dark screenshots; no overlap or clipping regression found. Native screenshots are saved alongside this review.
 
 Hosted Linux and Windows UI execution remains required. Original screenshot comparisons in this directory are renderer harness captures; the two `native-*.png` files come from the actual Electron application.
+
+## Windows checkout correction
+
+Windows x64 job `105960051872` in run `35466592042` failed only `colorThemesCss`. This asset is copied verbatim from `public`, and Windows checkout's CRLF conversion increased it from 11,918 to 12,330 bytes, over the 12,288-byte limit. A temporary Git repository with `core.autocrlf=true` reproduced exactly 412 CRLF sequences and the budget overrun. Adding the scoped `text eol=lf` rule and checking out again produced the original 11,918 bytes with no CRLF, below the unchanged limit. The rule is in `.gitattributes`; generated palette values and the previously tested application code are unchanged.
+
+After the checkout correction, repeated the full `npm run check`: 9,264 tests passed, 145 platform/optional tests skipped; quality checks and the production build passed with the unchanged 12 KiB theme CSS limit.

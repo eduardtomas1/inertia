@@ -1,2 +1,3 @@
 tests/fixtures/database/manifest.json text eol=lf
 src/renderer/src/assets/provider-icons/*.svg binary
+src/renderer/public/color-themes.css text eol=lf

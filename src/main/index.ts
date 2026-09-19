@@ -228,6 +228,7 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   attachmentRegistry: () => importedAttachments,
   conversationAttachments: () => conversationAttachments,
   runtimeSupervisor: () => runtimeSupervisor,
+  mascotSprite: (id, name) => mascotMain?.sprite(id, name) ?? null,
 });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
@@ -813,6 +814,7 @@ async function createMainWindow(): Promise<void> {
       if (detachedChatMain?.focusForNotification(conversationId)) return;
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
     },
+    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`,
   });
   mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(

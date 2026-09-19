@@ -1,3 +1,4 @@
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 
 import { ClaudeDelegateLifecycle } from "../../src/server/provider/claude-delegate-lifecycle";
@@ -49,6 +50,64 @@ describe("Claude delegated lifecycle", () => {
         terminal_reason: "completed",
       },
     });
+  });
+
+  it("waits past the empty result Claude sends for each queued background completion", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const ack = { ...claudeSuccessResult(""), num_turns: 0 } as SDKMessage;
+
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: true });
+    lifecycle.dispose();
+
+    lifecycle.observe(claudeBackgroundTasks(["agent-1", "agent-2"]));
+    expect(lifecycle.observe(claudeSuccessResult("Started", "completed"))).toEqual({ turnEnded: false });
+    lifecycle.observe(claudeBackgroundTasks([]));
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "agent-1", status: "completed" }));
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "agent-2", status: "completed" }));
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: false });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
+    expect(lifecycle.observe(claudeSuccessResult("Both delegates finished", "completed"))).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toMatchObject({
+      kind: "result",
+      result: { result: "Both delegates finished", num_turns: 1 },
+    });
+  });
+
+  it("keeps a resumed turn open past the empty result for a notification queued ahead of its prompt", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    const promptUuid = "11111111-1111-4111-8111-111111111111";
+    const lifecycleFrame = (state: string) =>
+      ({ type: "command_lifecycle", command_uuid: promptUuid, state }) as unknown as SDKMessage;
+    const ack = { ...claudeSuccessResult(""), num_turns: 0 } as SDKMessage;
+    lifecycle.expectPrompt(promptUuid);
+
+    lifecycle.observe(claudeSystem("task_notification", { task_id: "shell-1", status: "stopped" }));
+    lifecycle.observe(lifecycleFrame("queued"));
+    expect(lifecycle.observe(ack)).toEqual({ turnEnded: false });
+    lifecycle.observe(lifecycleFrame("started"));
+    expect(lifecycle.observe({
+      ...claudeSuccessResult("PONG", "completed"),
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toMatchObject({ kind: "result", result: { result: "PONG" } });
+
+    const refused = new ClaudeDelegateLifecycle();
+    refused.expectPrompt(promptUuid);
+    refused.observe(lifecycleFrame("queued"));
+    expect(refused.observe(ack)).toEqual({ turnEnded: false });
+    expect(refused.observe(lifecycleFrame("refused"))).toEqual({ turnEnded: true });
+    expect(refused.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
+
+    const legacy = new ClaudeDelegateLifecycle();
+    legacy.expectPrompt(promptUuid);
+    expect(legacy.observe(ack)).toEqual({ turnEnded: true });
+
+    const notification = new ClaudeDelegateLifecycle();
+    notification.expectPrompt(promptUuid);
+    expect(notification.observe({ ...(ack as object), origin: { kind: "task-notification" } } as SDKMessage))
+      .toEqual({ turnEnded: false });
+    expect(notification.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
   });
 
   it("does not wedge on stale edge events or an idle event from before the result", () => {

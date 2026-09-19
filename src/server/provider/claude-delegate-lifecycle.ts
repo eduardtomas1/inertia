@@ -3,6 +3,9 @@ import type {
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
+import { claudeCommandLifecycleMessage, claudeObjectValue } from "./claude-message-projector-support";
+
 export type ClaudeDelegateCompletion =
   | { kind: "result"; result: SDKResultMessage }
   | {
@@ -28,12 +31,41 @@ export class ClaudeDelegateLifecycle {
       }
     | undefined;
   private endedAtAuthoritativeIdle = false;
+  private promptUuid: string | null = null;
+  private promptPending = false;
+  private skippedAck: SDKResultMessage | undefined;
+
+  expectPrompt(uuid: string): void {
+    this.promptUuid = uuid;
+  }
 
   observe(
     message: SDKMessage,
     hasLiveTaskTrace = false,
   ): { turnEnded: boolean } {
+    const command = claudeCommandLifecycleMessage(message);
+    if (command) {
+      if (command.command_uuid !== this.promptUuid) return { turnEnded: false };
+      this.promptPending = command.state === "queued" || command.state === "started";
+      if (this.promptPending || this.latestResult || !this.skippedAck) {
+        return { turnEnded: false };
+      }
+      this.latestResult = { message: this.skippedAck, deferred: false };
+      return { turnEnded: this.canEndTurn() };
+    }
+
     if (message.type === "result") {
+      const answersPrompt = claudeResultUserMessageIds(message).includes(this.promptUuid ?? "");
+      const answersNotification = claudeObjectValue(
+        (message as { origin?: unknown }).origin,
+      )?.kind === "task-notification";
+      if (
+        (isClaudeQueuedCompletionAck(message) && (this.latestResult || (this.promptPending && !answersPrompt)))
+        || (!this.latestResult && answersNotification && !answersPrompt)
+      ) {
+        this.skippedAck ??= message;
+        return { turnEnded: false };
+      }
       const candidate = {
         message,
         deferred: isDeferredResult(
@@ -92,7 +124,8 @@ export class ClaudeDelegateLifecycle {
   }
 
   complete(): ClaudeDelegateCompletion {
-    const candidate = this.latestResult;
+    const candidate = this.latestResult
+      ?? (this.skippedAck ? { message: this.skippedAck, deferred: false } : undefined);
     if (!candidate) {
       return { kind: "incomplete", reason: "missing-result" };
     }
@@ -110,6 +143,8 @@ export class ClaudeDelegateLifecycle {
     this.observedBackgroundTaskLevel = false;
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
+    this.promptPending = false;
+    this.skippedAck = undefined;
   }
 
   hasProvisionalResult(): boolean {
@@ -151,4 +186,11 @@ function isDeferredResult(
   // result provisional regardless of terminal_reason. A later parent result
   // replaces it after the exact delegated-work terminal edge.
   return hadLiveDelegatedWork;
+}
+
+export function isClaudeQueuedCompletionAck(result: SDKResultMessage): boolean {
+  return result.subtype === "success"
+    && !result.is_error
+    && result.num_turns === 0
+    && result.result === "";
 }

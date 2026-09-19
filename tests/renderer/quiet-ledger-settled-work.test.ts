@@ -21,10 +21,6 @@ import type {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestedAt = "2026-07-23T10:00:00.000Z";
-const activitySource = readFileSync(
-  new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url),
-  "utf8",
-);
 const viewportSource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/viewport.tsx", import.meta.url),
   "utf8",
@@ -399,8 +395,8 @@ describe("Quiet Ledger settled work summary", () => {
       'class="turn-run-details" id="turn-run-details-auto-collapse" aria-labelledby="turn-run-details-auto-collapse-label"',
     );
     expect(expanded).not.toContain('aria-labelledby="turn-run-details-auto-collapse-label" hidden=""');
-    expect(activitySource).toContain("onKeyDownCapture: (event) =>");
-    expect(activitySource).toContain('event.key === "Enter" || event.key === " "');
+    // Keyboard activation and anchor ordering are exercised behaviorally in
+    // anchored-details-toggle.dom.test.tsx, rather than pinning an event phase.
     expect(viewportSource).toContain("onBeforeToggle={captureExpansionAnchor}");
     expect(viewportSource).toContain("onAfterToggle={restoreExpansionAnchor}");
   });

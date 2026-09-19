@@ -355,6 +355,8 @@ export function createWorkspaceSceneModel({
           conversationId: candidate.id,
           conversationTitle: candidate.title,
           projectName: candidateProject.name,
+          workspaceLabel: candidate.worktreePath ?? candidateProject.normalizedPath,
+          targetWorkspaceLabel: conversation?.worktreePath ?? project?.normalizedPath ?? activeDirectory,
           workspaceRelation: sameWorkspace
             ? "same-workspace"
             : "different-workspace",

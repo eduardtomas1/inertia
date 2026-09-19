@@ -12,6 +12,7 @@ import { createQuietLedgerFixture } from "./support/quiet-ledger-fixture";
 import { verifyFailureDiagnostics } from "./support/failure-diagnostics";
 import {
   revealVirtualizedTimelineTurn,
+  expandCompletedTurnDetails,
   verifyDesktopMarkdownControls,
   verifyNarrowDesktopMarkdownControls,
 } from "./support/markdown-controls";
@@ -592,8 +593,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureScenario("narrow-workspace");
 
     await revealTurn(completedTurn, completed.turn.id);
-    await runDetailsToggle.click();
-    await changedFilesSummary.click();
+    await expandCompletedTurnDetails(completedTurn);
     await expect(runDetails).toBeVisible();
     await expect(changedFiles.locator('[role="listitem"]')).toHaveCount(3);
     const narrowCompletedGeometry = await completedTurn.evaluate((element) => {

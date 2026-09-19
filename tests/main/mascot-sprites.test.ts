@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { rename } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
@@ -135,6 +135,30 @@ describe("mascot sprite validation", () => {
 });
 
 describe("mascot sprite persistence", () => {
+  it("keeps a committed replacement authoritative when backup cleanup fails, including a failed reset", async () => {
+    const root = join(temporary(), "mascot-sprites");
+    const first = await readMascotSprites(spriteFolder());
+    const next = await readMascotSprites(spriteFolder({ "working.png": png(96, "#557e81") }));
+    await saveMascotSprites(root, first);
+    let promoted = false;
+    const move = async (from: string, to: string): Promise<void> => {
+      await rename(from, to);
+      if (from.endsWith(".staging")) promoted = true;
+    };
+    const remove: typeof rm = async (path, options) => {
+      if (promoted && path === `${root}.previous`) throw new Error("backup is locked");
+      await rm(path, options);
+    };
+    await expect(saveMascotSprites(root, next, move, remove)).resolves.toBeUndefined();
+    expect((await loadMascotSprites(root))?.id).toBe(next.id);
+    expect(existsSync(`${root}.previous`)).toBe(true);
+    await expect(removeMascotSprites(root, remove)).rejects.toThrow("backup is locked");
+    expect((await loadMascotSprites(root))?.id).toBe(next.id);
+    await removeMascotSprites(root);
+    expect(await loadMascotSprites(root)).toBeNull();
+    expect(existsSync(`${root}.previous`)).toBe(false);
+  });
+
   it("saves a set privately, replaces the previous set, survives a reload and resets to defaults", async () => {
     const root = join(temporary(), "mascot-sprites");
     expect(await loadMascotSprites(root)).toBeNull();

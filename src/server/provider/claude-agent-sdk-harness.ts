@@ -40,7 +40,7 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
@@ -1079,9 +1079,15 @@ function planSteps(markdown: string): AgentPlanStep[] {
 }
 
 function claudeLifecycleFailure(
-  reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed",
+  reason: Extract<ClaudeDelegateCompletion, { kind: "incomplete" }>["reason"],
 ): string {
   switch (reason) {
+    case "prompt-refused":
+      return "Claude refused the request before returning an answer.";
+    case "prompt-cancelled":
+      return "Claude cancelled the request before returning an answer.";
+    case "prompt-discarded":
+      return "Claude discarded the request before returning an answer.";
     case "delegates-abandoned":
       return "Claude Agent SDK exited while delegated work was still running.";
     case "parent-not-resumed":

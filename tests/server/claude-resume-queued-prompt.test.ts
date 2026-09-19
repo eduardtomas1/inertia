@@ -14,6 +14,37 @@ describe("Claude resumed prompts", () => {
     await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
   });
 
+  it.each(["refused", "cancelled", "eof"] as const)("fails instead of accepting a notification result when the new prompt ends with %s", async (ending) => {
+    const root = portableFixtureRoot("Claude unanswered queued prompt");
+    roots.push(root);
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const promptUuid = (await iterator.next()).value.uuid as string;
+        const frame = (state: string) => ({
+          type: "command_lifecycle", command_uuid: promptUuid, state,
+          uuid: `lifecycle-${state}`, session_id: CLAUDE_PROTOCOL_SESSION_ID,
+        }) as unknown as SDKMessage;
+        yield frame("queued");
+        yield claudeSystem("init");
+        yield { ...claudeSuccessResult(""), num_turns: 0, origin: { kind: "task-notification" } } as SDKMessage;
+        if (ending !== "eof") {
+          yield frame(ending);
+          throw new Error("A rejected prompt must settle without another SDK frame.");
+        }
+      })()),
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({ providerId: "claude", conversationId: "unanswered-queued-prompt",
+        cwd: root, prompt: "Reply with exactly PONG.", interactionMode: "build", access: "supervised" }),
+      executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+    });
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed", text: "", cleanupConfirmed: true,
+      failure: { terminalEvent: `lifecycle/${ending === "eof" ? "missing-result" : `prompt-${ending}`}` },
+    });
+  });
+
   it.each([true, false])("answers a prompt that Claude Code queued behind a leftover task notification (lifecycle frames: %s)", async (withLifecycleFrames) => {
     const root = portableFixtureRoot("Claude resumed queued prompt");
     roots.push(root);

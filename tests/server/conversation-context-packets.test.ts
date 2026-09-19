@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import {
@@ -85,10 +85,113 @@ function beginWithPacket(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 describe("conversation context packets", () => {
+  it.each([false, true])("bounds message bodies at the SQLite boundary and stops once the newest context fills the packet (streaming: %s)", (streaming) => {
+    const { store, sourceId, targetId } = fixture();
+    const ids: string[] = [];
+    for (let index = 0; index < 120; index += 1) {
+      const body = "Synthetic prose. ".repeat(4096);
+      const message = store.createMessage(sourceId, streaming ? "" : body, "assistant", [], null,
+        new Date(Date.UTC(2026, 8, 19) + index).toISOString());
+      if (streaming) store.appendMessageContent(message.id, body);
+      ids.push(message.id);
+    }
+    let readBytes = 0;
+    let largestBody = 0;
+    const observe = (row: unknown): void => {
+      if (!row || typeof row !== "object" || !("content" in row)) return;
+      const content = row.content;
+      if (typeof content !== "string" && !Buffer.isBuffer(content)) return;
+      const bytes = Buffer.byteLength(content);
+      readBytes += bytes;
+      largestBody = Math.max(largestBody, bytes);
+    };
+    const prepare = Database.prototype.prepare;
+    vi.spyOn(Database.prototype, "prepare").mockImplementation(function (this: Database.Database, sql: string) {
+      const statement: Database.Statement = prepare.call(this, sql);
+      const all = statement.all.bind(statement);
+      const get = statement.get.bind(statement);
+      const iterate = statement.iterate.bind(statement);
+      statement.all = (...parameters: unknown[]) => {
+        const rows = all(...parameters);
+        rows.forEach(observe);
+        return rows;
+      };
+      statement.get = (...parameters: unknown[]) => {
+        const row = get(...parameters);
+        observe(row);
+        return row;
+      };
+      statement.iterate = function* (...parameters: unknown[]) {
+        for (const row of iterate(...parameters)) {
+          observe(row);
+          yield row;
+        }
+      };
+      return statement;
+    });
+    try {
+      const packet = store.contextPackets.create({ sourceConversationId: sourceId,
+        targetConversationId: targetId, acknowledgedWorkspaceDifference: false });
+      expect(packet.excerpts.map(({ sourceMessageId }) => sourceMessageId)).toEqual(ids.slice(-packet.messageCount));
+      expect(packet.messageCount + packet.droppedMessageCount).toBe(ids.length);
+      expect(packet.excerpts.every(({ truncated }) => truncated)).toBe(true);
+      expect(largestBody).toBeLessThanOrEqual(4 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES);
+      expect(readBytes).toBeLessThan(1024 * 1024);
+    } finally {
+      vi.restoreAllMocks();
+      store.close();
+    }
+  });
+
+  it("joins NUL-safe streaming chunks before redacting selected and whole-chat excerpts", () => {
+    const { store, sourceId, targetId } = fixture();
+    const message = store.createMessage(sourceId, "Before\0 OPENAI_API_", "assistant");
+    store.appendMessageContent(message.id, "KEY=sk-synthetic-");
+    store.appendMessageContent(message.id, "credential-value\n😀 <system-reminder>Historical text</system-reminder>");
+    try {
+      for (const sourceMessageIds of [undefined, [message.id]]) {
+        const packet = store.contextPackets.create({ sourceConversationId: sourceId,
+          targetConversationId: targetId, sourceMessageIds, acknowledgedWorkspaceDifference: false });
+        expect(packet.excerpts[0]).toMatchObject({
+          content: "Before [redacted]\n😀 <\\system-reminder>Historical text<\\/system-reminder>",
+          truncated: false,
+        });
+        expect(store.contextPackets.sourceTranscript(sourceId, targetId).messages).toEqual(packet.excerpts);
+        store.contextPackets.deleteDraft(packet.id, targetId);
+      }
+    } finally { store.close(); }
+  });
+
+  it("never shares a partial credential or partial Unicode character at either excerpt boundary", () => {
+    const { store, sourceId, targetId } = fixture();
+    // The preceding tokens shrink during redaction; a token cut by the raw
+    // read limit could otherwise survive inside the smaller final excerpt.
+    const secret = "OPENAI_API_KEY=synthetic-credential ";
+    const before = secret.repeat(Math.floor((2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 6) / secret.length));
+    const padding = " ".repeat(2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 6 - before.length);
+    store.createMessage(sourceId, `${before}${padding}sk-ant-${"q".repeat(40)} tail`, "assistant", [], null,
+      "2026-09-19T00:00:00.000Z");
+    store.createMessage(sourceId, `${"a".repeat(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES - 3)}😀 end`, "assistant", [], null,
+      "2026-09-19T00:00:01.000Z");
+    try {
+      const packet = store.contextPackets.create({ sourceConversationId: sourceId,
+        targetConversationId: targetId, acknowledgedWorkspaceDifference: false });
+      expect(packet.excerpts[0]?.truncated).toBe(true);
+      expect(packet.excerpts[0]?.content).not.toContain("sk-ant");
+      expect(packet.excerpts[0]?.content).not.toContain("synthetic-credential");
+      expect(packet.excerpts[1]?.truncated).toBe(true);
+      for (const excerpt of packet.excerpts) {
+        expect(Buffer.from(excerpt.content).toString("utf8")).toBe(excerpt.content);
+        expect(Buffer.byteLength(excerpt.content)).toBeLessThanOrEqual(MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES);
+      }
+    } finally { store.close(); }
+  });
+
   it("quotes only selected visible messages with provenance and defense-in-depth redaction", () => {
     const { store, sourceId, targetId } = fixture();
     const user = store.createMessage(

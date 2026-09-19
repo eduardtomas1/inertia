@@ -58,6 +58,7 @@ export function createClaudeOwnedQueryProcess(
   let shutdownRequested = false;
   let transportError: Error | undefined;
   let stderrTail = "";
+  let discardingStderrLine = false;
   let childClosed: Promise<void> | undefined;
   let terminateOwnedProcessTree: ReturnType<
     typeof createOwnedProcessTreeTermination
@@ -102,6 +103,15 @@ export function createClaudeOwnedQueryProcess(
     });
     ownedChild.stderr.setEncoding("utf8");
     ownedChild.stderr.on("data", (chunk: string) => {
+      // A pipe chunk need not start a line. Once an overlong line loses its
+      // prefix, discard its continuation too: a credential suffix cannot be
+      // recognized by either exact-value or prefix-based redaction.
+      if (discardingStderrLine) {
+        const newline = chunk.indexOf("\n");
+        if (newline < 0) return;
+        chunk = chunk.slice(newline + 1);
+        discardingStderrLine = false;
+      }
       const combined = stderrTail + chunk;
       if (combined.length <= MAX_CLAUDE_STDERR_TAIL_CHARS) {
         stderrTail = combined;
@@ -110,6 +120,7 @@ export function createClaudeOwnedQueryProcess(
       const kept = combined.slice(-MAX_CLAUDE_STDERR_TAIL_CHARS);
       const firstWholeLine = kept.indexOf("\n");
       stderrTail = firstWholeLine >= 0 ? kept.slice(firstWholeLine + 1) : "";
+      discardingStderrLine = firstWholeLine < 0;
     });
     terminateOwnedProcessTree = createOwnedProcessTreeTermination(
       ownedChild,

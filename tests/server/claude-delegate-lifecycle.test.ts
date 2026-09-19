@@ -97,7 +97,7 @@ describe("Claude delegated lifecycle", () => {
     refused.observe(lifecycleFrame("queued"));
     expect(refused.observe(ack)).toEqual({ turnEnded: false });
     expect(refused.observe(lifecycleFrame("refused"))).toEqual({ turnEnded: true });
-    expect(refused.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
+    expect(refused.complete()).toEqual({ kind: "incomplete", reason: "prompt-refused" });
 
     const legacy = new ClaudeDelegateLifecycle();
     legacy.expectPrompt(promptUuid);
@@ -107,7 +107,21 @@ describe("Claude delegated lifecycle", () => {
     notification.expectPrompt(promptUuid);
     expect(notification.observe({ ...(ack as object), origin: { kind: "task-notification" } } as SDKMessage))
       .toEqual({ turnEnded: false });
-    expect(notification.complete()).toMatchObject({ kind: "result", result: { num_turns: 0 } });
+    expect(notification.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+  });
+
+  it.each(["refused", "cancelled"])("ends a %s prompt even without a preceding acknowledgement", (state) => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    lifecycle.expectPrompt("current-prompt");
+    const frame = (commandUuid: string) => ({
+      type: "command_lifecycle", command_uuid: commandUuid, state,
+    }) as unknown as SDKMessage;
+    expect(lifecycle.observe(frame("another-prompt"))).toEqual({ turnEnded: false });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+    expect(lifecycle.observe(frame("current-prompt"))).toEqual({ turnEnded: true });
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: `prompt-${state}` });
+    lifecycle.dispose();
+    expect(lifecycle.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
   });
 
   it("does not wedge on stale edge events or an idle event from before the result", () => {

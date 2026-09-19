@@ -110,7 +110,7 @@ describe("Claude delegated lifecycle", () => {
     expect(notification.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
   });
 
-  it.each(["refused", "cancelled"])("ends a %s prompt even without a preceding acknowledgement", (state) => {
+  it.each(["refused", "cancelled", "discarded"])("ends a %s prompt even without a preceding acknowledgement", (state) => {
     const lifecycle = new ClaudeDelegateLifecycle();
     lifecycle.expectPrompt("current-prompt");
     const frame = (commandUuid: string) => ({

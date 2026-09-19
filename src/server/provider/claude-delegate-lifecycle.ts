@@ -11,7 +11,7 @@ export type ClaudeDelegateCompletion =
   | {
       kind: "incomplete";
       reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed"
-        | "prompt-refused" | "prompt-cancelled";
+        | "prompt-refused" | "prompt-cancelled" | "prompt-discarded";
     };
 
 /**
@@ -34,7 +34,7 @@ export class ClaudeDelegateLifecycle {
   private endedAtAuthoritativeIdle = false;
   private promptUuid: string | null = null;
   private promptPending = false;
-  private promptFailure: "prompt-refused" | "prompt-cancelled" | undefined;
+  private promptFailure: "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | undefined;
 
   expectPrompt(uuid: string): void {
     this.promptUuid = uuid;
@@ -48,7 +48,7 @@ export class ClaudeDelegateLifecycle {
     if (command) {
       if (command.command_uuid !== this.promptUuid) return { turnEnded: false };
       this.promptPending = command.state === "queued" || command.state === "started";
-      if (command.state === "refused" || command.state === "cancelled") {
+      if (command.state === "refused" || command.state === "cancelled" || command.state === "discarded") {
         this.promptFailure = `prompt-${command.state}`;
         return { turnEnded: true };
       }

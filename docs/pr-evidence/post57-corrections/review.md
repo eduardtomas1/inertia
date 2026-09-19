@@ -1,6 +1,6 @@
 # Post-v57 corrections
 
-Branch: `codex/post57-corrections`. Based on main `c95a049bb35e5277c4ac4c5c1e93d5a26a276b64` (#416). No PR, push, merge, version bump or release is part of this handoff.
+Branch: `codex/post57-corrections`, published as PR #421. Based on main `c95a049bb35e5277c4ac4c5c1e93d5a26a276b64` (#416). No version bump or release is included.
 
 ## Corrections
 
@@ -30,6 +30,12 @@ Failed run: https://github.com/eduardtomas1/inertia/actions/runs/35439933146
 - Linux ARM64: `quiet-ledger.spec.ts` lost the changed-files disclosure after opening Run details. Expansion anchoring could choose an overscanned row below the viewport; a tall source turn could also have a genuinely visible following row whose preservation evicted the clicked source. Anchor selection now requires viewport intersection and keeps tall source turns in place while preserving following-row anchoring for shorter turns. Repeated native checks additionally exposed the parent follow-latest ResizeObserver scrolling to the bottom as the disclosure grew. Captured scroll-call stacks identify that handler and its correction frames. Disclosures now claim reader navigation synchronously before resizing, cancelling competing final-answer/follow-latest ownership through the existing navigation callback. The strengthened native regression opens a tall turn at the viewport top with the next row visible, asserts reader-history mode, and exercises changed-file and code controls. This sequence failed before the correction; repeated Quiet Ledger and transcript scenarios pass afterward without longer timeouts, forced clicks, or skipped assertions. Temporary diagnostic probes were removed.
 - Windows x64: `usage-limits.spec.ts` tried to click a quota notice as its normal lifetime ended. Its native and hub fixtures also advanced reset timestamps on every request, changing notice identity. The fixture now shares a stable observation time and waits for normal notice expiry before layout captures. Quota notice behavior is not suppressed or changed.
 
+## PR review: discarded Claude prompts
+
+Codex review [discussion_r4053471638](https://github.com/eduardtomas1/inertia/pull/421#discussion_r4053471638) identified a missing terminal lifecycle state. A queued prompt can receive a background acknowledgement and then `discarded` while the SDK iterator stays open. The gate now reports `prompt-discarded` as an incomplete terminal outcome and the harness explains that Claude discarded the request before answering. Another prompt's command UUID cannot end the current turn.
+
+The regression fixture keeps the SDK stream open after the terminal frame and detects any further read deterministically, without a timer or a synthetic EOF. Both the lifecycle and open-stream discard regressions failed before the fix; the four focused lifecycle files pass all 26 tests afterward, including successful resume, refusal, cancellation, delegation and cleanup. The same fixture now verifies closure for all three command failure states. The complete local gate passed with 9,249 tests and the portable suite passed with 1,385 tests after this correction. Live authenticated Claude sessions were not exercised.
+
 ## Bundle accounting
 
 The baseline and implementation use the identical dependency graph. The necessary reference ownership/hydration guards add 1,032 bytes to each initial route. Preview feedback and the expansion correction bring the total core addition to 1,186 bytes. Only these exact measured additions were added to exceeded ceilings, retaining their previous headroom. All other ceilings and static-import assertions remain unchanged. See `renderer-bundle.json` for every measured metric.
@@ -38,8 +44,8 @@ The external-review corrections add another 806 bytes to main first load, 699 to
 
 ## Verification
 
-- `npm run check`: passed; 868 test files passed, 16 skipped; 9,247 tests passed, 145 skipped. Workflow policy, immutable migrations, architecture, color themes, both lint layers, all TypeScript targets, production builds and bundle budgets passed.
-- `npm run test:portable`: passed; 99 files, 1,384 tests passed, 9 skipped.
+- `npm run check`: passed; 868 test files passed, 16 skipped; 9,249 tests passed, 145 skipped. Workflow policy, immutable migrations, architecture, color themes, both lint layers, all TypeScript targets, production builds and bundle budgets passed.
+- `npm run test:portable`: passed; 99 files, 1,385 tests passed, 9 skipped.
 - Focused external-review regressions: encoded one/two-reference assembly and immutable previews/receipts; workspace consent/cancellation and request retry; bounded older running activity and settlement; sprite backup-cleanup fault injection. These passed individually and in the final full gate. Earlier corrections plus the Git fixture recheck passed 114 tests.
 - Electron repetition: Quiet Ledger and transcript navigation, each twice with one worker: 4 passed (41.3 seconds). Final Electron matrix: `npx playwright test tests/e2e/quiet-ledger.spec.ts tests/e2e/transcript.spec.ts tests/e2e/conversation-context.spec.ts tests/e2e/usage-limits.spec.ts tests/e2e/activity-lifecycle.spec.ts tests/e2e/mascot-sprites.spec.ts --project=display-sensitive --project=isolated --workers=1`: 7 passed (53.1 seconds). This covers native consent cancellation/acceptance, reference previews, activity settlement, quota layouts, transcript controls and sprite apply/restart/reset. The only subsequent renderer change clarifies the acknowledgement text from “Chat shared” to “Sharing approved”; the full gate was rerun afterward.
 
@@ -47,7 +53,9 @@ Native Windows x64 and Linux ARM64 jobs cannot be run on this macOS ARM64 host. 
 
 One earlier full-suite run timed out while a Git test fixture created 1,000 refs during a concurrent comparison build; the isolated Git suite and focused corrections passed afterward (114 tests). The final gate passed without that competing build.
 
-Local verification logs: `/tmp/inertia-pro-review-final-gate.log`, `/tmp/inertia-pro-review-final-portable.log`, `/tmp/inertia-pro-review-final-electron.log`, and `/tmp/inertia-disclosure-follow-native.log`. Electron screenshots remain under `/tmp/inertia-pro-review-final-electron`; the earlier failing expansion trace and captured scroll stacks in `/tmp/inertia-pro-expansion-probe3` were used to diagnose the competing resize handler.
+Discarded-prompt follow-up logs: `/tmp/inertia-421-discarded-before.log`, `/tmp/inertia-421-discarded-focused.log`, `/tmp/inertia-421-discarded-check.log`, and `/tmp/inertia-421-discarded-portable.log`.
+
+Earlier local verification logs: `/tmp/inertia-pro-review-final-gate.log`, `/tmp/inertia-pro-review-final-portable.log`, `/tmp/inertia-pro-review-final-electron.log`, and `/tmp/inertia-disclosure-follow-native.log`. Electron screenshots remain under `/tmp/inertia-pro-review-final-electron`; the earlier failing expansion trace and captured scroll stacks in `/tmp/inertia-pro-expansion-probe3` were used to diagnose the competing resize handler.
 
 ## Changed files on this branch
 

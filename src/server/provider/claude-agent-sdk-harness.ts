@@ -1086,6 +1086,8 @@ function claudeLifecycleFailure(
       return "Claude refused the request before returning an answer.";
     case "prompt-cancelled":
       return "Claude cancelled the request before returning an answer.";
+    case "prompt-discarded":
+      return "Claude discarded the request before returning an answer.";
     case "delegates-abandoned":
       return "Claude Agent SDK exited while delegated work was still running.";
     case "parent-not-resumed":

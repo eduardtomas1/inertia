@@ -947,14 +947,21 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scrollElement = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root) return;
-    const viewportTop = scrollElement.getBoundingClientRect().top;
+    const viewport = scrollElement.getBoundingClientRect();
+    const viewportTop = viewport.top;
     const rows = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")];
     const sourceIndex = rows.findIndex((row) => row.dataset.responseRowId === sourceTurnId);
     const rowsAfterSource = sourceIndex >= 0 ? rows.slice(sourceIndex + 1) : rows;
-    const anchor = rowsAfterSource.find((row) => row.getBoundingClientRect().top >= viewportTop + 8)
-      ?? rowsAfterSource.find((row) => row.getBoundingClientRect().bottom > viewportTop + 8)
-      ?? rows.find((row) => row.getBoundingClientRect().top >= viewportTop + 8)
-      ?? rows.find((row) => row.getBoundingClientRect().bottom > viewportTop + 8);
+    const visible = (row: HTMLElement): boolean => {
+      const bounds = row.getBoundingClientRect();
+      return bounds.top < viewport.bottom - 8 && bounds.bottom > viewportTop + 8;
+    };
+    // An overscanned row below the viewport is not a reading anchor. Following
+    // it can scroll a tall expanded turn out of the virtual window entirely.
+    const anchor = rowsAfterSource.find((row) => visible(row) && row.getBoundingClientRect().top >= viewportTop + 8)
+      ?? rowsAfterSource.find(visible)
+      ?? rows.find((row) => visible(row) && row.getBoundingClientRect().top >= viewportTop + 8)
+      ?? rows.find(visible);
     if (!anchor?.dataset.responseRowId) return;
     const source = sourceIndex >= 0 ? rows[sourceIndex] : undefined;
     const capturedAnchor: ExpansionAnchor = {

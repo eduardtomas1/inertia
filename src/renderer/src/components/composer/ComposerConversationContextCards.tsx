@@ -33,7 +33,6 @@ export function ConversationContextPreviewCard({
 
   useEffect(() => {
     let active = true;
-    setPacket(null);
     void onCommand("conversation.context.load", {
       type: "conversation.context.load",
       payload: { packetId, targetConversationId },
@@ -63,6 +62,7 @@ export function ConversationContextPreviewCard({
                 <li key={excerpt.sourceMessageId} data-role={excerpt.role}>
                   <span>{excerpt.role === "user" ? "You" : "Agent"}</span>
                   <p>{excerpt.content}</p>
+                  {excerpt.truncated && <small>Message shortened to fit the shared context.</small>}
                   {excerpt.attachments && excerpt.attachments.length > 0 && (
                     <small>
                       {excerpt.attachments.map(({ name }) => name).join(", ")}
@@ -137,7 +137,7 @@ export function ConversationContextRequestCard({
     >
       <header>
         <strong>The agent asked to read another chat</strong>
-        <small>It receives the whole chat, redacted, only if you share it.</small>
+        <small>It receives a size-limited, redacted copy of the chat only if you share it. Older messages and long text may be shortened.</small>
       </header>
       {preselected
         ? <p>{source?.conversationTitle ?? "That chat is unavailable."}</p>
@@ -167,7 +167,7 @@ export function ConversationContextRequestCard({
           disabled={pending || !source}
           onClick={() => respond(true)}
         >
-          Share whole chat
+          Share chat
         </button>
         <button type="button" disabled={pending} onClick={() => respond(false)}>
           Decline

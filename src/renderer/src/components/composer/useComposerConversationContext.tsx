@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacketSummary,
@@ -25,6 +25,7 @@ export interface ComposerConversationContextController {
   enabled: boolean;
   canReferenceChat: boolean;
   referencing: boolean;
+  isReferencing(): boolean;
   error: string | null;
   previewPacketId: string | null;
   referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
@@ -41,8 +42,20 @@ export function useComposerConversationContext(input: {
 }): ComposerConversationContextController {
   const { contextPackets, conversationId, enabled, onCommand } = input;
   const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
-  const [referencing, setReferencing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const pendingRequests = useRef(new Map<string, string | null>());
+  const [, refresh] = useReducer((revision: number) => revision + 1, 0);
+  const [error, setError] = useState<{ conversationId: string; message: string } | null>(null);
+  const isReferencing = (): boolean => {
+    return pendingRequests.current.has(conversationId)
+      && !contextPackets.some(({ id }) => id === pendingRequests.current.get(conversationId));
+  };
+  const referencing = isReferencing();
+  const pendingPacketId = pendingRequests.current.get(conversationId);
+  useEffect(() => {
+    if (!referencing && pendingRequests.current.get(conversationId) === pendingPacketId) {
+      pendingRequests.current.delete(conversationId);
+    }
+  }, [conversationId, referencing, pendingPacketId]);
 
   useEffect(() => {
     setPreviewPacketId(null);
@@ -73,12 +86,13 @@ export function useComposerConversationContext(input: {
   const referenceChat = async (
     source: ConversationContextSourceOption,
   ): Promise<boolean> => {
-    if (!enabled || !onCommand || referencing) return false;
+    if (!enabled || !onCommand || isReferencing()) return false;
     if (draftContextPackets.length >= MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
-      setError("Send or remove a referenced chat before adding another.");
+      setError({ conversationId, message: "Send or remove a referenced chat before adding another." });
       return false;
     }
-    setReferencing(true);
+    pendingRequests.current.set(conversationId, null);
+    refresh();
     setError(null);
     try {
       const event = await onCommand("conversation.context.create", {
@@ -90,16 +104,19 @@ export function useComposerConversationContext(input: {
             source.workspaceRelation === "different-workspace",
         },
       });
-      if (event.type !== "request.result") {
-        setError(`${source.conversationTitle} could not be referenced.`);
-        return false;
-      }
+      if (event.type !== "request.result"
+        || event.result.kind !== "conversation.context.packet"
+        || event.result.packet.targetConversationId !== conversationId
+        || event.result.packet.sourceConversationId !== source.conversationId
+        || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
+      pendingRequests.current.set(conversationId, event.result.packet.id);
       return true;
     } catch {
-      setError(`${source.conversationTitle} could not be referenced.`);
+      pendingRequests.current.delete(conversationId);
+      setError({ conversationId, message: `${source.conversationTitle} could not be referenced.` });
       return false;
     } finally {
-      setReferencing(false);
+      refresh();
     }
   };
 
@@ -109,9 +126,11 @@ export function useComposerConversationContext(input: {
     enabled,
     canReferenceChat: enabled
       && Boolean(onCommand)
+      && !referencing
       && draftContextPackets.length < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
     referencing,
-    error,
+    isReferencing,
+    error: error?.conversationId === conversationId ? error.message : null,
     previewPacketId,
     referenceChat,
     togglePreview: (packetId) => {
@@ -141,6 +160,7 @@ export function ComposerConversationContextStrip({
           void controller.remove(packetId).catch(() => undefined);
         }}
       />
+      {controller.referencing && <p role="status">Adding chat reference…</p>}
       {controller.error && (
         <p className="composer-limit-warning" role="alert">
           {controller.error}
@@ -163,6 +183,7 @@ export function ComposerConversationContextPreview({
   return (
     <Suspense fallback={null}>
       <PreviewCard
+        key={`${targetConversationId}/${controller.previewPacketId}/${controller.contextPacketIds.join(",")}`}
         packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
         onCommand={onCommand}

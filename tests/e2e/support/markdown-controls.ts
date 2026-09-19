@@ -293,6 +293,15 @@ export async function verifyDesktopMarkdownControls(input: {
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
 }
 
+/** Opening details in a tall narrow turn must retain its next disclosure. */
+export async function expandCompletedTurnDetails(turn: Locator): Promise<void> {
+  const toggle = turn.getByRole("button", { name: "Run details" });
+  await toggle.scrollIntoViewIfNeeded();
+  await toggle.click();
+  await expect(toggle).toBeInViewport();
+  await turn.getByLabel("Changed by this turn").locator("summary").click();
+}
+
 export async function verifyNarrowDesktopMarkdownControls(input: {
   electronApp: ElectronApplication;
   completedTurn: Locator;

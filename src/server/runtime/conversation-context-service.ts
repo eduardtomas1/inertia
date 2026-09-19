@@ -74,13 +74,14 @@ export class ConversationContextService {
   createFromRenderer(
     request: ConversationContextPacketCreationRequest,
   ): ConversationContextPacket {
-    return this.store.contextPackets.create({
+    const packet = this.store.contextPackets.create({
       sourceConversationId: request.sourceConversationId,
       targetConversationId: request.targetConversationId,
       sourceMessageIds: request.sourceMessageIds,
       note: request.note,
       acknowledgedWorkspaceDifference: request.acknowledgedWorkspaceDifference,
     });
+    return this.store.contextPackets.preview(packet.id, request.targetConversationId);
   }
 
   sourceTranscript(
@@ -97,7 +98,7 @@ export class ConversationContextService {
     packetId: string,
     targetConversationId: string,
   ): ConversationContextPacket {
-    return this.store.contextPackets.get(packetId, targetConversationId);
+    return this.store.contextPackets.preview(packetId, targetConversationId);
   }
 
   remove(packetId: string, targetConversationId: string): void {

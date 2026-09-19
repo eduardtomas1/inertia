@@ -1,8 +1,8 @@
-import { StringDecoder } from "node:string_decoder";
 import type Database from "better-sqlite3";
 
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES } from "../../shared/conversation-context";
 import type { MessageRow } from "./rows";
+import { readBoundedMessageText } from "./bounded-message-text";
 
 // Leave room for redaction before the final excerpt cap, without loading an
 // entire message or aggregating its durable streaming chunks inside SQLite.
@@ -35,30 +35,10 @@ export function* conversationContextSourceRows(
     FROM message_content_chunks WHERE message_id = ? ORDER BY sequence LIMIT ?
   `);
   for (const row of rows) {
-    const parts = [row.content];
-    let bytes = row.content.length;
-    if (bytes <= MAX_SOURCE_BYTES) {
-      // Each released stream chunk contains at least one byte. This row cap
-      // also bounds traversal of a message streamed one byte at a time.
-      for (const chunk of chunks.iterate(
-        MAX_SOURCE_BYTES + 1, row.id, MAX_SOURCE_BYTES + 1,
-      ) as Iterable<{ content: Buffer }>) {
-        parts.push(chunk.content);
-        bytes += chunk.content.length;
-        if (bytes > MAX_SOURCE_BYTES) break;
-      }
-    }
-    const contentTruncated = bytes > MAX_SOURCE_BYTES;
-    // BLOB substr is NUL-safe. StringDecoder omits an unfinished UTF-8 code
-    // point at the byte boundary instead of inventing a replacement character.
-    let content = new StringDecoder("utf8").write(Buffer.concat(
-      parts, Math.min(bytes, MAX_SOURCE_BYTES),
-    ));
-    if (contentTruncated) {
-      // Never retain the beginning of a credential cut short by the read cap.
-      // Redaction still runs on the complete retained tokens before sharing.
-      content = content.replace(/\S+$/u, "");
-    }
-    yield { ...row, content, contentTruncated };
+    const text = readBoundedMessageText(row.content, () => chunks.iterate(
+      // Released chunks contain at least one byte, bounding row traversal too.
+      MAX_SOURCE_BYTES + 1, row.id, MAX_SOURCE_BYTES + 1,
+    ) as Iterable<{ content: Buffer }>, MAX_SOURCE_BYTES);
+    yield { ...row, content: text.content, contentTruncated: text.truncated };
   }
 }

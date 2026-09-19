@@ -57,8 +57,10 @@ const budgets = {
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. It measures 11.4 KiB.
-  colorThemesCss: 12 * kibibyte,
+  // separate from the generated entry stylesheet. Three generated sidebar
+  // aurora colours per palette bring it to 12,238 bytes (12,642 with CRLF
+  // checkouts, which Vite copies verbatim); keep narrow headroom for both.
+  colorThemesCss: 12.5 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,

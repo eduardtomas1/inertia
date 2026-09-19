@@ -90,13 +90,14 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
   }
 });
 
-it("re-verifies a relocated CLI without quarantining the old installation", async () => {
+it.each([true, false])("re-verifies a relocated CLI without quarantining the old installation (previously verified: %s)", async (previouslyVerified) => {
   const root = portableFixtureRoot("relocated provider installation");
   const previous = join(root, "old-codex");
   const replacement = join(root, "new-codex");
   writeFileSync(previous, "old installation");
   writeFileSync(replacement, "new installation");
   let executable = previous;
+  let protocolVerified = previouslyVerified;
   const leases = new ProviderInstallationLeaseCoordinator();
   const manager = ProviderManager.createProduction({
     installationLeases: leases,
@@ -106,7 +107,7 @@ it("re-verifies a relocated CLI without quarantining the old installation", asyn
     detectProvider: async () => ({
       provider: PROVIDER_INFO.codex, available: true, executable,
       version: "0.155.0", installState: "installed", authState: "authenticated",
-      canRun: true, protocolVerified: true, cleanupConfirmed: true,
+      canRun: protocolVerified, protocolVerified, cleanupConfirmed: true,
     }),
   });
   try {
@@ -115,7 +116,8 @@ it("re-verifies a relocated CLI without quarantining the old installation", asyn
     const priorRun = leases.acquireUse(priorIdentity, { kind: "provider-run", operationId: "prior-running-turn" });
     unlinkSync(previous);
     executable = replacement;
-    expect(manager.providerInstallationState("codex")).toBe("changed");
+    protocolVerified = true;
+    expect(manager.providerInstallationState("codex")).toBe(previouslyVerified ? "changed" : "unverified");
     const verify = providerInstallationVerifier(manager, async (providerId, refreshEnvironment) => {
       expect(refreshEnvironment).toBe(true);
       await manager.detect(providerId!, { refreshEnvironment });

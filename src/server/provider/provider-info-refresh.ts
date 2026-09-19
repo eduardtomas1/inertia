@@ -194,11 +194,11 @@ export function providerInstallationVerifier(
     if (existing) return await existing;
     const state = providers.providerInstallationState(providerId);
     if (state === "current") return;
-    // Resolve a changed installation from its configured command again, as at
+    // Resolve an unverified installation from its configured command again, as at
     // startup. A removed PATH target must not lend its old physical identity
     // to the new probe. This drops capability evidence, never cleanup leases
     // or quarantine; admission stays closed until discovery verifies it.
-    if (state === "changed") providers.invalidateInstallationEvidence(providerId);
+    providers.invalidateInstallationEvidence(providerId);
     const verification = refresh(providerId, true)
       .catch(() => undefined)
       .finally(() => { pending.delete(providerId); });

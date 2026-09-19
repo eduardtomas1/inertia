@@ -471,6 +471,30 @@ describe("new-turn admission recovery", () => {
     },
   );
 
+  it("re-verifies the chat's provider installation before checking readiness", async () => {
+    const order: string[] = [];
+    const readiness = vi.fn(async () => {
+      order.push("readiness");
+      return null;
+    });
+    const relinquishAll = vi.fn(async () => undefined);
+    const runtime = dependencies({ queue: vi.fn(() => queuedTurn()), relinquishAll, readiness });
+    const verifyProviderInstallation = vi.fn(async (providerId: ProviderInfo["id"]) => {
+      order.push(`verify:${providerId}`);
+    });
+    const handler = createTurnInteractionCommandHandler({ ...runtime, verifyProviderInstallation });
+
+    await expect(handler({} as never, messageCommand())).resolves.toBe("handled");
+    expect(order).toEqual(["verify:codex", "readiness"]);
+
+    verifyProviderInstallation.mockRejectedValueOnce(new Error("injected verification failure"));
+    const failure = await handler({} as never, messageCommand()).then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeRequestError);
+    expect((failure as RuntimeRequestError).code).toBe("message-send/backend-readiness/unexpected");
+    expect(readiness).toHaveBeenCalledTimes(1);
+    expect(relinquishAll).toHaveBeenCalled();
+  });
+
   it("releases an admission lease that arrives after preparation timed out", async () => {
     vi.useFakeTimers();
     try {

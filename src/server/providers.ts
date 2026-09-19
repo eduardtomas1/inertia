@@ -278,6 +278,8 @@ export class ProviderManager {
       processEnvironment: () => this.processEnvironment,
       evidenceUncertain: (providerId) => Boolean(this.installationLeases)
         && !this.providerEvidenceTrusted(providerId),
+      installationState: (providerId) =>
+        this.providerInstallationState(providerId),
       capabilityAvailable: (input, capabilityId, configured, negotiated) =>
         this.installationLeases
           ? this.capabilityAuthority.available(
@@ -406,6 +408,12 @@ export class ProviderManager {
       capabilityId,
       configured,
     );
+  }
+
+  providerInstallationState(providerId: ProviderId): "current" | "changed" | "unverified" {
+    return this.installationLeases
+      ? this.capabilityAuthority.installationState(providerId)
+      : "current";
   }
 
   recordBackendProbeResult(resultInput: BackendCompatibilityProbeResult): void {

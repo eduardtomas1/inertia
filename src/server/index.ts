@@ -34,7 +34,7 @@ import { ProviderMaintenanceJournal } from
   "./provider/maintenance-journal";
 import { recoverProviderMaintenanceJournal } from
   "./provider/maintenance-recovery";
-import { createProviderInfoRefresh } from "./provider/provider-info-refresh";
+import { createProviderInfoRefresh, providerInstallationVerifier } from "./provider/provider-info-refresh";
 import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
@@ -732,6 +732,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         workflows: agentWorkflows,
         providerTerminalResumes,
         providerInfo: () => providerInfo,
+        verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
         broadcast,
         broadcastSnapshot,
         send,

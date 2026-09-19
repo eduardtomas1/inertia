@@ -124,6 +124,7 @@ export interface TurnInteractionCommandDependencies {
   workflows: AgentWorkflowController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
+  verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -483,6 +484,16 @@ export function createTurnInteractionCommandHandler(
         }
         messageSendStage = "backend-readiness";
         if (dependencies.enableProviders) {
+          try {
+            await awaitMessageSendPreparation(
+              dependencies.verifyProviderInstallation?.(conversation.providerId)
+                ?? Promise.resolve(),
+              preparationDeadlineAt,
+            );
+          } catch (error) {
+            await relinquishAttachments();
+            throw classifiedMessageSendError(error, "backend-readiness");
+          }
           const selectedProvider = dependencies.providerInfo().find(
             ({ id }) => id === conversation.providerId,
           );

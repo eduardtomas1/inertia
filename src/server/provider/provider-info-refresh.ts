@@ -183,3 +183,13 @@ export function createProviderInfoRefresh(
     });
   };
 }
+
+export function providerInstallationVerifier(
+  providers: Pick<ProviderManager, "providerInstallationState">,
+  refresh: RefreshProviderInfo,
+): (providerId: ProviderInfo["id"]) => Promise<void> {
+  return async (providerId) => {
+    if (providers.providerInstallationState(providerId) === "current") return;
+    await refresh(providerId, true).catch(() => undefined);
+  };
+}

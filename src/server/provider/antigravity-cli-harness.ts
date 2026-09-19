@@ -65,7 +65,7 @@ export const ANTIGRAVITY_CLI_CAPABILITIES = {
     usage: "result-usage",
     images: "unavailable-in-current-harness",
     authentication: "antigravity-cli",
-    modelMetadata: "unavailable-in-current-harness",
+    modelMetadata: "cli-models",
   },
 } as const satisfies AntigravityCliHarnessCapabilities;
 

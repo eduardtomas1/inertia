@@ -198,7 +198,7 @@ export interface AntigravityCliHarnessCapabilities extends AgentHarnessCoreCapab
     usage: "result-usage";
     images: "unavailable-in-current-harness";
     authentication: "antigravity-cli";
-    modelMetadata: "unavailable-in-current-harness";
+    modelMetadata: "cli-models";
   };
 }
 

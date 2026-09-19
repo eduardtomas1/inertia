@@ -23,6 +23,7 @@ import {
   type BackendCredentialBroker,
 } from "../../src/server/runtime/backends/backend-profile-controller";
 import { backendProbeTestAuthority } from "../helpers/backend-probe-authority";
+import { parseAntigravityModels } from "../../src/server/provider/antigravity-models";
 
 const temporaryDirectories: string[] = [];
 
@@ -299,6 +300,26 @@ describe("model backend profile controller", () => {
       harnessId: "antigravity-cli",
       backendProfileId: "builtin:antigravity",
     });
+    runtimeStore.close();
+  });
+
+  it("validates only catalogued Antigravity routes without inventing model capabilities", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const provider: ProviderInfo = {
+      ...nativeProvider(),
+      id: "antigravity",
+      label: "Antigravity",
+      command: "agy",
+      models: parseAntigravityModels("gemini-test-high  Gemini Test (High)"),
+    };
+    const profile = controller.profiles([provider]).find(({ id }) => id === "builtin:antigravity");
+    expect(profile?.models).toContainEqual(expect.objectContaining({ id: "gemini-test-high", contextWindowTokens: null, reasoningOptions: [] }));
+    const selection = providerNativeModelSelection({ providerId: "antigravity", modelId: "gemini-test-high" });
+    expect(controller.validateSelection(selection)).toMatchObject({ modelId: "gemini-test-high", reasoningEffort: null, contextWindowOverride: null });
+    expect(() => controller.validateSelection({ ...selection, modelId: "unlisted-model" })).toThrow("no longer offered");
+    expect(() => controller.validateSelection({ ...selection, reasoningEffort: "high" })).toThrow();
+    expect(() => controller.validateSelection({ ...selection, providerOptions: { fastMode: "fast" } })).toThrow();
     runtimeStore.close();
   });
 

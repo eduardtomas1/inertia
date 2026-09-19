@@ -349,7 +349,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
   {
     providerId: "antigravity",
     harnessId: "antigravity-cli",
-    implementationRevision: 1,
+    implementationRevision: 2,
     protocolRevision: "headless-stream-json/agy-1.2.2",
     bundledSdkVersion: null,
     support: {
@@ -360,6 +360,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "session-resume": "native",
       "usage-tokens": "native",
       "provider-native-tools": "native",
+      "model-discovery": "native",
       cancellation: "native",
       "native-session-id": "native",
       "process-cleanup": "host-exact-turn",

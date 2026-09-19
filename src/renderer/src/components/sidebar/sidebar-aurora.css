@@ -3,8 +3,8 @@
  * Colour: --aurora-1..3 are generated per palette (scripts/color-theme-spec.mjs):
  * the theme accent plus two analogous hues at one OKLCH lightness, so no hue
  * flares or muddies. Strengths are set per appearance; the palette tests keep
- * the brand name at least 4.5:1 over any single light and 3:1 where every
- * layer overlaps.
+ * the small brand name at least 4.5:1 even where every layer and the hover
+ * tint overlap.
  *
  * Cost: every layer is a static gradient that is painted once. The keyframes
  * change only transform and opacity (literal values, so the compositor applies
@@ -33,9 +33,9 @@
 }
 
 :root[data-theme="dark"] .sidebar-aurora {
-  --aurora-peak: 62%;
-  --aurora-mid: 44%;
-  --aurora-wash: 18%;
+  --aurora-peak: 40%;
+  --aurora-mid: 16%;
+  --aurora-wash: 8%;
 }
 
 .sidebar-aurora > span {

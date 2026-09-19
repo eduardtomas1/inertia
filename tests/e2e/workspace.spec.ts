@@ -191,6 +191,7 @@ test("contains commit dialog focus and restores its trigger", async () => {
 
 test("keeps the macOS brand in the native titlebar row and starts a new chat", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   const shell = page.locator(".app-shell");
   const brand = page.getByRole("button", { name: "Start a new chat" });
   await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));

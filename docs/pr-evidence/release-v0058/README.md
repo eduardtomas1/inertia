@@ -7,40 +7,95 @@
 - #418: `29a0364f405438cd0bf52d47f9292ee9ea800a1b`.
 - #420: `7bfa4f8a1cf57eed1f817bd809fcb87373c45e55`.
 - #422: `0c171c8735fe2a7199baf12c5adfde3c7817ef1b`.
+- #423: `a73735453357b98dabca7b470b6b791cc3a56bcd`, with the release review
+  corrections below.
 
-The release branch preserves the last three PR heads as merge parents so the
+The release branch preserves the last four PR heads as merge parents so the
 combined candidate can receive one complete, up-to-date certification. Their
 individual review findings and focused validation are recorded in the adjacent
 provider-reverify, usage-and-chat-palette, dependency-pr420 and antigravity-models
 evidence directories. All source review threads were resolved at preparation.
 
-The additional PR being prepared by Claude (expected #423) is **not yet included
-or reviewed**. This preliminary evidence is not the final release authorization;
-the complete candidate still requires review and hosted certification.
+## Sidebar aurora review
+
+Reviewed all 14 changed files in #423: palette generation and declarations,
+sidebar integration and native titlebar geometry, CSS stacking/tiling, the
+coarse animation scheduler, background/reduced-motion behavior, and unit/DOM/
+Electron coverage. No provider, persistence or privileged boundary changes.
+
+- The initial Linux and Windows CI jobs failed at `coreJavaScript`, before
+  native E2E, because the new scheduler was not accounted for. Identical-
+  dependency production builds of the combined candidate before and after
+  #423 measure **722 added core JavaScript bytes**, **552 palette CSS bytes**
+  and **62 entry CSS bytes**. Initial JavaScript routes are unchanged.
+  `aurora-renderer-bundle.json` records every closure. Only the first two
+  budgets grow, by their exact measured additions; entry CSS already fits.
+  The palette retains #418's LF rule rather than budgeting Windows CRLF.
+- The original contrast test allowed 3:1 for stacked light behind 14–15.5 px
+  clickable text and omitted the second wash and hover tint. The stronger
+  test reproduces five failing dark themes on the original strengths.
+  Reduce the dark strengths while preserving the animation design. Both
+  washes, every light and the native/platform hover tints must now retain
+  **at least 4.5:1**; the worst conservative bound is **4.57:1**. All ten
+  palette/appearance combinations pass.
+- The existing 125 ms scheduler stays paused while unfocused, hidden,
+  reduced-motion or a closed mobile drawer. It resumes existing animation
+  times and reacquires cancelled/recreated CSS animations. No React state
+  update is driven per frame; decoration remains inert and below the brand.
+- Focused palette, motion and scheduler coverage: **97 tests passed**.
+  These validate deterministic behavior; the Windows CPU measurements in
+  `BACKGROUND_RENDERER.md` remain the author's measurements of the original
+  artwork, not a new cross-platform performance claim.
+
+Individual #418, #420 and #422 native matrices are green, including merge-ready.
+The complete candidate still requires hosted certification before merge and
+an exact-tag native release build before publication.
 
 ## Local integrated validation
 
 macOS ARM64, Node 22.23.2, clean `npm ci`, reviewed lockfile:
 
-- `npm run check`: 871 test files passed, 16 skipped; **9,306 tests passed,
+- `VITEST_MAX_WORKERS=2 npm run check`: 873 test files passed, 16 skipped; **9,338 tests passed,
   145 skipped**. Workflow, migration lineage, architecture, generated themes,
   both lint layers, all TypeScript projects, production/private-connect builds
   and renderer bundle limits passed.
 - `npm run test:portable`: **102 files and 1,424 tests passed, 9 skipped**.
+  This ran on the combined provider/dependency changes before the renderer-only
+  aurora merge; provider code and its dependency graph are unchanged since.
 - Dependency installation/audit: zero vulnerabilities. Generated third-party
   notices contain the updated runtime dependency versions.
-- `npm run package:dir`: native ARM64 app packaged with publication disabled.
+- `npm run check:quality` passed again after the final E2E fixture prerequisite.
+- `npm run package:dir`: final native ARM64 app packaged with publication disabled.
 - `npm run verify:fuses -- release/mac-arm64/Inertia.app`: passed.
 - `INERTIA_EXPECTED_ARCH=arm64 npm run test:native-architecture`: passed,
   including the native Claude SDK 0.3.276 executable and native bindings.
 - `INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION=0.0.58 npm run test:package-smoke`:
-  passed. The packaged runtime became ready, extracted a PDF, retained image
-  evidence and exited cleanly with its owned runtime.
+  passed again on the final app. The packaged runtime became ready in 992 ms,
+  extracted a PDF, retained image evidence and exited cleanly with its owned
+  runtime (392 ms shutdown, exit 0).
 - `node scripts/capture-readme-screenshots.mjs`: all seven images recaptured
-  through the actual app with isolated demo data. The script now also captures
+  after the aurora changes through the actual app with isolated demo data. The script now also captures
   message search and Git review, waits for diff content and closed dialogs,
   and uses the current sidebar context menu. Dark/light, split, project picker,
   search and Git layouts were visually inspected.
+
+The first final local gate used Vitest's unrestricted default worker count and
+hit two 10-second `git update-ref` deadlines while seeding 1,000-branch fixtures.
+Both affected files passed unchanged with two workers (71 tests). The complete
+gate then passed with the same two-worker bound used by macOS CI, without
+altering test assertions, timeouts or production Git behavior. The native brand
+scenario explicitly sets no-reduced-motion before asserting motion, then
+separately checks reduced-motion cancellation. Its native titlebar geometry,
+brand hit target and reduced-motion checks passed on macOS ARM64.
+
+The three real-focus background scenarios could not restore native focus on
+this local host. A native session query reported `CGSSessionScreenIsLocked=Yes`;
+Electron reported the surviving window visible but neither it nor its web
+contents focused. Closing the temporary window first and explicitly activating
+the app did not change that result. Those speculative fixture edits were
+removed. The existing native-focus assertions and #423's animation assertions
+remain intact and required by the hosted display-sensitive matrix. Local
+results do not claim unlocked-desktop focus/resume coverage.
 
 An earlier scratch checkout shared another worktree's node_modules through a
 symlink. Vite rejected the external PDF-worker URL in 11 attachment tests.
@@ -50,7 +105,9 @@ attachment implementation. The native architecture probe also requires its
 explicit architecture environment variable; the recorded passing invocation
 includes it.
 
-Logs are under `/tmp/inertia-v0058-{check,portable,notices,package,fuses,native-architecture,package-smoke,screenshots-final}.log`.
+Logs are under `/tmp/inertia-v0058-*`, including `final-check-two-workers.log`,
+`git-focus.log`, `portable.log`, `aurora-e2e.log`, package/fuse/smoke and screenshot
+logs. The original unrestricted failures are retained in `final-check.log`.
 
 ## Remaining certification and release integrity
 

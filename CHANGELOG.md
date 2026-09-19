@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.58 — Unreleased
+## 0.0.58 — 2026-09-20
 
 ### Capture and share context
 
@@ -52,6 +52,8 @@ The useful changes in each Inertia release, in plain language.
   opening Limits immediately transfers keyboard focus and Escape handling.
 - Let color themes extend into the chat, composer and message actions. Newly
   added projects become the active sidebar scope for the next chat.
+- Add a theme-colored aurora behind the sidebar brand. Its slow motion pauses
+  when the window loses focus and becomes still with reduced motion enabled.
 - Customize the desktop mascot with validated sprite sets. Export a template,
   preview imported artwork, then apply or discard it from Settings.
 

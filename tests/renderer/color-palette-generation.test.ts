@@ -204,7 +204,13 @@ describe("generated color palettes", () => {
     const [first, second, third] = [1, 2, 3].map((index) => tokens[`aurora-${index}`]!);
     const glassAlpha = Number(tokens["glass-chrome"]!.match(/[\d.]+/gu)!.at(-1));
     const sidebar = over(tokens["glass-chrome"]!, glassAlpha, rgbOf(tokens["app-bg"]!));
-    const washed = over(first!, wash, sidebar);
+    // Both static washes can overlap. Include the strongest brand hover tint
+    // too: its 14–15.5 px label needs ordinary-text contrast while clickable.
+    const washed = over(second!, wash, over(first!, wash, sidebar));
+    const styles = repoFile("src/renderer/src/styles.css");
+    const hoverStrengths = [...styles.matchAll(/\.brand-lockup:hover\s*\{\s*background:\s*color-mix\(in srgb, var\(--text\) ([\d.]+)%/gu)]
+      .map(([, percent]) => Number(percent) / 100);
+    expect(hoverStrengths).toHaveLength(2);
     // Any single light at the strongest strength behind the name.
     for (const light of [first!, second!, third!]) {
       expect(contrastRatio(tokens.text!, hexOf(over(light, peak, washed))), `${family} ${appearance} single light`)
@@ -214,8 +220,11 @@ describe("generated color palettes", () => {
     for (const far of [third!, first!]) {
       for (const [near, strength] of [[first!, peak], [second!, mid]] as const) {
         const stacked = over(second!, mid, over(near, strength, over(far, mid, washed)));
-        expect(contrastRatio(tokens.text!, hexOf(stacked)), `${family} ${appearance} stacked lights`)
-          .toBeGreaterThanOrEqual(3);
+        for (const hover of [0, ...hoverStrengths]) {
+          expect(contrastRatio(tokens.text!, hexOf(over(tokens.text!, hover, stacked))),
+            `${family} ${appearance} stacked lights, hover ${hover}`)
+            .toBeGreaterThanOrEqual(4.5);
+        }
       }
     }
   });

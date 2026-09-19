@@ -60,10 +60,10 @@ const budgets = {
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. Three generated sidebar
-  // aurora colours per palette bring it to 12,238 bytes (12,642 with CRLF
-  // checkouts, which Vite copies verbatim); keep narrow headroom for both.
-  colorThemesCss: 12.5 * kibibyte,
+  // separate from the generated entry stylesheet. The aurora adds exactly
+  // 552 bytes to the integrated palette (12,470 total). Its scoped LF rule
+  // keeps Windows identical. Preserve headroom; see release-v0058 evidence.
+  colorThemesCss: 12 * kibibyte + 552,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
@@ -131,7 +131,10 @@ const budgets = {
   // 1,186 core bytes. All pre-existing bundle headroom remains unchanged.
   // Consent, deferred card error/retry states and active-operation disclosure
   // add 2,633 measured bytes in total, including the initial route additions.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156,
+  // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
+  // same source/dependency baseline. Both first-load routes are unchanged.
+  // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

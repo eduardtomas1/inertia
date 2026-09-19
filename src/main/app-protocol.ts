@@ -26,6 +26,7 @@ export function registerAppProtocol(options: {
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
+  mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
   workspaceImageConversationId?: string;
 }, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
@@ -52,6 +53,14 @@ export function registerAppProtocol(options: {
         );
         if (!response) throw new Error();
         return response;
+      }
+      const sprite = /^mascot-sprites\/([0-9a-f]{16})\/([a-z]+\.(?:png|webp|gif))$/u.exec(requestedPath);
+      if (sprite) {
+        const file = options.mascotSprite?.(sprite[1]!, sprite[2]!);
+        if (!file) throw new Error();
+        return new Response(new Uint8Array(file.bytes), {
+          headers: { "Content-Type": file.type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+        });
       }
       const workspaceImageRequest = parseWorkspaceImagePreviewUrl(url);
       if (workspaceImageRequest) {
@@ -88,6 +97,7 @@ export function createAppProtocolRegistrar(options: {
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
+  mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
 }): (target?: Pick<Protocol, "handle" | "isProtocolHandled">, conversationId?: string) => void {
   const registrations = new WeakMap<
     Pick<Protocol, "handle" | "isProtocolHandled">,

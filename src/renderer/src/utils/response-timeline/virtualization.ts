@@ -10,7 +10,7 @@ import {
   isTranscriptActivity,
   type TurnExecutionStreamEntry,
 } from "./execution";
-import { ACTIVITY_GROUP_LIVE_WINDOW, latestFailureIndex } from "./activity-summary";
+import { latestFailureIndex, resolveActivityGroupWindow } from "./activity-summary";
 import {
   shouldConsolidateSettledWorkIntoRunDetails,
   type ResponseTimelineItem,
@@ -380,9 +380,11 @@ function estimateActivityGroupHeight(
   if (activities.length === 1) return 27;
   if (expanded) return 28 + activities.length * 26;
   const live = windowed || activities.some(({ status }) => status === "running");
-  return 28 + (live
-    ? Math.min(ACTIVITY_GROUP_LIVE_WINDOW, activities.length) * 26
-    : 0);
+  const visibleRows = resolveActivityGroupWindow(activities, { expanded: false, settled: !live })
+    .filter(({ folded }) => !folded);
+  const hiddenRunning = activities.filter(({ status }) => status === "running").length
+    - visibleRows.filter(({ activity }) => activity.status === "running").length;
+  return 28 + visibleRows.length * 26 + (hiddenRunning > 0 ? 28 : 0);
 }
 
 function estimateExpandedWorkHeight(

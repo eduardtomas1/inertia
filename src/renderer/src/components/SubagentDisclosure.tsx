@@ -200,9 +200,9 @@ export function SubagentDisclosure({
           // Chromium dispatches the native details toggle after click. Persist
           // during activation so an immediate reload cannot overtake it.
           event.preventDefault();
+          onBeforeToggle?.();
           updateOpen(!open);
         }}
-        onPointerDown={() => onBeforeToggle?.()}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();

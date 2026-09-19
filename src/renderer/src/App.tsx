@@ -518,13 +518,15 @@ export default function App(): React.JSX.Element {
     visibleConversationRun,
   ]);
 
-  const { selectConversation, selectMessage } = useConversationNavigation({
+  // Navigation actions retain their identity across overlay state changes,
+  // while dispatching against the latest workspace and draft ownership.
+  const { selectConversation, selectMessage } = useStableActions(useConversationNavigation({
     snapshot: connection.snapshot, conversation, splitConversation, detachedChats, exitGlobalChat,
     conversationSelectionGenerationRef, splitSelectionTransitionsRef,
     setSuppressedMainConversationIds, setSecondaryPaneFirst,
     selectConversationCommand, updateSplitConversationId, request, setActionError,
     extraSplitPanes: split.extraPanes,
-  });
+  }));
   const openConversationInWindow = useCallback((
     nextConversation: Conversation,
   ): void => {
@@ -627,30 +629,32 @@ export default function App(): React.JSX.Element {
     if (owner !== "primary") setSplitPaneConversation(owner, dropped.id);
     if (plan.kind === "insert") commitSplitLayout(applySplitDrop(split.layout, plan));
   };
-  const activatePrimaryRunContext = (
-    activity: PreviewWorkspaceRun,
-    tool: "preview",
-  ): boolean => {
-    const targetProject = connection.snapshot?.projects.find(
-      ({ id }) => id === activity.projectId,
-    );
-    const targetConversation = activity.conversationId === null
-      ? null
-      : connection.snapshot?.conversations.find(
-          ({ id, projectId: ownerProjectId }) =>
-            id === activity.conversationId
-            && ownerProjectId === activity.projectId,
-        ) ?? null;
-    if (!targetProject || (activity.conversationId && !targetConversation)) {
-      return false;
-    }
-    if (targetConversation) selectConversation(targetConversation);
-    else selectProject(targetProject);
-    setView("workspace");
-    setSidebarOpen(false);
-    sceneSetActiveTool(tool);
-    return true;
-  };
+  const primaryPreviewActions = useStableActions({
+    activateContext: (
+      activity: PreviewWorkspaceRun,
+      tool: "preview",
+    ): boolean => {
+      const targetProject = connection.snapshot?.projects.find(
+        ({ id }) => id === activity.projectId,
+      );
+      const targetConversation = activity.conversationId === null
+        ? null
+        : connection.snapshot?.conversations.find(
+            ({ id, projectId: ownerProjectId }) =>
+              id === activity.conversationId
+              && ownerProjectId === activity.projectId,
+          ) ?? null;
+      if (!targetProject || (activity.conversationId && !targetConversation)) {
+        return false;
+      }
+      if (targetConversation) selectConversation(targetConversation);
+      else selectProject(targetProject);
+      setView("workspace");
+      setSidebarOpen(false);
+      sceneSetActiveTool(tool);
+      return true;
+    },
+  });
   const activityActions = useStableController(
     useActivityActions({
       project,
@@ -658,7 +662,7 @@ export default function App(): React.JSX.Element {
       run,
       setActiveTool: sceneSetActiveTool,
       setActionError,
-      activateContext: activatePrimaryRunContext,
+      activateContext: primaryPreviewActions.activateContext,
       navigatePreview: desktopTools.navigatePreview,
       focusPreview: focusPrimaryPreview,
     }),

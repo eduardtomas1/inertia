@@ -190,7 +190,6 @@ describe("Claude Agent SDK harness", () => {
     });
   });
 
-
   it("fails and cleans up a run that floods bounded provider events", async () => {
     const root = portableFixtureRoot("Claude SDK event flood");
     roots.push(root);
@@ -424,6 +423,7 @@ describe("Claude Agent SDK harness", () => {
     expect(capturedOptions).toMatchObject({
       pathToClaudeCodeExecutable: "/fake/claude",
       settingSources: [],
+      systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
       managedSettings: expect.objectContaining({
         disableAllHooks: true,
         disableSkillShellExecution: true,

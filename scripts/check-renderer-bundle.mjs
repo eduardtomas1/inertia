@@ -15,7 +15,7 @@ const budgets = {
   entryJavaScript: 217.5 * kibibyte,
   mascotFirstLoadJavaScript: 6 * kibibyte,
   mascotJavaScript: 6 * kibibyte,
-  mascotSettingsJavaScript: 4 * kibibyte,
+  mascotSettingsJavaScript: 6.8 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
   // detachment ownership live here while their larger UI stays deferred.
@@ -42,11 +42,17 @@ const budgets = {
   // Caret-aware skills, quota identity and bounded transcript navigation add
   // 1,204 / 1,125 startup bytes; shared core is essentially unchanged. Keep ~0.2 KiB
   // headroom per route. See chat-input-and-continuity/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte,
+  // Post-v57 reference ownership and hydration guards add 1,032 eager bytes
+  // on the identical dependency graph. Preserve the previous headroom; the
+  // exact before/after accounting is in post57-corrections/renderer-bundle.json.
+  // Explicit workspace consent and bounded live-activity disclosure add
+  // 806 / 699 bytes to the routes. Preserve headroom; see the matching-dependency
+  // post57-corrections/pro-review-renderer-bundle.json measurements.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -116,7 +122,11 @@ const budgets = {
   // 2,114,728 bytes retain 242 bytes of headroom; deferred caps stay separate.
   // Project-scope tracking adds 318 core bytes (2,115,046 total), leaving
   // 26 bytes under the revised cap. See workspace-383/review.md evidence.
-  coreJavaScript: 2_067.1 * kibibyte,
+  // The same guards, preview feedback and visible expansion anchors add
+  // 1,186 core bytes. All pre-existing bundle headroom remains unchanged.
+  // Consent, deferred card error/retry states and active-operation disclosure
+  // add 2,633 measured bytes in total, including the initial route additions.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -51,6 +51,55 @@ describe("Claude Agent SDK usage accounting", () => {
     });
   });
 
+  it("counts subagent and helper model calls in run totals without inflating context occupancy", () => {
+    const result = {
+      num_turns: 1,
+      usage: {
+        input_tokens: 1_000,
+        cache_read_input_tokens: 500,
+        output_tokens: 200,
+      },
+      modelUsage: {
+        "claude-sonnet-test": {
+          inputTokens: 1_000,
+          cacheReadInputTokens: 500,
+          cacheCreationInputTokens: 0,
+          outputTokens: 200,
+          thinkingTokens: 50,
+          contextWindow: 200_000,
+        },
+        "claude-haiku-test": {
+          inputTokens: 4_000,
+          cacheReadInputTokens: 1_000,
+          cacheCreationInputTokens: 300,
+          outputTokens: 700,
+          contextWindow: 200_000,
+        },
+      },
+    };
+
+    expect(parseClaudeUsage(result, { selectedModelId: "claude-sonnet-test" })).toEqual({
+      usedTokens: 1_700,
+      totalProcessedTokens: 7_700,
+      totalProcessedScope: "run",
+      maxTokens: 200_000,
+      inputTokens: 6_800,
+      cachedInputTokens: 1_500,
+      cacheWriteInputTokens: 300,
+      outputTokens: 900,
+      reasoningOutputTokens: 50,
+      compactsAutomatically: null,
+    });
+    expect(parseClaudeUsage({
+      ...result,
+      modelUsage: { "claude-sonnet-test": { inputTokens: 0, outputTokens: 0, contextWindow: 200_000 } },
+    }, { selectedModelId: "claude-sonnet-test" })).toMatchObject({
+      totalProcessedTokens: 1_700,
+      inputTokens: 1_500,
+      outputTokens: 200,
+    });
+  });
+
   it("prefers the Agent SDK context-control snapshot and only reports explicit compaction state", () => {
     expect(parseClaudeUsage({
       num_turns: 2,

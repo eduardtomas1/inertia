@@ -185,11 +185,24 @@ export function createProviderInfoRefresh(
 }
 
 export function providerInstallationVerifier(
-  providers: Pick<ProviderManager, "providerInstallationState">,
+  providers: Pick<ProviderManager, "providerInstallationState" | "invalidateInstallationEvidence">,
   refresh: RefreshProviderInfo,
 ): (providerId: ProviderInfo["id"]) => Promise<void> {
+  const pending = new Map<ProviderInfo["id"], Promise<void>>();
   return async (providerId) => {
-    if (providers.providerInstallationState(providerId) === "current") return;
-    await refresh(providerId, true).catch(() => undefined);
+    const existing = pending.get(providerId);
+    if (existing) return await existing;
+    const state = providers.providerInstallationState(providerId);
+    if (state === "current") return;
+    // Resolve a changed installation from its configured command again, as at
+    // startup. A removed PATH target must not lend its old physical identity
+    // to the new probe. This drops capability evidence, never cleanup leases
+    // or quarantine; admission stays closed until discovery verifies it.
+    if (state === "changed") providers.invalidateInstallationEvidence(providerId);
+    const verification = refresh(providerId, true)
+      .catch(() => undefined)
+      .finally(() => { pending.delete(providerId); });
+    pending.set(providerId, verification);
+    await verification;
   };
 }

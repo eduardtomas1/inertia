@@ -11,6 +11,10 @@ export const MAX_CLAUDE_STREAM_STATES = 256;
 export const MAX_CLAUDE_STREAM_CORRELATION_BLOCKS = 1_024;
 export const MAX_CLAUDE_STREAM_CORRELATION_CHARS = 4 * 1024 * 1024;
 const MAX_CLAUDE_STREAM_BLOCK_INDEX = 10_000;
+export const QUIET_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
+  "code_change_published",
+  "vcs_state_changed",
+]);
 
 export interface ClaudeProjectedFailure {
   message: string;

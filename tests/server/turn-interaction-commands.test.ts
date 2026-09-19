@@ -539,6 +539,37 @@ describe("new-turn admission recovery", () => {
     }
   });
 
+  it("releases attachments and admission when provider verification exceeds preparation time", async () => {
+    vi.useFakeTimers();
+    try {
+      let finishVerification!: () => void;
+      const verification = new Promise<void>((resolve) => { finishVerification = resolve; });
+      const queue = vi.fn(() => queuedTurn());
+      const readiness = vi.fn(async () => null);
+      const relinquishAll = vi.fn(async () => undefined);
+      const release = vi.fn();
+      const runtime = dependencies({ queue, readiness, relinquishAll, turnAdmissionRelease: release });
+      const verifyProviderInstallation = vi.fn(() => verification);
+      const handling = createTurnInteractionCommandHandler({
+        ...runtime, verifyProviderInstallation,
+      })({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+      await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+      await rejection;
+      expect(verifyProviderInstallation).toHaveBeenCalledOnce();
+      expect(relinquishAll).toHaveBeenCalledWith([trustedAttachment.id]);
+      expect(release).toHaveBeenCalledOnce();
+      finishVerification();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(readiness).not.toHaveBeenCalled();
+      expect(queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("accepts a detached-socket retry after the main socket publication fails", async () => {
     const queue = vi.fn((
       _request: unknown,

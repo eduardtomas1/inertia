@@ -180,7 +180,6 @@ export const Composer = memo(function Composer({
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
-  const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
   const { setMenuTrigger } = menuController;
   useLayoutEffect(() => {
@@ -464,9 +463,6 @@ export const Composer = memo(function Composer({
     };
   }, []);
 
-  const mentionQuery = mentionMatch?.[1] ?? null;
-  useEffect(() => { onMentionQuery(mentionQuery ?? ""); }, [mentionQuery, onMentionQuery]);
-
   useTextareaAutosize(textareaRef, message);
 
   const applyMessage = (next: string): void => {
@@ -510,7 +506,7 @@ export const Composer = memo(function Composer({
   };
 
   const submit = async () => {
-    if (attachmentImportingRef.current) return;
+    if (attachmentImportingRef.current || conversationContext.isReferencing()) return;
     const compactCommand = parseCompactComposerCommand(message);
     if (compactCommand) {
       await compact(compactCommand);
@@ -684,6 +680,7 @@ export const Composer = memo(function Composer({
     && routeReadiness.ready
     && !disabled
     && !attachmentImporting
+    && !conversationContext.referencing
     && !conversationUpdatePending;
   const primaryAction = composerPrimaryActionState({
     sendEligible,
@@ -700,7 +697,7 @@ export const Composer = memo(function Composer({
       || Boolean(promptContext)
       || previewContextSelected
       || fileReferences.length > 0
-      || contextPacketIds.length > 0,
+      || contextPacketIds.length > 0 || conversationContext.referencing,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
@@ -716,6 +713,7 @@ export const Composer = memo(function Composer({
       && !previewContextSelected
       && fileReferences.length === 0
       && messageFits
+      && !conversationContext.referencing
       && !disabled,
     submitting,
     sending,
@@ -723,7 +721,7 @@ export const Composer = memo(function Composer({
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
   const queueCurrentMessage = async (): Promise<void> => {
-    if (!canQueue) return;
+    if (!canQueue || conversationContext.isReferencing()) return;
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
@@ -1133,11 +1131,12 @@ export const Composer = memo(function Composer({
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
           messageFits={messageFits}
-          mentionMatch={mentionMatch}
+          onMentionQuery={onMentionQuery}
+          conversationId={conversation.id}
           mentionResults={mentionResults}
           chatSuggestions={conversationContext.canReferenceChat ? contextSources : []}
           onAddFileReference={addFileReference}
-          onReferenceChat={(source) => { void conversationContext.referenceChat(source); }}
+          onReferenceChat={conversationContext.referenceChat}
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}

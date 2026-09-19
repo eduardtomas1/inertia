@@ -453,6 +453,8 @@ describe("composer detachment ownership", () => {
         conversationId: "44444444-4444-4444-8444-444444444444",
         conversationTitle: "Reviewed context",
         projectName: "Inertia",
+        workspaceLabel: "/workspace/inertia",
+        targetWorkspaceLabel: "/workspace/inertia",
         workspaceRelation: "same-workspace",
         archived: false,
       }],

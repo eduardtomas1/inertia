@@ -1,9 +1,11 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 import {
   createAppFixture,
@@ -12,6 +14,8 @@ import {
 
 let app!: AppFixture;
 let sourceConversationId = "";
+let sourceWorkspace = "";
+let targetWorkspace = "";
 
 const THEME_CASES = COLOR_THEME_IDS
   .flatMap((colorTheme) => (["light", "dark"] as const)
@@ -42,7 +46,7 @@ test.beforeAll(async () => {
     name: "conversation-context",
     initialState: "conversation",
     windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+    beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),
         workspaceDirectory,
@@ -114,6 +118,16 @@ test.beforeAll(async () => {
         terminalReason: "provider-completed",
         updatedAt: answer.createdAt,
       });
+      targetWorkspace = snapshot.projects.find(({ id }) => id === snapshot.activeProjectId)!.normalizedPath;
+      const otherPath = join(testDirectory, "reference-source");
+      mkdirSync(otherPath, { recursive: true });
+      // Seed the same canonical identity the runtime publishes on startup,
+      // including Windows case folding and path separators.
+      const otherProject = store.createProject("Another workspace", otherPath, await inspectProjectIdentity(otherPath));
+      sourceWorkspace = otherProject.normalizedPath;
+      const otherSource = store.createConversation(otherProject.id, "External research", { activate: false });
+      store.createMessage(otherSource.id, "Share this note only after confirming the workspace boundary.", "assistant");
+      store.selectConversation(targetConversationId);
       store.close();
     },
   });
@@ -159,6 +173,12 @@ test("references a whole chat from the composer and preserves its provenance", a
   await chip.click();
   const preview = page.getByRole("region", { name: "Shared chat context" });
   await expect(preview).toBeVisible();
+  await expect(preview.getByText(
+    "Carry only this reviewed retry decision into the implementation chat.",
+  )).toBeVisible();
+  await preview.getByRole("button", { name: "Close preview" }).click();
+  await expect(preview).toHaveCount(0);
+  await chip.click();
   await expect(preview.getByText(
     "Carry only this reviewed retry decision into the implementation chat.",
   )).toBeVisible();
@@ -224,4 +244,41 @@ test("references a whole chat from the composer and preserves its provenance", a
   await capture("conversation-context-attached-provenance");
   expect(rendererErrors).toEqual([]);
   expect(sourceConversationId).not.toBe("");
+});
+
+test("requires native confirmation before attaching a chat from another workspace", async () => {
+  const { page } = app;
+  await app.resizeWindow(1280, 820);
+  const closePreview = page.getByRole("button", { name: "Close preview" });
+  if (await closePreview.isVisible()) await closePreview.click();
+  // Its role changes to combobox while the retained mention menu is open.
+  const editor = page.getByLabel("Message", { exact: true });
+  const reference = async (accept: boolean): Promise<void> => {
+    await editor.fill("Explain @External");
+    const option = page.getByRole("option", { name: /External research/u });
+    await expect(option).toBeVisible();
+    await expect(option).toContainText("Another workspace");
+    await expect(option).toContainText("different workspace");
+    await Promise.all([
+      page.waitForEvent("dialog").then(async (dialog) => {
+        expect(dialog.type()).toBe("confirm");
+        expect(dialog.message()).toContain(sourceWorkspace);
+        expect(dialog.message()).toContain(targetWorkspace);
+        if (accept) await dialog.accept(); else await dialog.dismiss();
+      }),
+      option.click(),
+    ]);
+  };
+  await reference(false);
+  await expect(editor).toHaveValue("Explain @External");
+  const chip = page.getByRole("button", { name: /From External research/u });
+  await expect(chip).toHaveCount(0);
+  await reference(true);
+  await expect(chip).toBeVisible();
+  await expect(editor).toHaveValue("Explain ");
+  await chip.click();
+  await expect(page.getByRole("region", { name: "Shared chat context" })).toContainText(
+    "Share this note only after confirming the workspace boundary.",
+  );
+  expect(app.rendererErrors).toEqual([]);
 });

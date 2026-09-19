@@ -6,7 +6,7 @@
 - **Choose** the model, reasoning level and access mode for each chat. The composer border animates at the selected model’s highest supported reasoning level; reduced motion keeps it still.
 - **Invoke a skill** by typing `$` and part of its name. Use ↑/↓ to choose, Tab or Enter to insert, and Escape to dismiss. You can edit a skill token anywhere in your draft.
 - **Follow up** while an agent is working: send a message right away or queue it for the next turn. The composer shows *Enter sends · Tab queues* while this is possible.
-- **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in the composer to attach a screenshot of the foreground window with its accessibility context.
+- **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in **Settings → Snapshots** to attach a screenshot of the foreground window with its accessibility context.
 - **Compact long chats** with `/compact`. A successful compaction leaves a receipt in the timeline with the provider-reported context counts.
 
 ## Follow the work

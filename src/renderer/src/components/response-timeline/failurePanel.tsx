@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
   Check,
@@ -76,9 +75,6 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       togglePrepared.current = false;
     });
   };
-  const prepareKeyboardToggle = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-    if (event.key === "Enter" || event.key === " ") prepareToggle();
-  };
   const copyDiagnostics = async (): Promise<void> => {
     if (!await writeClipboardText(presentation.copyText)) return;
     setCopied(true);
@@ -121,12 +117,6 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
             className="turn-failure-action turn-failure-toggle"
             aria-expanded={expanded}
             aria-controls={panelId}
-            onPointerDownCapture={prepareToggle}
-            onPointerCancelCapture={() => {
-              togglePrepared.current = false;
-            }}
-            onKeyDownCapture={prepareKeyboardToggle}
-            onClickCapture={prepareToggle}
             onClick={toggle}
           >
             <span>{expanded ? "Hide details" : "Technical details"}</span>

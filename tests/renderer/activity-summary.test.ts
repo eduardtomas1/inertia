@@ -178,4 +178,20 @@ describe("activity group summaries", () => {
       detail: "An unsupported optional capability was skipped.",
     }))).toBe("warning");
   });
+
+  it("keeps older running work visible while bounding both recent and active rows", () => {
+    const activities = Array.from({ length: 20 }, (_, index) =>
+      command(`row-${index}`, "cat file", { status: index < 8 ? "running" : "completed" }));
+    const rows = resolveActivityGroupWindow(activities, { expanded: false, settled: false });
+    const visible = rows.filter(({ folded }) => !folded).map(({ activity: row }) => row.id);
+    expect(visible).toEqual(["row-0", "row-1", "row-2", "row-3", "row-16", "row-17", "row-18", "row-19"]);
+    expect(rows).toHaveLength(9); // Four active, four recent, one folding row.
+    const activeExpanded = resolveActivityGroupWindow(activities, { expanded: false, settled: false, expandRunning: true });
+    expect(activeExpanded.filter(({ activity: row, folded }) => row.status === "running" && !folded)).toHaveLength(8);
+    expect(activeExpanded.some(({ activity: row }) => row.id === "row-10")).toBe(false);
+    activities[0] = { ...activities[0]!, status: "completed" };
+    const next = resolveActivityGroupWindow(activities, { expanded: false, settled: false });
+    expect(next.some(({ activity: row }) => row.id === "row-0")).toBe(false);
+    expect(next.find(({ activity: row }) => row.id === "row-4")?.folded).toBe(false);
+  });
 });

@@ -22,6 +22,7 @@ import {
   isChildOwnedClaudeMessage as isChildOwned,
   isClaudeToolUseBlock as isToolUseBlock,
   projectClaudeRateLimitEvent,
+  QUIET_CLAUDE_SYSTEM_SUBTYPES,
   MAX_CLAUDE_TRACKED_MESSAGE_IDS as MAX_TRACKED_MESSAGE_IDS,
   MAX_CLAUDE_TRACKED_TEXT_ALIASES,
   safeClaudeNonNegativeNumber as safeNonNegativeNumber,
@@ -31,6 +32,7 @@ import {
   type ClaudeCommandLifecycleMessage,
 } from "./claude-message-projector-support";
 import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlation";
+import { isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
 
 export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
@@ -459,7 +461,7 @@ export class ClaudeMessageProjector {
       contextWindowOverride: this.options.contextWindowOverride,
       contextUsage: this.options.contextUsage(),
     });
-    if (usage) this.options.emitter.rich({ type: "usage", usage });
+    if (usage && !isClaudeQueuedCompletionAck(message)) this.options.emitter.rich({ type: "usage", usage });
     for (const denial of message.permission_denials ?? []) {
       this.observePermissionDenial({
         tool_name: denial.tool_name,
@@ -936,6 +938,7 @@ export class ClaudeMessageProjector {
     const eventType = discriminator(event?.type);
     const deltaType = discriminator(objectValue(event?.delta)?.type);
     const signature = [scope, type, subtype, state, eventType, deltaType].join(":");
+    if (type === "system" && QUIET_CLAUDE_SYSTEM_SUBTYPES.has(subtype)) return;
     if (this.unknownRuntimeMessages.has(signature)) return;
     this.unknownRuntimeMessages.add(signature);
     this.options.emitter.activity(

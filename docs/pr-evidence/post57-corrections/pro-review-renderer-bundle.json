@@ -1,7 +1,7 @@
 {
   "baseline": "30e6d746",
   "runtime": "Node 22.23.2, macOS ARM64",
-  "method": "Same installed dependency graph and package-lock as the previous verified branch build. Measure emitted output with the unchanged static-import-closure accounting in scripts/check-renderer-bundle.mjs. The three exceeded budgets were increased by the observed consent/error/activity additions only. Final disclosure-navigation corrections and acknowledgement wording consume 66 more core bytes of the retained headroom without a further ceiling increase. Context cards remain deferred; every other ceiling and static-import assertion is unchanged. The PR CI activation-order correction removes 374 core/transcript bytes and 138 deferred failure-diagnostics bytes from that build; these final measurements include it, with no budget adjustment.",
+  "method": "Same installed dependency graph and package-lock as the previous verified branch build. Measure emitted output with the unchanged static-import-closure accounting in scripts/check-renderer-bundle.mjs. The three exceeded budgets were increased by the observed consent/error/activity additions only. Final disclosure-navigation corrections and acknowledgement wording consume 66 more core bytes of the retained headroom without a further ceiling increase. Context cards remain deferred; every other ceiling and static-import assertion is unchanged. The PR CI activation-order correction removes 374 core/transcript bytes and 138 deferred failure-diagnostics bytes from that build; these final measurements include it, with no budget adjustment. The overlay action stabilization adds 46 bytes to main first load and total core JavaScript; all existing ceilings still pass.",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "baselineBytes": 1219,
@@ -75,8 +75,8 @@
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "baselineBytes": 820228,
-      "implementationBytes": 821034,
-      "deltaBytes": 806
+      "implementationBytes": 821080,
+      "deltaBytes": 852
     },
     "detachedChatFirstLoadJavaScript": {
       "baselineBytes": 629346,
@@ -210,8 +210,8 @@
     },
     "coreJavaScript": {
       "baselineBytes": 2117654,
-      "implementationBytes": 2119979,
-      "deltaBytes": 2325
+      "implementationBytes": 2120025,
+      "deltaBytes": 2371
     },
     "deferredPdfJavaScript": {
       "baselineBytes": 437530,

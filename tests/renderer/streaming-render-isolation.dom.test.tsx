@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Profiler, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -347,6 +347,30 @@ describe("streamed agent text", () => {
     });
     await waitFor(() => expect(view.container.textContent)
       .toContain(`token${TOKENS - 1}`));
+  });
+
+  it("opens the prefetched command palette without re-rendering the background transcript", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { default: App } = await import("../../src/renderer/src/App");
+    const { loadCommandPalette } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
+    await loadCommandPalette();
+    const view = render(<App />);
+    await waitFor(() => expect(
+      view.container.querySelector(`[data-turn-id="${turn.id}"]`),
+    ).not.toBeNull());
+    const background = ["WorkspaceScene", "ChatWorkspace", "Composer", "ResponseTimeline", "TurnTimeline"];
+    for (const name of background) counting.renders[name] = 0;
+
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", metaKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" })).toHaveFocus();
+    expect(Object.fromEntries(background.map((name) => [name, counting.renders[name]])))
+      .toEqual(Object.fromEntries(background.map((name) => [name, 0])));
+    fireEvent.click(screen.getByRole("button", { name: "Close search" }));
+    expect(screen.queryByRole("dialog", { name: "Search Inertia" })).not.toBeInTheDocument();
+    expect(Object.fromEntries(background.map((name) => [name, counting.renders[name]])))
+      .toEqual(Object.fromEntries(background.map((name) => [name, 0])));
   });
 
   it("reveals each streamed word in its own commit behind the caret", async () => {

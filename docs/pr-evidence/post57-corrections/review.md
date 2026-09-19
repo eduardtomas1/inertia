@@ -52,15 +52,28 @@ Failed run: https://github.com/eduardtomas1/inertia/actions/runs/35450278386 (he
 
 Local evidence: `/tmp/inertia-421-linux-background-fast-negative.log`, `/tmp/inertia-421-pointer-dom-before.log`, `/tmp/inertia-421-pointer-dom-after.log`, `/tmp/inertia-421-linux-native.log`, `/tmp/inertia-421-mac-native.log`, `/tmp/inertia-421-mac-subagents.log`, and `/tmp/inertia-421-ci-fix-check-final.log`. Linux artifacts were retained locally and the temporary container was removed. Native Windows and Linux x64 validation remains with CI.
 
+## macOS Intel first-open CI correction
+
+Failed run: https://github.com/eduardtomas1/inertia/actions/runs/35454440567 (head `c0e48e38`). Every platform except macOS x64 passed. The Intel lane passed unit tests, packaging and smoke checks, 71 display-sensitive scenarios, 95 isolated scenarios, and four runtime-recovery scenarios. Its desktop benchmark then recorded command-palette first open at 117.8 ms and Settings at 127.4 ms against the existing 100 ms limit. The aggregate gate failed with that lane.
+
+- Native profiling and temporary dependency probes identified recreated navigation/preview callbacks invalidating the workspace scene during unrelated overlay state changes. Stabilize both action boundaries with the existing `useStableActions` helper, which dispatches to the latest committed implementation; keep project, draft, split-pane, and detached-window routing unchanged.
+- The new real-App DOM regression fails before the fix: opening the prefetched palette renders the workspace, chat, composer, and transcript again. Afterward opening and closing it preserves all five background render counts at zero while the palette and keyboard focus work normally.
+- Correct the earlier disclosure tests so assertions run in the test body instead of a React event callback, where an exception could be logged without failing the test. Happy DOM toggles native details while the click bubbles before React's delegated handler, unlike Chromium; the subagent DOM case verifies cancelled presses and activation, with native ordering covered by Electron scenarios.
+- Temporary CPU/dependency probes were removed. Performance limits, retries, CI configuration, and package checks are unchanged.
+- Validation: all 23 focused renderer tests passed. The full Node 22 gate passed with 868 files / 9,254 tests (16 files / 145 tests skipped), including architecture, lint, all TypeScript targets, production builds, and unchanged bundle budgets.
+- The complete native desktop benchmark passed on macOS ARM64 with `CI=true`: first command-palette open was 3.6 ms and Settings was 15.8 ms, both below the unchanged 100 ms threshold. This local result does not substitute for Intel CI; the Intel host remains to be rechecked after push.
+- Nine native Electron scenarios passed (22.2 seconds): all seven message-search scenarios, project/draft navigation, and Environment preview/failed-run actions. These cover fresh and historical results, split and detached ownership, restart, reconnect, and keyboard focus.
+- Logs: `/tmp/inertia-421-palette-negative.log`, `/tmp/inertia-421-overlay-focused.log`, `/tmp/inertia-421-overlay-check.log`, `/tmp/inertia-421-overlay-desktop.log`, `/tmp/inertia-421-overlay-native.log`. Native artifacts are in `/tmp/inertia-421-overlay-native`; the benchmark report is `/tmp/inertia-421-overlay-desktop.json`.
+
 ## Bundle accounting
 
 The baseline and implementation use the identical dependency graph. The necessary reference ownership/hydration guards add 1,032 bytes to each initial route. Preview feedback and the expansion correction bring the total core addition to 1,186 bytes. Only these exact measured additions were added to exceeded ceilings, retaining their previous headroom. All other ceilings and static-import assertions remain unchanged. See `renderer-bundle.json` for every measured metric.
 
-The external-review corrections, including the CI follow-up, add 806 bytes to main first load, 699 to detached first load, and 2,325 total core JavaScript bytes. Context cards stay deferred. The same-dependency measurements are in `pro-review-renderer-bundle.json`; only the initial measured consent/error/activity deltas were added to exceeded ceilings. The earlier disclosure-navigation fix and acknowledgement wording consumed 66 bytes of retained core headroom; the CI activation-order correction then recovered 374 bytes. Neither changed the ceiling. CSS remains within its existing ceiling.
+The external-review corrections, including both CI follow-ups, add 852 bytes to main first load, 699 to detached first load, and 2,371 total core JavaScript bytes. Context cards stay deferred. The same-dependency measurements are in `pro-review-renderer-bundle.json`; only the initial measured consent/error/activity deltas were added to exceeded ceilings. The earlier disclosure-navigation fix and acknowledgement wording consumed 66 bytes of retained core headroom; the CI activation-order correction then recovered 374 bytes. The overlay action stabilization adds 46 bytes to main first load and total core JavaScript. Neither follow-up changed the ceiling. CSS remains within its existing ceiling.
 
 ## Verification
 
-- `VITEST_MAX_WORKERS=4 npm run check`: passed; 868 test files passed, 16 skipped; 9,253 tests passed, 145 skipped. Workflow policy, immutable migrations, architecture, color themes, both lint layers, all TypeScript targets, production builds and bundle budgets passed.
+- `VITEST_MAX_WORKERS=4 npm run check`: passed; 868 test files passed, 16 skipped; 9,254 tests passed, 145 skipped. Workflow policy, immutable migrations, architecture, color themes, both lint layers, all TypeScript targets, production builds and bundle budgets passed.
 - `npm run test:portable`: passed; 99 files, 1,385 tests passed, 9 skipped.
 - Focused external-review regressions: encoded one/two-reference assembly and immutable previews/receipts; workspace consent/cancellation and request retry; bounded older running activity and settlement; sprite backup-cleanup fault injection. These passed individually and in the final full gate. Earlier corrections plus the Git fixture recheck passed 114 tests.
 - Electron repetition: Quiet Ledger and transcript navigation, each twice with one worker: 4 passed (41.3 seconds). Final Electron matrix: `npx playwright test tests/e2e/quiet-ledger.spec.ts tests/e2e/transcript.spec.ts tests/e2e/conversation-context.spec.ts tests/e2e/usage-limits.spec.ts tests/e2e/activity-lifecycle.spec.ts tests/e2e/mascot-sprites.spec.ts --project=display-sensitive --project=isolated --workers=1`: 7 passed (53.1 seconds). This covers native consent cancellation/acceptance, reference previews, activity settlement, quota layouts, transcript controls and sprite apply/restart/reset. The only subsequent renderer change clarifies the acknowledgement text from “Chat shared” to “Sharing approved”; the full gate was rerun afterward.
@@ -82,6 +95,7 @@ Earlier local verification logs: `/tmp/inertia-pro-review-final-gate.log`, `/tmp
 - `docs/user/chats-and-agents.md`
 - `scripts/check-renderer-bundle.mjs`
 - `src/main/mascot-sprites.ts`
+- `src/renderer/src/App.tsx`
 - `src/renderer/src/components/SubagentDisclosure.tsx`
 - `src/renderer/src/components/composer/Composer.tsx`
 - `src/renderer/src/components/composer/ComposerConversationContextCards.tsx`
@@ -119,6 +133,7 @@ Earlier local verification logs: `/tmp/inertia-pro-review-final-gate.log`, `/tmp
 - `tests/renderer/failure-diagnostics.dom.test.tsx`
 - `tests/renderer/quiet-ledger-settled-work.test.ts`
 - `tests/renderer/response-timeline.test.ts`
+- `tests/renderer/streaming-render-isolation.dom.test.tsx`
 - `tests/renderer/subagent-disclosure.dom.test.tsx`
 - `tests/server/claude-delegate-lifecycle.test.ts`
 - `tests/server/claude-resume-queued-prompt.test.ts`

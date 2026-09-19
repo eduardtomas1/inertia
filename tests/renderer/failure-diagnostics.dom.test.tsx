@@ -165,7 +165,7 @@ afterEach(() => {
 
 describe("turn failure diagnostics", () => {
   it.each(["Technical details", "Run details"])("claims navigation only when %s is activated", async (name) => {
-    const before = vi.fn(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
+    const before = vi.fn(() => toggle.getAttribute("aria-expanded"));
     const turn = name === "Run details"
       ? { ...failedTurn(), status: "completed" as const, terminalReason: "provider-completed", terminalAssistantMessageId: "final-answer" }
       : failedTurn();
@@ -179,6 +179,7 @@ describe("turn failure diagnostics", () => {
     fireEvent.pointerUp(toggle);
     fireEvent.click(toggle);
     expect(before).toHaveBeenCalledOnce();
+    expect(before).toHaveReturnedWith("false");
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 

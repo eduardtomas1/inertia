@@ -20,7 +20,7 @@ function AnchoredDetails({ before, after }: {
 
 describe("anchored disclosure lifecycle", () => {
   it("does not claim navigation until a pointer press activates the disclosure", async () => {
-    const before = vi.fn(() => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    const before = vi.fn(() => summary.closest("details")?.open);
     const after = vi.fn();
     render(<AnchoredDetails before={before} after={after} />);
     const summary = screen.getByText("Execution transcript");
@@ -33,6 +33,7 @@ describe("anchored disclosure lifecycle", () => {
     fireEvent.pointerUp(summary);
     fireEvent.click(summary);
     expect(before).toHaveBeenCalledOnce();
+    expect(before).toHaveReturnedWith(false);
     expect(summary.closest("details")).toHaveAttribute("open");
     await waitFor(() => expect(after).toHaveBeenCalledOnce());
   });

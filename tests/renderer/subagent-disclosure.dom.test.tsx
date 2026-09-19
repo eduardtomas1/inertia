@@ -435,7 +435,7 @@ describe("delegated-agent timeline disclosure", () => {
   });
 
   it("claims navigation on activation without moving a pending or cancelled pointer press", () => {
-    const before = vi.fn(() => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    const before = vi.fn();
     render(<SubagentDisclosure {...DISCLOSURE_OWNER} subagents={[trace()]} turns={[turn()]} now={NOW} onBeforeToggle={before} />);
     const summary = screen.getByText("1 delegated task · 1 working").closest("summary")!;
 

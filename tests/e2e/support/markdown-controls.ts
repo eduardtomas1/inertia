@@ -293,6 +293,31 @@ export async function verifyDesktopMarkdownControls(input: {
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
 }
 
+/** Opening details in a tall narrow turn must retain its next disclosure. */
+export async function expandCompletedTurnDetails(turn: Locator): Promise<void> {
+  const toggle = turn.getByRole("button", { name: "Run details" });
+  // Keep the following turn visible too: anchoring it must not evict the tall
+  // source turn whose disclosure the user is opening.
+  await toggle.evaluate((element) => element.scrollIntoView({ block: "start", inline: "nearest" }));
+  const before = await toggle.evaluate((element) => {
+    const scroll = element.closest<HTMLElement>(".message-scroll")!;
+    const viewport = scroll.getBoundingClientRect();
+    const rows = [...scroll.querySelectorAll<HTMLElement>("[data-response-row-id]")];
+    const index = rows.findIndex((row) => row.contains(element));
+    const source = rows[index]?.getBoundingClientRect();
+    const following = rows[index + 1]?.getBoundingClientRect();
+    return {
+      tallSource: Boolean(source && source.height > viewport.height),
+      followingVisible: Boolean(following && following.top < viewport.bottom - 8 && following.bottom > viewport.top + 8),
+    };
+  });
+  expect(before).toEqual({ tallSource: true, followingVisible: true });
+  await toggle.click();
+  await expect(toggle).toBeInViewport();
+  await expect(turn.page().getByRole("button", { name: "Jump to latest" })).toBeVisible();
+  await turn.getByLabel("Changed by this turn").locator("summary").click();
+}
+
 export async function verifyNarrowDesktopMarkdownControls(input: {
   electronApp: ElectronApplication;
   completedTurn: Locator;

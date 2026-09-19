@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../../lib/locale";
-import { Fragment, lazy, Suspense, useState, type RefObject } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type RefObject } from "react";
 import {
   Box,
   Check,
@@ -90,11 +90,12 @@ export interface ComposerInputZoneProps {
   followUpPending: boolean;
   typedMessageLimit: number;
   messageFits: boolean;
-  mentionMatch: RegExpExecArray | null;
+  conversationId: string;
+  onMentionQuery: (query: string) => void;
   mentionResults: WorkspaceEntry[];
   chatSuggestions: readonly ConversationContextSourceOption[];
   onAddFileReference: (path: string) => void;
-  onReferenceChat: (source: ConversationContextSourceOption) => void;
+  onReferenceChat: (source: ConversationContextSourceOption) => Promise<boolean>;
   onSkillSelectionChange?: (editor: HTMLTextAreaElement) => void;
   skillOpen: boolean;
   activeSkill: AgentSkillSummary | null;
@@ -153,7 +154,8 @@ export function ComposerInputZone({
   followUpPending,
   typedMessageLimit,
   messageFits,
-  mentionMatch,
+  conversationId,
+  onMentionQuery,
   mentionResults,
   chatSuggestions,
   onAddFileReference,
@@ -174,6 +176,11 @@ export function ComposerInputZone({
   onOpenResume,
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
+  const currentDraft = useRef({ conversationId, message });
+  currentDraft.current = { conversationId, message };
+  const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
+  const mentionQueryText = mentionMatch?.[1] ?? "";
+  useEffect(() => { onMentionQuery(mentionQueryText); }, [mentionQueryText, onMentionQuery]);
   const modeChangesDisabled = disabled || running;
   const slashQuery = slashMatch?.[1].toLowerCase();
   const slashCommands: ComposerSlashCommand[] = slashMatch ? [
@@ -257,8 +264,15 @@ export function ComposerInputZone({
   };
   const acceptMention = (option: (typeof mentionOptions)[number]): void => {
     if (option.kind === "chat") {
-      onMessageChange(message.replace(/@[^\s@]*$/u, ""));
-      onReferenceChat(option.source);
+      void onReferenceChat(option.source).then((created) => {
+        // Completion belongs to the draft that requested this reference. Keep
+        // the mention on failure, after navigation, or after further typing.
+        if (created && textareaRef.current?.isConnected
+          && currentDraft.current.conversationId === conversationId
+          && currentDraft.current.message === message && textareaRef.current.value === message) {
+          onMessageChange(message.replace(/@[^\s@]*$/u, ""));
+        }
+      });
     } else {
       onMessageChange(message.replace(
         /@[^\s@]*$/u,
@@ -581,9 +595,10 @@ export function ComposerInputZone({
                         {option.source.conversationTitle}
                       </span>
                       <small>
+                        {option.source.projectName}
                         {option.source.workspaceRelation === "different-workspace"
-                          ? "different workspace"
-                          : option.source.projectName}
+                          ? " · different workspace"
+                          : ""}
                       </small>
                     </>
                   )

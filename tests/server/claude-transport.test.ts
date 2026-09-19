@@ -283,8 +283,14 @@ describe("installed Claude SDK owned transport", () => {
   });
 
   it.each([
-    ["an opaque credential configured for the run", (root: string) => `Invalid API key opaque-launch-credential-value while reading ${root}\n`],
-    ["a key split by the tail boundary", () => `Key sk-ant-api03-${"q".repeat(40)} rejected\n${"n".repeat(4_040)}\nstartup stopped\n`],
+    ["an opaque credential configured for the run", (root: string) => [`Invalid API key opaque-launch-credential-value while reading ${root}\n`]],
+    ["a key split by the tail boundary", () => [`Key sk-ant-api03-${"q".repeat(40)} rejected\n${"n".repeat(4_040)}\nstartup stopped\n`]],
+    ["a key split across chunks of a discarded line", () => [
+      `${"n".repeat(4_100)} Key sk-ant-api03-`, "q".repeat(20), `${"q".repeat(20)} rejected\nstartup stopped\n`,
+    ]],
+    ["a key at the exact tail limit before a chunk continues it", () => [
+      `${"n".repeat(4_082)} sk-ant-api03-`, "q".repeat(20), `${"q".repeat(20)} rejected\r\nstartup stopped\n`,
+    ]],
   ])("never exposes %s in the stderr tail", async (_label, stderrFor) => {
     const root = portableFixtureRoot("Claude stderr credentials");
     const child = fakeClaudeChild() as ReturnType<typeof fakeClaudeChild> & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough };
@@ -304,7 +310,7 @@ describe("installed Claude SDK owned transport", () => {
           response: { commands: [], models: [], agents: [], account: {} },
         } })}\n`);
       } else if (message.type === "user") {
-        child.stderr.write(stderrFor(root));
+        for (const chunk of stderrFor(root)) child.stderr.write(chunk);
         setImmediate(exit);
       }
     });
@@ -326,6 +332,7 @@ describe("installed Claude SDK owned transport", () => {
       expect(detail).not.toContain("opaque-launch-credential-value");
       expect(detail).not.toMatch(/q{8}/u);
       expect(detail.length).toBeLessThanOrEqual(4 * 1024);
+      if (_label.includes("chunk")) expect(detail).toContain("startup stopped");
     } finally {
       input.close();
       child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();

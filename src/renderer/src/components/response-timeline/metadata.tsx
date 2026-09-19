@@ -244,14 +244,6 @@ export function TurnMetadata({
           id={detailsLabelId}
           aria-expanded={detailsExpanded}
           aria-controls={detailsId}
-          onPointerDownCapture={prepareToggle}
-          onPointerCancelCapture={() => {
-            togglePrepared.current = false;
-          }}
-          onKeyDownCapture={(event) => {
-            if (event.key === "Enter" || event.key === " ") prepareToggle();
-          }}
-          onClickCapture={prepareToggle}
           onClick={toggleDetails}
         >
           <span>Run details</span>

@@ -1,7 +1,7 @@
 {
   "baseline": "30e6d746",
   "runtime": "Node 22.23.2, macOS ARM64",
-  "method": "Same installed dependency graph and package-lock as the previous verified branch build. Measure emitted output with the unchanged static-import-closure accounting in scripts/check-renderer-bundle.mjs. The three exceeded budgets were increased by the observed consent/error/activity additions only. Final disclosure-navigation corrections and acknowledgement wording consume 66 more core bytes of the retained headroom without a further ceiling increase. Context cards remain deferred; every other ceiling and static-import assertion is unchanged.",
+  "method": "Same installed dependency graph and package-lock as the previous verified branch build. Measure emitted output with the unchanged static-import-closure accounting in scripts/check-renderer-bundle.mjs. The three exceeded budgets were increased by the observed consent/error/activity additions only. Final disclosure-navigation corrections and acknowledgement wording consume 66 more core bytes of the retained headroom without a further ceiling increase. Context cards remain deferred; every other ceiling and static-import assertion is unchanged. The PR CI activation-order correction removes 374 core/transcript bytes and 138 deferred failure-diagnostics bytes from that build; these final measurements include it, with no budget adjustment.",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "baselineBytes": 1219,
@@ -115,13 +115,13 @@
     },
     "transcriptJavaScript": {
       "baselineBytes": 539550,
-      "implementationBytes": 540033,
-      "deltaBytes": 483
+      "implementationBytes": 539659,
+      "deltaBytes": 109
     },
     "deferredFailureDiagnosticsJavaScript": {
       "baselineBytes": 6513,
-      "implementationBytes": 6513,
-      "deltaBytes": 0
+      "implementationBytes": 6375,
+      "deltaBytes": -138
     },
     "deferredAttachmentPreviewJavaScript": {
       "baselineBytes": 12333,
@@ -210,8 +210,8 @@
     },
     "coreJavaScript": {
       "baselineBytes": 2117654,
-      "implementationBytes": 2120353,
-      "deltaBytes": 2699
+      "implementationBytes": 2119979,
+      "deltaBytes": 2325
     },
     "deferredPdfJavaScript": {
       "baselineBytes": 437530,

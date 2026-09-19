@@ -2,14 +2,12 @@ import {
   memo,
   lazy,
   Suspense,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
   Brain,
@@ -434,31 +432,16 @@ export function useAnchoredDetailsToggle(
   onBeforeToggle?: () => void,
   onAfterToggle?: () => void,
 ): {
-  onPointerDownCapture: () => void;
-  onPointerCancelCapture: () => void;
-  onKeyDownCapture: (event: ReactKeyboardEvent<HTMLElement>) => void;
   onClickCapture: () => void;
   onClick: () => void;
 } {
-  const prepared = useRef(false);
-  const prepare = useCallback(() => {
-    if (prepared.current) return;
-    prepared.current = true;
-    onBeforeToggle?.();
-  }, [onBeforeToggle]);
   return {
-    onPointerDownCapture: prepare,
-    onPointerCancelCapture: () => {
-      prepared.current = false;
-    },
-    onKeyDownCapture: (event) => {
-      if (event.key === "Enter" || event.key === " ") prepare();
-    },
-    onClickCapture: prepare,
+    // Claim navigation before the native toggle, but after pointer release.
+    // Doing this on press can move the summary out from under the pointer.
+    onClickCapture: () => onBeforeToggle?.(),
     onClick: () => {
       window.requestAnimationFrame(() => {
         onAfterToggle?.();
-        prepared.current = false;
       });
     },
   };

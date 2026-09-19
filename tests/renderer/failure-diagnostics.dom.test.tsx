@@ -120,11 +120,16 @@ function failureActivity(detail = [
 function renderFailure(
   turn: AgentTurn = failedTurn(),
   activity: AgentActivity = failureActivity(),
+  onReaderNavigationIntent?: () => void,
 ): void {
   render(
     <ResponseTimeline
+      onReaderNavigationIntent={onReaderNavigationIntent}
       turns={[turn]}
-      messages={[userMessage()]}
+      messages={[userMessage(), ...(turn.terminalAssistantMessageId ? [{
+        ...userMessage(), id: turn.terminalAssistantMessageId,
+        role: "assistant" as const, content: "The work is complete.", createdAt: completedAt,
+      }] : [])]}
       activities={[activity]}
       reasonings={[]}
       plans={[]}
@@ -159,6 +164,24 @@ afterEach(() => {
 });
 
 describe("turn failure diagnostics", () => {
+  it.each(["Technical details", "Run details"])("claims navigation only when %s is activated", async (name) => {
+    const before = vi.fn(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
+    const turn = name === "Run details"
+      ? { ...failedTurn(), status: "completed" as const, terminalReason: "provider-completed", terminalAssistantMessageId: "final-answer" }
+      : failedTurn();
+    renderFailure(turn, undefined, before);
+    const toggle = await screen.findByRole("button", { name });
+    fireEvent.pointerDown(toggle);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerCancel(toggle);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerDown(toggle);
+    fireEvent.pointerUp(toggle);
+    fireEvent.click(toggle);
+    expect(before).toHaveBeenCalledOnce();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("keeps scrubbed details unmounted until the accessible disclosure opens", async () => {
     renderFailure();
 

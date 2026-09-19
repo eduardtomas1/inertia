@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 import {
   createAppFixture,
@@ -45,7 +46,7 @@ test.beforeAll(async () => {
     name: "conversation-context",
     initialState: "conversation",
     windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+    beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),
         workspaceDirectory,
@@ -120,7 +121,9 @@ test.beforeAll(async () => {
       targetWorkspace = snapshot.projects.find(({ id }) => id === snapshot.activeProjectId)!.normalizedPath;
       const otherPath = join(testDirectory, "reference-source");
       mkdirSync(otherPath, { recursive: true });
-      const otherProject = store.createProject("Another workspace", otherPath);
+      // Seed the same canonical identity the runtime publishes on startup,
+      // including Windows case folding and path separators.
+      const otherProject = store.createProject("Another workspace", otherPath, await inspectProjectIdentity(otherPath));
       sourceWorkspace = otherProject.normalizedPath;
       const otherSource = store.createConversation(otherProject.id, "External research", { activate: false });
       store.createMessage(otherSource.id, "Share this note only after confirming the workspace boundary.", "assistant");

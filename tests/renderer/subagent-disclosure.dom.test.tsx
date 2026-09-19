@@ -434,6 +434,22 @@ describe("delegated-agent timeline disclosure", () => {
     ).closest("details")).not.toHaveAttribute("open");
   });
 
+  it("claims navigation on activation without moving a pending or cancelled pointer press", () => {
+    const before = vi.fn(() => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    render(<SubagentDisclosure {...DISCLOSURE_OWNER} subagents={[trace()]} turns={[turn()]} now={NOW} onBeforeToggle={before} />);
+    const summary = screen.getByText("1 delegated task · 1 working").closest("summary")!;
+
+    fireEvent.pointerDown(summary);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerCancel(summary);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerDown(summary);
+    fireEvent.pointerUp(summary);
+    fireEvent.click(summary);
+    expect(before).toHaveBeenCalledOnce();
+    expect(summary.closest("details")).toHaveAttribute("open");
+  });
+
   it("persists pointer activation before a native toggle can be interrupted", () => {
     const view = render(
       <SubagentDisclosure

@@ -19,7 +19,25 @@ function AnchoredDetails({ before, after }: {
 }
 
 describe("anchored disclosure lifecycle", () => {
-  it("prepares once before a pointer toggle and settles after the next frame", async () => {
+  it("does not claim navigation until a pointer press activates the disclosure", async () => {
+    const before = vi.fn(() => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    const after = vi.fn();
+    render(<AnchoredDetails before={before} after={after} />);
+    const summary = screen.getByText("Execution transcript");
+
+    fireEvent.pointerDown(summary);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerCancel(summary);
+    expect(before).not.toHaveBeenCalled();
+    fireEvent.pointerDown(summary);
+    fireEvent.pointerUp(summary);
+    fireEvent.click(summary);
+    expect(before).toHaveBeenCalledOnce();
+    expect(summary.closest("details")).toHaveAttribute("open");
+    await waitFor(() => expect(after).toHaveBeenCalledOnce());
+  });
+
+  it("prepares once before a keyboard toggle and settles after the next frame", async () => {
     const before = vi.fn();
     const after = vi.fn();
     render(<AnchoredDetails before={before} after={after} />);

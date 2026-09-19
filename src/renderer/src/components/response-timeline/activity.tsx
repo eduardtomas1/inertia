@@ -478,6 +478,7 @@ export const ActivityGroup = memo(function ActivityGroup({
   onAfterToggle?: () => void;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [expandRunning, setExpandRunning] = useState(false);
   const rowsId = useId();
   const summary = useMemo(
     () => summarizeActivities(entry.activities),
@@ -509,7 +510,9 @@ export const ActivityGroup = memo(function ActivityGroup({
     expanded,
     settled: folded,
     revealLatestFailure,
+    expandRunning,
   });
+  const hiddenRunning = summary.running - rows.filter(({ activity, folded: hidden }) => !hidden && activity.status === "running").length;
   const toggle = (): void => {
     onBeforeToggle?.();
     setExpanded((current) => !current);
@@ -559,6 +562,21 @@ export const ActivityGroup = memo(function ActivityGroup({
           aria-hidden="true"
         />
       </button>
+      {!expanded && (hiddenRunning > 0 || (expandRunning && summary.running > 0)) && (
+        <button
+          type="button"
+          className="turn-activity-group-summary"
+          aria-expanded={expandRunning}
+          aria-controls={rowsId}
+          onClick={() => {
+            onBeforeToggle?.();
+            setExpandRunning((current) => !current);
+            window.requestAnimationFrame(() => onAfterToggle?.());
+          }}
+        >
+          {expandRunning ? "Show fewer running operations" : `Show ${hiddenRunning} more running ${hiddenRunning === 1 ? "operation" : "operations"}`}
+        </button>
+      )}
       <div className="turn-activity-group-rows" id={rowsId}>
         {rows.map(({ activity, folded: rowFolded }) => (
           <div

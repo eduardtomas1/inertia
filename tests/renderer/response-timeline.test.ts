@@ -552,9 +552,10 @@ describe("authoritative response timeline", () => {
       'aria-label="4 commands, 1 file read, 1 edit, 1 failed, 1 warning"',
     );
     expect(html).toContain('data-activity-group-state="live"');
-    expect(html.match(/data-folded="false"/g)).toHaveLength(4);
-    expect(html.match(/data-folded="true"/g)).toHaveLength(1);
-    expect(html).not.toContain("Read source");
+    // Running calls remain visible even after falling outside the recent four.
+    expect(html.match(/data-folded="false"/g)).toHaveLength(7);
+    expect(html).not.toContain('data-folded="true"');
+    expect(html).toContain("Read source");
     expect(html).toContain("Inspect package");
     expect(html).toContain("Checking the existing presentation.");
     expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));

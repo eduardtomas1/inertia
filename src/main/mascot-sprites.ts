@@ -186,6 +186,7 @@ export async function saveMascotSprites(
   root: string,
   set: MascotSpriteSet,
   move: (from: string, to: string) => Promise<void> = rename,
+  remove: typeof rm = rm,
 ): Promise<void> {
   const staging = `${root}.staging`;
   const previous = `${root}.previous`;
@@ -193,7 +194,7 @@ export async function saveMascotSprites(
   try {
     await mkdir(staging, { mode: 0o700 });
     for (const file of set.files) await writeFile(join(staging, file.name), file.bytes, { mode: 0o600, flag: "wx" });
-    await rm(previous, { recursive: true, force: true });
+    await remove(previous, { recursive: true, force: true });
     const replacing = await pathExists(root);
     if (replacing) await move(root, previous);
     try {
@@ -202,16 +203,20 @@ export async function saveMascotSprites(
       if (replacing) await move(previous, root);
       throw error;
     }
-    await rm(previous, { recursive: true, force: true });
+    // Promotion committed the new set. A locked backup must not report a
+    // failed apply and leave the live mascot on the old in-memory set.
+    await remove(previous, { recursive: true, force: true }).catch(() => undefined);
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;
   }
 }
 
-export async function removeMascotSprites(root: string): Promise<void> {
-  await rm(root, { recursive: true, force: true });
-  await rm(`${root}.previous`, { recursive: true, force: true });
+export async function removeMascotSprites(root: string, remove: typeof rm = rm): Promise<void> {
+  // Remove the recovery candidate first, so a failed cleanup cannot resurrect
+  // an older set after the active one has already been deleted.
+  await remove(`${root}.previous`, { recursive: true, force: true });
+  await remove(root, { recursive: true, force: true });
 }
 
 export async function loadMascotSprites(root: string): Promise<MascotSpriteSet | null> {

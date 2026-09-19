@@ -12,6 +12,8 @@ import {
   createConversationContextPacketFromAuthorizedAgent,
 } from "../../src/server/runtime/conversation-context-service";
 import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted-agent-text";
+import { assembleTurnRequest, MAX_EXECUTION_PAYLOAD_BYTES } from "../../src/server/runtime/turns/request-context";
+import { conversationContextTransportBudget } from "../../src/server/persistence/conversation-context-transport";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCK_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
@@ -90,6 +92,52 @@ afterEach(() => {
 });
 
 describe("conversation context packets", () => {
+  it.each([1, 2])("sends %s large JSON chat references with the same excerpts as their previews and receipts", (packetCount) => {
+    const { store, sourceId, targetId, otherId } = fixture();
+    const service = new ConversationContextService(store);
+    try {
+      // Nested JSON and Windows paths grow again when the packet's JSON is
+      // embedded as a string in the assembled provider prompt.
+      const line = JSON.stringify({ path: "C:\\src\\repo\\café.ts", status: "ok" }) + "\n";
+      const sources = [sourceId, otherId].slice(0, packetCount);
+      const sourceMessages = sources.map((source) => Array.from({ length: 30 }, (_, index) =>
+        store.createMessage(source, line.repeat(170), "assistant", [], null,
+          new Date(Date.UTC(2026, 8, 19) + index).toISOString()).id));
+      const packets = sources.map((sourceConversationId) => service.createFromRenderer({
+        sourceConversationId, targetConversationId: targetId, acknowledgedWorkspaceDifference: true,
+        note: 'Retain the "path" values and line breaks.',
+      }));
+      const ids = packets.map(({ id }) => id);
+      const previews = ids.map((id) => service.load(id, targetId));
+      const blocks = service.materializeForTurn(targetId, ids);
+      const assembled = assembleTurnRequest({
+        cwd: process.cwd(), visibleContent: "Use the referenced chats.", interactionMode: "build",
+        context: { conversationContexts: blocks },
+      });
+      expect(Buffer.byteLength(assembled.executionPrompt)).toBeLessThanOrEqual(MAX_EXECUTION_PAYLOAD_BYTES);
+      const sent = assembled.persistence.blobs.map(({ content }) => JSON.parse(content) as {
+        packetId: string; excerpts: typeof previews[number]["excerpts"];
+      });
+      for (const [index, preview] of previews.entries()) {
+        const packetBlocks = blocks.filter(({ packetId }) => packetId === preview.id);
+        expect(packetBlocks.reduce((total, { content }) => total + Buffer.byteLength(JSON.stringify(content)), 0))
+          .toBeLessThanOrEqual(conversationContextTransportBudget(packetCount));
+        expect(packetBlocks.every(({ content }) => Buffer.byteLength(content) <= MAX_CONVERSATION_CONTEXT_BLOCK_BYTES)).toBe(true);
+        expect(sent.filter(({ packetId }) => packetId === preview.id).flatMap(({ excerpts }) => excerpts))
+          .toEqual(preview.excerpts);
+        expect(preview.excerpts.map(({ sourceMessageId }) => sourceMessageId))
+          .toEqual(sourceMessages[index]!.slice(-preview.messageCount));
+        expect(preview.messageCount).toBeGreaterThan(0);
+        expect(preview.droppedMessageCount).toBeGreaterThan(0);
+        expect(preview.messageCount + preview.droppedMessageCount).toBe(30);
+      }
+      beginWithPacket(store, targetId, ids);
+      for (const preview of previews) {
+        expect(service.load(preview.id, targetId).excerpts).toEqual(preview.excerpts);
+      }
+    } finally { store.close(); }
+  });
+
   it("previews the shared transport budget and keeps sent receipts independent of later drafts", () => {
     const { store, sourceId, targetId, otherId } = fixture();
     const service = new ConversationContextService(store);
@@ -103,6 +151,7 @@ describe("conversation context packets", () => {
         sourceConversationId, targetConversationId: targetId, acknowledgedWorkspaceDifference: true,
       });
       const first = create(sourceId);
+      const original = store.contextPackets.get(first.id, targetId);
       const single = service.load(first.id, targetId);
       const second = create(otherId);
       const preview = service.load(first.id, targetId);
@@ -120,7 +169,7 @@ describe("conversation context packets", () => {
       create(sourceId);
       expect(service.load(first.id, targetId).excerpts).toEqual(preview.excerpts);
       // Previewing and sending never rewrite the immutable source packet.
-      expect(store.contextPackets.get(first.id, targetId).excerpts).toEqual(first.excerpts);
+      expect(store.contextPackets.get(first.id, targetId).excerpts).toEqual(original.excerpts);
     } finally { store.close(); }
   });
 
@@ -342,11 +391,13 @@ describe("conversation context packets", () => {
     store.close();
   });
 
-  it("shows the exact smaller host-tool result in agent-requested context receipts", () => {
+  it.each([false, true])("shows the exact smaller host-tool result in agent-requested context receipts (JSON logs: %s)", (jsonLogs) => {
     const { store, sourceId, targetId } = fixture();
     try {
       const messages = Array.from({ length: 12 }, (_, index) => store.createMessage(
-        sourceId, `Decision ${index}: ${"detail ".repeat(1160)}`, "assistant", [], null,
+        sourceId, jsonLogs
+          ? (JSON.stringify({ path: "C:\\src\\repo\\café.ts", status: "ok" }) + "\n").repeat(170)
+          : `Decision ${index}: ${"detail ".repeat(1160)}`, "assistant", [], null,
         new Date(Date.UTC(2026, 7, 19) + index).toISOString(),
       ));
       const turn = beginWithPacket(store, targetId, []).turn;
@@ -912,10 +963,10 @@ describe("conversation context packets", () => {
 
   it("splits an oversized whole-chat reference into ordered bounded blocks", () => {
     const { store, sourceId, targetId } = fixture();
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 22; index += 1) {
       store.createMessage(
         sourceId,
-        `${index}-${"detail ".repeat(1100)}`,
+        `${index}-${"detail ".repeat(1168)}`,
         index % 2 === 0 ? "user" : "assistant",
         [],
         null,

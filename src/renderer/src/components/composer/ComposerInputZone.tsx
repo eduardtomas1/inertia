@@ -595,9 +595,10 @@ export function ComposerInputZone({
                         {option.source.conversationTitle}
                       </span>
                       <small>
+                        {option.source.projectName}
                         {option.source.workspaceRelation === "different-workspace"
-                          ? "different workspace"
-                          : option.source.projectName}
+                          ? " · different workspace"
+                          : ""}
                       </small>
                     </>
                   )

@@ -5,6 +5,8 @@ export interface ConversationContextSourceOption {
   conversationId: string;
   conversationTitle: string;
   projectName: string;
+  workspaceLabel: string;
+  targetWorkspaceLabel: string;
   workspaceRelation: "same-workspace" | "different-workspace";
   archived: boolean;
 }

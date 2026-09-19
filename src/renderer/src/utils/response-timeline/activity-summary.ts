@@ -5,6 +5,7 @@ import { activityAttentionSeverity } from "./activity-attention";
 export type ActivityWorkKind = "command" | "read" | "search" | "edit" | "tool" | "event";
 
 export const ACTIVITY_GROUP_LIVE_WINDOW = 4;
+export const ACTIVITY_GROUP_ACTIVE_WINDOW = 4;
 
 const SHELL_WRAPPER_PATTERN =
   /^(?:(?:\/usr)?\/bin\/)?(?:ba|z|da)?sh\s+-l?c\s+([\s\S]+)$/u;
@@ -270,6 +271,7 @@ export function resolveActivityGroupWindow(
     expanded: boolean;
     settled: boolean;
     revealLatestFailure?: boolean;
+    expandRunning?: boolean;
   },
 ): ActivityGroupRowPresentation[] {
   if (options.expanded) {
@@ -283,11 +285,14 @@ export function resolveActivityGroupWindow(
     ? latestFailureIndex(activities)
     : -1;
   const rows: ActivityGroupRowPresentation[] = [];
+  let running = 0;
   activities.forEach((activity, index) => {
-    if (index < firstMounted && index !== revealed) return;
+    const keepRunning = !options.settled && activity.status === "running"
+      && (++running <= ACTIVITY_GROUP_ACTIVE_WINDOW || options.expandRunning);
+    if (index < firstMounted && index !== revealed && !keepRunning) return;
     rows.push({
       activity,
-      folded: index < firstVisible && index !== revealed,
+      folded: index < firstVisible && index !== revealed && !keepRunning,
     });
   });
   return rows;

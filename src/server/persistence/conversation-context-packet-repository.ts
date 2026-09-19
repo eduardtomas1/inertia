@@ -738,7 +738,7 @@ export class ConversationContextPacketRepository {
         requestId: input.requestId,
         consumedAt: input.completedAt,
       });
-      const { packet, blocks } = prepareConversationContextPacket(original, 28 * 1024);
+      const { packet, blocks } = prepareConversationContextPacket(original, 28 * 1024, "tool-result");
       const resultJson = JSON.stringify({
         context: blocks.map((block) => JSON.parse(block.content) as unknown),
       });
@@ -800,6 +800,7 @@ export class ConversationContextPacketRepository {
       packetFromRow(row, row.source_available === 1),
       agentPackets.has(row.id) ? 28 * 1024
         : conversationContextTransportBudget(counts.get(row.consumed_request_id)!),
+      agentPackets.has(row.id) ? "tool-result" : "prompt",
     ).packet));
   }
 
@@ -836,8 +837,11 @@ export class ConversationContextPacketRepository {
     `).get(packetId, targetConversationId, targetConversationId, packetId) as {
       count: number; agent_requested: number;
     };
-    return prepareConversationContextPacket(packet, cohort.agent_requested ? 28 * 1024
-      : conversationContextTransportBudget(cohort.count)).packet;
+    return prepareConversationContextPacket(
+      packet,
+      cohort.agent_requested ? 28 * 1024 : conversationContextTransportBudget(cohort.count),
+      cohort.agent_requested ? "tool-result" : "prompt",
+    ).packet;
   }
 
   deleteDraft(packetId: string, targetConversationId: string): void {

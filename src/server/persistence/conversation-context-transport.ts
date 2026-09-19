@@ -17,6 +17,7 @@ const byteLength = (text: string): number => Buffer.byteLength(text, "utf8");
 export function prepareConversationContextPacket(
   packet: ConversationContextPacket,
   budgetBytes = conversationContextTransportBudget(1),
+  transport: "prompt" | "tool-result" = "prompt",
 ): { packet: ConversationContextPacket; blocks: MaterializedConversationContext[] } {
   const buildContent = (
     excerpts: readonly ConversationContextExcerpt[],
@@ -42,45 +43,50 @@ export function prepareConversationContextPacket(
     droppedMessageCount,
     excerpts,
   });
-  const envelopeBytes = byteLength(buildContent(
+  const envelope = buildContent(
     [],
-    99,
-    99,
+    MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET - 1,
+    MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
     packet.droppedMessageCount + packet.excerpts.length,
-  ));
-  const blockCapacity = Math.max(
-    1,
-    Math.min(budgetBytes, MAX_CONVERSATION_CONTEXT_BLOCK_BYTES) - envelopeBytes,
   );
-  const totalCapacity = Math.max(
-    1,
-    budgetBytes - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * envelopeBytes,
-  );
-  const retained: ConversationContextExcerpt[] = [];
-  let used = 0;
+  // Prompt context embeds block JSON inside a JSON string. Tool results embed
+  // parsed blocks directly. Count the actual escaping for each transport;
+  // raw block sizes alone can pass here and exceed the final prompt limit.
+  const transportBytes = (serialized: string): number => transport === "prompt"
+    ? byteLength(JSON.stringify(serialized)) - 2
+    : byteLength(serialized);
+  const envelopeBytes = transportBytes(envelope) + (transport === "prompt" ? 2 : 0);
+  const blockCapacity = Math.min(budgetBytes, MAX_CONVERSATION_CONTEXT_BLOCK_BYTES)
+    - byteLength(envelope);
+  const groups: ConversationContextExcerpt[][] = [[]];
+  let current = groups[0]!;
+  let currentBytes = 0;
+  let used = envelopeBytes;
+  // Pack newest first so either bound drops only the oldest whole excerpts.
   for (let index = packet.excerpts.length - 1; index >= 0; index -= 1) {
     const excerpt = packet.excerpts[index]!;
-    const bytes = byteLength(JSON.stringify(excerpt)) + 1;
-    if (retained.length > 0 && used + bytes > totalCapacity) break;
-    used += bytes;
-    retained.unshift(excerpt);
-  }
-  const dropped = packet.droppedMessageCount
-    + (packet.excerpts.length - retained.length);
-  const groups: ConversationContextExcerpt[][] = [];
-  let current: ConversationContextExcerpt[] = [];
-  let currentBytes = 0;
-  for (const excerpt of retained) {
-    const bytes = byteLength(JSON.stringify(excerpt)) + 1;
-    if (current.length > 0 && currentBytes + bytes > blockCapacity) {
-      groups.push(current);
+    const serialized = JSON.stringify(excerpt);
+    const bytes = byteLength(serialized) + 1;
+    const newBlock = current.length > 0 && currentBytes + bytes > blockCapacity;
+    const nextUsed = used + transportBytes(serialized) + 1 + (newBlock ? envelopeBytes : 0);
+    if (bytes > blockCapacity || nextUsed > budgetBytes
+      || (newBlock && groups.length === MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET)) break;
+    if (newBlock) {
       current = [];
+      groups.push(current);
       currentBytes = 0;
     }
     current.push(excerpt);
     currentBytes += bytes;
+    used = nextUsed;
   }
-  groups.push(current);
+  groups.reverse().forEach((group) => group.reverse());
+  const retained = groups.flat();
+  if (retained.length === 0 && packet.excerpts.length > 0) {
+    throw new Error("The shared chat context excerpt exceeds its transport bound.");
+  }
+  const dropped = packet.droppedMessageCount
+    + (packet.excerpts.length - retained.length);
   const blockCount = groups.length;
   const blocks = groups.map((excerpts, blockIndex) => {
     const content = buildContent(excerpts, blockIndex, blockCount, dropped);

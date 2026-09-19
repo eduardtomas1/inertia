@@ -6,6 +6,7 @@ import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTime
 import {
   THINKING_LINE_FRAGMENT_INTERVAL_MS,
   THINKING_LINE_INTERVAL_MS,
+  ActivityGroup,
 } from "../../src/renderer/src/components/response-timeline/activity";
 import type {
   AgentActivity,
@@ -183,6 +184,26 @@ function renderState(input: StateInput = {}) {
 afterEach(() => cleanup());
 
 describe("agent loading and trace DOM", () => {
+  it("reveals older running operations independently of completed history and folds them after settlement", () => {
+    const activities = Array.from({ length: 20 }, (_, index) => ({
+      ...activity(`Operation ${index}`), id: `operation-${index}`,
+      status: index < 8 ? "running" as const : "completed" as const,
+    }));
+    const entry = { kind: "activity-group" as const, id: "active-group", createdAt: activities[0]!.createdAt, activities };
+    const view = render(<ActivityGroup entry={entry} settled />);
+    const visible = (): Element[] => [...view.container.querySelectorAll('[data-folded="false"]')];
+    expect(visible()).toHaveLength(8);
+    expect(visible()[0]).toHaveTextContent("Operation 0");
+    fireEvent.click(screen.getByRole("button", { name: "Show 4 more running operations" }));
+    expect(visible()).toHaveLength(12);
+    expect(view.container).not.toHaveTextContent("Operation 10");
+    fireEvent.click(screen.getByRole("button", { name: "Show fewer running operations" }));
+    expect(visible()).toHaveLength(8);
+    view.rerender(<ActivityGroup entry={{ ...entry, activities: activities.map((row) => ({ ...row, status: "completed" })) }} settled />);
+    expect(visible()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /running operations/u })).not.toBeInTheDocument();
+  });
+
   it("renders an inert pixel grid, stable live label, exact activity, and quiet timer", () => {
     const { container, onStop } = renderState({
       activities: [activity("Web search")],
@@ -222,6 +243,7 @@ describe("agent loading and trace DOM", () => {
     ].map((title, index) => ({
       ...activity(title),
       id: `activity-history-${index + 1}`,
+      status: index < 2 ? "completed" as const : "running" as const,
     }));
     const { container } = renderState({ activities });
     const group = container.querySelector(".turn-activity-group");

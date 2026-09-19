@@ -91,6 +91,9 @@ export function useComposerConversationContext(input: {
       setError({ conversationId, message: "Send or remove a referenced chat before adding another." });
       return false;
     }
+    const acknowledgedWorkspaceDifference = source.workspaceRelation === "different-workspace"
+      && window.confirm(`Share context from “${source.conversationTitle}” in ${source.projectName} (${source.workspaceLabel}) with this chat (${source.targetWorkspaceLabel})?\n\nThese are different workspaces. The agent will receive a size-limited copy of the source chat.`);
+    if (source.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) return false;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
@@ -100,8 +103,7 @@ export function useComposerConversationContext(input: {
         payload: {
           sourceConversationId: source.conversationId,
           targetConversationId: conversationId,
-          acknowledgedWorkspaceDifference:
-            source.workspaceRelation === "different-workspace",
+          acknowledgedWorkspaceDifference,
         },
       });
       if (event.type !== "request.result"
@@ -187,6 +189,7 @@ export function ComposerConversationContextPreview({
         packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
         onCommand={onCommand}
+        onDismiss={() => controller.togglePreview(controller.previewPacketId!)}
       />
     </Suspense>
   );
@@ -204,7 +207,7 @@ export function ComposerConversationContextRequestCard({
   if (!request || !onCommand) return null;
   return (
     <Suspense fallback={null}>
-      <RequestCard request={request} sources={sources} onCommand={onCommand} />
+      <RequestCard key={`${request.targetConversationId}/${request.requestId}`} request={request} sources={sources} onCommand={onCommand} />
     </Suspense>
   );
 }

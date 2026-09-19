@@ -1,0 +1,227 @@
+{
+  "baseline": "30e6d746",
+  "runtime": "Node 22.23.2, macOS ARM64",
+  "method": "Same installed dependency graph and package-lock as the previous verified branch build. Measure emitted output with the unchanged static-import-closure accounting in scripts/check-renderer-bundle.mjs. The three exceeded budgets were increased by the observed consent/error/activity additions only. Final disclosure-navigation corrections and acknowledgement wording consume 66 more core bytes of the retained headroom without a further ceiling increase. Context cards remain deferred; every other ceiling and static-import assertion is unchanged.",
+  "measurements": {
+    "deferredLegacyPromptStashJavaScript": {
+      "baselineBytes": 1219,
+      "implementationBytes": 1219,
+      "deltaBytes": 0
+    },
+    "deferredUsageLimitsJavaScript": {
+      "baselineBytes": 19949,
+      "implementationBytes": 19949,
+      "deltaBytes": 0
+    },
+    "deferredWelcomeGuideJavaScript": {
+      "baselineBytes": 13135,
+      "implementationBytes": 13135,
+      "deltaBytes": 0
+    },
+    "deferredSnapshotSettingsJavaScript": {
+      "baselineBytes": 5017,
+      "implementationBytes": 5017,
+      "deltaBytes": 0
+    },
+    "deferredProjectSettingsJavaScript": {
+      "baselineBytes": 12792,
+      "implementationBytes": 12792,
+      "deltaBytes": 0
+    },
+    "deferredReviewNoteJavaScript": {
+      "baselineBytes": 1439,
+      "implementationBytes": 1439,
+      "deltaBytes": 0
+    },
+    "deferredThreadActionsJavaScript": {
+      "baselineBytes": 8154,
+      "implementationBytes": 8154,
+      "deltaBytes": 0
+    },
+    "deferredDiagnosticsJavaScript": {
+      "baselineBytes": 12330,
+      "implementationBytes": 12330,
+      "deltaBytes": 0
+    },
+    "deferredDiagnosticCatalogJavaScript": {
+      "baselineBytes": 9890,
+      "implementationBytes": 9890,
+      "deltaBytes": 0
+    },
+    "deferredIssueReportJavaScript": {
+      "baselineBytes": 12520,
+      "implementationBytes": 12520,
+      "deltaBytes": 0
+    },
+    "mascotFirstLoadJavaScript": {
+      "baselineBytes": 6049,
+      "implementationBytes": 6049,
+      "deltaBytes": 0
+    },
+    "mascotJavaScript": {
+      "baselineBytes": 6049,
+      "implementationBytes": 6049,
+      "deltaBytes": 0
+    },
+    "mascotSettingsJavaScript": {
+      "baselineBytes": 6647,
+      "implementationBytes": 6647,
+      "deltaBytes": 0
+    },
+    "entryJavaScript": {
+      "baselineBytes": 222496,
+      "implementationBytes": 222496,
+      "deltaBytes": 0
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "baselineBytes": 820228,
+      "implementationBytes": 821034,
+      "deltaBytes": 806
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "baselineBytes": 629346,
+      "implementationBytes": 630045,
+      "deltaBytes": 699
+    },
+    "entryCss": {
+      "baselineBytes": 345068,
+      "implementationBytes": 345556,
+      "deltaBytes": 488
+    },
+    "colorThemesCss": {
+      "baselineBytes": 11686,
+      "implementationBytes": 11686,
+      "deltaBytes": 0
+    },
+    "detachedChatCss": {
+      "baselineBytes": 2677,
+      "implementationBytes": 2677,
+      "deltaBytes": 0
+    },
+    "settingsJavaScript": {
+      "baselineBytes": 48595,
+      "implementationBytes": 48595,
+      "deltaBytes": 0
+    },
+    "filesFirstLoadJavaScript": {
+      "baselineBytes": 105208,
+      "implementationBytes": 105208,
+      "deltaBytes": 0
+    },
+    "deferredMarkdownJavaScript": {
+      "baselineBytes": 431732,
+      "implementationBytes": 431732,
+      "deltaBytes": 0
+    },
+    "transcriptJavaScript": {
+      "baselineBytes": 539550,
+      "implementationBytes": 540033,
+      "deltaBytes": 483
+    },
+    "deferredFailureDiagnosticsJavaScript": {
+      "baselineBytes": 6513,
+      "implementationBytes": 6513,
+      "deltaBytes": 0
+    },
+    "deferredAttachmentPreviewJavaScript": {
+      "baselineBytes": 12333,
+      "implementationBytes": 12333,
+      "deltaBytes": 0
+    },
+    "deferredPreviewJavaScript": {
+      "baselineBytes": 8082,
+      "implementationBytes": 8082,
+      "deltaBytes": 0
+    },
+    "deferredBrowserEvidenceJavaScript": {
+      "baselineBytes": 3751,
+      "implementationBytes": 3751,
+      "deltaBytes": 0
+    },
+    "deferredSpreadsheetJavaScript": {
+      "baselineBytes": 487396,
+      "implementationBytes": 487396,
+      "deltaBytes": 0
+    },
+    "deferredDiscordSettingsJavaScript": {
+      "baselineBytes": 5395,
+      "implementationBytes": 5395,
+      "deltaBytes": 0
+    },
+    "deferredCanaryRollbackJavaScript": {
+      "baselineBytes": 2210,
+      "implementationBytes": 2210,
+      "deltaBytes": 0
+    },
+    "deferredLifecycleIntegritySettingsJavaScript": {
+      "baselineBytes": 4291,
+      "implementationBytes": 4291,
+      "deltaBytes": 0
+    },
+    "deferredSidebarUpdateControlJavaScript": {
+      "baselineBytes": 10797,
+      "implementationBytes": 10797,
+      "deltaBytes": 0
+    },
+    "deferredProviderAuthJavaScript": {
+      "baselineBytes": 10118,
+      "implementationBytes": 10118,
+      "deltaBytes": 0
+    },
+    "deferredProviderMaintenanceJavaScript": {
+      "baselineBytes": 3983,
+      "implementationBytes": 3983,
+      "deltaBytes": 0
+    },
+    "deferredComposerQueueJavaScript": {
+      "baselineBytes": 6957,
+      "implementationBytes": 6957,
+      "deltaBytes": 0
+    },
+    "deferredTerminalJavaScript": {
+      "baselineBytes": 25961,
+      "implementationBytes": 25961,
+      "deltaBytes": 0
+    },
+    "deferredGitMenusJavaScript": {
+      "baselineBytes": 9088,
+      "implementationBytes": 9088,
+      "deltaBytes": 0
+    },
+    "detachedChatJavaScript": {
+      "baselineBytes": 12532,
+      "implementationBytes": 12532,
+      "deltaBytes": 0
+    },
+    "preMergeConfidenceJavaScript": {
+      "baselineBytes": 22570,
+      "implementationBytes": 22570,
+      "deltaBytes": 0
+    },
+    "morphiconsJavaScript": {
+      "baselineBytes": 15829,
+      "implementationBytes": 15829,
+      "deltaBytes": 0
+    },
+    "morphingIconFeedbackJavaScript": {
+      "baselineBytes": 4221,
+      "implementationBytes": 4221,
+      "deltaBytes": 0
+    },
+    "coreJavaScript": {
+      "baselineBytes": 2117654,
+      "implementationBytes": 2120353,
+      "deltaBytes": 2699
+    },
+    "deferredPdfJavaScript": {
+      "baselineBytes": 437530,
+      "implementationBytes": 437530,
+      "deltaBytes": 0
+    },
+    "deferredPdfWorker": {
+      "baselineBytes": 1265413,
+      "implementationBytes": 1265413,
+      "deltaBytes": 0
+    }
+  }
+}

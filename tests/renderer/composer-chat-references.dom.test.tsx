@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationContextPacketSummary,
@@ -8,6 +8,7 @@ import type {
 } from "../../src/shared/contracts";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { ComposerConversationContextPreview, type ComposerConversationContextController } from "../../src/renderer/src/components/composer/useComposerConversationContext";
+import { ConversationContextPreviewCard, ConversationContextRequestCard } from "../../src/renderer/src/components/composer/ComposerConversationContextCards";
 
 import { composerProps, conversation, deferred } from "./composer-fixtures";
 
@@ -15,6 +16,8 @@ const sourceOption = {
   conversationId: "44444444-4444-4444-8444-444444444444",
   conversationTitle: "Architecture decisions",
   projectName: "Inertia",
+  workspaceLabel: "/workspace/inertia",
+  targetWorkspaceLabel: "/workspace/inertia",
   workspaceRelation: "same-workspace" as const,
   archived: false,
 };
@@ -53,7 +56,125 @@ function packetSummary(
   };
 }
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("composer chat references", () => {
+  it("keeps a cross-workspace mention until the user confirms the named source and destination", async () => {
+    const user = userEvent.setup();
+    const current = conversation("cross-workspace-reference");
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    const onCommand = vi.fn(async () => packetResult(current.id));
+    render(<Composer {...composerProps(current, {
+      contextSources: [{ ...sourceOption, workspaceRelation: "different-workspace", workspaceLabel: "/workspace/other" }],
+      onConversationContextCommand: onCommand,
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "Explain @Architect");
+    const option = await screen.findByRole("option", { name: /Architecture decisions/u });
+    await user.click(option);
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(editor).toHaveValue("Explain @Architect");
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("/workspace/other"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("/workspace/inertia"));
+    // The mention remains available for another deliberate selection.
+    fireEvent.change(editor, { target: { value: "Explain @Architec" } });
+    await user.click(await screen.findByRole("option", { name: /Architecture decisions/u }));
+    expect(onCommand).toHaveBeenCalledWith("conversation.context.create", expect.objectContaining({
+      payload: expect.objectContaining({ acknowledgedWorkspaceDifference: true }),
+    }));
+  });
+
+  it.each(["rejected", "unavailable", "wrong-owner"])("ends a %s preview load and allows retry and dismissal", async (failure) => {
+    const user = userEvent.setup();
+    const valid: ServerEvent = { type: "request.result", requestId: "preview", result: {
+      kind: "conversation.context.packet", packet: { ...packetSummary(), excerpts: [] },
+    } };
+    const onCommand = vi.fn().mockImplementationOnce(async () => {
+      if (failure === "rejected") throw new Error("disconnected");
+      if (failure === "unavailable") return { type: "request.ok", requestId: "preview" };
+      return { ...valid, result: { kind: "conversation.context.packet", packet: {
+        ...packetSummary({ targetConversationId: "another-chat" }), excerpts: [],
+      } } };
+    }).mockResolvedValue(valid);
+    const onDismiss = vi.fn();
+    render(<ConversationContextPreviewCard packetId={packetSummary().id}
+      targetConversationId={packetSummary().targetConversationId} onCommand={onCommand} onDismiss={onDismiss} />);
+    await screen.findByRole("alert");
+    expect(screen.queryByText("Loading the exact shared excerpt…")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry preview" }));
+    await screen.findByText(sourceOption.conversationTitle);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close preview" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("requires informed cross-workspace sharing and resets consent when the source changes (preselected: %s)", async (preselected) => {
+    const user = userEvent.setup();
+    const other = { ...sourceOption, conversationId: "other", projectName: "Other project",
+      workspaceLabel: "/workspace/other", workspaceRelation: "different-workspace" as const };
+    const onCommand = vi.fn().mockResolvedValue({ type: "request.ok", requestId: "reply" });
+    const request = { requestId: "request", targetConversationId: "target", targetTurnId: "turn",
+      requestedSourceConversationId: preselected ? other.conversationId : null, createdAt: "now", expiresAt: "later" };
+    const view = render(<ConversationContextRequestCard request={request} sources={[sourceOption, other]} onCommand={onCommand} />);
+    if (!preselected) await user.selectOptions(screen.getByRole("combobox"), other.conversationId);
+    expect(screen.getByRole("button", { name: "Share chat" })).toBeDisabled();
+    expect(screen.getByText(/From Other project/u)).toHaveTextContent("/workspace/other");
+    expect(screen.getByText(/From Other project/u)).toHaveTextContent("/workspace/inertia");
+    expect(onCommand).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("checkbox"));
+    if (preselected) {
+      view.rerender(<ConversationContextRequestCard request={request}
+        sources={[sourceOption, { ...other, workspaceLabel: "/workspace/moved" }]} onCommand={onCommand} />);
+    } else {
+      await user.selectOptions(screen.getByRole("combobox"), sourceOption.conversationId);
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Share chat" })).toBeEnabled();
+      await user.selectOptions(screen.getByRole("combobox"), other.conversationId);
+    }
+    expect(screen.getByRole("button", { name: "Share chat" })).toBeDisabled();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Share chat" }));
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith("conversation.context.agent.respond", expect.objectContaining({
+      payload: expect.objectContaining({ decision: "select", sourceConversationId: other.conversationId,
+        acknowledgedWorkspaceDifference: true }),
+    }));
+  });
+
+  it("allows declining a preselected cross-workspace request without authorizing a share", async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ type: "request.ok", requestId: "reply" });
+    render(<ConversationContextRequestCard request={{ requestId: "request", targetConversationId: "target",
+      targetTurnId: "turn", requestedSourceConversationId: sourceOption.conversationId, createdAt: "now", expiresAt: "later" }}
+    sources={[{ ...sourceOption, workspaceRelation: "different-workspace", workspaceLabel: "/workspace/other" }]}
+    onCommand={onCommand} />);
+    expect(screen.getByRole("button", { name: "Share chat" })).toBeDisabled();
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith("conversation.context.agent.respond", {
+      type: "conversation.context.agent.respond",
+      payload: { decision: "cancel", contextRequestId: "request", targetConversationId: "target" },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Request declined.");
+  });
+
+  it.each(["Share chat", "Decline"])("retains the selected source after a failed %s and allows retry", async (action) => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockRejectedValueOnce(new Error("disconnected"))
+      .mockResolvedValue({ type: "request.ok", requestId: "reply" });
+    render(<ConversationContextRequestCard request={{ requestId: "request", targetConversationId: "target",
+      targetTurnId: "turn", requestedSourceConversationId: null, createdAt: "now", expiresAt: "later" }}
+    sources={[sourceOption]} onCommand={onCommand} />);
+    await user.selectOptions(screen.getByRole("combobox"), sourceOption.conversationId);
+    await user.click(screen.getByRole("button", { name: action }));
+    await screen.findByRole("alert");
+    expect(screen.getByRole("combobox")).toHaveValue(sourceOption.conversationId);
+    await user.click(screen.getByRole("button", { name: action }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: action })).toBeDisabled();
+    expect(onCommand).toHaveBeenCalledTimes(2);
+  });
+
   it("reloads an open preview when the shared selection changes and labels shortened text", async () => {
     const responses = [deferred<ServerEvent>(), deferred<ServerEvent>()];
     const onCommand = vi.fn().mockImplementationOnce(() => responses[0]!.promise)

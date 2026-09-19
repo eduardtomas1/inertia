@@ -178,14 +178,31 @@ export function mascotSprites(set: MascotSpriteSet, origin: string): MascotSprit
   return { id: set.id, animated, files };
 }
 
-export async function saveMascotSprites(root: string, set: MascotSpriteSet): Promise<void> {
+async function pathExists(path: string): Promise<boolean> {
+  return lstat(path).then(() => true, () => false);
+}
+
+export async function saveMascotSprites(
+  root: string,
+  set: MascotSpriteSet,
+  move: (from: string, to: string) => Promise<void> = rename,
+): Promise<void> {
   const staging = `${root}.staging`;
+  const previous = `${root}.previous`;
   await rm(staging, { recursive: true, force: true });
   try {
     await mkdir(staging, { mode: 0o700 });
     for (const file of set.files) await writeFile(join(staging, file.name), file.bytes, { mode: 0o600, flag: "wx" });
-    await rm(root, { recursive: true, force: true });
-    await rename(staging, root);
+    await rm(previous, { recursive: true, force: true });
+    const replacing = await pathExists(root);
+    if (replacing) await move(root, previous);
+    try {
+      await move(staging, root);
+    } catch (error) {
+      if (replacing) await move(previous, root);
+      throw error;
+    }
+    await rm(previous, { recursive: true, force: true });
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;
@@ -194,9 +211,12 @@ export async function saveMascotSprites(root: string, set: MascotSpriteSet): Pro
 
 export async function removeMascotSprites(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true });
+  await rm(`${root}.previous`, { recursive: true, force: true });
 }
 
 export async function loadMascotSprites(root: string): Promise<MascotSpriteSet | null> {
+  const previous = `${root}.previous`;
+  if (!await pathExists(root) && await pathExists(previous)) await rename(previous, root).catch(() => undefined);
   try {
     const stat = await lstat(root);
     return stat.isDirectory() ? await readMascotSprites(root) : null;

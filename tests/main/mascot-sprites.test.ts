@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
@@ -149,6 +150,31 @@ describe("mascot sprite persistence", () => {
     await removeMascotSprites(root);
     expect(await loadMascotSprites(root)).toBeNull();
     await removeMascotSprites(root);
+  });
+
+  it("keeps the applied set when its replacement cannot be moved into place", async () => {
+    const root = join(temporary(), "mascot-sprites");
+    const applied = await readMascotSprites(spriteFolder({ "idle.webp": readFileSync(join(assets, "idle.webp")) }));
+    await saveMascotSprites(root, applied);
+    const lockedStaging = async (from: string, to: string): Promise<void> => {
+      if (from.endsWith(".staging")) throw new Error("staging is locked");
+      await rename(from, to);
+    };
+    await expect(saveMascotSprites(root, await readMascotSprites(spriteFolder()), lockedStaging)).rejects.toThrow("staging is locked");
+    expect((await loadMascotSprites(root))?.id).toBe(applied.id);
+    expect(readdirSync(join(root, "..")).sort()).toEqual(["mascot-sprites"]);
+  });
+
+  it("restores the applied set after a replacement was interrupted between its moves", async () => {
+    const root = join(temporary(), "mascot-sprites");
+    const applied = await readMascotSprites(spriteFolder());
+    await saveMascotSprites(root, applied);
+    renameSync(root, `${root}.previous`);
+    mkdirSync(`${root}.staging`);
+    expect((await loadMascotSprites(root))?.id).toBe(applied.id);
+    expect(existsSync(`${root}.previous`)).toBe(false);
+    await removeMascotSprites(root);
+    expect(await loadMascotSprites(root)).toBeNull();
   });
 
   it("ignores a stored set that no longer validates", async () => {

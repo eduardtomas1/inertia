@@ -1,9 +1,12 @@
 import type { Page } from "@playwright/test";
 
-export interface BranchSwitchTarget {
+export interface GitActionTarget {
   projectId: string;
   conversationId: string;
   repositoryPath: string;
+}
+
+export interface BranchSwitchTarget extends GitActionTarget {
   name: string;
   remote: boolean;
 }
@@ -20,15 +23,19 @@ function message(frame: Frame): Record<string, unknown> | undefined {
 }
 
 /** Observes the real UI command; never sends, holds, or substitutes a frame. */
-export async function observeBranchSwitch(page: Page, target: BranchSwitchTarget): Promise<{
+export async function observeGitAction(page: Page, command:
+  | { type: "git.branch.switch"; payload: BranchSwitchTarget }
+  | { type: "git.fetch"; payload: GitActionTarget },
+): Promise<{
   waitForResult: () => Promise<void>;
   dispose: () => Promise<void>;
 }> {
+  const label = command.type === "git.branch.switch" ? "Branch switch" : "Fetch";
   const session = await page.context().newCDPSession(page);
   try { await session.send("Network.enable"); }
   catch (error) {
     try { await session.detach(); }
-    catch (cleanupError) { throw new AggregateError([error, cleanupError], "Branch observer setup and cleanup failed."); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], `${label} observer setup and cleanup failed.`); }
     throw error;
   }
   let requestId: string | undefined;
@@ -48,29 +55,29 @@ export async function observeBranchSwitch(page: Page, target: BranchSwitchTarget
   };
   const sent = (frame: Frame): void => {
     if (requestId) return;
-    const command = message(frame);
-    const payload = object(command?.payload);
-    if (command?.type !== "git.branch.switch" || typeof command.requestId !== "string"
-      || !command.requestId || !payload
-      || Object.entries(target).some(([key, value]) => payload[key] !== value)) return;
-    requestId = command.requestId;
+    const sentCommand = message(frame);
+    const payload = object(sentCommand?.payload);
+    if (sentCommand?.type !== command.type || typeof sentCommand.requestId !== "string"
+      || !sentCommand.requestId || !payload
+      || Object.entries(command.payload).some(([key, value]) => payload[key] !== value)) return;
+    requestId = sentCommand.requestId;
     clearTimeout(timer);
-    timer = setTimeout(() => finish(new Error(`Branch switch ${requestId} did not return a result within 60000ms.`)), 60_000);
+    timer = setTimeout(() => finish(new Error(`${label} ${requestId} did not return a result within 60000ms.`)), 60_000);
   };
   const received = (frame: Frame): void => {
     const raw = message(frame);
     const event = raw?.type === "runtime.event" ? object(raw.event) : raw;
     if (!requestId || event?.requestId !== requestId) return;
     if (event.type === "request.error") {
-      finish(new Error(typeof event.message === "string" ? event.message : "Branch switch was rejected."));
+      finish(new Error(typeof event.message === "string" ? event.message : `${label} was rejected.`));
     } else if (event.type === "request.result") {
       finish(object(event.result)?.kind === "git.action" ? undefined
-        : new Error(`Branch switch ${requestId} returned an unexpected result kind.`));
+        : new Error(`${label} ${requestId} returned an unexpected result kind.`));
     }
   };
   session.on("Network.webSocketFrameSent", sent);
   session.on("Network.webSocketFrameReceived", received);
-  timer = setTimeout(() => finish(new Error("The intended branch switch was not sent within 15000ms.")), 15_000);
+  timer = setTimeout(() => finish(new Error(`${label} was not sent within 15000ms.`)), 15_000);
   let disposal: Promise<void> | undefined;
   return {
     waitForResult: async () => {
@@ -78,7 +85,7 @@ export async function observeBranchSwitch(page: Page, target: BranchSwitchTarget
       if (error) throw error;
     },
     dispose: () => {
-      finish(new Error("Branch switch observation was disposed before completion."));
+      finish(new Error(`${label} observation was disposed before completion.`));
       disposal ??= session.detach();
       return disposal;
     },

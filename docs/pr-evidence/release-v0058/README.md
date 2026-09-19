@@ -109,6 +109,42 @@ Logs are under `/tmp/inertia-v0058-*`, including `final-check-two-workers.log`,
 `git-focus.log`, `portable.log`, `aurora-e2e.log`, package/fuse/smoke and screenshot
 logs. The original unrestricted failures are retained in `final-check.log`.
 
+## Integrated CI follow-up: fetch settlement
+
+The first candidate CI run (`35473877153`) reached native packaging and desktop
+coverage. Linux ARM64 passed its AppImage checks and 70 of 71 display-sensitive
+scenarios, including native Linux Snapshots and the three real-focus background
+scenarios. The remaining failure was the pre-existing tracking-branch scenario:
+it clicked Fetch and required the busy indicator to clear in 15 seconds before
+performing its branch switch. Its recorded runtime remained ready and connected,
+with no renderer errors. The later branch switch already had a separate bounded
+backend observer, but the initial fetch did not.
+
+A controlled native regression held one fixture-owned remote-tracking ref lock
+for 20 seconds, within Git's configured lock-wait bound. The original scenario
+failed its 15-second UI check even though its observed real Fetch returned
+`git.action` successfully after 20.634 seconds. With the fix, the same delay
+returned successfully after 19.853 seconds and the complete scenario passed,
+including the exact upstream and repaired fetch-mapping assertions. The delay
+and diagnostic probes were then removed; they are not application or CI code.
+
+Reuse the existing passive branch-switch observer for the exact scoped Fetch
+request in this scenario. It matches command type, project, conversation,
+repository and request ID, allows at most 60 seconds after admission, rejects
+explicit errors or malformed results, and then retains the normal 15-second
+UI assertion. The scenario's existing 120-second overall deadline is unchanged.
+No product deadline, repository guard, cleanup boundary, UI assertion or retry
+policy changed. The observer's 13 focused tests cover wrong ownership/type,
+stale replies, delayed success, errors, missing admission/settlement and cleanup.
+All seven native Git workflow scenarios then passed without the injected delay
+on macOS ARM64 (1.5 minutes). The full two-worker Node 22 gate passed again:
+**9,341 tests passed, 145 skipped**, with quality, types, both builds and bundle
+limits passing (`/tmp/inertia-v0058-post-ci-check.log`).
+
+Evidence: `/tmp/inertia-v0058-fetch-delay-negative.log`,
+`fetch-delay-positive.log`, `fetch-observer-tests.log`, and the downloaded
+Linux ARM64 CI trace. Hosted validation must pass again on the corrected head.
+
 ## Remaining certification and release integrity
 
 Live authenticated Antigravity discovery was unavailable locally. Its catalog,

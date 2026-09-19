@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { Page } from "@playwright/test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { observeBranchSwitch, type BranchSwitchTarget } from "../e2e/support/git-branch-switch-observer";
+import { observeGitAction, type BranchSwitchTarget } from "../e2e/support/git-action-observer";
 
 const target: BranchSwitchTarget = {
   projectId: "project", conversationId: "conversation", repositoryPath: ".", name: "origin/topic", remote: true,
@@ -28,7 +28,7 @@ afterEach(() => { vi.useRealTimers(); });
 
 it("ignores unrelated payloads and stale replies, then accepts only the observed request's real result", async () => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   f.frame("Sent", "not JSON");
   f.frame("Received", "not JSON");
   for (const key of Object.keys(target)) f.admit(`wrong-${key}`, { ...target, [key]: key === "remote" ? false : "other" });
@@ -49,7 +49,7 @@ it("ignores unrelated payloads and stale replies, then accepts only the observed
 
 it("accepts successful backend settlement after 15s without changing the later UI assertion's budget", async () => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   f.admit();
   await vi.advanceTimersByTimeAsync(20_000);
   f.reply();
@@ -64,7 +64,7 @@ it.each([
   [{ type: "request.result", requestId: "exact" }, "unexpected result kind"],
 ])("rejects a matching error or malformed/wrong result: %j", async (reply, error) => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   f.admit();
   f.frame("Received", reply);
   await expect(observer.waitForResult()).rejects.toThrow(error);
@@ -75,7 +75,7 @@ it.each([
 
 it("fails missing admission at 15s even when unrelated commands and stale replies continue", async () => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   await vi.advanceTimersByTimeAsync(14_999);
   f.admit("wrong-target", { ...target, conversationId: "other" });
   f.reply();
@@ -88,7 +88,7 @@ it("fails missing admission at 15s even when unrelated commands and stale replie
 
 it("bounds missing completion at 60s from admission without refreshing the deadline for other traffic", async () => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   await vi.advanceTimersByTimeAsync(14_999);
   f.admit();
   await vi.advanceTimersByTimeAsync(59_999);
@@ -103,7 +103,7 @@ it("bounds missing completion at 60s from admission without refreshing the deadl
 
 it.each([false, true])("disposes before completion with admitted=%s and no retained timers/listeners", async (admitted) => {
   const f = fixture();
-  const observer = await observeBranchSwitch(f.page, target);
+  const observer = await observeGitAction(f.page, { type: "git.branch.switch", payload: target });
   if (admitted) f.admit();
   await observer.dispose();
   f.admit();
@@ -116,7 +116,46 @@ it.each([false, true])("disposes before completion with admitted=%s and no retai
 it("detaches its owned session if enabling observation fails", async () => {
   const f = fixture();
   f.session.send.mockRejectedValueOnce(new Error("CDP setup failed"));
-  await expect(observeBranchSwitch(f.page, target)).rejects.toThrow("CDP setup failed");
+  await expect(observeGitAction(f.page, { type: "git.branch.switch", payload: target })).rejects.toThrow("CDP setup failed");
   expectObservationRemoved(f.session);
   expect(f.session.detach).toHaveBeenCalledTimes(1);
+});
+
+it("matches fetch ownership and command type before accepting a result beyond the UI deadline", async () => {
+  const f = fixture();
+  const payload = { projectId: "project", conversationId: "conversation", repositoryPath: "." };
+  const observer = await observeGitAction(f.page, { type: "git.fetch", payload });
+  f.admit("branch-switch", payload);
+  for (const key of Object.keys(payload)) {
+    f.frame("Sent", { type: "git.fetch", requestId: `wrong-${key}`, payload: { ...payload, [key]: "other" } });
+  }
+  f.reply("fetch");
+  f.frame("Sent", { type: "git.fetch", requestId: "fetch", payload });
+  await vi.advanceTimersByTimeAsync(20_000);
+  f.reply("branch-switch");
+  expect(f.session.listenerCount("Network.webSocketFrameReceived")).toBe(1);
+  f.reply("fetch");
+  await expect(observer.waitForResult()).resolves.toBeUndefined();
+  expectObservationRemoved(f.session);
+  await observer.dispose();
+});
+
+it("reports a fetch failure instead of treating a cleared busy indicator as success", async () => {
+  const f = fixture();
+  const observer = await observeGitAction(f.page, { type: "git.fetch", payload: target });
+  f.frame("Sent", { type: "git.fetch", requestId: "fetch", payload: target });
+  f.frame("Received", { type: "request.error", requestId: "fetch", message: "Unable to fetch remote branches." });
+  await expect(observer.waitForResult()).rejects.toThrow("Unable to fetch remote branches.");
+  expectObservationRemoved(f.session);
+  await observer.dispose();
+});
+
+it("still fails a fetch that never completes within its backend budget", async () => {
+  const f = fixture();
+  const observer = await observeGitAction(f.page, { type: "git.fetch", payload: target });
+  f.frame("Sent", { type: "git.fetch", requestId: "fetch", payload: target });
+  await vi.advanceTimersByTimeAsync(60_000);
+  await expect(observer.waitForResult()).rejects.toThrow("Fetch fetch did not return a result within 60000ms.");
+  expectObservationRemoved(f.session);
+  await observer.dispose();
 });

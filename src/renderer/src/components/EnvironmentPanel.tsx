@@ -316,15 +316,18 @@ export function EnvironmentPanel({
   const tightestLimit = summary.usage?.quota.limits.reduce<
     NonNullable<typeof summary.usage>["quota"]["limits"][number] | null
   >((lowest, limit) => (lowest === null || limit.remainingPercent < lowest.remainingPercent ? limit : lowest), null) ?? null;
+  const usageFreshnessQualifier = summary.usage?.quota.freshness === "stale"
+    ? " · stale"
+    : summary.usage?.quota.freshness === "refreshing" ? " · refreshing" : "";
   const usageSummaryLabel = tightestLimit
-    ? `${Math.round(tightestLimit.remainingPercent)}% left`
+    ? `${Math.round(tightestLimit.remainingPercent)}% left${usageFreshnessQualifier}`
     : summary.usage?.quota.freshness === "refreshing"
       ? "Refreshing"
       : summary.usage?.quota.source === "isolated"
         ? "Not shared"
         : "Unavailable";
   const usageSummaryDescription = tightestLimit
-    ? `Tightest provider limit, ${tightestLimit.label}: ${Math.round(tightestLimit.remainingPercent)}% left`
+    ? `Tightest provider limit, ${tightestLimit.label}: ${Math.round(tightestLimit.remainingPercent)}% left${usageFreshnessQualifier ? `, ${usageFreshnessQualifier.slice(3)}` : ""}`
     : `Provider limits: ${usageSummaryLabel}`;
 
   return (

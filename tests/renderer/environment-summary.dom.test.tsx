@@ -623,6 +623,19 @@ describe("Environment panel", () => {
     fireEvent.click(within(openUsage()).getByRole("button", { name: "Refresh usage" }));
     expect(actions.onRefreshUsage).toHaveBeenCalledOnce();
 
+    for (const freshness of ["stale", "refreshing"] as const) {
+      view.rerender(
+        <EnvironmentPanel
+          summary={{ ...summary, usage: { ...summary.usage!, quota: { ...summary.usage!.quota, freshness } } }}
+          workspaceToolsAvailable
+          {...actions}
+        />,
+      );
+      const collapsedSummary = openUsage().querySelector("summary")!;
+      expect(collapsedSummary).toHaveTextContent(`64% left · ${freshness}`);
+      expect(within(collapsedSummary).getByLabelText(new RegExp(`64% left, ${freshness}$`, "u"))).toBeInTheDocument();
+    }
+
     view.rerender(
       <EnvironmentPanel
         summary={{

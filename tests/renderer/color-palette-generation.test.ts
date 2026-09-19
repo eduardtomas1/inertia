@@ -61,6 +61,40 @@ const LADDER_ROLES = [
 const palette = (family: string, appearance: string): Record<string, string> =>
   Object.fromEntries(buildPaletteTokens(family as never, appearance as never));
 
+type Rgb = readonly [number, number, number];
+
+function rgbOf(color: string): Rgb {
+  if (color.startsWith("#")) {
+    return [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16)) as unknown as Rgb;
+  }
+  return color.match(/[\d.]+/gu)!.slice(0, 3).map(Number) as unknown as Rgb;
+}
+
+function over(top: string, alpha: number, base: Rgb): Rgb {
+  return rgbOf(top).map((channel, index) => channel * alpha + base[index]! * (1 - alpha)) as unknown as Rgb;
+}
+
+function hexOf(rgb: Rgb): string {
+  return `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hueDistance(left: number, right: number): number {
+  const difference = Math.abs(left - right) % 360;
+  return Math.min(difference, 360 - difference);
+}
+
+/** The strengths the sidebar aurora actually paints with, per appearance. */
+function auroraStrengths(appearance: string): { peak: number; mid: number; wash: number } {
+  const source = repoFile("src/renderer/src/components/sidebar/sidebar-aurora.css")
+    .replace(/\/\*[\s\S]*?\*\//gu, "");
+  const selector = appearance === "dark" ? ':root[data-theme="dark"] .sidebar-aurora' : ".sidebar-aurora";
+  const body = [...source.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+    .find(([, selectors]) => selectors!.trim() === selector)?.[2] ?? "";
+  const read = (name: string): number =>
+    Number(new RegExp(`--aurora-${name}:\\s*([\\d.]+)%`, "u").exec(body)?.[1]) / 100;
+  return { peak: read("peak"), mid: read("mid"), wash: read("wash") };
+}
+
 const cases = PALETTE_FAMILIES.flatMap((family) =>
   PALETTE_APPEARANCES.map((appearance) => [family, appearance] as const));
 
@@ -147,6 +181,43 @@ describe("generated color palettes", () => {
     expect(mapped.h).toBe(requested.h);
     expect(mapped.c).toBeLessThan(requested.c);
     expect(oklchToHex(requested)).toBe(oklchToHex(mapped));
+  });
+
+  it.each(cases)("builds the %s %s aurora from the accent and two neighbours at one lightness", (family, appearance) => {
+    const tokens = palette(family, appearance);
+    const lights = [1, 2, 3].map((index) => oklchOf(tokens[`aurora-${index}`]!));
+    const lightness = lights.map(({ l }) => l);
+    expect(Math.max(...lightness) - Math.min(...lightness), `${family} ${appearance} aurora lightness`)
+      .toBeLessThan(0.012);
+    expect(hueDistance(lights[0]!.h, FAMILY_SPECS[family]!.accentHue)).toBeLessThan(6);
+    for (const [left, right] of [[0, 1], [0, 2], [1, 2]] as const) {
+      expect(hueDistance(lights[left]!.h, lights[right]!.h), `${family} ${appearance} aurora hue spread`)
+        .toBeGreaterThan(20);
+    }
+    for (const { c } of lights) expect(c, `${family} ${appearance} aurora chroma`).toBeGreaterThan(0.06);
+  });
+
+  it.each(cases)("keeps the brand name readable over the %s %s aurora", (family, appearance) => {
+    const tokens = palette(family, appearance);
+    const { peak, mid, wash } = auroraStrengths(appearance);
+    expect([peak, mid, wash].every((strength) => strength > 0 && strength < 1)).toBe(true);
+    const [first, second, third] = [1, 2, 3].map((index) => tokens[`aurora-${index}`]!);
+    const glassAlpha = Number(tokens["glass-chrome"]!.match(/[\d.]+/gu)!.at(-1));
+    const sidebar = over(tokens["glass-chrome"]!, glassAlpha, rgbOf(tokens["app-bg"]!));
+    const washed = over(first!, wash, sidebar);
+    // Any single light at the strongest strength behind the name.
+    for (const light of [first!, second!, third!]) {
+      expect(contrastRatio(tokens.text!, hexOf(over(light, peak, washed))), `${family} ${appearance} single light`)
+        .toBeGreaterThanOrEqual(4.5);
+    }
+    // Every layer overlapping at once: far, near and the breathing glow.
+    for (const far of [third!, first!]) {
+      for (const [near, strength] of [[first!, peak], [second!, mid]] as const) {
+        const stacked = over(second!, mid, over(near, strength, over(far, mid, washed)));
+        expect(contrastRatio(tokens.text!, hexOf(stacked)), `${family} ${appearance} stacked lights`)
+          .toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it("does not leave usable chroma unspent on muted semantic roles", () => {

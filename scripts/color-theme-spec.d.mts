@@ -16,6 +16,7 @@ export const FAMILY_SPECS: Readonly<Record<PaletteFamily, {
   neutralHue: number;
   accentHue: number;
   neutralTint: number;
+  auroraHues: readonly [number, number, number];
 }>>;
 
 export function buildPaletteTokens(

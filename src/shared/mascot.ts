@@ -1,4 +1,5 @@
 import type { AgentRunState } from "./run-state";
+import type { MascotSpriteImport, MascotSprites, MascotTemplateExport } from "./mascot-sprites";
 
 export const MASCOT_IPC = {
   preferences: "inertia:mascot-preferences",
@@ -6,6 +7,7 @@ export const MASCOT_IPC = {
   changed: "inertia:mascot-changed",
   snapshot: "inertia:mascot-snapshot",
   action: "inertia:mascot-action",
+  sprites: "inertia:mascot-sprites",
 } as const;
 
 export type MascotPhase = AgentRunState | "idle" | "unavailable";
@@ -34,6 +36,7 @@ export interface MascotSnapshot {
   dragging?: boolean;
   /** Renderer lifetime and monotonically increasing pointer gesture. */
   gesture?: MascotGesture;
+  sprites?: MascotSprites;
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
@@ -102,4 +105,8 @@ export interface MascotBridge {
 
 export interface MascotSettingsBridge extends MascotBridge {
   configure(preferences: MascotPreferences): Promise<MascotSnapshot>;
+  importSprites(): Promise<MascotSpriteImport>;
+  applySprites(id: string): Promise<MascotSnapshot>;
+  resetSprites(): Promise<MascotSnapshot>;
+  exportSpriteTemplate(): Promise<MascotTemplateExport>;
 }

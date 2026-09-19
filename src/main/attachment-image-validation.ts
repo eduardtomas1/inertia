@@ -20,7 +20,7 @@ const MAX_STRUCTURE_RECORDS = 4_096;
 const MAX_JPEG_MARKER_FILL_BYTES = 32;
 const MAX_GIF_SUB_BLOCKS = 48_000;
 
-interface ImageMetadata {
+export interface ImageMetadata {
   readonly width: number;
   readonly height: number;
   readonly frames: number;
@@ -589,7 +589,7 @@ function inspectWebp(bytes: Buffer): ImageMetadata {
   });
 }
 
-function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): boolean {
+export function decodedImageMatches(bytes: Buffer, metadata: ImageMetadata): boolean {
   try {
     const image = new Image();
     image.src = bytes;
@@ -608,13 +608,12 @@ export type ImageAttachmentInspection =
       readonly height: number;
     };
 
-export function inspectImageAttachment(
+export function inspectImageMetadata(
   bytes: Buffer,
   mimeType: ImageAttachmentMimeType,
-): ImageAttachmentInspection {
-  let metadata: ImageMetadata;
+): ImageMetadata | null {
   try {
-    metadata = mimeType === "image/png"
+    return mimeType === "image/png"
       ? inspectPng(bytes)
       : mimeType === "image/jpeg"
         ? inspectJpeg(bytes)
@@ -622,8 +621,16 @@ export function inspectImageAttachment(
           ? inspectGif(bytes)
           : inspectWebp(bytes);
   } catch {
-    return { status: "unsafe" };
+    return null;
   }
+}
+
+export function inspectImageAttachment(
+  bytes: Buffer,
+  mimeType: ImageAttachmentMimeType,
+): ImageAttachmentInspection {
+  const metadata = inspectImageMetadata(bytes, mimeType);
+  if (!metadata) return { status: "unsafe" };
   const { width, height, frames } = metadata;
   // Structurally valid but beyond the decode budget: report it distinctly and
   // never hand it to the decoder.

@@ -20,6 +20,9 @@ body { user-select: none; }
 .mascot[data-motion="true"][data-dragging="true"] .mascot-lift { opacity: 1; visibility: hidden; background-position-x: -1152px; transition: background-position 400ms steps(12), opacity 80ms linear, visibility 0s linear 500ms; }
 .mascot[data-motion="true"][data-dragging="true"] .mascot-activity { transition: opacity 80ms linear; }
 .mascot[data-motion="true"][data-dragging="true"] .mascot-pickup { transition: opacity 100ms linear 400ms; }
+.mascot[data-sprites="custom"] .mascot-lift { display: none; }
+.mascot[data-sprites="custom"] .mascot-activity,
+.mascot[data-sprites="custom"][data-dragging="true"] .mascot-pickup { transition-delay: 0s; }
 .mascot-status { position: absolute; top: 0; left: 4px; -webkit-app-region: no-drag; width: 232px; height: 116px; padding: 8px 10px; display: flex; flex-direction: column; text-align: left; border: 1px solid #ffffff24; border-radius: 14px; background: #1d2229; color: #f1f2e9; cursor: pointer; font: inherit; transition: background-color 140ms ease, border-color 140ms ease; }
 .mascot-content { display: flex; flex-direction: column; width: 100%; min-width: 0; }
 .mascot-chat { margin-top: 2px; font-size: 10px; line-height: 12px; color: #a9b5c2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

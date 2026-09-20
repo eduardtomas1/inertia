@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const SOURCE_PATH = join(ROOT, "resources", "icon.svg");
 const ICON_DIRECTORY = join(ROOT, "resources", "icons");
-const SIZES = [16, 24, 32, 48, 64, 128, 192, 256, 512, 1024];
+const SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 192, 256, 512, 1024];
 const EXPECTED_SOURCE_MARKERS = [
   'viewBox="0 0 1024 1024"',
   'fill="#07070a"',
@@ -148,3 +148,24 @@ for (const size of SIZES) {
 }
 await writeFile(join(ROOT, "resources", "icon.png"), renderIcon(1024), { mode: 0o644 });
 console.log(`Generated ${SIZES.length} Linux icons and the cross-platform 1024px icon from resources/icon.svg.`);
+
+// Windows loads the requested small/large HICON directly from this directory.
+// A standalone PNG reaches Electron's bitmap conversion without size selection.
+const windowsSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
+const windowsImages = await Promise.all(windowsSizes.map((size) =>
+  readFile(join(ICON_DIRECTORY, `${size}x${size}.png`))));
+const iconDirectory = Buffer.alloc(6 + windowsImages.length * 16);
+iconDirectory.writeUInt16LE(1, 2);
+iconDirectory.writeUInt16LE(windowsImages.length, 4);
+let imageOffset = iconDirectory.length;
+for (const [index, image] of windowsImages.entries()) {
+  const entry = 6 + index * 16;
+  iconDirectory[entry] = windowsSizes[index] % 256;
+  iconDirectory[entry + 1] = windowsSizes[index] % 256;
+  iconDirectory.writeUInt16LE(1, entry + 4);
+  iconDirectory.writeUInt16LE(32, entry + 6);
+  iconDirectory.writeUInt32LE(image.length, entry + 8);
+  iconDirectory.writeUInt32LE(imageOffset, entry + 12);
+  imageOffset += image.length;
+}
+await writeFile(join(ROOT, "resources", "icon.ico"), Buffer.concat([iconDirectory, ...windowsImages]));

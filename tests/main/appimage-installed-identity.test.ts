@@ -16,11 +16,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  installAppImageUpdate,
-  launchAppImage,
   finalizeAppImageUpdate,
   prepareAppImageUpdate,
   recoverAppImageUpdate,
@@ -28,6 +26,36 @@ import {
   validateCommittedAppImageUpdate,
   validateStagedAppImageUpdate,
 } from "../../src/main/appimage-installed-identity";
+
+// These fixtures exercise filesystem admission. The real token-bound bootstrap
+// and runtime-readiness handshake remains covered by electron-app-updater tests.
+async function completePreparedUpdate(
+  options: Omit<Parameters<typeof prepareAppImageUpdate>[0], "operationId">,
+): Promise<string> {
+  const staged = await prepareAppImageUpdate({
+    ...options,
+    operationId: "44444444-4444-4444-8444-444444444444",
+  });
+  const authority = {
+    channel: options.channel,
+    operationId: staged.operationId,
+    artifactDigest: staged.artifactDigest,
+    executableIdentityDigest: staged.executableIdentityDigest,
+  };
+  await validateStagedAppImageUpdate({
+    ...authority,
+    candidatePath: staged.candidatePath,
+    deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+  });
+  const stablePath = await staged.commit();
+  await validateCommittedAppImageUpdate({
+    ...authority,
+    stablePath,
+    deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+  });
+  await finalizeAppImageUpdate({ ...authority, stablePath });
+  return stablePath;
+}
 
 const roots: string[] = [];
 
@@ -337,23 +365,69 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
       .toBe(true);
   });
 
-  it("never treats candidate process creation as bootstrap readiness", async () => {
+  it.each(["contents", "identity"] as const)(
+    "rejects candidate %s substitution after staging and retains recovery evidence",
+    async (substitution) => {
+      const root = await temporaryRoot();
+      const active = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
+      const downloaded = await appImage(join(root, "downloaded.AppImage"), "candidate");
+      const staged = await prepareAppImageUpdate({
+        channel: "stable",
+        activePath: active,
+        downloadedPath: downloaded,
+        operationId: "44444444-4444-4444-8444-444444444444",
+      });
+      if (substitution === "identity") {
+        await rename(staged.candidatePath, join(root, "moved-candidate"));
+      }
+      await appImage(staged.candidatePath, "foreign-candidate");
+      await expect(staged.commit()).rejects.toThrow("candidate changed before commit");
+      expect(await readFile(active, "utf8")).toBe("known-good");
+      expect(await missing(staged.stablePath)).toBe(true);
+      expect(await readFile(join(root, ".Inertia.AppImage.inertia-update-backup"), "utf8"))
+        .toBe("known-good");
+      expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json"))).toBe(false);
+    },
+  );
+
+  it("does not replace a stable path occupied after staging", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
+    const downloaded = await appImage(join(root, "downloaded.AppImage"), "candidate");
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      operationId: "44444444-4444-4444-8444-444444444444",
+    });
+    await appImage(staged.stablePath, "foreign-stable");
+    await expect(staged.commit()).rejects.toMatchObject({ code: "EEXIST" });
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    expect(await readFile(staged.stablePath, "utf8")).toBe("foreign-stable");
+    expect(await readFile(staged.candidatePath, "utf8")).toBe("candidate");
+  });
+
+  it("never launches a candidate during filesystem preparation", async () => {
     const root = await temporaryRoot();
     const marker = join(root, "candidate-ran");
     const candidate = await appImage(
       join(root, "candidate.AppImage"),
-      "#!/bin/sh\nprintf launched > \"$INERTIA_TEST_APPIMAGE_MARKER\"\n",
+      `#!/bin/sh\nprintf launched > ${JSON.stringify(marker)}\n`,
     );
 
-    await expect(launchAppImage(candidate, {
-      INERTIA_TEST_APPIMAGE_MARKER: marker,
-    })).rejects.toThrow(
-      "cannot be admitted without a verified bootstrap acknowledgement",
-    );
+    const active = await appImage(join(root, "Inertia.AppImage"), "known-good");
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: candidate,
+      operationId: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    await staged.rollback();
     expect(await missing(marker)).toBe(true);
   });
 
-  it("rolls the production transaction back when no bootstrap ACK channel exists", async () => {
+  it("rolls an unadmitted versioned candidate back without retiring the known-good executable", async () => {
     const root = await temporaryRoot();
     const active = await appImage(
       join(root, "Inertia-0.0.46.AppImage"),
@@ -364,13 +438,15 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
       "unacknowledged-candidate",
     );
 
-    await expect(installAppImageUpdate({
+    const staged = await prepareAppImageUpdate({
       channel: "stable",
       activePath: active,
       downloadedPath: downloaded,
-    })).rejects.toThrow(
-      "cannot be admitted without a verified bootstrap acknowledgement",
-    );
+      operationId: "44444444-4444-4444-8444-444444444444",
+    });
+    await staged.commit();
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    await staged.rollback();
 
     expect(await readFile(active, "utf8")).toBe("known-good");
     for (const leaf of [
@@ -391,22 +467,17 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     await symlink(downloads, alias, "dir");
     const active = await appImage(join(downloads, "Inertia-0.0.46.AppImage"), "old-version");
     const downloaded = await appImage(join(cache, "Inertia-0.0.47.AppImage"), "new-version");
-    const launch = vi.fn(async (path: string) => {
-      expect(await readFile(path, "utf8")).toBe("new-version");
-    });
 
-    const installed = await installAppImageUpdate({
+    const installed = await completePreparedUpdate({
       channel: "stable",
       activePath: join(alias, "Inertia-0.0.46.AppImage"),
       downloadedPath: downloaded,
-      launch,
     });
 
     const stable = join(await realpath(downloads), "Inertia.AppImage");
     expect(installed).toBe(stable);
     expect(await readFile(installed, "utf8")).toBe("new-version");
     expect(await missing(active)).toBe(true);
-    expect(launch).toHaveBeenCalledWith(stable, process.env);
   });
 
   it("keeps the unversioned name across repeated updates", async () => {
@@ -416,27 +487,20 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     const stable = await appImage(join(root, "Inertia.AppImage"), "version-one");
     const second = await appImage(join(cache, "Inertia-0.0.47.AppImage"), "version-two");
     const third = await appImage(join(cache, "Inertia-0.0.48.AppImage"), "version-three");
-    const launch = vi.fn(async () => undefined);
 
-    await installAppImageUpdate({
+    await completePreparedUpdate({
       channel: "stable",
       activePath: stable,
       downloadedPath: second,
-      launch,
     });
     expect(await readFile(stable, "utf8")).toBe("version-two");
-    await installAppImageUpdate({
+    await completePreparedUpdate({
       channel: "stable",
       activePath: stable,
       downloadedPath: third,
-      launch,
     });
 
     expect(await readFile(stable, "utf8")).toBe("version-three");
-    expect(launch).toHaveBeenCalledTimes(2);
-    const canonicalStable = join(await realpath(root), "Inertia.AppImage");
-    expect(launch).toHaveBeenNthCalledWith(1, canonicalStable, process.env);
-    expect(launch).toHaveBeenNthCalledWith(2, canonicalStable, process.env);
   });
 
   it("keeps Canary on its distinct durable AppImage identity", async () => {
@@ -444,11 +508,10 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     const active = await appImage(join(root, "Inertia-Canary-0.0.46.AppImage"), "canary-old");
     const downloaded = await appImage(join(root, "downloaded-canary.AppImage"), "canary-new");
 
-    const installed = await installAppImageUpdate({
+    const installed = await completePreparedUpdate({
       channel: "canary",
       activePath: active,
       downloadedPath: downloaded,
-      launch: async () => undefined,
     });
 
     expect(installed).toBe(join(await realpath(root), "Inertia Canary.AppImage"));
@@ -474,11 +537,11 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
         await symlink(downloaded, join(root, "Inertia.AppImage"));
       }
 
-      await expect(installAppImageUpdate({
+      await expect(prepareAppImageUpdate({
         channel: "stable",
+        operationId: "44444444-4444-4444-8444-444444444444",
         activePath,
         downloadedPath,
-        launch: async () => undefined,
       })).rejects.toThrow();
       expect(await readFile(active, "utf8")).toBe("active");
     },
@@ -487,17 +550,19 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
   it.each([
     ["versioned", "Inertia-0.0.46.AppImage"],
     ["unversioned", "Inertia.AppImage"],
-  ] as const)("rolls back a %s installation when the replacement cannot launch", async (_kind, name) => {
+  ] as const)("rolls back a %s ownership commit when the replacement is not admitted", async (_kind, name) => {
     const root = await temporaryRoot();
     const active = await appImage(join(root, name), "known-good");
     const downloaded = await appImage(join(root, "downloaded.AppImage"), "broken-update");
 
-    await expect(installAppImageUpdate({
+    const staged = await prepareAppImageUpdate({
       channel: "stable",
       activePath: active,
       downloadedPath: downloaded,
-      launch: async () => { throw new Error("launch failed"); },
-    })).rejects.toThrow("launch failed");
+      operationId: "44444444-4444-4444-8444-444444444444",
+    });
+    await staged.commit();
+    await staged.rollback();
 
     expect(await readFile(active, "utf8")).toBe("known-good");
     if (name !== "Inertia.AppImage") {
@@ -505,22 +570,30 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     }
   });
 
-  it("keeps both launchable paths when cleanup is interrupted after the replacement starts", async () => {
+  it("keeps both launchable paths and the journal when finalization finds a foreign backup", async () => {
     const root = await temporaryRoot();
     const active = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
     const downloaded = await appImage(join(root, "downloaded.AppImage"), "replacement");
     const backup = join(root, ".Inertia.AppImage.inertia-update-backup");
 
-    const installed = await installAppImageUpdate({
+    const staged = await prepareAppImageUpdate({
       channel: "stable",
       activePath: active,
       downloadedPath: downloaded,
-      launch: async (path) => {
-        expect(await readFile(path, "utf8")).toBe("replacement");
-        await unlink(backup);
-        await appImage(backup, "interfering-file");
-      },
+      operationId: "44444444-4444-4444-8444-444444444444",
     });
+    const installed = await staged.commit();
+    await unlink(backup);
+    await appImage(backup, "interfering-file");
+    await expect(finalizeAppImageUpdate({
+      channel: "stable",
+      operationId: staged.operationId,
+      stablePath: installed,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+    })).rejects.toThrow();
+    expect(await readFile(backup, "utf8")).toBe("interfering-file");
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json"))).toBe(false);
 
     expect(installed).toBe(join(await realpath(root), "Inertia.AppImage"));
     expect(await readFile(installed, "utf8")).toBe("replacement");

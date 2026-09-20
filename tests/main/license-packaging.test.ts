@@ -33,15 +33,14 @@ describe("packaged license notices", () => {
     expect(packageJson.build.extraResources).toEqual(expect.arrayContaining(shared));
     // Electron ships its Chromium credits beside the executable on Windows and
     // Linux. Only the macOS bundle, which does not carry that file, packages a
-    // copy, and macOS keeps every shared resource because a platform list
-    // replaces the shared one.
+    // copy. The builder combines this addition with the shared resources.
     const chromiumCredits = {
       from: "node_modules/electron/dist/LICENSES.chromium.html",
       to: "electron/LICENSES.chromium.html",
     };
     expect(packageJson.build.extraResources).not.toContainEqual(chromiumCredits);
     expect(packageJson.build.mac.extraResources)
-      .toEqual([...packageJson.build.extraResources, chromiumCredits]);
+      .toEqual([chromiumCredits]);
   });
 
   it("includes the statically linked musl runtime notice", async () => {

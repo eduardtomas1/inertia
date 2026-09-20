@@ -240,12 +240,12 @@ bypass that prebuild step.
 
 Packaging excludes files the application never executes: dependency source
 maps and type declarations, better-sqlite3's C sources, and prebuilt binaries
-for other operating systems. Each platform list repeats the shared patterns
-because electron-builder replaces the shared list rather than merging it, and
-each list removes only other systems' prebuilds, never its own.
-`tests/main/packaging-file-patterns.test.ts` holds both rules, because a
-platform list that loses the shared patterns silently packages the entire
-repository.
+for other operating systems. Each platform file list repeats the shared
+inclusions: the pinned builder normalizes shared files into a separate matcher,
+so a negative-only platform matcher would add an include-all fallback and ship
+the repository. Platform resources are combined with the shared resources and
+must not repeat them. Tests exercise the builder's normalized file matchers to
+keep source files out, runtime files in, and each legal resource copied once.
 
 Electron already installs its Chromium credits beside the executable on Windows
 and Linux, so only macOS, whose application bundle does not contain that file,

@@ -195,26 +195,6 @@
       ],
       "extraResources": [
         {
-          "from": "resources/icons/512x512.png",
-          "to": "icons/inertia.png"
-        },
-        {
-          "from": "resources/generated/THIRD_PARTY_NOTICES.txt",
-          "to": "THIRD_PARTY_NOTICES.txt"
-        },
-        {
-          "from": "LICENSE",
-          "to": "LICENSE.txt"
-        },
-        {
-          "from": "node_modules/electron/dist/LICENSE",
-          "to": "electron/LICENSE.txt"
-        },
-        {
-          "from": "resources/generated/runtime-process-guardian",
-          "to": "runtime"
-        },
-        {
           "from": "node_modules/electron/dist/LICENSES.chromium.html",
           "to": "electron/LICENSES.chromium.html"
         }

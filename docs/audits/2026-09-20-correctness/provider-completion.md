@@ -7,6 +7,11 @@ provider deadlines, dependencies, or release configuration. Deterministic fixtur
 use synthetic provider messages; they do not establish which message sequence
 occurred in the user's live installation.
 
+The later [final capability review](final-provider-capabilities.md) extends this
+checkpoint with six further reproduced defects and fresh full/portable gates.
+It also resolves the previously unconfirmed quiet-message deadline suspicion;
+the rejected extra-read-only inference below remains correctly bounded.
+
 ## Reproduced defects
 
 ### Claude terminal failures with accepted prompts

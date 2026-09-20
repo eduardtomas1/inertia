@@ -93,8 +93,8 @@ Rejected or bounded suspicions:
 
 ## Confirmed defects and verification
 
-Fifteen distinct defects were reproduced and fixed, including four additional
-provider completion defects from the follow-up user report. Each domain report records
+Twenty-one distinct defects were reproduced and fixed, including ten additional
+provider defects from the follow-up user reports. Each domain report records
 its failing-before experiment and independent review depth. Tests use synthetic
 credentials and disposable repositories/directories; no live provider accounts
 or user data were used.
@@ -116,6 +116,12 @@ or user data were used.
 | Claude could remain Working after a visible final answer because ambient watchers counted as delegated activity | Exclude SDK-declared ambient activity while preserving foreground delegate and fresh-parent completion requirements. See the completion report below. |
 | Codex internally rejected malformed protocol but reported user cancellation | Explicit internal protocol-failure cause, preserving first failure detail and owned cleanup. Ordered malformed/prior-error/input regressions; `71d88a60`. |
 | Late cancellation during Codex cleanup overwrote an accepted completed/failed outcome | Snapshot cancellation at terminal acceptance; public harness trusts the cleanup-joined outcome. Public/low-level controls and uncertain-cleanup regressions; `71d88a60`. |
+| Quiet Claude messages discarded an armed completion deadline | Preserve one monotonic parent-resume deadline across non-work traffic; actual resumed root work releases it. Fourteen regressions include wall-clock rollback and long resumed work. |
+| Cursor/Kimi sent prompts with unconfirmed or subsequently reverted configuration | Validate each requested config-based selection and its retention in the final authoritative response; 28 cases cover both providers and compatible defaults/native modes. |
+| Antigravity accepted foreign conversation output | Pin requested/first session identity before text/tool/result projection; eight new foreign-ID and ID-less controls. `eb6e2ba8`. |
+| OpenCode accepted foreign session GET responses | Confirm exact resumed/created session identity before prompting; two local-server regressions. `57f40383`. |
+| Additional Codex approval/auxiliary protocol rejections still appeared cancelled | Forward explicit failure cause on rejected request paths; seven new malformed/foreign request regressions. `30adcc3c`. |
+| Installation evidence refresh disabled controls for healthy admitted runs | Reuse run-scoped capability authority for controls while new launches require fresh evidence; five interactive-provider regressions. `b0a32e65`. |
 
 ## Verification ledger
 
@@ -170,11 +176,11 @@ policy changed.
 
 ## Provider completion follow-up verification
 
-Final reviewed source is `0fd57338`, with Claude prompt-terminal settlement in
+The earlier completion follow-up used reviewed source `0fd57338`, with Claude prompt-terminal settlement in
 `b32f9374`, Codex outcome preservation in `71d88a60`, and all-six restart/UI
 regressions in `d7848c0c`. Documentation follows these source commits.
 
-| Check | Result on final provider source |
+| Check | Result on earlier completion-follow-up source |
 | --- | --- |
 | `npm run check` | Passed: 881 test files, 9,503 tests, 146 platform/native skips; test phase 122.51 seconds. Quality, lint, types, migration lineage, build and unchanged renderer budgets all passed. |
 | `npm run test:portable` | Passed: 108 files, 1,530 tests, nine native/platform skips; 153.04 seconds. The final discovery-marker correction below adds the separately verified 16-case Codex suite. |
@@ -190,7 +196,34 @@ comment-only marker expands discovery from 108 to 109 files; manifest verificati
 and a separate single-worker run passed all 16 cases. The aggregate portable
 command was not repeated after this test-metadata-only correction; all cases had
 also passed the full gate. Log: `local-log:inertia-provider-followup-portable-codex.log`.
-No gate or threshold changed.
+No gate or threshold changed. The final aggregate run below includes the marker
+correction and supersedes that earlier portable sequencing limitation.
+
+## Final provider capability verification
+
+Final reviewed source is `a3bb31ca`. The final pass covers all six production
+routes and the 28 manifest capabilities, with six more reproduced defects and
+65 additional regression/control cases since the earlier completion follow-up.
+The [capability report](2026-09-20-correctness/final-provider-capabilities.md)
+records scope, exact unsupported boundaries and independent review.
+
+| Check | Result on final source |
+| --- | --- |
+| `npm run check` | Passed: 883 test files, 9,568 tests, 146 native/platform skips; test phase 122.33 seconds. Quality, lint, types, migration lineage, build and unchanged renderer budgets passed. |
+| `npm run test:portable` | Passed: 111 files, 1,611 tests, nine native/platform skips; 158.90 seconds. Includes all final regressions and the earlier Codex portable-marker correction in one aggregate run. |
+| Claude and Antigravity focused checks | Claude 101 passed across six files; Antigravity 69 across two files. Fourteen new Claude drain cases and eight Antigravity session controls. |
+| Cursor/Kimi focused checks | Final configuration batch: 86 passed, one native-only skip, four files; 28 new admission/retention cases. Cursor extraction and backend routing: 84 passed across four files. |
+| Codex and OpenCode focused checks | Codex 200 passed across fourteen files; OpenCode initial batch 89 across eight files, then final extracted harness 53 passed including delayed SSE. Seven new Codex and two new session-read failure cases. |
+| Shared active controls | Complete conformance suite: 106 passed, including five interactive-provider installation-refresh regressions. New launches still refused without verified evidence. |
+| Review / architecture | Final deltas independently reviewed. 1,132 source files / 4,261 edges pass unchanged architecture rules. Initial aggregate attempt stopped at Cursor/OpenCode file-size ceilings; focused extraction resolved both before a fresh full gate. |
+| Native/live-provider limits | Earlier macOS E2E/package/performance results remain tied to their original source. Final native Windows/Linux CI, merge and release belong to the coordinating task. No live provider account was used. |
+
+Focused batches overlap and are not summed as unique tests. No duration, size
+ceiling, assertion or capability requirement was relaxed. Logs:
+`local-log:inertia-final-providers-check.log`,
+`local-log:inertia-final-providers-portable.log`; the initial architecture-only
+failure is retained in `local-log:inertia-final-providers-check-architecture-before.log`.
+All new provider test files carry portable discovery markers.
 
 ## Measured desktop performance
 
@@ -232,6 +265,10 @@ steady-state behavior. Controlled Linux discovery was not exercised.
 records the visible-answer/Working investigation, all six provider endings,
 restart policy, exact reproduced failures and independent review.
 
+[Final provider capability review](2026-09-20-correctness/final-provider-capabilities.md)
+maps all 28 manifest capabilities across the six production routes and records
+the final six reproduced defects, independent review and upstream limits.
+
 - [Source and tooling inventory](2026-09-20-source-inventory.tsv): baseline file-to-domain map; inventory is broader than manual deep-read coverage.
 - [Native desktop, Windows, terminals and update review](2026-09-20-correctness/windows.md).
 - [Attachments and document/provider handoff review](2026-09-20-correctness/attachments.md).
@@ -253,11 +290,14 @@ under Detailed evidence above):
 | [src/main/runtime-supervisor.ts](../../src/main/runtime-supervisor.ts) | [tests/main/runtime-supervisor-lifecycle.test.ts](../../tests/main/runtime-supervisor-lifecycle.test.ts) |
 | [src/server/git/reversal-files.ts](../../src/server/git/reversal-files.ts)<br>[src/server/git/reversal-index.ts](../../src/server/git/reversal-index.ts)<br>[src/server/git/reversal.ts](../../src/server/git/reversal.ts) | [tests/server/git-diff-review.test.ts](../../tests/server/git-diff-review.test.ts) |
 | [src/server/persistence/database-recovery-import.ts](../../src/server/persistence/database-recovery-import.ts) | [tests/server/database-export.test.ts](../../tests/server/database-export.test.ts) |
-| [src/server/provider/claude-agent-sdk-harness.ts](../../src/server/provider/claude-agent-sdk-harness.ts)<br>[src/server/provider/claude-prompt.ts](../../src/server/provider/claude-prompt.ts)<br>[src/server/provider/claude-delegate-lifecycle.ts](../../src/server/provider/claude-delegate-lifecycle.ts)<br>[src/server/provider/claude-subagent-trace.ts](../../src/server/provider/claude-subagent-trace.ts) | [tests/server/claude-prompt.test.ts](../../tests/server/claude-prompt.test.ts)<br>[tests/server/claude-follow-up-settlement.test.ts](../../tests/server/claude-follow-up-settlement.test.ts)<br>[tests/server/claude-visible-final-settlement.test.ts](../../tests/server/claude-visible-final-settlement.test.ts) |
-| [src/server/codex/app-server-events.ts](../../src/server/codex/app-server-events.ts)<br>[src/server/codex/app-server-run.ts](../../src/server/codex/app-server-run.ts)<br>[src/server/provider/codex-app-server-harness.ts](../../src/server/provider/codex-app-server-harness.ts) | [tests/server/codex-app-server.test.ts](../../tests/server/codex-app-server.test.ts)<br>[tests/server/codex-app-server-terminal-outcomes.test.ts](../../tests/server/codex-app-server-terminal-outcomes.test.ts) |
+| [src/server/provider/claude-agent-sdk-harness.ts](../../src/server/provider/claude-agent-sdk-harness.ts)<br>[src/server/provider/claude-prompt.ts](../../src/server/provider/claude-prompt.ts)<br>[src/server/provider/claude-delegate-lifecycle.ts](../../src/server/provider/claude-delegate-lifecycle.ts)<br>[src/server/provider/claude-subagent-trace.ts](../../src/server/provider/claude-subagent-trace.ts) | [tests/server/claude-prompt.test.ts](../../tests/server/claude-prompt.test.ts)<br>[tests/server/claude-follow-up-settlement.test.ts](../../tests/server/claude-follow-up-settlement.test.ts)<br>[tests/server/claude-visible-final-settlement.test.ts](../../tests/server/claude-visible-final-settlement.test.ts)<br>[tests/server/claude-terminal-drain.test.ts](../../tests/server/claude-terminal-drain.test.ts) |
+| [src/server/codex/app-server-events.ts](../../src/server/codex/app-server-events.ts)<br>[src/server/codex/app-server-requests.ts](../../src/server/codex/app-server-requests.ts)<br>[src/server/codex/app-server-run.ts](../../src/server/codex/app-server-run.ts)<br>[src/server/provider/codex-app-server-harness.ts](../../src/server/provider/codex-app-server-harness.ts) | [tests/server/codex-app-server.test.ts](../../tests/server/codex-app-server.test.ts)<br>[tests/server/codex-app-server-terminal-outcomes.test.ts](../../tests/server/codex-app-server-terminal-outcomes.test.ts) |
+| [src/server/provider/acp-config-options.ts](../../src/server/provider/acp-config-options.ts)<br>[src/server/provider/cursor-acp-harness.ts](../../src/server/provider/cursor-acp-harness.ts)<br>[src/server/provider/cursor-acp-session.ts](../../src/server/provider/cursor-acp-session.ts)<br>[src/server/provider/kimi-acp-session.ts](../../src/server/provider/kimi-acp-session.ts) | [tests/server/acp-config-admission.test.ts](../../tests/server/acp-config-admission.test.ts)<br>[tests/server/cursor-acp-harness.test.ts](../../tests/server/cursor-acp-harness.test.ts) |
+| [src/server/provider/antigravity-cli-harness.ts](../../src/server/provider/antigravity-cli-harness.ts) | [tests/server/antigravity-cli-harness.test.ts](../../tests/server/antigravity-cli-harness.test.ts) |
+| [src/server/provider/opencode-sdk-harness.ts](../../src/server/provider/opencode-sdk-harness.ts) | [tests/server/opencode-sdk-harness.test.ts](../../tests/server/opencode-sdk-harness.test.ts)<br>[tests/helpers/opencode-lifecycle-server.ts](../../tests/helpers/opencode-lifecycle-server.ts) |
 | Shared controller and UI behavior (test-only follow-up) | [tests/server/turn-restart-continuation.test.ts](../../tests/server/turn-restart-continuation.test.ts)<br>[tests/server/turn-terminal-ui-projection.test.ts](../../tests/server/turn-terminal-ui-projection.test.ts) |
 | [src/server/provider/discovery.ts](../../src/server/provider/discovery.ts) | [tests/server/provider-auth-readiness.test.ts](../../tests/server/provider-auth-readiness.test.ts) |
-| [src/server/provider/run-coordinator.ts](../../src/server/provider/run-coordinator.ts) | [tests/server/provider-run-admission-cleanup.test.ts](../../tests/server/provider-run-admission-cleanup.test.ts) |
+| [src/server/provider/run-coordinator.ts](../../src/server/provider/run-coordinator.ts) | [tests/server/provider-run-admission-cleanup.test.ts](../../tests/server/provider-run-admission-cleanup.test.ts)<br>[tests/server/provider-conformance.test.ts](../../tests/server/provider-conformance.test.ts) |
 | [src/server/runtime/attachments/private-generated-attachments.ts](../../src/server/runtime/attachments/private-generated-attachments.ts) | [tests/server/private-generated-attachments.test.ts](../../tests/server/private-generated-attachments.test.ts) |
 | [src/renderer/src/hooks/useConversationProjection.ts](../../src/renderer/src/hooks/useConversationProjection.ts)<br>[src/renderer/src/hooks/useInertiaConnection.ts](../../src/renderer/src/hooks/useInertiaConnection.ts)<br>[src/renderer/src/hooks/useSplitWorkspaceScene.ts](../../src/renderer/src/hooks/useSplitWorkspaceScene.ts)<br>[src/renderer/src/utils/runtimeSequencing.ts](../../src/renderer/src/utils/runtimeSequencing.ts)<br>[src/server/runtime-sequencing.ts](../../src/server/runtime-sequencing.ts)<br>[src/server/runtime/runtime-sync-hub.ts](../../src/server/runtime/runtime-sync-hub.ts)<br>[src/shared/contracts/client-command/app.ts](../../src/shared/contracts/client-command/app.ts)<br>[src/shared/runtime-detail-subscriptions.ts](../../src/shared/runtime-detail-subscriptions.ts) | [tests/renderer/conversation-projection-interactions.dom.test.tsx](../../tests/renderer/conversation-projection-interactions.dom.test.tsx)<br>[tests/renderer/runtime-sequencing.test.ts](../../tests/renderer/runtime-sequencing.test.ts)<br>[tests/server/runtime-sequencing.test.ts](../../tests/server/runtime-sequencing.test.ts)<br>[tests/server/runtime-sync-hub.test.ts](../../tests/server/runtime-sync-hub.test.ts) |
 
@@ -279,4 +319,3 @@ rollback uses a real writer lock and byte/identity checks; native Windows rename
 semantics still require branch-specific hosted validation. Large native helper,
 migration, provider projection and preview hook modules received targeted review
 plus fixture coverage, not a claim of formal or exhaustive line-by-line proof.
-

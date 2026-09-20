@@ -95,7 +95,30 @@ projection DOM, sidebar and response timeline. Logs:
 `local-log:inertia-terminal-working-ui.log`,
 `local-log:inertia-audit-claude-visible-final-after.log`.
 
-No blocking finding remains in the final scoped patches. Live account behavior
-and the user's exact sequence were not observed. A separate source suspicion
-about unrelated frames resetting a preexisting parent-resume drain flag was not
-reproduced or changed; it is not a confirmed defect or explanation of the report.
+No blocking finding remained at this checkpoint. Live account behavior and the
+user's exact sequence were not observed. The later capability pass reproduced
+the separate suspicion about quiet frames discarding an armed parent-resume
+deadline. The final review below supersedes its earlier unconfirmed status.
+
+## Final provider capability delta review
+
+Independent review covered Antigravity session pinning, exact OpenCode session
+reads, the remaining Codex protocol-rejection paths, Cursor/Kimi authoritative
+configuration, Claude parent-resume deadlines and shared admitted-control
+authority. Root read every production diff and regression fixture. Provider and
+native reviewers cross-reviewed changes outside their own implementation scope.
+
+The coordinator identified two gaps before source freeze: wall-clock rollback
+could extend the new Claude absolute deadline, and later full ACP configuration
+responses could revert earlier confirmed selections. Negative controls reproduced
+both. Claude now uses monotonic elapsed time; ACP checks every actual config
+selection against the final authoritative response. Native mode APIs, genuine
+new foreground work, exact control ownership and cancellation checks remain
+intact. No timeout duration, cleanup requirement or verification gate was relaxed.
+
+The shared-control fix reuses the same admitted capability snapshot as run event
+admission, including current exact-run negotiated observations. Invalidated
+installation evidence still blocks new runs. Five interactive-provider controls
+verify the existing run stays usable and stale/cancelled owners stay rejected.
+See the [final capability report](final-provider-capabilities.md) for the complete
+scope and limitations; final aggregate checks are in the main audit ledger.

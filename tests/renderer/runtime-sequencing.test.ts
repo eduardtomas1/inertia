@@ -13,6 +13,26 @@ const CONVERSATION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const CONVERSATION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 describe("RuntimeProjectionSequence", () => {
+  it("retains all four pane subscriptions through reconnect and individual closure", () => {
+    const subscriptions = new RuntimeDetailSubscriptions();
+    const ids = [CONVERSATION, CONVERSATION_B, CONVERSATION_C,
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd"];
+    for (const [index, owner] of (["primary", "secondary", "tertiary", "quaternary"] as const).entries()) {
+      subscriptions.set(owner, ids[index]);
+    }
+    expect(subscriptions.conversationIds()).toEqual(ids);
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      subscriptions.mountedPanes(),
+    ));
+    expect(url.searchParams.getAll("conversationId")).toEqual(ids);
+    expect(url.searchParams.getAll("conversationOwner"))
+      .toEqual(["primary", "secondary", "tertiary", "quaternary"]);
+    subscriptions.set("secondary", null);
+    expect(subscriptions.conversationIds()).toEqual([ids[0], ids[2], ids[3]]);
+  });
+
   it("ignores duplicates and requires a refresh for a live gap", () => {
     const projection = new RuntimeProjectionSequence();
     projection.replaceFromSnapshot({ runtimeGeneration: GENERATION_A, latestSequence: 5 });

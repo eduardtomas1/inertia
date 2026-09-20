@@ -49,6 +49,7 @@ import {
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
 import { createStreamingAgentStore } from "./useStreamingAgentState";
+import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_TURNS: AgentTurn[] = [];
@@ -95,7 +96,8 @@ export interface ConversationProjectionOptions {
    * conversation. `undefined` preserves the primary-workspace behavior.
    */
   targetConversationId?: string | null;
-  /** Keeps the secondary pane dormant until a split conversation exists. */
+  subscriptionOwner?: RuntimeDetailSubscriptionOwner;
+  /** Keeps a split pane dormant until a conversation exists. */
   enabled?: boolean;
   autoOpenPlan: boolean;
   onOpenPlan: (conversationId: string) => void;
@@ -108,6 +110,7 @@ export function useConversationProjection({
   request,
   subscribe,
   targetConversationId,
+  subscriptionOwner: requestedSubscriptionOwner,
   enabled = true,
   autoOpenPlan,
   onOpenPlan,
@@ -191,9 +194,8 @@ export function useConversationProjection({
       ? snapshot?.activeConversationId ?? null
       : targetConversationId
     : null;
-  const subscriptionOwner = targetConversationId === undefined
-    ? "primary"
-    : "secondary";
+  const subscriptionOwner = requestedSubscriptionOwner
+    ?? (targetConversationId === undefined ? "primary" : "secondary");
   const persistedConversation = useMemo(
     () => snapshot?.conversations.find(({ id }) =>
       id === conversationId) ?? null,
@@ -483,7 +485,7 @@ export function useConversationProjection({
           ({ id }) => id === activeConversation.id,
         )
         && (
-          subscriptionOwner === "secondary"
+          subscriptionOwner !== "primary"
           || event.snapshot.activeConversationId === activeConversation.id
         )
       );

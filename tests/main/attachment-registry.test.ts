@@ -98,6 +98,35 @@ afterEach(async () => {
 });
 
 describe("main-owned attachment registry", () => {
+  it.each([
+    ["directory", "import"], ["directory", "release"], ["directory", "dispose"],
+    ["link", "import"], ["link", "release"], ["link", "dispose"],
+  ] as const)("rejects a %s root replacement during %s", async (replacement, operation) => {
+    const { directory, registry: attachments } = await registry();
+    const [attachment] = await attachments.import([{ name: "owned.png", mimeType: "image/png", data: png }]);
+    const original = `${directory}-original`;
+    const foreign = replacement === "directory" ? directory : `${directory}-foreign`;
+    directories.push(original);
+    if (replacement === "link") directories.push(foreign);
+    await rename(directory, original);
+    await mkdir(foreign, { mode: 0o700 });
+    if (replacement === "link") {
+      await symlink(foreign, directory, process.platform === "win32" ? "junction" : "dir");
+    }
+    const name = `${attachment!.id}.png`;
+    await writeFile(join(foreign, name), "unrelated content");
+    const action = operation === "import"
+      ? attachments.import([{ name: "next.png", mimeType: "image/png", data: alternatePng }])
+      : operation === "release"
+        ? attachments.release(attachment!.id)
+        : attachments.dispose();
+    await expect(action).rejects.toThrow("storage could not be verified safely");
+    expect(await readFile(join(foreign, name), "utf8")).toBe("unrelated content");
+    expect(await readdir(foreign)).toEqual([name]);
+    expect(await readFile(join(original, name))).toEqual(png);
+    expect(attachments.usage()).toEqual({ bytes: png.length, records: 1 });
+  });
+
   it("preserves only validated main-owned snapshot context with its image capability", async () => {
     const { registry: attachments } = await registry();
     const [image] = await attachments.import([{ name: "snapshot.png", mimeType: "image/png", data: png }]);
@@ -709,7 +738,6 @@ describe("main-owned attachment registry", () => {
     await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
     const rendererRelease = attachments.releaseFromRenderer(imported!.id);
     attachments.finishHandoff(handoffId);
-
     await expect(rendererRelease).resolves.toBe(true);
     await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
   });
@@ -731,6 +759,7 @@ describe("main-owned attachment registry", () => {
     await attachments.prepareHandoff(handoffId, [imported!.id], () => false);
     const rendererRelease = attachments.releaseFromRenderer(imported!.id);
     attachments.finishHandoff(handoffId);
+    await vi.waitFor(() => expect(unlinkFile).toHaveBeenCalledOnce());
     await expect(attachments.prepareHandoff(
       retryHandoffId,
       [imported!.id],
@@ -1331,7 +1360,7 @@ describe("main-owned attachment registry", () => {
 
     const first = attachments.release(attachment!.id);
     const second = attachments.release(attachment!.id);
-    expect(unlinkFile).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(unlinkFile).toHaveBeenCalledOnce());
     finishUnlink();
 
     await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
@@ -1353,6 +1382,7 @@ describe("main-owned attachment registry", () => {
     }]);
 
     const release = attachments.release(attachment!.id);
+    await vi.waitFor(() => expect(unlinkFile).toHaveBeenCalledOnce());
     await expect(attachments.resolve(attachment!.id)).resolves.toBeNull();
     finishUnlink();
     await expect(release).resolves.toBe(true);

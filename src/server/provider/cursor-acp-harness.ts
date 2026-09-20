@@ -79,6 +79,7 @@ import {
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
 import { readBoundedProviderImage } from "./provider-image-read";
+import { assertAcpConfigSelection } from "./acp-config-options";
 
 export {
   cursorOneShotPermissionOption,
@@ -1087,6 +1088,7 @@ async function configureCursorSession(
   } else if (!nativeMode && configMode) {
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Cursor", authoritativeConfigOptions, configMode);
   } else if (interactionMode === "plan" && !nativeMode) {
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
   }
@@ -1095,12 +1097,14 @@ async function configureCursorSession(
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected model '${model}'.`);
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Cursor", authoritativeConfigOptions, selected);
   }
   if (effort) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Cursor", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;
 }

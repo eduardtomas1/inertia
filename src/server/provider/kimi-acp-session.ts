@@ -9,6 +9,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 import { readBoundedProviderImage } from "./provider-image-read";
+import { assertAcpConfigSelection } from "./acp-config-options";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_COMPACTION_INSTRUCTION_CHARS = 4_000;
@@ -101,6 +102,7 @@ export async function configureKimiSession(
       "session/set_config_option",
     );
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, configMode);
   } else if (!nativeMode && interactionMode === "plan") {
     throw new Error("This Kimi ACP server does not advertise a plan mode.");
   }
@@ -124,6 +126,7 @@ export async function configureKimiSession(
       "session/set_config_option",
     );
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
   }
   if (effort) {
     const selected = findKimiAdvertisedConfigValue(
@@ -144,6 +147,7 @@ export async function configureKimiSession(
       "session/set_config_option",
     );
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;
 }

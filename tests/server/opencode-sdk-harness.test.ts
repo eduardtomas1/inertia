@@ -65,7 +65,12 @@ type LifecycleScenario =
   | "slow"
   | "endless"
   | "no-image";
-function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
+function lifecycleServerSource(
+  root: string,
+  capturePath: string,
+  scenario: LifecycleScenario,
+  sessionReadId = "opencode-lifecycle-session",
+): string {
   return `
 const http = require("node:http");
 const fs = require("node:fs");
@@ -93,7 +98,7 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }], default: { fake: "model-a" }, connected: ["fake"] });
     if (req.method === "GET" && url.pathname === "/agent") return json(res, []);
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
-    if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, session);
+    if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, { ...session, id: ${JSON.stringify(sessionReadId)} });
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
@@ -1055,6 +1060,31 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           files: [{ uri: expect.stringMatching(/^file:/u), name: "follow-up.png" }],
         },
       });
+  });
+
+  it.each(["new", "resumed"] as const)("rejects a foreign active session read before prompting a %s session", async (mode) => {
+    const root = portableFixtureRoot("OpenCode session attestation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(
+      root, capturePath, "idle-after-admission", "foreign-session",
+    ));
+    const run = createOpenCodeSdkHarness().start({
+      executable: command, environment: process.env,
+      providerNativeToolsAvailable: true,
+      input: nativeProviderRunInput({
+        providerId: "opencode", conversationId: `attestation-${mode}`,
+        cwd: root, prompt: "Preserve exact session ownership.",
+        interactionMode: "build", access: "supervised",
+        ...(mode === "resumed" ? { sessionId: "opencode-lifecycle-session" } : {}),
+      }),
+    });
+    await expect(run.result).resolves.toMatchObject({ status: "failed", cleanupConfirmed: true });
+    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string }>;
+    };
+    expect(captured.some(({ path }) => path.endsWith("/prompt_async"))).toBe(false);
   });
 
   it("waits for an exact follow-up receipt before replaying its early permission", async () => {

@@ -233,8 +233,24 @@ separate requirements.
 Every package build runs `npm run notices:generate` first. The generator reads
 the installed production dependency graph, fails when a package references
 missing license material, and places deterministic third-party notices beside
-Inertia's own license and Electron's Chromium notices in the packaged
-resources. Release validation must not bypass that prebuild step.
+Inertia's own license in the packaged resources. Release validation must not
+bypass that prebuild step.
+
+## What ships
+
+Packaging excludes files the application never executes: dependency source
+maps and type declarations, better-sqlite3's C sources, and prebuilt binaries
+for other operating systems. Each platform list repeats the shared patterns
+because electron-builder replaces the shared list rather than merging it, and
+each list removes only other systems' prebuilds, never its own.
+`tests/main/packaging-file-patterns.test.ts` holds both rules, because a
+platform list that loses the shared patterns silently packages the entire
+repository.
+
+Electron already installs its Chromium credits beside the executable on Windows
+and Linux, so only macOS, whose application bundle does not contain that file,
+packages a copy. `package-smoke-legal-resources.mjs` verifies whichever layout
+applies, so previously installed builds keep passing.
 
 ## Database migration lineage
 

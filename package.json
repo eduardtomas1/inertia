@@ -137,7 +137,13 @@
     "files": [
       "out/**/*",
       "resources/generated/windows-runtime-job-integrity.json",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/*.d.mts",
+      "!node_modules/**/*.d.cts",
+      "!node_modules/better-sqlite3/src/**",
+      "!node_modules/better-sqlite3/deps/**"
     ],
     "extraResources": [
       {
@@ -157,10 +163,6 @@
         "to": "electron/LICENSE.txt"
       },
       {
-        "from": "node_modules/electron/dist/LICENSES.chromium.html",
-        "to": "electron/LICENSES.chromium.html"
-      },
-      {
         "from": "resources/generated/runtime-process-guardian",
         "to": "runtime"
       }
@@ -173,12 +175,72 @@
       "target": [
         "dmg",
         "zip"
+      ],
+      "files": [
+        "out/**/*",
+        "resources/generated/windows-runtime-job-integrity.json",
+        "package.json",
+        "!node_modules/**/*.map",
+        "!node_modules/**/*.d.ts",
+        "!node_modules/**/*.d.mts",
+        "!node_modules/**/*.d.cts",
+        "!node_modules/better-sqlite3/src/**",
+        "!node_modules/better-sqlite3/deps/**",
+        "!node_modules/**/prebuilds/win32-*/**",
+        "!node_modules/**/prebuilds/win32-*.node",
+        "!node_modules/**/prebuilds/linux-*/**",
+        "!node_modules/**/prebuilds/linux-*.node",
+        "!node_modules/**/prebuilds/linuxmusl-*/**",
+        "!node_modules/**/prebuilds/linuxmusl-*.node"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/icons/512x512.png",
+          "to": "icons/inertia.png"
+        },
+        {
+          "from": "resources/generated/THIRD_PARTY_NOTICES.txt",
+          "to": "THIRD_PARTY_NOTICES.txt"
+        },
+        {
+          "from": "LICENSE",
+          "to": "LICENSE.txt"
+        },
+        {
+          "from": "node_modules/electron/dist/LICENSE",
+          "to": "electron/LICENSE.txt"
+        },
+        {
+          "from": "resources/generated/runtime-process-guardian",
+          "to": "runtime"
+        },
+        {
+          "from": "node_modules/electron/dist/LICENSES.chromium.html",
+          "to": "electron/LICENSES.chromium.html"
+        }
       ]
     },
     "win": {
       "icon": "resources/icon.png",
       "artifactName": "Inertia.Setup.${version}.${ext}",
-      "target": "nsis"
+      "target": "nsis",
+      "files": [
+        "out/**/*",
+        "resources/generated/windows-runtime-job-integrity.json",
+        "package.json",
+        "!node_modules/**/*.map",
+        "!node_modules/**/*.d.ts",
+        "!node_modules/**/*.d.mts",
+        "!node_modules/**/*.d.cts",
+        "!node_modules/better-sqlite3/src/**",
+        "!node_modules/better-sqlite3/deps/**",
+        "!node_modules/**/prebuilds/darwin-*/**",
+        "!node_modules/**/prebuilds/darwin-*.node",
+        "!node_modules/**/prebuilds/linux-*/**",
+        "!node_modules/**/prebuilds/linux-*.node",
+        "!node_modules/**/prebuilds/linuxmusl-*/**",
+        "!node_modules/**/prebuilds/linuxmusl-*.node"
+      ]
     },
     "nsis": {
       "include": "resources/installer.nsh"
@@ -197,6 +259,23 @@
       },
       "target": [
         "AppImage"
+      ],
+      "files": [
+        "out/**/*",
+        "resources/generated/windows-runtime-job-integrity.json",
+        "package.json",
+        "!node_modules/**/*.map",
+        "!node_modules/**/*.d.ts",
+        "!node_modules/**/*.d.mts",
+        "!node_modules/**/*.d.cts",
+        "!node_modules/better-sqlite3/src/**",
+        "!node_modules/better-sqlite3/deps/**",
+        "!node_modules/**/prebuilds/win32-*/**",
+        "!node_modules/**/prebuilds/win32-*.node",
+        "!node_modules/**/prebuilds/darwin-*/**",
+        "!node_modules/**/prebuilds/darwin-*.node",
+        "!node_modules/**/prebuilds/linuxmusl-*/**",
+        "!node_modules/**/prebuilds/linuxmusl-*.node"
       ]
     }
   },
@@ -227,7 +306,6 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.7.0",
     "ws": "^8.21.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.6.5"

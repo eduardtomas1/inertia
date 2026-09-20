@@ -3,6 +3,11 @@ import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+// Electron already ships its Chromium credits beside the executable on Windows
+// and Linux, so only macOS, whose application bundle does not contain that
+// file, carries a packaged copy. Both layouts are verified, never neither.
+const CHROMIUM_CREDITS_IN_RESOURCES = process.platform === "darwin";
+
 const LEGAL_RESOURCES = [
   {
     path: "THIRD_PARTY_NOTICES.txt", maximumBytes: 16 * 1024 * 1024,
@@ -20,7 +25,11 @@ const LEGAL_RESOURCES = [
       /Permission is hereby granted, free of charge/u, /THE SOFTWARE IS PROVIDED "AS IS"/u],
   },
   {
-    path: "electron/LICENSES.chromium.html", maximumBytes: 64 * 1024 * 1024,
+    path: CHROMIUM_CREDITS_IN_RESOURCES
+      ? "electron/LICENSES.chromium.html"
+      : "LICENSES.chromium.html",
+    base: CHROMIUM_CREDITS_IN_RESOURCES ? "resources" : "application",
+    maximumBytes: 64 * 1024 * 1024,
     markers: [/<html\b/iu, /<title>\s*Credits\s*<\/title>/iu,
       /class=["']license["']/u, /<pre>\s*Copyright/iu],
   },
@@ -40,8 +49,8 @@ async function directDirectory(path) {
   return metadata;
 }
 
-async function readLegalResource(directory, resource) {
-  const path = join(directory, resource.path);
+async function readLegalResource(directories, resource) {
+  const path = join(directories[resource.base ?? "resources"], resource.path);
   let handle;
   try {
     const parent = await directDirectory(dirname(path));
@@ -80,9 +89,15 @@ async function readLegalResource(directory, resource) {
 // Validate each artifact's actual files; hashes are evidence, not source attestation.
 export async function verifyPackagedLegalResources(resourcesDirectory) {
   const initial = await directDirectory(resourcesDirectory);
+  // The application directory holds the resources directory in every packaged
+  // layout, so Electron's own credits file is reached without a search.
+  const directories = {
+    resources: resourcesDirectory,
+    application: dirname(resourcesDirectory),
+  };
   const evidence = [];
   for (const resource of LEGAL_RESOURCES) {
-    evidence.push(await readLegalResource(resourcesDirectory, resource));
+    evidence.push(await readLegalResource(directories, resource));
   }
   if (!sameFile(initial, await directDirectory(resourcesDirectory))) {
     throw new Error("The packaged legal resources directory changed during verification.");

@@ -272,7 +272,7 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
-      UPDATE conversations SET branch = 'codex/release-0.0.48'
+      UPDATE conversations SET branch = 'main'
       WHERE id = ?
     `).run(conversationId);
     database.prepare(`
@@ -617,16 +617,46 @@ try {
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("");
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-dark.png");
+  await page.keyboard.press("Meta+K");
+  await page.getByRole("combobox", {
+    name: "Search commands, projects, chats, and messages",
+  }).fill("context");
+  await page.locator(".palette-message-snippet mark").first().waitFor();
+  await capture(page, "inertia-message-search.png");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Open workspace tools", exact: true }).click();
+  const tools = page.locator(".workspace-panel");
+  const changesTab = tools.locator('[data-workspace-tab="changes"]');
+  if (await changesTab.isVisible()) {
+    await changesTab.click();
+  } else {
+    await tools.getByLabel("Choose workspace tool").click();
+    await tools.getByRole("button", { name: "Changes", exact: true }).click();
+  }
+  await page.locator(".diff-line.is-addition").filter({
+    hasText: "export const welcome = 'calm, focused, and ready';",
+  }).first().waitFor();
+  const toolsResize = page.getByRole("separator", { name: "Resize workspace tools" });
+  for (let step = 0; step < 6; step += 1) await toolsResize.press("Shift+ArrowLeft");
+  await tools.getByRole("heading", { name: "Changes", exact: true }).click();
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-git-workflow.png");
+  await toolsResize.press("Enter");
+  await closeWorkspaceTools(page);
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
   await page.getByRole("combobox", { name: "Search projects" }).fill("Interface");
   await capture(page, "inertia-project-picker.png");
   await page.keyboard.press("Escape");
+  await page.getByRole("dialog", { name: "Choose project filter" }).waitFor({ state: "hidden" });
   await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
   await page.getByRole("dialog", { name: "Add project" }).waitFor();
   await capture(page, "inertia-add-project.png");
   await page.getByRole("button", { name: "Close add project" }).click();
-  await sidebar.getByRole("button", { name: "Thread actions for Review runtime safeguards", exact: true }).click();
-  await sidebar.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
+  await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "hidden" });
+  await sidebar.locator(".activity-thread-select").filter({
+    hasText: "Review runtime safeguards",
+  }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
   await page.getByRole("main", { name: "Split conversation workspace" }).waitFor();
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-split-workspace.png");
@@ -634,6 +664,7 @@ try {
   await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.mouse.move(1100, 350);
   await capture(page, "inertia-light.png");
 
 } finally {

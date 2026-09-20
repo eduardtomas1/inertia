@@ -1,10 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { oklchToHex } from "./color-palette.mjs";
 import {
-  ARCHITECTURE,
-  FAMILY_SPECS,
   PALETTE_APPEARANCES,
   PALETTE_FAMILIES,
   buildPaletteTokens,
@@ -13,8 +10,6 @@ import {
 const STYLES = "src/renderer/src/styles.css";
 const FAMILY_THEMES = "src/renderer/public/color-themes.css";
 const THEME_LIBRARY = "src/renderer/src/components/ThemeLibrary.css";
-
-const MESSAGE_ACTION_HUE_ROTATION = 50;
 
 export function paletteSelector(family, appearance) {
   if (family === "inertia") {
@@ -29,20 +24,13 @@ export function swatchSelector(family, appearance) {
 
 export function buildSwatchTokens(family, appearance) {
   const tokens = Object.fromEntries(buildPaletteTokens(family, appearance));
-  const arch = ARCHITECTURE[appearance];
-  const spec = FAMILY_SPECS[family];
-  const messageAction = oklchToHex({
-    l: arch.accentL,
-    c: arch.accentChroma * 0.9,
-    h: (spec.accentHue + MESSAGE_ACTION_HUE_ROTATION) % 360,
-  });
   return [
     ["theme-preview-canvas", tokens["app-bg"]],
     ["theme-preview-sidebar", tokens["sidebar-bg"]],
     ["theme-preview-surface", tokens["surface-strong"]],
     ["theme-preview-accent", tokens.accent],
     ["theme-preview-accent-soft", tokens["accent-soft"]],
-    ["theme-preview-message-action", messageAction],
+    ["theme-preview-message-action", tokens["message-action"]],
   ];
 }
 

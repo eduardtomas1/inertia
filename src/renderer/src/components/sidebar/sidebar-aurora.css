@@ -1,0 +1,109 @@
+/* Aurora light behind the sidebar brand.
+ *
+ * Colour: --aurora-1..3 are generated per palette (scripts/color-theme-spec.mjs):
+ * the theme accent plus two analogous hues at one OKLCH lightness, so no hue
+ * flares or muddies. Strengths are set per appearance; the palette tests keep
+ * the small brand name at least 4.5:1 even where every layer and the hover
+ * tint overlap.
+ *
+ * Cost: every layer is a static gradient that is painted once. The keyframes
+ * change only transform and opacity (literal values, so the compositor applies
+ * them without layout or repaint). The animations are paused here, and
+ * SidebarAurora.tsx advances their time about 8 times a second while the
+ * window is focused and motion is allowed, instead of producing a frame at
+ * every display refresh. Nothing is masked, so no extra render pass is needed:
+ * each light fades out on its own gradient before the search row.
+ *
+ * Seams: each drifting layer repeats its gradient tile and moves exactly one
+ * tile per loop, and every light stays inside its tile. */
+.sidebar-aurora {
+  --aurora-peak: 60%;
+  --aurora-mid: 42%;
+  --aurora-wash: 18%;
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 84px;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  background:
+    radial-gradient(150px 64px at 100% 0%, color-mix(in srgb, var(--aurora-2) var(--aurora-wash), transparent), transparent 80%),
+    linear-gradient(180deg, color-mix(in srgb, var(--aurora-1) var(--aurora-wash), transparent), transparent 88%);
+}
+
+:root[data-theme="dark"] .sidebar-aurora {
+  --aurora-peak: 40%;
+  --aurora-mid: 16%;
+  --aurora-wash: 8%;
+}
+
+.sidebar-aurora > span {
+  position: absolute;
+  will-change: transform;
+  animation-play-state: paused;
+}
+
+.sidebar-aurora-near,
+.sidebar-aurora-far {
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-repeat: repeat-x;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* A mid stop at 45% keeps each light rounded and soft instead of conical. */
+.sidebar-aurora-near {
+  --aurora-light-a: color-mix(in srgb, var(--aurora-1) var(--aurora-peak), transparent);
+  --aurora-light-b: color-mix(in srgb, var(--aurora-2) var(--aurora-mid), transparent);
+  width: calc(100% + 400px);
+  background-image:
+    radial-gradient(72px 26px at 92px 28px, var(--aurora-light-a), color-mix(in srgb, var(--aurora-light-a) 45%, transparent) 45%, transparent),
+    radial-gradient(104px 30px at 276px 42px, var(--aurora-light-b), color-mix(in srgb, var(--aurora-light-b) 45%, transparent) 45%, transparent);
+  background-size: 400px 100%;
+  animation-name: sidebar-aurora-drift-near;
+  animation-duration: 48s;
+}
+
+.sidebar-aurora-far {
+  --aurora-light-c: color-mix(in srgb, var(--aurora-3) var(--aurora-mid), transparent);
+  --aurora-light-d: color-mix(in srgb, var(--aurora-1) var(--aurora-mid), transparent);
+  width: calc(100% + 560px);
+  background-image:
+    radial-gradient(116px 22px at 138px 17px, var(--aurora-light-c), color-mix(in srgb, var(--aurora-light-c) 45%, transparent) 45%, transparent),
+    radial-gradient(92px 28px at 410px 38px, var(--aurora-light-d), color-mix(in srgb, var(--aurora-light-d) 45%, transparent) 45%, transparent);
+  background-size: 560px 100%;
+  animation-name: sidebar-aurora-drift-far;
+  animation-duration: 76s;
+}
+
+.sidebar-aurora-glow {
+  top: -48px;
+  right: -44px;
+  width: 230px;
+  height: 120px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--aurora-2) var(--aurora-mid), transparent), transparent);
+  animation: sidebar-aurora-breathe 11s ease-in-out infinite alternate paused;
+}
+
+@keyframes sidebar-aurora-drift-near {
+  to { transform: translate3d(-400px, 0, 0); }
+}
+
+@keyframes sidebar-aurora-drift-far {
+  from { transform: translate3d(-560px, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes sidebar-aurora-breathe {
+  from { opacity: 0.6; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-aurora > span {
+    animation: none;
+  }
+}

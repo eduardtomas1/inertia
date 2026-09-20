@@ -191,9 +191,34 @@ test("contains commit dialog focus and restores its trigger", async () => {
 
 test("keeps the macOS brand in the native titlebar row and starts a new chat", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   const shell = page.locator(".app-shell");
   const brand = page.getByRole("button", { name: "Start a new chat" });
   await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));
+
+  // The aurora spans the sidebar top behind the brand, takes no input, and
+  // drifts on its coarse timer while focused; reduced motion removes it.
+  const aurora = page.locator(".sidebar-aurora");
+  await expect(aurora).toHaveAttribute("aria-hidden", "true");
+  expect(await page.evaluate(() => {
+    const sidebar = document.querySelector("aside.sidebar")!.getBoundingClientRect();
+    const layer = document.querySelector(".sidebar-aurora")!;
+    const bounds = layer.getBoundingClientRect();
+    const lockup = document.querySelector(".brand-lockup")!.getBoundingClientRect();
+    const hit = document.elementFromPoint(lockup.left + lockup.width / 2, lockup.top + lockup.height / 2);
+    return {
+      left: bounds.left - sidebar.left, top: bounds.top - sidebar.top, width: bounds.width - sidebar.width,
+      pointerEvents: getComputedStyle(layer).pointerEvents, brandOnTop: Boolean(hit?.closest(".brand-lockup")),
+    };
+  })).toEqual({ left: 0, top: 0, width: 0, pointerEvents: "none", brandOnTop: true });
+  const auroraTimes = () => aurora.evaluate((element) =>
+    element.getAnimations({ subtree: true }).map((animation) => Number(animation.currentTime)));
+  const initialAuroraTimes = await auroraTimes();
+  expect(initialAuroraTimes).toHaveLength(3);
+  await expect.poll(async () => (await auroraTimes())[0]! - initialAuroraTimes[0]!).toBeGreaterThan(500);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(async () => (await auroraTimes()).length).toBe(0);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
 
   if (process.platform === "darwin") {
     const geometry = await page.evaluate(() => {
@@ -218,8 +243,8 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
     expect(geometry).not.toBeNull();
     expect(geometry?.row.top).toBeCloseTo(12, 0);
     expect(geometry?.row.height).toBeLessThanOrEqual(30);
-    expect(geometry?.mark.width).toBe("24px");
-    expect(geometry?.mark.height).toBe("24px");
+    expect(geometry?.mark.width).toBe("26px");
+    expect(geometry?.mark.height).toBe("26px");
     expect(geometry?.mark.maskImage).toContain("inertia-logo.png");
     expect(geometry?.logoDisplay).toBe("none");
     expect(geometry?.safeInset).toBe(MAC_BRAND_SAFE_INSET);

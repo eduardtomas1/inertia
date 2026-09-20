@@ -7,7 +7,7 @@ import { expect, test, type Locator } from "@playwright/test";
 import Database from "better-sqlite3";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openLocalProjectFromDialog } from "./support/add-project";
-import { observeBranchSwitch } from "./support/git-branch-switch-observer";
+import { observeGitAction, type GitActionTarget } from "./support/git-action-observer";
 
 const execFileAsync = promisify(execFile);
 async function gitOutput(cwd: string, ...args: string[]): Promise<string> {
@@ -162,9 +162,13 @@ async function openGit(): Promise<Locator> {
   await expect(menu.getByRole("menuitem", { name: /^Fetch/u })).not.toHaveAttribute("aria-disabled", "true");
   return menu;
 }
-async function fetchFromUi(): Promise<void> {
+async function fetchFromUi(target?: GitActionTarget): Promise<void> {
   const menu = await openGit();
-  await menu.getByRole("menuitem", { name: /^Fetch/u }).click();
+  const observer = target ? await observeGitAction(app.page, { type: "git.fetch", payload: target }) : undefined;
+  try {
+    await menu.getByRole("menuitem", { name: /^Fetch/u }).click();
+    await observer?.waitForResult();
+  } finally { await observer?.dispose(); }
   await openGit();
   await app.page.keyboard.press("Escape");
 }
@@ -315,15 +319,18 @@ test(trackingScenario, async () => {
   // full setup/action/assertion allowance is 120s, not the former 45s.
   test.setTimeout(120_000);
   const { page, workspaceDirectory } = app;
-  await fetchFromUi();
+  if (!trackingIdentity) throw new Error("The seeded tracking conversation is unavailable.");
+  // Fetch has its own guarded backend work before branch switching. Observe
+  // that exact request's settlement, then keep the ordinary UI assertion bound.
+  await fetchFromUi({ ...trackingIdentity, repositoryPath: "." });
   const trigger = page.locator('[data-header-menu="branch"] > button');
   await trigger.click();
   const branches = page.getByRole("menu", { name: "Branches" });
   await branches.getByRole("searchbox").fill("remote-review");
   await expect(branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
-  if (!trackingIdentity) throw new Error("The seeded tracking conversation is unavailable.");
-  const switchObserver = await observeBranchSwitch(page, {
-    ...trackingIdentity, repositoryPath: ".", name: "origin/feature/remote-review", remote: true,
+  const switchObserver = await observeGitAction(page, {
+    type: "git.branch.switch",
+    payload: { ...trackingIdentity, repositoryPath: ".", name: "origin/feature/remote-review", remote: true },
   });
   try {
     await branches.getByRole("searchbox").press("Enter");

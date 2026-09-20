@@ -17,11 +17,15 @@
   padding: 16px 105px 15px 18px;
   border: 1px solid var(--composer-border);
   border-radius: 23px;
-  background: var(--composer-surface);
+  background: color-mix(in srgb, var(--composer-surface) 90%, var(--accent-soft));
   box-shadow: 0 5px 20px -12px rgb(0 0 0 / 30%);
 }
 .composer-shell .composer-input-zone:focus-within {
   border-color: var(--interactive-border-hover);
+  box-shadow:
+    0 5px 20px -12px rgb(0 0 0 / 30%),
+    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 0 34px -14px color-mix(in srgb, var(--accent) 42%, transparent);
 }
 .composer-shell .composer textarea {
   min-height: 26px;
@@ -35,8 +39,8 @@
   border-radius: 0 0 16px 16px;
   background: color-mix(
     in srgb,
-    var(--composer-surface) 85%,
-    var(--surface-muted)
+    var(--composer-surface) 76%,
+    var(--accent-soft)
   );
   box-shadow: none;
 }

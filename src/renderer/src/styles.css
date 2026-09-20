@@ -23,6 +23,7 @@
   --accent-soft: #dfe0fc;
   --accent-text: #fdfdff;
   --accent-strong: #380f9d;
+  --message-action: #8e0e82;
   --danger: #96423c;
   --danger-soft: #f5dad7;
   --warning: #81520f;
@@ -80,6 +81,9 @@
   --surface-grain: none;
   --surface-grain-size: auto;
   --ultra-sweep: #2a7da6;
+  --aurora-1: #adaefb;
+  --aurora-2: #60c3fb;
+  --aurora-3: #de9be9;
   --text-faint: color-mix(in srgb, var(--text-muted) 93%, var(--surface));
   --success: var(--status-completed);
   --mono: var(--font-mono);
@@ -265,6 +269,7 @@
   --accent-soft: #202036;
   --accent-text: #090912;
   --accent-strong: #bfc1fc;
+  --message-action: #dd8fd0;
   --danger: #ea9088;
   --danger-soft: #2f1a18;
   --warning: #d9a05a;
@@ -305,10 +310,13 @@
     0 2px 9px -5px rgba(0, 0, 0, 0.88);
   --selected-surface: color-mix(in srgb, var(--surface-hover) 88%, var(--accent-soft));
   --selected-surface-strong: color-mix(in srgb, var(--surface-hover) 74%, var(--accent-soft));
-  --user-request-tint: color-mix(in srgb, var(--surface-muted) 94%, var(--accent-soft));
+  --user-request-tint: color-mix(in srgb, var(--surface-muted) 62%, var(--accent-soft));
   --surface-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='0.32'/%3E%3C/svg%3E");
   --surface-grain-size: 140px 140px;
   --ultra-sweep: #82c8ef;
+  --aurora-1: #817ce9;
+  --aurora-2: #1f97d0;
+  --aurora-3: #b867c5;
 }
 
 * {
@@ -548,18 +556,18 @@ textarea {
 }
 
 .platform-darwin .brand-lockup {
-  gap: 7px;
-  padding: 2px 4px 2px 2px;
-  border-radius: 7px;
+  gap: 8px;
+  padding: 1px 5px 1px 1px;
+  border-radius: 8px;
 }
 
 .platform-darwin .brand-lockup:hover {
-  background: color-mix(in srgb, var(--surface-hover) 46%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .platform-darwin .brand-lockup::before {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   flex: 0 0 auto;
   content: "";
   background: currentColor;
@@ -579,40 +587,42 @@ textarea {
 }
 
 .platform-darwin .brand-name {
-  font-size: 13px;
-  font-weight: 660;
-  letter-spacing: -0.005em;
+  font-size: 14px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
 }
 
 .brand-lockup {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   margin: 0;
-  padding: 3px 5px 3px 3px;
-  border-radius: 10px;
+  padding: 3px 7px 3px 3px;
+  border-radius: 11px;
   color: var(--text);
   background: transparent;
   text-align: left;
   transition: background var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
 
-.brand-lockup:hover { background: color-mix(in srgb, var(--surface-hover) 82%, transparent); }
+/* A translucent tint of the text colour reads as a hover over the aurora on
+   every theme, where an opaque surface would cut a grey block out of it. */
+.brand-lockup:hover { background: color-mix(in srgb, var(--text) 9%, transparent); }
 .brand-lockup:active { transform: scale(0.98); }
 
 .brand-logo {
-  width: 31px;
-  height: 31px;
+  width: 34px;
+  height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-medium);
+  border-radius: 10px;
   box-shadow: var(--shadow-soft);
 }
 
 .brand-name {
-  font-size: 14px;
-  font-weight: 680;
-  letter-spacing: -0.01em;
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 .mobile-close {
@@ -2140,7 +2150,6 @@ button.environment-row:focus-visible,
 .environment-disclosure-actions.is-repositories > section > header > span,
 .environment-run-list > li > span,
 .environment-plain-list > li > span,
-.environment-usage-context > span,
 .environment-usage-limits > li > span {
   display: grid;
   min-width: 0;
@@ -2149,8 +2158,7 @@ button.environment-row:focus-visible,
 
 .environment-disclosure-content.is-repositories strong,
 .environment-disclosure-actions.is-repositories strong,
-.environment-run-list strong,
-.environment-usage-context strong {
+.environment-run-list strong {
   overflow: hidden;
   color: var(--text-soft);
   font-size: var(--ui-font-secondary);
@@ -2163,7 +2171,6 @@ button.environment-row:focus-visible,
 .environment-disclosure-actions.is-repositories small,
 .environment-run-list small,
 .environment-plain-list small,
-.environment-usage-context small,
 .environment-usage-limits small {
   overflow: hidden;
   color: var(--text-muted);
@@ -2257,7 +2264,6 @@ button.environment-row:focus-visible,
   outline-offset: -2px;
 }
 
-.environment-usage-context,
 .environment-usage-quota-state,
 .environment-usage-limits > li {
   display: flex;
@@ -2271,7 +2277,6 @@ button.environment-row:focus-visible,
   font-size: var(--ui-font-secondary);
 }
 
-.environment-usage-context > b,
 .environment-usage-limits b {
   flex: 0 0 auto;
   color: var(--text-soft);
@@ -2293,6 +2298,28 @@ button.environment-row:focus-visible,
 
 .environment-usage-quota-state small.is-unavailable {
   color: var(--text-muted);
+}
+
+.environment-usage-quota-state:first-child {
+  border-top: 0;
+}
+
+.environment-usage-quota-state > span {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-usage-section .environment-disclosure > summary > small[data-tone="low"],
+.environment-usage-limits b[data-tone="low"] {
+  color: var(--warning);
+}
+
+.environment-usage-section .environment-disclosure > summary > small[data-tone="critical"],
+.environment-usage-limits b[data-tone="critical"] {
+  color: var(--danger);
 }
 
 .environment-usage-refresh {
@@ -12444,9 +12471,10 @@ button.sent-attachment-open:focus-visible {
 }
 
 .turn-meta .turn-action:hover,
-.turn-run-details-toggle:hover {
-  color: var(--quiet-secondary);
-  background: var(--surface-hover);
+.turn-run-details-toggle:hover,
+.turn-run-details-toggle[aria-expanded="true"] {
+  color: var(--message-action);
+  background: color-mix(in srgb, var(--message-action) 10%, transparent);
 }
 
 .turn-run-details-toggle:focus-visible {

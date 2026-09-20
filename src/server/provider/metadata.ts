@@ -23,6 +23,7 @@ import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
+import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 
 export type ProviderMetadataField = "models" | "rateLimits";
@@ -141,10 +142,10 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   cursor: [],
   kimi: [],
   opencode: ["models"],
-  antigravity: [],
+  antigravity: ["models"],
 };
 
-Object.assign(AVAILABLE_FIELDS, { antigravity: [] as const });
+Object.assign(AVAILABLE_FIELDS, { antigravity: ["models"] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -462,6 +463,9 @@ export async function readProviderMetadata(
   if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, 6_000, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
     return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
+  }
+  if (providerId === "antigravity" && fields.includes("models")) {
+    return { models: await readAntigravityModels(executable, environment, cwd, { signal }) };
   }
   return {};
 }

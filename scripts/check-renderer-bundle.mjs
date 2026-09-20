@@ -48,17 +48,22 @@ const budgets = {
   // Explicit workspace consent and bounded live-activity disclosure add
   // 806 / 699 bytes to the routes. Preserve headroom; see the matching-dependency
   // post57-corrections/pro-review-renderer-bundle.json measurements.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806,
+  // Reviewed production dependency batch adds exactly 1,156 emitted bytes
+  // on identical application source. Preserve existing headroom; see
+  // docs/pr-evidence/dependency-pr420/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. It measures 11.4 KiB.
-  colorThemesCss: 12 * kibibyte,
+  // separate from the generated entry stylesheet. The aurora adds exactly
+  // 552 bytes to the integrated palette (12,470 total). Its scoped LF rule
+  // keeps Windows identical. Preserve headroom; see release-v0058 evidence.
+  colorThemesCss: 12 * kibibyte + 552,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   deferredIssueReportJavaScript: 13 * kibibyte,
@@ -126,7 +131,10 @@ const budgets = {
   // 1,186 core bytes. All pre-existing bundle headroom remains unchanged.
   // Consent, deferred card error/retry states and active-operation disclosure
   // add 2,633 measured bytes in total, including the initial route additions.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633,
+  // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
+  // same source/dependency baseline. Both first-load routes are unchanged.
+  // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

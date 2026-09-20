@@ -37,6 +37,7 @@ import {
   hashObject,
   type IndexEntry,
   readIndexEntry,
+  restoreIndexEntry,
   textBuffer,
   updateIndexEntry,
   writeAtomic,
@@ -662,7 +663,12 @@ async function revertDiffSelectionLocked(
       },
     };
   } catch (error) {
-    if (indexUpdated) await updateIndexEntry(root, state.plan.filePath, state.index.mode, state.index.oid, indexScope).catch(() => undefined);
+    if (indexUpdated) await restoreIndexEntry(
+      root, state.plan.filePath,
+      { mode: state.index.mode, oid: nextIndexOid },
+      { mode: state.index.mode, oid: state.index.oid },
+      secureFiles, secureRoot, workspace,
+    ).catch(() => undefined);
     if (worktreeUpdated) {
       await writeAtomic(
         root,
@@ -814,7 +820,12 @@ async function undoDiffSelectionLocked(
       secureRoot,
     );
   } catch (error) {
-    if (indexUpdated) await updateIndexEntry(root, path!, operation.postIndexMode, operation.postIndexOid, indexScope).catch(() => undefined);
+    if (indexUpdated) await restoreIndexEntry(
+      root, path!,
+      { mode: operation.preIndexMode, oid: operation.preIndexOid },
+      { mode: operation.postIndexMode, oid: operation.postIndexOid },
+      secureFiles, secureRoot, workspace,
+    ).catch(() => undefined);
     if (worktreeUpdated) {
       await writeAtomic(
         root,
@@ -848,7 +859,12 @@ async function undoDiffSelectionLocked(
     undone = await registryOperation(controller.markUndone(operation.operationId));
   } catch (error) {
     if (operation.affectedLayers.includes("index")) {
-      await updateIndexEntry(root, path!, operation.postIndexMode, operation.postIndexOid, indexScope).catch(() => undefined);
+      await restoreIndexEntry(
+        root, path!,
+        { mode: operation.preIndexMode, oid: operation.preIndexOid },
+        { mode: operation.postIndexMode, oid: operation.postIndexOid },
+        secureFiles, secureRoot, workspace,
+      ).catch(() => undefined);
     }
     await writeAtomic(
       root,

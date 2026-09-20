@@ -1,6 +1,6 @@
 // @inertia-test-suite portable
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -13,6 +13,7 @@ import { runtimeSupervisorDefaults } from
   "../../src/main/runtime-supervisor-values";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
+import { recoverRuntimeOwnedProcesses } from "../../src/main/runtime-owned-process-recovery";
 import {
   encodeConversationAttachmentStoreOperation,
   type ConversationAttachmentStoreAnyOperationRunner,
@@ -441,6 +442,56 @@ describe("RuntimeSupervisor lifecycle", () => {
     expect(supervisor.snapshot()).toMatchObject({
       phase: "stopped",
       restartScheduled: false,
+    });
+  });
+
+  it("retains unexpected-exit cleanup authority when the journal directory disappears", async () => {
+    const { children, supervisor } = createHarness({
+      recoverOwnedProcesses: (generation, boot, deadlineAt) =>
+        recoverRuntimeOwnedProcesses(dataDirectory, generation, boot, { deadlineAt }),
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    const start = children[0].messages.find((message) => message.type === "runtime.start");
+    if (start?.type !== "runtime.start") throw new Error("Missing runtime start command.");
+    const generation = start.options.runtimeGenerationId!;
+    const movedDirectory = `${dataDirectory}-temporarily-unavailable`;
+    renameSync(dataDirectory, movedDirectory);
+    try {
+      expect(() => children[0].exit(137)).not.toThrow();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(children).toHaveLength(1);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped", restartScheduled: false, websocketUrl: null,
+      });
+      await expect(supervisor.stop()).resolves.toBe(false);
+    } finally {
+      renameSync(movedDirectory, dataDirectory);
+    }
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ runtimeGenerationId: generation })]),
+    );
+    expect(new RuntimeOwnedProcessJournal(dataDirectory).sessionExact(generation)).not.toBeNull();
+  });
+
+  it.each(["stop", "recycle"] as const)("settles %s when unexpected-exit recovery throws synchronously", async (operation) => {
+    const { children, supervisor } = createHarness({
+      recoverOwnedProcesses: () => { throw new Error("journal unavailable"); },
+    });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    const pending = operation === "stop" ? supervisor.stop() : supervisor.testOnlyRecycle();
+    const settled = operation === "stop"
+      ? expect(pending).resolves.toBe(false)
+      : expect(pending).rejects.toThrow("before clean readiness");
+    expect(() => children[0].exit(137)).not.toThrow();
+    await settled;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped", restartScheduled: false, websocketUrl: null,
     });
   });
 

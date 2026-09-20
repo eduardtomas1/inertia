@@ -225,12 +225,14 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+K" : "Control+K",
   );
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  // Suspension is committed in a layout effect during the same render that
+  // mounts the overlay, so an observable trusted dialog already implies the
+  // hidden preview. Ordering against that dialog is the actual requirement;
+  // reading the bounds straight after the keypress only raced the renderer's
+  // commit and reported the still-visible preview on slow runners.
   await expect(page.getByRole("dialog", { name: "Search Inertia" }))
     .toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   await page.getByRole("button", { name: "Close search" }).click();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
@@ -241,12 +243,9 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   );
   await expect(commitButton).toBeEnabled();
   await commitButton.click();
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   const commitDialog = page.getByRole("dialog", { name: "Commit changes" });
   await expect(commitDialog).toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   // Visibility precedes the dialog's deferred focus handoff from the native
   // preview. Verify keyboard readiness before sending a one-shot Escape.
   await expect(commitDialog.getByRole("textbox", { name: "Commit message" }))

@@ -327,7 +327,7 @@ describe("runtime sequence helpers", () => {
       conversationIds: [CONVERSATION_A, CONVERSATION_B],
     });
     expect(parseRuntimeResumeRequest(
-      `${path}?runtimeGeneration=${GENERATION}&afterSequence=42&conversationId=${CONVERSATION_A}&conversationId=${CONVERSATION_B}&conversationId=cccccccc-cccc-4ccc-8ccc-cccccccccccc`,
+      `${path}?runtimeGeneration=${GENERATION}&afterSequence=42&conversationId=${CONVERSATION_A}&conversationId=${CONVERSATION_B}&conversationId=cccccccc-cccc-4ccc-8ccc-cccccccccccc&conversationId=dddddddd-dddd-4ddd-8ddd-dddddddddddd&conversationId=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee`,
       path,
     )).toEqual({ kind: "invalid" });
     expect(parseRuntimeResumeRequest(`${path}?afterSequence=1`, path)).toEqual({ kind: "invalid" });
@@ -335,5 +335,26 @@ describe("runtime sequence helpers", () => {
       .toEqual({ kind: "invalid" });
     expect(parseRuntimeResumeRequest(`${path}?runtimeGeneration=${GENERATION}&afterSequence=1&extra=x`, path))
       .toEqual({ kind: "invalid" });
+  });
+
+  it.each([
+    "&conversationOwner=unknown",
+    "&conversationOwner=tertiary&conversationOwner=tertiary",
+    "&conversationOwner=tertiary&conversationOwner=quaternary",
+    "&conversationOwner=primary&conversationId=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  ])("rejects mismatched or unauthorized reconnect owner pairs: %s", (owners) => {
+    const path = "/runtime/token";
+    expect(parseRuntimeResumeRequest(
+      `${path}?runtimeGeneration=${GENERATION}&afterSequence=0&conversationId=${CONVERSATION_A}${owners}`,
+      path,
+    )).toEqual({ kind: "invalid" });
+  });
+
+  it("rejects duplicate reconnect owners even with distinct valid conversations", () => {
+    const path = "/runtime/token";
+    expect(parseRuntimeResumeRequest(
+      `${path}?runtimeGeneration=${GENERATION}&afterSequence=0&conversationId=${CONVERSATION_A}&conversationOwner=tertiary&conversationId=${CONVERSATION_B}&conversationOwner=tertiary`,
+      path,
+    )).toEqual({ kind: "invalid" });
   });
 });

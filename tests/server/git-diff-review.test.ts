@@ -26,6 +26,7 @@ import {
 } from "../../src/server/git";
 import { REVERSAL_MAX_ACTIVE_BACKUPS, REVERSAL_REGISTRY_REF } from "../../src/server/reversal-registry";
 import { writeAtomic } from "../../src/server/git/reversal-files";
+import { restoreReversalIndexEntry } from "../../src/server/git/reversal-index";
 import {
   SecureFileError,
   type RuntimeSecureFileBroker,
@@ -437,6 +438,66 @@ describe("safe selected diff reversal", () => {
     expect(git(root, "show", ":example.txt")).toContain("delta");
     expect(reversalBackupRefs(root)).toEqual([]);
     expect(readRegistry(root).operations.at(-1)?.status).toBe("failed");
+  });
+
+  it("preserves newer staged content when a reversal fails after changing the index", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+    const newer = "alpha\nbeta\ngamma\nnew staged work\n";
+
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation }, {
+      afterIndexUpdated: () => {
+        const oid = hashBlob(root, newer);
+        git(root, "update-index", "--cacheinfo", "100644", oid, "example.txt");
+        throw new Error("injected after concurrent staging");
+      },
+    })).rejects.toThrow(/injected after concurrent staging/u);
+
+    expect(git(root, "show", ":example.txt")).toBe(newer);
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toContain("delta");
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("recovery-required");
+    expect(reversalBackupRefs(root).length).toBeGreaterThan(0);
+  });
+
+  it("preserves concurrent staging of other files while rolling back its own index entry", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const plan = await inspectDiffSelection(root, selection);
+
+    await expect(revertDiffSelection(root, { ...selection, expected: plan.validation }, {
+      afterIndexUpdated: () => {
+        writeFileSync(join(root, "other.txt"), "independent staged work\n");
+        git(root, "add", "other.txt");
+        throw new Error("injected after other staging");
+      },
+    })).rejects.toThrow(/injected after other staging/u);
+
+    expect(git(root, "show", ":example.txt")).toContain("delta");
+    expect(git(root, "show", ":other.txt")).toBe("independent staged work\n");
+    expect(readRegistry(root).operations.at(-1)?.status).toBe("failed");
+    expect(() => lstatSync(join(root, ".git", "index.lock"))).toThrow();
+  });
+
+  it("preserves a reversal index lock whose ownership marker changed in place", async () => {
+    const root = repository();
+    const indexBefore = readFileSync(join(root, ".git", "index"));
+    const oid = git(root, "rev-parse", ":example.txt").trim();
+    const desiredOid = hashBlob(root, "restored content\n");
+    const lockPath = join(root, ".git", "index.lock");
+    let checks = 0;
+    await expect(restoreReversalIndexEntry(
+      root, "example.txt", { mode: "100644", oid },
+      { mode: "100644", oid: desiredOid }, async () => {
+        if (++checks === 2) writeFileSync(lockPath, "foreign lock owner\n");
+      },
+    )).rejects.toThrow(/reservation|index changed/u);
+    expect(readFileSync(join(root, ".git", "index"))).toEqual(indexBefore);
+    expect(readFileSync(lockPath, "utf8")).toBe("foreign lock owner\n");
   });
 
   it("does not reconcile a live reversal during concurrent inspection", async () => {

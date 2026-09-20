@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { mkdir, open, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -90,6 +90,139 @@ function recoveryImportJournalCount(databasePath: string): number {
 }
 
 describe("safe database recovery exports", () => {
+  it("rejects a staging link before creating directories outside the authorized root", async () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = realpathSync(temporaryDirectory());
+    const externalRoot = temporaryDirectory();
+    const originalStaging = join(authorizedRoot, "original-staging");
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, { recoverInterruptedRuns: false });
+    const operationId = "77777777-7777-4777-8777-777777777777";
+    const staging = join(authorizedRoot, `.inertia-recovery-${operationId}.partial`);
+    const injectedMkdir = (async (
+      path: Parameters<typeof mkdir>[0], options: Parameters<typeof mkdir>[1],
+    ) => {
+      const result = await mkdir(path, options);
+      if (String(path) === staging) {
+        renameSync(staging, originalStaging);
+        symlinkSync(externalRoot, staging, "junction");
+      }
+      return result;
+    }) as typeof mkdir;
+    try {
+      const failure = await store.importRecoveryData(JSON.stringify({
+        format: "inertia-recovery-export", version: 1, exportedAt: new Date().toISOString(),
+        projects: [{ name: "Recovered", path: "/informational", conversations: [] }],
+      }), authorizedRoot, { operationId, operations: { mkdir: injectedMkdir } })
+        .then(() => null, (error: unknown) => error);
+      expect(readdirSync(externalRoot)).toEqual([]);
+      expect(failure).toBeInstanceOf(Error);
+      expect(store.shellSnapshot().projects).toHaveLength(0);
+      expect(recoveryImportJournalCount(databasePath)).toBe(1);
+      unlinkSync(staging);
+      renameSync(originalStaging, staging);
+      store.reconcileRecoveryImport();
+      expect(recoveryImportJournalCount(databasePath)).toBe(0);
+      expect(readdirSync(authorizedRoot)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each(["staging", "publication", "commit"] as const)("rejects a replaced authorized root during import %s", async (phase) => {
+    const dataDirectory = temporaryDirectory();
+    const destination = temporaryDirectory();
+    const authorizedRoot = join(realpathSync(destination), "authorized");
+    const originalRoot = join(realpathSync(destination), "original");
+    mkdirSync(authorizedRoot, { mode: 0o700 });
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, { recoverInterruptedRuns: false });
+    const operationId = "77777777-7777-4777-8777-777777777777";
+    const finalName = `recovered-${operationId}`;
+    const stagingName = `.inertia-recovery-${operationId}.partial`;
+    const replaceRoot = (): void => {
+      renameSync(authorizedRoot, originalRoot);
+      mkdirSync(authorizedRoot, { mode: 0o700 });
+      writeFileSync(join(authorizedRoot, "external-marker"), "preserve this directory\n");
+      mkdirSync(join(authorizedRoot, phase === "staging" ? stagingName : finalName));
+      if (phase !== "staging") {
+        mkdirSync(join(authorizedRoot, finalName, "project-00001"));
+        writeFileSync(join(authorizedRoot, finalName, "project-00001", "external-file"), "preserve\n");
+      }
+    };
+    const injectedMkdir = (async (
+      path: Parameters<typeof mkdir>[0], options: Parameters<typeof mkdir>[1],
+    ) => {
+      const result = await mkdir(path, options);
+      if (basename(String(path)) === stagingName) replaceRoot();
+      return result;
+    }) as typeof mkdir;
+    const serialized = JSON.stringify({
+      format: "inertia-recovery-export", version: 1, exportedAt: new Date().toISOString(),
+      projects: [{ name: "Recovered", path: "/informational", conversations: [{
+        title: "Recovered chat", providerId: "codex", model: "test-model", reasoningEffort: "high",
+        interactionMode: "build", accessMode: "supervised",
+        messages: [{ role: "user", content: "Recovered message", createdAt: new Date().toISOString() }],
+      }] }],
+    });
+    try {
+      await expect(store.importRecoveryData(serialized, authorizedRoot, {
+        operationId,
+        operations: phase === "staging" ? { mkdir: injectedMkdir }
+          : phase === "publication" ? { afterStagingPublish: replaceRoot }
+          : { afterMessageCreate: replaceRoot },
+      })).rejects.toThrow("destination changed");
+      expect(store.shellSnapshot().projects).toHaveLength(0);
+      expect(recoveryImportJournalCount(databasePath)).toBe(1);
+      expect(readFileSync(join(authorizedRoot, "external-marker"), "utf8"))
+        .toBe("preserve this directory\n");
+      if (phase === "staging") expect(readdirSync(join(authorizedRoot, stagingName))).toEqual([]);
+      else expect(readFileSync(join(authorizedRoot, finalName, "project-00001", "external-file"), "utf8"))
+        .toBe("preserve\n");
+      rmSync(authorizedRoot, { recursive: true });
+      renameSync(originalRoot, authorizedRoot);
+      store.reconcileRecoveryImport();
+      expect(recoveryImportJournalCount(databasePath)).toBe(0);
+      expect(readdirSync(authorizedRoot)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rejects a replaced published import directory before committing database paths", async () => {
+    const dataDirectory = temporaryDirectory();
+    const authorizedRoot = realpathSync(temporaryDirectory());
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, dataDirectory, { recoverInterruptedRuns: false });
+    const operationId = "77777777-7777-4777-8777-777777777777";
+    const published = join(authorizedRoot, `recovered-${operationId}`);
+    const original = join(authorizedRoot, "original-import");
+    try {
+      await expect(store.importRecoveryData(JSON.stringify({
+        format: "inertia-recovery-export", version: 1, exportedAt: new Date().toISOString(),
+        projects: [{ name: "Recovered", path: "/informational", conversations: [] }],
+      }), authorizedRoot, { operationId, operations: {
+        afterStagingPublish: () => {
+          renameSync(published, original);
+          mkdirSync(published);
+          mkdirSync(join(published, "project-00001"));
+          writeFileSync(join(published, "external-marker"), "preserve\n");
+        },
+      } })).rejects.toThrow("destination changed");
+      expect(store.shellSnapshot().projects).toHaveLength(0);
+      expect(recoveryImportJournalCount(databasePath)).toBe(1);
+      expect(readFileSync(join(published, "external-marker"), "utf8")).toBe("preserve\n");
+      expect(readdirSync(published).sort()).toEqual(["external-marker", "project-00001"]);
+      rmSync(published, { recursive: true });
+      renameSync(original, published);
+      store.reconcileRecoveryImport();
+      expect(recoveryImportJournalCount(databasePath)).toBe(0);
+      expect(readdirSync(authorizedRoot)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("revalidates the authorized root at every destructive cleanup boundary", () => {
     const dataDirectory = temporaryDirectory();
     const authorizedRoot = temporaryDirectory();

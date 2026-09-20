@@ -1,6 +1,6 @@
 import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -39,10 +39,8 @@ import {
   type PreparedAttachmentImport,
   type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
-import {
-  isStablePrivateAttachment,
-  verifyStoredAttachmentAfterValidation,
-} from "./attachment-registry-file-verification.js";
+import { isStablePrivateAttachment, verifyPinnedAttachmentDirectory,
+  verifyStoredAttachmentAfterValidation } from "./attachment-registry-file-verification.js";
 import {
   inProcessAttachmentImportValidationRunner,
   type AttachmentImportFileOperation,
@@ -473,6 +471,7 @@ export class AttachmentRegistry {
   private readonly pendingPaths = new Map<string, number>();
   private pendingImportBytes = 0;
   private importTail: Promise<void> = Promise.resolve();
+  private directoryAuthority: { root: string; identity: BigIntStats } | null = null;
   private disposed = false;
   private disposal: Promise<void> | null = null;
 
@@ -842,7 +841,7 @@ export class AttachmentRegistry {
     ) {
       throw new Error("The registered attachment metadata no longer matches its content.");
     }
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await this.verifiedDirectory();
     if (this.revokedAttachmentIds.has(id)) return null;
     const canonicalRoot = await realpath(this.directory);
     const pathInfo = await lstat(record.path);
@@ -988,6 +987,7 @@ export class AttachmentRegistry {
     if (!validationStopped) {
       throw new Error("Attachment validation utility shutdown is unconfirmed.");
     }
+    if (this.directoryAuthority) await this.verifiedDirectory();
     for (const handoff of this.handoffs.values()) clearTimeout(handoff.timer);
     this.handoffs.clear();
     this.attachmentHandoffs.clear();
@@ -1001,7 +1001,10 @@ export class AttachmentRegistry {
     this.pendingPaths.clear();
     this.revokedAttachmentIds.clear();
     await Promise.all([...records.map(({ path }) => path), ...pendingPaths]
-      .map((path) => unlink(path).catch(() => undefined)));
+      .map(async (path) => {
+        await this.verifiedDirectory();
+        await unlink(path).catch(() => undefined);
+      }));
   }
 
   private cancelPendingRelease(id: string): boolean {
@@ -1068,7 +1071,10 @@ export class AttachmentRegistry {
   private async releaseRecord(
     record: AttachmentRegistryRecord,
   ): Promise<boolean> {
-    await unlinkWithRetry(record.path, this.unlinkFile, this.waitForRetry);
+    await unlinkWithRetry(record.path, async (path) => {
+      await this.verifiedDirectory();
+      await this.unlinkFile(path);
+    }, this.waitForRetry);
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
@@ -1109,7 +1115,7 @@ export class AttachmentRegistry {
     ) => Promise<void>,
     signal: AbortSignal,
   ): Promise<AttachmentRegistryRecord> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await this.verifiedDirectory();
     const id = randomUUID();
     const path = join(this.directory, `${id}.${attachment.extension}`);
     const file = await open(
@@ -1120,6 +1126,7 @@ export class AttachmentRegistry {
     this.pendingPaths.set(path, attachment.size);
     try {
       try {
+        await this.verifiedDirectory();
         await write(file, signal);
       } finally {
         await file.close();
@@ -1157,7 +1164,10 @@ export class AttachmentRegistry {
     } catch (error) {
       const removed = await unlinkWithRetry(
         path,
-        this.unlinkFile,
+        async (path) => {
+          await this.verifiedDirectory();
+          await this.unlinkFile(path);
+        },
         this.waitForRetry,
       ).then(() => true, () => false);
       if (removed) this.pendingPaths.delete(path);
@@ -1172,7 +1182,7 @@ export class AttachmentRegistry {
     allowTestDelay: boolean,
   ): Promise<AttachmentImportValidationReceipt> {
     signal.throwIfAborted();
-    const root = await securePrivateDirectory(this.directory);
+    const root = await this.verifiedDirectory();
     const rootInfo = await lstat(root, { bigint: true });
     const [before, canonicalPath] = await Promise.all([
       lstat(path, { bigint: true }),
@@ -1222,9 +1232,18 @@ export class AttachmentRegistry {
       path,
       receipt,
       resolveVerifiedRoot: async () =>
-        await securePrivateDirectory(this.directory),
+        await this.verifiedDirectory(),
       signal,
     });
     return receipt;
+  }
+
+  private async verifiedDirectory(): Promise<string> {
+    if (!this.directoryAuthority) {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      const root = await securePrivateDirectory(this.directory);
+      this.directoryAuthority = { root, identity: await lstat(root, { bigint: true }) };
+    }
+    return await verifyPinnedAttachmentDirectory(this.directory, this.directoryAuthority);
   }
 }

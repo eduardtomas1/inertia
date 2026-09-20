@@ -178,10 +178,18 @@ function startAntigravityRun(
     failure ??= next;
     requestProcessTermination(true);
   };
-  const adoptSession = (conversationId: string | null): void => {
-    if (!conversationId || conversationId === sessionId) return;
+  const adoptSession = (conversationId: string | null): boolean => {
+    if (!conversationId || conversationId === sessionId) return true;
+    if (sessionId) {
+      fail(antigravityFailure(
+        "malformed", "", input.cwd,
+        "Antigravity returned an update for a different conversation.",
+      ));
+      return false;
+    }
     sessionId = conversationId;
     emitter.session(conversationId);
+    return true;
   };
   const handle = (event: AntigravityStreamEvent): void => {
     if (event.kind === "session") {
@@ -197,8 +205,8 @@ function startAntigravityRun(
         activityId: `antigravity:${input.runId}:${event.id}`,
       });
     } else {
+      if (!adoptSession(event.result.conversationId)) return;
       result = event.result;
-      adoptSession(event.result.conversationId);
       if (event.result.status === "SUCCESS" && !sawText && event.result.response) {
         resultText.append(event.result.response);
         emitter.text(event.result.response);
@@ -238,7 +246,7 @@ function startAntigravityRun(
       }
       for (const event of events) {
         handle(event);
-        if (result) return;
+        if (result || failure) return;
       }
     },
     () => {

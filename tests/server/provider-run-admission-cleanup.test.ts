@@ -7,6 +7,7 @@ import type { AgentHarnessStartOptions } from "../../src/server/provider/agent-h
 import { providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { ProviderRunCoordinator } from "../../src/server/provider/run-coordinator";
+import { ProviderInstallationAdmissionError } from "../../src/server/provider/installation-lease";
 import { nativeProviderRunInput } from "./model-route-fixture";
 import {
   cleanupTurnControllerTestDirectories,
@@ -132,6 +133,58 @@ describe("provider admission cleanup proof", () => {
     await expect(coordinator.stopOwned(input.conversationId, {
       ...input, turnId: "another-turn",
     })).resolves.toBe("missing");
+  });
+
+  it("releases a queued turn refused by provider maintenance before launch", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const value = fixture();
+    value.capabilityAdmissible.mockReturnValue(true);
+    value.acquireInstallationUse.mockImplementationOnce(() => {
+      throw new ProviderInstallationAdmissionError(
+        "The provider installation is unavailable while maintenance owns it.", [],
+      );
+    });
+    vi.spyOn(runtime.provider, "run").mockImplementation((input, callbacks) =>
+      value.coordinator.run(input, callbacks));
+    vi.spyOn(runtime.provider, "cancel").mockImplementation(() =>
+      value.coordinator.cancel(runtime.conversationId));
+    vi.spyOn(runtime.provider, "isRunning").mockImplementation((id) =>
+      value.coordinator.isRunning(id));
+    vi.spyOn(runtime.provider, "stopOwned").mockImplementation((id, owner) =>
+      value.coordinator.stopOwned(id, owner));
+
+    try {
+      const first = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Maintenance acquired its lease while this queued turn prepared.",
+      });
+      expect(runtime.controller.start(first.turn.id)).toBe(false);
+      await flushTurnControllerTestPromises();
+
+      expect(value.start).not.toHaveBeenCalled();
+      expect(value.resolveBackendLaunchOptions).not.toHaveBeenCalled();
+      expect(value.release).not.toHaveBeenCalled();
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: "failed", terminalReason: "turn-start-failed",
+      });
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+      await expect(value.coordinator.stopOwned(runtime.conversationId, {
+        runId: "another-run", turnId: first.turn.id,
+      })).resolves.toBe("missing");
+
+      const retry = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Retry once maintenance has released its own authority.",
+      });
+      expect(runtime.controller.start(retry.turn.id)).toBe(true);
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(retry.turn.id).status).toBe("completed");
+      expect(value.start).toHaveBeenCalledOnce();
+      expect(value.release).toHaveBeenCalledOnce();
+    } finally {
+      runtime.store.close();
+    }
   });
 
   it("also settles an explicit custom-model refusal without acquiring installation authority", async () => {

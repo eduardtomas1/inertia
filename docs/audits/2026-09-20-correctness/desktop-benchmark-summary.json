@@ -1,0 +1,155 @@
+{
+  "sourceCommit": "77745385d38df5d6ae5dcaeb3ae4ca1dc801bca0",
+  "collectedAt": "2026-09-20T15:22:26.159Z",
+  "command": "npm run benchmark:desktop:built",
+  "result": "passed",
+  "durationMinutes": 1.6,
+  "runtime": {
+    "node": "v22.23.2",
+    "electron": "44.3.0",
+    "playwright": "bundled"
+  },
+  "host": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpuModel": "Apple M5 Pro",
+    "logicalCpuCount": 15,
+    "totalMemoryBytes": 25769803776
+  },
+  "fixture": {
+    "conversations": 2,
+    "primaryTurns": 300,
+    "primaryMessages": 600,
+    "secondaryMessages": 40,
+    "workspaceFiles": 120,
+    "profileReuse": true,
+    "providerMode": "deterministic-codex-app-server",
+    "streamingSamples": 5
+  },
+  "startup": {
+    "cold": {
+      "firstWindowMs": 760.4146250000001,
+      "runtimeInteractiveMs": 1643.8877909999999,
+      "definition": "fresh Electron profile and pre-seeded runtime database; package-smoke executable override enables discovery in NODE_ENV=test; inherited provider environment and operating-system cache uncontrolled"
+    },
+    "warm": {
+      "firstWindowMs": 382.93754099999205,
+      "runtimeInteractiveMs": 1255.6472499999945,
+      "definition": "same Electron profile and runtime database after the prior utility-runtime PID was confirmed stopped; package-smoke executable override keeps discovery enabled in NODE_ENV=test"
+    }
+  },
+  "streaming": {
+    "sampleCount": 5,
+    "distributions": {
+      "firstProviderDeltaToPaintMs": {
+        "sampleCount": 5,
+        "minimum": 17,
+        "median": 21,
+        "p95": 31,
+        "maximum": 31
+      },
+      "completionToFinalPaintMs": {
+        "sampleCount": 5,
+        "minimum": 238,
+        "median": 241,
+        "p95": 251,
+        "maximum": 251
+      },
+      "p95VisibleGapMs": {
+        "sampleCount": 5,
+        "minimum": 75.70000004768372,
+        "median": 75.90000009536743,
+        "p95": 91.79999995231628,
+        "maximum": 91.79999995231628
+      },
+      "longTaskTotalMs": {
+        "sampleCount": 5,
+        "minimum": 0,
+        "median": 0,
+        "p95": 0,
+        "maximum": 0
+      },
+      "droppedOrOverBudgetFrames": {
+        "sampleCount": 5,
+        "minimum": 0,
+        "median": 2,
+        "p95": 3,
+        "maximum": 3
+      }
+    },
+    "stableTargets": {
+      "firstProviderDeltaToPaintMs": 100,
+      "p95VisibleGapMs": 100,
+      "firstPaintMet": true,
+      "visibleGapMet": true
+    },
+    "longTasks": 0,
+    "frames": 2788,
+    "droppedOrOverBudgetFrames": 10,
+    "readerNavigationPreserved": true,
+    "jumpToLatestMs": {
+      "sampleCount": 5,
+      "minimum": 48.11020800000006,
+      "median": 51.7690419999999,
+      "p95": 54.18383300000278,
+      "maximum": 54.18383300000278
+    },
+    "finalSettledBottomGap": 0
+  },
+  "longConversation": {
+    "frames": 120,
+    "medianFrameMs": 8.300000000000182,
+    "p95FrameMs": 16.600000000000364,
+    "maximumFrameMs": 17.299999999999727,
+    "over25Ms": 0,
+    "longTasks": 0,
+    "mountedAuthoritativeRows": 6,
+    "totalTimelineRows": 300,
+    "maximumDomDescendants": 458
+  },
+  "firstOpenLatency": {
+    "coldIntentDialogMs": 13.099999904632568,
+    "commandPaletteFirstOpenMs": 4.199999809265137,
+    "settingsFirstOpenMs": 13
+  },
+  "fileTree": {
+    "interactiveMs": 424.0650000000023
+  },
+  "terminal": {
+    "startupMs": 798.9287499999991
+  },
+  "splitChat": {
+    "interactiveMs": 92.56575000000157
+  },
+  "memory": {
+    "postClose30s": {
+      "usedJsHeapBytes": 16348104,
+      "totalDomNodes": 901,
+      "activeTerminalPanels": 0,
+      "activeXtermContainers": 0,
+      "loadedWorkspaceSurfaces": 0,
+      "splitPaneCount": 0
+    },
+    "openCloseCycles": 8,
+    "cyclesFirstHeapBytes": 16346816,
+    "cyclesLastHeapBytes": 17907704,
+    "cyclesAllReleased": true,
+    "soakIterations": 5,
+    "soakScrollFrames": 600,
+    "soakHeapBeforeBytes": 17908372,
+    "soakHeapAfterBytes": 20072120,
+    "soakRetainedJsHeapBytes": 2163748
+  },
+  "shutdown": {
+    "coldMs": 304.6096249999973,
+    "warmMs": 6516.727457999994
+  },
+  "limits": [
+    "Single macOS ARM64 run; no same-host baseline comparison or speedup claim.",
+    "Deterministic local provider fixture; no live provider/network latency.",
+    "Fresh-profile startup uses pre-seeded data and uncontrolled operating-system caches.",
+    "Five streaming samples; visible cadence omits four fixture-gated initial intervals.",
+    "Short memory/scroll soak does not establish absence of all leaks.",
+    "Controlled Linux discovery was not exercised."
+  ]
+}

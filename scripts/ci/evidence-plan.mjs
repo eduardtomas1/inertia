@@ -104,6 +104,27 @@ export function outputsForEvidencePlan(plan) {
   return Object.entries(outputs).map(([key, value]) => `${key}=${value}`).join("\n") + "\n";
 }
 
+// Read-only comparison. Neither this record nor a shadow baseline can supply
+// workflow outputs or stand in for the canonical current-candidate plan.
+export function compareEvidencePlans(current, proposed) {
+  if (current.head !== proposed.head || current.sourceHead !== proposed.sourceHead
+    || current.event !== proposed.event || current.lane !== proposed.lane) {
+    throw new Error("Cannot compare plans for different candidates or lanes.");
+  }
+  const difference = (left, right) => left.filter((entry) => !right.includes(entry));
+  return {
+    currentBase: current.base, proposedBase: proposed.base,
+    currentFullCertification: current.fullCertification,
+    proposedFullCertification: proposed.fullCertification,
+    proposedDomains: proposed.domains,
+    newlyOmittedChecks: difference(current.requiredChecks, proposed.requiredChecks),
+    newlyRequiredChecks: difference(proposed.requiredChecks, current.requiredChecks),
+    newlyOmittedSuites: difference(current.suites, proposed.suites),
+    newlyRequiredSuites: difference(proposed.suites, current.suites),
+    currentBenchmarks: current.benchmarks, proposedBenchmarks: proposed.benchmarks,
+  };
+}
+
 // Missing evidence is never equivalent to an intentionally omitted job. The
 // REST records additionally prove every matrix member, which `needs.test`
 // alone cannot enumerate. Evidence comes only from this run, not PR artifacts.

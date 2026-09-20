@@ -141,3 +141,22 @@ portable and native/package evidence are recorded in the PR after execution.
 The first typecheck also caught a missing catalog import in the relocated error
 parser. The import is restored, its failure-event behavior has a regression test,
 and the subsequent typecheck passed. No threshold or timeout was changed.
+
+The first hosted macOS x64 full gate reported a failed, empty result in the
+pre-existing OpenCode descendant-liveness test; its assertion did not include
+the terminal failure details. Investigation reproduced a fixture race: the SDK
+opens the SSE request lazily, so the prompt can arrive before the fixture's
+event writer exists. Early root and descendant ancestry events were silently
+dropped. The lifecycle fixture now waits for that writer before starting its
+descendant timeline. The test covers both immediate and 150 ms delayed stream
+connections and includes the terminal result in assertion diagnostics.
+
+Negative control: removing only that readiness wait makes the delayed case
+fail with an empty result and `event/inactivity-deadline`, while the immediate
+case passes. With the wait restored, both cases and the unrelated-session,
+inactive-descendant and cancellation cases pass. This demonstrates a fixture
+race; the hosted log alone cannot establish its exact terminal cause. The
+one-second inactivity deadline, 2.6-second descendant timeline, native server,
+SDK event stream, production ownership and process cleanup remain unchanged.
+The fixture generator moved into a test helper to keep the existing harness
+test below its file-size gate.

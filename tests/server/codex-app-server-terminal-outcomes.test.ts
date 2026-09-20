@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";

@@ -30,7 +30,7 @@ that implementation.
 | --- | --- | --- |
 | Native desktop, Windows and restart/update | Electron entry, runtime supervisor and recovery admission, process journals/guardian, Windows Job and ConPTY authority, terminal lifecycle, discovery and launch, installed update receipts, AppImage identity/singleton, window state and notifications | Native reviewer traced lifecycle and platform branches, inspected package/release boundary checks read-only; deterministic failure tests plus exact-baseline Windows/Linux CI evidence. Native report below distinguishes full small-module reads from targeted large-module review. |
 | Attachments | Renderer imports/drafts/handoff/preview → main selection/import registry/workers → retained conversation store → runtime resolver/extraction scheduler → provider image/document adapters; PDF/image/spreadsheet/text extraction and cancellation | Attachment reviewer traced ownership, limits, detached capabilities, private generated files, worker cancellation and utility termination. Three reproduced fixes and broad focused tests. |
-| Providers and turns | Discovery/auth/model metadata and six supported production routes; custom backend profiles/vault broker; approvals/input/host tools; admission, follow-up, queue, streaming, settlement, resume and restart ownership | Provider reviewer traced every production route, exact-run cleanup and turn persistence linkage. Two reproduced fixes; portable contracts and live-provider limitations documented. |
+| Providers and turns | Discovery/auth/model metadata and six supported production routes; custom backend profiles/vault broker; approvals/input/host tools; admission, follow-up, queue, streaming, settlement, resume and restart ownership | Provider reviewer traced every production route, exact-run cleanup and turn persistence linkage. Original admission/readiness fixes plus provider-completion follow-up; portable contracts and live-provider limitations documented. |
 | Renderer and performance | Streaming projections/subscriptions/reconnect, transcript virtualization/scroll/focus, drafts/composer ownership, four-pane split and detached windows; workspace files/editor/search, terminal lifecycle, settings and usage | Renderer reviewer plus root review. Reproduced four-pane subscription identity/capacity defect. DOM tests plus native Electron geometry/lifecycle scenarios and a measured desktop benchmark; no unsupported speedup claim. |
 | Persistence and recovery | Migration catalog/runner/lineage, SQLite repositories, export/import/backup/quarantine workers, path authority, execution ledger, Duo recovery and WebSocket sequencing | Root and independent persistence reviewer. Transaction/future-schema and worker-exit boundaries checked; reproduced authorized import-root replacement race. Released migrations remain unchanged. |
 | Git and workspaces | Project/conversation path identities, source-control authority bindings, bounded shell-free runner, repository discovery/scans, branch/remote/worktree operations, checkpoint/reversal and reviewed commit transactions | Root deep review of reversal/rollback/index ownership and workspace containment; native reviewer examined executable/process settlement. Reproduced newer staged-work rollback loss and added a native Git writer-lock compare/restore. |
@@ -93,7 +93,8 @@ Rejected or bounded suspicions:
 
 ## Confirmed defects and verification
 
-Eleven distinct defects were reproduced and fixed. Each domain report records
+Fifteen distinct defects were reproduced and fixed, including four additional
+provider completion defects from the follow-up user report. Each domain report records
 its failing-before experiment and independent review depth. Tests use synthetic
 credentials and disposable repositories/directories; no live provider accounts
 or user data were used.
@@ -111,14 +112,20 @@ or user data were used.
 | Concurrent cold credential reads could erase a newly saved credential | Share initial load promise and clear it after success/failure, retaining serialized mutations. Lost-save reproduction plus shared-failure/retry regression. `97990fb4`. |
 | Recovery import could publish into a replaced destination/staging directory and commit wrong paths | Retain selected-root and staging identity through publication, SQL completion and abort; five authority-swap regressions. Preserve journal when reconciliation is unsafe. `1309d432`. |
 | Third/fourth split panes lost subscriptions; reconnect could remap vacant owners | Shared bounded four-owner contract and exact optional owner/ID URL pairs; backward-compatible legacy URLs, detached scope unchanged. Five initial failing cases plus vacant-middle reconnect failure; 112 subscription/integration tests pass. `23893a8d`. |
+| Claude could wait indefinitely after an accepted prompt was rejected or an error result arrived with pending follow-ups | Exact root prompt failure ends the persistent Query; final errors precede successful correlation checks. Fifteen new regressions; `b32f9374`. |
+| Claude could remain Working after a visible final answer because ambient watchers counted as delegated activity | Exclude SDK-declared ambient activity while preserving foreground delegate and fresh-parent completion requirements. See the completion report below. |
+| Codex internally rejected malformed protocol but reported user cancellation | Explicit internal protocol-failure cause, preserving first failure detail and owned cleanup. Ordered malformed/prior-error/input regressions; `71d88a60`. |
+| Late cancellation during Codex cleanup overwrote an accepted completed/failed outcome | Snapshot cancellation at terminal acceptance; public harness trusts the cleanup-joined outcome. Public/low-level controls and uncertain-cleanup regressions; `71d88a60`. |
 
 ## Verification ledger
 
 Source and regression changes completed independent review and are open in
 [PR #433](https://github.com/eduardtomas1/inertia/pull/433). Required local gates
-completed on final source 77745385. Documentation-only consolidation follows that
-source commit. Hosted CI monitoring belongs to the coordinating task; this
-handoff makes no native Windows/Linux pass claim for the final patch.
+completed on the original audit source 77745385. The provider-completion
+follow-up below records new source and validation separately; earlier native and
+performance measurements remain evidence for that original source. Hosted CI
+monitoring belongs to the coordinating task; this handoff makes no native
+Windows/Linux pass claim for the final patch.
 
 | Check | Recorded result |
 | --- | --- |
@@ -161,6 +168,30 @@ package smoke passed. This was a setup sequencing error, not a bypass or relaxed
 check. Generated resources are ignored build output; no dependency or notice
 policy changed.
 
+## Provider completion follow-up verification
+
+Final reviewed source is `0fd57338`, with Claude prompt-terminal settlement in
+`b32f9374`, Codex outcome preservation in `71d88a60`, and all-six restart/UI
+regressions in `d7848c0c`. Documentation follows these source commits.
+
+| Check | Result on final provider source |
+| --- | --- |
+| `npm run check` | Passed: 881 test files, 9,503 tests, 146 platform/native skips; test phase 122.51 seconds. Quality, lint, types, migration lineage, build and unchanged renderer budgets all passed. |
+| `npm run test:portable` | Passed: 108 files, 1,530 tests, nine native/platform skips; 153.04 seconds. The final discovery-marker correction below adds the separately verified 16-case Codex suite. |
+| Focused provider/shared/renderer checks | Claude 103 tests, Codex 106, shared SQLite/controller/restart/UI 52, independent renderer 67; overlapping batches are not summed. See the follow-up report for exact scope. |
+| Native/package/performance scope | The earlier macOS measurements below precede this provider follow-up. No new native Windows/Linux or live account result is claimed. Hosted CI and the separately tracked Linux teardown investigation remain with the coordinating task. |
+
+Local logs: `local-log:inertia-provider-followup-check.log` and
+`local-log:inertia-provider-followup-portable.log`. All 89 newly added provider
+completion/restart/UI cases are included in the full gate; required portable
+annotations are present on all five new test files. A final manifest audit found
+that the new 16-case Codex outcome suite lacked its portable marker. Adding the
+comment-only marker expands discovery from 108 to 109 files; manifest verification
+and a separate single-worker run passed all 16 cases. The aggregate portable
+command was not repeated after this test-metadata-only correction; all cases had
+also passed the full gate. Log: `local-log:inertia-provider-followup-portable-codex.log`.
+No gate or threshold changed.
+
 ## Measured desktop performance
 
 The normal benchmark passed on macOS ARM64 (Apple M5 Pro, Node 22.23.2,
@@ -197,6 +228,10 @@ steady-state behavior. Controlled Linux discovery was not exercised.
 
 ## Detailed evidence and independent review
 
+[Provider completion and restart follow-up](2026-09-20-correctness/provider-completion.md)
+records the visible-answer/Working investigation, all six provider endings,
+restart policy, exact reproduced failures and independent review.
+
 - [Source and tooling inventory](2026-09-20-source-inventory.tsv): baseline file-to-domain map; inventory is broader than manual deep-read coverage.
 - [Native desktop, Windows, terminals and update review](2026-09-20-correctness/windows.md).
 - [Attachments and document/provider handoff review](2026-09-20-correctness/attachments.md).
@@ -218,7 +253,9 @@ under Detailed evidence above):
 | [src/main/runtime-supervisor.ts](../../src/main/runtime-supervisor.ts) | [tests/main/runtime-supervisor-lifecycle.test.ts](../../tests/main/runtime-supervisor-lifecycle.test.ts) |
 | [src/server/git/reversal-files.ts](../../src/server/git/reversal-files.ts)<br>[src/server/git/reversal-index.ts](../../src/server/git/reversal-index.ts)<br>[src/server/git/reversal.ts](../../src/server/git/reversal.ts) | [tests/server/git-diff-review.test.ts](../../tests/server/git-diff-review.test.ts) |
 | [src/server/persistence/database-recovery-import.ts](../../src/server/persistence/database-recovery-import.ts) | [tests/server/database-export.test.ts](../../tests/server/database-export.test.ts) |
-| [src/server/provider/claude-agent-sdk-harness.ts](../../src/server/provider/claude-agent-sdk-harness.ts)<br>[src/server/provider/claude-prompt.ts](../../src/server/provider/claude-prompt.ts) | [tests/server/claude-prompt.test.ts](../../tests/server/claude-prompt.test.ts) |
+| [src/server/provider/claude-agent-sdk-harness.ts](../../src/server/provider/claude-agent-sdk-harness.ts)<br>[src/server/provider/claude-prompt.ts](../../src/server/provider/claude-prompt.ts)<br>[src/server/provider/claude-delegate-lifecycle.ts](../../src/server/provider/claude-delegate-lifecycle.ts)<br>[src/server/provider/claude-subagent-trace.ts](../../src/server/provider/claude-subagent-trace.ts) | [tests/server/claude-prompt.test.ts](../../tests/server/claude-prompt.test.ts)<br>[tests/server/claude-follow-up-settlement.test.ts](../../tests/server/claude-follow-up-settlement.test.ts)<br>[tests/server/claude-visible-final-settlement.test.ts](../../tests/server/claude-visible-final-settlement.test.ts) |
+| [src/server/codex/app-server-events.ts](../../src/server/codex/app-server-events.ts)<br>[src/server/codex/app-server-run.ts](../../src/server/codex/app-server-run.ts)<br>[src/server/provider/codex-app-server-harness.ts](../../src/server/provider/codex-app-server-harness.ts) | [tests/server/codex-app-server.test.ts](../../tests/server/codex-app-server.test.ts)<br>[tests/server/codex-app-server-terminal-outcomes.test.ts](../../tests/server/codex-app-server-terminal-outcomes.test.ts) |
+| Shared controller and UI behavior (test-only follow-up) | [tests/server/turn-restart-continuation.test.ts](../../tests/server/turn-restart-continuation.test.ts)<br>[tests/server/turn-terminal-ui-projection.test.ts](../../tests/server/turn-terminal-ui-projection.test.ts) |
 | [src/server/provider/discovery.ts](../../src/server/provider/discovery.ts) | [tests/server/provider-auth-readiness.test.ts](../../tests/server/provider-auth-readiness.test.ts) |
 | [src/server/provider/run-coordinator.ts](../../src/server/provider/run-coordinator.ts) | [tests/server/provider-run-admission-cleanup.test.ts](../../tests/server/provider-run-admission-cleanup.test.ts) |
 | [src/server/runtime/attachments/private-generated-attachments.ts](../../src/server/runtime/attachments/private-generated-attachments.ts) | [tests/server/private-generated-attachments.test.ts](../../tests/server/private-generated-attachments.test.ts) |

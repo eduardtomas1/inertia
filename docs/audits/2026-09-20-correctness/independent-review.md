@@ -36,3 +36,66 @@ Reviewed the three-file follow-up removing the renderer-only, production-unused 
 Reviewed second renderer size follow-up (uncommitted Map-based mounted-pane tracker, hook destructuring default, sparse remount-order regression). URL encoding pairs owners and IDs explicitly; map insertion/remount order does not affect server owner lookup. Distinct owners sharing one conversation remain separate and deletion removes only the named owner. Parameter default preserves the declared optional, non-null owner contract. No blocking finding. Proposed shared maximum derived from the existing four-owner tuple would preserve the bound; separate parent approval/commit remains required. No verification budgets changed by this review.
 
 Final bundle follow-up: d7a94605 and 77745385 remove only unused renderer compatibility code, store only mounted pane owner/ID pairs, and initialize the existing hook owner fallback directly in its parameter default. Providers reviewer independently approved these semantics and the sparse-remount regression. Root separately reviewed the shared numeric four-pane maximum: its TypeScript type is the owner tuple's length, preserving a compile-time mismatch error if owner count changes, while server enum and URL validation remain unchanged. The actual renderer bundle check passed every unchanged ceiling on 77745385. No blocking review findings remain in the final source delta.
+
+## Provider completion follow-up, 20 September
+
+Reviewer `providers_turns` independently approved the final scoped changes:
+
+- **b32f9374 — Claude prompt failure settlement.** Exact root UUID/session/child
+  ownership distinguishes terminal failures of initial and accepted follow-up
+  prompts. Error results precede pending-success correlation checks. The reviewer
+  identified success-shaped `is_error` and masked error-result cases; both were
+  reproduced and fixed. Genuine local cancellation and successful correlation
+  remain intact. Fifteen new cases; author reported 83 focused tests in eight files.
+- **71d88a60 — Codex terminal outcomes.** Explicit malformed-protocol rejection
+  stays separate from user cancellation, retains first-error detail, and accepts
+  the outcome before asynchronous owned cleanup. The public harness preserves
+  that outcome. Review identified the earlier-error masking case, and the author
+  reproduced it before switching from inferred reason to explicit cause. Final
+  review includes malformed/foreign input and the intentionally changed existing
+  integration assertion. Cleanup uncertainty still fails. Author reported 106
+  focused tests in six files, including sixteen new cases, plus lint and unit types.
+- **d7848c0c — all-six restart and UI projection.** Real SQLite/controller tests
+  verify recovery warning idempotence, exact continuation identity and no launch
+  merely from opening the runtime. Terminal tests use the actual sidebar
+  projection and assert terminal runState/status; late events cannot revive
+  Working or mutate messages. Old-generation cleanup is explicitly simulated,
+  so these tests make no native provider-session claim.
+- **0fd57338 — Claude ambient tasks.** Pinned SDK declarations explicitly mark
+  ambient roster entries and task-start events as non-activity. The reviewer found
+  the missing `local_agent, ambient:true` edge case after the roster fix; the
+  author reproduced it and added the same exclusion to the existing bounded
+  ignored-task path. Older messages without ambient flags retain prior behavior.
+  Actual delegates and explicit background deferral still need fresh parent
+  completion. Final author log: 103 tests in seven files passed, including 22
+  visible-final cases; no timeout value changed.
+
+The foreground-to-ambient transition received an additional review. Its original
+extra-read sentinel did not prove an unbounded hang: a fresh parent final already
+arms the existing trace drain. The replacement test leaves the iterator open,
+verifies bounded settlement, and retains the known live child trace. The shared
+controller conservatively rejects completed-with-live-descendants when no typed
+child terminal edge arrives. No roster/edge ownership correlation, invented
+completion, or reversible liveness/schema workaround was introduced.
+
+## Shared terminal-to-Working trace
+
+All six native routes enter ProviderRunCoordinator and TurnController. Exact
+provider/run/turn identity and cleanup proof gate terminal release. The terminal
+transaction writes the turn/runState, conversation and workspace-run state
+atomically. Exact-owner renderer terminal overlays survive failed detail refresh.
+The sidebar reads the selected workspace run/conversation; transcript activity
+reads authoritative runState/status. Remaining text or historical activities do
+not independently reactivate a terminal turn, and late provider callbacks are
+rejected after settlement.
+
+No additional committed-terminal stale-Working defect was reproduced. Independent
+renderer verification passed **67 tests in three files**, covering conversation
+projection DOM, sidebar and response timeline. Logs:
+`local-log:inertia-terminal-working-ui.log`,
+`local-log:inertia-audit-claude-visible-final-after.log`.
+
+No blocking finding remains in the final scoped patches. Live account behavior
+and the user's exact sequence were not observed. A separate source suspicion
+about unrelated frames resetting a preexisting parent-resume drain flag was not
+reproduced or changed; it is not a confirmed defect or explanation of the report.

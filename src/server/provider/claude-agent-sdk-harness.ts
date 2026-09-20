@@ -44,6 +44,7 @@ import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck, type ClaudeDelega
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
+import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
 import { claudeQuestions } from "./claude-questions";
 import {
   claudePrompt,
@@ -681,6 +682,14 @@ function startClaudeRun(
         subagentTracker.observe(message);
         const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
         messageProjector.observe(message, provesRequestedCompaction);
+        const commandLifecycle = !childOwned ? claudeCommandLifecycleMessage(message) : null;
+        if (commandLifecycle && (commandLifecycle.state === "refused"
+          || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
+          if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+            throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+          }
+          if (commandLifecycle.command_uuid === prompt.uuid) break;
+        }
         if (message.type === "result" && lifecycle.turnEnded === false
           && delegateLifecycle.hasProvisionalResult()) {
           // A result emitted while delegated work is live is the parent's
@@ -712,7 +721,7 @@ function startClaudeRun(
           drainTerminalSubagents = true;
         }
         if (message.type === "result") {
-          if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
+          if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
               if (isClaudeQueuedCompletionAck(message)) continue;
@@ -741,11 +750,6 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
-      if (pendingFollowUpIds.size > 0) {
-        throw new Error(
-          "Claude Agent SDK exited before correlating every accepted follow-up.",
-        );
-      }
       if (options.input.operation?.kind === "compact"
         && (messageProjector.compactFailure
           || !messageProjector.compactSucceeded)) {
@@ -816,6 +820,11 @@ function startClaudeRun(
                 `result/${resultReason}`,
                 technicalDetail ?? undefined,
               ),
+        );
+      }
+      if (pendingFollowUpIds.size > 0) {
+        throw new Error(
+          "Claude Agent SDK exited before correlating every accepted follow-up.",
         );
       }
       if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {

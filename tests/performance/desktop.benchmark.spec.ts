@@ -616,6 +616,21 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
   const viewportLocator = page.locator(".message-scroll");
   await viewportLocator.hover();
   await page.mouse.wheel(0, -1);
+  // Both virtual ranges must have rendered before measuring steady-state
+  // scrolling. A stable bottom-only range can still contain estimates for the
+  // first rows; their first mount then changes the total height mid-sample.
+  for (const index of [0, expectedRows - 1]) {
+    await viewportLocator.evaluate((viewport, atTop) => {
+      viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: atTop ? -1 : 1,
+      }));
+      viewport.scrollTop = atTop ? 0 : viewport.scrollHeight;
+    }, index === 0);
+    await expect(viewportLocator.locator(
+      `.response-virtual-item[data-index="${index}"]`,
+    )).toBeInViewport();
+  }
   const result = await viewportLocator.evaluate(async (viewport, {
     edgeTolerancePx,
     expectedRows,
@@ -2139,7 +2154,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; a bounded, unmeasured bottom-range preflight settles deferred virtualizer measurements before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; bounded, unmeasured setup renders both virtual edge ranges and calibrates the bottom geometry before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
         "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence; those four gate-controlled intervals are excluded from visible-cadence statistics, while every later visible interval remains measured. It then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",

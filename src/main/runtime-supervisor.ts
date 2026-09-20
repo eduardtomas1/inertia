@@ -938,8 +938,13 @@ export class RuntimeSupervisor {
         }
         this.emitState();
       };
-      const recovery = this.recoverOwnedProcesses(record.runtimeGenerationId,
-        this.systemBootId, deadlineAt);
+      let recovery: boolean | Promise<boolean> | null;
+      try {
+        recovery = this.recoverOwnedProcesses(record.runtimeGenerationId, this.systemBootId, deadlineAt);
+      } catch {
+        // An unreadable journal cannot admit a replacement; retain cleanup authority.
+        this.desiredRunning = false; finishRecovery(false); return;
+      }
       if (typeof recovery === "boolean") finishRecovery(recovery);
       else if (recovery) void recovery.catch(() => false).then(finishRecovery);
       else finishRecovery(false);

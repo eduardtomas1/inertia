@@ -98,9 +98,10 @@ export class ClaudeDelegateLifecycle {
     if (message.subtype === "background_tasks_changed") {
       // This is a level signal with REPLACE semantics. Do not pair it with
       // task_started/task_notification edges; their relative order is not
-      // guaranteed by the SDK.
+      // guaranteed by the SDK. Ambient watchers are explicitly not activity.
       this.liveBackgroundTaskIds = new Set(
         message.tasks
+          .filter((task) => task.ambient !== true)
           .map((task) => task.task_id)
           .filter((taskId) => taskId.length > 0),
       );
@@ -162,7 +163,7 @@ export class ClaudeDelegateLifecycle {
     return this.hasProvisionalResult() && (
       (message.type === "system"
         && message.subtype === "background_tasks_changed"
-        && message.tasks.length === 0)
+        && this.liveBackgroundTaskIds.size === 0)
       || (!this.observedBackgroundTaskLevel
         && hadLiveTaskTrace
         && !hasLiveTaskTrace)

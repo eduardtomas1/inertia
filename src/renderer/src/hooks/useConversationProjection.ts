@@ -110,7 +110,7 @@ export function useConversationProjection({
   request,
   subscribe,
   targetConversationId,
-  subscriptionOwner: requestedSubscriptionOwner,
+  subscriptionOwner = targetConversationId === undefined ? "primary" : "secondary",
   enabled = true,
   autoOpenPlan,
   onOpenPlan,
@@ -194,8 +194,6 @@ export function useConversationProjection({
       ? snapshot?.activeConversationId ?? null
       : targetConversationId
     : null;
-  const subscriptionOwner = requestedSubscriptionOwner
-    ?? (targetConversationId === undefined ? "primary" : "secondary");
   const persistedConversation = useMemo(
     () => snapshot?.conversations.find(({ id }) =>
       id === conversationId) ?? null,

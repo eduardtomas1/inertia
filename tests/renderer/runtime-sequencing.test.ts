@@ -42,6 +42,46 @@ describe("RuntimeProjectionSequence", () => {
     ]);
   });
 
+  it("keeps exact sparse owner pairs after panes remount in a different order", () => {
+    const subscriptions = new RuntimeDetailSubscriptions();
+    subscriptions.set("quaternary", CONVERSATION_C);
+    subscriptions.set("primary", CONVERSATION);
+    subscriptions.set("tertiary", CONVERSATION_C);
+    subscriptions.set("primary", null);
+    subscriptions.set("primary", CONVERSATION_B);
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      subscriptions.mountedPanes(),
+    ));
+    const owners = url.searchParams.getAll("conversationOwner");
+    const ids = url.searchParams.getAll("conversationId");
+    expect(Object.fromEntries(owners.map((owner, index) => [owner, ids[index]]))).toEqual({
+      primary: CONVERSATION_B,
+      tertiary: CONVERSATION_C,
+      quaternary: CONVERSATION_C,
+    });
+    subscriptions.set("tertiary", null);
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "quaternary", conversationId: CONVERSATION_C },
+      { owner: "primary", conversationId: CONVERSATION_B },
+    ]);
+  });
+
+  it("bounds reconnect URLs to the four supported panes", () => {
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      (["primary", "secondary", "tertiary", "quaternary", "primary"] as const).map((owner) => ({
+        owner,
+        conversationId: CONVERSATION,
+      })),
+    ));
+    expect(url.searchParams.getAll("conversationOwner"))
+      .toEqual(["primary", "secondary", "tertiary", "quaternary"]);
+    expect(url.searchParams.getAll("conversationId")).toHaveLength(4);
+  });
+
   it("ignores duplicates and requires a refresh for a live gap", () => {
     const projection = new RuntimeProjectionSequence();
     projection.replaceFromSnapshot({ runtimeGeneration: GENERATION_A, latestSequence: 5 });

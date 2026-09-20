@@ -374,6 +374,51 @@ process.exit(0);
     ]);
   });
 
+  it.each((["resumed", "new"] as const).flatMap((kind) =>
+    (["text", "tool", "result"] as const).map((event) => ({ kind, event }))))(
+    "rejects a foreign conversation $event in a $kind run before projecting it",
+    async ({ kind, event }) => {
+      const root = fixtureRoot("antigravity foreign conversation");
+      const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+      const { command } = fakeAgy(root, `
+${kind === "new" ? `emit({ event: "init", init: { conversation_id: ${JSON.stringify(CONVERSATION)} } });` : ""}
+emit(${JSON.stringify(event === "result"
+  ? { event: "result", result: { conversation_id: foreign, status: "SUCCESS", response: "Foreign answer" } }
+  : { event: "step_update", step_update: { conversation_id: foreign, step_index: 1,
+    ...(event === "text" ? { text_delta: "Foreign answer" } : { tool_name: "foreign_tool", state: "ACTIVE" }) } })});
+emit({ event: "result", result: { status: "SUCCESS", response: "Later answer" } });
+process.exit(0);
+`);
+      const text: string[] = [];
+      const sessions: string[] = [];
+      const activities: string[] = [];
+      const result = await managerFor(command).run(antigravityInput(root,
+        kind === "resumed" ? { sessionId: CONVERSATION } : {}), {
+        onText: (event) => text.push(event.text),
+        onSession: (event) => sessions.push(event.sessionId),
+        onActivity: (event) => { if (event.kind === "tool") activities.push(event.label); },
+      });
+      expect(result).toMatchObject({ status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true });
+      expect(text).toEqual([]);
+      expect(activities).toEqual([]);
+      expect(sessions).not.toContain(foreign);
+    },
+  );
+
+  it.each(["resumed", "new"] as const)("accepts ID-less continuation frames in a %s run", async (kind) => {
+    const root = fixtureRoot("antigravity ID-less continuation");
+    const { command } = fakeAgy(root, `
+${kind === "new" ? `emit({ event: "init", init: { conversation_id: ${JSON.stringify(CONVERSATION)} } });` : ""}
+emit({ event: "step_update", step_update: { text_delta: "Valid answer" } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Valid answer" } });
+process.exit(0);
+`);
+    await expect(managerFor(command).run(antigravityInput(root,
+      kind === "resumed" ? { sessionId: CONVERSATION } : {}))).resolves.toMatchObject({
+      status: "completed", sessionId: CONVERSATION, text: "Valid answer", cleanupConfirmed: true,
+    });
+  });
+
   it("fails fast into the Connect prompt when Antigravity reports missing sign-in", async () => {
     const root = fixtureRoot("antigravity auth");
     const { command } = fakeAgy(root, `

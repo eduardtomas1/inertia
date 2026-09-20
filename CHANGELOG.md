@@ -2,13 +2,13 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.59 — 2026-09-20
+## 0.0.60 — 2026-09-20
 
-This release contains the reviewed changes since 0.0.57 listed below. Version
-0.0.58 was held during release certification and was never published; its tag
-remains unchanged. The replacement candidate fixes a Windows ARM64 test that
-assumed two processes had perfectly synchronized clocks. The diagnostic reader
-still rejects future timestamps, and native release checks remain required.
+This release contains the reviewed changes since 0.0.57 listed below. Versions
+0.0.58 and 0.0.59 were held during release certification and were never
+published; both tags remain unchanged. This candidate also fixes Windows
+installer module discovery and stabilizes native clock and scroll measurements
+without relaxing their safety or performance checks.
 
 ### Capture and share context
 
@@ -65,6 +65,10 @@ still rejects future timestamps, and native release checks remain required.
 
 ### Performance and upgrades
 
+- Keep Windows Setup's process checks independent of unrelated PowerShell
+  modules inherited from the launching shell. The installer still refuses live
+  installation processes and unavailable identity checks without terminating
+  the app, within the same bounded deadline.
 - Keep streamed tokens from re-rendering the app shell and reduce repeated
   runtime snapshots, database reads, frame encoding and diagnostic pruning.
   Timeline navigation and file previews also avoid unnecessary listener changes.
@@ -83,10 +87,17 @@ still rejects future timestamps, and native release checks remain required.
   unavailable. Linux installations still on 0.0.52 need one manual upgrade,
   preserving the existing profile.
 
+## 0.0.59 — unpublished
+
+Held after Windows ARM64 release certification reproduced an installer
+process-check timeout caused by the inherited PowerShell module environment.
+The corrected installer and reviewed changes are included in 0.0.60 above;
+no public packages were published for 0.0.59.
+
 ## 0.0.58 — unpublished
 
 Held during native release certification. The reviewed product changes are
-included in 0.0.59 above; no public packages were published for 0.0.58.
+included in 0.0.60 above; no public packages were published for 0.0.58.
 
 ## 0.0.57 — 2026-09-15
 

@@ -215,7 +215,7 @@ describe("cross-platform packaged behavior contract", () => {
   ])("requires installed upgrades on both stable Windows architectures in %s", async (filename, job) => {
     const workflow = parse(await source(`.github/workflows/${filename}`)) as {
       jobs: Record<string, { steps: Array<{
-        name?: string; run?: string; if?: string; env?: Record<string, string>;
+        name?: string; run?: string; if?: string; shell?: string; env?: Record<string, string>;
       }> }>;
     };
     const steps = workflow.jobs[job]!.steps;
@@ -230,7 +230,9 @@ describe("cross-platform packaged behavior contract", () => {
     expect(upgrade.env?.INERTIA_WINDOWS_N_MINUS_ONE_METADATA).toBe("release/n-minus-one/metadata.json");
     expect(upgrade.run).toBe("npm run test:windows-installer-smoke");
     if (filename === "release-platforms.yml") {
+      expect(upgrade.shell).toBe("pwsh");
       const canary = steps.find(({ name }) => name === "Install, smoke, and uninstall Windows Canary package")!;
+      expect(canary.shell).toBe("pwsh");
       expect(canary.if).toBe("runner.os == 'Windows' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')");
       expect(canary.run).toBe("npm run test:windows-installer-smoke");
       expect(canary.env?.INERTIA_WINDOWS_N_MINUS_ONE_METADATA).toBeUndefined();

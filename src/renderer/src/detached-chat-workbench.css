@@ -4,12 +4,6 @@
   width: min(188px, calc(100vw - 24px));
 }
 
-.detached-chat-header-button.is-open {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--interactive-border));
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface-strong));
-}
-
 .app-startup-loading {
   display: grid;
   width: 100%;

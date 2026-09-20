@@ -188,11 +188,10 @@ test("runs a saved action only on explicit selection through the real terminal",
   await page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
   await app.resizeWindow(1000, 700);
-  const actionButton = page.getByRole("button", { name: "Add action", exact: true });
+  const actionButton = page.getByRole("button", { name: "More workspace actions" });
   await expect(actionButton).toBeVisible();
-  await expect(actionButton.locator(".header-plus-icon")).toBeVisible();
   await actionButton.click();
-  const menu = page.getByRole("menu", { name: "Project actions", exact: true });
+  const menu = page.getByRole("menu", { name: "Workspace actions", exact: true });
   await expect(menu.getByRole("menuitem", { name: /Check workspace/u })).toBeVisible();
   await capture(info, "saved-project-action-menu-dark");
   await menu.getByRole("menuitem", { name: /Check workspace/u }).click();

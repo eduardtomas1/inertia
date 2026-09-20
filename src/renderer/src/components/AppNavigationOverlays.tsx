@@ -33,6 +33,7 @@ interface AppNavigationOverlaysProps {
   createConversation: () => void;
   importProject: () => Promise<void>;
   openSettings: () => void;
+  openMultiSpawn: () => void;
 }
 
 export function AppNavigationOverlays({
@@ -48,6 +49,7 @@ export function AppNavigationOverlays({
   createConversation,
   importProject,
   openSettings,
+  openMultiSpawn,
 }: AppNavigationOverlaysProps): React.JSX.Element {
   // Suspend the native preview from the always-loaded shell. Waiting for the
   // palette's lazy chunk to mount would briefly place untrusted native content
@@ -79,6 +81,7 @@ export function AppNavigationOverlays({
             onNewThread={createConversation}
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
+            onOpenMultiSpawn={openMultiSpawn}
           />
         ) : <PaletteLoadingShell />
       )}

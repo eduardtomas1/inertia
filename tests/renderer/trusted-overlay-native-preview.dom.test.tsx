@@ -368,6 +368,7 @@ describe("trusted overlay native preview suspension", () => {
       onNewThread: vi.fn(),
       onAddProject: vi.fn(),
       onOpenSettings: vi.fn(),
+      onOpenMultiSpawn: vi.fn(),
     };
     const view = render(<CommandPalette open {...props} />);
 

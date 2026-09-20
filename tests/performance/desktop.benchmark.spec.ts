@@ -1745,8 +1745,12 @@ async function rendererInteractionMeasurement(
 }
 
 async function coldIntentDialogMeasurement(page: Page): Promise<number> {
+  // The duo launcher is reached from the command palette now, so the palette
+  // opens first and only the dialog's own cold load stays inside the sample.
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.locator('.command-palette [role="option"]').first().waitFor();
   const elapsed = await rendererInteractionMeasurement(page, {
-    triggerSelector: 'button[aria-label="Launch two chats"]',
+    triggerSelector: '#palette-action\\:multi-spawn',
     targetSelector: '.multi-spawn-dialog[role="dialog"]',
   });
   await page.getByRole("button", { name: "Close multi-spawn" }).click();

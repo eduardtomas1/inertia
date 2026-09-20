@@ -444,8 +444,9 @@ describe("Environment panel", () => {
         onOpenBrowser={onOpenBrowser}
       />,
     );
-    const trigger = screen.getByRole("button", { name: "Open Browser" });
-    expect(trigger).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "More workspace actions" }));
+    const trigger = screen.getByRole("menuitem", { name: "Open Browser" });
+    expect(trigger).not.toHaveAttribute("aria-current");
     fireEvent.click(trigger);
     expect(onOpenBrowser).toHaveBeenCalledOnce();
 
@@ -457,8 +458,9 @@ describe("Environment panel", () => {
         onOpenBrowser={onOpenBrowser}
       />,
     );
-    expect(screen.getByRole("button", { name: "Open Browser" }))
-      .toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "More workspace actions" }));
+    expect(screen.getByRole("menuitem", { name: "Open Browser" }))
+      .toHaveAttribute("aria-current", "true");
   });
 
   it("does not offer Environment before a task has a project", () => {

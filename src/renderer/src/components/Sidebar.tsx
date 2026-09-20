@@ -25,7 +25,6 @@ import {
   Pencil,
   Search,
   Settings,
-  Share2,
   SquarePen,
   Trash2,
   X,
@@ -64,7 +63,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
@@ -144,7 +143,6 @@ function SidebarView({
   onOpenConversationInWindow,
   onCloseConversationSplit,
   onCreateConversation,
-  onOpenMultiSpawn,
   onOpenDailyWork,
   dailyWorkOpen,
   onRenameConversation,
@@ -923,7 +921,6 @@ function SidebarView({
             const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
             if (target) onCreateConversation(target);
           }}><SquarePen size={17} /></IconButton>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
         <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {

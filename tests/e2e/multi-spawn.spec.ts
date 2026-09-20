@@ -160,7 +160,10 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Launch two chats" }).click();
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.getByRole("dialog", { name: "Search Inertia" });
+  await expect(palette).toBeVisible();
+  await palette.getByRole("option", { name: /Launch two chats/u }).click();
 
   const dialog = page.getByRole("dialog", {
     name: "Launch a duo",

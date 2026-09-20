@@ -20,16 +20,6 @@
   height: 30px;
   flex: 0 0 28px;
 }
-.sidebar .sidebar-search-row .multi-spawn-button {
-  margin: 0;
-  min-width: 28px;
-  min-height: 30px;
-  border: 0;
-  border-radius: 6px;
-  box-shadow: none;
-  background: transparent;
-  color: var(--text-muted);
-}
 .sidebar-project-scope {
   position: relative;
   display: flex;
@@ -283,7 +273,3 @@
   margin-bottom: 12px;
 }
 
-.sidebar .sidebar-search-row .multi-spawn-button:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}

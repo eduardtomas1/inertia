@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { closeHeaderOverflow, headerAction } from "./support/header-actions";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -44,11 +45,8 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   await app.resizeWindow(1_440, 920);
   await page.keyboard.press("Escape");
 
-  const browserButton = page.getByRole("button", {
-    name: "Open Browser",
-    exact: true,
-  });
-  await expect(browserButton).toHaveAttribute("aria-pressed", "false");
+  const browserButton = await headerAction(page, "Open Browser");
+  await expect(browserButton).not.toHaveAttribute("aria-current");
   await browserButton.click();
   const workspaceTools = page.getByRole("complementary", {
     name: "Workspace tools",
@@ -73,8 +71,9 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     name: "Close workspace tools",
   }).click();
   ({ page } = await app.restart());
-  await expect(page.getByRole("button", { name: "Open Browser", exact: true }))
-    .toHaveAttribute("aria-pressed", "false");
+  await expect(await headerAction(page, "Open Browser"))
+    .not.toHaveAttribute("aria-current");
+  await closeHeaderOverflow(page);
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
@@ -91,10 +90,8 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     conversationId,
   )).toMatchObject({ ok: false, code: "unavailable" });
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(page.getByRole("button", {
-    name: "Open Browser",
-    exact: true,
-  })).toBeVisible();
+  await expect(await headerAction(page, "Open Browser")).toBeVisible();
+  await closeHeaderOverflow(page);
 
   const agentUrl = `${app.previewUrl}agent-browser-page`;
   const agentFirst = await app.electronApp.evaluate(
@@ -114,7 +111,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   );
   expect(agentFirst).toMatchObject({ ok: true });
 
-  await page.getByRole("button", { name: "Open Browser", exact: true }).click();
+  await (await headerAction(page, "Open Browser")).click();
   const sharedTools = page.getByRole("complementary", {
     name: "Workspace tools",
   });

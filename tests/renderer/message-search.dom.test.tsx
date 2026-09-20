@@ -46,7 +46,7 @@ describe("message search in the palette", () => {
             });
             return true;
           }}
-          onClose={() => { setOpen(false); setRevealed(true); }} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+          onClose={() => { setOpen(false); setRevealed(true); }} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp} onOpenMultiSpawn={noOp}
         />
       </>;
     }
@@ -73,7 +73,7 @@ describe("message search in the palette", () => {
     const noOp = (): void => undefined;
     const view = render(<CommandPalette open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
       newThreadShortcut="Ctrl+N" sendCommand={async () => response()} onSelectMessage={select}
-      onClose={close} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+      onClose={close} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp} onOpenMultiSpawn={noOp}
     />);
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "needle" } });
@@ -100,7 +100,7 @@ describe("message search in the palette", () => {
     const noOp = (): void => undefined;
     render(<CommandPalette open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
       newThreadShortcut="Ctrl+N" sendCommand={async () => response()} onSelectMessage={select}
-      onClose={close} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+      onClose={close} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp} onOpenMultiSpawn={noOp}
     />);
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "needle" } });
@@ -164,7 +164,7 @@ describe("message search in the palette", () => {
     const view = render(<CommandPalette
       open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
       newThreadShortcut="Ctrl+N" sendCommand={send} onSelectMessage={onSelectMessage}
-      onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+      onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp} onOpenMultiSpawn={noOp}
     />);
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "needle" } });
@@ -189,7 +189,7 @@ describe("message search in the palette", () => {
     const noOp = (): void => undefined;
     render(<CommandPalette open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
       newThreadShortcut="Ctrl+N" sendCommand={send} onSelectMessage={async () => true}
-      onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
+      onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp} onOpenMultiSpawn={noOp}
     />);
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "needle" } });
@@ -211,7 +211,7 @@ describe("message search in the palette", () => {
       conversations: [{ ...chat, title: "Needle chat" }], newThreadShortcut: "Ctrl+N",
       sendCommand: async () => response("needle", { hits: [{ ...hit, snippet: "needle and NEEDLE", matchStart: 0, matchEnd: 6 }] }),
       onSelectMessage: select, onClose: noOp, onSelectProject: noOp, onSelectConversation: noOp,
-      onNewThread: noOp, onAddProject: noOp, onOpenSettings: noOp,
+      onNewThread: noOp, onAddProject: noOp, onOpenSettings: noOp, onOpenMultiSpawn: noOp,
     };
     const view = render(<CommandPalette {...props} />);
     const input = screen.getByRole("combobox");

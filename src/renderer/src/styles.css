@@ -674,31 +674,6 @@ textarea {
   transform: scale(0.985);
 }
 
-.multi-spawn-button {
-  width: 38px;
-  min-width: 38px;
-  min-height: 38px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  color: var(--text-soft);
-  background: var(--surface-muted);
-  box-shadow: var(--glass-inset);
-  transition:
-    border-color var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease),
-    transform var(--motion-fast) var(--motion-ease);
-}
-
-.multi-spawn-button:not(:disabled):hover {
-  border-color: var(--interactive-border-hover);
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.multi-spawn-button:not(:disabled):active {
-  transform: scale(0.96);
-}
-
 .sidebar-destination {
   display: flex;
   width: 100%;
@@ -1808,27 +1783,6 @@ textarea {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
 }
 
-.header-plus-icon {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.header-plus-icon::before,
-.header-plus-icon::after {
-  position: absolute;
-  top: 6px;
-  left: 2px;
-  width: 10px;
-  height: 1.5px;
-  border-radius: 999px;
-  background: currentColor;
-  content: "";
-}
-
-.header-plus-icon::after { transform: rotate(90deg); }
-
 .checkout-context-dot {
   width: 5px;
   height: 5px;
@@ -1894,11 +1848,6 @@ textarea {
   border-radius: 12px;
   background: var(--surface-strong);
   box-shadow: var(--shadow);
-}
-
-.action-header-popover {
-  right: auto;
-  left: 0;
 }
 
 .git-action-popover {
@@ -2448,6 +2397,26 @@ button.environment-row:focus-visible,
 .action-header-popover > button {
   align-items: flex-start;
   flex-direction: column;
+  gap: 2px;
+}
+
+.more-header-popover > button {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.more-header-popover > button > svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.more-header-popover > button:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.more-header-popover > button.more-header-action > span {
+  display: grid;
+  min-width: 0;
   gap: 2px;
 }
 
@@ -10603,7 +10572,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     padding-left: 6px;
   }
 
-  .header-actions > .header-popover-anchor:not(.environment-panel-anchor):not(.private-connect-alert-anchor),
+  .header-actions > .header-popover-anchor:not(.environment-panel-anchor):not(.private-connect-alert-anchor):not(.more-header-anchor),
   .header-actions > .header-button {
     display: none;
   }

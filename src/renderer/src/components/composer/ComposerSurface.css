@@ -1,11 +1,15 @@
 /* One card. The text area, the control row and the checkout strip share a
    single border, radius and shadow instead of a floating pill over an inset
    drawer. All controls retain their original handlers and ownership. */
+.composer-shell .composer {
+  --radius-composer: 22px;
+}
+
 .composer-shell .composer-input-zone {
   position: relative;
   z-index: 3;
-  min-height: 58px;
-  padding: 15px 16px 12px;
+  min-height: 74px;
+  padding: 17px 18px 13px;
   border-radius:
     calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px) 0 0;
 }
@@ -30,7 +34,7 @@
   border-top: 1px solid transparent;
   border-radius:
     0 0 calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px);
-  background: color-mix(in srgb, var(--surface-muted) 24%, var(--composer-surface));
+  background: var(--composer-surface);
   box-shadow: none;
 }
 
@@ -72,18 +76,13 @@
   grid-area: rail;
 }
 .composer-shell .composer-checkout-strip {
-  z-index: auto;
+  z-index: 0;
   min-height: 26px;
-  margin-top: 0;
-  padding: 4px 10px 6px;
-  border-top-color: color-mix(
-    in srgb,
-    var(--composer-zone-separator) 45%,
-    transparent
-  );
-  border-radius:
-    0 0 calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px);
-  background: transparent;
+  margin: 0 14px -11px;
+  padding: 6px 12px 9px;
+  border-top: 0;
+  border-radius: 0 0 15px 15px;
+  background: color-mix(in srgb, var(--surface-muted) 58%, var(--composer-surface));
   font-size: 10.5px;
   grid-area: checkout;
 }
@@ -143,4 +142,26 @@
 .composer-shell .selected-model-chip[aria-expanded="true"] {
   border-color: var(--interactive-border-hover);
   background: var(--selected-surface-strong);
+}
+
+.composer-shell .composer-setting-family,
+.composer-shell .composer-provider-control,
+.composer-shell .composer-action-control {
+  display: none;
+}
+
+.composer-shell .composer-options > .composer-more-control {
+  position: static;
+  display: block;
+}
+
+.composer-shell .composer-more-control .composer-pill {
+  width: var(--composer-control-height);
+  justify-content: center;
+  padding: 0;
+}
+
+.composer-shell .composer-more-control .composer-pill > span,
+.composer-shell .composer-more-control .composer-pill > svg:last-child {
+  display: none;
 }

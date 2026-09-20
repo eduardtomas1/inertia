@@ -520,7 +520,6 @@ export function AppLayout({
             onOpenConversationInWindow={sidebarActions.openConversationInWindow}
             onCloseConversationSplit={sidebarActions.closeConversationSplit}
             onCreateConversation={sidebarActions.createConversation}
-            onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
             dailyWorkOpen={dailyWorkOpen}
             onRenameConversation={sidebarActions.renameConversation}
@@ -780,6 +779,7 @@ export function AppLayout({
         createConversation={() => actions.createConversation()}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
+        openMultiSpawn={multiSpawn.openDialog}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Globe2, ListFilter, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, Command, FolderOpen, GitBranch, Globe2, ListFilter, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -96,12 +96,12 @@ export function WorkspaceHeader({
   onPush,
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
-  const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
+  const [menu, setMenu] = useState<"branch" | "more" | "git" | null>(null);
   useEffect(() => setMenu(null), [project?.id, conversation?.id]);
   useEffect(() => {
-    // Git discovery can finish after opening project actions. Only Git menus
+    // Git discovery can finish after the overflow menu opens. Only Git menus
     // belong to that root; project/chat navigation still dismisses every menu.
-    setMenu((current) => current === "action" ? current : null);
+    setMenu((current) => current === "more" ? current : null);
   }, [gitStatus?.root]);
   const privateConnectLoad = usePrivateConnectState();
   const privateConnect = privateConnectLoad.state;
@@ -121,6 +121,22 @@ export function WorkspaceHeader({
     : project?.name && conversation ? project.name : "Inertia";
   const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
   const primaryGitAction = primaryHeaderGitAction(gitStatus);
+  /**
+   * The header keeps the controls that report state — branch, Git, the
+   * Environment dock, theme and the tools panel. Everything else is an errand
+   * that reads better as a named row in one menu.
+   */
+  const workspaceScope = view === "workspace" && Boolean(project);
+  const showDevicesInHeader = Boolean(privateConnect) && Boolean(pendingPrivateConnectPairing);
+  const overflowDevices = Boolean(privateConnect) && !showDevicesInHeader;
+  const overflowBrowser = workspaceScope && Boolean(conversation) && Boolean(onOpenBrowser);
+  const overflowWindow = workspaceScope && Boolean(conversation) && Boolean(onOpenConversationInWindow);
+  const overflowActions = workspaceScope ? actions : [];
+  const hasOverflowMenu = overflowDevices
+    || overflowBrowser
+    || overflowWindow
+    || workspaceScope
+    || overflowActions.length > 0;
   const runGitAction = (action: HeaderGitActionId): void => {
     if (menu === "git") {
       headerActionsRef.current?.querySelector<HTMLElement>(
@@ -194,7 +210,7 @@ export function WorkspaceHeader({
       </div>
 
       <div className="header-actions no-drag" ref={headerActionsRef}>
-        {privateConnect && (
+        {showDevicesInHeader && privateConnect && (
           <div className="header-popover-anchor private-connect-alert-anchor">
             <button
               type="button"
@@ -236,40 +252,6 @@ export function WorkspaceHeader({
         )}
         {view === "workspace" && project && (
           <>
-            {actions.length > 0 && (
-              <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-label="Add action" title="Add action" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
-                  <span className="header-plus-icon" aria-hidden="true" /><span>Add action</span>
-                </button>
-                {menu === "action" && (
-                  <div className="header-popover action-header-popover" id="workspace-header-action-menu" role="menu" aria-label="Project actions" onKeyDown={navigateMenuItems}>
-                    {actions.map((action) => <button type="button" role="menuitem" key={action.id} onClick={() => { setMenu(null); onRunAction(action); }}><strong>{action.label}</strong><small>{action.command}</small></button>)}
-                  </div>
-                )}
-              </div>
-            )}
-            {conversation && onOpenConversationInWindow && (
-              <button
-                type="button"
-                className={`header-button detached-chat-header-button${
-                  conversationDetached ? " is-open" : ""
-                }`}
-                aria-label={conversationDetached
-                  ? `Focus chat window for ${conversation.title}`
-                  : `Open ${conversation.title} in a new window`}
-                title={!conversationDetached && detachedChatLimitReached
-                  ? "Close a chat window before opening another."
-                  : conversationDetached
-                    ? "Focus chat window"
-                    : "Open chat in new window"}
-                disabled={!conversationDetached && detachedChatLimitReached}
-                onClick={() => onOpenConversationInWindow(conversation)}
-              >
-                <PictureInPicture2 size={14} />
-                <span>{conversationDetached ? "Focus window" : "New window"}</span>
-              </button>
-            )}
-            <button type="button" className="header-button" onClick={onOpenProject}><FolderOpen size={14} /><span>Open</span></button>
             {gitStatus?.isRepository && (
               <div className="header-popover-anchor" data-header-menu="branch">
                 <button
@@ -346,19 +328,66 @@ export function WorkspaceHeader({
             )}
           </>
         )}
-        {view === "workspace" && project && (
-          conversation && onOpenBrowser && (
+        {hasOverflowMenu && (
+          <div className="header-popover-anchor more-header-anchor" data-header-menu="more">
             <IconButton
-              label="Open Browser"
-              aria-pressed={activeTool === "preview"}
-              onClick={() => {
-                setMenu(null);
-                onOpenBrowser();
-              }}
+              label="More workspace actions"
+              aria-haspopup="menu"
+              aria-controls="workspace-header-more-menu"
+              aria-expanded={menu === "more"}
+              onClick={() => setMenu(menu === "more" ? null : "more")}
             >
-              <Globe2 size={17} />
+              <MoreHorizontal size={17} />
             </IconButton>
-          )
+            {menu === "more" && (
+              <div className="header-popover more-header-popover" id="workspace-header-more-menu" role="menu" aria-label="Workspace actions" onKeyDown={navigateMenuItems}>
+                {overflowBrowser && (
+                  <button type="button" role="menuitem" aria-current={activeTool === "preview" ? "true" : undefined} onClick={() => { setMenu(null); onOpenBrowser?.(); }}>
+                    <Globe2 size={15} /><strong>Open Browser</strong>
+                  </button>
+                )}
+                {overflowWindow && conversation && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={conversationDetached
+                      ? `Focus chat window for ${conversation.title}`
+                      : `Open ${conversation.title} in a new window`}
+                    disabled={!conversationDetached && detachedChatLimitReached}
+                    onClick={() => { setMenu(null); onOpenConversationInWindow?.(conversation); }}
+                  >
+                    <PictureInPicture2 size={15} />
+                    <strong>{conversationDetached ? "Focus window" : "New window"}</strong>
+                  </button>
+                )}
+                {workspaceScope && (
+                  <button type="button" role="menuitem" onClick={() => { setMenu(null); onOpenProject(); }}>
+                    <FolderOpen size={15} /><strong>Open</strong>
+                  </button>
+                )}
+                {overflowDevices && privateConnect && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={privateConnect.activeSessions > 0
+                      ? `Connections & devices, ${privateConnect.activeSessions} active browsers`
+                      : `Connections & devices ${privateConnect.status}`}
+                    onClick={() => { setMenu(null); onOpenConnectionsSettings(); }}
+                  >
+                    <RadioTower size={15} />
+                    <strong>{privateConnect.activeSessions > 0
+                      ? `Devices · ${privateConnect.activeSessions} active`
+                      : "Devices"}</strong>
+                  </button>
+                )}
+                {overflowActions.map((action) => (
+                  <button type="button" role="menuitem" className="more-header-action" key={action.id} onClick={() => { setMenu(null); onRunAction(action); }}>
+                    <Command size={15} /><span><strong>{action.label}</strong><small>{action.command}</small></span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {view === "workspace" && project && (
           <div className="header-popover-anchor environment-panel-anchor">

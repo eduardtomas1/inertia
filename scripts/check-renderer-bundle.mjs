@@ -73,7 +73,8 @@ const budgets = {
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte,
+  // The header overflow shares modules with this surface: +22 measured bytes.
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 64,
   deferredThreadActionsJavaScript: 8 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
@@ -105,7 +106,8 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   deferredTerminalJavaScript: 25.5 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
-  deferredGitMenusJavaScript: 8.875 * kibibyte,
+  // The header overflow shares modules with them: +44 measured bytes.
+  deferredGitMenusJavaScript: 8.875 * kibibyte + 64,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -134,7 +136,10 @@ const budgets = {
   // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
   // same source/dependency baseline. Both first-load routes are unchanged.
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722,
+  // The dock strip, the diff per-line highlight mapping with its hunk context,
+  // the header overflow and the palette entry add 624 measured bytes against
+  // this branch's merge base on the same installed dependencies.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 1_024,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

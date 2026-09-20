@@ -294,9 +294,9 @@ describe("WorkspaceHeader Git pull request availability", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "More Git actions" }));
     expect(await screen.findByRole("menu", { name: "Git actions" })).toBeInTheDocument();
-    const open = screen.getByRole("button", { name: "Open" });
-    fireEvent.pointerDown(open);
-    fireEvent.click(open);
+    const sibling = screen.getByRole("button", { name: /^Change theme/u });
+    fireEvent.pointerDown(sibling);
+    fireEvent.click(sibling);
 
     expect(screen.queryByRole("menu", { name: "Git actions" }))
       .not.toBeInTheDocument();
@@ -342,7 +342,7 @@ describe("WorkspaceHeader Git pull request availability", () => {
     expect(onCommit).not.toHaveBeenCalled();
     expect(menu).toBeInTheDocument();
 
-    screen.getByRole("button", { name: "Open" }).focus();
+    screen.getByRole("button", { name: /^Change theme/u }).focus();
     await waitFor(() => expect(screen.queryByRole("menu", { name: "Git actions" }))
       .not.toBeInTheDocument());
   });

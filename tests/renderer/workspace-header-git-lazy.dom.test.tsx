@@ -111,7 +111,7 @@ describe("WorkspaceHeader deferred Git menu", () => {
     fireEvent.click(trigger);
     expect(screen.getByRole("status")).toHaveTextContent("Loading Git actions");
 
-    const openProject = screen.getByRole("button", { name: "Open" });
+    const openProject = screen.getByRole("button", { name: /^Change theme/u });
     openProject.focus();
     deferredMenu.release();
 

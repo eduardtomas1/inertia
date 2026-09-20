@@ -11,6 +11,7 @@ import type {
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { headerAction } from "./support/header-actions";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -294,7 +295,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   });
   await page.getByRole("button", { name: "Close daily work" }).click();
   await expect(dailyWorkDialog).toBeHidden();
-  await page.getByRole("button", { name: /^Connections & devices/u }).click();
+  await (await headerAction(page, /^Connections & devices/u)).click();
   await expect(page.getByRole("button", {
     name: "Connections & devices",
     exact: true,

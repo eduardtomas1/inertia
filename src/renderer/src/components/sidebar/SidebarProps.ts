@@ -33,7 +33,6 @@ export interface SidebarProps {
   onOpenConversationInWindow?: (conversation: Conversation) => void;
   onCloseConversationSplit: (conversation: Conversation) => void;
   onCreateConversation: (project: Project) => void;
-  onOpenMultiSpawn: () => void;
   onOpenDailyWork: () => void;
   dailyWorkOpen: boolean;
   onRenameConversation: (conversation: Conversation, title: string) => void;

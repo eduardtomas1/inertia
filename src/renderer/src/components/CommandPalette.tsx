@@ -1,4 +1,4 @@
-import { Folder, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { Folder, FolderPlus, MessageSquare, Search, Settings, Share2, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -21,6 +21,7 @@ type CommandPaletteProps = {
   onNewThread: () => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
+  onOpenMultiSpawn: () => void;
 };
 
 type PaletteItem = {
@@ -67,7 +68,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onAddProject, onOpenSettings, onOpenMultiSpawn }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [openError, setOpenError] = useState(false);
@@ -93,6 +94,9 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
       ...(projects.length > 0
         ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: newThreadShortcut, run: onNewThread }]
         : []),
+      ...(projects.length > 0
+        ? [{ id: "action:multi-spawn", group: "Actions" as const, label: "Launch two chats", detail: "Start the same work in two chats", icon: <Share2 size={15} />, run: onOpenMultiSpawn }]
+        : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
     ];
@@ -100,7 +104,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenSettings, onSelectConversation, onSelectProject, projects]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onOpenMultiSpawn, onOpenSettings, onSelectConversation, onSelectProject, projects]);
   const messageItems = useMemo<PaletteItem[]>(() => {
     if (!onSelectMessage) return [];
     return (search.result?.hits ?? []).flatMap((hit) => {

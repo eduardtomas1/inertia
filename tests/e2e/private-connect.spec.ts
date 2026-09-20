@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { headerAction } from "./support/header-actions";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -45,9 +46,7 @@ test("wires the packaged Private Connect state through the desktop settings boun
   await expect(diagnostics.getByText("1", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  const indicator = page.getByRole("button", {
-    name: /^Connections & devices/u,
-  });
+  const indicator = await headerAction(page, /^Connections & devices/u);
   await expect(indicator).toBeVisible();
   await indicator.click();
   await expect(page.getByRole("heading", {

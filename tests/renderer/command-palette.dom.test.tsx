@@ -66,6 +66,7 @@ function palette(
       onNewThread={noOp}
       onAddProject={noOp}
       onOpenSettings={noOp}
+      onOpenMultiSpawn={noOp}
     />
   );
 }
@@ -88,6 +89,7 @@ function ResetHarness({ onOpenSettings }: {
         onNewThread={noOp}
         onAddProject={noOp}
         onOpenSettings={onOpenSettings}
+        onOpenMultiSpawn={noOp}
       />
     </>
   );
@@ -110,6 +112,7 @@ function FocusHarness(): React.JSX.Element {
         onNewThread={noOp}
         onAddProject={noOp}
         onOpenSettings={noOp}
+        onOpenMultiSpawn={noOp}
       />
     </>
   );

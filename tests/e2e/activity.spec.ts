@@ -652,9 +652,10 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(expandedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);
     expect(expandedRailGeometry.attachmentBeforeMessage).toBe(true);
-    await expect(compactMore).toBeHidden();
+    // The control row carries the model and one overflow at every width now.
+    await expect(compactMore).toBeVisible();
     await expect(composer.getByRole("group", { name: "Composer settings" }))
-      .toBeVisible();
+      .toBeHidden();
     await expectNoViewportOverflow();
     const attachmentComposerScreenshot = testInfo.outputPath("composer-working-attachment-expanded-933x800.png");
     await page.screenshot({ animations: "disabled", path: attachmentComposerScreenshot });

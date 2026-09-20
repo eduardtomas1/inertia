@@ -3,7 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Command,
-  SlidersHorizontal,
+  MoreHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -269,9 +269,9 @@ export function ComposerMoreMenu({
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("more", event)}
       >
-        <SlidersHorizontal
-          size={13}
-          strokeWidth={1.8}
+        <MoreHorizontal
+          size={15}
+          strokeWidth={2}
           aria-hidden="true"
         />
         <span>More</span>

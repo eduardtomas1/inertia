@@ -38,32 +38,33 @@ describe("workspace header project action ownership", () => {
   it("keeps the focused project action available when initial Git discovery completes", async () => {
     const callbacks = props();
     const view = render(<WorkspaceHeader {...callbacks} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    fireEvent.click(screen.getByRole("button", { name: "More workspace actions" }));
     const action = screen.getByRole("menuitem", { name: /Check workspace/u });
-    await waitFor(() => expect(action).toHaveFocus());
+    const firstItem = screen.getAllByRole("menuitem")[0]!;
+    await waitFor(() => expect(firstItem).toHaveFocus());
 
     view.rerender(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
 
-    expect(screen.getByRole("menu", { name: "Project actions" })).toBeInTheDocument();
-    expect(action).toHaveFocus();
+    expect(screen.getByRole("menu", { name: "Workspace actions" })).toBeInTheDocument();
+    expect(firstItem).toHaveFocus();
     expect(callbacks.onRunAction).not.toHaveBeenCalled();
     fireEvent.click(action);
     expect(callbacks.onRunAction).toHaveBeenCalledExactlyOnceWith(callbacks.actions[0]);
-    expect(screen.queryByRole("menu", { name: "Project actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "Workspace actions" })).not.toBeInTheDocument();
   });
 
   it.each(["project", "conversation"])("still dismisses project actions when the %s owner changes", async (owner) => {
     const callbacks = props();
     const view = render(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: /Check workspace/u })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "More workspace actions" }));
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]!).toHaveFocus());
 
     const nextId = "22222222-2222-4222-8222-222222222222";
     view.rerender(<WorkspaceHeader {...callbacks} gitStatus={gitStatus}
       project={owner === "project" ? { ...callbacks.project!, id: nextId } : callbacks.project}
       conversation={owner === "conversation" ? conversation(nextId) : callbacks.conversation} />);
 
-    expect(screen.queryByRole("menu", { name: "Project actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "Workspace actions" })).not.toBeInTheDocument();
     expect(callbacks.onRunAction).not.toHaveBeenCalled();
   });
 

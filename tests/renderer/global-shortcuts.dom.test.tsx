@@ -45,6 +45,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
         onNewThread={vi.fn()}
         onAddProject={vi.fn()}
         onOpenSettings={vi.fn()}
+        onOpenMultiSpawn={vi.fn()}
       />
     </>
   );
@@ -274,6 +275,7 @@ describe("global shortcut DOM integration", () => {
           onNewThread={vi.fn()}
           onAddProject={vi.fn()}
           onOpenSettings={vi.fn()}
+          onOpenMultiSpawn={vi.fn()}
         />
       );
     }

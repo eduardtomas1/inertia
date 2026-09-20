@@ -212,7 +212,8 @@ describe("detached chat leaf controls", () => {
       />,
     );
 
-    const focus = screen.getByRole("button", {
+    fireEvent.click(screen.getByRole("button", { name: "More workspace actions" }));
+    const focus = screen.getByRole("menuitem", {
       name: "Focus chat window for Detachable ownership",
     });
     expect(focus).toBeEnabled();
@@ -304,7 +305,6 @@ describe("detached chat leaf controls", () => {
         onOpenConversationInWindow={noOp}
         onCloseConversationSplit={noOp}
         onCreateConversation={noOp}
-        onOpenMultiSpawn={noOp}
         onOpenDailyWork={noOp}
         onRenameConversation={noOp}
         onPinConversation={noOp}

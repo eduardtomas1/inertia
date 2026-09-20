@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test, type Page, type TestInfo, type WebSocketRoute } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { headerAction } from "./support/header-actions";
 
 let app: AppFixture;
 let page: Page;
@@ -143,7 +144,7 @@ test("reveals a match in an existing split pane and in its detached window", asy
   await expect(finalAnswer(page)).toBeInViewport();
 
   const opened = app.electronApp.waitForEvent("window");
-  await page.getByRole("button", { name: `Open ${targetTitle} in a new window` }).click();
+  await (await headerAction(page, `Open ${targetTitle} in a new window`)).click();
   const popup = await opened;
   await popup.locator(".detached-chat-shell").waitFor();
   await popup.getByRole("textbox", { name: "Message" }).fill("Detached draft stays here.");
@@ -207,7 +208,7 @@ test("retains detached focus while the owning runtime client reconnects", async 
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
   const opened = app.electronApp.waitForEvent("window");
-  await page.getByRole("button", { name: `Open ${targetTitle} in a new window` }).click();
+  await (await headerAction(page, `Open ${targetTitle} in a new window`)).click();
   const popup = await opened;
   await popup.getByRole("textbox", { name: "Message" }).waitFor();
   let acceptSocket!: (route: WebSocketRoute) => void;

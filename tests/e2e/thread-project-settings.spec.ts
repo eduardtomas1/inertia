@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { openComposerSurface } from "./support/composer-surfaces";
 
 let app: AppFixture;
 let projectId: string;
@@ -157,9 +158,9 @@ test("scratch prompts belong only to their original chat, including after restar
   await expect(owner).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Review the authentication tests before the next change.");
-  await page.getByRole("button", { name: "Scratch prompts", exact: true }).click();
+  await openComposerSurface(page.locator(".composer-shell"), "Scratch prompts");
   await page.getByRole("menuitem", { name: /Save current prompt/u }).click();
-  await page.getByRole("button", { name: "Scratch prompts, 1 saved", exact: true }).click();
+  await openComposerSurface(page.locator(".composer-shell"), "Scratch prompts");
   await expect(page.getByRole("menuitem", { name: /^Review the authentication tests/u })).toBeVisible();
   await capture(info, "chat-owned-scratch-prompt-dark");
   await page.keyboard.press("Escape");
@@ -167,13 +168,13 @@ test("scratch prompts belong only to their original chat, including after restar
   await other.click();
   await expect(other).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".header-title-wrap h1")).toHaveText("thread-project-settings fixture");
-  await page.getByRole("button", { name: "Scratch prompts", exact: true }).click();
+  await openComposerSurface(page.locator(".composer-shell"), "Scratch prompts");
   await expect(page.getByRole("menuitem", { name: /^Review the authentication tests/u })).toHaveCount(0);
   await capture(info, "other-chat-scratch-prompts-empty-dark");
   await app.restart();
   await app.page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
   await expect(app.page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
-  await app.page.getByRole("button", { name: "Scratch prompts, 1 saved", exact: true }).click();
+  await openComposerSurface(app.page.locator(".composer-shell"), "Scratch prompts");
   await app.page.getByRole("menuitem", { name: /^Review the authentication tests/u }).click();
   await expect(app.page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Review the authentication tests before the next change.");
   expect(app.rendererErrors).toEqual([]);

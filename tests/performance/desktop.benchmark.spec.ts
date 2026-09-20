@@ -630,6 +630,41 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     await expect(viewportLocator.locator(
       `.response-virtual-item[data-index="${index}"]`,
     )).toBeInViewport();
+    if (index === 0) {
+      // Intersection alone can precede the virtualizer's deferred ResizeObserver
+      // measurement. Keep these rows mounted through consecutive stable frames.
+      await viewportLocator.evaluate(async (viewport, { maximumFrames, edgeTolerancePx }) => {
+        let previousGeometry: string | null = null;
+        let stableFrames = 0;
+        for (let frame = 0; frame < maximumFrames; frame += 1) {
+          viewport.scrollTop = 0;
+          await new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+          const rows = Array.from(viewport.querySelectorAll<HTMLElement>(".response-virtual-item"));
+          const geometry = JSON.stringify({
+            height: viewport.scrollHeight,
+            viewportHeight: viewport.clientHeight,
+            rows: rows.map((row) => {
+              const bounds = row.getBoundingClientRect();
+              return [row.dataset.index, bounds.top, bounds.height];
+            }),
+          });
+          const firstRowMounted = rows.some((row) => row.dataset.index === "0");
+          stableFrames = firstRowMounted
+            && viewport.scrollTop <= edgeTolerancePx
+            && geometry === previousGeometry
+            ? stableFrames + 1
+            : 0;
+          if (stableFrames >= 2) return;
+          previousGeometry = geometry;
+        }
+        throw new Error(
+          `The authoritative top range did not stabilize within ${maximumFrames} preflight frames.`,
+        );
+      }, {
+        maximumFrames: AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES,
+        edgeTolerancePx: AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX,
+      });
+    }
   }
   const result = await viewportLocator.evaluate(async (viewport, {
     edgeTolerancePx,
@@ -2154,7 +2189,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; bounded, unmeasured setup renders both virtual edge ranges and calibrates the bottom geometry before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; bounded, unmeasured setup renders both virtual edge ranges and waits for stable geometry at each end before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
         "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence; those four gate-controlled intervals are excluded from visible-cadence statistics, while every later visible interval remains measured. It then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",

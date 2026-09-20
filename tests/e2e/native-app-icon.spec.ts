@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { expect, test } from "@playwright/test";
 import { createAppFixture } from "./support/app-fixture";
 
-test("supplies native Windows taskbar and window icons at the system sizes", async (_fixtures, testInfo) => {
+test("supplies native Windows taskbar and window icons at the system sizes", async ({ browserName: _browserName }, testInfo) => {
   test.skip(process.platform !== "win32", "Inspects real Windows HICONs.");
   const fixture = await createAppFixture({ name: "native-app-icon", initialState: "empty" });
   try {

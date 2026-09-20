@@ -65,3 +65,12 @@ quality, architecture, the application and Private Connect builds, and all
 renderer budgets passed. Hosted native platform results remain required before
 merge and are recorded in the PR. No release tag or version is changed by this
 work.
+
+The first hosted run caught a Playwright collection error in the new Windows
+test: its unused first fixture argument used an identifier instead of the
+required object-destructuring pattern. The declaration now destructures an
+unused fixture, following the other native tests and the lint rules. Local
+collection succeeds for all 171 Electron scenarios across 92 files, and the
+Windows-only test reaches its intended platform skip on macOS. Native Windows
+execution is still required; collection and a platform skip do not prove HICON
+behavior.

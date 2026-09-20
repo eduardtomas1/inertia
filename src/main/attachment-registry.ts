@@ -39,10 +39,8 @@ import {
   type PreparedAttachmentImport,
   type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
-import {
-  isStablePrivateAttachment,
-  verifyStoredAttachmentAfterValidation,
-} from "./attachment-registry-file-verification.js";
+import { isStablePrivateAttachment, verifyPinnedAttachmentDirectory,
+  verifyStoredAttachmentAfterValidation } from "./attachment-registry-file-verification.js";
 import {
   inProcessAttachmentImportValidationRunner,
   type AttachmentImportFileOperation,
@@ -1246,15 +1244,6 @@ export class AttachmentRegistry {
       const root = await securePrivateDirectory(this.directory);
       this.directoryAuthority = { root, identity: await lstat(root, { bigint: true }) };
     }
-    const { root, identity } = this.directoryAuthority;
-    const named = await lstat(this.directory, { bigint: true });
-    if (
-      !named.isDirectory() || named.isSymbolicLink()
-      || named.dev !== identity.dev || named.ino !== identity.ino
-      || await realpath(this.directory) !== root
-      || (process.platform !== "win32" && ((named.mode & 0o777n) !== 0o700n
-        || named.uid !== identity.uid))
-    ) throw new Error("Temporary attachment storage could not be verified safely.");
-    return root;
+    return await verifyPinnedAttachmentDirectory(this.directory, this.directoryAuthority);
   }
 }

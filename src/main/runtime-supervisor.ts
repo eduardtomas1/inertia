@@ -941,8 +941,7 @@ export class RuntimeSupervisor {
       let recovery: boolean | Promise<boolean> | null;
       try {
         recovery = this.recoverOwnedProcesses(record.runtimeGenerationId, this.systemBootId, deadlineAt);
-      } catch {
-        // An unreadable journal cannot admit a replacement; retain cleanup authority.
+      } catch { // An unreadable journal cannot admit a replacement; retain cleanup authority.
         this.desiredRunning = false; finishRecovery(false); return;
       }
       if (typeof recovery === "boolean") finishRecovery(recovery);

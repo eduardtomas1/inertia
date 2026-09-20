@@ -201,7 +201,7 @@ correction and supersedes that earlier portable sequencing limitation.
 
 ## Final provider capability verification
 
-Final reviewed source is `a3bb31ca`. The final pass covers all six production
+The provider capability source is `a3bb31ca`. The final pass covers all six production
 routes and the 28 manifest capabilities, with six more reproduced defects and
 65 additional regression/control cases since the earlier completion follow-up.
 The [capability report](2026-09-20-correctness/final-provider-capabilities.md)
@@ -224,6 +224,28 @@ ceiling, assertion or capability requirement was relaxed. Logs:
 `local-log:inertia-final-providers-portable.log`; the initial architecture-only
 failure is retained in `local-log:inertia-final-providers-check-architecture-before.log`.
 All new provider test files carry portable discovery markers.
+
+## Hosted CI fixture correction verification
+
+Source `49acfe2b` preserves all production changes above and corrects the test
+observations exposed by run `35523302446`. Four Codex rejection cases observe
+the real outgoing error instead of depending on a terminated peer's log; six
+Antigravity foreign-session fixtures let the harness own process shutdown. The
+real-process assertions remain, with additional termination and no-active-run
+checks. A separate previously reproduced Intel Mac large-WAL test timeout now
+uses its neighboring fixture's 30-second allowance, preserving every data and
+production-deadline assertion. See the [follow-up evidence](2026-09-20-correctness/final-provider-capabilities.md#hosted-ci-fixture-follow-up).
+
+- Independent review: no blocking finding; production cleanup is unchanged.
+- Linux ARM64: 168 tests passed across four native provider/lifecycle suites.
+- Full Node 22 check: 883 files / 9,568 tests passed, 146 native/platform skips;
+  lint, types, migrations, architecture, build and renderer budgets passed.
+- Portable Node 22 check: 111 files / 1,611 tests passed, nine platform skips
+  (155.37 seconds). Fresh hosted Windows confirmation remains required.
+
+Logs: `local-log:inertia-pr433-ci-fix-check.log`,
+`local-log:inertia-pr433-ci-fix-portable.log` and
+`local-log:inertia-pr433-linux-arm-provider-regressions-final.log`.
 
 ## Measured desktop performance
 

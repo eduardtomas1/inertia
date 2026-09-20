@@ -508,7 +508,10 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       access: "supervised",
     }), { onApproval });
 
-    expect(result.status).toBe("cancelled");
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
     expect(onApproval).not.toHaveBeenCalled();
     expect(captured(fake.capturePath).find(
       ({ id }) => id === "approval-rpc",
@@ -1709,7 +1712,10 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       onApproval: (event) => approvals.push(event.request),
     });
 
-    expect(result).toMatchObject({ status: "cancelled" });
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
     expect(approvals).toEqual([]);
     const response = captured(fake.capturePath).find(
       ({ id }) => id === "approval-rpc",
@@ -2110,7 +2116,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
-  it("interrupts deterministically when Codex offers only unsupported decisions", async () => {
+  it("fails deterministically when Codex offers only unsupported decisions", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-decisions";
@@ -2126,11 +2132,14 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       access: "supervised",
     }), { onApproval: (event) => approvals.push(event.request.requestId) });
 
-    expect(result).toMatchObject({ status: "cancelled" });
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
     expect(approvals).toEqual([]);
     const messages = captured(fake.capturePath);
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ error: { code: -32602 } });
-    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
     await manager.disposeAll();
   });
 

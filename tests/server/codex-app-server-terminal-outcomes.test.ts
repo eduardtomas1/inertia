@@ -63,6 +63,9 @@ function fixture(throughHarness = false) {
   child.emit("spawn");
   return {
     run, terminateProcessTree, finishCleanup,
+    serverRequest(method: string, params: Record<string, unknown>) {
+      stdout.write(`${JSON.stringify({ id: "review-request", method, params })}\n`);
+    },
     unsafeInputRequest(kind: "foreign-turn" | "malformed") {
       stdout.write(`${JSON.stringify({
         id: "unsafe-input", method: "item/tool/requestUserInput",
@@ -127,6 +130,27 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("Codex App Server terminal outcomes", () => {
+  it.each([
+    ["foreign approval", "item/commandExecution/requestApproval", { threadId: "foreign-thread", command: "npm test" }],
+    ["malformed approval", "item/commandExecution/requestApproval", { threadId: "thread-test", command: { invalid: true } }],
+    ["unsupported decisions", "item/commandExecution/requestApproval", { threadId: "thread-test", availableDecisions: ["acceptForSession"] }],
+    ["foreign time request", "currentTime/read", { threadId: "foreign-thread" }],
+    ["malformed time request", "currentTime/read", {}],
+    ["foreign elicitation", "mcpServer/elicitation/request", { threadId: "thread-test", turnId: "foreign-turn", serverName: "synthetic", mode: "form" }],
+    ["malformed elicitation", "mcpServer/elicitation/request", {}],
+  ] as const)("classifies rejected %s as provider failure", async (_label, method, params) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.serverRequest(method, params);
+    app.terminal("interrupted");
+    app.finishCleanup(true);
+    await expect(app.run.result).resolves.toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
   it.each([undefined, "interrupted", "completed"])(
     "fails malformed delegated-agent output even when cleanup races %s",
     async (racingStatus) => {

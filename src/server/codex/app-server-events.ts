@@ -398,7 +398,7 @@ export class CodexAppServerEvents {
         this.host.writeMessage({ id, error: { code: -32602, message } });
         this.host.setLastError(message);
         this.emitActivity("system", "failed", message);
-        this.host.cancel();
+        this.host.cancel("malformed-protocol");
         return;
       }
       const { request: approval } = parsedApproval;
@@ -406,7 +406,7 @@ export class CodexAppServerEvents {
         const message = "Codex reused a reserved Inertia approval identity.";
         this.host.writeMessage({ id, error: { code: -32602, message } });
         this.host.setLastError(message);
-        this.host.cancel();
+        this.host.cancel("malformed-protocol");
         return;
       }
       if (approval.availableDecisions.length === 0) {
@@ -422,7 +422,7 @@ export class CodexAppServerEvents {
           "failed",
           "Codex requested an unsupported approval decision",
         );
-        this.host.cancel();
+        this.host.cancel("malformed-protocol");
         return;
       }
       if (!this.reserveServerRequest(id)) return;
@@ -450,7 +450,7 @@ export class CodexAppServerEvents {
         "failed",
         "Codex requested an unsupported approval shape",
       );
-      this.host.cancel();
+      this.host.cancel("malformed-protocol");
       return;
     }
 

@@ -2,7 +2,13 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.58 — 2026-09-20
+## 0.0.59 — 2026-09-20
+
+This release contains the reviewed changes since 0.0.57 listed below. Version
+0.0.58 was held during release certification and was never published; its tag
+remains unchanged. The replacement candidate fixes a Windows ARM64 test that
+assumed two processes had perfectly synchronized clocks. The diagnostic reader
+still rejects future timestamps, and native release checks remain required.
 
 ### Capture and share context
 
@@ -76,6 +82,11 @@ The useful changes in each Inertia release, in plain language.
 - Windows and macOS retain manual installation while release signing is
   unavailable. Linux installations still on 0.0.52 need one manual upgrade,
   preserving the existing profile.
+
+## 0.0.58 — unpublished
+
+Held during native release certification. The reviewed product changes are
+included in 0.0.59 above; no public packages were published for 0.0.58.
 
 ## 0.0.57 — 2026-09-15
 

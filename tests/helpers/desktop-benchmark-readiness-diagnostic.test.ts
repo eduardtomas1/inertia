@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { WebSocketServer } from "ws";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BENCHMARK_LOGIN_MARKER, BENCHMARK_READINESS_MAX_FRAME_BYTES,
@@ -144,20 +144,29 @@ describe("benchmark readiness evidence", () => {
 
   it("records fixed fixture timestamps without changing login output, and rejects stale/unsafe marker data", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "inertia-login-evidence-"));
+    const launchedAt = 1_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_003);
     try {
-      const launchedAt = Date.now();
-      await writeFile(join(workspace, "login"), benchmarkLoginFixtureSource);
+      // Native Windows processes can disagree by a few milliseconds even after
+      // the child exits. Control both clocks when testing timestamp validation.
+      await writeFile(join(workspace, "login"),
+        `let fixtureNow = ${launchedAt}; Date.now = () => fixtureNow++;\n${benchmarkLoginFixtureSource}`);
       const { stdout, stderr } = await promisify(execFile)(process.execPath, ["login", "status"], { cwd: workspace, timeout: 5000 });
       expect(stdout).toBe("Logged in using ChatGPT\n");
       expect(stderr).toBe("");
       const marker = await readBenchmarkLoginMarker(workspace, launchedAt);
-      expect(marker).toMatchObject({ stage: "write-completed", fromCurrentLaunch: true });
-      expect(await readBenchmarkLoginMarker(workspace, Date.now() + 1000)).toMatchObject({ fromCurrentLaunch: false });
+      expect(marker).toEqual({ stage: "write-completed", startedAt: 1_000,
+        observedAt: 1_002, fromCurrentLaunch: true });
+      expect(await readBenchmarkLoginMarker(workspace, launchedAt + 1)).toMatchObject({ fromCurrentLaunch: false });
       for (const payload of ["x".repeat(513), "broken", JSON.stringify({ stage: "secret", startedAt: 1, observedAt: 2 }),
-        JSON.stringify({ stage: "started", startedAt: 2, observedAt: 1 })]) {
+        JSON.stringify({ stage: "started", startedAt: 2, observedAt: 1 }),
+        JSON.stringify({ stage: "write-completed", startedAt: 1_000, observedAt: 1_004 })]) {
         await writeFile(join(workspace, BENCHMARK_LOGIN_MARKER), payload);
         expect(await readBenchmarkLoginMarker(workspace, launchedAt)).toBeNull();
       }
-    } finally { await rm(workspace, { recursive: true, force: true }); }
+    } finally {
+      clock.mockRestore();
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 });

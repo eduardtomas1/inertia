@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -27,9 +28,11 @@ import {
   Trash2,
 } from "lucide-react";
 
-import type {
-  EnvironmentRunItem,
-  EnvironmentSummarySnapshot,
+import {
+  ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT,
+  ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT,
+  type EnvironmentRunItem,
+  type EnvironmentSummarySnapshot,
 } from "../utils/environmentSummary";
 import {
   workspaceGitRepositoryLabel,
@@ -42,6 +45,7 @@ import { SentMessageAttachmentList } from "./SentMessageAttachmentList";
 
 export type EnvironmentRepositoryAction = WorkspaceChangesRequestedAction;
 export const ENVIRONMENT_USAGE_OPEN_STORAGE_KEY = "inertia:environment:usage-open:v1";
+export const ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY = "inertia:environment:attachments-expanded:v1";
 
 export interface EnvironmentPanelProps {
   summary: EnvironmentSummarySnapshot;
@@ -198,9 +202,11 @@ export function EnvironmentPanel({
   const panelId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const [usageOpen, setUsageOpen] = useState(() => layoutStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY) !== "false");
+  const [attachmentsOpen, setAttachmentsOpen] = useState(() => layoutStorage.getItem(ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY) === "true");
   useEffect(() => {
     const syncUsageOpen = (event: StorageEvent): void => {
       if (event.key === ENVIRONMENT_USAGE_OPEN_STORAGE_KEY) setUsageOpen(event.newValue !== "false");
+      if (event.key === ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY) setAttachmentsOpen(event.newValue === "true");
     };
     window.addEventListener("storage", syncUsageOpen);
     return () => window.removeEventListener("storage", syncUsageOpen);
@@ -214,6 +220,16 @@ export function EnvironmentPanel({
   const repositoryHeadingId = `${panelId}-repository`;
   const editorHeadingId = `${panelId}-editor`;
   const attachmentsHeadingId = `${panelId}-attachments`;
+  const attachmentsGalleryId = `${panelId}-attachment-gallery`;
+  const attachmentsExpandable = summary.attachments.length
+    > ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT;
+  const attachmentsExpanded = attachmentsExpandable && attachmentsOpen;
+  const visibleAttachments = useMemo(
+    () => attachmentsExpanded
+      ? summary.attachments
+      : summary.attachments.slice(0, ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT),
+    [attachmentsExpanded, summary.attachments],
+  );
   const runtimeAttention = summary.runtime.status === "online"
     ? null
     : summary.runtime.status === "connecting"
@@ -707,9 +723,44 @@ export function EnvironmentPanel({
         )}
 
         {summary.attachments.length > 0 && (
-          <section className="environment-panel-section environment-attachments" aria-labelledby={attachmentsHeadingId}>
-            <h3 id={attachmentsHeadingId}>Recent attachments</h3>
-            <SentMessageAttachmentList attachments={summary.attachments} label="Recent attachments" />
+          <section
+            className="environment-panel-section environment-attachments"
+            data-expanded={attachmentsExpanded}
+            aria-labelledby={attachmentsHeadingId}
+          >
+            <div className="environment-attachments-header">
+              <h3 id={attachmentsHeadingId}>
+                {attachmentsExpanded ? "Attachments" : "Recent attachments"}
+              </h3>
+              {attachmentsExpandable && (
+                <button
+                  type="button"
+                  className="environment-attachments-toggle"
+                  aria-expanded={attachmentsExpanded}
+                  aria-controls={attachmentsGalleryId}
+                  onClick={() => {
+                    layoutStorage.setItem(
+                      ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY,
+                      String(!attachmentsExpanded),
+                    );
+                    setAttachmentsOpen(!attachmentsExpanded);
+                  }}
+                >
+                  <span>
+                    {attachmentsExpanded
+                      ? "Show fewer"
+                      : `Show all ${summary.attachments.length}${summary.attachments.length === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT ? "+" : ""}`}
+                  </span>
+                  <ChevronDown className="environment-attachments-chevron" size={13} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            <div id={attachmentsGalleryId} className="environment-attachments-gallery">
+              <SentMessageAttachmentList
+                attachments={visibleAttachments}
+                label={attachmentsExpanded ? "All attachments" : "Recent attachments"}
+              />
+            </div>
           </section>
         )}
 

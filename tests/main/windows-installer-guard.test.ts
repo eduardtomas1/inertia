@@ -10,9 +10,10 @@ import { expect, test } from "vitest";
 
 const repositoryRoot = join(import.meta.dirname, "../..");
 
-test.runIf(process.platform === "win32")(
-  "the compiled NSIS guard preserves live processes and accepts a drained root under Restricted policy",
-  async ({ onTestFailed }) => {
+test.runIf(process.platform === "win32").for(["inherited", "external-only"] as const)(
+  "the compiled NSIS guard preserves live processes under Restricted policy with %s modules",
+  { timeout: 90_000 },
+  async (modulePaths, { onTestFailed }) => {
     const { runBounded, BoundedProcessExitError } = await import(pathToFileURL(
       join(repositoryRoot, "scripts/bounded-process-tree.mjs"),
     ).href);
@@ -20,6 +21,12 @@ test.runIf(process.platform === "win32")(
     const installDirectory = join(root, "installed with spaces");
     const siblingDirectory = `${installDirectory}-sibling`;
     const fixture = join(root, "guard.exe");
+    const externalModules = join(root, "external modules");
+    // Node keeps only one spelling of a Windows environment key. Remove every
+    // inherited spelling before supplying the deliberate external-only path.
+    const externalModuleEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PSMODULEPATH"),
+    );
     const children: ChildProcess[] = [];
     const queryResults: Array<{
       expectedCode: number;
@@ -32,7 +39,7 @@ test.runIf(process.platform === "win32")(
       process.stderr.write(`Compiled NSIS guard failure: ${JSON.stringify(queryResults)}\n`);
     });
     try {
-      await Promise.all([mkdir(installDirectory), mkdir(siblingDirectory)]);
+      await Promise.all([mkdir(installDirectory), mkdir(siblingDirectory), mkdir(externalModules)]);
       const compiler = await getMakeNsisPath(undefined);
       await runBounded(compiler.path, [
         "/V2", join(repositoryRoot, "tests/fixtures/windows-installer-guard.nsi"),
@@ -54,10 +61,11 @@ test.runIf(process.platform === "win32")(
           await runBounded(fixture, ["/S"], {
             label: `Compiled NSIS guard: expected exit ${expectedCode}`,
             env: {
-              ...process.env,
+              ...(modulePaths === "external-only" ? externalModuleEnvironment : process.env),
               INERTIA_GUARD_FIXTURE_ROOT: installRoot,
               INERTIA_GUARD_FIXTURE_QUERY_RESULT: queryResultPath,
               PSExecutionPolicyPreference: "Restricted",
+              ...(modulePaths === "external-only" ? { PSModulePath: externalModules } : {}),
             },
             timeoutMs: 20_000,
           });
@@ -115,5 +123,4 @@ test.runIf(process.platform === "win32")(
       await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   },
-  90_000,
 );

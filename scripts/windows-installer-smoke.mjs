@@ -553,6 +553,7 @@ async function smokeInstalledApplication(
 
 const INSTALL_ROOT_PROCESS_SNAPSHOT_SCRIPT = `
 $ErrorActionPreference = "Stop"
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, "Modules")
 $rootPath = [IO.Path]::GetFullPath($env:INERTIA_INSTALLER_SMOKE_ROOT).TrimEnd([char[]]'\\/')
 $rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
 if ($rootItem -isnot [IO.DirectoryInfo] -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {

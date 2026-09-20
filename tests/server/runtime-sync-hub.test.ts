@@ -168,8 +168,10 @@ describe("runtime sync hub", () => {
     const runtime = fixture();
     const ids = [CONVERSATION_A, CONVERSATION_B, CONVERSATION_C,
       "dddddddd-dddd-4ddd-8ddd-dddddddddddd"];
+    const owners = ["primary", "secondary", "tertiary", "quaternary"] as const;
     const resumeUrl = new URL(runtimeResumeUrl(
-      "ws://127.0.0.1:4312/runtime/token", runtime.hub.cursor(), ids,
+      "ws://127.0.0.1:4312/runtime/token", runtime.hub.cursor(),
+      owners.map((owner, index) => ({ owner, conversationId: ids[index] })),
     ));
     const publish = () => {
       for (const conversationId of ids) runtime.hub.broadcast({

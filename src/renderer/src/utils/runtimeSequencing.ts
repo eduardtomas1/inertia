@@ -38,12 +38,6 @@ export class RuntimeDetailSubscriptions {
     this.conversations[owner] = conversationId;
   }
 
-  conversationIds(): string[] {
-    return RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.map((owner) =>
-      this.conversations[owner]).filter((id, index, ids): id is string =>
-      id !== null && ids.indexOf(id) === index);
-  }
-
   mountedPanes(): RuntimePaneSubscription[] {
     return RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.flatMap((owner) => {
       const conversationId = this.conversations[owner];
@@ -147,18 +141,15 @@ export class RuntimeProjectionSequence {
 export function runtimeResumeUrl(
   websocketUrl: string,
   cursor: RuntimeSyncCursor | null,
-  subscriptions: readonly string[] | readonly RuntimePaneSubscription[],
+  subscriptions: readonly RuntimePaneSubscription[],
 ): string {
   if (!cursor || !validCursor(cursor)) return websocketUrl;
   const url = new URL(websocketUrl);
   url.searchParams.set("runtimeGeneration", cursor.runtimeGeneration);
   url.searchParams.set("afterSequence", String(cursor.latestSequence));
-  for (const subscription of subscriptions.slice(0, RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.length)) {
-    const conversationId = typeof subscription === "string" ? subscription : subscription.conversationId;
+  for (const { owner, conversationId } of subscriptions.slice(0, RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.length)) {
     url.searchParams.append("conversationId", conversationId);
-    if (typeof subscription !== "string") {
-      url.searchParams.append("conversationOwner", subscription.owner);
-    }
+    url.searchParams.append("conversationOwner", owner);
   }
   return url.toString();
 }

@@ -12,6 +12,7 @@ import {
   promptStashStorageKey,
 } from "../../src/renderer/src/utils/promptStash";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { openComposerSurface } from "./support/composer-surfaces";
 
 const codexAppServerSource = `
 const readline = require("node:readline");
@@ -292,9 +293,7 @@ test("keeps every composer utility popover inside both split panes", async (
       subtree: true,
     });
   });
-  await primary.getByRole("button", {
-    name: /^Scratch prompts/u,
-  }).click();
+  await openComposerSurface(primary, "Scratch prompts");
   const menu = primary.getByRole("menu", { name: "Scratch prompts" });
   await expect(menu).toBeVisible();
   await expect(menu).toHaveAttribute(
@@ -389,9 +388,7 @@ test("keeps every composer utility popover inside both split panes", async (
   await app.resizeWindow(1_180, 640);
   await separator.focus();
   await separator.press("Enter");
-  await secondary.getByRole("button", {
-    name: /^Scratch prompts/u,
-  }).click();
+  await openComposerSurface(secondary, "Scratch prompts");
   const secondaryScratch = secondary.getByRole("menu", {
     name: "Scratch prompts",
   });

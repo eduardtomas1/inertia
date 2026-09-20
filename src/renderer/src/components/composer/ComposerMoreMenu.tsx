@@ -34,6 +34,11 @@ export interface ComposerMoreMenuProps {
   disabled: boolean;
   running: boolean;
   menuController: ComposerMenuController;
+  showPresets: boolean;
+  showStash: boolean;
+  showUsage: boolean;
+  presetCount: number;
+  stashCount: number;
   onRunAction: (action: ProjectAction) => void;
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
@@ -56,6 +61,11 @@ export function ComposerMoreMenu({
   disabled,
   running,
   menuController,
+  showPresets,
+  showStash,
+  showUsage,
+  presetCount,
+  stashCount,
   onRunAction,
   onUpdateReasoningEffort,
   onUpdateFastMode,
@@ -360,6 +370,50 @@ export function ComposerMoreMenu({
                     </button>
                   ))}
                 </div>
+                {(showPresets || showStash || showUsage) && (
+                  <div className="composer-more-root composer-more-surfaces">
+                    {showPresets && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => toggleMenu("presets")}
+                      >
+                        <span>
+                          <strong>Prompt presets</strong>
+                          <small>{presetCount > 0
+                            ? `${presetCount} saved`
+                            : "Saved prompts for this route"}</small>
+                        </span>
+                      </button>
+                    )}
+                    {showStash && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => toggleMenu("stash")}
+                      >
+                        <span>
+                          <strong>Scratch prompts</strong>
+                          <small>{stashCount > 0
+                            ? `${stashCount} saved`
+                            : "Set the message aside and bring it back"}</small>
+                        </span>
+                      </button>
+                    )}
+                    {showUsage && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => toggleMenu("usage")}
+                      >
+                        <span>
+                          <strong>Usage and context</strong>
+                          <small>Context window and provider limits</small>
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -347,6 +347,11 @@ export function ComposerToolbar({
               disabled={disabled}
               running={running}
               menuController={menuController}
+              showPresets={promptPresetsEnabled}
+              showStash={promptStashEnabled}
+              showUsage={Boolean(selectedProvider)}
+              presetCount={promptPresets.length}
+              stashCount={promptStash.length}
               onRunAction={onRunAction}
               onUpdateReasoningEffort={onUpdateReasoningEffort}
               onUpdateFastMode={onUpdateFastMode}
@@ -354,6 +359,48 @@ export function ComposerToolbar({
               conversationUpdatePending={conversationUpdatePending}
             />
           </Suspense>
+          {promptPresetsEnabled && (
+            <Suspense fallback={null}>
+              <PromptPresetMenu
+                presets={promptPresets}
+                currentMessage={currentPrompt}
+                currentRoute={{
+                  harnessId: conversation.modelSelection.harnessId,
+                  backendProfileId: conversation.modelSelection.backendProfileId,
+                  modelId: conversation.modelSelection.modelId,
+                  reasoningEffort: conversation.modelSelection.reasoningEffort,
+                  ...((selectedModel?.fastMode || selectedFastMode)
+                    && routeSupportsNativeFastModeIdentity(
+                      conversation.modelSelection,
+                    )
+                    ? {
+                        fastMode: modelSelectionUsesFastMode(
+                          conversation.modelSelection,
+                        ),
+                      }
+                    : {}),
+                }}
+                menuController={menuController}
+                onApply={onApplyPromptPreset}
+                onCommand={onPromptPresetCommand}
+              />
+            </Suspense>
+          )}
+          {promptStashEnabled && (
+            <Suspense fallback={null}>
+              <PromptStashMenu
+                entries={promptStash}
+                canStash={canStashPrompt}
+                blockedReason={promptStashBlockedReason}
+                restoreBlockedReason={promptRestoreBlockedReason}
+                menuController={menuController}
+                onStash={onStashPrompt}
+                onRestore={onRestorePrompt}
+                onRemove={onRemoveStashedPrompt}
+                onSetRecurrence={onSetPromptRecurrence}
+              />
+            </Suspense>
+          )}
           {selectedProvider?.agentThreadManagement && (
             <span
               className={clsx(
@@ -371,6 +418,37 @@ export function ComposerToolbar({
           )}
         </div>
         <div
+          className="composer-actions"
+          role="group"
+          aria-label="Usage"
+        >
+        {selectedProvider ? (
+          <UsageIndicator
+            open={menu === "usage"}
+            onOpenChange={(next) => {
+              if (next) toggleMenu("usage");
+              else dismissMenu("selection");
+            }}
+            providerId={selectedProvider.id}
+            usage={usage}
+            rateLimits={selectedProvider.rateLimits}
+            rateLimitState={selectedProvider.metadataState.rateLimits}
+            quotaSource={usageQuotaSourceForSelection(
+              conversation.modelSelection,
+              selectedBackendProfile,
+            )}
+            mode={usageDisplayMode}
+            providerLabel={selectedIdentityLabel}
+            contextQuality={contextUsageQualityForTurn(
+              usage,
+              latestTurn?.id ?? null,
+            )}
+            onModeChange={onUsageDisplayModeChange}
+          />
+        ) : null}
+
+        </div>
+        <div
           className="composer-tools"
           role="group"
           aria-label="Add context"
@@ -384,48 +462,6 @@ export function ComposerToolbar({
             />
             <span>Adding attachments…</span>
           </span>
-        )}
-        {promptPresetsEnabled && (
-          <Suspense fallback={null}>
-            <PromptPresetMenu
-              presets={promptPresets}
-              currentMessage={currentPrompt}
-              currentRoute={{
-                harnessId: conversation.modelSelection.harnessId,
-                backendProfileId: conversation.modelSelection.backendProfileId,
-                modelId: conversation.modelSelection.modelId,
-                reasoningEffort: conversation.modelSelection.reasoningEffort,
-                ...((selectedModel?.fastMode || selectedFastMode)
-                  && routeSupportsNativeFastModeIdentity(
-                    conversation.modelSelection,
-                  )
-                  ? {
-                      fastMode: modelSelectionUsesFastMode(
-                        conversation.modelSelection,
-                      ),
-                    }
-                  : {}),
-              }}
-              menuController={menuController}
-              onApply={onApplyPromptPreset}
-              onCommand={onPromptPresetCommand}
-            />
-          </Suspense>
-        )}
-        {promptStashEnabled && (
-          <Suspense fallback={null}>
-            <PromptStashMenu
-              entries={promptStash}
-              canStash={canStashPrompt}
-              blockedReason={promptStashBlockedReason}
-              restoreBlockedReason={promptRestoreBlockedReason}
-              menuController={menuController}
-              onStash={onStashPrompt}
-              onRestore={onRestorePrompt}
-              onRemove={onRemoveStashedPrompt}
-              onSetRecurrence={onSetPromptRecurrence}
-            />
-          </Suspense>
         )}
         <Suspense fallback={null}>
           <ComposerSkillsMenu
@@ -492,32 +528,6 @@ export function ComposerToolbar({
             )}
           </div>
         ) : null}
-        </div>
-        <div
-          className="composer-actions"
-          role="group"
-          aria-label="Usage"
-        >
-        {selectedProvider ? (
-          <UsageIndicator
-            providerId={selectedProvider.id}
-            usage={usage}
-            rateLimits={selectedProvider.rateLimits}
-            rateLimitState={selectedProvider.metadataState.rateLimits}
-            quotaSource={usageQuotaSourceForSelection(
-              conversation.modelSelection,
-              selectedBackendProfile,
-            )}
-            mode={usageDisplayMode}
-            providerLabel={selectedIdentityLabel}
-            contextQuality={contextUsageQualityForTurn(
-              usage,
-              latestTurn?.id ?? null,
-            )}
-            onModeChange={onUsageDisplayModeChange}
-          />
-        ) : null}
-
         </div>
       </div>
       {showCheckoutContext && (

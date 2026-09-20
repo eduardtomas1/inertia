@@ -165,3 +165,29 @@
 .composer-shell .composer-more-control .composer-pill > svg:last-child {
   display: none;
 }
+
+/* Prompt presets and scratch prompts are named rows in the overflow, so their
+   icons leave the row. The anchors stay in place: each popover is positioned
+   against the one it belongs to. */
+.composer-shell .prompt-presets-control > .icon-button,
+.composer-shell .prompt-stash-control > .icon-button {
+  /* The box stays so each popover is still measured against its own trigger;
+     visibility keeps it out of the tab order and off the screen. */
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  visibility: hidden;
+}
+
+/* Route on the left, actions on the right, exactly two of each. The usage
+   readout is route state, so it sits with the model rather than beside send. */
+.composer-shell .composer-primary-rail {
+  display: flex;
+  align-items: center;
+}
+
+.composer-shell .composer-actions {
+  margin-right: auto;
+  padding-left: 0;
+}

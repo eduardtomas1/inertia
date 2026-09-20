@@ -31,8 +31,8 @@ const measureComposerRail = async (composer: Locator): Promise<{
   const toolbar = dock.querySelector<HTMLElement>(".composer-toolbar");
   const groups = [
     dock.querySelector<HTMLElement>(".composer-options"),
-    dock.querySelector<HTMLElement>(".composer-tools"),
     dock.querySelector<HTMLElement>(".composer-actions"),
+    dock.querySelector<HTMLElement>(".composer-tools"),
   ].flatMap((group) => group ? [group.getBoundingClientRect()] : []);
   const toolbarBounds = toolbar?.getBoundingClientRect();
   const attachmentBounds = dock.querySelector<HTMLElement>(

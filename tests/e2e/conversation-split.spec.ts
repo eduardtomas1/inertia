@@ -7,6 +7,7 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
 import { openConversationPaneTool } from "./support/workspace-tools";
+import { composerSurfaceSummary, openComposerSurface } from "./support/composer-surfaces";
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -168,35 +169,30 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
-  await primary.getByRole("button", { name: "Scratch prompts" }).click();
+  await openComposerSurface(primary, "Scratch prompts");
   await primary.getByRole("menu", { name: "Scratch prompts" })
     .getByRole("menuitem", { name: /Save current prompt/u })
     .click();
   await expect(primaryMessage).toHaveValue("");
-  const primaryStash = primary.getByRole("button", {
-    name: "Scratch prompts, 1 saved",
-  });
-  await expect(primaryStash).toBeVisible();
-  await expect(secondary.getByRole("button", {
-    name: "Scratch prompts, 1 saved",
-  })).toHaveCount(0);
-  await secondary.getByRole("button", { name: "Scratch prompts", exact: true }).click();
+  expect(await composerSurfaceSummary(primary, "Scratch prompts"))
+    .toContain("1 saved");
+  expect(await composerSurfaceSummary(secondary, "Scratch prompts"))
+    .not.toContain("saved");
+  await openComposerSurface(secondary, "Scratch prompts");
   const secondaryStashMenu = secondary.getByRole("menu", { name: "Scratch prompts" });
   await expect(secondaryStashMenu).toContainText("No scratch prompts saved yet.");
   await expect(secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u })).toHaveCount(0);
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
   await secondaryStashMenu.getByRole("menuitem", { name: /Save current prompt/u }).click();
   await expect(secondaryMessage).toHaveValue("");
-  const secondaryStash = secondary.getByRole("button", {
-    name: "Scratch prompts, 1 saved",
-  });
-  await expect(secondaryStash).toBeVisible();
-  await secondaryStash.click();
+  expect(await composerSurfaceSummary(secondary, "Scratch prompts"))
+    .toContain("1 saved");
+  await openComposerSurface(secondary, "Scratch prompts");
   await expect(secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u })).toHaveCount(0);
   await secondaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Companion/u }).click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
   await expect(secondaryMessage).toBeFocused();
-  await primaryStash.click();
+  await openComposerSurface(primary, "Scratch prompts");
   const primaryStashMenu = primary.getByRole("menu", { name: "Scratch prompts" });
   await expect(primaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Companion/u })).toHaveCount(0);
   await primaryStashMenu.getByRole("menuitem", { name: /^Draft owned by Inertia/u }).click();

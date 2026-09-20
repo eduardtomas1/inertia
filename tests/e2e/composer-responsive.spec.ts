@@ -292,7 +292,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
-    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "actions", "tools"]);
     expect(wideGeometry.checkoutText).toContain("Current checkout");
     expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");

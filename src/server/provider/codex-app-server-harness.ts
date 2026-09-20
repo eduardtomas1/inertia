@@ -223,7 +223,7 @@ function startCodexRun(
       continuationError,
       ...publicRuntimeResult
     } = runtimeResult;
-    if (runtimeResult.status === "cancelled" || cancelRequested) {
+    if (runtimeResult.status === "cancelled") {
       emitter.status("cancelled");
       return {
         ...publicRuntimeResult,

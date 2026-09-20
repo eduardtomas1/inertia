@@ -2220,7 +2220,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
-  it("interrupts an unrepresentable Codex input request without exposing a partial prompt", async () => {
+  it("fails an unrepresentable Codex input request without exposing a partial prompt", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-input";
@@ -2238,7 +2238,10 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       onInput: (event) => inputs.push(event.request.requestId),
     });
 
-    expect(result).toMatchObject({ status: "cancelled" });
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
     expect(inputs).toEqual([]);
     const messages = captured(fake.capturePath);
     expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({
@@ -2247,7 +2250,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         message: "Codex sent a user-input request this client could not safely represent.",
       },
     });
-    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(true);
+    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
     expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });

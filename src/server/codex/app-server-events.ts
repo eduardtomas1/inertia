@@ -100,7 +100,7 @@ export interface CodexAppServerEventHost {
   setLastActivityId: (activityId: string) => void;
   setTerminalEvent: (event: string) => void;
   writeMessage: (message: JsonObject) => boolean;
-  cancel: () => void;
+  cancel: (reason?: "malformed-protocol") => void;
   finish: (
     status: CodexAppServerResult["status"],
     exitCode: number | null,
@@ -378,10 +378,10 @@ export class CodexAppServerEvents {
         message,
       );
       this.emitActivity("system", "failed", message);
-      // Do not emit a second response with the duplicate id. Cancellation
-      // settles the original request exactly once before closing transport.
+      // Do not emit a second response with the duplicate id. Retire the
+      // original interaction as the malformed run closes its transport.
       this.hostTools.settle("cancel");
-      this.host.cancel();
+      this.host.cancel("malformed-protocol");
       return;
     }
     if (method === "item/tool/call") {
@@ -465,7 +465,7 @@ export class CodexAppServerEvents {
         this.host.writeMessage({ id, error: { code: -32602, message } });
         this.host.setLastError(message);
         this.emitActivity("system", "failed", message);
-        this.host.cancel();
+        this.host.cancel("malformed-protocol");
         return;
       }
       if (!this.reserveServerRequest(id)) return;
@@ -490,7 +490,7 @@ export class CodexAppServerEvents {
         "failed",
         "Codex requested an unsupported user-input shape",
       );
-      this.host.cancel();
+      this.host.cancel("malformed-protocol");
       return;
     }
 
@@ -532,7 +532,7 @@ export class CodexAppServerEvents {
         message,
       );
       this.emitActivity("system", "failed", message);
-      this.host.cancel();
+      this.host.cancel("malformed-protocol");
       return false;
     }
     this.pendingServerRequestIds.add(rpcRequestKey(id));
@@ -555,7 +555,7 @@ export class CodexAppServerEvents {
       "failed",
       "Codex sent malformed delegated-agent lifecycle data",
     );
-    this.host.cancel();
+    this.host.cancel("malformed-protocol");
   }
 
   handleNotification(method: string, params: JsonObject): void {
@@ -1233,7 +1233,7 @@ export class CodexAppServerEvents {
         message,
       );
       this.emitActivity("system", "failed", message);
-      this.host.cancel();
+      this.host.cancel("malformed-protocol");
       return false;
     }
     items.add(itemId);

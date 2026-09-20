@@ -183,7 +183,7 @@ module.exports = {
             entry: {
               Name: productName,
               Comment: packageJson.description,
-              StartupWMClass: productName,
+              StartupWMClass: desktopName.replace(/\.desktop$/, ""),
             },
           },
         }

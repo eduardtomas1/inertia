@@ -10,7 +10,15 @@ export interface RuntimeAssetLocations {
  * Runtime assets live outside app.asar in production. Development resolves the
  * same generated mark from the checked-out source tree.
  */
-export function resolveRuntimeIconPath(locations: RuntimeAssetLocations): string {
+export function resolveRuntimeIconPath(
+  locations: RuntimeAssetLocations,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    return locations.isPackaged
+      ? join(resolve(locations.resourcesPath), "icons", "inertia.ico")
+      : join(resolve(locations.appPath), "resources", "icon.ico");
+  }
   return locations.isPackaged
     ? join(resolve(locations.resourcesPath), "icons", "inertia.png")
     : join(resolve(locations.appPath), "resources", "icons", "512x512.png");

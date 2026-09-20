@@ -1316,7 +1316,7 @@ describe("transcript following motion", () => {
     }));
   });
 
-  it("keeps correcting delayed virtual measurements until reader intent", async () => {
+  it.each([null, 0, -40])("keeps fresh reader intent through an early scroll event (offset: %s)", async (earlyScrollOffset) => {
     const activeConversation = conversation("conversation-delayed-measurement");
     const scheduled = new Map<number, FrameRequestCallback>();
     let nextFrameId = 0;
@@ -1374,8 +1374,15 @@ describe("transcript following motion", () => {
     expect(scheduled.size).toBe(1);
 
     fireEvent.wheel(transcript);
+    // A queued correction or a small upward movement can still fall within
+    // the 120px follow tolerance after the reader has started navigating.
+    const readerScrollTop = 550 + (earlyScrollOffset ?? 0);
+    if (earlyScrollOffset !== null) {
+      scrollTop = readerScrollTop;
+      fireEvent.scroll(transcript);
+    }
     height = 800;
-    expect(scrollTop).toBe(550);
+    expect(scrollTop).toBe(readerScrollTop);
     expect(scheduled.size).toBe(0);
 
     scrollTo.mockClear();
@@ -1392,7 +1399,7 @@ describe("transcript following motion", () => {
     scheduled.delete(lateContentFrame[0]);
     lateContentFrame[1](32);
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(scrollTop).toBe(550);
+    expect(scrollTop).toBe(readerScrollTop);
     expect(scheduled.size).toBe(0);
   });
 });

@@ -38,3 +38,31 @@ or macOS x64 behavior.
 The PR's original Windows size comparison reported 13.10 MiB less download and
 94.28 MiB less installed storage. Those numbers describe that before/after
 measurement, not a new six-platform measurement.
+
+## Follow-up CI investigation
+
+The next macOS x64 run passed package smoke but failed two native scenarios:
+runtime recycle exceeded its unchanged 12.75-second shutdown deadline, and an
+upward transcript gesture did not expose Jump to latest. The lifecycle evidence
+does not identify which resource delayed shutdown; no shutdown fix is claimed.
+
+A deterministic DOM negative control reproduced a reader-intent race: a queued
+bottom-scroll event, or a small upward move inside the follow tolerance, erased
+fresh wheel intent and let later virtual measurements pull the reader downward.
+Keep the existing bounded 750 ms gesture guard through those scroll events.
+Explicit navigation and the existing expiry still clear it. The focused
+transcript/navigation batch passes all 54 tests, including both event orders.
+
+Both failing native scenarios passed three repetitions each on macOS ARM64 with
+two workers. Temporary instrumentation of ignored build output recorded nine
+complete shutdowns with no unresolved operation; the longest command-quiescence
+phase took 5.79 seconds. The original build output was restored byte-for-byte,
+and both scenarios passed again without instrumentation. These eight passes do
+not establish the cause of the hosted Intel timeout; fresh native CI remains
+required.
+
+The full local gate also exposed a fixture setup timeout while creating 999
+loose Git refs. Seed real sorted packed refs in the disposable test repository
+instead. The real Git enumeration, current branch, symbolic aliases, 1,000 versus
+1,001 branch bounds and production deadlines remain unchanged. All six focused
+branch-limit tests pass.

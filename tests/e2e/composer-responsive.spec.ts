@@ -287,8 +287,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("18px 105px");
-    expect(wideGeometry.inputPaddingBlock).toBe("16px 15px");
+    expect(wideGeometry.inputPaddingInline).toBe("16px 16px");
+    expect(wideGeometry.inputPaddingBlock).toBe("15px 12px");
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);

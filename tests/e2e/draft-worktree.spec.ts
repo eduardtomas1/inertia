@@ -137,7 +137,7 @@ test("keeps Environment available while an isolated draft worktree materializes"
       name: "Environment",
     })).toHaveAttribute("aria-selected", "true");
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
-    await expect(workspaceTools.getByLabel("Choose workspace tool"))
+    await expect(workspaceTools.getByRole("tab", { name: "Files" }))
       .toBeVisible();
     await selectWorkspaceTool(workspaceTools, "Files");
     await expect(

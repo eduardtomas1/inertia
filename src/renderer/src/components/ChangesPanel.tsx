@@ -17,6 +17,7 @@ import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLin
 import { sourceLanguageForFile } from "@shared/source-language";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
+import { highlightedSourceLines } from "../utils/sourceHighlighting";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 
@@ -75,6 +76,25 @@ export type ChangesPanelProps = {
 const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialog"));
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
+
+const HUNK_HEADER = /^(@@[^@]*@@)\s*(.*)$/u;
+
+function hunkRange(header: string): string {
+  return HUNK_HEADER.exec(header)?.[1] ?? header;
+}
+
+function hunkContext(header: string): string {
+  return HUNK_HEADER.exec(header)?.[2]?.trim() ?? "";
+}
+
+/** Lines Git skipped between the previous hunk and this one. */
+function unchangedBefore(hunks: readonly DiffHunk[], index: number): number {
+  const hunk = hunks[index];
+  if (!hunk) return 0;
+  const previous = index > 0 ? hunks[index - 1] : null;
+  const previousEnd = previous ? previous.oldStart + previous.oldCount : 1;
+  return Math.max(0, hunk.oldStart - previousEnd);
+}
 
 function pathParts(path: string): { name: string; parent: string } {
   // Git's wire paths use "/" on every platform. A backslash can be a literal
@@ -204,6 +224,27 @@ export function ChangesPanel({
     ? summary
     : null;
   const fileSummary = activeSummary?.files.find((item) => item.path === selectedFile?.path) ?? null;
+  const selectedFileLines = useMemo(
+    () => selectedFile?.hunks.flatMap((hunk) => hunk.lines) ?? [],
+    [selectedFile],
+  );
+  const highlightedDiffLines = useMemo(() => {
+    if (!selectedFile || selectedFileLines.length === 0) return null;
+    const highlighted = highlightedSourceLines(
+      selectedFileLines.map((line) => line.content).join("\n"),
+      sourceLanguageForFile(selectedFile.path),
+    );
+    if (!highlighted || highlighted.length !== selectedFileLines.length) return null;
+    return new Map(selectedFileLines.map((line, index) => [line.id, highlighted[index] ?? ""]));
+  }, [selectedFile, selectedFileLines]);
+  const selectedFileCounts = useMemo(() => selectedFileLines.reduce(
+    (result, line) => line.kind === "addition"
+      ? { ...result, insertions: result.insertions + 1 }
+      : line.kind === "deletion"
+        ? { ...result, deletions: result.deletions + 1 }
+        : result,
+    { insertions: 0, deletions: 0 },
+  ), [selectedFileLines]);
   const totals = useMemo(() => files.reduce(
     (result, file) => ({ insertions: result.insertions + file.insertions, deletions: result.deletions + file.deletions }),
     { insertions: 0, deletions: 0 },
@@ -490,6 +531,10 @@ export function ChangesPanel({
               }}>
                 <div className="diff-file-review-heading">
                   <span><strong>{selectedFile.path}</strong>{fileSummary && <small>{fileSummary.summary}</small>}<ClassificationHints hints={fileSummary?.classifications} /></span>
+                  <span className="diff-file-review-counts" aria-label={`${selectedFileCounts.insertions} added, ${selectedFileCounts.deletions} removed`}>
+                    <span className="file-insertions">+{selectedFileCounts.insertions}</span>
+                    <span className="file-deletions">−{selectedFileCounts.deletions}</span>
+                  </span>
                   {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={12} />Open file</button>}
                   {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
                   {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
@@ -511,8 +556,10 @@ export function ChangesPanel({
                   </div>
                 ))}
                 <p className="diff-selection-help">Select a line, then Shift-click another to review a range.</p>
-                {selectedFile.hunks.map((hunk) => {
+                {selectedFile.hunks.map((hunk, hunkIndex) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);
+                  const skipped = unchangedBefore(selectedFile.hunks, hunkIndex);
+                  const context = hunkContext(hunk.header);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);
                   const hunkSummary = fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.summary;
                   const selected = reviewSelection(selectedFile, hunk);
@@ -528,7 +575,10 @@ export function ChangesPanel({
                     : null;
                   return <div className="diff-filter-row" inert={!shown} key={hunk.id}><div><section className="diff-hunk" id={`review-${hunk.id}`}>
                     <div className="diff-hunk-header">
-                      <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
+                      <code title={hunk.header}>{hunkRange(hunk.header)}</code>
+                      {context && <span className="diff-hunk-context" title={context}>{context}</span>}
+                      {skipped > 0 && <span className="diff-hunk-gap">{skipped.toLocaleString()} unchanged {skipped === 1 ? "line" : "lines"}</span>}
+                      {hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
                         {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
                         {persistentReview && <button type="button" onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
@@ -544,14 +594,20 @@ export function ChangesPanel({
                         <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                       </div>
                     ))}
-                    {hunk.lines.map((line, index) => <div key={line.id}>
+                    {hunk.lines.map((line, index) => {
+                      const highlighted = line.kind === "meta" || !line.content
+                        ? null
+                        : highlightedDiffLines?.get(line.id) ?? null;
+                      return <div key={line.id}>
                       <button
                         type="button"
                         className={clsx("diff-line", `is-${line.kind}`, selected?.lineIds.includes(line.id) && "is-selected")}
                         onClick={(event) => chooseLine(hunk, index, event.shiftKey)}
                         disabled={line.kind === "meta"}
                       >
-                        <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>
+                        <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span>{highlighted === null
+                          ? <span className="diff-line-content">{line.content || " "}</span>
+                          : <span className="diff-line-content" dangerouslySetInnerHTML={{ __html: highlighted }} />}
                       </button>
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
@@ -602,7 +658,8 @@ export function ChangesPanel({
                           )}
                         </div>
                       )}
-                    </div>)}
+                    </div>;
+                    })}
                   </section></div></div>;
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}

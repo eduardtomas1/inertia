@@ -1,65 +1,57 @@
-/* The input floats over an inset control drawer. All controls retain their
-   original handlers and ownership. */
-.composer-shell .composer {
-  --radius-composer: 23px;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-}
-.composer-shell .composer:focus-within {
-  border-color: transparent;
-  box-shadow: none;
-}
+/* One card. The text area, the control row and the checkout strip share a
+   single border, radius and shadow instead of a floating pill over an inset
+   drawer. All controls retain their original handlers and ownership. */
 .composer-shell .composer-input-zone {
   position: relative;
   z-index: 3;
   min-height: 58px;
-  padding: 16px 105px 15px 18px;
-  border: 1px solid var(--composer-border);
-  border-radius: 23px;
-  background: color-mix(in srgb, var(--composer-surface) 90%, var(--accent-soft));
-  box-shadow: 0 5px 20px -12px rgb(0 0 0 / 30%);
-}
-.composer-shell .composer-input-zone:focus-within {
-  border-color: var(--interactive-border-hover);
-  box-shadow:
-    0 5px 20px -12px rgb(0 0 0 / 30%),
-    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
-    0 0 34px -14px color-mix(in srgb, var(--accent) 42%, transparent);
+  padding: 15px 16px 12px;
+  border-radius:
+    calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px) 0 0;
 }
 .composer-shell .composer textarea {
   min-height: 26px;
   max-height: 176px;
 }
+
+/* The control row reads left to right: what the message runs on, then what
+   sends it. The checkout strip closes the card underneath both. */
 .composer-shell .composer-toolbar {
   position: static;
-  margin: -15px 16px 0;
-  padding-top: 15px;
-  border: 1px solid var(--composer-border);
-  border-radius: 0 0 16px 16px;
-  background: color-mix(
-    in srgb,
-    var(--composer-surface) 76%,
-    var(--accent-soft)
-  );
+  display: grid;
+  margin: 0;
+  padding-top: 0;
+  align-items: center;
+  grid-template-areas:
+    "rail actions"
+    "checkout checkout";
+  grid-template-columns: minmax(0, 1fr) max-content;
+  border: 0;
+  border-top: 1px solid transparent;
+  border-radius:
+    0 0 calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px);
+  background: color-mix(in srgb, var(--surface-muted) 24%, var(--composer-surface));
   box-shadow: none;
 }
+
+/* Static placement hands queued messages back to the card, which is what
+   reserves room for them above the composer. */
 .composer-input-actions {
   --composer-send-size: max(34px, var(--composer-control-height));
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 13px;
+  position: static;
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 6px;
+  padding: 5px 9px 5px 4px;
+  grid-area: actions;
 }
 /* Secondary icons only: the primary send/stop action keeps its own on-accent
    and danger colors. :where() leaves this rule's specificity unchanged. */
 .composer-shell .composer-input-actions .icon-button:where(:not(.send-button)) {
-  width: 28px;
-  height: 32px;
-  min-height: 32px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
   color: var(--text-muted);
 }
 .composer-shell .composer-input-actions .send-button {
@@ -72,11 +64,12 @@
 }
 .composer-shell .composer-primary-rail {
   z-index: auto;
-  padding: 4px 9px;
+  padding: 5px 5px 5px 9px;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
   gap: 4px;
+  grid-area: rail;
 }
 .composer-shell .composer-checkout-strip {
   z-index: auto;
@@ -88,9 +81,11 @@
     var(--composer-zone-separator) 45%,
     transparent
   );
-  border-radius: 0 0 16px 16px;
+  border-radius:
+    0 0 calc(var(--radius-composer) - 1px) calc(var(--radius-composer) - 1px);
   background: transparent;
   font-size: 10.5px;
+  grid-area: checkout;
 }
 .composer-shell .composer-tools,
 .composer-shell .composer-actions {
@@ -106,19 +101,15 @@
   background: transparent;
 }
 @container (max-width: 480px) {
-  .composer-shell .composer-toolbar {
-    margin-inline: 8px;
-  }
   .composer-shell .composer-primary-rail {
     padding-inline: 5px;
   }
   .composer-shell .composer-input-zone {
-    padding-left: 13px;
-    padding-right: 94px;
+    padding-inline: 13px;
   }
   .composer-input-actions {
-    right: 10px;
     gap: 2px;
+    padding-right: 6px;
   }
 }
 

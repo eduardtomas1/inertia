@@ -21,16 +21,7 @@ export async function selectWorkspaceTool(
   name: string,
 ): Promise<void> {
   const tabId = name === "Browser" ? "preview" : name.toLowerCase();
-  const tab = panel.locator(
-    `[data-workspace-tab="${tabId}"]`,
-  );
-  if (await tab.isVisible().catch(() => false)) {
-    await tab.click();
-    return;
-  }
-
-  await panel.getByLabel("Choose workspace tool").click();
-  await panel.getByRole("button", { name, exact: true }).click();
+  await panel.locator(`[data-workspace-tab="${tabId}"]`).click();
 }
 
 export async function openConversationPaneTool(

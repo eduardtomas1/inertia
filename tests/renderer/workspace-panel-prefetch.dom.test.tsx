@@ -22,7 +22,7 @@ describe("workspace tool intent prefetch", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps Environment primary while exposing settings and the other tools", () => {
+  it("keeps every tool in one strip while Environment is active", () => {
     const onTabChange = vi.fn();
     const onOpenSettings = vi.fn();
     render(
@@ -41,22 +41,17 @@ describe("workspace tool intent prefetch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Environment settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
 
-    const chooser = screen.getByLabelText("Choose workspace tool");
-    const disclosure = chooser.closest("details")!;
-    fireEvent.click(chooser);
-    expect(disclosure).toHaveAttribute("open");
-    const terminal = screen.getByRole("button", { name: "Terminal" });
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-workspace-tab")))
+      .toEqual(["environment", "changes", "terminal"]);
+    expect(screen.queryByLabelText("Choose workspace tool")).toBeNull();
+
+    const terminal = screen.getByRole("tab", { name: "Terminal" });
+    expect(terminal).toHaveAttribute("aria-selected", "false");
     fireEvent.pointerEnter(terminal);
     fireEvent.focus(terminal);
     expect(prefetchWorkspaceTool).toHaveBeenCalledWith("terminal");
     fireEvent.click(terminal);
     expect(onTabChange).toHaveBeenCalledWith("terminal");
-    expect(disclosure).not.toHaveAttribute("open");
-
-    fireEvent.click(chooser);
-    expect(disclosure).toHaveAttribute("open");
-    fireEvent.blur(disclosure, { relatedTarget: document.body });
-    expect(disclosure).not.toHaveAttribute("open");
   });
 
   it("starts the local chunk before activating a tab", () => {
@@ -123,8 +118,7 @@ describe("workspace tool intent prefetch", () => {
     flushFocusFrame();
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
 
-    fireEvent.click(screen.getByLabelText("Choose workspace tool"));
-    fireEvent.click(screen.getByRole("button", { name: "Browser" }), {
+    fireEvent.click(screen.getByRole("tab", { name: "Browser" }), {
       detail: 0,
     });
     flushFocusFrame();
@@ -138,8 +132,7 @@ describe("workspace tool intent prefetch", () => {
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("environment");
 
-    fireEvent.click(screen.getByLabelText("Choose workspace tool"));
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }), {
+    fireEvent.click(screen.getByRole("tab", { name: "Changes" }), {
       detail: 0,
     });
     flushFocusFrame();

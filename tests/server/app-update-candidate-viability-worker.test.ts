@@ -99,6 +99,9 @@ describe("app update candidate viability worker", () => {
     )).resolves.toBeUndefined();
   });
 
+  // Includes generating/checkpointing a real 257 MiB WAL and two validation
+  // passes. Match the adjacent large-profile fixture's bounded allowance;
+  // production validation retains its independent 30-second worker deadline.
   it("accepts a current-schema profile above 256 MiB without losing its WAL snapshot or migration guard", async () => {
     const dataDirectory = await dataRoot();
     const databasePath = join(dataDirectory, "inertia.sqlite");
@@ -130,7 +133,7 @@ describe("app update candidate viability worker", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 
   it("rehearses migrations on a private backup above 256 MiB and preserves the live WAL profile", async () => {
     const dataDirectory = await dataRoot();

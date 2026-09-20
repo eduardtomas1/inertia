@@ -14,6 +14,7 @@ import {
   type ProviderSubagentEvent,
 } from "../../src/server/providers";
 import { startCodexAppServerRun } from "../../src/server/codex-app-server";
+import { CodexJsonLineWriter } from "../../src/server/codex/jsonl-writer";
 import {
   readCodexMetadata,
 } from "../../src/server/codex-metadata";
@@ -42,6 +43,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
 
   afterEach(async () => {
     await Promise.all(managers.splice(0).map((manager) => manager.disposeAll()));
+    vi.restoreAllMocks();
     if (originalCapturePath === undefined) delete process.env.INERTIA_APP_SERVER_CAPTURE;
     else process.env.INERTIA_APP_SERVER_CAPTURE = originalCapturePath;
     if (originalApprovalKind === undefined) delete process.env.INERTIA_APP_SERVER_APPROVAL_KIND;
@@ -493,7 +495,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   });
 
   it("rejects supervised approvals from an unrelated provider thread", async () => {
-    const fake = fakeAppServer();
+    const fake = createFakeAppServer(roots, true);
+    const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unrelated-approval";
     const manager = trackedManager(fake.command);
@@ -513,7 +516,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       failure: { reason: "malformed-protocol" },
     });
     expect(onApproval).not.toHaveBeenCalled();
-    expect(captured(fake.capturePath).find(
+    const messages = writes.mock.calls.map(([message]) => message);
+    expect(messages.find(
       ({ id }) => id === "approval-rpc",
     )).toMatchObject({
       error: {
@@ -521,6 +525,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
         message: "Codex sent an approval for a different provider thread.",
       },
     });
+    expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
   });
 
   it.each([
@@ -1694,7 +1700,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   });
 
   it("rejects permission approvals whose complete grant cannot be displayed", async () => {
-    const fake = fakeAppServer();
+    const fake = createFakeAppServer(roots, true);
+    const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_APPROVAL_KIND = "permissions";
     process.env.INERTIA_APP_SERVER_SCENARIO = "permission-overflow";
@@ -1717,7 +1724,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       failure: { reason: "malformed-protocol" },
     });
     expect(approvals).toEqual([]);
-    const response = captured(fake.capturePath).find(
+    const response = writes.mock.calls.map(([message]) => message).find(
       ({ id }) => id === "approval-rpc",
     );
     expect(response).toMatchObject({
@@ -1728,6 +1735,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       },
     });
     expect(response).not.toHaveProperty("result.permissions");
+    expect(writes.mock.calls.some(([message]) => message.method === "turn/interrupt")).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
 
@@ -2117,7 +2126,8 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   });
 
   it("fails deterministically when Codex offers only unsupported decisions", async () => {
-    const fake = fakeAppServer();
+    const fake = createFakeAppServer(roots, true);
+    const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-decisions";
     const manager = trackedManager(fake.command, 500);
@@ -2137,9 +2147,10 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       failure: { reason: "malformed-protocol" },
     });
     expect(approvals).toEqual([]);
-    const messages = captured(fake.capturePath);
+    const messages = writes.mock.calls.map(([message]) => message);
     expect(messages.find(({ id }) => id === "approval-rpc")).toMatchObject({ error: { code: -32602 } });
     expect(messages.some(({ method }) => method === "turn/interrupt")).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
     await manager.disposeAll();
   });
 
@@ -2230,7 +2241,10 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
   });
 
   it("fails an unrepresentable Codex input request without exposing a partial prompt", async () => {
-    const fake = fakeAppServer();
+    const fake = createFakeAppServer(roots, true);
+    // Keep the real writer and child. The rejected peer may be stopped before
+    // reading its response, so assert emission at the transport boundary.
+    const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "unsupported-input";
     const manager = trackedManager(fake.command, 500);
@@ -2252,7 +2266,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       failure: { reason: "malformed-protocol" },
     });
     expect(inputs).toEqual([]);
-    const messages = captured(fake.capturePath);
+    const messages = writes.mock.calls.map(([message]) => message);
     expect(messages.find(({ id }) => id === "input-rpc")).toMatchObject({
       error: {
         code: -32602,

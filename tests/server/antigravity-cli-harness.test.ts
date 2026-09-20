@@ -2,7 +2,7 @@
 // @inertia-harness antigravity-cli
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ANTIGRAVITY_CLI_CAPABILITIES,
@@ -25,6 +25,7 @@ import type {
 } from "../../src/server/provider/contracts";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
   removePortableFixture,
@@ -387,18 +388,28 @@ emit(${JSON.stringify(event === "result"
   : { event: "step_update", step_update: { conversation_id: foreign, step_index: 1,
     ...(event === "text" ? { text_delta: "Foreign answer" } : { tool_name: "foreign_tool", state: "ACTIVE" }) } })});
 emit({ event: "result", result: { status: "SUCCESS", response: "Later answer" } });
-process.exit(0);
+// Rejection owns shutdown. Exiting here races Windows taskkill before it can
+// confirm the rejected provider's process tree was stopped.
+hang();
 `);
       const text: string[] = [];
       const sessions: string[] = [];
       const activities: string[] = [];
-      const result = await managerFor(command).run(antigravityInput(root,
+      const terminate = vi.fn(terminateProcessTreeAndWait);
+      const result = await managerFor(command, { terminateProcessTree: terminate }).run(antigravityInput(root,
         kind === "resumed" ? { sessionId: CONVERSATION } : {}), {
         onText: (event) => text.push(event.text),
         onSession: (event) => sessions.push(event.sessionId),
         onActivity: (event) => { if (event.kind === "tool") activities.push(event.label); },
       });
-      expect(result).toMatchObject({ status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true });
+      expect(result).toMatchObject({
+        status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(terminate).toHaveBeenCalledOnce();
+      const child = terminate.mock.calls[0]![0];
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      expect(child.stdout?.closed).toBe(true);
       expect(text).toEqual([]);
       expect(activities).toEqual([]);
       expect(sessions).not.toContain(foreign);

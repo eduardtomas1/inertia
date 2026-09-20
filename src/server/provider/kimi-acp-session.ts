@@ -73,6 +73,7 @@ export async function configureKimiSession(
   requestControl: KimiControlRequest = (request) => request,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
+  const requestedSelections: Array<{ id: string; value: string }> = [];
   const wantedMode = interactionMode === "plan"
     ? /plan|architect/iu
     : /build|agent|code|default/iu;
@@ -103,6 +104,7 @@ export async function configureKimiSession(
     );
     authoritativeConfigOptions = response.configOptions;
     assertAcpConfigSelection("Kimi", authoritativeConfigOptions, configMode);
+    requestedSelections.push(configMode);
   } else if (!nativeMode && interactionMode === "plan") {
     throw new Error("This Kimi ACP server does not advertise a plan mode.");
   }
@@ -127,6 +129,7 @@ export async function configureKimiSession(
     );
     authoritativeConfigOptions = response.configOptions;
     assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    requestedSelections.push(selected);
   }
   if (effort) {
     const selected = findKimiAdvertisedConfigValue(
@@ -147,6 +150,10 @@ export async function configureKimiSession(
       "session/set_config_option",
     );
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    requestedSelections.push(selected);
+  }
+  for (const selected of requestedSelections) {
     assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;

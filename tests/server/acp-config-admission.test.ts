@@ -24,9 +24,9 @@ vi.mock("../../src/node/runtime-owned-processes", async (original) => ({
 }));
 
 type Category = "model" | "thought_level" | "mode";
-type ResponseKind = "applied" | "unchanged" | "missing" | "wrong-type" | "category-omitted";
+type ResponseKind = "applied" | "unchanged" | "missing" | "wrong-type" | "category-omitted" | "reverted";
 
-function providerFixture(provider: "cursor" | "kimi", category: Category, responseKind: ResponseKind) {
+function providerFixture(provider: "cursor" | "kimi", category: Category, responseKind: ResponseKind, laterEffort: boolean) {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const methods: string[] = [];
@@ -37,6 +37,10 @@ function providerFixture(provider: "cursor" | "kimi", category: Category, respon
     currentValue: previous,
     options: [{ value: previous, name: previous }, { value: desired, name: desired }],
   };
+  const configOptions = [option, ...(laterEffort ? [{
+    id: "later-effort", name: "Effort", category: "thought_level", type: "select",
+    currentValue: "low", options: [{ value: "low", name: "Low" }, { value: "high", name: "High" }],
+  }] : [])];
   const send = (message: unknown) => stdout.write(`${JSON.stringify(message)}\n`);
   let pending = "";
   const stdin = new Writable({
@@ -46,7 +50,7 @@ function providerFixture(provider: "cursor" | "kimi", category: Category, respon
         const newline = pending.indexOf("\n");
         if (newline < 0) break;
         const message = JSON.parse(pending.slice(0, newline)) as {
-          id?: number; method: string; params?: { value?: string };
+          id?: number; method: string; params?: { configId?: string; value?: string };
         };
         pending = pending.slice(newline + 1);
         methods.push(message.method);
@@ -56,21 +60,23 @@ function providerFixture(provider: "cursor" | "kimi", category: Category, respon
           agentInfo: { name: provider },
         };
         else if (message.method === "session/new") result = {
-          sessionId: "config-session", configOptions: [option],
+          sessionId: "config-session", configOptions,
           ...(category === "mode" ? {} : {
             modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] },
           }),
         };
         else if (message.method === "session/set_config_option") {
-          if (responseKind === "applied" || responseKind === "category-omitted") {
-            option.currentValue = message.params!.value!;
+          if (responseKind === "applied" || responseKind === "category-omitted" || responseKind === "reverted") {
+            const selected = configOptions.find(({ id }) => id === message.params!.configId)!;
+            selected.currentValue = message.params!.value!;
+            if (responseKind === "reverted" && selected.id === "later-effort") option.currentValue = previous;
           }
           const { category: _category, ...withoutCategory } = option;
           result = { configOptions: responseKind === "missing" ? []
             : responseKind === "wrong-type" ? [{
                 id: option.id, name: option.name, type: "boolean", currentValue: true,
               }]
-            : [responseKind === "category-omitted" ? withoutCategory : option] };
+            : responseKind === "category-omitted" ? [withoutCategory] : configOptions };
         } else if (message.method === "session/prompt") {
           send({ jsonrpc: "2.0", method: "session/update", params: {
             sessionId: "config-session", update: {
@@ -115,9 +121,17 @@ describe.each([
   it("keeps provider-default selection without sending a configuration mutation", async () => {
     await verify("model", "unchanged", false);
   });
+  it.each(["model", "mode"] as const)(
+    "rejects a later full response that reverts the confirmed %s selection",
+    async (category) => { await verify(category, "reverted", true, true); },
+  );
+  it.each(["model", "mode"] as const)(
+    "accepts sequential full responses that retain the confirmed %s selection",
+    async (category) => { await verify(category, "applied", true, true); },
+  );
 
-  async function verify(category: Category, responseKind: ResponseKind, requestSelection = true) {
-    const fixture = providerFixture(provider, category, responseKind);
+  async function verify(category: Category, responseKind: ResponseKind, requestSelection = true, laterEffort = false) {
+    const fixture = providerFixture(provider, category, responseKind, laterEffort);
     const applied = !requestSelection || responseKind === "applied" || responseKind === "category-omitted";
     processFixture.child = fixture.child;
     const terminate = vi.fn(async () => true);
@@ -127,7 +141,7 @@ describe.each([
         prompt: "Use the selected configuration", access: "supervised",
         interactionMode: category === "mode" ? "plan" : "build",
         ...(category === "model" && requestSelection ? { model: fixture.desired } : {}),
-        ...(category === "thought_level" ? { reasoningEffort: fixture.desired } : {}),
+        ...(category === "thought_level" ? { reasoningEffort: fixture.desired } : laterEffort ? { reasoningEffort: "high" } : {}),
       }),
       executable: "/synthetic/acp", environment: {}, providerNativeToolsAvailable: true,
     });

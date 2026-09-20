@@ -1077,6 +1077,7 @@ async function configureCursorSession(
   requestControl: <T>(request: Promise<T>, method: string) => Promise<T> = (request) => request,
 ): Promise<SessionConfigOption[]> {
   let authoritativeConfigOptions = configOptions;
+  const requestedSelections: Array<{ id: string; value: string }> = [];
   const wantedMode = interactionMode === "plan" ? /plan|architect/iu : /build|agent|code/iu;
   const nativeMode = modes?.availableModes.find((mode) => wantedMode.test(`${mode.id} ${mode.name}`));
   const configMode = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "mode", interactionMode === "plan" ? "plan" : "build", wantedMode);
@@ -1089,6 +1090,7 @@ async function configureCursorSession(
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: configMode.id, value: configMode.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
     assertAcpConfigSelection("Cursor", authoritativeConfigOptions, configMode);
+    requestedSelections.push(configMode);
   } else if (interactionMode === "plan" && !nativeMode) {
     throw new Error("This Cursor ACP server does not advertise a plan mode.");
   }
@@ -1098,12 +1100,17 @@ async function configureCursorSession(
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
     assertAcpConfigSelection("Cursor", authoritativeConfigOptions, selected);
+    requestedSelections.push(selected);
   }
   if (effort) {
     const selected = findCursorAdvertisedConfigValue(authoritativeConfigOptions, "thought_level", effort);
     if (!selected) throw new Error(`Cursor ACP does not advertise the selected reasoning effort '${effort}'.`);
     const response = redactResponse(await requestControl(context.request(acp.methods.agent.session.setConfigOption, { sessionId, configId: selected.id, value: selected.value }), "session/set_config_option"));
     authoritativeConfigOptions = response.configOptions;
+    assertAcpConfigSelection("Cursor", authoritativeConfigOptions, selected);
+    requestedSelections.push(selected);
+  }
+  for (const selected of requestedSelections) {
     assertAcpConfigSelection("Cursor", authoritativeConfigOptions, selected);
   }
   return authoritativeConfigOptions;

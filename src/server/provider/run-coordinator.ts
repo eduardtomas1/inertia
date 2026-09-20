@@ -33,6 +33,7 @@ import {
   providerCallbacksFromHarness,
 } from "./emitter";
 import type { ProviderMetadataCache } from "./metadata";
+import { ProviderInstallationAdmissionError } from "./installation-lease";
 import { providerChildEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
@@ -397,7 +398,19 @@ export class ProviderRunCoordinator {
         // Cleanup is best effort and must never mask the provider result.
       }
     };
-    const installationUse = this.options.acquireInstallationUse(input, executable);
+    let installationUse: ProviderRunInstallationUse;
+    try {
+      installationUse = this.options.acquireInstallationUse(input, executable);
+    } catch (error) {
+      // Maintenance can claim the installation after a turn was queued. Its
+      // explicit refusal happens before launch preparation or harness.start(),
+      // so this exact turn owns no provider process requiring cleanup. Keep
+      // unexpected authority failures fail-closed as before.
+      if (error instanceof ProviderInstallationAdmissionError) {
+        this.rememberCleanupReceipt(expectedIdentity);
+      }
+      throw error;
+    }
     if (!this.options.resolvedCommandFor(providerId)) {
       this.options.rememberResolvedCommand(providerId, executable);
     }

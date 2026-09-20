@@ -35,9 +35,6 @@ type UsageIndicatorProps = {
   providerLabel: string;
   contextQuality?: ContextUsageDataQuality;
   onModeChange: (mode: UsageDisplayMode) => void;
-  /** Supplied when the composer's overflow owns which surface is open. */
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 };
 
 const processedScopes = new Set<NonNullable<ThreadUsageSnapshot["totalProcessedScope"]>>([
@@ -235,17 +232,9 @@ export function UsageIndicator({
   providerLabel,
   contextQuality = usage ? "current" : "unavailable",
   onModeChange,
-  open: controlledOpen,
-  onOpenChange,
 }: UsageIndicatorProps): React.JSX.Element | null {
   const limitsContext = useUsageLimitsContext();
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const open = controlledOpen ?? uncontrolledOpen;
-  const setOpen = (next: boolean | ((current: boolean) => boolean)): void => {
-    const value = typeof next === "function" ? next(open) : next;
-    if (onOpenChange) onOpenChange(value);
-    else setUncontrolledOpen(value);
-  };
+  const [open, setOpen] = useState(false);
   useNativePreviewSuspension(open);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);

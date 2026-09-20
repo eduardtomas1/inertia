@@ -721,8 +721,8 @@ test("applies every interface scale live and remains usable at common Linux disp
       const send = element.querySelector<HTMLElement>(
         '[aria-label="Send message"]',
       );
-      const inputBounds = element.querySelector(".composer-input-zone")
-        ?.getBoundingClientRect();
+      // Send sits in the control row now, so the card is what has to hold it.
+      const cardBounds = element.getBoundingClientRect();
       const modelBounds = model?.getBoundingClientRect();
       const labelBounds = label?.getBoundingClientRect();
       const sendBounds = send?.getBoundingClientRect();
@@ -742,12 +742,11 @@ test("applies every interface scale live and remains usable at common Linux disp
           ? getComputedStyle(label).overflow
           : "",
         sendContained: Boolean(
-          inputBounds
-          && sendBounds
-          && sendBounds.left >= inputBounds.left - 1
-          && sendBounds.right <= inputBounds.right + 1
-          && sendBounds.top >= inputBounds.top - 1
-          && sendBounds.bottom <= inputBounds.bottom + 1,
+          sendBounds
+          && sendBounds.left >= cardBounds.left - 1
+          && sendBounds.right <= cardBounds.right + 1
+          && sendBounds.top >= cardBounds.top - 1
+          && sendBounds.bottom <= cardBounds.bottom + 1,
         ),
       };
     });

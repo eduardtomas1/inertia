@@ -349,7 +349,6 @@ export function ComposerToolbar({
               menuController={menuController}
               showPresets={promptPresetsEnabled}
               showStash={promptStashEnabled}
-              showUsage={Boolean(selectedProvider)}
               presetCount={promptPresets.length}
               stashCount={promptStash.length}
               onRunAction={onRunAction}
@@ -424,11 +423,6 @@ export function ComposerToolbar({
         >
         {selectedProvider ? (
           <UsageIndicator
-            open={menu === "usage"}
-            onOpenChange={(next) => {
-              if (next) toggleMenu("usage");
-              else dismissMenu("selection");
-            }}
             providerId={selectedProvider.id}
             usage={usage}
             rateLimits={selectedProvider.rateLimits}

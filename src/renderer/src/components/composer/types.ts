@@ -150,7 +150,6 @@ export type ComposerMenu =
   | "skills"
   | "presets"
   | "stash"
-  | "usage"
   | "more";
 export type MoreSection = "actions" | "reasoning" | "speed" | "mode" | "access";
 

@@ -55,8 +55,8 @@ const budgets = {
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  // The composer's usage disclosure takes its open state from the shared
-  // menu: +277 measured bytes on the detached window's first load.
+  // The composer overflow rows reach the detached window too: +105 measured
+  // bytes on its first load.
   detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 512,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
@@ -140,7 +140,7 @@ const budgets = {
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
   // The dock strip, the diff per-line highlight mapping with its hunk context,
   // the header overflow, the composer overflow rows and the palette entry add
-  // 1,713 measured bytes against this branch's merge base on the same
+  // 1,305 measured bytes against this branch's merge base on the same
   // installed dependencies.
   coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 2_048,
   deferredPdfJavaScript: 500 * kibibyte,

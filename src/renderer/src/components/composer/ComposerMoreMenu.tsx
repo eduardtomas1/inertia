@@ -36,7 +36,6 @@ export interface ComposerMoreMenuProps {
   menuController: ComposerMenuController;
   showPresets: boolean;
   showStash: boolean;
-  showUsage: boolean;
   presetCount: number;
   stashCount: number;
   onRunAction: (action: ProjectAction) => void;
@@ -63,7 +62,6 @@ export function ComposerMoreMenu({
   menuController,
   showPresets,
   showStash,
-  showUsage,
   presetCount,
   stashCount,
   onRunAction,
@@ -370,7 +368,7 @@ export function ComposerMoreMenu({
                     </button>
                   ))}
                 </div>
-                {(showPresets || showStash || showUsage) && (
+                {(showPresets || showStash) && (
                   <div className="composer-more-root composer-more-surfaces">
                     {showPresets && (
                       <button
@@ -397,18 +395,6 @@ export function ComposerMoreMenu({
                           <small>{stashCount > 0
                             ? `${stashCount} saved`
                             : "Set the message aside and bring it back"}</small>
-                        </span>
-                      </button>
-                    )}
-                    {showUsage && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => toggleMenu("usage")}
-                      >
-                        <span>
-                          <strong>Usage and context</strong>
-                          <small>Context window and provider limits</small>
                         </span>
                       </button>
                     )}

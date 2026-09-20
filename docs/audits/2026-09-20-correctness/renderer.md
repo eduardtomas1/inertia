@@ -1,5 +1,7 @@
 # Renderer correctness audit
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Baseline: origin/main d56f972b. Shared worktree codex/full-correctness-audit. Node22.23.2. Continuation after attachment domain audit; native slots reserved for root.
 
 ## Confirmed issue: four-pane subscription identity
@@ -129,3 +131,7 @@ Executed streaming-render-isolation DOM test measures 200 sequential token event
 HappyDOM establishes state/effect/focus behavior and render counts, not native layout fidelity, keyboard OS routing, actual scroll/virtualization geometry, GPU/paint times or detached BrowserWindow IPC wiring. Native E2E, packaged behavior and benchmark lanes remain coordinated by root. Windows/Linux native execution and real provider runtime are not claimed. No changes to snapshot matching already merged in #430.
 
 Committed renderer fix:23893a8d (12 files,8 production/4 tests;262 insertions/34 deletions). Independent providers_turns review requested. Source stable for root full gate.
+
+Bundle follow-up: root full check passed quality+9412 tests but failed renderer bundle budgets by100–200bytes. Committed d7a94605 (3files,1production/2tests): removed now-unused renderer conversationIds() and test-only legacy string-input URL branch; production ownerpair URLs and server legacy URL compatibility preserved. Updated fixtures to actual paired API. Focused5files63tests pass1.38s (renderer sequencing,server sequencing,hub,connection,parser recovery),focused lint/diffcheck pass. Providers_turns independent review says safe/no blocking findings. No budget increases, rebuild/native/broad runs by this worker; root owns bundle retry.
+
+Second bundle follow-up: d7a94605 fixed detached budget, but root measured main40bytes/core138bytes above unchanged ceilings. Committed77745385: Map keeps only mounted owner objects; hook owner uses equivalent declared-type destructuring default; shared MAX4 has the owner tuple's literal length type so a tuple-size change must update it. Renderer imports only numeric limit, server enum/validation unchanged. Added tests for noncanonical mount/reopen order with duplicate conversation ownership and explicit4pair URL bound.89focusedtests6files pass1.51s; lint/diffcheck pass. Providers independently approved Map/default semantics. No build/native/broad runs by this worker; root owns final byte verification.

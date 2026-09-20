@@ -1,5 +1,7 @@
 # Provider and turn correctness audit
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Baseline: d56f972b, fresh origin/main in shared isolated worktree `codex/full-correctness-audit`.
 Scope owner: providers_turns. Node 22 executable prefix `the local Node 22 installation`. Read repository AGENTS.md. No provider accounts, real prompts, releases, external messages, Windows execution, or package runs used by this subagent.
 

@@ -31,7 +31,7 @@ that implementation.
 | Native desktop, Windows and restart/update | Electron entry, runtime supervisor and recovery admission, process journals/guardian, Windows Job and ConPTY authority, terminal lifecycle, discovery and launch, installed update receipts, AppImage identity/singleton, window state and notifications | Native reviewer traced lifecycle and platform branches, inspected package/release boundary checks read-only; deterministic failure tests plus exact-baseline Windows/Linux CI evidence. Native report below distinguishes full small-module reads from targeted large-module review. |
 | Attachments | Renderer imports/drafts/handoff/preview → main selection/import registry/workers → retained conversation store → runtime resolver/extraction scheduler → provider image/document adapters; PDF/image/spreadsheet/text extraction and cancellation | Attachment reviewer traced ownership, limits, detached capabilities, private generated files, worker cancellation and utility termination. Three reproduced fixes and broad focused tests. |
 | Providers and turns | Discovery/auth/model metadata and six supported production routes; custom backend profiles/vault broker; approvals/input/host tools; admission, follow-up, queue, streaming, settlement, resume and restart ownership | Provider reviewer traced every production route, exact-run cleanup and turn persistence linkage. Two reproduced fixes; portable contracts and live-provider limitations documented. |
-| Renderer and performance | Streaming projections/subscriptions/reconnect, transcript virtualization/scroll/focus, drafts/composer ownership, four-pane split and detached windows; workspace files/editor/search, terminal lifecycle, settings and usage | Renderer reviewer plus root review. Reproduced four-pane subscription identity/capacity defect. DOM tests and planned native geometry/performance evidence; no unsupported speedup claim. |
+| Renderer and performance | Streaming projections/subscriptions/reconnect, transcript virtualization/scroll/focus, drafts/composer ownership, four-pane split and detached windows; workspace files/editor/search, terminal lifecycle, settings and usage | Renderer reviewer plus root review. Reproduced four-pane subscription identity/capacity defect. DOM tests plus native Electron geometry/lifecycle scenarios and a measured desktop benchmark; no unsupported speedup claim. |
 | Persistence and recovery | Migration catalog/runner/lineage, SQLite repositories, export/import/backup/quarantine workers, path authority, execution ledger, Duo recovery and WebSocket sequencing | Root and independent persistence reviewer. Transaction/future-schema and worker-exit boundaries checked; reproduced authorized import-root replacement race. Released migrations remain unchanged. |
 | Git and workspaces | Project/conversation path identities, source-control authority bindings, bounded shell-free runner, repository discovery/scans, branch/remote/worktree operations, checkpoint/reversal and reviewed commit transactions | Root deep review of reversal/rollback/index ownership and workspace containment; native reviewer examined executable/process settlement. Reproduced newer staged-work rollback loss and added a native Git writer-lock compare/restore. |
 | IPC, preload and Private Connect | Main/detached preload surfaces, trusted frame/role checks, Zod command/router coverage, scoped detached capabilities, bounded authenticated WebSockets; pairing/session/grants/Tailscale/HTTP projection and mutation delivery receipts | Root deep review of authenticated dispatch and await boundaries; five stale-read authority scenarios reproduced. Detached attachment IDs remain explicit bearer capabilities; no demonstrated cross-window ID leak. |
@@ -114,9 +114,11 @@ or user data were used.
 
 ## Verification ledger
 
-At this draft stage, required full/local native gates are **pending the shared
-local heavy-test slot**. No pass is claimed until the command completes. This
-section will be replaced with final results before the PR is ready for review.
+Source and regression changes completed independent review and are open in
+[PR #433](https://github.com/eduardtomas1/inertia/pull/433). Required local gates
+completed on final source 77745385. Documentation-only consolidation follows that
+source commit. Hosted CI monitoring belongs to the coordinating task; this
+handoff makes no native Windows/Linux pass claim for the final patch.
 
 | Check | Recorded result |
 | --- | --- |
@@ -126,16 +128,72 @@ section will be replaced with final results before the PR is ready for review.
 | `npm run test:windows-codex` on macOS | Four tests passed; four native-only tests skipped. This does not establish native Windows behavior. |
 | `npm run test:linux-package` on macOS | Two files / nine tests passed; metadata/asset contracts, not actual Linux execution. |
 | Streaming render isolation | 200 token events produced 200 transcript/turn renders and zero shell/layout/sidebar/header/scene/chat-workspace/composer renders. Deterministic DOM evidence, not native frame timing. |
-| `npm run check` | Pending. |
-| `npm run test:portable` | Pending; includes new provider cases. |
-| Local Electron E2E / packaged smoke / fuses | Pending. |
-| Native desktop benchmark | Pending; report absolute measurements without an unmeasured baseline speedup claim. |
-| Exact-head Windows/Linux CI | Pending PR checks. Baseline CI passed on all six native platform/architecture jobs, and is explicitly not this patch's certification. |
+| `npm run check` | Passed on final source 77745385: quality/lint/types/lineage/build and 876 test files; 9,414 passed, 146 platform/native skips. Test phase 125.03 seconds. |
+| `npm run test:portable` | Passed: 104 files, 1,457 tests; nine native/platform skips, 149.51 seconds. The subsequent renderer trim and shared maximum are covered by the final full gate. |
+| Native dependency architecture | Passed on darwin/arm64: Claude binary architecture, SQLite, canvas, accessibility/FFI bindings and bounded PTY probe. |
+| Local Electron E2E | Passed: 27/27 scenarios across 13 specs, one worker, 3.4 minutes on macOS ARM64. Exact specs below. |
+| Packaged application / fuses / smoke | Passed on macOS ARM64: package-dir, all expected fuse states, runtime guardian, Private Connect assets, manual update fallback, actual PDF extraction and image retention; 1,077 ms launch-to-ready, 294 ms shutdown, clean exit. |
+| Native desktop benchmark | Passed, 1.6 minutes on macOS ARM64; five streaming samples, startup/scroll/terminal/split/close cycles and 600-frame soak. Measurements below. |
+| Exact-head hosted native CI | Owned by the coordinating task. No final Windows/Linux pass claimed here; historical baseline checks are explicitly separate evidence. |
 
 One early direct-Vitest provider sweep produced four Antigravity failures because
 the generated runtime guardian had not been built. Direct Vitest bypasses npm's
 pretest prerequisite. This result is retained in the provider report; the normal
-full gate must build the guardian and pass these cases, without relaxing timeouts.
+first full gate built the guardian and all 9,412 tests passed, including those cases.
+That run then failed unchanged renderer bundle ceilings by fewer than 300 bytes.
+The scoped reconnect code was simplified in d7a94605/77745385 and independently
+reviewed; a fresh bundle check passed. The final full gate then passed on 77745385 with 9,414 tests.
+Final measured renderer budgets: main first load 803.0/803.1 KiB, detached first
+load 616.4/616.6 KiB, shared core 2,072.6/2,072.7 KiB. No timeout, assertion, architecture ceiling or byte budget was relaxed.
+
+The native scenario batch used the normal Playwright configuration with one
+worker and these specs: `authoritative-run-state`, `conversation-split`,
+`detached-chat-window`, `git-workflows`, `image-send-regression`,
+`attachment-preview`, `checkpoint-recovery`, `database-recovery`,
+`document-decoder-isolation`, `private-connect`, `runtime-live-recovery`,
+`terminal`, and `runtime-stranded-profile`. All 27 scenarios passed without retries.
+
+The first package attempt omitted the normal generated third-party notices
+prerequisite because it started from `check`/`build:bundle`; package smoke
+correctly rejected the missing legal resource before launch. Running
+`npm run notices:generate`, rebuilding the package, then verifying fuses and
+package smoke passed. This was a setup sequencing error, not a bypass or relaxed
+check. Generated resources are ignored build output; no dependency or notice
+policy changed.
+
+## Measured desktop performance
+
+The normal benchmark passed on macOS ARM64 (Apple M5 Pro, Node 22.23.2,
+Electron 44.3.0), using 300 primary turns, 600 primary messages, 120 workspace
+files and a deterministic local Codex app-server fixture. This exercises the
+provider/runtime/SQLite/WebSocket/React/paint path, without live network latency.
+[Sanitized numeric evidence](2026-09-20-correctness/desktop-benchmark-summary.json)
+omits process IDs, local paths and raw diagnostics.
+
+| Measurement | Observed value |
+| --- | --- |
+| Cold / warm first window | 760 / 383 ms |
+| Cold / warm runtime interactive | 1,644 / 1,256 ms |
+| First provider delta to paint, five samples | Median 21 ms; p95 31 ms |
+| Completion to final paint, five samples | Median 241 ms; p95 251 ms |
+| Per-sample p95 visible-update gap | Median 75.9 ms; maximum 91.8 ms; normal 100 ms target met |
+| Streaming long tasks | Zero in measured samples; 10 over-budget/dropped frames across 2,788 measured frames |
+| Authoritative 300-turn scroll sample | 120 frames; p95 16.6 ms; zero frames over 25 ms, zero long tasks; six mounted timeline rows |
+| First command palette / settings / intent dialog open | 4.2 / 13.0 / 13.1 ms |
+| File tree / terminal / split interactive | 424 / 799 / 93 ms |
+| Reader navigation / Jump to latest | Preserved in all five samples; median Jump to latest 51.8 ms, final bottom gap zero |
+| Eight open/close cycles | Terminal, xterm, workspace-surface and split counters returned to zero each cycle; heap 16.35 → 17.91 MB |
+| Five-iteration, 600-frame soak | Heap 17.91 → 20.07 MB (+2.16 MB); bounded fixture passed |
+| Cold / warm shutdown | 305 / 6,517 ms; both runtime exits confirmed |
+
+These are absolute measurements from one host/run, not an improvement claim or
+proof of leak absence. The 6.52-second warm shutdown is the slowest observed
+lifecycle sample; this run does not establish its cause or a regression against
+baseline. The fresh-profile startup still uses pre-seeded data and uncontrolled
+OS caches. Visible cadence excludes the fixture's first four gated intervals;
+all later intervals remain measured. The short soak and eight close cycles
+establish bounded observed retention and disposed UI counters, not indefinite
+steady-state behavior. Controlled Linux discovery was not exercised.
 
 ## Detailed evidence and independent review
 
@@ -146,6 +204,25 @@ full gate must build the guardian and pass these cases, without relaxing timeout
 - [Persistence, migrations, recovery, workspace identity and Duo review](2026-09-20-correctness/persistence.md), including independent provider/vault/Claude review.
 - [Renderer, reconnect, draft/focus and performance review](2026-09-20-correctness/renderer.md).
 - [Independent aggregate change review](2026-09-20-correctness/independent-review.md). The reviewer excludes their own changes; a different reviewer checked those. The Git reviewer found an additional lock-marker gap, fixed and regression-tested before commit.
+
+## Changed files
+
+Production and regression files changed by this audit (documentation is listed
+under Detailed evidence above):
+
+| Production file | Regression file(s) |
+| --- | --- |
+| [src/main/attachment-registry-file-verification.ts](../../src/main/attachment-registry-file-verification.ts)<br>[src/main/attachment-registry.ts](../../src/main/attachment-registry.ts) | [tests/main/attachment-registry.test.ts](../../tests/main/attachment-registry.test.ts) |
+| [src/main/credential-vault.ts](../../src/main/credential-vault.ts) | [tests/main/credential-vault-load-race.test.ts](../../tests/main/credential-vault-load-race.test.ts) |
+| [src/main/private-connect/service.ts](../../src/main/private-connect/service.ts) | [tests/main/private-connect/service.test.ts](../../tests/main/private-connect/service.test.ts) |
+| [src/main/runtime-supervisor.ts](../../src/main/runtime-supervisor.ts) | [tests/main/runtime-supervisor-lifecycle.test.ts](../../tests/main/runtime-supervisor-lifecycle.test.ts) |
+| [src/server/git/reversal-files.ts](../../src/server/git/reversal-files.ts)<br>[src/server/git/reversal-index.ts](../../src/server/git/reversal-index.ts)<br>[src/server/git/reversal.ts](../../src/server/git/reversal.ts) | [tests/server/git-diff-review.test.ts](../../tests/server/git-diff-review.test.ts) |
+| [src/server/persistence/database-recovery-import.ts](../../src/server/persistence/database-recovery-import.ts) | [tests/server/database-export.test.ts](../../tests/server/database-export.test.ts) |
+| [src/server/provider/claude-agent-sdk-harness.ts](../../src/server/provider/claude-agent-sdk-harness.ts)<br>[src/server/provider/claude-prompt.ts](../../src/server/provider/claude-prompt.ts) | [tests/server/claude-prompt.test.ts](../../tests/server/claude-prompt.test.ts) |
+| [src/server/provider/discovery.ts](../../src/server/provider/discovery.ts) | [tests/server/provider-auth-readiness.test.ts](../../tests/server/provider-auth-readiness.test.ts) |
+| [src/server/provider/run-coordinator.ts](../../src/server/provider/run-coordinator.ts) | [tests/server/provider-run-admission-cleanup.test.ts](../../tests/server/provider-run-admission-cleanup.test.ts) |
+| [src/server/runtime/attachments/private-generated-attachments.ts](../../src/server/runtime/attachments/private-generated-attachments.ts) | [tests/server/private-generated-attachments.test.ts](../../tests/server/private-generated-attachments.test.ts) |
+| [src/renderer/src/hooks/useConversationProjection.ts](../../src/renderer/src/hooks/useConversationProjection.ts)<br>[src/renderer/src/hooks/useInertiaConnection.ts](../../src/renderer/src/hooks/useInertiaConnection.ts)<br>[src/renderer/src/hooks/useSplitWorkspaceScene.ts](../../src/renderer/src/hooks/useSplitWorkspaceScene.ts)<br>[src/renderer/src/utils/runtimeSequencing.ts](../../src/renderer/src/utils/runtimeSequencing.ts)<br>[src/server/runtime-sequencing.ts](../../src/server/runtime-sequencing.ts)<br>[src/server/runtime/runtime-sync-hub.ts](../../src/server/runtime/runtime-sync-hub.ts)<br>[src/shared/contracts/client-command/app.ts](../../src/shared/contracts/client-command/app.ts)<br>[src/shared/runtime-detail-subscriptions.ts](../../src/shared/runtime-detail-subscriptions.ts) | [tests/renderer/conversation-projection-interactions.dom.test.tsx](../../tests/renderer/conversation-projection-interactions.dom.test.tsx)<br>[tests/renderer/runtime-sequencing.test.ts](../../tests/renderer/runtime-sequencing.test.ts)<br>[tests/server/runtime-sequencing.test.ts](../../tests/server/runtime-sequencing.test.ts)<br>[tests/server/runtime-sync-hub.test.ts](../../tests/server/runtime-sync-hub.test.ts) |
 
 ## Remaining limits
 

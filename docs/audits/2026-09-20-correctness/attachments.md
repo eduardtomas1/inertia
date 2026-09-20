@@ -1,5 +1,7 @@
 # Attachment correctness audit
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Baseline: origin/main d56f972b; shared clean branch codex/full-correctness-audit. Node 22.23.2. Fresh-code audit; no historical PDF report supplied to this worker.
 
 ## Confirmed defects and fixes

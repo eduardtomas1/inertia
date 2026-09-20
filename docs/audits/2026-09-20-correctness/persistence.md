@@ -1,5 +1,7 @@
 # Persistence, recovery, identity, and Duo audit (wave 2)
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Workspace: the audit worktree, branch codex/full-correctness-audit. Reviewer: windows_native. Baseline d56f972b; no migration schema edited. This is a scoped independent source/Node integration audit, not a native Windows execution claim.
 
 ## Confirmed and fixed

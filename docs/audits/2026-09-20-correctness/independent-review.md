@@ -1,5 +1,7 @@
 # Independent aggregate correctness review
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Reviewer: providers_turns. Baseline d56f972b. Shared worktree codex/full-correctness-audit. This review excludes the reviewer's own auth/admission/vault changes; Windows/native reviewer owns their independent review. No claim of zero defects across every original source line or native platform behavior.
 
 ## Reviewed commits
@@ -18,7 +20,7 @@ Reviewer: providers_turns. Baseline d56f972b. Shared worktree codex/full-correct
 - Parent reported Git helper/rollback regression 3/3 and full diff/workspace suite 49/49 passed. This reviewer inspected the fixtures and implementation but did not duplicate those suites or consume the reserved native test slot.
 - Temporary/generated attachment authority omits birthtime comparison; no concrete directory inode reuse was reproduced. Initialization race suspicion was rejected after import/read/dispose call graph tracing as above. Directory component replacement between final pathname validation and a native syscall remains a platform-level limitation to distinguish from tested before/after-await identity retention.
 - No live provider accounts, real credential vaults, local browser private pages, external messages or releases were used.
-- Additional forthcoming renderer/continuation commits need a final delta review; this report does not cover commits created after 1309d432 yet.
+- At the first review checkpoint, renderer continuation commits remained outstanding; the final delta and size reviews below cover them.
 
 ## Final renderer and architecture delta review
 
@@ -26,3 +28,11 @@ Reviewer: providers_turns. Baseline d56f972b. Shared worktree codex/full-correct
 - **434ff843** — architecture-size refactor. Read full delta. Attachment directory identity verification was moved verbatim into the existing file-verification module with unchanged condition/error text; supervisor change only compacts the comment. No behavior change or blocking finding. Author reports 81 attachment tests passed following relocation; full architecture gate remains parent-owned.
 
 Final reviewed source HEAD: **434ff843**. No outstanding blocking review findings. Remaining test/platform limitations above still apply; final full-gate outcome must come from parent verification logs.
+
+## Renderer size follow-up
+
+Reviewed the three-file follow-up removing the renderer-only, production-unused `RuntimeDetailSubscriptions.conversationIds()` method and legacy string-array URL-generator branch. Call-site search confirms actual connection code already supplies `mountedPanes()` owner pairs and no removed-method consumers remain. Server parsing of legacy URLs is unchanged. Updated two test files exercise the same paired-owner API used in production, including duplicate-conversation panes. No blocking finding; no budget changes, native runs, or broad reruns by this reviewer. Review completed on the uncommitted delta pending attachments owner's commit.
+
+Reviewed second renderer size follow-up (uncommitted Map-based mounted-pane tracker, hook destructuring default, sparse remount-order regression). URL encoding pairs owners and IDs explicitly; map insertion/remount order does not affect server owner lookup. Distinct owners sharing one conversation remain separate and deletion removes only the named owner. Parameter default preserves the declared optional, non-null owner contract. No blocking finding. Proposed shared maximum derived from the existing four-owner tuple would preserve the bound; separate parent approval/commit remains required. No verification budgets changed by this review.
+
+Final bundle follow-up: d7a94605 and 77745385 remove only unused renderer compatibility code, store only mounted pane owner/ID pairs, and initialize the existing hook owner fallback directly in its parameter default. Providers reviewer independently approved these semantics and the sparse-remount regression. Root separately reviewed the shared numeric four-pane maximum: its TypeScript type is the owner tuple's length, preserving a compile-time mismatch error if owner count changes, while server enum and URL validation remain unchanged. The actual renderer bundle check passed every unchanged ceiling on 77745385. No blocking review findings remain in the final source delta.

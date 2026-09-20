@@ -1,5 +1,7 @@
 # Windows/native correctness audit — wave 1
 
+This domain review records its review-wave evidence. The [consolidated audit](../2026-09-20-correctness.md) contains final local gates, native results and limitations.
+
 Baseline: `d56f972b32fadfa29169bb8390401f5ca49e419b`, branch `codex/full-correctness-audit`. Local host macOS ARM64, Node 22.23.2. No native Windows execution was performed locally. No releases, native benchmarks, E2E runs, Docker/Colima changes, or edits to sibling worktrees.
 
 ## Confirmed defect and fix

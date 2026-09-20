@@ -360,13 +360,17 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
+      # Match native CI for immutable predecessor installers: Git Bash inherits
+      # an unrelated module search path that can exhaust their process-check budget.
       - name: Install N-1, upgrade in place, smoke, and uninstall Windows package
+        shell: pwsh
         if: runner.os == 'Windows' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
         env:
           INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
         run: npm run test:windows-installer-smoke
 
       - name: Install, smoke, and uninstall Windows Canary package
+        shell: pwsh
         if: runner.os == 'Windows' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')
         run: npm run test:windows-installer-smoke
 

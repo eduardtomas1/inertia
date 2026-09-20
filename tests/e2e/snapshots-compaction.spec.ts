@@ -71,6 +71,13 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     const preview = tile.getByRole("button", { name: "Preview attachment snapshot.png" });
     await preview.click(); const dialog = page.getByRole("dialog", { name: "snapshot.png" });
     await expect(dialog).toBeVisible(); await expect(dialog.getByRole("button", { name: "Close preview of snapshot.png" })).toBeFocused();
+    // The dialog loads its own validated image. Finish that request before
+    // switching views and later revoking the attachment by removing it.
+    await expect.poll(() => dialog.locator(".attachment-preview-stage img").evaluate((image) => ({
+      complete: (image as HTMLImageElement).complete,
+      width: (image as HTMLImageElement).naturalWidth,
+      height: (image as HTMLImageElement).naturalHeight,
+    }))).toEqual({ complete: true, width: 800, height: 500 });
     await dialog.getByRole("button", { name: "View accessibility data" }).click();
     const controls = await dialog.locator(".snapshot-preview-controls").boundingBox();
     const stage = await dialog.locator(".attachment-preview-stage").boundingBox();

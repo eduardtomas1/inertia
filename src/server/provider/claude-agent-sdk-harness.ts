@@ -252,7 +252,7 @@ function startClaudeRun(
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
-  const skillAbortController = new AbortController();
+  const preparationAbortController = new AbortController();
   const delegateLifecycle = new ClaudeDelegateLifecycle();
   const promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
@@ -486,7 +486,7 @@ function startClaudeRun(
       if (!promptReservation) return finishResult("cancelled");
       let prompt: SDKUserMessage;
       try {
-        prompt = await claudePrompt(promptText, initialImagePaths);
+        prompt = await claudePrompt(promptText, initialImagePaths, preparationAbortController.signal);
       } catch (error) {
         promptChannel.release(promptReservation);
         throw error;
@@ -502,7 +502,7 @@ function startClaudeRun(
       const skillDeadline = createClaudeSkillDeadline(
         CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,
         "Claude selected-skill staging timed out.",
-        skillAbortController.signal,
+        preparationAbortController.signal,
       );
       const staging = stageClaudeSkillPlugin(
         selectedClaudeSkills,
@@ -959,8 +959,8 @@ function startClaudeRun(
     if (cancelRequested && !force) return;
     cancelRequested = true;
     hostToolRuntime?.settle();
-    skillAbortController.abort(
-      new Error("Claude selected-skill staging was cancelled."),
+    preparationAbortController.abort(
+      new Error("Claude input preparation was cancelled."),
     );
     acceptingFollowUps = false;
     promptChannel.cancel();
@@ -1008,7 +1008,7 @@ function startClaudeRun(
         if (!reservation) return false;
         let followUp: SDKUserMessage;
         try {
-          followUp = await claudePrompt(text, input.imagePaths);
+          followUp = await claudePrompt(text, input.imagePaths, preparationAbortController.signal);
         } catch (error) {
           promptChannel.release(reservation);
           throw error;

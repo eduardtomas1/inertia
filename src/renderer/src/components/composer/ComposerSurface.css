@@ -1,7 +1,16 @@
-/* The input floats over an inset control drawer. All controls retain their
-   original handlers and ownership. */
 .composer-shell .composer {
-  --radius-composer: 23px;
+  --radius-composer: 20px;
+  --composer-drawer-inset: 22px;
+  --composer-strip-height: 30px;
+  --composer-strip-offset: 0px;
+  --composer-surface-highlight: color-mix(in srgb, #fff 6%, transparent);
+  --composer-surface-fill: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--composer-surface) 96%, var(--accent-soft)),
+    color-mix(in srgb, var(--composer-surface) 88%, var(--accent-soft))
+  );
+  --composer-surface-shadow: 0 24px 60px -34px rgb(0 0 0 / 55%);
+  isolation: isolate;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -10,22 +19,41 @@
   border-color: transparent;
   box-shadow: none;
 }
+.composer-shell .composer:has(> .composer-toolbar > .composer-checkout-strip) {
+  --composer-strip-offset: var(--composer-strip-height);
+}
+.composer-shell .composer::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 var(--composer-strip-offset) 0;
+  pointer-events: none;
+  content: "";
+  border: 1px solid var(--composer-border);
+  border-radius: var(--radius-composer);
+  background: var(--composer-surface-fill);
+  box-shadow:
+    inset 0 1px var(--composer-surface-highlight),
+    var(--composer-surface-shadow);
+  transition:
+    border-color 180ms var(--motion-ease),
+    box-shadow 180ms var(--motion-ease);
+}
+.composer-shell .composer:focus-within::before {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--composer-border));
+  box-shadow:
+    inset 0 1px var(--composer-surface-highlight),
+    0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent),
+    0 24px 60px -30px color-mix(in srgb, var(--accent) 22%, rgb(0 0 0 / 60%));
+}
 .composer-shell .composer-input-zone {
   position: relative;
-  z-index: 3;
-  min-height: 58px;
-  padding: 16px 105px 15px 18px;
-  border: 1px solid var(--composer-border);
-  border-radius: 23px;
-  background: color-mix(in srgb, var(--composer-surface) 90%, var(--accent-soft));
-  box-shadow: 0 5px 20px -12px rgb(0 0 0 / 30%);
-}
-.composer-shell .composer-input-zone:focus-within {
-  border-color: var(--interactive-border-hover);
-  box-shadow:
-    0 5px 20px -12px rgb(0 0 0 / 30%),
-    0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
-    0 0 34px -14px color-mix(in srgb, var(--accent) 42%, transparent);
+  z-index: 1;
+  min-height: 0;
+  padding: 15px 18px 4px;
+  border: 0;
+  border-radius: var(--radius-composer) var(--radius-composer) 0 0;
+  background: transparent;
+  box-shadow: none;
 }
 .composer-shell .composer textarea {
   min-height: 26px;
@@ -33,29 +61,68 @@
 }
 .composer-shell .composer-toolbar {
   position: static;
-  margin: -15px 16px 0;
-  padding-top: 15px;
-  border: 1px solid var(--composer-border);
-  border-radius: 0 0 16px 16px;
-  background: color-mix(
-    in srgb,
-    var(--composer-surface) 76%,
-    var(--accent-soft)
-  );
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "rail send"
+    "strip strip";
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
-.composer-input-actions {
-  --composer-send-size: max(34px, var(--composer-control-height));
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 13px;
+.composer-shell .composer-primary-rail {
+  z-index: 1;
   display: flex;
+  grid-area: rail;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 9px 8px;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.composer-shell .composer-attach-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.composer-shell .composer-attach-actions .icon-button {
+  width: var(--composer-control-height);
+  height: var(--composer-control-height);
+  min-height: var(--composer-control-height);
+  color: var(--text-muted);
+}
+.composer-shell .composer-attach-actions .icon-button:not(:disabled):hover {
+  color: var(--text);
+}
+.composer-shell .composer-options {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.composer-shell .composer-tools,
+.composer-shell .composer-actions {
+  flex: 0 0 auto;
+  padding-left: 0;
+  border-left: 0;
+}
+.composer-shell .composer-tools {
+  margin-left: auto;
+}
+.composer-input-actions {
+  --composer-send-size: max(32px, var(--composer-control-height));
+  position: static;
+  z-index: 1;
+  display: flex;
+  grid-area: send;
   align-items: center;
   gap: 6px;
+  padding: 2px 10px 9px 2px;
 }
-/* Secondary icons only: the primary send/stop action keeps its own on-accent
-   and danger colors. :where() leaves this rule's specificity unchanged. */
 .composer-shell .composer-input-actions .icon-button:where(:not(.send-button)) {
   width: 28px;
   height: 32px;
@@ -69,66 +136,92 @@
   min-height: var(--composer-send-size);
   flex: 0 0 var(--composer-send-size);
   margin-left: 0;
-}
-.composer-shell .composer-primary-rail {
-  z-index: auto;
-  padding: 4px 9px;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  gap: 4px;
-}
-.composer-shell .composer-checkout-strip {
-  z-index: auto;
-  min-height: 26px;
-  margin-top: 0;
-  padding: 4px 10px 6px;
-  border-top-color: color-mix(
-    in srgb,
-    var(--composer-zone-separator) 45%,
-    transparent
-  );
-  border-radius: 0 0 16px 16px;
-  background: transparent;
-  font-size: 10.5px;
-}
-.composer-shell .composer-tools,
-.composer-shell .composer-actions {
-  border-left: 0;
-  padding-left: 2px;
+  box-shadow: inset 0 1px color-mix(in srgb, #fff 24%, transparent);
 }
 .composer-shell .selected-model-chip {
   border-color: transparent;
   background: transparent;
 }
+.composer-shell .selected-model-chip:hover {
+  border-color: var(--interactive-border-hover);
+  background: var(--surface-hover);
+}
+.composer-shell .selected-model-chip[aria-expanded="true"] {
+  border-color: var(--interactive-border-hover);
+  background: var(--selected-surface-strong);
+}
 .composer-shell .composer-setting-family {
+  gap: 0;
+  margin: 0;
+  padding: 0;
   border: 0;
   background: transparent;
 }
+.composer-shell .composer-setting-family .composer-setting-control {
+  display: inline-flex;
+  align-items: center;
+}
+.composer-shell .composer-setting-family .composer-setting-control + .composer-setting-control::before {
+  content: "·";
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.composer-shell .composer-setting-family .composer-pill {
+  padding-inline: 5px;
+  color: var(--text-muted);
+}
+.composer-shell .composer-setting-family .composer-pill:hover,
+.composer-shell .composer-setting-family .composer-pill[aria-expanded="true"] {
+  color: var(--text);
+}
+.composer-shell .composer-setting-family .composer-setting-control:not(:first-child) .composer-setting-icon,
+.composer-shell .composer-setting-family .composer-setting-control:not(:last-child) .composer-setting-chevron {
+  display: none;
+}
+.composer-shell .composer-checkout-strip {
+  z-index: -2;
+  grid-area: strip;
+  height: var(--composer-strip-height);
+  min-height: 0;
+  margin: 0 var(--composer-drawer-inset);
+  padding: 3px 10px 0;
+  border: 0;
+  border-radius: 0;
+  color: color-mix(in srgb, var(--text-muted) 82%, transparent);
+  background: transparent;
+  font-size: max(calc(var(--ui-font-secondary) + var(--platform-readability-adjustment)), 11.5px);
+}
+.composer-shell .composer-checkout-strip::before {
+  position: absolute;
+  z-index: -1;
+  inset: -16px 0 0;
+  pointer-events: none;
+  content: "";
+  border: 1px solid var(--composer-border);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  background: color-mix(in srgb, var(--composer-surface) 62%, transparent);
+  box-shadow: 0 14px 32px -20px rgb(0 0 0 / 55%);
+}
+.composer-shell .composer-checkout-location {
+  color: inherit;
+  font-weight: 500;
+}
 @container (max-width: 480px) {
-  .composer-shell .composer-toolbar {
-    margin-inline: 8px;
+  .composer-shell .composer {
+    --composer-drawer-inset: 12px;
   }
   .composer-shell .composer-primary-rail {
-    padding-inline: 5px;
+    padding-left: 5px;
   }
   .composer-shell .composer-input-zone {
-    padding-left: 13px;
-    padding-right: 94px;
+    padding-inline: 14px;
   }
   .composer-input-actions {
-    right: 10px;
-    gap: 2px;
+    padding-right: 8px;
   }
 }
-
-.composer-shell .composer-input-zone {
-  transition:
-    border-color 180ms var(--motion-ease),
-    box-shadow 180ms var(--motion-ease);
-}
 .composer-shell .composer-popover {
-  /* Placement measures this surface; fading keeps its bounds stable. */
   animation: composer-popover-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes composer-popover-in {
@@ -143,13 +236,7 @@
   .composer-shell .composer-popover {
     animation: none;
   }
-}
-
-.composer-shell .selected-model-chip:hover {
-  border-color: var(--interactive-border-hover);
-  background: var(--surface-hover);
-}
-.composer-shell .selected-model-chip[aria-expanded="true"] {
-  border-color: var(--interactive-border-hover);
-  background: var(--selected-surface-strong);
+  .composer-shell .composer::before {
+    transition: none;
+  }
 }

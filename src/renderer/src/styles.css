@@ -2641,15 +2641,14 @@ button.environment-row:focus-visible,
   text-align: center;
 }
 
-/* Follow the raised input's own border, above the inset controls drawer. */
-.composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+.composer[data-maximum-reasoning="true"]::after {
   position: absolute;
-  z-index: 1;
-  inset: -1px;
+  z-index: 2;
+  inset: 0 0 var(--composer-strip-offset, 0px);
   padding: 1px;
   pointer-events: none;
   content: "";
-  border-radius: inherit;
+  border-radius: var(--radius-composer);
   background: linear-gradient(
     105deg,
     color-mix(in srgb, var(--accent) 10%, transparent) 0%,
@@ -2674,7 +2673,7 @@ button.environment-row:focus-visible,
 }
 
 .app-shell[data-document-visible="false"]
-  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"]::after {
   animation-play-state: paused;
 }
 
@@ -2684,7 +2683,7 @@ button.environment-row:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"]::after {
     animation: none;
     background-position: 50% 50%;
   }

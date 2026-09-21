@@ -245,54 +245,31 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
-      <div className="composer-input-actions" role="group" aria-label="Message actions">
-        <IconButton
-          label={running
-            ? imageInputUnavailableReason
-              ? `Attach images. ${imageInputUnavailableReason}`
-              : canSendAttachmentWhileRunning
-                ? "Attach follow-up images"
-                : "Attach queued images"
-            : imageInputUnavailableReason
-              ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
-              : "Attach images, documents, or spreadsheets"}
-          onClick={() => void onChooseAttachments()}
-          disabled={
-            disabled
-            || attachmentImporting
-            || primaryAction === "submitting"
-            || attachmentCount >= MAX_CHAT_ATTACHMENTS
-            || (running && imageInputUnavailableReason !== null)
-          }
-        >
-          <Paperclip size={16} />
-        </IconButton>
-        <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} /></Suspense>
-        <Suspense
-          fallback={(
-            <ComposerSendActionsFallback
-              primaryAction={primaryAction}
-              onSubmit={onSubmit}
-              onStop={onStop}
-            />
-          )}
-        >
-          <ComposerSendActions
-            conversationId={conversation.id}
-            primaryAction={primaryAction}
-            canSendQueuedNow={canSendQueuedNow}
-            running={running}
-            latestTurnId={queuedTurnId}
-            latestTurnStatus={queuedTurnStatus}
-            latestTurnAuthoritative={queuedTurnAuthoritative}
-            onSendQueued={onSendQueued}
-            onReleaseAttachment={onReleaseAttachment}
-            onSubmit={onSubmit}
-            onStop={onStop}
-          />
-        </Suspense>
-      </div>
       <div className="composer-primary-rail">
+        <div className="composer-attach-actions" role="group" aria-label="Attach">
+          <IconButton
+            label={running
+              ? imageInputUnavailableReason
+                ? `Attach images. ${imageInputUnavailableReason}`
+                : canSendAttachmentWhileRunning
+                  ? "Attach follow-up images"
+                  : "Attach queued images"
+              : imageInputUnavailableReason
+                ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
+                : "Attach images, documents, or spreadsheets"}
+            onClick={() => void onChooseAttachments()}
+            disabled={
+              disabled
+              || attachmentImporting
+              || primaryAction === "submitting"
+              || attachmentCount >= MAX_CHAT_ATTACHMENTS
+              || (running && imageInputUnavailableReason !== null)
+            }
+          >
+            <Paperclip size={16} />
+          </IconButton>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} /></Suspense>
+        </div>
         <div
           className="composer-options"
           role="group"
@@ -519,6 +496,31 @@ export function ComposerToolbar({
         ) : null}
 
         </div>
+      </div>
+      <div className="composer-input-actions" role="group" aria-label="Message actions">
+        <Suspense
+          fallback={(
+            <ComposerSendActionsFallback
+              primaryAction={primaryAction}
+              onSubmit={onSubmit}
+              onStop={onStop}
+            />
+          )}
+        >
+          <ComposerSendActions
+            conversationId={conversation.id}
+            primaryAction={primaryAction}
+            canSendQueuedNow={canSendQueuedNow}
+            running={running}
+            latestTurnId={queuedTurnId}
+            latestTurnStatus={queuedTurnStatus}
+            latestTurnAuthoritative={queuedTurnAuthoritative}
+            onSendQueued={onSendQueued}
+            onReleaseAttachment={onReleaseAttachment}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+        </Suspense>
       </div>
       {showCheckoutContext && (
         <div

@@ -25,6 +25,8 @@ native application icons.
 - Keep approvals, follow-ups and other controls available to admitted runs
   while provider installation evidence refreshes.
 - Bound Claude image preparation and stop pending reads when a turn is cancelled.
+- Avoid rebuilding the model picker's layout data on every keyboard movement
+  through a large catalog.
 
 ### Preserve work
 

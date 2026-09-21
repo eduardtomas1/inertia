@@ -93,6 +93,7 @@ export interface CodexAppServerEventHost {
   providerThreadId: () => string | undefined;
   activeTurnId: () => string | undefined;
   setActiveTurnId: (turnId: string | undefined) => void;
+  requestedTurnId?: () => string | null | undefined;
   cancelRequested: () => boolean;
   lastError: () => string | undefined;
   setLastError: (message: string) => void;
@@ -670,6 +671,12 @@ export class CodexAppServerEvents {
         || notificationThreadId !== this.host.providerThreadId()
         || !notificationTurnId
         || this.completedTurnIds.has(notificationTurnId)
+      ) return;
+      const requestedTurnId = this.host.requestedTurnId?.();
+      if (
+        phase === "starting-turn"
+        && requestedTurnId !== undefined
+        && notificationTurnId !== requestedTurnId
       ) return;
       if (
         phase !== "awaiting-goal-continuation"

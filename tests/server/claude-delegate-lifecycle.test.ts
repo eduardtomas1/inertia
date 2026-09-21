@@ -108,6 +108,28 @@ describe("Claude delegated lifecycle", () => {
     expect(notification.observe({ ...(ack as object), origin: { kind: "task-notification" } } as SDKMessage))
       .toEqual({ turnEnded: false });
     expect(notification.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+
+    const echoed = new ClaudeDelegateLifecycle();
+    echoed.expectPrompt(promptUuid);
+    echoed.observe(lifecycleFrame("queued"));
+    echoed.observe(lifecycleFrame("started"));
+    expect(echoed.observe({
+      ...(ack as object),
+      origin: { kind: "task-notification" },
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: false });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(false);
+    expect(echoed.observe(lifecycleFrame("completed"))).toEqual({ turnEnded: false });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(true);
+    expect(echoed.complete()).toEqual({ kind: "incomplete", reason: "prompt-unanswered" });
+    expect(echoed.observe({
+      ...claudeSuccessResult("PONG", "completed"),
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: true });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(false);
+    expect(echoed.complete()).toMatchObject({ kind: "result", result: { result: "PONG" } });
   });
 
   it.each(["refused", "cancelled", "discarded"])("ends a %s prompt even without a preceding acknowledgement", (state) => {

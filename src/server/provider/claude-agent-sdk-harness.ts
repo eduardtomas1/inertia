@@ -40,7 +40,7 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
@@ -691,6 +691,10 @@ function startClaudeRun(
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;
         }
+        if (commandLifecycle?.state === "completed" && commandLifecycle.command_uuid === prompt.uuid
+          && delegateLifecycle.awaitsUnansweredPrompt()) {
+          terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
+        }
         if (message.type === "result" && lifecycle.turnEnded === false
           && delegateLifecycle.hasProvisionalResult()) {
           // A result emitted while delegated work is live is the parent's
@@ -722,7 +726,8 @@ function startClaudeRun(
           terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (message.type === "result") {
-          if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0) {
+          if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0
+            && !(isClaudeQueuedCompletionAck(message) && isClaudeNotificationResult(message))) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
               if (isClaudeQueuedCompletionAck(message)) continue;
@@ -827,6 +832,16 @@ function startClaudeRun(
         throw new Error(
           "Claude Agent SDK exited before correlating every accepted follow-up.",
         );
+      }
+      if (
+        isClaudeQueuedCompletionAck(finalMessage)
+        && finalMessage.local_command === undefined
+        && !messageProjector.sawOutputText
+        && options.input.operation?.kind !== "compact"
+        && !promptText.trimStart().startsWith("/")
+      ) {
+        const error = routeFailure(claudeLifecycleFailure("prompt-unanswered"));
+        return finishResult("failed", error, claudeFailure(error, "result/unanswered"));
       }
       if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {
         messageProjector.emitTerminalText(finalMessage.result, finalMessage.uuid);
@@ -1104,6 +1119,8 @@ function claudeLifecycleFailure(
       return "Claude Agent SDK exited before the parent resumed after delegated work.";
     case "missing-result":
       return "Claude Agent SDK exited without a final result.";
+    case "prompt-unanswered":
+      return "Claude finished the request without returning an answer.";
   }
 }
 

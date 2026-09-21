@@ -11,6 +11,9 @@ import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/
 import { createAppFixture } from "./support/app-fixture";
 
 test("the real update validator decodes Electron message envelopes and acknowledges its result", async () => {
+  // Preserve the platform's fixture setup/teardown allowance in addition to
+  // both sequential 30-second probes and their two-second exit-proof bounds.
+  test.setTimeout(test.info().timeout + 2 * (30_000 + 2_000));
   const fixture = await createAppFixture({ name: "update-viability-transport", initialState: "empty" });
   try {
     const data = join(fixture.testDirectory, "candidate-data");

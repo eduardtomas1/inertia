@@ -741,11 +741,18 @@ export function ChatWorkspace({
     if (readerIntentReleaseTimerRef.current !== null) {
       window.clearTimeout(readerIntentReleaseTimerRef.current);
     }
+    const intentConversationId = navigationRef.current.conversationId;
     readerIntentReleaseTimerRef.current = window.setTimeout(() => {
       readerIntentRef.current = false;
       readerIntentReleaseTimerRef.current = null;
+      // Content may have finished growing while the gesture guard blocked
+      // following. Retry only if this conversation still owns following.
+      if (
+        navigationRef.current.conversationId === intentConversationId
+        && transcriptNavigationFollowsContent(navigationRef.current)
+      ) performScrollToLatest("auto");
     }, READER_INTENT_GUARD_MS);
-  }, [clearPendingFinalAnswerNavigation]);
+  }, [clearPendingFinalAnswerNavigation, performScrollToLatest]);
 
   const noteResponseTimelineNavigationIntent = useCallback((): void => {
     noteReaderIntent();

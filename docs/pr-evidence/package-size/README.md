@@ -1,6 +1,8 @@
 # Package-size review
 
-Reviewed against main `d56f972b` using Node 22. No version or release-tag change.
+Initial package review against main `d56f972b` using Node 22. The transcript
+follow-up below incorporates main `67d81d24` through an ordinary merge; it makes
+no independent version or release-tag change.
 
 The production graph does not import `tailwind-merge`. The excluded dependency
 files are source maps, TypeScript declarations, SQLite build inputs, and foreign
@@ -66,3 +68,39 @@ loose Git refs. Seed real sorted packed refs in the disposable test repository
 instead. The real Git enumeration, current branch, symbolic aliases, 1,000 versus
 1,001 branch bounds and production deadlines remain unchanged. All six focused
 branch-limit tests pass.
+
+## Retained-intent follow correction
+
+Review found that the 750 ms gesture guard could discard the final content
+correction while navigation still followed the latest content. Deterministic
+DOM regressions reproduced both streaming and persisted updates leaving a
+300 px bottom gap after expiry. Both regressions fail without the fix.
+
+On expiry, retry instant following only when the gesture's conversation is
+still active and navigation still follows content. Reuse the existing bounded
+measurement correction and final-answer ownership checks. New gestures renew
+the guard; history reading prevents the retry, and switching conversations or
+unmounting cancels the timer. The queued-bottom-event protection remains intact.
+
+The follow-up changes no package selection, dependencies, provider protocol,
+deadlines, coverage requirements or bundle limits. Original native packaging,
+smoke and fuse evidence above remains historical evidence for the package
+changes, not a claim that new installers were produced for this renderer fix.
+
+Final local validation on Node 22.23.2 / Electron 44.3.0 / macOS ARM64:
+
+- Focused transcript DOM/state tests: 63 passed across five files. The eight new
+  cases cover the final streaming/persisted update, fresh wheel/touch/keyboard
+  intent, active and pending final-answer ownership, switch and unmount cleanup.
+- Full `npm run check`: 9,604 passed, 146 skipped, plus seven separate-process
+  tests. All quality checks, builds and unchanged renderer bundle budgets pass;
+  packaging selection, legal-resource and Linux contract tests are included.
+- `npx playwright test tests/e2e/transcript.spec.ts
+  tests/e2e/transcript-turn-anchor.spec.ts tests/e2e/chat-scroll-memory.spec.ts
+  --workers=1`: all five native scenarios pass in 36.8 seconds, including both
+  4-turn and 80-turn history restoration, long-transcript keyboard/geometry,
+  delayed accepted-turn following and final-answer positioning.
+
+This follow-up was not exercised locally on Windows, Linux, macOS Intel, live
+providers or newly packaged installers. Hosted CI remains the user's
+responsibility; no CI retry, monitoring, PR merge or release was performed.

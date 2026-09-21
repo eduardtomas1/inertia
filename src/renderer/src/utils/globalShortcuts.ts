@@ -1,11 +1,4 @@
-export type WorkspaceShortcutTool =
-  | "environment"
-  | "changes"
-  | "files"
-  | "terminal"
-  | "goal"
-  | "plan"
-  | "preview";
+export type WorkspaceShortcutTool = WorkspacePanelTab;
 
 export interface GlobalShortcutActions {
   keybindings: AppKeybindings;
@@ -121,6 +114,7 @@ export function installGlobalShortcuts(
     target.removeEventListener("keyup", handleKeyUp, true);
   };
 }
+import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
 import type {
   AppKeybindings,
   AppShortcutAction,

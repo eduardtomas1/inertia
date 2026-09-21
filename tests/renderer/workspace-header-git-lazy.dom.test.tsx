@@ -79,20 +79,17 @@ describe("WorkspaceHeader deferred Git menu", () => {
         project={project}
         conversation={null}
         view="workspace"
-        activeTool={null}
         sidebarCollapsed={false}
-        theme="dark"
         gitStatus={gitStatus}
         branches={[]}
         actions={[]}
         busy={false}
         onOpenSidebar={vi.fn()}
-        onToggleTools={vi.fn()}
-        onOpenEnvironment={vi.fn()}
-        onCycleTheme={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenConnectionsSettings={vi.fn()}
-        onOpenProject={vi.fn()}
+        onOpenFolder={vi.fn()}
+        onRevealFolder={vi.fn()}
+        onOpenFiles={vi.fn()}
         onRefreshBranches={vi.fn()}
         onSwitchBranch={vi.fn()}
         onCreateBranch={vi.fn()}
@@ -107,11 +104,11 @@ describe("WorkspaceHeader deferred Git menu", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: "More Git actions" });
+    const trigger = await screen.findByRole("button", { name: "More Git actions" });
     fireEvent.click(trigger);
     expect(screen.getByRole("status")).toHaveTextContent("Loading Git actions");
 
-    const openProject = screen.getByRole("button", { name: "Open" });
+    const openProject = screen.getByRole("button", { name: /^Open Inertia in/u });
     openProject.focus();
     deferredMenu.release();
 

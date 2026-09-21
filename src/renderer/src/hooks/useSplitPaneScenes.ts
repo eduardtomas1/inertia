@@ -105,8 +105,8 @@ export function useSplitPaneScenes({
           ...pane.scene,
           tools: {
             ...tools,
-            environment: {
-              ...tools.environment,
+            runs: {
+              ...tools.runs,
               onOpenRunPreview: openWorkspaceRunPreview,
             },
           },

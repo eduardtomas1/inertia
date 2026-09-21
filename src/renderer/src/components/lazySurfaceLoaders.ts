@@ -7,7 +7,7 @@ export const loadCommandPalette = createSurfaceLoader(async () => ({
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
 export const loadConversationSplitView = createSurfaceLoader(() => import("./ConversationSplitView"));
 export const loadDailyWorkDialog = createSurfaceLoader(() => import("./DailyWorkDialog"));
-export const loadEnvironmentPanel = createSurfaceLoader(() => import("./EnvironmentPanel"));
+export const loadAgentsSurface = createSurfaceLoader(() => import("./AgentsSurface"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
 export const loadHistoricalDiffPanel = createSurfaceLoader(() => import("./HistoricalDiffPanel"));
@@ -21,9 +21,11 @@ export const loadProviderAuthDialog = createSurfaceLoader(() => import("./Provid
 export const loadSettingsView = createSurfaceLoader(async () => ({
   default: (await import("./SettingsView")).SettingsView,
 }));
+export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface"));
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
+export const loadWorkspacePanel = createSurfaceLoader(() => import("./WorkspacePanel"));
 export const loadWelcomeGuide = createSurfaceLoader(() => import("./welcome-guide/WelcomeGuide"));
 
 const frequentSurfaceLoads = [
@@ -38,8 +40,10 @@ export function prefetchFrequentSurfaces(): void {
 }
 
 export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
-  if (tab === "environment") {
-    return;
+  if (tab === "usage") {
+    void loadUsageSurface();
+  } else if (tab === "agents") {
+    void loadAgentsSurface();
   } else if (tab === "changes") {
     void loadWorkspaceChangesPanel();
     void loadHistoricalDiffPanel();

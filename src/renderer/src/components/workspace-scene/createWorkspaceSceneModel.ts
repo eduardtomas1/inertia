@@ -34,11 +34,12 @@ import type { useInertiaConnection } from "../../hooks/useInertiaConnection";
 import type { useProviderMaintenance } from "../../hooks/useProviderMaintenance";
 import { EMPTY_STREAMING_AGENT_SOURCE } from "../../hooks/useStreamingAgentState";
 import {
-  ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
+  TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
   TOOLS_MIN_WIDTH,
   type useWorkspaceLayout,
 } from "../../hooks/useWorkspaceLayout";
+import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
@@ -59,6 +60,7 @@ import {
   goalExecutionStatus,
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
+import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 
@@ -90,7 +92,14 @@ type WorkspaceSceneLayout = Pick<
   | "toolsVisible"
   | "workspaceBodyRef"
   | "tools"
+  | "panel"
+  | "panelPresentation"
+  | "openSurface"
+  | "activateSurface"
+  | "closeSurface"
+  | "toggleWorkspaceTools"
 >;
+
 type WorkspaceTools = ReturnType<typeof useWorkspaceTools>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type DesktopTools = ReturnType<typeof useDesktopTools>;
@@ -206,6 +215,7 @@ export interface WorkspaceSceneActions {
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
   openSettings: () => void;
+  openUsageView?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -386,10 +396,23 @@ export function createWorkspaceSceneModel({
     toolsVisible,
     workspaceBodyRef,
     tools: toolsLayout,
+    panel: panelState,
+    panelPresentation,
   } = layout;
-  const effectiveActiveTool = workspaceToolsUnavailable
-    ? "environment" as const
-    : activeTool;
+  const unavailableSurfaces: Partial<Record<WorkspacePanelTab, string>> = {};
+  if (workspaceToolsUnavailable) {
+    for (const surface of WORKSPACE_BOUND_SURFACES) {
+      unavailableSurfaces[surface] =
+        "Available after the first message creates this isolated worktree.";
+    }
+  }
+  if (!conversation) {
+    unavailableSurfaces.preview ??= "Open a chat to use the Browser.";
+  }
+  const effectiveActiveTool = activeTool && !unavailableSurfaces[activeTool]
+    ? activeTool
+    : null;
+  const sheetPanel = !stackedTools && panelPresentation === "sheet";
   const usageRoute = conversation && connection.snapshot
     ? resolveComposerRouteState({
         conversationProviderId: conversation.providerId,
@@ -466,6 +489,17 @@ export function createWorkspaceSceneModel({
   const canGuideParent = (trace: SubagentTrace): boolean =>
     Boolean(conversationIsRunning
       && canFollowUpSubagentTrace(trace, projection.turns));
+  const liveAgentCount = projection.subagents.filter(isLiveSubagentTrace).length;
+  const stopSubagent = async (trace: SubagentTrace): Promise<void> => {
+    try {
+      await actions.stopSubagent(trace);
+    } catch (error) {
+      setActionError(error instanceof Error
+        ? error.message
+        : "The delegated task could not be stopped.");
+      throw error;
+    }
+  };
   const setGoal = async (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -706,7 +740,33 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: project && toolsVisible && !globalChatActive ? {
+    checkoutBranch: project && !globalChatActive ? {
+      project,
+      conversation,
+      gitStatus: workspaceTools.gitStatus,
+      branches: workspaceTools.branches,
+      branchesLoading: workspaceTools.branchesLoading,
+      branchesError: workspaceTools.branchesError,
+      busy: Boolean(busyAction),
+      onRefreshBranches: () => workspaceTools.loadBranches(),
+      onSwitchBranch: (name, remote) =>
+        workspaceTools.mutateBranch("git.branch.switch", name, remote),
+      onCreateBranch: (name) =>
+        workspaceTools.mutateBranch("git.branch.create", name),
+      onCreateConversationOnBranch: (branch) =>
+        actions.createConversation(project, { kind: "branch", branch }),
+      onCreateConversationInWorktree: () => {
+        if (!conversation?.worktreePath) return;
+        actions.createConversation(project, {
+          kind: "worktree",
+          branch: workspaceTools.gitStatus?.branch ?? conversation.branch,
+          path: conversation.worktreePath,
+        });
+      },
+      onCreateConversationInIsolatedWorktree: () =>
+        actions.createConversation(project, { kind: "isolated-worktree" }),
+    } : null,
+    resizeHandle: project && toolsVisible && !globalChatActive && !sheetPanel ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -715,11 +775,7 @@ export function createWorkspaceSceneModel({
       value: stackedTools ? toolsLayout.height : toolsLayout.width,
       min: stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH,
       max: stackedTools ? toolsLayout.maxHeight : toolsLayout.maxWidth,
-      defaultValue: stackedTools
-        ? 320
-        : effectiveActiveTool === "environment"
-          ? ENVIRONMENT_TOOLS_DEFAULT_WIDTH
-          : 520,
+      defaultValue: stackedTools ? 320 : TOOLS_DEFAULT_WIDTH,
       onChange: stackedTools
         ? toolsLayout.onHeightChange
         : toolsLayout.onWidthChange,
@@ -732,55 +788,53 @@ export function createWorkspaceSceneModel({
     tools: project ? (globalChatActive ? null : {
       activeTool: effectiveActiveTool,
       panel: {
-        activeTab: effectiveActiveTool ?? "environment",
+        surfaces: panelState.surfaces,
+        activeSurface: effectiveActiveTool,
+        unavailable: unavailableSurfaces,
+        presentation: stackedTools ? "stacked" : sheetPanel ? "sheet" : "inline",
         visible: toolsVisible,
-        onTabChange: setActiveTool,
-        ...(workspaceToolsUnavailable
-          ? { tabs: ["environment"] as const }
-          : {}),
+        liveAgentCount,
         badges: {
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
-          goal: (currentWorkflow?.goals.some(({ status }) =>
-            status !== "complete") ? 1 : 0)
-            + projection.subagents.filter(isLiveSubagentTrace).length,
+          goal: currentWorkflow?.goals.some(({ status }) =>
+            status !== "complete") ? 1 : 0,
           plan: planSteps.length,
         },
-        onClose: () => setActiveTool(null),
-        onOpenSettings: actions.openSettings,
+        onActivateSurface: layout.activateSurface,
+        onOpenSurface: layout.openSurface,
+        onCloseSurface: layout.closeSurface,
+        onClosePanel: layout.toggleWorkspaceTools,
       },
-      environment: {
-        summary: environmentSummary,
-        workspaceToolsAvailable: !workspaceToolsUnavailable,
-        onOpenChanges: (repositoryPath, action = "review") => {
-          if (repositoryPath) {
-            workspaceTools.requestWorkspaceChanges(repositoryPath, action);
-          }
-          setActiveTool("changes");
-        },
-        onOpenFiles: () => setActiveTool("files"),
-        onOpenProject: () => actions.openProjectPath({
-          projectId: project.id,
-          ...runtimeConversation,
-          relativePath: ".",
-          action: "open-externally",
-        }),
-        onRevealProject: () => actions.openProjectPath({
-          projectId: project.id,
-          ...runtimeConversation,
-          relativePath: ".",
-          action: "reveal",
-        }),
-        onRetryGit: () => {
-          void workspaceTools.loadGit({ authoritative: true })
-            .catch((error) => setActionError(
-              error instanceof Error
-                ? error.message
-                : "Git changes could not be loaded.",
-            ));
-        },
+      usage: {
+        usage: environmentSummary.usage,
         ...(usageProvider && usageQuotaSource === "selected-route"
           ? { onRefreshUsage: () => actions.refreshProvider(usageProvider.id) }
           : {}),
+        ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
+      },
+      agents: {
+        runtimeStatus: environmentSummary.runtime.status,
+        attachments: environmentSummary.attachments,
+        subagents: projection.subagents,
+        turns: projection.turns,
+        canFollowUpSubagent: canGuideParent,
+        onFollowUpSubagent: actions.followUpSubagent,
+        onOpenSubagent: (trace) => {
+          if (sheetPanel) setActiveTool(null);
+          requestTimelineFocus({
+            conversationId: trace.conversationId,
+            turnId: trace.turnId,
+          });
+        },
+        canStopSubagent: (trace) =>
+          Boolean(conversationIsRunning
+            && canStopSubagentTrace(trace, projection.turns)),
+        onStopSubagent: stopSubagent,
+      },
+      gitNotice: environmentSummary.gitNotice,
+      runs: {
+        localServers: environmentSummary.localServers,
+        checks: environmentSummary.checks,
         onStopRun: activityActions.stopWorkspaceRun,
         onOpenRunPreview: activityActions.openWorkspaceRunPreview,
         onAcknowledgeRun: activityActions.acknowledgeActivity,
@@ -943,16 +997,7 @@ export function createWorkspaceSceneModel({
         canStopSubagent: (trace) =>
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
-        onStopSubagent: async (trace) => {
-          try {
-            await actions.stopSubagent(trace);
-          } catch (error) {
-            setActionError(error instanceof Error
-              ? error.message
-              : "The delegated task could not be stopped.");
-            throw error;
-          }
-        },
+        onStopSubagent: stopSubagent,
       },
       plan: {
         steps: planSteps,

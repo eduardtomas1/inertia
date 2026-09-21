@@ -205,6 +205,12 @@
 .sidebar-utility-footer .sidebar-destination:has(.lucide-settings) {
   order: -1;
 }
+.sidebar-utility-footer .sidebar-devices-button.has-pending {
+  color: var(--warning);
+}
+.sidebar-utility-footer .sidebar-devices-button.is-active {
+  color: var(--status-completed);
+}
 .sidebar .sidebar-update-button {
   position: relative;
   margin-left: auto;

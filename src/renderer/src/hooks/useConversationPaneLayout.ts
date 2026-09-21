@@ -4,22 +4,34 @@ import {
   useMemo,
   useRef,
   useState,
-  type Dispatch,
   type RefObject,
-  type SetStateAction,
 } from "react";
 
-import type { WorkspacePanelTab } from "../components/WorkspacePanel";
-import { workspacePanelTab } from "../utils/workspaceStartup";
+import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
+import {
+  activeRightPanelSurface,
+  activateRightPanelSurface,
+  applyRightPanelTool,
+  closeAllRightPanelSurfaces,
+  closeOtherRightPanelSurfaces,
+  closeRightPanelSurface,
+  legacyRightPanelState,
+  openRightPanelSurface,
+  parseRightPanelState,
+  serializeRightPanelState,
+  toggleRightPanelSurface,
+  toggleRightPanelVisibility,
+  type RightPanelState,
+} from "../utils/rightPanelSurfaces";
+import type { WorkspacePanelActions } from "./useWorkspaceLayout";
 import { usePersistedSize } from "./usePersistedSize";
 
 const PANE_TOOL_MIN_HEIGHT = 150;
 const PANE_TOOL_MAX_HEIGHT = 520;
 
-export interface ConversationPaneLayout {
-  activeTool: WorkspacePanelTab | null;
-  setActiveTool: Dispatch<SetStateAction<WorkspacePanelTab | null>>;
+export interface ConversationPaneLayout extends WorkspacePanelActions {
   stackedTools: true;
+  panelPresentation: "inline";
   toolsVisible: boolean;
   workspaceBodyRef: RefObject<HTMLDivElement | null>;
   tools: {
@@ -32,32 +44,27 @@ export interface ConversationPaneLayout {
     onWidthCommit: (value: number) => void;
     onHeightCommit: (value: number) => void;
   };
-  toggleWorkspaceTools: () => void;
 }
 
-function initialTool(storageKey: string): WorkspacePanelTab {
-  return workspacePanelTab(window.localStorage.getItem(storageKey))
-    ?? "environment";
-}
-
-interface PersistedPaneToolState {
+interface PersistedPanePanelState {
   key: string;
-  activeTool: WorkspacePanelTab | null;
-  lastTool: WorkspacePanelTab;
+  panel: RightPanelState;
 }
 
-function storedPaneToolState(
+function storedPanePanelState(
   key: string,
-  toolStorageKey: string,
-  openStorageKey: string,
-): PersistedPaneToolState {
-  const lastTool = initialTool(toolStorageKey);
+  panelStorageKey: string,
+  legacyToolStorageKey: string,
+  legacyOpenStorageKey: string,
+): PersistedPanePanelState {
+  const stored = parseRightPanelState(window.localStorage.getItem(panelStorageKey));
+  if (stored) return { key, panel: stored };
   return {
     key,
-    activeTool: window.localStorage.getItem(openStorageKey) === "true"
-      ? lastTool
-      : null,
-    lastTool,
+    panel: legacyRightPanelState(
+      window.localStorage.getItem(legacyToolStorageKey),
+      window.localStorage.getItem(legacyOpenStorageKey) === "true",
+    ),
   };
 }
 
@@ -69,19 +76,27 @@ function storedPaneToolState(
 export function useConversationPaneLayout(
   conversationId: string | null,
 ): ConversationPaneLayout {
-  const toolStorageKey =
-    `inertia:layout:split-pane-tool:${conversationId ?? "empty"}:v1`;
-  const openStorageKey =
-    `inertia:layout:split-pane-open:${conversationId ?? "empty"}:v1`;
-  const heightStorageKey =
-    `inertia:layout:split-pane-height:${conversationId ?? "empty"}:v1`;
   const ownerKey = conversationId ?? "empty";
-  const [persistedToolState, setPersistedToolState] = useState(() =>
-    storedPaneToolState(ownerKey, toolStorageKey, openStorageKey));
-  const toolState = persistedToolState.key === ownerKey
-    ? persistedToolState
-    : storedPaneToolState(ownerKey, toolStorageKey, openStorageKey);
-  const activeTool = toolState.activeTool;
+  const panelStorageKey = `inertia:layout:split-pane-panel:${ownerKey}:v1`;
+  const legacyToolStorageKey = `inertia:layout:split-pane-tool:${ownerKey}:v1`;
+  const legacyOpenStorageKey = `inertia:layout:split-pane-open:${ownerKey}:v1`;
+  const heightStorageKey = `inertia:layout:split-pane-height:${ownerKey}:v1`;
+  const [persistedPanelState, setPersistedPanelState] = useState(() =>
+    storedPanePanelState(
+      ownerKey,
+      panelStorageKey,
+      legacyToolStorageKey,
+      legacyOpenStorageKey,
+    ));
+  const panelState = persistedPanelState.key === ownerKey
+    ? persistedPanelState.panel
+    : storedPanePanelState(
+      ownerKey,
+      panelStorageKey,
+      legacyToolStorageKey,
+      legacyOpenStorageKey,
+    ).panel;
+  const activeTool = activeRightPanelSurface(panelState);
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = usePersistedSize(
     heightStorageKey,
@@ -90,49 +105,72 @@ export function useConversationPaneLayout(
   );
 
   useEffect(() => {
-    if (persistedToolState.key !== ownerKey) {
-      setPersistedToolState(
-        storedPaneToolState(ownerKey, toolStorageKey, openStorageKey),
-      );
+    if (persistedPanelState.key !== ownerKey) {
+      setPersistedPanelState(storedPanePanelState(
+        ownerKey,
+        panelStorageKey,
+        legacyToolStorageKey,
+        legacyOpenStorageKey,
+      ));
     }
   }, [
-    openStorageKey,
+    legacyOpenStorageKey,
+    legacyToolStorageKey,
     ownerKey,
-    persistedToolState.key,
-    toolStorageKey,
+    panelStorageKey,
+    persistedPanelState.key,
   ]);
 
-  const setActiveTool = useCallback<Dispatch<
-    SetStateAction<WorkspacePanelTab | null>
-  >>((update) => {
-    setPersistedToolState((current) => {
+  const updatePanel = useCallback((
+    update: (current: RightPanelState) => RightPanelState,
+  ): void => {
+    setPersistedPanelState((current) => {
       const owned = current.key === ownerKey
-        ? current
-        : storedPaneToolState(ownerKey, toolStorageKey, openStorageKey);
-      const next = typeof update === "function"
-        ? update(owned.activeTool)
-        : update;
-      window.localStorage.setItem(openStorageKey, String(next !== null));
-      if (next) window.localStorage.setItem(toolStorageKey, next);
-      return {
-        key: ownerKey,
-        activeTool: next,
-        lastTool: next ?? owned.lastTool,
-      };
+        ? current.panel
+        : storedPanePanelState(
+          ownerKey,
+          panelStorageKey,
+          legacyToolStorageKey,
+          legacyOpenStorageKey,
+        ).panel;
+      const next = update(owned);
+      window.localStorage.setItem(panelStorageKey, serializeRightPanelState(next));
+      return { key: ownerKey, panel: next };
     });
-  }, [openStorageKey, ownerKey, toolStorageKey]);
+  }, [legacyOpenStorageKey, legacyToolStorageKey, ownerKey, panelStorageKey]);
 
-  const toggleWorkspaceTools = useCallback(() => {
-    setActiveTool(
-      activeTool ? null : toolState.lastTool,
-    );
-  }, [activeTool, setActiveTool, toolState.lastTool]);
+  const panelActions = useMemo(() => ({
+    setActiveTool: ((update) => {
+      updatePanel((current) => applyRightPanelTool(
+        current,
+        typeof update === "function"
+          ? update(activeRightPanelSurface(current))
+          : update,
+      ));
+    }) as React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>,
+    openSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => openRightPanelSurface(current, surface)),
+    toggleSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => toggleRightPanelSurface(current, surface)),
+    activateSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => activateRightPanelSurface(current, surface)),
+    closeSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => closeRightPanelSurface(current, surface)),
+    closeOtherSurfaces: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
+    toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
+    toggleTerminal: () =>
+      updatePanel((current) => toggleRightPanelSurface(current, "terminal")),
+  }), [updatePanel]);
 
   return useMemo(() => ({
+    panel: panelState,
     activeTool,
-    setActiveTool,
+    ...panelActions,
     stackedTools: true as const,
-    toolsVisible: activeTool !== null && conversationId !== null,
+    panelPresentation: "inline" as const,
+    toolsVisible: panelState.isOpen && conversationId !== null,
     workspaceBodyRef,
     tools: {
       width: 0,
@@ -144,13 +182,12 @@ export function useConversationPaneLayout(
       onWidthCommit: () => undefined,
       onHeightCommit: setHeight,
     },
-    toggleWorkspaceTools,
   }), [
     activeTool,
     conversationId,
     height,
-    setActiveTool,
+    panelActions,
+    panelState,
     setHeight,
-    toggleWorkspaceTools,
   ]);
 }

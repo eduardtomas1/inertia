@@ -21,7 +21,10 @@ import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
 import { useProjectScope } from "../hooks/useProjectScope";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
-import type { useWorkspaceLayout } from "../hooks/useWorkspaceLayout";
+import type {
+  useWorkspaceLayout,
+  WorkspacePanelActions,
+} from "../hooks/useWorkspaceLayout";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
@@ -38,10 +41,10 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
-import { WorkspaceHeader } from "./WorkspaceHeader";
+import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
+import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
 import {
   WorkspaceScene,
-  type WorkspacePanelTab,
   type WorkspaceSceneProps,
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
@@ -119,6 +122,7 @@ interface AppLayoutActions {
     remote?: boolean,
   ) => void | Promise<void>;
   loadGit: () => Promise<void>;
+  refreshGitStatus?: () => void;
   mutateRemote: (type: "git.fetch" | "git.pull" | "git.push") => Promise<void>;
   loadCommitReview: () => Promise<GitDiffSnapshot | null>;
   discardCommitReview: () => void;
@@ -165,10 +169,7 @@ interface AppLayoutProps {
   detachedConversationIds: ReadonlySet<string>;
   detachedChatLimitReached: boolean;
   conversationSuppressedInMain: boolean;
-  sceneActiveTool: WorkspacePanelTab | null;
-  sceneToggleWorkspaceTools: () => void;
-  sceneOpenEnvironment: () => void;
-  sceneOpenBrowser: () => void;
+  scenePanel: WorkspacePanelActions;
   workspaceToolsUnavailableReason: string | null;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
@@ -259,10 +260,7 @@ export function AppLayout({
   detachedConversationIds,
   detachedChatLimitReached,
   conversationSuppressedInMain,
-  sceneActiveTool,
-  sceneToggleWorkspaceTools,
-  sceneOpenEnvironment,
-  sceneOpenBrowser,
+  scenePanel,
   workspaceToolsUnavailableReason,
   gitStatus,
   branches,
@@ -277,6 +275,7 @@ export function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
   const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
@@ -285,9 +284,9 @@ export function AppLayout({
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
-    stackedTools,
     mobileNavigation,
     toolsVisible,
+    panelPresentation,
     appShellRef,
     workspaceBodyRef,
     appShellStyle,
@@ -456,6 +455,71 @@ export function AppLayout({
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
     });
 
+  const splitActive = splitConversationIds.size > 0;
+  const headerTools = scene.tools;
+  const isServerConversation = Boolean(
+    headerConversation && conversation && headerConversation.id === conversation.id,
+  );
+  const cornerControlsVisible = view === "workspace" && project !== null;
+  const mainPanelOpen = view === "workspace"
+    && !splitActive
+    && toolsVisible
+    && headerTools !== null;
+  const frameHasInlinePanel = mainPanelOpen && panelPresentation === "inline";
+  const frameHasSheetPanel = mainPanelOpen && panelPresentation === "sheet";
+  const frameStyle = {
+    ...workspaceBodyStyle,
+    "--workspace-corner-controls-width": `${cornerControlsVisible ? cornerControlsWidth : 0}px`,
+  } as CSSProperties;
+  const openCheckout = (action: "open-externally" | "reveal"): void => {
+    if (!project) return;
+    actions.openProjectPath({
+      projectId: project.id,
+      ...(conversation ? { conversationId: conversation.id } : {}),
+      relativePath: ".",
+      action,
+    });
+  };
+  const openPullRequest = (): void => {
+    if (!project) return;
+    if (!rootRepository) {
+      setActionError(
+        "Refresh repository status before opening a pull request.",
+      );
+      return;
+    }
+    setPullRequestDialogOpen(true);
+  };
+  const headerConversationMenu: HeaderConversationMenu | null = headerConversation
+    && isServerConversation
+    ? {
+        projectPath: project?.path,
+        onMarkUnread: () => sidebarActions.markConversationUnread(headerConversation),
+        onRegenerateTitle: () =>
+          sidebarActions.regenerateConversationTitle(headerConversation),
+        ...(project && actions.openProjectSettings ? {
+          onProjectSettings: () => actions.openProjectSettings?.(project.id),
+        } : {}),
+        activeConversationId: connection.snapshot?.activeConversationId ?? null,
+        detachedChatLimitReached,
+        isDetached: detachedConversationIds.has(headerConversation.id),
+        runs: connection.snapshot?.runs ?? [],
+        splitConversationIds,
+        splitViewFull,
+        onAcknowledgeRun: sidebarActions.acknowledgeRun,
+        onArchiveConversation: sidebarActions.archiveConversation,
+        onCloseConversationSplit: sidebarActions.closeConversationSplit,
+        onDeleteConversation: sidebarActions.deleteConversation,
+        onDismissRun: sidebarActions.dismissRun,
+        onOpenConversationInSplit: sidebarActions.openConversationInSplit,
+        onOpenConversationInWindow: sidebarActions.openConversationInWindow,
+        onPinConversation: sidebarActions.pinConversation,
+        onRestoreConversation: sidebarActions.restoreConversation,
+        onSettleConversation: sidebarActions.settleConversation,
+        onSnoozeConversation: sidebarActions.snoozeConversation,
+      }
+    : null;
+
   const [appBooted, setAppBooted] = useState(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setAppBooted(true));
@@ -542,6 +606,9 @@ export function AppLayout({
               sidebarActions.setProjectGitRepositoryLimit
             }
             onRemoveProject={sidebarActions.removeProject}
+            theme={settings.theme}
+            onCycleTheme={actions.cycleTheme}
+            onOpenConnectionsSettings={actions.openConnectionsSettings}
           />
         </Suspense>
       )}
@@ -569,47 +636,47 @@ export function AppLayout({
         tabIndex={-1}
         inert={mobileNavigation && sidebarOpen ? true : undefined}
       >
-        <div className="workspace-frame">
+        <div
+          className={`workspace-frame${frameHasInlinePanel ? " has-right-panel" : ""}${frameHasSheetPanel ? " has-right-sheet" : ""}${cornerControlsVisible ? " has-corner-controls" : ""}`}
+          style={frameStyle}
+        >
           <WorkspaceHeader
             project={project}
             conversation={headerConversation}
+            isServerConversation={isServerConversation}
             view={view}
-            activeTool={sceneActiveTool}
             sidebarCollapsed={sidebarCollapsed}
-            theme={settings.theme}
+            compact={mobileNavigation}
             gitStatus={gitStatus}
+            gitNotice={headerTools?.gitNotice ?? null}
             branches={branches}
             branchesLoading={branchesLoading}
             branchesError={branchesError}
             actions={projectActions}
+            runs={headerTools?.runs ?? null}
             busy={Boolean(busyAction)}
-            conversationDetached={Boolean(
-              conversation && detachedConversationIds.has(conversation.id)
-            )}
-            detachedChatLimitReached={detachedChatLimitReached}
-            onOpenConversationInWindow={actions.openConversationInWindow}
+            checkoutPath={headerConversation?.worktreePath ?? project?.path ?? null}
+            filesAvailable={!workspaceToolsUnavailableReason}
+            conversationMenu={headerConversationMenu}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
-            onToggleTools={sceneToggleWorkspaceTools}
-            workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-            onOpenEnvironment={sceneOpenEnvironment}
-            {...(!conversationSuppressedInMain
-              ? { onOpenBrowser: sceneOpenBrowser }
-              : {})}
-            onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}
-            onOpenProject={() => {
-              if (project) {
-                actions.openProjectPath({
-                  projectId: project.id,
-                  relativePath: ".",
-                  action: "open-externally",
-                });
-              }
-            }}
+            {...(project ? {
+              onCreateConversationInProject: () => actions.createConversation(project),
+            } : {})}
+            {...(headerConversation && isServerConversation ? {
+              onRenameConversation: (title: string) =>
+                sidebarActions.renameConversation(headerConversation, title),
+            } : {})}
+            onOpenFolder={() => openCheckout("open-externally")}
+            onRevealFolder={() => openCheckout("reveal")}
+            onOpenFiles={() => scenePanel.openSurface("files")}
+            {...(project && actions.openProjectSettings ? {
+              onAddAction: () => actions.openProjectSettings?.(project.id),
+            } : {})}
             onRefreshBranches={actions.loadBranches}
             onSwitchBranch={(name, remote) =>
               actions.mutateBranch("git.branch.switch", name, remote)}
@@ -632,35 +699,49 @@ export function AppLayout({
               actions.createConversation(project, {
                 kind: "isolated-worktree",
               })}
-            onOpenPullRequest={() => {
-              if (!project) return;
-              if (!rootRepository) {
-                setActionError(
-                  "Refresh repository status before opening a pull request.",
-                );
-                return;
-              }
-              setPullRequestDialogOpen(true);
+            onOpenPullRequest={openPullRequest}
+            onPushAndCreatePullRequest={() => {
+              void actions.mutateRemote("git.push")
+                .then(openPullRequest)
+                .catch(() => undefined);
             }}
             onFetch={() => { void actions.mutateRemote("git.fetch").catch(() => undefined); }}
             onPull={() => { void actions.mutateRemote("git.pull").catch(() => undefined); }}
             onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
+            {...(actions.refreshGitStatus ? { onRefreshGitStatus: actions.refreshGitStatus } : {})}
           />
+          {cornerControlsVisible && (
+            <PanelLayoutControls
+              usage={headerTools?.usage.usage ?? null}
+              terminalAvailable={Boolean(headerTools) && !workspaceToolsUnavailableReason}
+              {...(workspaceToolsUnavailableReason
+                ? { terminalUnavailableLabel: workspaceToolsUnavailableReason }
+                : {})}
+              terminalOpen={scenePanel.activeTool === "terminal"}
+              terminalShortcutLabel={formatAppShortcutLabel(
+                platform,
+                settings.keybindings["toggle-terminal"],
+              )}
+              rightPanelAvailable={Boolean(headerTools)}
+              rightPanelOpen={Boolean(headerTools) && scenePanel.panel.isOpen}
+              rightPanelUnavailableLabel={workspaceToolsUnavailableReason ?? "Right panel is unavailable"}
+              liveAgentCount={headerTools?.panel.liveAgentCount ?? 0}
+              onToggleTerminal={scenePanel.toggleTerminal}
+              onToggleRightPanel={scenePanel.toggleWorkspaceTools}
+              onOpenUsage={() => scenePanel.openSurface("usage")}
+              onWidthChange={setCornerControlsWidth}
+            />
+          )}
 
           <div
             ref={workspaceBodyRef}
             id="workspace-content"
             data-view={view}
             className={`workspace-body${
-              view === "workspace" && splitConversationIds.size === 0 && toolsVisible
-                ? " has-tools"
-                : ""
-            }${view === "workspace" && splitConversationIds.size === 0 && stackedTools
-              ? " is-tools-stacked"
-              : ""}`}
-            style={workspaceBodyStyle}
+              frameHasInlinePanel ? " has-tools" : ""
+            }${frameHasSheetPanel ? " has-tools-sheet" : ""}`}
           >
-            {view === "usage" ? (
+          {view === "usage" ? (
               <Suspense fallback={(
                 <div className="workspace-tool-loading usage-surface-loading">
                   <LoadingMark label="Loading usage" />

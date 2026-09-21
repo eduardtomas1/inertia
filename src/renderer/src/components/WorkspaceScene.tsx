@@ -12,6 +12,10 @@ import {
 } from "react";
 
 import { ChatWorkspace } from "./ChatWorkspace";
+import {
+  CheckoutBranchControlProvider,
+  type CheckoutBranchControlModel,
+} from "./CheckoutBranchControl";
 import { ConversationDetailState } from "./ConversationDetailState";
 import {
   DetachedConversationPlaceholder,
@@ -20,22 +24,26 @@ import {
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
-import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
-import type { EnvironmentPanelProps } from "./EnvironmentPanel";
+import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
+import type { UsageSurfaceProps } from "./UsageSurface";
+import type { AgentsSurfaceProps } from "./AgentsSurface";
+import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
+  loadAgentsSurface,
   loadFilesPanel,
-  loadEnvironmentPanel,
   loadGoalPanel,
   loadHistoricalDiffPanel,
   loadPlanPanel,
   loadPreviewPanel,
   loadSettingsView,
   loadTerminalPanel,
+  loadUsageSurface,
   loadWorkspaceChangesPanel,
+  loadWorkspacePanel,
 } from "./lazySurfaceLoaders";
 
 function lazySurface<TModule, TProps>(
@@ -47,9 +55,17 @@ function lazySurface<TModule, TProps>(
   })));
 }
 
-const EnvironmentPanel = lazySurface(
-  loadEnvironmentPanel,
-  (module) => module.EnvironmentPanel,
+const WorkspacePanel = lazySurface(
+  loadWorkspacePanel,
+  (module) => module.WorkspacePanel,
+);
+const UsageSurface = lazySurface(
+  loadUsageSurface,
+  (module) => module.UsageSurface,
+);
+const AgentsSurface = lazySurface(
+  loadAgentsSurface,
+  (module) => module.AgentsSurface,
 );
 const ConversationSplitView = lazySurface(
   loadConversationSplitView,
@@ -85,8 +101,11 @@ function WorkspaceToolFallback(): JSX.Element {
 
 export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
-  panel: Omit<ComponentProps<typeof WorkspacePanel>, "children">;
-  environment: EnvironmentPanelProps;
+  panel: Omit<WorkspacePanelProps, "children">;
+  usage: UsageSurfaceProps;
+  agents: AgentsSurfaceProps;
+  runs: WorkspaceRunsModel;
+  gitNotice: string | null;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
   changes: ComponentProps<typeof WorkspaceChangesPanel>;
   files: ComponentProps<typeof FilesPanel>;
@@ -101,6 +120,7 @@ export interface WorkspaceToolScene {
 export interface ConversationPaneScene {
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
+  checkoutBranch?: CheckoutBranchControlModel | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
 }
@@ -122,6 +142,7 @@ export interface WorkspaceSceneProps {
   detachedChat?: DetachedConversationPlaceholderProps | null;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
+  checkoutBranch?: CheckoutBranchControlModel | null;
   splitScene?: {
     layout: SplitLayout;
     panes: SplitPaneDetails[];
@@ -130,6 +151,20 @@ export interface WorkspaceSceneProps {
   } | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
+}
+
+function WorkspacePanelFallback({
+  presentation = "inline",
+  visible = true,
+}: Omit<WorkspacePanelProps, "children">): JSX.Element {
+  return (
+    <aside
+      className={`workspace-panel is-${presentation}`}
+      aria-label="Workspace tools"
+      aria-busy="true"
+      hidden={!visible}
+    />
+  );
 }
 
 function WorkspaceToolSurface({
@@ -155,29 +190,34 @@ function WorkspaceToolSurface({
     <>
       {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
       {tools && (
-        <WorkspacePanel {...tools.panel}>
-          <Suspense fallback={<WorkspaceToolFallback />}>
-            {tools.activeTool === "environment" && (
-              <EnvironmentPanel {...tools.environment} />
-            )}
-            {tools.activeTool === "changes" && (
-              tools.historicalDiff
-                ? <HistoricalDiffPanel {...tools.historicalDiff} />
-                : <WorkspaceChangesPanel {...tools.changes} />
-            )}
-            {tools.activeTool === "files" && (
-              <FilesPanel key={tools.filesKey} {...tools.files} />
-            )}
-            {terminalLifecycleRef.current.activated && (
-              <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-            )}
-            {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
-            {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
-            {tools.activeTool === "preview" && (
-              <PreviewPanel owner={owner} {...tools.preview} />
-            )}
-          </Suspense>
-        </WorkspacePanel>
+        <Suspense fallback={<WorkspacePanelFallback {...tools.panel} />}>
+          <WorkspacePanel {...tools.panel}>
+            <Suspense fallback={<WorkspaceToolFallback />}>
+              {tools.activeTool === "usage" && (
+                <UsageSurface {...tools.usage} />
+              )}
+              {tools.activeTool === "agents" && (
+                <AgentsSurface {...tools.agents} />
+              )}
+              {tools.activeTool === "changes" && (
+                tools.historicalDiff
+                  ? <HistoricalDiffPanel {...tools.historicalDiff} />
+                  : <WorkspaceChangesPanel {...tools.changes} />
+              )}
+              {tools.activeTool === "files" && (
+                <FilesPanel key={tools.filesKey} {...tools.files} />
+              )}
+              {terminalLifecycleRef.current.activated && (
+                <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
+              )}
+              {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
+              {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+              {tools.activeTool === "preview" && (
+                <PreviewPanel owner={owner} {...tools.preview} />
+              )}
+            </Suspense>
+          </WorkspacePanel>
+        </Suspense>
       )}
     </>
   );
@@ -187,6 +227,7 @@ function ConversationPane({
   detachedChat = null,
   detailState,
   chat,
+  checkoutBranch = null,
   resizeHandle,
   tools,
   owner,
@@ -213,7 +254,15 @@ function ConversationPane({
           ? <DetachedConversationPlaceholder {...detachedChat} />
           : detailState
           ? <ConversationDetailState {...detailState} embedded />
-          : <ChatWorkspace {...chat} embedded />}
+          : (
+            <CheckoutBranchControlProvider
+              value={checkoutBranch
+                ? { ...checkoutBranch, respondsToHeaderRequests: owner === "primary" }
+                : null}
+            >
+              <ChatWorkspace {...chat} embedded />
+            </CheckoutBranchControlProvider>
+          )}
       </div>
       <WorkspaceToolSurface
         resizeHandle={resizeHandle}
@@ -235,6 +284,7 @@ function WorkspaceSceneView({
   detachedChat = null,
   detailState,
   chat,
+  checkoutBranch = null,
   splitScene = null,
   resizeHandle,
   tools,
@@ -265,6 +315,7 @@ function WorkspaceSceneView({
                 detachedChat={detachedChat}
                 detailState={detailState}
                 chat={chat}
+                checkoutBranch={checkoutBranch}
                 resizeHandle={resizeHandle}
                 tools={tools}
               />
@@ -277,7 +328,13 @@ function WorkspaceSceneView({
       ) : detailState ? (
         <ConversationDetailState {...detailState} />
       ) : (
-        <ChatWorkspace {...chat} />
+        <CheckoutBranchControlProvider
+          value={checkoutBranch
+            ? { ...checkoutBranch, respondsToHeaderRequests: true }
+            : null}
+        >
+          <ChatWorkspace {...chat} />
+        </CheckoutBranchControlProvider>
       )}
 
       {!splitScene && (

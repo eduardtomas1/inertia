@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { detachedChatWindowTitle } from "../src/shared/desktop-window-title";
 import {
   parseAttachmentPickerMode,
   parseDetachedChatDraftAcknowledgement,
@@ -22,6 +23,21 @@ const conversationId = "22222222-2222-4222-8222-222222222222";
 const handoffId = "33333333-3333-4333-8333-333333333333";
 
 describe("desktop detached-chat contract", () => {
+  it.each([
+    ["First line\nSecond line\r\nThird", "First line Second line Third"],
+    ["\0\r\n ", "Untitled chat"],
+    ["🌍".repeat(64), "🌍".repeat(60)],
+    ["x".repeat(119) + "🌍", "x".repeat(119)],
+    ["Ordinary chat", "Ordinary chat"],
+  ])("opens and retitles chats whose stored title is %j", (stored, expected) => {
+    const title = detachedChatWindowTitle(stored);
+    expect(title).toBe(expected);
+    const request = { conversationId, title };
+    expect(parseDetachedChatWindowRequest(request)).toEqual(request);
+    expect(parseDetachedChatWindowOpenRequest({ ...request, draft: "Pending\nmessage" }))
+      .toEqual({ ...request, draft: "Pending\nmessage" });
+  });
+
   it("accepts one exact conversation identity and a bounded display title", () => {
     expect(parseDetachedChatWindowRequest({
       conversationId,

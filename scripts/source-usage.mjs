@@ -12,6 +12,14 @@ const BUILD_CONFIGS = [
 ];
 const CONFIG_PATHS = ["tsconfig.node.json", "tsconfig.web.json"];
 const MODULE_FILE = /\.[cm]?[jt]sx?$/u;
+// Match generated/dependency directories at any depth, including nested tools.
+// Keep exclusions explicit: new checked-in tooling locations are roots by default.
+const TOOLING_EXCLUDED_DIRECTORIES = new Set([
+  ".git", "node_modules", "out", "dist", "release", "coverage",
+  "playwright-report", "blob-report", "test-results", "performance-results",
+  ".nyc_output", ".vite", ".electron-vite", ".cache",
+]);
+const TOOLING_EXCLUDED_PATHS = new Set(["resources/generated"]);
 const portable = (path) => path.replaceAll("\\", "/");
 
 function walk(node, visit) {
@@ -73,15 +81,20 @@ function moduleScripts(html) {
 }
 
 function toolingFiles(root) {
-  return [
-    ...["tests", "scripts", "benchmarks"].flatMap((directory) =>
-      readdirSync(resolve(root, directory), { recursive: true, withFileTypes: true })
-        .filter((entry) => entry.isFile() && MODULE_FILE.test(entry.name))
-        .map((entry) => resolve(entry.parentPath, entry.name))),
-    ...readdirSync(root).filter((file) => MODULE_FILE.test(file))
-      .map((file) => resolve(root, file)),
-    ...BUILD_CONFIGS.map((file) => resolve(root, file)),
-  ];
+  const files = BUILD_CONFIGS.map((file) => resolve(root, file));
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = resolve(directory, entry.name);
+      const path = portable(relative(root, file));
+      // Source is analyzed separately and must never become a blanket tool root.
+      if (path === "src" || TOOLING_EXCLUDED_PATHS.has(path)) continue;
+      if (entry.isDirectory()) {
+        if (!TOOLING_EXCLUDED_DIRECTORIES.has(entry.name)) visit(file);
+      } else if (entry.isFile() && MODULE_FILE.test(entry.name)) files.push(file);
+    }
+  };
+  visit(root);
+  return files;
 }
 
 export function reachableFiles(roots, edges) {
@@ -138,7 +151,11 @@ export function sourceUsage(root) {
     buildInputs,
     productionRoots: productionRoots.map(path),
     toolingRoots: tools.map(path),
-    toolingPolicy: "Every checked-in test, benchmark, script and root/build config is a conservative tool root, including helpers. No src glob is a production root.",
+    toolingPolicy: "Module files across the checkout outside src are conservative tool roots, including documentation tools, helpers and local untracked modules. Explicit build configs inside src are also tools. Generated/dependency directories are excluded; symlinks are not followed. No src glob is a root.",
+    toolingExclusions: {
+      directoryNames: [...TOOLING_EXCLUDED_DIRECTORIES],
+      paths: [...TOOLING_EXCLUDED_PATHS],
+    },
     production: source.filter((file) => production.has(file)).map(path),
     complete: source.filter((file) => complete.has(file)).map(path),
     productionTypeOnly: source.filter((file) => production.has(file) && !runtime.has(file)).map(path),

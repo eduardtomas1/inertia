@@ -1,6 +1,6 @@
 # Source usage and confirmed cleanup
 
-Audited checkout: `d56f972b32fadfa29169bb8390401f5ca49e419b` (fresh
+Initial audited checkout: `d56f972b32fadfa29169bb8390401f5ca49e419b` (fresh
 `origin/main`, 20 September 2026, version 0.0.60). The historical
 *Inertia Dead Code and Structure Audit* describes v0.0.57 at `5aaaaac8` and
 explicitly claims no executed validation. Its recommendations are not deletion
@@ -26,17 +26,23 @@ The inventory also follows inline TypeScript `import("...").Type` references
 checker's pre-existing cycle/layer policy is unchanged.
 
 Production roots are derived without executing the three build configurations:
-13 main/runtime/worker inputs, four window-specific preloads, two desktop HTML
+14 main/runtime/worker inputs, four window-specific preloads, two desktop HTML
 scripts, and Private Connect's HTML script. The Vite `new Worker(new URL(...))`
-diff parser is an explicit additional source entry. All 21 roots are named in
+diff parser is an explicit additional source entry. All 22 roots are named in
 the JSON output. Unsupported build-input syntax fails instead of silently
 omitting an entry. No `src` glob is an entry root. Type-only reachability is
 reported separately; a type edge does not prove emitted runtime code.
 
-The complete view adds every checked-in test, script, benchmark and root/build
-configuration, including helpers, as **conservative tooling roots**. It answers
+The complete view discovers module files throughout the checkout outside `src`,
+including documentation evidence tools, tests, scripts, benchmarks, hidden
+tooling directories and helpers, as **conservative tooling roots**. Explicit
+build configurations inside `src` are also tooling roots. Local untracked
+modules are included conservatively; symlinks are not followed. This answers
 whether source has any test/tool consumer, not whether each script or helper is
-itself invoked. Computed imports in tools and tests remain visible in
+itself invoked. Repository metadata, dependency directories, build/package/test
+output, caches and `resources/generated` are excluded explicitly; the JSON
+report lists the exact directory names and paths in `toolingExclusions`.
+Computed imports in tools and tests remain visible in
 `analysisLimitations`; there are 44 at the implementation checkpoint. The source
 graph has no unresolved imports or parse errors. Non-module assets are excluded
 from source deletion candidates, not presumed unused.
@@ -51,13 +57,18 @@ wrappers and packaging helpers are tooling roots. These resource records require
 review when loaders change; they do not replace package-smoke or native checks.
 
 `tests/source-usage.test.ts` checks root discovery, disconnected cycles, source
-analysis failures and the exact reviewed non-production file baseline. It is
+analysis failures and the exact reviewed non-production file baseline. A
+synthetic checkout verifies that documentation-only and hidden-tool-only source
+is retained by the complete graph but absent from the production graph, while
+generated and dependency imports cannot make orphaned source appear used. It is
 part of the existing `npm run check` gate. Review new findings rather than
 adding broad ignores. Existing architecture checks continue to reject source
 imports of test fixtures; the old sunset-harness ban also prevents resurrection
 at its former path.
 
 ## Measured inventory
+
+Initial cleanup at the 20 September checkout:
 
 | Measure | Before | After |
 | --- | ---: | ---: |
@@ -73,6 +84,17 @@ module still own live behavior. 942 lines of fixture implementation/imports left
 `src`, and 121 lines of obsolete AppImage writer/API were removed. No download,
 installed-size, startup-time or rendering improvement is claimed. Tree shaking
 may already have removed these implementations from shipped bundles.
+
+After integrating `main` at `67d81d24db60a2bbb5b6b361e44d9213737f8e52`
+(21 September 2026), the inventory has 22 production entries, 1,129 production
+source files, 21 type-only source files, 82 lazy-import edges and 1,205 tooling
+roots. The additional production entry is main's Linux file-icon worker. The
+three test/tool-only findings and single unreferenced finding below are unchanged.
+The complete graph now includes
+`docs/pr-evidence/legacy-368/legacy-backfill-evidence.ts` and its migration-module
+imports. The real-checkout assertion and synthetic tooling regression both
+failed before repository-wide discovery and passed after it. No additional
+production code was deleted, and released migrations were not changed.
 
 ## Deletion and relocation decisions
 

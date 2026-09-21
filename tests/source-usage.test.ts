@@ -38,9 +38,76 @@ describe("source usage inventory", () => {
     expect(result.complete).toEqual(["fixture", "lazy", "main", "test", "types"]);
   });
 
+  it("retains documentation and other repository tools without rooting source or generated output", () => {
+    const report = evaluate<{
+      toolingRoots: string[];
+      production: string[];
+      testAndToolOnly: string[];
+      unreferenced: string[];
+      analysisLimitations: string[];
+    }>(`
+      import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+      import { tmpdir } from "node:os";
+      import { dirname, join } from "node:path";
+      const root = mkdtempSync(join(tmpdir(), "inertia-source-usage-"));
+      const build = 'export default { build: { rollupOptions: { input: resolve("src/main.ts") } } };';
+      const files = {
+        "electron.vite.config.ts": build,
+        "scripts/runtime-status.vite.config.mjs": build,
+        "src/renderer/private-connect/vite.config.ts": build,
+        "scripts/source-usage-resources.json": '{"sourceEntries":[],"resources":[]}',
+        "tsconfig.node.json": "{}",
+        "tsconfig.web.json": "{}",
+        "database-migration-lineage.json": '{"migrations":[]}',
+        "package.json": '{"build":{}}',
+        "src/main.ts": "export {};",
+        "src/docs-only.ts": "export {};",
+        "src/other-tool-only.ts": "export {};",
+        "src/generated-only.ts": "export {};",
+        "src/dependency-only.ts": "export {};",
+        "src/orphan.ts": "export {};",
+        "docs/pr-evidence/legacy/evidence.ts": 'import "../../../src/docs-only.ts";',
+        ".github/tools/inspect.cjs": 'require("../../src/other-tool-only.ts");',
+        "docs/out/generated.mjs": 'import "../../src/generated-only.ts";',
+        "resources/generated/tool.ts": 'import "../../src/generated-only.ts";',
+        "node_modules/dependency/index.js": 'require("../../src/dependency-only.ts");',
+        ".git/ignored.ts": "this must never be parsed",
+      };
+      try {
+        for (const [file, contents] of Object.entries(files)) {
+          const path = join(root, file);
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, contents);
+        }
+        // These conventional directories need not contain any modules.
+        mkdirSync(join(root, "tests"));
+        mkdirSync(join(root, "benchmarks"));
+        console.log(JSON.stringify(sourceUsage(root)));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    `);
+    expect(report.toolingRoots).toEqual([
+      ".github/tools/inspect.cjs",
+      "docs/pr-evidence/legacy/evidence.ts",
+      "electron.vite.config.ts",
+      "scripts/runtime-status.vite.config.mjs",
+      "src/renderer/private-connect/vite.config.ts",
+    ]);
+    expect(report.production).toEqual(["src/main.ts"]);
+    expect(report.testAndToolOnly).toEqual([
+      "src/docs-only.ts", "src/other-tool-only.ts", "src/renderer/private-connect/vite.config.ts",
+    ]);
+    expect(report.unreferenced).toEqual([
+      "src/dependency-only.ts", "src/generated-only.ts", "src/orphan.ts",
+    ]);
+    expect(report.analysisLimitations).toEqual([]);
+  });
+
   it("keeps reviewed non-production files visible and reports all shipped entry families", () => {
     const report = evaluate<{
       productionRoots: string[];
+      toolingRoots: string[];
       production: string[];
       testAndToolOnly: string[];
       unreferenced: string[];
@@ -49,8 +116,10 @@ describe("source usage inventory", () => {
       inlineTypeImports: { from: string; to: string }[];
       compatibilityPins: { path: string }[];
     }>("console.log(JSON.stringify(sourceUsage(process.cwd())));");
+    expect(report.toolingRoots).toContain("docs/pr-evidence/legacy-368/legacy-backfill-evidence.ts");
     expect(report.productionRoots).toEqual(expect.arrayContaining([
       "src/main/index.ts",
+      "src/main/linux-file-icon-worker.ts",
       "src/main/snapshot-shortcut-worker.ts",
       "src/server/runtime-worker.ts",
       "src/server/runtime-status-cli.ts",

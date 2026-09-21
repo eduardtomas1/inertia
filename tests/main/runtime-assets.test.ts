@@ -8,13 +8,13 @@ import {
   resolveWindowsRuntimeJobAssemblyPath,
 } from "../../src/main/runtime-assets";
 
-describe("runtime icon resolution", () => {
+describe.each(["darwin", "linux"] as const)("%s runtime icon resolution", (platform) => {
   it("uses an explicit extraResources icon in packaged builds", () => {
     expect(resolveRuntimeIconPath({
       isPackaged: true,
       resourcesPath: "/opt/Inertia/resources",
       appPath: "/opt/Inertia/resources/app.asar",
-    })).toBe(join(resolve("/opt/Inertia/resources"), "icons", "inertia.png"));
+    }, platform)).toBe(join(resolve("/opt/Inertia/resources"), "icons", "inertia.png"));
   });
 
   it("uses the generated source icon during development", () => {
@@ -22,7 +22,7 @@ describe("runtime icon resolution", () => {
       isPackaged: false,
       resourcesPath: "/ignored",
       appPath: "/work/inertia",
-    })).toBe(join(resolve("/work/inertia"), "resources", "icons", "512x512.png"));
+    }, platform)).toBe(join(resolve("/work/inertia"), "resources", "icons", "512x512.png"));
   });
 });
 
@@ -80,4 +80,9 @@ describe("Windows runtime Job Object assembly resolution", () => {
       "windows-runtime-job.exe",
     ));
   });
+});
+
+it.each([true, false])("uses the Windows ICO for packaged=%s", (isPackaged) => {
+  expect(resolveRuntimeIconPath({ isPackaged, appPath: "/app", resourcesPath: "/resources" }, "win32"))
+    .toBe(isPackaged ? join(resolve("/resources"), "icons", "inertia.ico") : join(resolve("/app"), "resources", "icon.ico"));
 });

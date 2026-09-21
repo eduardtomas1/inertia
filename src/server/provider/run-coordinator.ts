@@ -33,6 +33,7 @@ import {
   providerCallbacksFromHarness,
 } from "./emitter";
 import type { ProviderMetadataCache } from "./metadata";
+import { ProviderInstallationAdmissionError } from "./installation-lease";
 import { providerChildEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
@@ -54,6 +55,7 @@ interface ActiveRun {
   turnId: string;
   input: ProviderRunInput;
   negotiatedCapabilities: Set<ProviderCapabilityId>;
+  capabilityAvailable(capabilityId: ProviderCapabilityId): boolean;
   installationUse: ProviderRunInstallationUse;
   processCleanupConfirmed: boolean;
   cancelRequested: boolean;
@@ -397,7 +399,19 @@ export class ProviderRunCoordinator {
         // Cleanup is best effort and must never mask the provider result.
       }
     };
-    const installationUse = this.options.acquireInstallationUse(input, executable);
+    let installationUse: ProviderRunInstallationUse;
+    try {
+      installationUse = this.options.acquireInstallationUse(input, executable);
+    } catch (error) {
+      // Maintenance can claim the installation after a turn was queued. Its
+      // explicit refusal happens before launch preparation or harness.start(),
+      // so this exact turn owns no provider process requiring cleanup. Keep
+      // unexpected authority failures fail-closed as before.
+      if (error instanceof ProviderInstallationAdmissionError) {
+        this.rememberCleanupReceipt(expectedIdentity);
+      }
+      throw error;
+    }
     if (!this.options.resolvedCommandFor(providerId)) {
       this.options.rememberResolvedCommand(providerId, executable);
     }
@@ -566,6 +580,9 @@ export class ProviderRunCoordinator {
       turnId,
       input,
       negotiatedCapabilities: new Set(),
+      capabilityAvailable: (capabilityId) => runCapabilityAvailable(
+        capabilityId, [...active.negotiatedCapabilities],
+      ),
       installationUse,
       processCleanupConfirmed: false,
       cancelRequested: false,
@@ -761,12 +778,7 @@ export class ProviderRunCoordinator {
       || active.cancelRequested
       || active.runId !== identity.runId
       || active.turnId !== identity.turnId
-      || !this.options.capabilityAvailable(
-        active.input,
-        "follow-up-steer",
-        [],
-        [...active.negotiatedCapabilities],
-      )
+      || !active.capabilityAvailable("follow-up-steer")
     ) return false;
     const extension = active.harnessRun?.extension;
     const steer = extension && "steer" in extension
@@ -792,12 +804,7 @@ export class ProviderRunCoordinator {
       || active.cancelRequested
       || active.runId !== identity.runId
       || active.turnId !== identity.turnId
-      || !this.options.capabilityAvailable(
-        active.input,
-        "goals",
-        [],
-        [...active.negotiatedCapabilities],
-      )
+      || !active.capabilityAvailable("goals")
     ) return null;
     const extension = active.harnessRun?.extension;
     if (!extension || extension.kind !== "codex-app-server") return null;
@@ -815,12 +822,7 @@ export class ProviderRunCoordinator {
       || active.cancelRequested
       || active.runId !== identity.runId
       || active.turnId !== identity.turnId
-      || !this.options.capabilityAvailable(
-        active.input,
-        "goals",
-        [],
-        [...active.negotiatedCapabilities],
-      )
+      || !active.capabilityAvailable("goals")
     ) return false;
     const extension = active.harnessRun?.extension;
     if (!extension || extension.kind !== "codex-app-server") return false;
@@ -839,12 +841,7 @@ export class ProviderRunCoordinator {
       || active.cancelRequested
       || active.runId !== identity.runId
       || active.turnId !== identity.turnId
-      || !this.options.capabilityAvailable(
-        active.input,
-        "subagent-stop",
-        [],
-        [...active.negotiatedCapabilities],
-      )
+      || !active.capabilityAvailable("subagent-stop")
     ) return false;
     const extension = active.harnessRun?.extension;
     const stopSubagent = extension && "stopSubagent" in extension
@@ -939,12 +936,7 @@ export class ProviderRunCoordinator {
     const active = this.activeRuns.get(conversationId);
     if (!active || !active.harnessRun || active.settled || active.cancelRequested) return false;
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) return false;
-    if (!this.options.capabilityAvailable(
-      active.input,
-      "approvals",
-      [],
-      [...active.negotiatedCapabilities],
-    )) return false;
+    if (!active.capabilityAvailable("approvals")) return false;
     const extension = active.harnessRun.extension;
     if (!("respondToApproval" in extension)) return false;
     return extension.respondToApproval(requestId, decision);
@@ -959,12 +951,7 @@ export class ProviderRunCoordinator {
     const active = this.activeRuns.get(conversationId);
     if (!active || !active.harnessRun || active.settled || active.cancelRequested) return false;
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) return false;
-    if (!this.options.capabilityAvailable(
-      active.input,
-      "structured-input",
-      [],
-      [...active.negotiatedCapabilities],
-    )) return false;
+    if (!active.capabilityAvailable("structured-input")) return false;
     const extension = active.harnessRun.extension;
     if (!("respondToInput" in extension)) return false;
     return extension.respondToInput(requestId, answers);

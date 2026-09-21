@@ -35,6 +35,18 @@ chmod 0755 ./Inertia-VERSION-arm64.AppImage
 
 Do not apply executable permissions to a wildcard or to an unverified download.
 
+After its first launch, Inertia registers a launcher and a persistent icon in your
+XDG data directory so Ubuntu/GNOME can associate the dock and task switcher with
+the running app. Launchers managed by another installer are preserved. Moving
+the AppImage updates Inertia's own launcher the next time you open it.
+
+On file managers using GIO metadata, Inertia also assigns the AppImage file its
+icon after launch, while preserving an icon you selected yourself. A downloaded
+AppImage may still look generic before its first launch, or on file managers
+without that metadata service; the embedded icon alone cannot control their
+file thumbnails. The application launcher and running-window icons are separate
+from that file-manager behavior.
+
 Linux v0.0.52 requires one manual installation of this release because its
 installed updater cannot repair itself. That repair first shipped in v0.0.53.
 Quit the old app cleanly, verify and open the new AppImage as described above,

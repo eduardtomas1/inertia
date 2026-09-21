@@ -1446,4 +1446,71 @@ describe("production provider lifecycle conformance", () => {
   it("keeps exact identity fields mandatory at compile time", () => {
     expect(compileTimeProviderContractAssertions).toBeTypeOf("function");
   });
+
+  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) => harnessId !== "antigravity-cli"))(
+    "$harnessId retains admitted interaction authority after installation evidence is refreshed",
+    async (route) => {
+      const controlled = controlledManager(route, route.providerId, true);
+      await controlled.manager.detect(route.providerId);
+      const input = inputFor(route);
+      const running = controlled.manager.run(input);
+      try {
+        const exact = { runId: input.runId, turnId: input.turnId };
+        if (route.providerId === "cursor") {
+          expect(controlled.manager.respondToInput(
+            input.conversationId, "input-1", { answer: ["yes"] }, exact,
+          )).toBe(false);
+          controlled.emit({
+            providerId: input.providerId,
+            conversationId: input.conversationId,
+            ...exact,
+            type: "capability-observation",
+            capabilityId: "structured-input",
+            available: true,
+          });
+        }
+        controlled.manager.invalidateInstallationEvidence(route.providerId);
+        expect(() => controlled.manager.run({
+          ...input,
+          conversationId: `${input.conversationId}-new`,
+          runId: `${input.runId}-new`,
+          turnId: `${input.turnId}-new`,
+        })).toThrow(/not verified|does not attest/u);
+        expect(controlled.manager.respondToApproval(
+          input.conversationId, "approval-1", "approve",
+          { ...exact, runId: `${exact.runId}-stale` },
+        )).toBe(false);
+        expect(controlled.manager.respondToApproval(
+          input.conversationId,
+          "approval-1",
+          "approve",
+          exact,
+        )).toBe(true);
+        expect(controlled.manager.respondToInput(
+          input.conversationId, "input-1", { answer: ["yes"] }, exact,
+        )).toBe(true);
+        const canSteer = ["codex", "claude", "opencode"].includes(input.providerId);
+        await expect(controlled.manager.steer(
+          input.conversationId, { content: "Continue this run.", imagePaths: [] }, exact,
+        )).resolves.toBe(canSteer);
+        expect(controlled.manager.cancel(input.conversationId)).toBe(true);
+        expect(controlled.manager.respondToApproval(
+          input.conversationId, "approval-1", "approve", exact,
+        )).toBe(false);
+        await expect(controlled.manager.steer(
+          input.conversationId, { content: "Do not restart.", imagePaths: [] }, exact,
+        )).resolves.toBe(false);
+      } finally {
+        controlled.resolve({
+          ...providerRunTerminal(input, "completed"),
+          text: "",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        });
+        await running;
+      }
+    },
+  );
 });

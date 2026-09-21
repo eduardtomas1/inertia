@@ -45,6 +45,7 @@ export function lifecycleServerSource(
   capturePath: string,
   scenario: LifecycleScenario,
   eventSubscriptionDelayMs = 0,
+  sessionReadId = "opencode-lifecycle-session",
 ): string {
   return `
 const http = require("node:http");
@@ -75,7 +76,7 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/provider") return json(res, { all: [{ id: "fake", name: "Fake", source: "config", env: [], options: {}, models: { "model-a": model } }], default: { fake: "model-a" }, connected: ["fake"] });
     if (req.method === "GET" && url.pathname === "/agent") return json(res, []);
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
-    if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, session);
+    if (url.pathname === "/session/" + sessionID && req.method === "GET") return json(res, { ...session, id: ${JSON.stringify(sessionReadId)} });
     if (url.pathname === "/session/" + sessionID && req.method !== "GET") return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") {
       const openEvents = () => {

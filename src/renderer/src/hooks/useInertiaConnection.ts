@@ -127,7 +127,7 @@ export function useInertiaConnection(): InertiaConnection {
         const socket = new WebSocket(runtimeResumeUrl(
           websocketUrl,
           resumeCursor,
-          detailSubscriptionsRef.current.conversationIds(),
+          detailSubscriptionsRef.current.mountedPanes(),
         ));
         let acceptingFrames = true;
         let mutationReconciliationPending = false;

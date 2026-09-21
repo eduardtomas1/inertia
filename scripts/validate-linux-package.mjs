@@ -83,12 +83,16 @@ function parseDesktopEntry(source) {
 async function validateAppDir(appDir) {
   const desktopFiles = (await readdir(appDir)).filter((name) => name.endsWith(".desktop"));
   if (desktopFiles.length !== 1) throw new Error(`Expected one embedded desktop entry; found ${desktopFiles.length}.`);
+  const expectedDesktopFile = canary
+    ? "dev.inertia.app.desktop.canary.desktop"
+    : "dev.inertia.app.desktop";
+  if (desktopFiles[0] !== expectedDesktopFile) throw new Error("The packaged desktop filename does not match Electron's application identity.");
   const desktopPath = join(appDir, desktopFiles[0]);
   const desktop = parseDesktopEntry(await readFile(desktopPath, "utf8"));
   const expectedDesktop = {
     Name: canary ? "Inertia Canary" : "Inertia",
     Icon: canary ? "inertia-canary" : "inertia",
-    StartupWMClass: canary ? "Inertia Canary" : "Inertia",
+    StartupWMClass: canary ? "dev.inertia.app.desktop.canary" : "dev.inertia.app",
   };
   for (const [field, expected] of Object.entries(expectedDesktop)) {
     if (desktop.get(field) !== expected) throw new Error(`Desktop ${field} must be ${JSON.stringify(expected)}; received ${JSON.stringify(desktop.get(field))}.`);

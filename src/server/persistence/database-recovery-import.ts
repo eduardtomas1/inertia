@@ -307,18 +307,25 @@ export function reconcileRecoveryImportJournal(
 
 export class PreparedRecoveryImport {
   readonly #database: Database.Database;
+  readonly #authorizedRoot: string;
+  readonly #authorizedRootIdentity: RecoveryImportRootIdentity;
   readonly #projectCount: number;
   readonly #roots: { staging: string; final: string };
   readonly #afterStagingPublish?: () => void;
+  #importRootIdentity: RecoveryImportRootIdentity | undefined;
+  #published = false;
 
   constructor(options: {
     database: Database.Database;
     authorizedRoot: string;
+    authorizedRootIdentity: RecoveryImportRootIdentity;
     operationId: string;
     projectCount: number;
     afterStagingPublish?: () => void;
   }) {
     this.#database = options.database;
+    this.#authorizedRoot = options.authorizedRoot;
+    this.#authorizedRootIdentity = options.authorizedRootIdentity;
     this.#projectCount = options.projectCount;
     this.#roots = roots(options.authorizedRoot, options.operationId);
     this.#afterStagingPublish = options.afterStagingPublish;
@@ -328,19 +335,41 @@ export class PreparedRecoveryImport {
     return projectPath(this.#roots.final, index);
   }
 
+  assertAuthority(): void {
+    assertAuthorizedRootAvailable(this.#authorizedRoot, this.#authorizedRootIdentity);
+    if (this.#importRootIdentity) {
+      assertAuthorizedRootAvailable(
+        this.#published ? this.#roots.final : this.#roots.staging,
+        this.#importRootIdentity,
+      );
+    }
+  }
+
+  bindStagingRoot(): void {
+    this.assertAuthority();
+    this.#importRootIdentity = readAuthorizedRootIdentity(this.#roots.staging);
+  }
+
   publish(): void {
+    this.assertAuthority();
     if (this.#projectCount === 0) return;
     renameSync(this.#roots.staging, this.#roots.final);
+    this.#published = true;
     this.#afterStagingPublish?.();
+    this.assertAuthority();
   }
 
   complete(): void {
+    // The SQL transaction must not commit paths authorized by a replaced root,
+    // or discard the journal needed to reconcile the original directories.
+    this.assertAuthority();
     this.#database.prepare(
       "DELETE FROM recovery_import_journals WHERE singleton = 1",
     ).run();
   }
 
   abort(): void {
+    this.assertAuthority();
     reconcileRecoveryImportJournal(this.#database);
   }
 }
@@ -388,6 +417,7 @@ export async function prepareRecoveryImport(
   const prepared = new PreparedRecoveryImport({
     database: options.database,
     authorizedRoot: options.authorizedRoot,
+    authorizedRootIdentity,
     operationId,
     projectCount: options.projectCount,
     afterStagingPublish: options.operations?.afterStagingPublish,
@@ -395,15 +425,20 @@ export async function prepareRecoveryImport(
   try {
     if (options.projectCount === 0) return prepared;
     const mkdirDirectory = options.operations?.mkdir ?? mkdir;
-    await mkdirDirectory(importRoots.staging, { mode: 0o700 });
+    const createOwnedDirectory = async (path: string): Promise<void> => {
+      prepared.assertAuthority();
+      await mkdirDirectory(path, { mode: 0o700 });
+      prepared.assertAuthority();
+    };
+    await createOwnedDirectory(importRoots.staging);
+    prepared.bindStagingRoot();
     for (let start = 0; start < options.projectCount; start += DIRECTORY_BATCH) {
       assertActive(options.signal);
       const end = Math.min(options.projectCount, start + DIRECTORY_BATCH);
       const outcomes = await Promise.allSettled(Array.from(
         { length: end - start },
-        (_unused, offset) => mkdirDirectory(
+        (_unused, offset) => createOwnedDirectory(
           projectPath(importRoots.staging, start + offset),
-          { mode: 0o700 },
         ),
       ));
       const failure = outcomes.find(

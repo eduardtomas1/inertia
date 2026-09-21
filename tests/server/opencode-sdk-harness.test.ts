@@ -21,10 +21,7 @@ import {
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
-import {
-  COMPACTION_REQUEST_TIMESTAMP,
-  lifecycleServerSource,
-} from "../helpers/opencode-lifecycle-server";
+import { COMPACTION_REQUEST_TIMESTAMP, lifecycleServerSource } from "../helpers/opencode-lifecycle-server";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 function permissionDecisionServerSource(root: string, capturePath: string): string {
@@ -580,6 +577,31 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           files: [{ uri: expect.stringMatching(/^file:/u), name: "follow-up.png" }],
         },
       });
+  });
+
+  it.each(["new", "resumed"] as const)("rejects a foreign active session read before prompting a %s session", async (mode) => {
+    const root = portableFixtureRoot("OpenCode session attestation");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(
+      root, capturePath, "idle-after-admission", 0, "foreign-session",
+    ));
+    const run = createOpenCodeSdkHarness().start({
+      executable: command, environment: process.env,
+      providerNativeToolsAvailable: true,
+      input: nativeProviderRunInput({
+        providerId: "opencode", conversationId: `attestation-${mode}`,
+        cwd: root, prompt: "Preserve exact session ownership.",
+        interactionMode: "build", access: "supervised",
+        ...(mode === "resumed" ? { sessionId: "opencode-lifecycle-session" } : {}),
+      }),
+    });
+    await expect(run.result).resolves.toMatchObject({ status: "failed", cleanupConfirmed: true });
+    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string }>;
+    };
+    expect(captured.some(({ path }) => path.endsWith("/prompt_async"))).toBe(false);
   });
 
   it("waits for an exact follow-up receipt before replaying its early permission", async () => {

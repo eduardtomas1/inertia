@@ -13,6 +13,75 @@ const CONVERSATION_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const CONVERSATION_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 describe("RuntimeProjectionSequence", () => {
+  it("retains all four pane subscriptions through reconnect and individual closure", () => {
+    const subscriptions = new RuntimeDetailSubscriptions();
+    const ids = [CONVERSATION, CONVERSATION_B, CONVERSATION_C,
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd"];
+    for (const [index, owner] of (["primary", "secondary", "tertiary", "quaternary"] as const).entries()) {
+      subscriptions.set(owner, ids[index]);
+    }
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "primary", conversationId: ids[0] },
+      { owner: "secondary", conversationId: ids[1] },
+      { owner: "tertiary", conversationId: ids[2] },
+      { owner: "quaternary", conversationId: ids[3] },
+    ]);
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      subscriptions.mountedPanes(),
+    ));
+    expect(url.searchParams.getAll("conversationId")).toEqual(ids);
+    expect(url.searchParams.getAll("conversationOwner"))
+      .toEqual(["primary", "secondary", "tertiary", "quaternary"]);
+    subscriptions.set("secondary", null);
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "primary", conversationId: ids[0] },
+      { owner: "tertiary", conversationId: ids[2] },
+      { owner: "quaternary", conversationId: ids[3] },
+    ]);
+  });
+
+  it("keeps exact sparse owner pairs after panes remount in a different order", () => {
+    const subscriptions = new RuntimeDetailSubscriptions();
+    subscriptions.set("quaternary", CONVERSATION_C);
+    subscriptions.set("primary", CONVERSATION);
+    subscriptions.set("tertiary", CONVERSATION_C);
+    subscriptions.set("primary", null);
+    subscriptions.set("primary", CONVERSATION_B);
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      subscriptions.mountedPanes(),
+    ));
+    const owners = url.searchParams.getAll("conversationOwner");
+    const ids = url.searchParams.getAll("conversationId");
+    expect(Object.fromEntries(owners.map((owner, index) => [owner, ids[index]]))).toEqual({
+      primary: CONVERSATION_B,
+      tertiary: CONVERSATION_C,
+      quaternary: CONVERSATION_C,
+    });
+    subscriptions.set("tertiary", null);
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "quaternary", conversationId: CONVERSATION_C },
+      { owner: "primary", conversationId: CONVERSATION_B },
+    ]);
+  });
+
+  it("bounds reconnect URLs to the four supported panes", () => {
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token",
+      { runtimeGeneration: GENERATION_A, latestSequence: 23 },
+      (["primary", "secondary", "tertiary", "quaternary", "primary"] as const).map((owner) => ({
+        owner,
+        conversationId: CONVERSATION,
+      })),
+    ));
+    expect(url.searchParams.getAll("conversationOwner"))
+      .toEqual(["primary", "secondary", "tertiary", "quaternary"]);
+    expect(url.searchParams.getAll("conversationId")).toHaveLength(4);
+  });
+
   it("ignores duplicates and requires a refresh for a live gap", () => {
     const projection = new RuntimeProjectionSequence();
     projection.replaceFromSnapshot({ runtimeGeneration: GENERATION_A, latestSequence: 5 });
@@ -56,15 +125,16 @@ describe("RuntimeProjectionSequence", () => {
     const result = new URL(runtimeResumeUrl(
       "ws://127.0.0.1:4312/runtime/token",
       { runtimeGeneration: GENERATION_A, latestSequence: 19 },
-      [CONVERSATION],
+      [{ owner: "primary", conversationId: CONVERSATION }],
     ));
     expect(result.searchParams.get("runtimeGeneration")).toBe(GENERATION_A);
     expect(result.searchParams.get("afterSequence")).toBe("19");
     expect(result.searchParams.get("conversationId")).toBe(CONVERSATION);
+    expect(result.searchParams.get("conversationOwner")).toBe("primary");
     expect(runtimeResumeUrl(
       "ws://127.0.0.1:4312/runtime/token",
       null,
-      [CONVERSATION],
+      [{ owner: "primary", conversationId: CONVERSATION }],
     ))
       .toBe("ws://127.0.0.1:4312/runtime/token");
   });
@@ -76,14 +146,14 @@ describe("RuntimeProjectionSequence", () => {
     subscriptions.set("secondary", null);
     subscriptions.set("secondary", CONVERSATION_C);
 
-    expect(subscriptions.conversationIds()).toEqual([
-      CONVERSATION,
-      CONVERSATION_C,
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "primary", conversationId: CONVERSATION },
+      { owner: "secondary", conversationId: CONVERSATION_C },
     ]);
     const resumed = new URL(runtimeResumeUrl(
       "ws://127.0.0.1:4312/runtime/token",
       { runtimeGeneration: GENERATION_A, latestSequence: 23 },
-      subscriptions.conversationIds(),
+      subscriptions.mountedPanes(),
     ));
     expect(resumed.searchParams.getAll("conversationId")).toEqual([
       CONVERSATION,
@@ -91,6 +161,9 @@ describe("RuntimeProjectionSequence", () => {
     ]);
 
     subscriptions.set("secondary", CONVERSATION);
-    expect(subscriptions.conversationIds()).toEqual([CONVERSATION]);
+    expect(subscriptions.mountedPanes()).toEqual([
+      { owner: "primary", conversationId: CONVERSATION },
+      { owner: "secondary", conversationId: CONVERSATION },
+    ]);
   });
 });

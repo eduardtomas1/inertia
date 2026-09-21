@@ -181,7 +181,7 @@ export class ClaudeSubagentTraceTracker {
       || subagentType
       || (taskType && SUBAGENT_TASK_TYPES.has(taskType)),
     );
-    if (!isSubagent || record.skip_transcript === true) {
+    if (!isSubagent || record.skip_transcript === true || record.ambient === true) {
       if (
         !this.ignoredTaskIds.has(taskId)
         && this.ignoredTaskIds.size >= MAX_CLAUDE_IGNORED_TASK_IDS

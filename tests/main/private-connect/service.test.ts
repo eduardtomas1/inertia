@@ -144,6 +144,46 @@ async function pairCollaboratingBrowser(service: PrivateConnectService) {
 }
 
 describe("Private Connect service lifecycle", () => {
+  it.each(["revoke", "narrow", "lock", "logout", "replace"] as const)("withholds an in-flight read after %s changes its authority", async (change) => {
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    let entered = false;
+    const service = await createServiceWith(testStore(), testTailscale(), {
+      privateConnectRequest: async (_subject, request) => {
+        entered = true;
+        await readGate;
+        return {
+          type: "response", requestId: request.requestId, ok: true,
+          result: {
+            kind: "state",
+            state: {
+              generatedAt: "2030-01-01T00:00:00.000Z",
+              projects: [{ id: projectId, name: "withheld-project-sentinel" }],
+              conversations: [], runs: [],
+            },
+          },
+        };
+      },
+    });
+    const session = await pairCollaboratingBrowser(service);
+    const pending = service.handleRequest(session, {
+      protocolVersion: 1, type: "state.get",
+      requestId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(entered).toBe(true);
+    if (change === "revoke") await service.revokeDevice(deviceId);
+    if (change === "narrow") await service.updateDevice(
+      deviceId, "monitor", [otherProjectId], "2030-01-15T00:00:00.000Z",
+    );
+    if (change === "lock") await service.setPrivacyLocked(true);
+    if (change === "logout") await service.logout(session);
+    if (change === "replace") await pairCollaboratingBrowser(service);
+    releaseRead();
+    const response = await pending;
+    expect(response).toMatchObject({ ok: false, code: "forbidden" });
+    expect(JSON.stringify(response)).not.toContain("withheld-project-sentinel");
+  });
+
   it.each(["The runtime is unavailable.", "The runtime has uncertain availability."])("reports runtime read failures independently of wording: %s", async (message) => {
     const service = await createServiceWith(testStore(), testTailscale(), {
       privateConnectRequest: async () => { throw new Error(`${message} internal-sentinel`); },

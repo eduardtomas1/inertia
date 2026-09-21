@@ -445,19 +445,34 @@ describe("visual contrast system", () => {
       '.composer[data-maximum-reasoning="true"]::after',
     );
     expect(ultraFrame).toContain("pointer-events: none");
-    expect(ultraFrame).toContain("animation: ultra-reasoning-frame-flow 6s linear infinite");
+    expect(ultraFrame).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
+    expect(ultraFrame).toContain("conic-gradient(");
+    expect(ultraFrame).toContain("from var(--ultra-angle)");
     expect(ultraFrame).toContain("mask-composite: exclude");
     expect(ultraFrame).toContain("border-radius: var(--radius-composer)");
     expect(ultraFrame).toContain("inset: 0 0 var(--composer-strip-offset, 0px)");
+    expect(css).toMatch(/@property --ultra-angle\s*\{[^}]*syntax:\s*"<angle>";[^}]*inherits:\s*false;/su);
+    const glow = cssBlock('.composer[data-maximum-reasoning="true"] > .composer-ultra-glow');
+    expect(glow).toContain("pointer-events: none");
+    expect(glow).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
+    expect(css).toMatch(/\.composer-ultra-glow\s*\{[^}]*display:\s*none;/su);
     expect(css).not.toMatch(
       /\.composer-input-zone::after/u,
     );
     expect(css).toMatch(
-      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after,[\s\S]*?\.composer-ultra-glow\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after\s*\{[^}]*animation:\s*none;/u,
     );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-ultra-glow\s*\{[^}]*display:\s*none;/u,
+    );
+    const label = cssBlock(
+      '.composer[data-maximum-reasoning="true"] .composer-reasoning-control .composer-setting-value',
+    );
+    expect(label).toContain("background-clip: text");
+    expect(label).toContain("color: transparent");
   });
 });
 

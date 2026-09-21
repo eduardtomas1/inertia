@@ -1028,6 +1028,7 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
+        <span className="composer-ultra-glow" aria-hidden="true" />
         {goal && (
           <Suspense fallback={null}>
             <ChatGoalControl

@@ -681,14 +681,13 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .toHaveValue("Draft owned by Companion");
   await expect(secondary.getByRole("textbox", { name: "Message" }))
     .toHaveValue("Draft owned by Inertia");
-  await expect(
-    primary.getByRole("complementary", { name: "Workspace tools" })
-      .getByText("Companion", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    secondary.getByRole("complementary", { name: "Workspace tools" })
-      .getByText("Inertia", { exact: true }),
-  ).toBeVisible();
+  // Each pane keeps its own docked terminal, labelled with its project.
+  await expect(primary.locator(".conversation-pane-chat > .terminal-dock")
+    .getByRole("tab", { name: "Terminal 1" }))
+    .toHaveAttribute("title", "Terminal 1 · Companion");
+  await expect(secondary.locator(".conversation-pane-chat > .terminal-dock")
+    .getByRole("tab", { name: "Terminal 1" }))
+    .toHaveAttribute("title", "Terminal 1 · Inertia");
   await expect(
     primary.locator(".terminal-panel[data-terminal-id]"),
   ).toHaveAttribute(

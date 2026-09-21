@@ -12,6 +12,7 @@ import {
 import { runGit } from "./runner";
 import { GitError } from "./types";
 import { reversalFileLocation, type ReversalWorkspaceScope } from "./reversal-scope";
+import { restoreReversalIndexEntry } from "./reversal-index";
 
 export interface IndexEntry {
   mode: string;
@@ -95,6 +96,21 @@ export async function updateIndexEntry(
   await runGit(root, ["update-index", "--cacheinfo", mode, oid, path], {
     maxOutputBytes: 256,
     failureMessage: "Unable to update the selected file in the Git index.",
+  });
+}
+
+export async function restoreIndexEntry(
+  root: string,
+  path: string,
+  expected: { mode: string; oid: string },
+  restored: { mode: string; oid: string },
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
+  workspace?: ReversalWorkspaceScope,
+): Promise<void> {
+  await restoreReversalIndexEntry(root, path, expected, restored, async () => {
+    await secureFiles.verifyRoot(secureRoot);
+    await reversalFileLocation(secureFiles, secureRoot, path, workspace);
   });
 }
 

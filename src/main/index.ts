@@ -1,3 +1,4 @@
+import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
@@ -749,6 +750,7 @@ async function createMainWindow(): Promise<void> {
     appPath: app.getAppPath(),
   });
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
+  await registerLinuxDesktopIcon(app, releaseChannel, iconPath);
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
   const backgroundColor = resolveWindowBackground(

@@ -798,7 +798,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true } }, agentInfo: { name: "Cursor", version: "9.9.9" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "plan", name: "Plan" }] }, configOptions } });
   if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
-  if (message.method === "session/set_config_option") return send({ jsonrpc: "2.0", id: message.id, result: { configOptions: modelAConfigOptions } });
+  if (message.method === "session/set_config_option") {
+    const selected = modelAConfigOptions.find(option => option.id === message.params.configId);
+    if (selected) selected.currentValue = message.params.value;
+    return send({ jsonrpc: "2.0", id: message.id, result: { configOptions: modelAConfigOptions } });
+  }
   if (message.method === "session/prompt") {
     promptRequestId = message.id;
     return send({ jsonrpc: "2.0", id: 100, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "tool-1", title: "Run tests", kind: "execute", status: "pending", rawInput: { command: "npm test" } }, options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }] } });

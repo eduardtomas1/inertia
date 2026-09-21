@@ -282,7 +282,9 @@ export function startCodexAppServerRun(
     events?.settleInteractions();
     ownedTerminationArmed = true;
     void (async () => {
-      let finalStatus = status;
+      // Capture an earlier user cancellation at terminal acceptance. A later
+      // cancellation cannot rewrite this outcome while owned cleanup drains.
+      let finalStatus: CodexAppServerResult["status"] = cancelRequested ? "cancelled" : status;
       let cleanupConfirmed = true;
       try {
         // A terminal App Server turn has no further process work to preserve.
@@ -503,7 +505,21 @@ export function startCodexAppServerRun(
       terminalEvent = event;
     },
     writeMessage,
-    cancel,
+    cancel: (reason) => {
+      if (!cancelRequested && reason === "malformed-protocol") {
+        // Rejecting unsafe provider output is a failed turn, not a user
+        // cancellation. Accept it before a later interrupt/completion races
+        // cleanup; finish still joins the same owned process-tree proof.
+        rememberFailure(
+          "malformed-protocol",
+          "Codex sent an invalid App Server request.",
+          lastError,
+        );
+        finish("failed", child.exitCode, child.signalCode);
+      } else {
+        cancel();
+      }
+    },
     finish,
     rememberFailure,
   });

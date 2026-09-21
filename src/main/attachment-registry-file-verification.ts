@@ -12,6 +12,22 @@ import {
 const VERIFICATION_ERROR =
   "Temporary attachment storage could not be verified safely.";
 
+export async function verifyPinnedAttachmentDirectory(
+  directory: string,
+  authority: { readonly root: string; readonly identity: BigIntStats },
+): Promise<string> {
+  const { root, identity } = authority;
+  const named = await lstat(directory, { bigint: true });
+  if (
+    !named.isDirectory() || named.isSymbolicLink()
+    || named.dev !== identity.dev || named.ino !== identity.ino
+    || await realpath(directory) !== root
+    || (process.platform !== "win32" && ((named.mode & 0o777n) !== 0o700n
+      || named.uid !== identity.uid))
+  ) throw new Error(VERIFICATION_ERROR);
+  return root;
+}
+
 export function isStablePrivateAttachment(
   before: BigIntStats,
   after: BigIntStats,

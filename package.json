@@ -1,6 +1,6 @@
 {
   "name": "inertia",
-  "version": "0.0.60",
+  "version": "0.0.61",
   "description": "A calm local workspace for coding with agents.",
   "desktopName": "dev.inertia.app.desktop",
   "inertiaReleaseChannel": "stable",
@@ -151,6 +151,10 @@
         "to": "icons/inertia.png"
       },
       {
+        "from": "resources/icon.ico",
+        "to": "icons/inertia.ico"
+      },
+      {
         "from": "resources/generated/THIRD_PARTY_NOTICES.txt",
         "to": "THIRD_PARTY_NOTICES.txt"
       },
@@ -201,7 +205,7 @@
       ]
     },
     "win": {
-      "icon": "resources/icon.png",
+      "icon": "resources/icon.ico",
       "artifactName": "Inertia.Setup.${version}.${ext}",
       "target": "nsis",
       "files": [
@@ -234,7 +238,7 @@
         "entry": {
           "Name": "Inertia",
           "Comment": "A calm local workspace for coding with agents.",
-          "StartupWMClass": "Inertia"
+          "StartupWMClass": "dev.inertia.app"
         }
       },
       "target": [

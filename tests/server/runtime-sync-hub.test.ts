@@ -9,7 +9,9 @@ import type {
   ProviderMaintenanceOperation,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { RuntimeSequencer } from "../../src/server/runtime-sequencing";
+import { parseRuntimeResumeRequest, RuntimeSequencer } from "../../src/server/runtime-sequencing";
+import { clientCommandSchema } from "../../src/shared/contracts";
+import { RuntimeDetailSubscriptions, runtimeResumeUrl } from "../../src/renderer/src/utils/runtimeSequencing";
 import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
 import { sendRuntimeEvent } from "../../src/server/runtime-protocol";
 import { SerializedRuntimeEvent } from "../../src/server/serialized-runtime-event";
@@ -134,6 +136,131 @@ function fixture() {
 }
 
 describe("runtime sync hub", () => {
+  it("keeps four live pane subscriptions independent when a pane closes", () => {
+    const runtime = fixture();
+    const ids = [CONVERSATION_A, CONVERSATION_B, CONVERSATION_C,
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd"];
+    runtime.hub.connect("split", { kind: "none" }, {
+      snapshot, approvals: [], inputs: [], plans: [],
+    });
+    for (const [index, owner] of ["primary", "secondary", "tertiary", "quaternary"].entries()) {
+      const command = clientCommandSchema.parse({
+        requestId: crypto.randomUUID(),
+        type: "conversation.detail.subscription",
+        payload: { owner, conversationId: ids[index] },
+      });
+      if (command.type !== "conversation.detail.subscription") throw new Error("Unexpected command.");
+      runtime.hub.setConversationSubscription("split", command.payload.owner, command.payload.conversationId);
+    }
+    const publish = () => {
+      runtime.events.get("split")!.length = 0;
+      for (const conversationId of ids) runtime.hub.broadcast({
+        type: "agent.text", conversationId, runId: "run", turnId: "turn", text: conversationId,
+      });
+      return runtime.events.get("split")!.map((event) => event.type);
+    };
+    expect(publish()).toEqual(Array(4).fill("runtime.event"));
+    runtime.hub.setConversationSubscription("split", "secondary", null);
+    expect(publish()).toEqual(["runtime.event", "runtime.cursor", "runtime.event", "runtime.event"]);
+  });
+
+  it("replays and keeps streaming every pane after a four-pane reconnect", () => {
+    const runtime = fixture();
+    const ids = [CONVERSATION_A, CONVERSATION_B, CONVERSATION_C,
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd"];
+    const owners = ["primary", "secondary", "tertiary", "quaternary"] as const;
+    const resumeUrl = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1:4312/runtime/token", runtime.hub.cursor(),
+      owners.map((owner, index) => ({ owner, conversationId: ids[index] })),
+    ));
+    const publish = () => {
+      for (const conversationId of ids) runtime.hub.broadcast({
+        type: "agent.text", conversationId, runId: "run", turnId: "turn", text: conversationId,
+      });
+    };
+    publish();
+    const resume = parseRuntimeResumeRequest(`${resumeUrl.pathname}${resumeUrl.search}`, "/runtime/token");
+    expect(resume).toMatchObject({ kind: "resume", conversationIds: ids });
+    runtime.hub.connect("split", resume, { snapshot, approvals: [], inputs: [], plans: [] });
+    expect(runtime.events.get("split")!.filter((event) => event.type === "runtime.event"))
+      .toHaveLength(4);
+    runtime.events.get("split")!.length = 0;
+    runtime.hub.setConversationSubscription("split", "secondary", null);
+    publish();
+    expect(runtime.events.get("split")!.map((event) => event.type))
+      .toEqual(["runtime.event", "runtime.cursor", "runtime.event", "runtime.event"]);
+  });
+
+  it("preserves a vacant middle owner through reconnect and immediate pane closure", () => {
+    const runtime = fixture();
+    const subscriptions = new RuntimeDetailSubscriptions();
+    subscriptions.set("primary", CONVERSATION_A);
+    subscriptions.set("tertiary", CONVERSATION_C);
+    const url = new URL(runtimeResumeUrl(
+      "ws://127.0.0.1/runtime/token", runtime.hub.cursor(), subscriptions.mountedPanes(),
+    ));
+    const resume = parseRuntimeResumeRequest(`${url.pathname}${url.search}`, url.pathname);
+    expect(resume).toMatchObject({
+      kind: "resume", conversationOwners: ["primary", "tertiary"],
+    });
+    runtime.hub.connect("split", resume, { snapshot, approvals: [], inputs: [], plans: [] });
+    runtime.events.get("split")!.length = 0;
+    // Closing the still-vacant secondary pane must not evict tertiary before
+    // React has had a chance to re-register the mounted panes online.
+    runtime.hub.setConversationSubscription("split", "secondary", null);
+    runtime.hub.broadcast({
+      type: "agent.text", conversationId: CONVERSATION_C,
+      runId: "run", turnId: "turn", text: "visible tertiary",
+    });
+    expect(runtime.events.get("split")!.at(-1)).toMatchObject({ type: "runtime.event" });
+    runtime.hub.setConversationSubscription("split", "tertiary", null);
+    runtime.hub.broadcast({
+      type: "agent.text", conversationId: CONVERSATION_C,
+      runId: "run", turnId: "turn", text: "closed tertiary",
+    });
+    expect(runtime.events.get("split")!.at(-1)).toMatchObject({ type: "runtime.cursor" });
+  });
+
+  it("retains duplicate conversation ownership until its last resumed pane closes", () => {
+    const runtime = fixture();
+    const url = new URL(runtimeResumeUrl("ws://127.0.0.1/runtime/token", runtime.hub.cursor(), [
+      { owner: "tertiary", conversationId: CONVERSATION_C },
+      { owner: "quaternary", conversationId: CONVERSATION_C },
+    ]));
+    const resume = parseRuntimeResumeRequest(`${url.pathname}${url.search}`, url.pathname);
+    expect(resume.kind).toBe("resume");
+    runtime.hub.connect("split", resume, { snapshot, approvals: [], inputs: [], plans: [] });
+    const publish = () => runtime.hub.broadcast({
+      type: "agent.text", conversationId: CONVERSATION_C,
+      runId: "run", turnId: "turn", text: "shared conversation",
+    });
+    runtime.hub.setConversationSubscription("split", "primary", null);
+    runtime.hub.setConversationSubscription("split", "tertiary", null);
+    publish();
+    expect(runtime.events.get("split")!.at(-1)).toMatchObject({ type: "runtime.event" });
+    runtime.hub.setConversationSubscription("split", "quaternary", null);
+    publish();
+    expect(runtime.events.get("split")!.at(-1)).toMatchObject({ type: "runtime.cursor" });
+  });
+
+  it("keeps detached reconnects restricted to their authorized conversation regardless of pane labels", () => {
+    const runtime = fixture();
+    runtime.hub.connect("detached", {
+      kind: "resume", runtimeGeneration: GENERATION, afterSequence: 0,
+      conversationIds: [CONVERSATION_B, CONVERSATION_C],
+      conversationOwners: ["tertiary", "quaternary"],
+    }, { snapshot, approvals: [], inputs: [], plans: [] }, {
+      kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "detached",
+    });
+    runtime.events.get("detached")!.length = 0;
+    runtime.hub.setConversationSubscription("detached", "quaternary", CONVERSATION_C);
+    for (const conversationId of [CONVERSATION_A, CONVERSATION_B, CONVERSATION_C]) {
+      runtime.hub.broadcast({ type: "agent.text", conversationId, runId: "run", turnId: "turn", text: conversationId });
+    }
+    expect(runtime.events.get("detached")!.map((event) => event.type))
+      .toEqual(["runtime.event", "runtime.cursor", "runtime.cursor"]);
+  });
+
   it("does not own a socket when fresh hydration fails", () => {
     const runtime = fixture();
     expect(() => runtime.hub.connect("broken", { kind: "none" }, {

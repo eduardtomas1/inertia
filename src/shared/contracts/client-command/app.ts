@@ -2,6 +2,7 @@ import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import { RUNTIME_DETAIL_SUBSCRIPTION_OWNERS } from "../../runtime-detail-subscriptions";
 
 import {
   modelBackendProfileIdSchema,
@@ -242,7 +243,7 @@ export const appCommandSchemas = [
       ...requestBase,
       type: z.literal("conversation.detail.subscription"),
       payload: z.object({
-        owner: z.enum(["primary", "secondary"]),
+        owner: z.enum(RUNTIME_DETAIL_SUBSCRIPTION_OWNERS),
         conversationId: z.string().uuid().nullable(),
       }).strict(),
     })

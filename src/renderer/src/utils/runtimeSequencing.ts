@@ -1,4 +1,11 @@
 import type { RuntimeSyncCursor } from "@shared/contracts";
+import {
+  MAX_RUNTIME_DETAIL_SUBSCRIPTIONS,
+  type RuntimeDetailSubscriptionOwner,
+  type RuntimePaneSubscription,
+} from "@shared/runtime-detail-subscriptions";
+
+export type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
 export interface RuntimeProjectionState extends RuntimeSyncCursor {
   synchronized: boolean;
@@ -7,35 +14,25 @@ export interface RuntimeProjectionState extends RuntimeSyncCursor {
 
 export type RuntimeFrameDecision = "apply" | "ignore" | "gap" | "generation-mismatch";
 export type RuntimeCompletionDecision = "completed" | "ignore" | "gap" | "generation-mismatch";
-export type RuntimeDetailSubscriptionOwner = "primary" | "secondary";
 
 /**
- * Tracks the conversations owned by the two mounted workspace panes. Keeping
+ * Tracks the conversations owned by the mounted workspace panes. Keeping
  * this state beside the socket makes reconnect URLs represent current pane
  * ownership rather than whichever detail requests happened most recently.
  */
 export class RuntimeDetailSubscriptions {
-  private readonly conversations: Record<
-    RuntimeDetailSubscriptionOwner,
-    string | null
-  > = {
-    primary: null,
-    secondary: null,
-  };
+  private readonly panes = new Map<RuntimeDetailSubscriptionOwner, RuntimePaneSubscription>();
 
   set(
     owner: RuntimeDetailSubscriptionOwner,
     conversationId: string | null,
   ): void {
-    this.conversations[owner] = conversationId;
+    if (conversationId === null) this.panes.delete(owner);
+    else this.panes.set(owner, { owner, conversationId });
   }
 
-  conversationIds(): string[] {
-    return [
-      this.conversations.primary,
-      this.conversations.secondary,
-    ].filter((id, index, ids): id is string =>
-      id !== null && ids.indexOf(id) === index);
+  mountedPanes(): RuntimePaneSubscription[] {
+    return [...this.panes.values()];
   }
 }
 
@@ -134,14 +131,15 @@ export class RuntimeProjectionSequence {
 export function runtimeResumeUrl(
   websocketUrl: string,
   cursor: RuntimeSyncCursor | null,
-  conversationIds: readonly string[],
+  subscriptions: readonly RuntimePaneSubscription[],
 ): string {
   if (!cursor || !validCursor(cursor)) return websocketUrl;
   const url = new URL(websocketUrl);
   url.searchParams.set("runtimeGeneration", cursor.runtimeGeneration);
   url.searchParams.set("afterSequence", String(cursor.latestSequence));
-  for (const conversationId of conversationIds.slice(-2)) {
+  for (const { owner, conversationId } of subscriptions.slice(0, MAX_RUNTIME_DETAIL_SUBSCRIPTIONS)) {
     url.searchParams.append("conversationId", conversationId);
+    url.searchParams.append("conversationOwner", owner);
   }
   return url.toString();
 }

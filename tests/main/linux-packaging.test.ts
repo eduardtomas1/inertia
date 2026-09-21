@@ -46,7 +46,7 @@ describe("Linux application icon packaging", () => {
     expect(packageJson.build.linux.executableName).toBe("inertia");
     expect(packageJson.build.linux.desktop.entry).toMatchObject({
       Name: "Inertia",
-      StartupWMClass: "Inertia",
+      StartupWMClass: "dev.inertia.app",
     });
     expect(packageJson.build.extraResources).toContainEqual({
       from: "resources/icons/512x512.png",

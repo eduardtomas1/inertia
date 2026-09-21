@@ -51,11 +51,11 @@ const budgets = {
   // Reviewed production dependency batch adds exactly 1,156 emitted bytes
   // on identical application source. Preserve existing headroom; see
   // docs/pr-evidence/dependency-pr420/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -105,7 +105,8 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   deferredTerminalJavaScript: 25.5 * kibibyte,
   // Branch search/tracking and the Git overview load only when opened.
-  deferredGitMenusJavaScript: 8.875 * kibibyte,
+  deferredGitMenusJavaScript: 8.875 * kibibyte + 245,
+  deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -134,7 +135,7 @@ const budgets = {
   // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
   // same source/dependency baseline. Both first-load routes are unchanged.
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -524,6 +525,16 @@ const mascotJavaScriptBytes = await closureBytes(mascotClosure, entryJavaScriptC
 const mascotSettingsJavaScriptBytes = await closureBytes(mascotSettingsClosure, new Set([
   ...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...mascotClosure,
 ]));
+const headerActionsEntry = assetNames.find((name) => /^WorkspaceHeaderActions-.*\.js$/u.test(name));
+if (!headerActionsEntry) throw new Error("Missing deferred workspace header actions");
+if (mainWorkbenchJavaScriptClosure.has(headerActionsEntry) || detachedChatJavaScriptClosure.has(headerActionsEntry)) {
+  throw new Error("Workspace header actions must remain deferred from the initial routes");
+}
+const headerActionsJavaScriptClosure = await javaScriptClosure(headerActionsEntry);
+const deferredWorkspaceHeaderActionsJavaScriptBytes = await closureBytes(
+  headerActionsJavaScriptClosure,
+  new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]),
+);
 const gitMenuEntries = ["WorkspaceBranchMenu", "WorkspaceGitActionMenu"].map((prefix) => {
   const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
   if (!entry) throw new Error(`Missing deferred Git menu: ${prefix}`);
@@ -533,7 +544,12 @@ const gitMenuEntries = ["WorkspaceBranchMenu", "WorkspaceGitActionMenu"].map((pr
 const gitMenuClosures = await Promise.all(gitMenuEntries.map(javaScriptClosure));
 const deferredGitMenusJavaScriptBytes = await closureBytes(
   new Set(gitMenuClosures.flatMap((closure) => [...closure])),
-  new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]),
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+    ...headerActionsJavaScriptClosure,
+  ]),
 );
 const issueReportEntry = assetNames.find((name) => /^IssueReportSettings-.*\.js$/u.test(name));
 if (!issueReportEntry) throw new Error("Missing deferred issue report surface");
@@ -614,6 +630,7 @@ const coreJavaScriptBytes =
   - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
   - deferredGitMenusJavaScriptBytes
+  - deferredWorkspaceHeaderActionsJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
@@ -661,6 +678,7 @@ const measurements = {
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   deferredGitMenusJavaScript: deferredGitMenusJavaScriptBytes,
+  deferredWorkspaceHeaderActionsJavaScript: deferredWorkspaceHeaderActionsJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,

@@ -68,11 +68,15 @@
     "strip strip";
   align-items: center;
   margin: 0;
-  padding: 0;
+  padding: 0 0 7px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+.composer-shell .composer-toolbar:has(> .composer-checkout-strip) {
+  row-gap: 7px;
+  padding-bottom: 0;
 }
 .composer-shell .composer-primary-rail {
   z-index: 1;
@@ -81,7 +85,7 @@
   min-width: 0;
   align-items: center;
   gap: 4px;
-  padding: 2px 4px 9px 8px;
+  padding: 2px 4px 2px 8px;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -121,7 +125,7 @@
   grid-area: send;
   align-items: center;
   gap: 6px;
-  padding: 2px 10px 9px 2px;
+  padding: 2px 10px 2px 2px;
 }
 .composer-shell .composer-input-actions .icon-button:where(:not(.send-button)) {
   width: 28px;

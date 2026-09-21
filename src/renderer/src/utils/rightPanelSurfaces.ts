@@ -4,7 +4,6 @@ export const RIGHT_PANEL_SURFACES = [
   "changes",
   "files",
   "preview",
-  "terminal",
   "agents",
   "usage",
   "goal",
@@ -18,7 +17,6 @@ export const RIGHT_PANEL_SURFACE_META: Record<
   changes: { label: "Changes", shortcut: "D" },
   files: { label: "Files", shortcut: "F" },
   preview: { label: "Browser", shortcut: "B" },
-  terminal: { label: "Terminal", shortcut: "T" },
   agents: { label: "Agents", shortcut: "A" },
   usage: { label: "Usage", shortcut: "U" },
   goal: { label: "Goal", shortcut: "G" },
@@ -28,7 +26,6 @@ export const RIGHT_PANEL_SURFACE_META: Record<
 export const WORKSPACE_BOUND_SURFACES = [
   "changes",
   "files",
-  "terminal",
   "preview",
 ] as const satisfies readonly WorkspacePanelTab[];
 

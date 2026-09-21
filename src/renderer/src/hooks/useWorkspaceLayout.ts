@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
+import { useTerminalDock, type TerminalDockActions } from "./useTerminalDock";
 import {
   LAST_WORKSPACE_TOOL_KEY,
   type WorkspaceStartupSurface,
@@ -146,7 +147,7 @@ export interface WorkspaceLayoutOptions {
   forceStackedTools?: boolean;
 }
 
-export interface WorkspacePanelActions {
+export interface WorkspacePanelActions extends TerminalDockActions {
   panel: RightPanelState;
   activeTool: WorkspacePanelTab | null;
   setActiveTool: React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>;
@@ -157,7 +158,6 @@ export interface WorkspacePanelActions {
   closeOtherSurfaces: (surface: WorkspacePanelTab) => void;
   closeAllSurfaces: () => void;
   toggleWorkspaceTools: () => void;
-  toggleTerminal: () => void;
 }
 
 export interface WorkspaceLayout extends WorkspacePanelActions {
@@ -323,9 +323,8 @@ export function useWorkspaceLayout(
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
-    toggleTerminal: () =>
-      updatePanel((current) => toggleRightPanelSurface(current, "terminal")),
   }), [updatePanel]);
+  const terminalDock = useTerminalDock(workspaceScope);
 
   const showStartupSurface = useMemo(
     () => (surface: WorkspaceStartupSurface) => {
@@ -407,6 +406,7 @@ export function useWorkspaceLayout(
     panel: panelState,
     activeTool: activeToolState,
     ...panelActions,
+    ...terminalDock,
     showStartupSurface,
     stackedTools,
     panelPresentation,
@@ -452,6 +452,7 @@ export function useWorkspaceLayout(
     showStartupSurface,
     sidebarCollapsed,
     sidebarDynamicMax,
+    terminalDock,
     sidebarOpen,
     stackedTools,
     toolsDynamicMaxHeight,

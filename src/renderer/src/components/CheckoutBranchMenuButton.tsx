@@ -16,7 +16,7 @@ import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
 import { onCheckoutBranchMenuRequest } from "../utils/checkoutBranchMenu";
-import type { CheckoutBranchControlModel } from "./CheckoutBranchControl";
+import type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
 import "./CheckoutBranchControl.css";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));

@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
-import { Columns2, Plus, TerminalSquare, X } from "lucide-react";
+import { ChevronDown, Columns2, Plus, TerminalSquare, X } from "lucide-react";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -384,6 +384,9 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     if (event.key === "Delete") closeTerminal(id);
   };
   const sessionIds = new Map(tabs.map((tab) => [tab.id, `terminal-session-${tab.id}`]));
+  // One header row: an unsplit session puts its controls beside the tabs
+  // instead of repeating "Terminal" in a header of its own.
+  const [sessionActionsHost, setSessionActionsHost] = useState<HTMLDivElement | null>(null);
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
   const panelError = actionRoutingError ?? closeError?.[1];
 
@@ -394,6 +397,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
           {tabs.map((tab) => (
             <div role="presentation" className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}>
               <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
+                title={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
@@ -404,7 +408,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
             </div>
           ))}
         </div>
-        <div className="terminal-tab-actions"><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={addTerminal}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
+        <div className="terminal-tab-actions"><div ref={setSessionActionsHost} className="terminal-session-actions" hidden={split} /><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={addTerminal}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton><IconButton label="Hide terminal" onClick={props.onClose}><ChevronDown size={14} /></IconButton></div>
       </header>
       {panelError && (
         <div className="terminal-resume-status is-unavailable" role="alert">
@@ -424,7 +428,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
               resumed.tabId === tab.id ? [] : [conversationId]
             )),
           );
-          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} initialTerminalId={tab.terminalId} visible={Boolean(props.visible && visible)} actionId={tab.id === actionTargetId ? props.actionId : null} onActionStarted={tab.id === actionTargetId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onRestorableTerminalChange={(terminalId) => updateRestorableTerminal(tab.id, terminalId)} onTerminalReplaced={(replacement) => replaceTerminalTab(tab.id, replacement)} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} actionsHost={!split && tab.id === activeId ? sessionActionsHost : null} initialTerminalId={tab.terminalId} visible={Boolean(props.visible && visible)} actionId={tab.id === actionTargetId ? props.actionId : null} onActionStarted={tab.id === actionTargetId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onRestorableTerminalChange={(terminalId) => updateRestorableTerminal(tab.id, terminalId)} onTerminalReplaced={(replacement) => replaceTerminalTab(tab.id, replacement)} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

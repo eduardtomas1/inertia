@@ -86,7 +86,6 @@ describe("WorkspaceHeader deferred Git menu", () => {
         busy={false}
         onOpenSidebar={vi.fn()}
         onOpenSettings={vi.fn()}
-        onOpenConnectionsSettings={vi.fn()}
         onOpenFolder={vi.fn()}
         onRevealFolder={vi.fn()}
         onOpenFiles={vi.fn()}

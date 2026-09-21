@@ -1,15 +1,9 @@
-export type WorkspaceShortcutTool = WorkspacePanelTab;
-
 export interface GlobalShortcutActions {
   keybindings: AppKeybindings;
   createConversation: () => void;
   mobileNavigation: boolean;
   suspended: boolean;
-  setActiveTool: (
-    update: WorkspaceShortcutTool
-      | null
-      | ((tool: WorkspaceShortcutTool | null) => WorkspaceShortcutTool | null),
-  ) => void;
+  toggleTerminal: () => void;
   setPaletteOpen: (open: boolean) => void;
   setSidebarCollapsed: (
     update: boolean | ((collapsed: boolean) => boolean),
@@ -86,8 +80,7 @@ export function installGlobalShortcuts(
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
-      actions.current.setActiveTool((tool) =>
-        tool === "terminal" ? null : "terminal");
+      actions.current.toggleTerminal();
     } else if (shortcut === "toggle-sidebar") {
       event.preventDefault();
       event.stopPropagation();
@@ -114,7 +107,6 @@ export function installGlobalShortcuts(
     target.removeEventListener("keyup", handleKeyUp, true);
   };
 }
-import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
 import type {
   AppKeybindings,
   AppShortcutAction,

@@ -1978,15 +1978,6 @@ button.header-breadcrumb-project:hover {
   }
 }
 
-.header-live-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--status-completed);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-completed) 22%, transparent);
-}
-
 .header-run-icon {
   fill: currentColor;
 }
@@ -2018,11 +2009,6 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   flex: 1 1 auto;
   gap: 1px;
-}
-
-.header-menu-item > .header-live-dot {
-  display: block;
-  flex: 0 0 auto;
 }
 
 .header-popover .header-action-item > svg,
@@ -2107,18 +2093,6 @@ button.header-breadcrumb-project:hover {
   align-items: center;
   gap: 8px;
   padding: 2px 4px 2px 9px;
-}
-
-.header-run-state {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.header-run-state.is-live {
-  background: var(--status-completed);
 }
 
 .header-run-copy {
@@ -2873,7 +2847,7 @@ button.header-breadcrumb-project:hover {
   outline-offset: -1px;
 }
 
-.workspace-body > .chat-workspace .message-scroll {
+.workspace-chat-column > .chat-workspace .message-scroll {
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22px);
   mask-image: linear-gradient(to bottom, transparent, #000 22px);
 }
@@ -6122,7 +6096,31 @@ button.header-breadcrumb-project:hover {
   padding-right: var(--workspace-tools-width);
 }
 
-.workspace-body.has-tools > .chat-workspace { min-width: 0; }
+.workspace-body.has-tools > .workspace-chat-column { min-width: 0; }
+
+.workspace-chat-column {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+/* The terminal docks under the chat and never takes its last 180px. */
+.terminal-dock {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 min(var(--terminal-dock-height, 260px), calc(100% - 180px));
+  flex-direction: column;
+  border-top: 1px solid var(--panel-border);
+  background: var(--surface);
+}
+
+.terminal-dock[hidden] { display: none; }
+.terminal-dock-resize-handle.is-horizontal { flex: 0 0 7px; margin-block: -3px -4px; }
+.terminal-session-actions { display: flex; align-items: center; }
+.terminal-session-actions[hidden] { display: none; }
 
 .workspace-body > .workspace-panel.is-inline,
 .workspace-body > .workspace-panel.is-sheet {
@@ -14681,12 +14679,15 @@ button.sent-attachment-open:focus-visible {
   min-width: 0;
   min-height: 180px;
   flex: 1 1 auto;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .conversation-pane-chat > .chat-workspace,
 .conversation-pane-chat > .conversation-detail-state {
   width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .conversation-pane-workspace > .workspace-panel {
@@ -14839,64 +14840,6 @@ html[data-chat-drag] * {
     forced-color-adjust: auto;
   }
 }
-/* Private Connect keeps its local controls visually explicit and separate
-   from provider/runtime permissions. */
-.private-connect-indicator {
-  color: var(--text-muted);
-}
-
-.private-connect-indicator.is-active {
-  color: var(--success-accent);
-  border-color: currentColor;
-}
-
-.private-connect-indicator.has-pending {
-  color: var(--warning-accent);
-  border-color: color-mix(in srgb, var(--warning-accent) 68%, var(--border));
-  background: color-mix(in srgb, var(--warning-accent) 10%, var(--surface));
-}
-
-.private-connect-pairing-alert {
-  position: absolute;
-  z-index: 64;
-  top: calc(100% + 8px);
-  right: 0;
-  display: grid;
-  width: min(270px, calc(100vw - 20px));
-  gap: 5px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--warning-accent) 52%, var(--border));
-  border-radius: 12px;
-  color: var(--text);
-  background: var(--surface-strong);
-  box-shadow: var(--shadow);
-}
-
-.private-connect-pairing-alert span,
-.private-connect-pairing-alert small {
-  color: var(--text-muted);
-}
-
-.private-connect-pairing-alert code {
-  color: var(--text);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-
-.private-connect-pairing-alert button {
-  justify-self: start;
-  margin-top: 4px;
-  padding: 6px 9px;
-  border: 1px solid var(--interactive-border);
-  border-radius: 8px;
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
-.private-connect-pairing-alert button:hover {
-  border-color: var(--interactive-border-hover);
-}
-
 .private-connect-settings-rows .settings-row,
 .private-connect-device-heading {
   display: flex;

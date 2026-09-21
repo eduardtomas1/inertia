@@ -405,7 +405,7 @@ describe("Environment content in its workspace surfaces", () => {
     expect(screen.getByText(/Usage is unavailable/iu)).toBeVisible();
   });
 
-  it("moves local servers into Run with a live dot and preserves their controls", async () => {
+  it("moves local servers into Run with their status in text, not a dot", async () => {
     const runs = runsModel();
     render(<RunControl runs={runs} />);
     expect(screen.getByRole("button", { name: "Add action, 1 running" })).toBeVisible();
@@ -414,8 +414,9 @@ describe("Environment content in its workspace surfaces", () => {
     const server = within(menu).getByRole("group", {
       name: "Docs preview · Docs chat (docs/preview) · npm run preview",
     });
-    expect(within(server).getByText("http://127.0.0.1:4173 · Docs chat (docs/preview) · npm run preview"))
+    expect(within(server).getByText("Running · http://127.0.0.1:4173 · Docs chat (docs/preview) · npm run preview"))
       .toBeVisible();
+    expect(document.querySelector(".header-live-dot, .header-run-state")).toBeNull();
     fireEvent.click(within(server).getByRole("menuitem", { name: /Stop Docs preview · Docs chat/u }));
     expect(runs.onStopRun).toHaveBeenCalledWith(summary.localServers[0]);
     fireEvent.click(within(server).getByRole("menuitem", { name: /Open preview for Docs preview/u }));
@@ -605,7 +606,6 @@ describe("Environment content in its workspace surfaces", () => {
         busy={false}
         onOpenSidebar={vi.fn()}
         onOpenSettings={vi.fn()}
-        onOpenConnectionsSettings={vi.fn()}
         onOpenFolder={vi.fn()}
         onRevealFolder={vi.fn()}
         onOpenFiles={vi.fn()}

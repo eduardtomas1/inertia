@@ -1,6 +1,5 @@
 import type {
   AppSnapshot,
-  ThemePreference,
   Conversation,
   Project,
   ProjectGroupingMode,
@@ -57,7 +56,4 @@ export interface SidebarProps {
   ) => void;
   onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
   onRemoveProject: (project: Project) => void;
-  theme?: ThemePreference;
-  onCycleTheme?: () => void;
-  onOpenConnectionsSettings?: () => void;
 }

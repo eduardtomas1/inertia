@@ -33,7 +33,10 @@ export function readLegacyWorkspaceStartup(
 export function forgetWorkspaceBoundLastTool(
   storage: Pick<Storage, "getItem" | "removeItem">,
 ): void {
-  if (isWorkspaceBoundSurface(workspacePanelTab(storage.getItem(LAST_WORKSPACE_TOOL_KEY)))) {
+  const stored = storage.getItem(LAST_WORKSPACE_TOOL_KEY);
+  const tool = workspacePanelTab(stored);
+  // An unknown value, such as a terminal tab from before it docked, is stale.
+  if (stored !== null && (tool === null || isWorkspaceBoundSurface(tool))) {
     storage.removeItem(LAST_WORKSPACE_TOOL_KEY);
   }
 }

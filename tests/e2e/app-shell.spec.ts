@@ -18,6 +18,7 @@ import { seedViewedConversationContext } from "./support/viewed-conversation-con
 import {
   closeWorkspaceTools,
   ensureWorkspaceTools,
+  openTerminalDock,
   rightPanelToggle,
   selectWorkspaceTool,
 } from "./support/workspace-tools";
@@ -180,7 +181,7 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
-  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Terminal");
+  await openTerminalDock(page);
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   expect(conversationCount()).toBe(0);
   await closeWorkspaceTools(page);
@@ -189,7 +190,7 @@ test("starts without a demo and adds the first real project", async () => {
   await expect.poll(conversationCount).toBe(1);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(rightPanelToggle(page)).toHaveAttribute("aria-pressed", "false");
-  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Terminal");
+  await openTerminalDock(page);
   await expect(page.locator(
     '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
   ).first()).toBeVisible();
@@ -199,7 +200,7 @@ test("starts without a demo and adds the first real project", async () => {
     ["branch", "--show-current"],
     { cwd: workspaceDirectory },
   )).stdout.trim();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   const changesPanel = page.getByRole("tabpanel", { name: "Changes" });
   await expect(changesPanel.locator(
     `.workspace-repository-scope-branch[title=${JSON.stringify(currentBranch)}]`,

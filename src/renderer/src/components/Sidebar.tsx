@@ -75,7 +75,6 @@ import {
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
 import { WorkStatusCue } from "./sidebar/WorkStatusCue";
-import { SidebarDevicesButton, SidebarThemeButton } from "./sidebar/SidebarUtilityControls";
 import { INTERFACE_LOCALE } from "../lib/locale";
 const SidebarUpdateControl = lazy(async () => ({
   default: (await import("./sidebar/SidebarUpdateControl")).SidebarUpdateControl,
@@ -168,9 +167,6 @@ function SidebarView({
   appUpdate,
   projectScopeId,
   onProjectScopeChange,
-  theme,
-  onCycleTheme,
-  onOpenConnectionsSettings,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const {
@@ -1013,8 +1009,6 @@ function SidebarView({
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
-          {onOpenConnectionsSettings && <SidebarDevicesButton onOpen={() => { onOpenConnectionsSettings(); onClose(); }} />}
-          {theme && onCycleTheme && <SidebarThemeButton theme={theme} onCycle={onCycleTheme} />}
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
             <SidebarUpdateControl controller={appUpdate} />
           </Suspense>}

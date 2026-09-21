@@ -265,7 +265,7 @@ export function useSplitWorkspaceScene({
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
     run,
-    setActiveTool: layout.setActiveTool,
+    openTerminal: layout.openTerminal,
     setActionError,
     activateContext: activatePreviewContext,
     navigatePreview: desktopTools.navigatePreview,
@@ -451,6 +451,8 @@ export function useSplitWorkspaceScene({
       projectName: splitProject.name,
       toolsOpen: layout.activeTool !== null,
       onToggleTools: layout.toggleWorkspaceTools,
+      terminalOpen: layout.terminalOpen,
+      onToggleTerminal: layout.toggleTerminal,
       scene: {
         detailState: model.detailState,
         chat: {
@@ -463,6 +465,8 @@ export function useSplitWorkspaceScene({
     };
   }, [
     layout.activeTool,
+    layout.terminalOpen,
+    layout.toggleTerminal,
     layout.toggleWorkspaceTools,
     model,
     owner,

@@ -119,7 +119,6 @@ export function ProjectActionsControl({
           >
             <Play size={14} aria-hidden="true" />
             <span>Run {primaryAction.label}</span>
-            {liveRuns > 0 && <span className="header-live-dot" aria-label={`${liveRuns} running`} />}
           </button>
         )}
         {primaryAction || runCount > 0 ? (
@@ -174,7 +173,6 @@ export function ProjectActionsControl({
           }}
         >
           {primaryAction ? <Play size={14} aria-hidden="true" className="header-run-icon" /> : <Plus size={14} aria-hidden="true" />}
-          {liveRuns > 0 && <span className="header-live-dot" aria-hidden="true" />}
           <span className="header-split-label">{primaryAction ? primaryAction.label : "Add action"}</span>
         </button>
         <button

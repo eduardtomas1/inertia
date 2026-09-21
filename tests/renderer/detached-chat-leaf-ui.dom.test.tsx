@@ -206,7 +206,6 @@ describe("detached chat leaf controls", () => {
         }}
         onOpenSidebar={noOp}
         onOpenSettings={noOp}
-        onOpenConnectionsSettings={noOp}
         onOpenFolder={noOp}
         onRevealFolder={noOp}
         onOpenFiles={noOp}
@@ -250,6 +249,8 @@ describe("detached chat leaf controls", () => {
             projectName: "Inertia",
             toolsOpen: false,
             onToggleTools: noOp,
+            terminalOpen: false,
+            onToggleTerminal: noOp,
             onOpenInWindow: openPrimary,
           },
           {
@@ -259,6 +260,8 @@ describe("detached chat leaf controls", () => {
             projectName: "Desktop",
             toolsOpen: false,
             onToggleTools: noOp,
+            terminalOpen: false,
+            onToggleTerminal: noOp,
             onOpenInWindow: openSecondary,
           },
         ]}

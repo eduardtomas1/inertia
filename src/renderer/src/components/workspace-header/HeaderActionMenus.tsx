@@ -15,7 +15,6 @@ import type { ProjectAction } from "@shared/contracts";
 
 import type { EnvironmentRunItem } from "../../utils/environmentSummary";
 import {
-  workspaceRunIsLive,
   workspaceRunStatusLabel,
   type WorkspaceRunsModel,
 } from "../../utils/workspaceRuns";
@@ -34,10 +33,10 @@ function RunRow({
   onBeforeRowAction: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }): React.JSX.Element {
   const owner = run.contextLabel ? ` · ${run.contextLabel}` : "";
-  const detail = run.url ?? workspaceRunStatusLabel(run.status);
+  const status = workspaceRunStatusLabel(run.status);
+  const detail = run.url ? `${status} · ${run.url}` : status;
   return (
     <div className="header-run-row" role="group" aria-label={`${run.label}${owner}`}>
-      <span className={workspaceRunIsLive(run) ? "header-run-state is-live" : "header-run-state"} aria-hidden="true" />
       <span className="header-run-copy">
         <strong>{run.label}</strong>
         <small title={`${detail}${owner}`}>{detail}{owner}</small>

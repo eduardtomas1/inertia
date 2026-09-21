@@ -43,13 +43,13 @@ describe("right panel surface host state", () => {
   });
 
   it("toggles the active surface closed and reopens it", () => {
-    const open = withSurfaces(["terminal"], "terminal");
-    const hidden = toggleRightPanelSurface(open, "terminal");
-    expect(hidden).toEqual(withSurfaces(["terminal"], "terminal", false));
+    const open = withSurfaces(["plan"], "plan");
+    const hidden = toggleRightPanelSurface(open, "plan");
+    expect(hidden).toEqual(withSurfaces(["plan"], "plan", false));
     expect(activeRightPanelSurface(hidden)).toBeNull();
-    expect(toggleRightPanelSurface(hidden, "terminal")).toEqual(open);
-    expect(toggleRightPanelSurface(withSurfaces(["files"], "files"), "terminal")).toEqual(
-      withSurfaces(["files", "terminal"], "terminal"),
+    expect(toggleRightPanelSurface(hidden, "plan")).toEqual(open);
+    expect(toggleRightPanelSurface(withSurfaces(["files"], "files"), "plan")).toEqual(
+      withSurfaces(["files", "plan"], "plan"),
     );
   });
 
@@ -86,8 +86,8 @@ describe("right panel surface host state", () => {
   });
 
   it("maps the legacy active-tool API onto surfaces", () => {
-    const opened = applyRightPanelTool(EMPTY_RIGHT_PANEL_STATE, "terminal");
-    expect(opened).toEqual(withSurfaces(["terminal"], "terminal"));
+    const opened = applyRightPanelTool(EMPTY_RIGHT_PANEL_STATE, "plan");
+    expect(opened).toEqual(withSurfaces(["plan"], "plan"));
     expect(applyRightPanelTool(opened, null)).toEqual(hideRightPanel(opened));
   });
 });
@@ -99,14 +99,16 @@ describe("right panel persistence", () => {
     expect(parseRightPanelState(JSON.stringify({
       isOpen: true,
       activeSurfaceId: "environment",
-      surfaces: ["environment", "files", "files", 3],
+      surfaces: ["environment", "terminal", "files", "files", 3],
     }))).toEqual(withSurfaces(["files"], "files"));
     expect(parseRightPanelState("{broken")).toBeNull();
     expect(parseRightPanelState(null)).toBeNull();
   });
 
   it("migrates the single-tool layout, dropping Environment", () => {
-    expect(legacyRightPanelState("terminal", true)).toEqual(withSurfaces(["terminal"], "terminal"));
+    expect(legacyRightPanelState("files", true)).toEqual(withSurfaces(["files"], "files"));
+    // The terminal now docks under the chat, so an old terminal tab is dropped.
+    expect(legacyRightPanelState("terminal", true)).toEqual(withSurfaces([], null, true));
     expect(legacyRightPanelState("environment", true)).toEqual(withSurfaces([], null, true));
     expect(legacyRightPanelState("files", false)).toEqual(withSurfaces(["files"], "files", false));
   });

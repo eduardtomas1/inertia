@@ -6,7 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
-import { openConversationPaneTool } from "./support/workspace-tools";
+import { openConversationPaneTool, openPaneTerminal } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -299,16 +299,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(secondaryChangedFiles.getByText("sample.ts", { exact: true }))
     .toHaveCount(0);
 
-  const primaryTerminal = await openConversationPaneTool(
-    primary,
-    primaryTitle,
-    "Terminal",
-  );
-  const secondaryTerminal = await openConversationPaneTool(
-    secondary,
-    secondaryTitle,
-    "Terminal",
-  );
+  const primaryTerminal = await openPaneTerminal(primary, primaryTitle);
+  const secondaryTerminal = await openPaneTerminal(secondary, secondaryTitle);
   const primarySession = primaryTerminal.locator(
     ".terminal-panel[data-terminal-id]",
   );
@@ -322,10 +314,10 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const secondaryTerminalId =
     await secondarySession.getAttribute("data-terminal-id");
   expect(primaryTerminalId).not.toBe(secondaryTerminalId);
-  await expect(primaryTerminal.getByText("Inertia", { exact: true }))
-    .toBeVisible();
-  await expect(secondaryTerminal.getByText("Companion", { exact: true }))
-    .toBeVisible();
+  await expect(primaryTerminal.getByRole("tab", { name: "Terminal 1" }))
+    .toHaveAttribute("title", "Terminal 1 · Inertia");
+  await expect(secondaryTerminal.getByRole("tab", { name: "Terminal 1" }))
+    .toHaveAttribute("title", "Terminal 1 · Companion");
 
   const wideScreenshot = testInfo.outputPath(
     "cross-project-split-independent-tools.png",
@@ -658,14 +650,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     },
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
-  await primaryPreview.getByRole("tab", {
-    name: "Terminal",
-    exact: true,
-  }).click();
-  await secondaryPreview.getByRole("tab", {
-    name: "Terminal",
-    exact: true,
-  }).click();
+  await primaryPreview.locator('[data-workspace-tab="changes"]').click();
+  await secondaryPreview.locator('[data-workspace-tab="changes"]').click();
 
   await sidebar.locator("button.activity-thread-select")
     .filter({ hasText: secondaryTitle })

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test, type Page, type TestInfo, type WebSocketRoute } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { setAppearance } from "./support/appearance";
 
 let app: AppFixture;
 let page: Page;
@@ -119,7 +120,7 @@ test("finds chunked content in an unloaded chat, jumps to an old virtual row and
   await app.expectNoViewportOverflow();
   await evidence(page, info, "matching-turn");
 
-  await page.getByRole("button", { name: /^Change theme \(current:/ }).click();
+  await setAppearance(page, "light");
   await app.resizeWindow(1000, 740);
   await search();
   await app.expectNoViewportOverflow();

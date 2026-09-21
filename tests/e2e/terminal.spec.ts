@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   ensureWorkspaceTools,
+  openTerminalDock,
   rightPanelToggle,
   selectWorkspaceTool,
 } from "./support/workspace-tools";
@@ -53,7 +54,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(page.getByLabel("Workspace changes")).toBeVisible();
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   await expect(page.getByRole("region", { name: "Project files" })).toBeVisible();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await page.getByRole("button", { name: "New terminal" }).click();
   const secondTerminalTab = page.getByRole("tab", { name: "Terminal 2", exact: true });
   await expect(secondTerminalTab).toBeVisible();
@@ -104,7 +105,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await page.getByRole("button", { name: "Go", exact: true }).click();
   await expect.poll(() => electronApp.evaluate(({ webContents }, url) => webContents.getAllWebContents().some((contents) => contents.getURL() === url), previewUrl)).toBe(true);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Plan");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
   await rightPanelToggle(page).click();
   await expect(page.locator(".workspace-panel")).toBeHidden();
@@ -121,7 +122,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
     { timeout: 15_000 },
   );
   await ensureWorkspaceTools(page);
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await expect(liveTerminals).toHaveCount(2);
   await expect(page.locator(
     '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',

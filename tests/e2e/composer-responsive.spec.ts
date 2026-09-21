@@ -677,20 +677,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         ".composer-toolbar",
       );
       if (!workspace || !chat || !tools || !chooser || !toolbar) return null;
+      const edges = ({ top, right, bottom, left }: DOMRect) => ({ top, right, bottom, left });
       return {
         besideTools: chat.right <= tools.left + 1,
-        chooserBounds: {
-          top: chooser.top,
-          right: chooser.right,
-          bottom: chooser.bottom,
-          left: chooser.left,
-        },
-        workspaceBounds: {
-          top: workspace.top,
-          right: workspace.right,
-          bottom: workspace.bottom,
-          left: workspace.left,
-        },
+        chooserBounds: edges(chooser),
+        workspaceBounds: edges(workspace),
         viewport,
         chooserInsideViewport:
           chooser.top >= viewport.top - 1

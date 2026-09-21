@@ -58,7 +58,6 @@ import {
   cacheThemePreference,
   cachedColorTheme,
   cachedThemePreference,
-  nextQuickTheme,
 } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
@@ -647,7 +646,7 @@ export default function App(): React.JSX.Element {
       project,
       conversationId: conversation?.id ?? null,
       run,
-      setActiveTool: sceneSetActiveTool,
+      openTerminal: primarySceneLayout.openTerminal,
       setActionError,
       activateContext: primaryPreviewActions.activateContext,
       navigatePreview: desktopTools.navigatePreview,
@@ -697,7 +696,7 @@ export default function App(): React.JSX.Element {
     keybindings: settings.keybindings,
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
-    setActiveTool: sceneSetActiveTool,
+    toggleTerminal: primarySceneLayout.toggleTerminal,
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
@@ -792,11 +791,6 @@ export default function App(): React.JSX.Element {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });
   };
-  const cycleTheme = () => {
-    void updateSettings({
-      theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
-    }).catch(() => undefined);
-  };
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", {
       type: "provider.refresh",
@@ -811,10 +805,6 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
   const openBackendSetup = useCallback((profileId: string) => {
     setSettingsTarget({ section: "backends", profileId });
-    navigateToView("settings");
-  }, [navigateToView]);
-  const openConnectionsSettings = useCallback(() => {
-    setSettingsTarget({ section: "connections" });
     navigateToView("settings");
   }, [navigateToView]);
   const openProjectSettings = useCallback((projectId: string) => {
@@ -1109,12 +1099,10 @@ export default function App(): React.JSX.Element {
         dropConversationInSplit,
         openProviderSetup,
         openBackendSetup,
-        openConnectionsSettings,
         openProjectSettings,
         createConversation,
         updateSettings,
         openProjectPath,
-        cycleTheme,
         loadBranches,
         mutateBranch, mutateRemote: workspaceTools.mutateRemote,
         loadGit: () => loadGit({ authoritative: true }),

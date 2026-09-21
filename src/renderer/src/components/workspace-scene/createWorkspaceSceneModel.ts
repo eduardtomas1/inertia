@@ -88,6 +88,9 @@ type WorkspaceSceneLayout = Pick<
   WorkspaceLayout,
   | "activeTool"
   | "setActiveTool"
+  | "terminalOpen"
+  | "openTerminal"
+  | "closeTerminal"
   | "stackedTools"
   | "toolsVisible"
   | "workspaceBodyRef"
@@ -392,6 +395,9 @@ export function createWorkspaceSceneModel({
   const {
     activeTool,
     setActiveTool,
+    terminalOpen,
+    openTerminal,
+    closeTerminal,
     stackedTools,
     toolsVisible,
     workspaceBodyRef,
@@ -700,7 +706,7 @@ export function createWorkspaceSceneModel({
       onRefreshProvider: actions.refreshProvider,
       onOpenProviderSetup: actions.openProviderSetup,
       onOpenBackendSetup: actions.openBackendSetup,
-      onOpenResume: () => setActiveTool("terminal"),
+      onOpenResume: openTerminal,
       resumeOptions: terminalResumeOptions,
       onResumeConversation: activityActions.requestProviderResume,
       onProbeBackendProfile: async (profileId, modelId) => {
@@ -941,7 +947,7 @@ export function createWorkspaceSceneModel({
       },
       filesKey: `files:${project.id}:${conversation?.id ?? "project"}`,
       terminal: {
-        visible: toolsVisible && effectiveActiveTool === "terminal",
+        visible: terminalOpen && !workspaceToolsUnavailable,
         projectId: project.id,
         ...runtimeConversation,
         projectName: project.name,
@@ -956,7 +962,7 @@ export function createWorkspaceSceneModel({
         onActionStarted: activityActions.clearPendingAction,
         resumeRequestConversationId: activityActions.pendingResumeConversationId,
         onResumeRequestHandled: activityActions.clearPendingResume,
-        onClose: () => setActiveTool(null),
+        onClose: closeTerminal,
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {

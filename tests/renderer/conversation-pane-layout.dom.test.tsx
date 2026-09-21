@@ -30,7 +30,7 @@ describe("useConversationPaneLayout", () => {
   });
 
   it("projects the new conversation's tool state on its first render", () => {
-    window.localStorage.setItem(toolKey("alpha"), "terminal");
+    window.localStorage.setItem(toolKey("alpha"), "files");
     window.localStorage.setItem(openKey("alpha"), "true");
     window.localStorage.setItem(toolKey("beta"), "preview");
     window.localStorage.setItem(openKey("beta"), "true");
@@ -52,7 +52,7 @@ describe("useConversationPaneLayout", () => {
       { initialProps: { conversationId: "alpha" } },
     );
 
-    expect(hook.result.current.activeTool).toBe("terminal");
+    expect(hook.result.current.activeTool).toBe("files");
     observations.length = 0;
     hook.rerender({ conversationId: "beta" });
 

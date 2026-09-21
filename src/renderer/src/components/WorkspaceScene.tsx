@@ -2,7 +2,10 @@ import {
   lazy,
   memo,
   Suspense,
+  useEffect,
+  useId,
   useRef,
+  useState,
   type ComponentProps,
   type ComponentType,
   type CSSProperties,
@@ -29,6 +32,7 @@ import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AgentsSurfaceProps } from "./AgentsSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { usePersistedSize } from "../hooks/usePersistedSize";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
@@ -43,8 +47,11 @@ import {
   loadTerminalPanel,
   loadUsageSurface,
   loadWorkspaceChangesPanel,
-  loadWorkspacePanel,
 } from "./lazySurfaceLoaders";
+import { createSurfaceLoader } from "../utils/surfaceLoader";
+
+// Loaded here, not in lazySurfaceLoaders: the panel imports those loaders.
+const loadWorkspacePanel = createSurfaceLoader(() => import("./WorkspacePanel"));
 
 function lazySurface<TModule, TProps>(
   loader: () => Promise<TModule>,
@@ -132,6 +139,8 @@ export interface SplitPaneDetails {
   projectName: string;
   toolsOpen: boolean;
   onToggleTools: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
   onOpenInWindow?: () => void;
   scene: ConversationPaneScene | null;
 }
@@ -174,18 +183,6 @@ function WorkspaceToolSurface({
 }: Pick<ConversationPaneScene, "resizeHandle" | "tools"> & {
   owner: WorkspacePreviewOwner;
 }): JSX.Element {
-  const terminalLifecycleRef = useRef({
-    key: null as string | null,
-    activated: false,
-  });
-  if (terminalLifecycleRef.current.key !== (tools?.terminalKey ?? null)) {
-    terminalLifecycleRef.current = {
-      key: tools?.terminalKey ?? null,
-      activated: tools?.activeTool === "terminal",
-    };
-  } else if (tools?.activeTool === "terminal") {
-    terminalLifecycleRef.current.activated = true;
-  }
   return (
     <>
       {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
@@ -207,9 +204,6 @@ function WorkspaceToolSurface({
               {tools.activeTool === "files" && (
                 <FilesPanel key={tools.filesKey} {...tools.files} />
               )}
-              {terminalLifecycleRef.current.activated && (
-                <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-              )}
               {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
               {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
               {tools.activeTool === "preview" && (
@@ -219,6 +213,66 @@ function WorkspaceToolSurface({
           </WorkspacePanel>
         </Suspense>
       )}
+    </>
+  );
+}
+
+const TERMINAL_DOCK_MIN_HEIGHT = 140;
+const TERMINAL_DOCK_MAX_HEIGHT = 640;
+const TERMINAL_DOCK_DEFAULT_HEIGHT = 260;
+
+/**
+ * Docks the terminal under the chat, beside whatever the right panel shows.
+ * Once opened it stays mounted while hidden so its sessions keep running.
+ */
+function TerminalDock({
+  tools,
+  containerRef,
+}: {
+  tools: WorkspaceToolScene | null;
+  containerRef: RefObject<HTMLDivElement | null>;
+}): JSX.Element | null {
+  const id = useId();
+  const [persistedHeight, setPersistedHeight] = usePersistedSize(
+    "inertia:layout:terminal-dock-height:v1",
+    TERMINAL_DOCK_DEFAULT_HEIGHT,
+    { min: TERMINAL_DOCK_MIN_HEIGHT, max: TERMINAL_DOCK_MAX_HEIGHT },
+  );
+  const [height, setHeight] = useState(persistedHeight);
+  useEffect(() => setHeight(persistedHeight), [persistedHeight]);
+  const activatedKeyRef = useRef<string | null>(null);
+  const open = Boolean(tools?.terminal.visible);
+  if (tools && open) activatedKeyRef.current = tools.terminalKey;
+  if (!tools || activatedKeyRef.current !== tools.terminalKey) return null;
+  return (
+    <>
+      {open && (
+        <PaneResizeHandle
+          label="Resize terminal"
+          controls={id}
+          containerRef={containerRef}
+          orientation="horizontal"
+          pane="after"
+          value={height}
+          min={TERMINAL_DOCK_MIN_HEIGHT}
+          max={TERMINAL_DOCK_MAX_HEIGHT}
+          defaultValue={TERMINAL_DOCK_DEFAULT_HEIGHT}
+          onChange={setHeight}
+          onCommit={setPersistedHeight}
+          className="terminal-dock-resize-handle"
+        />
+      )}
+      <section
+        id={id}
+        className="terminal-dock"
+        aria-label="Terminal"
+        hidden={!open}
+        style={{ "--terminal-dock-height": `${height}px` } as CSSProperties}
+      >
+        <Suspense fallback={<WorkspaceToolFallback />}>
+          <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
+        </Suspense>
+      </section>
     </>
   );
 }
@@ -238,6 +292,7 @@ function ConversationPane({
   const containerRef = resizeHandle?.containerRef as
     | RefObject<HTMLDivElement | null>
     | undefined;
+  const chatRef = useRef<HTMLDivElement>(null);
   const style = resizeHandle
     ? {
         "--conversation-pane-tools-height": `${resizeHandle.value}px`,
@@ -249,7 +304,7 @@ function ConversationPane({
       className={`conversation-pane-workspace${tools ? " has-tools" : ""}`}
       style={style}
     >
-      <div className="conversation-pane-chat">
+      <div ref={chatRef} className="conversation-pane-chat">
         {detachedChat
           ? <DetachedConversationPlaceholder {...detachedChat} />
           : detailState
@@ -263,6 +318,7 @@ function ConversationPane({
               <ChatWorkspace {...chat} embedded />
             </CheckoutBranchControlProvider>
           )}
+        <TerminalDock tools={tools} containerRef={chatRef} />
       </div>
       <WorkspaceToolSurface
         resizeHandle={resizeHandle}
@@ -290,6 +346,7 @@ function WorkspaceSceneView({
   tools,
 }: WorkspaceSceneProps): JSX.Element {
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
+  const chatColumnRef = useRef<HTMLDivElement>(null);
   return (
     <>
       {view === "settings" ? (
@@ -323,18 +380,23 @@ function WorkspaceSceneView({
           }))}
         />
         </Suspense>
-      ) : detachedChat ? (
-        <DetachedConversationPlaceholder {...detachedChat} />
-      ) : detailState ? (
-        <ConversationDetailState {...detailState} />
       ) : (
-        <CheckoutBranchControlProvider
-          value={checkoutBranch
-            ? { ...checkoutBranch, respondsToHeaderRequests: true }
-            : null}
-        >
-          <ChatWorkspace {...chat} />
-        </CheckoutBranchControlProvider>
+        <div ref={chatColumnRef} className="workspace-chat-column">
+          {detachedChat ? (
+            <DetachedConversationPlaceholder {...detachedChat} />
+          ) : detailState ? (
+            <ConversationDetailState {...detailState} />
+          ) : (
+            <CheckoutBranchControlProvider
+              value={checkoutBranch
+                ? { ...checkoutBranch, respondsToHeaderRequests: true }
+                : null}
+            >
+              <ChatWorkspace {...chat} />
+            </CheckoutBranchControlProvider>
+          )}
+          <TerminalDock tools={tools} containerRef={chatColumnRef} />
+        </div>
       )}
 
       {!splitScene && (

@@ -121,6 +121,8 @@ export function useSplitPaneScenes({
       projectName: project?.name ?? "Project",
       toolsOpen: primaryLayout.activeTool !== null,
       onToggleTools: primaryLayout.toggleWorkspaceTools,
+      terminalOpen: primaryLayout.terminalOpen,
+      onToggleTerminal: primaryLayout.toggleTerminal,
       onOpenInWindow: () => openConversationInWindow(conversation),
       scene: null,
     }, ...pinnedPanes];
@@ -136,6 +138,8 @@ export function useSplitPaneScenes({
     openWorkspaceRunPreview,
     pinned,
     primaryLayout.activeTool,
+    primaryLayout.terminalOpen,
+    primaryLayout.toggleTerminal,
     primaryLayout.toggleWorkspaceTools,
     project?.name,
     quaternary.pane,

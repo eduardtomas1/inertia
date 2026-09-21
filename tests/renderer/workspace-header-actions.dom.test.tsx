@@ -19,7 +19,7 @@ function props(): HeaderProps {
     sidebarCollapsed: false, gitStatus: null, branches: [],
     actions: [{ id: "check", label: "Check workspace", command: "node --version", preview: false }],
     busy: false,
-    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(), onOpenConnectionsSettings: vi.fn(),
+    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(),
     onOpenFolder: vi.fn(), onRevealFolder: vi.fn(), onOpenFiles: vi.fn(),
     onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn(), onCreateConversationOnBranch: vi.fn(),

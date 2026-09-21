@@ -1,6 +1,7 @@
 import { expect, type Locator, type TestInfo } from "@playwright/test";
 
 import type { AppFixture } from "./app-fixture";
+import { setAppearanceInPlace } from "./appearance";
 
 interface VerifyBrowserEvidenceOptions {
   app: AppFixture;
@@ -176,11 +177,7 @@ export async function verifyBrowserEvidence({
     contentType: "image/png",
   });
 
-  const themeButton = page.getByRole("button", { name: /Change theme/u });
-  if (!/current: dark/u.test(await themeButton.getAttribute("aria-label") ?? "")) {
-    await themeButton.click();
-  }
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await setAppearanceInPlace(app, "dark");
   await app.resizeWindow(1_050, 820);
   await expect(primaryPreview.locator(".preview-evidence-toggle > span"))
     .toBeHidden();
@@ -201,8 +198,7 @@ export async function verifyBrowserEvidence({
     contentType: "image/png",
   });
   await app.resizeWindow(1_440, 900);
-  await themeButton.click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await setAppearanceInPlace(app, "light");
   await primaryToolsResize.press("Enter");
 
   const secondaryEvidenceToggle = secondaryPreview.getByRole("button", {

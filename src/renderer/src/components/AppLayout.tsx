@@ -104,7 +104,6 @@ interface AppLayoutActions {
   dropConversationInSplit?: (conversationId: string, plan: SplitDropPlan) => void;
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
-  openConnectionsSettings: () => void;
   openProjectSettings?: (projectId: string) => void;
   createConversation: (
     project?: Project | null,
@@ -114,7 +113,6 @@ interface AppLayoutActions {
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
-  cycleTheme: () => void;
   loadBranches: () => void;
   mutateBranch: (
     type: "git.branch.create" | "git.branch.switch",
@@ -606,9 +604,6 @@ export function AppLayout({
               sidebarActions.setProjectGitRepositoryLimit
             }
             onRemoveProject={sidebarActions.removeProject}
-            theme={settings.theme}
-            onCycleTheme={actions.cycleTheme}
-            onOpenConnectionsSettings={actions.openConnectionsSettings}
           />
         </Suspense>
       )}
@@ -663,7 +658,6 @@ export function AppLayout({
               else setSidebarCollapsed((collapsed) => !collapsed);
             }}
             onOpenSettings={() => setView("settings")}
-            onOpenConnectionsSettings={actions.openConnectionsSettings}
             {...(project ? {
               onCreateConversationInProject: () => actions.createConversation(project),
             } : {})}
@@ -717,7 +711,7 @@ export function AppLayout({
               {...(workspaceToolsUnavailableReason
                 ? { terminalUnavailableLabel: workspaceToolsUnavailableReason }
                 : {})}
-              terminalOpen={scenePanel.activeTool === "terminal"}
+              terminalOpen={scenePanel.terminalOpen}
               terminalShortcutLabel={formatAppShortcutLabel(
                 platform,
                 settings.keybindings["toggle-terminal"],

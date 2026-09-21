@@ -25,7 +25,6 @@ export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
-export const loadWorkspacePanel = createSurfaceLoader(() => import("./WorkspacePanel"));
 export const loadWelcomeGuide = createSurfaceLoader(() => import("./welcome-guide/WelcomeGuide"));
 
 const frequentSurfaceLoads = [
@@ -50,8 +49,6 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
     void loadPreMergeConfidenceLauncher();
   } else if (tab === "files") {
     void loadFilesPanel();
-  } else if (tab === "terminal") {
-    void loadTerminalPanel();
   } else if (tab === "goal") {
     void loadGoalPanel();
   } else if (tab === "plan") {

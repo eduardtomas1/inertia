@@ -16,7 +16,6 @@ import {
   Ellipsis,
   PanelLeftClose,
   PanelLeftOpen,
-  RadioTower,
   Settings,
 } from "lucide-react";
 import type {
@@ -29,7 +28,6 @@ import type {
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
-import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
 import type { AppView } from "../appView";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { sidebarThreadView } from "../utils/sidebarModel";
@@ -96,7 +94,6 @@ type WorkspaceHeaderProps = {
   conversationMenu?: HeaderConversationMenu | null;
   onOpenSidebar: () => void;
   onOpenSettings: () => void;
-  onOpenConnectionsSettings: () => void;
   onCreateConversationInProject?: () => void;
   onRenameConversation?: (title: string) => void;
   onOpenFolder: () => void;
@@ -119,37 +116,6 @@ type WorkspaceHeaderProps = {
   onRunAction: (action: ProjectAction) => void;
 };
 
-function PrivateConnectAlert({
-  onOpenConnectionsSettings,
-}: {
-  onOpenConnectionsSettings: () => void;
-}): React.JSX.Element | null {
-  const privateConnect = usePrivateConnectState().state;
-  const pending = privateConnect?.pendingPairings.length ?? 0;
-  const pairing = privateConnect?.pendingPairings[0] ?? null;
-  if (!privateConnect || pending === 0 || !pairing) return null;
-  return (
-    <div className="header-popover-anchor private-connect-alert-anchor">
-      <button
-        type="button"
-        className="header-button private-connect-indicator has-pending"
-        aria-label={`Connections & devices, ${pending} pairing ${pending === 1 ? "approval" : "approvals"} waiting`}
-        onClick={onOpenConnectionsSettings}
-      >
-        <RadioTower size={14} />
-        <span>{pending === 1 ? "Approve device" : `Approve ${pending} devices`}</span>
-      </button>
-      <div className="private-connect-pairing-alert" role="alert" aria-label="Private Connect pairing approval">
-        <strong>{pairing.deviceLabel} wants to connect</strong>
-        <span>Code <code>{pairing.comparisonCode}</code></span>
-        <small>{pairing.tailnetLabel ?? "Tailnet identity unavailable"}</small>
-        {pending > 1 && <small>+{pending - 1} more waiting</small>}
-        <button type="button" onClick={onOpenConnectionsSettings}>Review access</button>
-      </div>
-    </div>
-  );
-}
-
 export function WorkspaceHeader({
   project,
   conversation,
@@ -170,7 +136,6 @@ export function WorkspaceHeader({
   conversationMenu = null,
   onOpenSidebar,
   onOpenSettings,
-  onOpenConnectionsSettings,
   onCreateConversationInProject,
   onRenameConversation,
   onOpenFolder,
@@ -421,7 +386,6 @@ export function WorkspaceHeader({
       </div>
 
       <div className="header-trailing no-drag" data-chat-header-actions>
-        <PrivateConnectAlert onOpenConnectionsSettings={onOpenConnectionsSettings} />
         {workspaceActions && (
           <>
             <div className="header-actions" ref={mountInlineActions} />

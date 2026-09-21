@@ -2,7 +2,8 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
+import { openTerminalDock, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
+import { setAppearance } from "./support/appearance";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -65,7 +66,6 @@ interface DOMRectLike {
 }
 
 test("starts with the chat alone and hosts surfaces in a responsive right panel", async ({ browserName: _browserName }, testInfo) => {
-  const themeButton = page.getByRole("button", { name: /Change theme/u });
   const toggle = rightPanelToggle(page);
   const panel = page.locator(".workspace-panel");
   await resizeWindow(1440, 920);
@@ -77,10 +77,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
 
   for (const theme of ["dark", "light"] as const) {
     await resizeWindow(1440, 920);
-    if (!new RegExp(`current: ${theme}`, "u").test(await themeButton.getAttribute("aria-label") ?? "")) {
-      await themeButton.click();
-    }
-    await expect(themeButton).toHaveAttribute("aria-label", new RegExp(`current: ${theme}`, "u"));
+    await setAppearance(page, theme);
 
     for (const size of [
       { width: 1440, height: 920, label: "wide", sheet: false },
@@ -133,7 +130,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
         await expect(launcher).toBeFocused();
         await page.keyboard.press("u");
         await expect(page.getByRole("tab", { name: "Usage" })).toBeFocused();
-        await expect(page.getByRole("region", { name: "Usage" })).toBeVisible();
+        await expect(page.getByRole("region", { name: "Usage", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Add panel surface" }).click();
         const addMenu = page.getByRole("menu", { name: "Add panel surface" });
         await expect(addMenu.getByRole("menuitem").first()).toBeFocused();
@@ -150,17 +147,14 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
     }
   }
   await resizeWindow(1440, 920);
-  if (!/current: dark/u.test(await themeButton.getAttribute("aria-label") ?? "")) {
-    await themeButton.click();
-  }
-  await expect(themeButton).toHaveAttribute("aria-label", /current: dark/u);
+  await setAppearance(page, "dark");
   expect(rendererErrors).toEqual([]);
 });
 
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
 
   const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
   const sidebarBefore = Number(await sidebarHandle.getAttribute("aria-valuenow"));
@@ -197,6 +191,7 @@ test("resizes and persists the internal workspace panes", async () => {
 test("collapses and restores both workspace sides without losing layout", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
   await navigationToggle.click();
   await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toHaveCount(0);
@@ -212,7 +207,7 @@ test("collapses and restores both workspace sides without losing layout", async 
     lastTool: window.localStorage.getItem(
       "inertia:layout:last-workspace-tool:v2",
     ),
-  }))).toEqual({ legacy: null, lastTool: "terminal" });
+  }))).toEqual({ legacy: null, lastTool: "files" });
   const readingCanvas = await page.evaluate(() => {
     const workspaceBody = document.querySelector<HTMLElement>(".workspace-body");
     const chat = document.querySelector<HTMLElement>(".chat-workspace");

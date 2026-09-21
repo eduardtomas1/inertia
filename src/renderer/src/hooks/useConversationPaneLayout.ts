@@ -25,6 +25,7 @@ import {
 } from "../utils/rightPanelSurfaces";
 import type { WorkspacePanelActions } from "./useWorkspaceLayout";
 import { usePersistedSize } from "./usePersistedSize";
+import { useTerminalDock } from "./useTerminalDock";
 
 const PANE_TOOL_MIN_HEIGHT = 150;
 const PANE_TOOL_MAX_HEIGHT = 520;
@@ -160,14 +161,14 @@ export function useConversationPaneLayout(
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
-    toggleTerminal: () =>
-      updatePanel((current) => toggleRightPanelSurface(current, "terminal")),
   }), [updatePanel]);
+  const terminalDock = useTerminalDock(conversationId === null ? null : `split:${conversationId}`);
 
   return useMemo(() => ({
     panel: panelState,
     activeTool,
     ...panelActions,
+    ...terminalDock,
     stackedTools: true as const,
     panelPresentation: "inline" as const,
     toolsVisible: panelState.isOpen && conversationId !== null,
@@ -189,5 +190,6 @@ export function useConversationPaneLayout(
     panelActions,
     panelState,
     setHeight,
+    terminalDock,
   ]);
 }

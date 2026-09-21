@@ -65,7 +65,7 @@ function headerProps(overrides: Partial<HeaderProps> = {}): HeaderProps {
     busy: false,
     onOpenSidebar: vi.fn(),
     onOpenSettings: vi.fn(),
-    onOpenConnectionsSettings: vi.fn(),
+   
     onOpenFolder: vi.fn(),
     onRevealFolder: vi.fn(),
     onOpenFiles: vi.fn(),

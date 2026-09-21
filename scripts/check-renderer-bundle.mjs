@@ -103,7 +103,9 @@ const budgets = {
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte,
+  // Docking under the chat moves session controls into the tab row and adds
+  // Hide: 494 bytes (26,456 measured).
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte,

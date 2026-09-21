@@ -26,6 +26,31 @@ export async function closeWorkspaceTools(page: Page): Promise<void> {
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
 }
 
+/** Opens the terminal docked under the primary chat. */
+export async function openTerminalDock(page: Page): Promise<Locator> {
+  const dock = page.locator(".workspace-chat-column > .terminal-dock");
+  if (!await dock.isVisible().catch(() => false)) {
+    await page.locator("[data-panel-layout-controls]")
+      .getByRole("button", { name: /^Toggle terminal/u })
+      .click();
+  }
+  await expect(dock).toBeVisible();
+  return dock;
+}
+
+/** Opens the terminal docked under one split pane's chat. */
+export async function openPaneTerminal(
+  pane: Locator,
+  chatTitle: string,
+): Promise<Locator> {
+  const dock = pane.locator(".conversation-pane-chat > .terminal-dock");
+  if (!await dock.isVisible().catch(() => false)) {
+    await pane.getByRole("button", { name: `Open terminal for ${chatTitle}` }).click();
+  }
+  await expect(dock).toBeVisible();
+  return dock;
+}
+
 export async function selectWorkspaceTool(
   panel: Locator,
   name: string,
@@ -52,7 +77,7 @@ export async function selectWorkspaceTool(
 export async function openConversationPaneTool(
   pane: Locator,
   chatTitle: string,
-  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Browser",
+  tab: "Changes" | "Files" | "Goal" | "Browser",
 ): Promise<Locator> {
   const tools = pane.getByRole("complementary", { name: "Workspace tools" });
   if (!await tools.isVisible().catch(() => false)) {

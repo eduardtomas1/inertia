@@ -2,7 +2,6 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -220,16 +219,14 @@ export function EnvironmentPanel({
   const repositoryHeadingId = `${panelId}-repository`;
   const editorHeadingId = `${panelId}-editor`;
   const attachmentsHeadingId = `${panelId}-attachments`;
-  const attachmentsGalleryId = `${panelId}-attachment-gallery`;
-  const attachmentsExpandable = summary.attachments.length
-    > ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT;
+  const attachmentsGalleryId = `${attachmentsHeadingId}-gallery`;
+  const { attachments } = summary;
+  const attachmentCount = attachments.length;
+  const attachmentsExpandable = attachmentCount > ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT;
   const attachmentsExpanded = attachmentsExpandable && attachmentsOpen;
-  const visibleAttachments = useMemo(
-    () => attachmentsExpanded
-      ? summary.attachments
-      : summary.attachments.slice(0, ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT),
-    [attachmentsExpanded, summary.attachments],
-  );
+  const visibleAttachments = attachmentsExpanded
+    ? attachments
+    : attachments.slice(0, ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT);
   const runtimeAttention = summary.runtime.status === "online"
     ? null
     : summary.runtime.status === "connecting"
@@ -722,7 +719,7 @@ export function EnvironmentPanel({
           </section>
         )}
 
-        {summary.attachments.length > 0 && (
+        {attachmentCount > 0 && (
           <section
             className="environment-panel-section environment-attachments"
             data-expanded={attachmentsExpanded}
@@ -749,7 +746,7 @@ export function EnvironmentPanel({
                   <span>
                     {attachmentsExpanded
                       ? "Show fewer"
-                      : `Show all ${summary.attachments.length}${summary.attachments.length === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT ? "+" : ""}`}
+                      : `Show all ${attachmentCount}${attachmentCount === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT ? "+" : ""}`}
                   </span>
                   <ChevronDown className="environment-attachments-chevron" size={13} aria-hidden="true" />
                 </button>
@@ -758,6 +755,7 @@ export function EnvironmentPanel({
             <div id={attachmentsGalleryId} className="environment-attachments-gallery">
               <SentMessageAttachmentList
                 attachments={visibleAttachments}
+                deferImages={attachmentsExpanded}
                 label={attachmentsExpanded ? "All attachments" : "Recent attachments"}
               />
             </div>

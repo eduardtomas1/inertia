@@ -122,6 +122,8 @@ test("recent attachments show real thumbnails, open retained previews and handle
   const gallery = page.getByRole("list", { name: "All attachments" });
   await expect(gallery.getByRole("listitem")).toHaveCount(10);
   await app.expectNoViewportOverflow();
+  // Newest first; check while the leading tile is still in the scrollport.
+  await expect.poll(() => gallery.locator("img").first().evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(24);
   // The gallery stays inside a bounded scroller instead of stretching the
   // panel. Whether it actually overflows depends on the window, so assert the
   // bound and that scrolling is offered exactly when the tiles outgrow it.
@@ -141,8 +143,6 @@ test("recent attachments show real thumbnails, open retained previews and handle
   expect(scroller.clientHeight).toBeLessThanOrEqual(scroller.maxHeight + 1);
   expect(scroller.scrollTop > 0)
     .toBe(scroller.scrollHeight > scroller.clientHeight);
-  // Newest first: the leading tile is the last image the chat attached.
-  await expect.poll(() => gallery.locator("img").first().evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(24);
   await capture("recent-attachments-gallery-light");
   await page.getByRole("button", { name: "Show fewer" }).click();
   await expect(page.getByRole("list", { name: "Recent attachments" })).toBeVisible();

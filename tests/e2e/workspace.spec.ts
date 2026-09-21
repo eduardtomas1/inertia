@@ -59,7 +59,7 @@ test("filters Work by project and manages chat history", async () => {
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
   const branchName = (await page
-    .locator('[data-header-menu="branch"] > button span')
+    .locator(".checkout-branch-button code")
     .first()
     .textContent())?.trim();
   if (!branchName) {

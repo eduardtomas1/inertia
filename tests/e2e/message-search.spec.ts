@@ -206,8 +206,9 @@ test("retains detached focus while the owning runtime client reconnects", async 
   const input = await search();
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
+  await page.locator(".workspace-header").getByRole("button", { name: targetTitle, exact: true }).click();
   const opened = app.electronApp.waitForEvent("window");
-  await page.getByRole("button", { name: `Open ${targetTitle} in a new window` }).click();
+  await page.getByRole("menuitem", { name: "Open chat in new window" }).click();
   const popup = await opened;
   await popup.getByRole("textbox", { name: "Message" }).waitFor();
   let acceptSocket!: (route: WebSocketRoute) => void;

@@ -630,7 +630,10 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-  const newChat = page.getByRole("button", {
+  const newChat = page.getByRole("complementary", {
+    name: "Project navigation",
+    exact: true,
+  }).getByRole("button", {
     name: "New chat",
     exact: true,
   });

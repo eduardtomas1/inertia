@@ -530,6 +530,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
         const input = document.querySelector("input[type='file']");
         if (!(input instanceof HTMLInputElement)) return false;
         input.focus();
+        document.querySelector("button")?.scrollIntoView({ block: "nearest" });
         return document.activeElement === input;
       })()`);
     },

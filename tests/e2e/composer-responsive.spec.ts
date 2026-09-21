@@ -678,7 +678,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       );
       if (!workspace || !chat || !tools || !chooser || !toolbar) return null;
       return {
-        horizontalSplit: chat.bottom <= tools.top + 1,
+        besideTools: chat.right <= tools.left + 1,
         chooserBounds: {
           top: chooser.top,
           right: chooser.right,
@@ -702,7 +702,16 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           && chooser.right <= workspace.right + 1
           && chooser.bottom <= workspace.bottom + 1
           && chooser.left >= workspace.left - 1,
-        toolbarFits: toolbar.scrollWidth <= toolbar.clientWidth + 1,
+        chooserInsideChat:
+          chooser.left >= chat.left - 1 && chooser.right <= chat.right + 1,
+        toolbarControlsFit: [...toolbar.querySelectorAll<HTMLElement>("button")]
+          .filter((button) => !button.closest(".model-chooser-palette"))
+          .every((button) => {
+            const bounds = button.getBoundingClientRect();
+            const container = toolbar.getBoundingClientRect();
+            return bounds.width === 0
+              || (bounds.left >= container.left - 1 && bounds.right <= container.right + 1);
+          }),
       };
     });
     await capture("composer-model-chooser-dark-stacked-1024x760");
@@ -710,10 +719,11 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       stackedModelChooserGeometry,
       JSON.stringify(stackedModelChooserGeometry),
     ).toMatchObject({
-      horizontalSplit: true,
+      besideTools: true,
       chooserInsideViewport: true,
       chooserInsideWorkspace: true,
-      toolbarFits: true,
+      chooserInsideChat: true,
+      toolbarControlsFit: true,
     });
     await page.keyboard.press("Escape");
     const stackedUsageTrigger = stackedDock.locator(

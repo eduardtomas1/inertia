@@ -8,7 +8,7 @@ import {
 } from "../../src/shared/model-routing";
 import { selectionAnswerFixtureMarkup } from "./support/selection-answer-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -28,19 +28,13 @@ test.afterAll(async () => {
   await app.close();
 });
 
-async function ensureWorkspaceTools(): Promise<void> {
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-  }
-}
-
 test("keeps the Changes panel readable when the side tool area is narrow", async () => {
   await resizeWindow(1024, 800);
   const gitMenuTrigger = page.getByRole("button", { name: "More Git actions" });
   await expect(gitMenuTrigger).toBeVisible();
   await expect(gitMenuTrigger.locator("svg").last()).toBeVisible();
   await resizeWindow(1040, 800);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const picker = page.getByRole("combobox", { name: "Repository and changed file" });
   await expect(picker).toBeVisible();
@@ -66,7 +60,7 @@ test("keeps the Changes panel readable when the side tool area is narrow", async
 
 test("adds a selected diff range to the next agent prompt", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const addedLine = page.locator(".diff-line.is-addition").filter({ hasText: "export const ready = true;" }).first();
   await expect(addedLine).toBeVisible();
@@ -81,7 +75,7 @@ test("adds a selected diff range to the next agent prompt", async () => {
 
 test("creates and edits a review note with keyboard access in the native window", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1040, 800);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const noteButton = page.getByRole("button", { name: "Note", exact: true }).first();
   await noteButton.click();
@@ -108,7 +102,7 @@ test("creates and edits a review note with keyboard access in the native window"
 
 test("keeps a contextual selection answer readable and dismissible across responsive layouts", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   const hunkHeader = page.locator(".diff-hunk-header").first();
   await expect(hunkHeader).toBeVisible();

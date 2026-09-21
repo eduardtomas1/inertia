@@ -9,7 +9,7 @@ import {
   expectComposerEndsAtDock,
 } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -42,22 +42,19 @@ test.afterAll(async () => {
 });
 
 async function ensureTerminalTools(): Promise<void> {
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-  }
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Terminal");
 }
 
 test("navigates settings, changes theme, and returns to chat", async () => {
   await ensureTerminalTools();
   const terminalPanel = page.locator("aside.terminal-panel").first();
   const terminalFontSize = await terminalPanel.getAttribute("data-terminal-font-size");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
-  const environmentSettings = page.getByRole("button", {
-    name: "Environment settings",
+  const sidebarSettings = page.getByRole("button", {
+    name: "Settings",
+    exact: true,
   });
-  await environmentSettings.focus();
-  await environmentSettings.press("Enter");
+  await sidebarSettings.focus();
+  await sidebarSettings.press("Enter");
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");

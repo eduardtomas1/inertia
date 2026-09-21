@@ -107,6 +107,7 @@ describe("stable and Canary coexistence", () => {
       ["temp", isolatedTemporaryDirectory],
       ["userData", "/tmp/e2e-profile"],
     ]);
+    expect(appIds.at(-1)).toBe("dev.inertia.app.canary.dev");
 
     configuredPaths.length = 0;
     Object.assign(app, { isPackaged: false });
@@ -115,6 +116,7 @@ describe("stable and Canary coexistence", () => {
       INERTIA_TEST_TEMP_DIR: join(tmpdir(), "untrusted-production-temp"),
     });
     expect(configuredPaths).toEqual([]);
+    expect(appIds.at(-1)).toBe("dev.inertia.app.dev");
   });
 
   it("uses channel-specific package names on every release platform", () => {

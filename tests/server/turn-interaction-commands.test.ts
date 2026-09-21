@@ -609,6 +609,23 @@ describe("new-turn admission recovery", () => {
 });
 
 describe("attachment send handoff", () => {
+  it("creates a single-line title from a multiline first message", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(() => null),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders: false,
+    });
+    const original = runtime.store.conversation(conversationId);
+    vi.mocked(runtime.store.conversation).mockReturnValue({ ...original, title: "New chat" });
+    const command = messageCommand();
+    command.payload.content = "Please fix this:\n\n- first issue\r\n- second issue";
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command))
+      .resolves.toBe("handled");
+    expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
+      title: "Please fix this: - first issue - second issue",
+    });
+  });
+
   it("preserves a manual title entered during attachment preparation", async () => {
     const runtime = dependencies({
       queue: vi.fn(() => null),

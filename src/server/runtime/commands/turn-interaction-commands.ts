@@ -841,7 +841,7 @@ export function createTurnInteractionCommandHandler(
           const currentTitle = dependencies.store.conversation(conversation.id).title;
           if (currentTitle === "New chat" || currentTitle === "New thread") {
             dependencies.store.updateConversation(conversation.id, {
-              title: Array.from(command.payload.content.slice(0, 128)).slice(0, 64).join(""),
+              title: Array.from(command.payload.content.replace(/\s+/gu, " ").trim().slice(0, 128)).slice(0, 64).join("") || "New chat",
             });
           }
           dependencies.send(socket, queued

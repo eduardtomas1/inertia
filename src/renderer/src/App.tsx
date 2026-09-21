@@ -16,6 +16,7 @@ import {
   type SubagentTrace,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
+import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
@@ -554,11 +555,9 @@ export default function App(): React.JSX.Element {
     if (pinnedOwner) setSplitPaneConversation(pinnedOwner, null);
 
     // Let React unmount the current composer before the second renderer owns it.
-    void new Promise<void>((resolve) => window.requestAnimationFrame(() => {
-      resolve();
-    })).then(() => detachedChats.open({
+    void new Promise<number>((resolve) => requestAnimationFrame(resolve)).then(() => detachedChats.open({
       conversationId: nextConversation.id,
-      title: nextConversation.title.trim() || "Untitled chat",
+      title: detachedChatWindowTitle(nextConversation.title),
       draft: preparation.draft,
     })).catch((error: unknown) => {
       if (!wasSuppressed) {

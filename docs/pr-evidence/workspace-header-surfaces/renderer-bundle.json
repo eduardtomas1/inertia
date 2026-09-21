@@ -5,6 +5,7 @@
   "raisedBudgets": {
     "mainWorkbenchFirstLoadJavaScript": "+3,324 bytes: persisted right-panel surface state, the corner panel toggles, the checkout-strip branch slot and the header title-menu wiring stay eager so the frame renders without layout shift.",
     "detachedChatFirstLoadJavaScript": "+566 bytes: the composer checkout-strip branch slot and its context provider.",
+    "deferredTerminalJavaScript": "+494 bytes: the terminal docks under the chat, its session controls join the tab row through a portal and it gains a Hide control (26,456 bytes measured on Windows x64 after the change).",
     "deferredGitMenusJavaScript": "+245 bytes: the Git menu gains the embedded overflow presentation, the branch entry and inline notices.",
     "deferredWorkspaceHeaderActionsJavaScript": "new ceiling of 18.75 KiB for the deferred Run, Open and Git controls (18,983 bytes measured).",
     "coreJavaScript": "+16,500 bytes of total application JavaScript for the Usage and Agents surfaces, the surface launcher and the new header modules, net of the removed Environment panel."

@@ -5,12 +5,13 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -119,6 +120,39 @@ describe("private generated attachment storage", () => {
     await expect(access(outside)).resolves.toBeUndefined();
     await store.release([owned]);
   });
+
+  it.each([
+    ["directory", "write"], ["directory", "release"],
+    ["link", "write"], ["link", "release"],
+  ] as const)(
+    "refuses a %s replacement during %s without touching foreign files",
+    async (replacement, operation) => {
+      const dataDirectory = await temporaryDataDirectory();
+      const store = await PrivateGeneratedAttachmentStore.create(dataDirectory);
+      const owned = await store.writeJpeg(new Uint8Array([1, 2, 3]));
+      const original = join(dataDirectory, "original-generated");
+      await rename(store.directory, original);
+      const foreignRoot = replacement === "directory"
+        ? store.directory
+        : join(dataDirectory, "foreign-generated");
+      await mkdir(foreignRoot, { mode: 0o700 });
+      if (replacement === "link") {
+        await symlink(foreignRoot, store.directory,
+          process.platform === "win32" ? "junction" : "dir");
+      }
+      const foreignFile = join(foreignRoot, basename(owned));
+      await writeFile(foreignFile, "unrelated content");
+
+      await expect(operation === "write"
+        ? store.writeJpeg(new Uint8Array([4, 5, 6]))
+        : store.release([owned])).rejects.toThrow("authority changed");
+      expect(await readFile(foreignFile, "utf8")).toBe("unrelated content");
+      expect(await readdir(foreignRoot)).toEqual([basename(owned)]);
+      expect(await readFile(join(original, basename(owned))))
+        .toEqual(Buffer.from([1, 2, 3]));
+      expect(store.usage()).toEqual({ bytes: 3, records: 1 });
+    },
+  );
 
   it("sweeps crash leftovers on restart and rejects unexpected directory entries", async () => {
     const dataDirectory = await temporaryDataDirectory();

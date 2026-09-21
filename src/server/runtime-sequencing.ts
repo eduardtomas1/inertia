@@ -7,6 +7,10 @@ import type {
   RuntimeSyncCursor,
 } from "../shared/contracts";
 import { SerializedRuntimeEvent } from "./serialized-runtime-event";
+import {
+  RUNTIME_DETAIL_SUBSCRIPTION_OWNERS,
+  type RuntimeDetailSubscriptionOwner,
+} from "../shared/runtime-detail-subscriptions";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DEFAULT_MAX_REPLAY_EVENTS = 2_048;
@@ -23,6 +27,8 @@ export type RuntimeResumeRequest =
       runtimeGeneration: string;
       afterSequence: number;
       conversationIds: string[];
+      /** Paired with IDs; omitted only by older renderers. */
+      conversationOwners?: RuntimeDetailSubscriptionOwner[];
     }
   | { kind: "invalid" };
 
@@ -264,16 +270,26 @@ export function parseRuntimeResumeRequest(
     keys.some((key) =>
       key !== "runtimeGeneration"
       && key !== "afterSequence"
-      && key !== "conversationId")
+      && key !== "conversationId"
+      && key !== "conversationOwner")
     || url.searchParams.getAll("runtimeGeneration").length !== 1
     || url.searchParams.getAll("afterSequence").length !== 1
-    || url.searchParams.getAll("conversationId").length > 2
+    || url.searchParams.getAll("conversationId").length > RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.length
   ) {
     return { kind: "invalid" };
   }
   const runtimeGeneration = url.searchParams.get("runtimeGeneration");
   const rawSequence = url.searchParams.get("afterSequence");
   const conversationIds = url.searchParams.getAll("conversationId");
+  const conversationOwners = url.searchParams.getAll("conversationOwner");
+  const hasOwners = conversationOwners.length > 0;
+  const knownOwner = (owner: string): owner is RuntimeDetailSubscriptionOwner =>
+    RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.some((known) => known === owner);
+  if (hasOwners && (
+    conversationOwners.length !== conversationIds.length
+    || !conversationOwners.every(knownOwner)
+    || new Set(conversationOwners).size !== conversationOwners.length
+  )) return { kind: "invalid" };
   if (
     !runtimeGeneration
     || !UUID_PATTERN.test(runtimeGeneration)
@@ -281,7 +297,7 @@ export function parseRuntimeResumeRequest(
     || !/^(?:0|[1-9]\d*)$/u.test(rawSequence)
     || conversationIds.some((conversationId) =>
       !UUID_PATTERN.test(conversationId))
-    || new Set(conversationIds).size !== conversationIds.length
+    || (!hasOwners && new Set(conversationIds).size !== conversationIds.length)
   ) {
     return { kind: "invalid" };
   }
@@ -292,5 +308,6 @@ export function parseRuntimeResumeRequest(
     runtimeGeneration,
     afterSequence,
     conversationIds,
+    ...(hasOwners ? { conversationOwners: conversationOwners.filter(knownOwner) } : {}),
   };
 }

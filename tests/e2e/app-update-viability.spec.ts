@@ -11,6 +11,9 @@ import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/
 import { createAppFixture } from "./support/app-fixture";
 
 test("the real update validator decodes Electron message envelopes and acknowledges its result", async () => {
+  // Preserve the platform's fixture setup/teardown allowance in addition to
+  // both sequential 30-second probes and their two-second exit-proof bounds.
+  test.setTimeout(test.info().timeout + 2 * (30_000 + 2_000));
   const fixture = await createAppFixture({ name: "update-viability-transport", initialState: "empty" });
   try {
     const data = join(fixture.testDirectory, "candidate-data");
@@ -19,22 +22,68 @@ test("the real update validator decodes Electron message envelopes and acknowled
       dataDirectory: await realpath(data), expectedActiveRuntimeOwner: null });
     for (const exact of [true, false]) {
       const result = await fixture.electronApp.evaluate(async ({ utilityProcess }, input) => {
+        const started = performance.now();
+        const phases: string[] = [];
+        const mark = (phase: string) => phases.push(`${phase}:${Math.round(performance.now() - started)}ms`);
         const child = utilityProcess.fork(input.worker, [], { env: {}, stdio: "ignore" });
+        mark("fork");
         return await new Promise<{ event: unknown; code: number; acknowledged: boolean }>((resolveProbe, reject) => {
           let event: unknown;
           let acknowledged = false;
-          const timeout = setTimeout(() => { child.kill(); reject(new Error("Update validator transport timed out.")); }, 5_000);
-          child.once("error", (error) => { clearTimeout(timeout); child.kill(); reject(error); });
-          child.once("spawn", () => child.postMessage(input.request));
+          let stoppingError: Error | null = null;
+          let acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
+          let exitProofTimer: ReturnType<typeof setTimeout> | undefined;
+          const diagnostic = (error: Error) => new Error(
+            `${error.message} (exact=${input.exact}; ${phases.join(", ")})`,
+          );
+          const kill = () => {
+            try { mark(`kill:${child.kill()}`); }
+            catch { mark("kill:failed"); }
+          };
+          const stop = (error: Error) => {
+            if (stoppingError) return;
+            stoppingError = error;
+            clearTimeout(timeout);
+            clearTimeout(acknowledgementTimer);
+            mark("stopping");
+            // Failure is not proof of exit. Keep spawn/exit listeners attached
+            // so even a worker that spawns late remains owned by this fixture.
+            exitProofTimer = setTimeout(() => {
+              mark("exit-unconfirmed");
+              reject(diagnostic(error));
+            }, 2_000);
+            kill();
+          };
+          // This real worker imports SQLite and rehearses the complete migration
+          // catalog before responding. Use the application's 30-second validation
+          // bound; acknowledgement/exit retains its separate two-second bound.
+          const timeout = setTimeout(() => stop(new Error("Update validator validation timed out.")), 30_000);
+          child.once("error", () => stop(new Error("Update validator process stopped unexpectedly.")));
+          child.once("spawn", () => {
+            mark("spawn");
+            if (stoppingError) { kill(); return; }
+            try { child.postMessage(input.request); mark("request"); }
+            catch (error) { stop(error instanceof Error ? error : new Error("Update validator request failed.")); }
+          });
           child.once("message", (value) => {
+            if (stoppingError) return;
+            mark("result");
             event = value;
-            acknowledged = true;
-            child.postMessage({ schemaVersion: input.request.schemaVersion, type: "result-ack",
-              operationId: input.exact ? input.request.operationId : "00000000-0000-4000-8000-000000000000" });
+            acknowledgementTimer = setTimeout(() => stop(new Error("Update validator acknowledgement exit timed out.")), 2_000);
+            try {
+              child.postMessage({ schemaVersion: input.request.schemaVersion, type: "result-ack",
+                operationId: input.exact ? input.request.operationId : "00000000-0000-4000-8000-000000000000" });
+              acknowledged = true;
+              mark("acknowledgement");
+            } catch (error) { stop(error instanceof Error ? error : new Error("Update validator acknowledgement failed.")); }
           });
           child.once("exit", (code) => {
+            mark(`exit:${code}`);
             clearTimeout(timeout);
-            resolveProbe({ event, code, acknowledged });
+            clearTimeout(acknowledgementTimer);
+            clearTimeout(exitProofTimer);
+            if (stoppingError) reject(diagnostic(stoppingError));
+            else resolveProbe({ event, code, acknowledged });
           });
         });
       }, { worker: resolve("out/main/app-update-candidate-viability-worker.js"), request, exact });

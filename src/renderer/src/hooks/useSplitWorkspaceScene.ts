@@ -172,6 +172,7 @@ export function useSplitWorkspaceScene({
     request,
     subscribe: connection.subscribe,
     targetConversationId: splitConversation?.id ?? null,
+    subscriptionOwner: owner,
     enabled: Boolean(splitConversation),
     autoOpenPlan: false,
     onOpenPlan: () => undefined,

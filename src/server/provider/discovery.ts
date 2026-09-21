@@ -323,7 +323,7 @@ function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): Provide
   if (providerId === "claude") {
     try {
       const status = JSON.parse(normalized) as { loggedIn?: unknown };
-      if (status.loggedIn === true) return "authenticated";
+      if (status.loggedIn === true) return probe.exitCode === 0 ? "authenticated" : "unknown";
       if (status.loggedIn === false) return "unauthenticated";
     } catch { /* Older Claude releases may return text. */ }
   }
@@ -357,11 +357,13 @@ function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): Provide
     return "unknown";
   }
 
-  if (/not (?:logged|signed) in|loggedin["']?\s*:\s*false|authentication required|no credentials|please (?:log|sign) in/iu.test(lower)) {
+  if (/not (?:logged|signed) in|not authenticated|\bunauthenticated\b|(?:logged|signed) out|loggedin["']?\s*:\s*false|authentication required|no credentials|please (?:log|sign) in/iu.test(lower)) {
     return "unauthenticated";
   }
-  if (/logged in|signed in|authenticated|loggedin["']?\s*:\s*true/iu.test(lower)) return "authenticated";
+  // Error output can mention a prior authenticated state. Only a completed,
+  // successful status probe can establish positive authentication evidence.
   if (probe.exitCode && probe.exitCode !== 0) return "unauthenticated";
+  if (probe.exitCode === 0 && /logged in|signed in|\bauthenticated\b|loggedin["']?\s*:\s*true/iu.test(lower)) return "authenticated";
   return "unknown";
 }
 

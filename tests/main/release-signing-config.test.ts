@@ -366,7 +366,7 @@ describe("release signing configuration", () => {
         executableName: "inertia-canary",
         desktop: { entry: {
           Name: "Inertia Canary",
-          StartupWMClass: "Inertia Canary",
+          StartupWMClass: "dev.inertia.app.desktop.canary",
         } },
       },
     });

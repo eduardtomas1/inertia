@@ -91,6 +91,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "linux-file-icon-worker": resolve("src/main/linux-file-icon-worker.ts"),
           "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
           "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),
           "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),

@@ -1875,7 +1875,7 @@ describe("useConversationProjection pending interactions", () => {
     }
   });
 
-  it("subscribes and unsubscribes the mounted secondary pane explicitly", () => {
+  it.each(["secondary", "tertiary", "quaternary"] as const)("subscribes and unsubscribes the mounted %s pane explicitly", (owner) => {
     const source = createEventSource();
     const request = vi.fn(
       async (_command: CommandWithoutId): Promise<ServerEvent> => ({
@@ -1900,6 +1900,7 @@ describe("useConversationProjection pending interactions", () => {
         request,
         subscribe: source.subscribe,
         targetConversationId: props.targetConversationId,
+        subscriptionOwner: owner,
         enabled: props.enabled,
         autoOpenPlan: false,
         onOpenPlan: vi.fn(),
@@ -1913,7 +1914,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(request).toHaveBeenLastCalledWith({
       type: "conversation.detail.subscription",
       payload: {
-        owner: "secondary",
+        owner,
         conversationId: secondaryId,
       },
     });
@@ -1925,7 +1926,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(request).toHaveBeenLastCalledWith({
       type: "conversation.detail.subscription",
       payload: {
-        owner: "secondary",
+        owner,
         conversationId: null,
       },
     });
@@ -1937,7 +1938,7 @@ describe("useConversationProjection pending interactions", () => {
     expect(request).toHaveBeenLastCalledWith({
       type: "conversation.detail.subscription",
       payload: {
-        owner: "secondary",
+        owner,
         conversationId: primaryId,
       },
     });

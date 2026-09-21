@@ -604,6 +604,7 @@ function parseVault(value: string | null): PersistedCredentialVault {
 
 export class CredentialVault {
   private loaded: PersistedCredentialVault | null = null;
+  private loading: Promise<PersistedCredentialVault> | null = null;
   private mutation: Promise<void> = Promise.resolve();
 
   constructor(
@@ -876,8 +877,13 @@ export class CredentialVault {
 
   private async load(): Promise<PersistedCredentialVault> {
     if (this.loaded) return this.loaded;
-    this.loaded = parseVault(await this.persistence.read());
-    return this.loaded;
+    this.loading ??= this.persistence.read().then((value) => {
+      this.loaded = parseVault(value);
+      return this.loaded;
+    }).finally(() => {
+      this.loading = null;
+    });
+    return await this.loading;
   }
 
   private async persist(vault: PersistedCredentialVault): Promise<void> {

@@ -97,7 +97,7 @@ interface CodexAuxiliaryServerRequestHost {
   writeMessage: (message: JsonObject) => boolean;
   setLastError: (message: string) => void;
   emitActivity: (phase: "info" | "failed", label: string) => void;
-  cancel: () => void;
+  cancel: (reason: "malformed-protocol") => void;
 }
 
 /** Handles bounded App Server requests that do not open a UI interaction. */
@@ -159,7 +159,7 @@ function rejectOwnedRequest(
   host.writeMessage({ id: host.id, error: { code: -32602, message } });
   host.setLastError(message);
   host.emitActivity("failed", message);
-  host.cancel();
+  host.cancel("malformed-protocol");
   return true;
 }
 

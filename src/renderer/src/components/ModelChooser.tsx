@@ -313,15 +313,20 @@ export function ModelChooser({
     () => searchModelRoutes(sourceRoutes, query),
     [query, sourceRoutes],
   );
-  const virtualized = results.items.length
+  const resultItems = results.items;
+  const virtualized = resultItems.length
     >= MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS;
+  const resultKey = useCallback(
+    (index: number) => resultItems[index]?.key ?? index,
+    [resultItems],
+  );
   const resultVirtualizer = useVirtualizer({
-    count: virtualized ? results.items.length : 0,
+    count: virtualized ? resultItems.length : 0,
     getScrollElement: () => resultsScrollRef.current,
     estimateSize: () => MODEL_CHOOSER_ESTIMATED_ROW_SIZE,
     initialRect: MODEL_CHOOSER_INITIAL_VIRTUAL_RECT,
     overscan: 6,
-    getItemKey: (index) => results.items[index]?.key ?? index,
+    getItemKey: resultKey,
   });
   const virtualItems = virtualized
     ? resultVirtualizer.getVirtualItems()
@@ -330,21 +335,21 @@ export function ModelChooser({
     index: number;
     virtualStart?: number;
   }[] = !virtualized
-    ? results.items.map((_, index) => ({ index }))
+    ? resultItems.map((_, index) => ({ index }))
     : virtualItems.length > 0
       ? virtualItems.map(({ index, start }) => ({ index, virtualStart: start }))
       : Array.from(
           {
             length: Math.min(
               MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
-              results.items.length,
+              resultItems.length,
             ),
           },
           (_, offset) => {
             const startIndex = Math.min(
               Math.max(activeIndex - 6, 0),
               Math.max(
-                results.items.length - MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
+                resultItems.length - MODEL_CHOOSER_FALLBACK_RENDER_COUNT,
                 0,
               ),
             );
@@ -361,10 +366,10 @@ export function ModelChooser({
   const shortcuts = useMemo(
     () => resolveModelShortcutBindings(
       resolvedFavorites,
-      results.items,
+      resultItems,
       { platform },
     ),
-    [platform, resolvedFavorites, results.items],
+    [platform, resolvedFavorites, resultItems],
   );
   const shortcutsByRoute = useMemo(
     () => new Map(shortcuts.map((binding) => [binding.routeKey, binding])),
@@ -415,20 +420,20 @@ export function ModelChooser({
     const preserveNavigation =
       activeSelectionContextRef.current === selectionContext;
     const preservedIndex = preserveNavigation && activeRouteKeyRef.current
-      ? results.items.findIndex((route) =>
+      ? resultItems.findIndex((route) =>
         route.key === activeRouteKeyRef.current && route.selectable)
       : -1;
-    const selectedIndex = results.items.findIndex((route) =>
+    const selectedIndex = resultItems.findIndex((route) =>
       matchesSelection(route) && route.selectable);
     const nextIndex = preservedIndex >= 0
       ? preservedIndex
       : selectedIndex >= 0
         ? selectedIndex
-        : nextModelChooserIndex(results.items, -1, "Home");
+        : nextModelChooserIndex(resultItems, -1, "Home");
     activeSelectionContextRef.current = selectionContext;
-    activeRouteKeyRef.current = results.items[nextIndex]?.key ?? null;
+    activeRouteKeyRef.current = resultItems[nextIndex]?.key ?? null;
     setActiveIndex((current) => current === nextIndex ? current : nextIndex);
-  }, [matchesSelection, open, query, results.items, selectedConfigurationKey, selectedKey, selectedSourceId]);
+  }, [matchesSelection, open, query, resultItems, selectedConfigurationKey, selectedKey, selectedSourceId]);
 
   useEffect(() => {
     if (!open) return;
@@ -490,9 +495,9 @@ export function ModelChooser({
   }, [favoriteReference]);
 
   const navigateTo = useCallback((index: number): void => {
-    activeRouteKeyRef.current = results.items[index]?.key ?? null;
+    activeRouteKeyRef.current = resultItems[index]?.key ?? null;
     setActiveIndex(index);
-  }, [results.items]);
+  }, [resultItems]);
 
   const handleNavigation = (
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -516,35 +521,35 @@ export function ModelChooser({
       event.preventDefault();
       setActiveIndex((current) => {
         const nextIndex = nextModelChooserIndex(
-          results.items,
+          resultItems,
           current,
           event.key as ModelChooserNavigationKey,
         );
-        activeRouteKeyRef.current = results.items[nextIndex]?.key ?? null;
+        activeRouteKeyRef.current = resultItems[nextIndex]?.key ?? null;
         return nextIndex;
       });
       return;
     }
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    const route = results.items[activeIndex];
+    const route = resultItems[activeIndex];
     if (!route?.selectable) return;
     event.preventDefault();
     select(route);
   };
 
-  const activeRoute = results.items[activeIndex] ?? null;
+  const activeRoute = resultItems[activeIndex] ?? null;
   const activeResultMounted = !virtualized
     || renderedResultItems.some(({ index }) => index === activeIndex);
   const activeDescendant = activeRoute && activeResultMounted
     ? `${reactId}-model-option-${activeIndex}`
     : undefined;
-  const chooserRows = useMemo(() => results.items.map((route) =>
+  const chooserRows = useMemo(() => resultItems.map((route) =>
     modelChooserRowFromRoute(route, {
       active: matchesSelection(route),
       favorite: favoriteKeys.has(modelFavoriteKey(favoriteReference(route))),
       shortcut: shortcutsByRoute.get(route.key) ?? null,
       compatibility: route.rowCompatibility,
-    })), [favoriteKeys, favoriteReference, matchesSelection, results.items, shortcutsByRoute]);
+    })), [favoriteKeys, favoriteReference, matchesSelection, resultItems, shortcutsByRoute]);
 
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -643,7 +648,7 @@ export function ModelChooser({
                 <ul
                   role="grid"
                   aria-colcount={2}
-                  aria-rowcount={results.items.length}
+                  aria-rowcount={resultItems.length}
                   id={resultsId}
                   className="model-chooser-list"
                   aria-label="Model results"
@@ -653,7 +658,7 @@ export function ModelChooser({
                   } : undefined}
                 >
                   {renderedResultItems.map((item) => {
-                    const route = results.items[item.index]!;
+                    const route = resultItems[item.index]!;
                     return (
                       <ModelChooserResult
                         key={route.key}

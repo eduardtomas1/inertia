@@ -778,12 +778,29 @@ function startClaudeRun(
           projectedFailure?.message
             ?? claudeLifecycleFailure(completion.reason),
         );
+        // The stream ended without a thrown error, so this is the only place
+        // the CLI's own reason for exiting can reach the failure details.
+        const technicalDetail = sanitizeProviderActivityDetail(
+          redactExactCredentials(ownedProcess.stderrTail(), launchCredentials),
+          {
+            workspaceRoot: options.input.cwd,
+            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+          },
+        );
         return finishResult(
           "failed",
           error,
           projectedFailure
-            ? { ...projectedFailure, message: error }
-            : claudeFailure(error, `lifecycle/${completion.reason}`),
+            ? {
+                ...projectedFailure,
+                message: error,
+                ...(technicalDetail ? { technicalDetail } : {}),
+              }
+            : claudeFailure(
+                error,
+                `lifecycle/${completion.reason}`,
+                technicalDetail ?? undefined,
+              ),
         );
       }
       const finalMessage = completion.result;

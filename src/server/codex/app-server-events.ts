@@ -673,11 +673,8 @@ export class CodexAppServerEvents {
         || this.completedTurnIds.has(notificationTurnId)
       ) return;
       const requestedTurnId = this.host.requestedTurnId?.();
-      if (
-        phase === "starting-turn"
-        && requestedTurnId !== undefined
-        && notificationTurnId !== requestedTurnId
-      ) return;
+      if (phase === "starting-turn" && requestedTurnId !== undefined
+        && notificationTurnId !== requestedTurnId) return;
       if (
         phase !== "awaiting-goal-continuation"
         && phase !== "awaiting-subagent-continuation"

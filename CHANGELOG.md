@@ -2,6 +2,52 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.61 — 2026-09-21
+
+A correctness update focused on reliable provider turns, preserving work and
+native application icons.
+
+### Provider turns
+
+- Fix Claude staying on **Working** after a final answer when only background
+  watchers remain. Rejected or discarded prompts and terminal API errors also
+  end the affected turn, including accepted follow-ups. Quiet background
+  notices retain the existing deadline for a missing parent continuation;
+  active delegated work still requires its completion evidence.
+- Preserve Codex's completed or failed result when cancellation arrives during
+  cleanup. Malformed provider requests are reported as failures instead of a
+  user pressing Stop.
+- Correct false connected states after failed login checks, and settle turns
+  refused before launch while a provider installation is being maintained.
+- Reject mismatched Antigravity and OpenCode conversation identities before
+  accepting output or sending a resumed prompt. Confirm Cursor and Kimi apply
+  requested model, mode and reasoning settings before sending the prompt.
+- Keep approvals, follow-ups and other controls available to admitted runs
+  while provider installation evidence refreshes.
+- Bound Claude image preparation and stop pending reads when a turn is cancelled.
+
+### Preserve work
+
+- Keep the third and fourth split panes subscribed to their own conversations,
+  including after reconnecting with a vacant pane.
+- Preserve newer staged changes when a Git reversal fails and rolls back.
+- Protect attachment storage and recovery imports when their selected folders
+  are moved or replaced during an operation.
+- Keep a concurrent credential read from overwriting a newly saved credential.
+- Recheck Private Connect access after asynchronous reads, and settle runtime
+  recovery safely when its journal cannot be written.
+
+### Native application icons
+
+- Supply Windows with the Inertia icon at its native taskbar and window sizes,
+  including detached chat windows, instead of falling back to Electron's icon.
+- Register a matching per-user Linux launcher and persistent icon when an
+  AppImage is first launched, so Ubuntu can associate its running window with
+  Inertia. Preserve desktop entries owned by another integrator.
+- Set the AppImage file's icon where the file manager supports GIO metadata,
+  preserving an existing custom icon. This takes effect after launch; an
+  unopened download's appearance still depends on the file manager.
+
 ## 0.0.60 — 2026-09-20
 
 This release contains the reviewed changes since 0.0.57 listed below. Versions

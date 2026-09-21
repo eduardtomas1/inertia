@@ -139,7 +139,10 @@ export function initializeInertiaReleaseChannel(
         ? app.getPath("userData")
       : canaryUserDataPath(app.getPath("appData")));
   }
-  app.setAppUserModelId(configuration.appId);
+  // On Windows, Electron's first notification writes a Start Menu shortcut for
+  // this ID. An unpackaged electron.exe claiming the release ID would give the
+  // installed app's taskbar button the stock Electron icon.
+  app.setAppUserModelId(app.isPackaged ? configuration.appId : `${configuration.appId}.dev`);
   return { configuration, packageSmokeRoot };
 }
 

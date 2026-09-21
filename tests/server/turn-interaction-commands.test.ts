@@ -185,6 +185,7 @@ function dependencies(options: {
         },
       })),
       conversationPath: vi.fn(() => options.conversationPath ?? tmpdir()),
+      hasConversationMessages: vi.fn(() => false),
       checkpointCount: options.checkpointCount ?? vi.fn(() => 0),
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
@@ -609,6 +610,47 @@ describe("new-turn admission recovery", () => {
 });
 
 describe("attachment send handoff", () => {
+  it.each([
+    ["New\nchat", "New chat", false],
+    ["New\tthread", "New thread", false],
+    ["New\nchat", "New chat", true],
+    ["New\tthread", "New thread", true],
+  ] as const)("keeps the first title for %j as %j (providers: %s)", async (content, expectedTitle, enableProviders) => {
+    let hasMessages = false;
+    const runtime = dependencies({
+      queue: vi.fn(() => {
+        hasMessages = true;
+        return queuedTurn();
+      }),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders,
+    });
+    const original = runtime.store.conversation(conversationId);
+    let title = "New chat";
+    vi.mocked(runtime.store.conversation).mockImplementation(() => ({ ...original, title }));
+    vi.mocked(runtime.store.hasConversationMessages).mockImplementation(() => hasMessages);
+    vi.mocked(runtime.store.createMessage).mockImplementation(() => {
+      hasMessages = true;
+      return { id: "message-id" } as ReturnType<typeof runtime.store.createMessage>;
+    });
+    vi.mocked(runtime.store.updateConversation).mockImplementation((_id, update) => {
+      title = update.title!;
+      return { ...original, title };
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const first = messageCommand();
+    first.payload.content = content;
+    await handler({} as never, first);
+    expect(title).toBe(expectedTitle);
+    expect(hasMessages).toBe(true);
+    const followUp = messageCommand();
+    followUp.requestId = "77777777-7777-4777-8777-777777777777";
+    followUp.payload.content = "Do not rename this conversation";
+    await handler({} as never, followUp);
+    expect(title).toBe(expectedTitle);
+    expect(runtime.store.updateConversation).toHaveBeenCalledOnce();
+  });
+
   it("creates a single-line title from a multiline first message", async () => {
     const runtime = dependencies({
       queue: vi.fn(() => null),

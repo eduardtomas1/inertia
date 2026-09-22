@@ -6,7 +6,7 @@ import {
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
-  type AppSettings, type AppSettingsUpdate,
+  type AppSettingsUpdate,
   type AppSnapshot,
   type ChatAttachment,
   type ChatMessage,

@@ -55,6 +55,14 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { WorkingOrb } from "../working-indicator/WorkingOrb";
+import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
+import {
+  ACTIVITY_ORB_MOTION,
+  orbMotionForActivity,
+  resolveOrbMotion,
+  usesActivityOrbs,
+} from "../working-indicator/orbMotion";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
   latestReasoningLine,
@@ -72,6 +80,10 @@ export function ReasoningSummary({
   streaming?: boolean;
 }): React.JSX.Element {
   const segments = useMemo(() => parseReasoningSummary(content), [content]);
+  const indicator = useWorkingIndicator();
+  const stepOrb = streaming && usesActivityOrbs(indicator)
+    ? resolveOrbMotion(indicator, ACTIVITY_ORB_MOTION.reasoning)
+    : null;
   if (segments.length === 0) {
     return (
       <p className="turn-reasoning-body">
@@ -89,7 +101,16 @@ export function ReasoningSummary({
             "turn-reasoning-step",
             streaming && index === segments.length - 1 && "is-active",
           )}
+          data-step-indicator={stepOrb && index === segments.length - 1 ? "orb" : undefined}
         >
+          {stepOrb && index === segments.length - 1 && (
+            <WorkingOrb
+              className="turn-reasoning-step-orb"
+              size={12}
+              design={stepOrb.design}
+              pace={stepOrb.pace}
+            />
+          )}
           {segment.title && (
             <span className="turn-reasoning-step-title">{segment.title}</span>
           )}
@@ -249,6 +270,12 @@ export const ActivityRow = memo(function ActivityRow({
     detailPresentation.full && !showDisclosure && !needsAttention,
   );
   const Icon = severity !== "neutral" ? TriangleAlert : WORK_KIND_ICONS[workKind];
+  const indicator = useWorkingIndicator();
+  const runningOrb = activity.status === "running"
+    && severity === "neutral"
+    && usesActivityOrbs(indicator)
+    ? resolveOrbMotion(indicator, orbMotionForActivity(activity, executionCategory))
+    : null;
   const { leadingTarget, verb, trailingTarget } = commandLine
     ? { leadingTarget: "", verb: commandLine.verb, trailingTarget: commandLine.target }
     : splitActivityTitle(activity.title, severity);
@@ -285,8 +312,14 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-visibility={visibility}
       title={visibleTitle}
     >
-      <span className="agent-activity-icon" aria-hidden="true">
-        <Icon size={12} />
+      <span
+        className="agent-activity-icon"
+        aria-hidden="true"
+        data-activity-indicator={runningOrb ? "orb" : undefined}
+      >
+        {runningOrb
+          ? <WorkingOrb size={14} design={runningOrb.design} pace={runningOrb.pace} />
+          : <Icon size={12} />}
       </span>
       <span className={clsx(
         "agent-activity-copy",
@@ -469,6 +502,16 @@ export const ActivityGroup = memo(function ActivityGroup({
   );
   const containsAttention = summary.failed + summary.warnings > 0;
   const folded = settled && summary.running === 0;
+  const indicator = useWorkingIndicator();
+  const latestRunning = summary.running > 0 && usesActivityOrbs(indicator)
+    ? [...entry.activities].reverse().find((activity) => activity.status === "running")
+    : undefined;
+  const groupOrb = latestRunning
+    ? resolveOrbMotion(
+        indicator,
+        orbMotionForActivity(latestRunning, activityExecutionCategory(latestRunning)),
+      )
+    : null;
   const mode = containsAttention ? "attention" : "calls";
   if (entry.activities.length === 1) {
     const [activity] = entry.activities;
@@ -521,9 +564,12 @@ export const ActivityGroup = memo(function ActivityGroup({
         <span
           className="turn-activity-group-mark"
           data-running={summary.running > 0}
+          data-group-indicator={groupOrb ? "orb" : undefined}
           aria-hidden="true"
         >
-          <MarkIcon size={11} />
+          {groupOrb
+            ? <WorkingOrb size={14} design={groupOrb.design} pace={groupOrb.pace} />
+            : <MarkIcon size={11} />}
         </span>
         <span className="turn-activity-group-parts">
           {parts.map((part) => (

@@ -187,7 +187,7 @@ export default defineConfig({
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
-              "WelcomeGuide", "SnapshotSettings", "WorkspaceHeaderActions",
+              "WelcomeGuide", "SnapshotSettings", "WorkspaceHeaderActions", "OrbCanvas",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

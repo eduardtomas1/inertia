@@ -140,7 +140,6 @@
   min-height: var(--composer-send-size);
   flex: 0 0 var(--composer-send-size);
   margin-left: 0;
-  box-shadow: inset 0 1px color-mix(in srgb, #fff 24%, transparent);
 }
 .composer-shell .selected-model-chip {
   border-color: transparent;
@@ -183,8 +182,6 @@
   display: none;
 }
 .composer-shell .composer-checkout-strip {
-  /* Only the drawer background tucks under the card; the strip's controls
-     stay above the toolbar so the project picker and branch remain usable. */
   z-index: auto;
   grid-area: strip;
   height: var(--composer-strip-height);

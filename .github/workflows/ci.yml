@@ -198,6 +198,8 @@ jobs:
     timeout-minutes: 25
     env:
       CI: "true"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Check out source
@@ -259,6 +261,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Keep compact Electron timing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: electron-timings-pr-linux-lifecycle-${{ github.run_attempt }}
+          path: ci-test-timings/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   pr-windows-lifecycle:
     name: Windows x64 lifecycle sentinel
     if: needs.classify.outputs.pr_windows_lifecycle == 'true'
@@ -267,6 +278,8 @@ jobs:
     timeout-minutes: 25
     env:
       CI: "true"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Check out source
@@ -338,6 +351,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Keep compact Electron timing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: electron-timings-pr-windows-lifecycle-${{ github.run_attempt }}
+          path: ci-test-timings/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   pr-macos-lifecycle:
     name: macOS arm64 lifecycle sentinel
     if: needs.classify.outputs.pr_macos_lifecycle == 'true'
@@ -346,6 +368,8 @@ jobs:
     timeout-minutes: 25
     env:
       CI: "true"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Check out source
@@ -401,6 +425,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Keep compact Electron timing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: electron-timings-pr-macos-lifecycle-${{ github.run_attempt }}
+          path: ci-test-timings/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   test:
     name: ${{ matrix.label }}
     if: needs.classify.outputs.test == 'true'
@@ -414,6 +447,8 @@ jobs:
       max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
     env:
       CI: "true"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.artifact }}.json
       INERTIA_DESKTOP_BENCHMARK_REPORT: performance-results/desktop-${{ matrix.artifact }}.json
       INERTIA_PACKAGE_BENCHMARK_REPORT: performance-results/package-${{ matrix.artifact }}.json
@@ -785,6 +820,15 @@ jobs:
         run: |
           echo "At least one retained lifecycle attempt failed or flaked." >&2
           exit 1
+
+      - name: Keep compact Electron timing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: electron-timings-${{ matrix.artifact }}-${{ github.run_attempt }}
+          path: ci-test-timings/*.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   windows-unit:
     name: Windows unit tests (${{ matrix.shard }}/4)

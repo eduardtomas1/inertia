@@ -136,3 +136,18 @@ it("isolates native and verifier dependency changes without suppressing security
   expect(npm["rebase-strategy"]).not.toBe("disabled");
   expect(npm["open-pull-requests-limit"]).toBeGreaterThan(0);
 });
+
+it("retains compact timing evidence on success and failure without adding retries or changing selection", () => {
+  for (const id of ["pr-linux-lifecycle", "pr-windows-lifecycle", "pr-macos-lifecycle", "test"]) {
+    const job = workflow.jobs[id];
+    expect(job.env.INERTIA_CI_TIMINGS).toBe("true");
+    expect(job.env.INERTIA_CI_SOURCE_HEAD).toBe("${{ github.event.pull_request.head.sha || github.sha }}");
+    const timing = job.steps.find((step: { name: string }) => step.name === "Keep compact Electron timing evidence");
+    expect(timing.if).toBe("always()");
+    expect(timing.with.path).toBe("ci-test-timings/*.json");
+    expect(timing.with.name).toContain("${{ github.run_attempt }}");
+    expect(timing.with["retention-days"]).toBe(7);
+  }
+  expect(source("playwright.config.ts")).toContain('trace: "retain-on-failure"');
+  expect(source("playwright.config.ts")).not.toMatch(/retries:/u);
+});

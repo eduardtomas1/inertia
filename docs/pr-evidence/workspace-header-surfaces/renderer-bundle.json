@@ -1,0 +1,178 @@
+{
+  "baseline": "620ca04842dbd18ef0f69962c2f74f09c6057a6b",
+  "platform": "Linux x64 / Node 22.23.2",
+  "method": "Production electron-vite builds of origin/main and of this branch with the same dependency tree, measured with scripts/check-renderer-bundle.mjs. The Run, Open and Git split buttons, their menus, the header usage meter, the right-panel shell and its launcher load as deferred chunks. WorkspaceHeaderActions has its own ceiling and is excluded from the Git menu and shared-core totals.",
+  "raisedBudgets": {
+    "mainWorkbenchFirstLoadJavaScript": "+3,324 bytes: persisted right-panel surface state, the corner panel toggles, the checkout-strip branch slot and the header title-menu wiring stay eager so the frame renders without layout shift.",
+    "detachedChatFirstLoadJavaScript": "+566 bytes: the composer checkout-strip branch slot and its context provider.",
+    "deferredTerminalJavaScript": "+494 bytes: the terminal docks under the chat, its session controls join the tab row through a portal and it gains a Hide control (26,456 bytes measured on Windows x64 after the change).",
+    "deferredGitMenusJavaScript": "+245 bytes: the Git menu gains the embedded overflow presentation, the branch entry and inline notices.",
+    "deferredWorkspaceHeaderActionsJavaScript": "new ceiling of 18.75 KiB for the deferred Run, Open and Git controls (18,983 bytes measured).",
+    "coreJavaScript": "+16,500 bytes of total application JavaScript for the Usage and Agents surfaces, the surface launcher and the new header modules, net of the removed Environment panel."
+  },
+  "before": {
+    "deferredLegacyPromptStashJavaScript": 1219,
+    "deferredUsageLimitsJavaScript": 19949,
+    "deferredWelcomeGuideJavaScript": 13135,
+    "deferredSnapshotSettingsJavaScript": 5017,
+    "deferredProjectSettingsJavaScript": 12792,
+    "deferredReviewNoteJavaScript": 1439,
+    "deferredThreadActionsJavaScript": 8154,
+    "deferredDiagnosticsJavaScript": 12330,
+    "deferredDiagnosticCatalogJavaScript": 9890,
+    "deferredIssueReportJavaScript": 12520,
+    "mascotFirstLoadJavaScript": 6049,
+    "mascotJavaScript": 6049,
+    "mascotSettingsJavaScript": 6647,
+    "entryJavaScript": 222496,
+    "mainWorkbenchFirstLoadJavaScript": 822190,
+    "detachedChatFirstLoadJavaScript": 631135,
+    "entryCss": 346263,
+    "colorThemesCss": 12470,
+    "detachedChatCss": 2677,
+    "settingsJavaScript": 48595,
+    "filesFirstLoadJavaScript": 105208,
+    "deferredMarkdownJavaScript": 431732,
+    "transcriptJavaScript": 539659,
+    "deferredFailureDiagnosticsJavaScript": 6375,
+    "deferredAttachmentPreviewJavaScript": 12333,
+    "deferredPreviewJavaScript": 8082,
+    "deferredBrowserEvidenceJavaScript": 3751,
+    "deferredSpreadsheetJavaScript": 487396,
+    "deferredDiscordSettingsJavaScript": 5395,
+    "deferredCanaryRollbackJavaScript": 2210,
+    "deferredLifecycleIntegritySettingsJavaScript": 4291,
+    "deferredSidebarUpdateControlJavaScript": 10797,
+    "deferredProviderAuthJavaScript": 10118,
+    "deferredProviderMaintenanceJavaScript": 3983,
+    "deferredComposerQueueJavaScript": 6957,
+    "deferredTerminalJavaScript": 25961,
+    "deferredGitMenusJavaScript": 9088,
+    "detachedChatJavaScript": 12532,
+    "preMergeConfidenceJavaScript": 22570,
+    "morphiconsJavaScript": 15829,
+    "morphingIconFeedbackJavaScript": 4221,
+    "coreJavaScript": 2122297,
+    "deferredPdfJavaScript": 437530,
+    "deferredPdfWorker": 1265413
+  },
+  "after": {
+    "deferredLegacyPromptStashJavaScript": 1219,
+    "deferredUsageLimitsJavaScript": 19949,
+    "deferredWelcomeGuideJavaScript": 13135,
+    "deferredSnapshotSettingsJavaScript": 5017,
+    "deferredProjectSettingsJavaScript": 12791,
+    "deferredReviewNoteJavaScript": 1439,
+    "deferredThreadActionsJavaScript": 8005,
+    "deferredDiagnosticsJavaScript": 12330,
+    "deferredDiagnosticCatalogJavaScript": 9890,
+    "deferredIssueReportJavaScript": 12520,
+    "mascotFirstLoadJavaScript": 6049,
+    "mascotJavaScript": 6049,
+    "mascotSettingsJavaScript": 6647,
+    "entryJavaScript": 222496,
+    "mainWorkbenchFirstLoadJavaScript": 825514,
+    "detachedChatFirstLoadJavaScript": 631701,
+    "entryCss": 347821,
+    "colorThemesCss": 12470,
+    "detachedChatCss": 2677,
+    "settingsJavaScript": 48721,
+    "filesFirstLoadJavaScript": 105208,
+    "deferredMarkdownJavaScript": 431732,
+    "transcriptJavaScript": 540477,
+    "deferredFailureDiagnosticsJavaScript": 6375,
+    "deferredAttachmentPreviewJavaScript": 12333,
+    "deferredPreviewJavaScript": 8109,
+    "deferredBrowserEvidenceJavaScript": 3751,
+    "deferredSpreadsheetJavaScript": 487396,
+    "deferredDiscordSettingsJavaScript": 5395,
+    "deferredCanaryRollbackJavaScript": 2276,
+    "deferredLifecycleIntegritySettingsJavaScript": 4188,
+    "deferredSidebarUpdateControlJavaScript": 10797,
+    "deferredProviderAuthJavaScript": 10118,
+    "deferredProviderMaintenanceJavaScript": 3983,
+    "deferredComposerQueueJavaScript": 6957,
+    "deferredTerminalJavaScript": 25962,
+    "deferredGitMenusJavaScript": 9333,
+    "deferredWorkspaceHeaderActionsJavaScript": 18983,
+    "detachedChatJavaScript": 12532,
+    "preMergeConfidenceJavaScript": 22570,
+    "morphiconsJavaScript": 15829,
+    "morphingIconFeedbackJavaScript": 4221,
+    "coreJavaScript": 2138797,
+    "deferredPdfJavaScript": 437530,
+    "deferredPdfWorker": 1265413
+  },
+  "changed": {
+    "deferredProjectSettingsJavaScript": {
+      "before": 12792,
+      "after": 12791,
+      "delta": -1
+    },
+    "deferredThreadActionsJavaScript": {
+      "before": 8154,
+      "after": 8005,
+      "delta": -149
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "before": 822190,
+      "after": 825514,
+      "delta": 3324
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "before": 631135,
+      "after": 631701,
+      "delta": 566
+    },
+    "entryCss": {
+      "before": 346263,
+      "after": 347821,
+      "delta": 1558
+    },
+    "settingsJavaScript": {
+      "before": 48595,
+      "after": 48721,
+      "delta": 126
+    },
+    "transcriptJavaScript": {
+      "before": 539659,
+      "after": 540477,
+      "delta": 818
+    },
+    "deferredPreviewJavaScript": {
+      "before": 8082,
+      "after": 8109,
+      "delta": 27
+    },
+    "deferredCanaryRollbackJavaScript": {
+      "before": 2210,
+      "after": 2276,
+      "delta": 66
+    },
+    "deferredLifecycleIntegritySettingsJavaScript": {
+      "before": 4291,
+      "after": 4188,
+      "delta": -103
+    },
+    "deferredTerminalJavaScript": {
+      "before": 25961,
+      "after": 25962,
+      "delta": 1
+    },
+    "deferredGitMenusJavaScript": {
+      "before": 9088,
+      "after": 9333,
+      "delta": 245
+    },
+    "deferredWorkspaceHeaderActionsJavaScript": {
+      "before": null,
+      "after": 18983,
+      "delta": 18983
+    },
+    "coreJavaScript": {
+      "before": 2122297,
+      "after": 2138797,
+      "delta": 16500
+    }
+  }
+}

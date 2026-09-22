@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("workspace scene lifecycle", () => {
-  it("keeps an activated terminal alive while other tools are selected", async () => {
+  it("keeps an activated terminal docked and alive while it is hidden", async () => {
     const source = await readFile(
       new URL(
         "../../src/renderer/src/components/WorkspaceScene.tsx",
@@ -11,8 +11,9 @@ describe("workspace scene lifecycle", () => {
       ),
       "utf8",
     );
-    expect(source).toContain("terminalLifecycleRef.current.activated &&");
-    expect(source).not.toContain('tools.activeTool === "terminal" &&');
+    expect(source).toContain("if (tools && open) activatedKeyRef.current = tools.terminalKey;");
+    expect(source).toContain("hidden={!open}");
+    expect(source).not.toContain('tools.activeTool === "terminal"');
   });
 
   it("renders split panes before applying a primary-only detail boundary", async () => {

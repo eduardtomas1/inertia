@@ -2,7 +2,10 @@ import {
   lazy,
   memo,
   Suspense,
+  useEffect,
+  useId,
   useRef,
+  useState,
   type ComponentProps,
   type ComponentType,
   type CSSProperties,
@@ -12,6 +15,10 @@ import {
 } from "react";
 
 import { ChatWorkspace } from "./ChatWorkspace";
+import {
+  CheckoutBranchControlProvider,
+  type CheckoutBranchControlModel,
+} from "./CheckoutBranchControl";
 import { ConversationDetailState } from "./ConversationDetailState";
 import {
   DetachedConversationPlaceholder,
@@ -20,23 +27,31 @@ import {
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
-import { WorkspacePanel, type WorkspacePanelTab } from "./WorkspacePanel";
-import type { EnvironmentPanelProps } from "./EnvironmentPanel";
+import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
+import type { UsageSurfaceProps } from "./UsageSurface";
+import type { AgentsSurfaceProps } from "./AgentsSurface";
+import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { usePersistedSize } from "../hooks/usePersistedSize";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
+  loadAgentsSurface,
   loadFilesPanel,
-  loadEnvironmentPanel,
   loadGoalPanel,
   loadHistoricalDiffPanel,
   loadPlanPanel,
   loadPreviewPanel,
   loadSettingsView,
   loadTerminalPanel,
+  loadUsageSurface,
   loadWorkspaceChangesPanel,
 } from "./lazySurfaceLoaders";
+import { createSurfaceLoader } from "../utils/surfaceLoader";
+
+// Loaded here, not in lazySurfaceLoaders: the panel imports those loaders.
+const loadWorkspacePanel = createSurfaceLoader(() => import("./WorkspacePanel"));
 
 function lazySurface<TModule, TProps>(
   loader: () => Promise<TModule>,
@@ -47,9 +62,17 @@ function lazySurface<TModule, TProps>(
   })));
 }
 
-const EnvironmentPanel = lazySurface(
-  loadEnvironmentPanel,
-  (module) => module.EnvironmentPanel,
+const WorkspacePanel = lazySurface(
+  loadWorkspacePanel,
+  (module) => module.WorkspacePanel,
+);
+const UsageSurface = lazySurface(
+  loadUsageSurface,
+  (module) => module.UsageSurface,
+);
+const AgentsSurface = lazySurface(
+  loadAgentsSurface,
+  (module) => module.AgentsSurface,
 );
 const ConversationSplitView = lazySurface(
   loadConversationSplitView,
@@ -85,8 +108,11 @@ function WorkspaceToolFallback(): JSX.Element {
 
 export interface WorkspaceToolScene {
   activeTool: WorkspacePanelTab | null;
-  panel: Omit<ComponentProps<typeof WorkspacePanel>, "children">;
-  environment: EnvironmentPanelProps;
+  panel: Omit<WorkspacePanelProps, "children">;
+  usage: UsageSurfaceProps;
+  agents: AgentsSurfaceProps;
+  runs: WorkspaceRunsModel;
+  gitNotice: string | null;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
   changes: ComponentProps<typeof WorkspaceChangesPanel>;
   files: ComponentProps<typeof FilesPanel>;
@@ -101,6 +127,7 @@ export interface WorkspaceToolScene {
 export interface ConversationPaneScene {
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
+  checkoutBranch?: CheckoutBranchControlModel | null;
   resizeHandle: ComponentProps<typeof PaneResizeHandle> | null;
   tools: WorkspaceToolScene | null;
 }
@@ -112,6 +139,8 @@ export interface SplitPaneDetails {
   projectName: string;
   toolsOpen: boolean;
   onToggleTools: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
   onOpenInWindow?: () => void;
   scene: ConversationPaneScene | null;
 }
@@ -122,6 +151,7 @@ export interface WorkspaceSceneProps {
   detachedChat?: DetachedConversationPlaceholderProps | null;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
   chat: ComponentProps<typeof ChatWorkspace>;
+  checkoutBranch?: CheckoutBranchControlModel | null;
   splitScene?: {
     layout: SplitLayout;
     panes: SplitPaneDetails[];
@@ -132,6 +162,20 @@ export interface WorkspaceSceneProps {
   tools: WorkspaceToolScene | null;
 }
 
+function WorkspacePanelFallback({
+  presentation = "inline",
+  visible = true,
+}: Omit<WorkspacePanelProps, "children">): JSX.Element {
+  return (
+    <aside
+      className={`workspace-panel is-${presentation}`}
+      aria-label="Workspace tools"
+      aria-busy="true"
+      hidden={!visible}
+    />
+  );
+}
+
 function WorkspaceToolSurface({
   resizeHandle,
   tools,
@@ -139,46 +183,96 @@ function WorkspaceToolSurface({
 }: Pick<ConversationPaneScene, "resizeHandle" | "tools"> & {
   owner: WorkspacePreviewOwner;
 }): JSX.Element {
-  const terminalLifecycleRef = useRef({
-    key: null as string | null,
-    activated: false,
-  });
-  if (terminalLifecycleRef.current.key !== (tools?.terminalKey ?? null)) {
-    terminalLifecycleRef.current = {
-      key: tools?.terminalKey ?? null,
-      activated: tools?.activeTool === "terminal",
-    };
-  } else if (tools?.activeTool === "terminal") {
-    terminalLifecycleRef.current.activated = true;
-  }
   return (
     <>
       {resizeHandle && <PaneResizeHandle {...resizeHandle} />}
       {tools && (
-        <WorkspacePanel {...tools.panel}>
-          <Suspense fallback={<WorkspaceToolFallback />}>
-            {tools.activeTool === "environment" && (
-              <EnvironmentPanel {...tools.environment} />
-            )}
-            {tools.activeTool === "changes" && (
-              tools.historicalDiff
-                ? <HistoricalDiffPanel {...tools.historicalDiff} />
-                : <WorkspaceChangesPanel {...tools.changes} />
-            )}
-            {tools.activeTool === "files" && (
-              <FilesPanel key={tools.filesKey} {...tools.files} />
-            )}
-            {terminalLifecycleRef.current.activated && (
-              <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-            )}
-            {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
-            {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
-            {tools.activeTool === "preview" && (
-              <PreviewPanel owner={owner} {...tools.preview} />
-            )}
-          </Suspense>
-        </WorkspacePanel>
+        <Suspense fallback={<WorkspacePanelFallback {...tools.panel} />}>
+          <WorkspacePanel {...tools.panel}>
+            <Suspense fallback={<WorkspaceToolFallback />}>
+              {tools.activeTool === "usage" && (
+                <UsageSurface {...tools.usage} />
+              )}
+              {tools.activeTool === "agents" && (
+                <AgentsSurface {...tools.agents} />
+              )}
+              {tools.activeTool === "changes" && (
+                tools.historicalDiff
+                  ? <HistoricalDiffPanel {...tools.historicalDiff} />
+                  : <WorkspaceChangesPanel {...tools.changes} />
+              )}
+              {tools.activeTool === "files" && (
+                <FilesPanel key={tools.filesKey} {...tools.files} />
+              )}
+              {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
+              {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+              {tools.activeTool === "preview" && (
+                <PreviewPanel owner={owner} {...tools.preview} />
+              )}
+            </Suspense>
+          </WorkspacePanel>
+        </Suspense>
       )}
+    </>
+  );
+}
+
+const TERMINAL_DOCK_MIN_HEIGHT = 140;
+const TERMINAL_DOCK_MAX_HEIGHT = 640;
+const TERMINAL_DOCK_DEFAULT_HEIGHT = 260;
+
+/**
+ * Docks the terminal under the chat, beside whatever the right panel shows.
+ * Once opened it stays mounted while hidden so its sessions keep running.
+ */
+function TerminalDock({
+  tools,
+  containerRef,
+}: {
+  tools: WorkspaceToolScene | null;
+  containerRef: RefObject<HTMLDivElement | null>;
+}): JSX.Element | null {
+  const id = useId();
+  const [persistedHeight, setPersistedHeight] = usePersistedSize(
+    "inertia:layout:terminal-dock-height:v1",
+    TERMINAL_DOCK_DEFAULT_HEIGHT,
+    { min: TERMINAL_DOCK_MIN_HEIGHT, max: TERMINAL_DOCK_MAX_HEIGHT },
+  );
+  const [height, setHeight] = useState(persistedHeight);
+  useEffect(() => setHeight(persistedHeight), [persistedHeight]);
+  const activatedKeyRef = useRef<string | null>(null);
+  const open = Boolean(tools?.terminal.visible);
+  if (tools && open) activatedKeyRef.current = tools.terminalKey;
+  if (!tools || activatedKeyRef.current !== tools.terminalKey) return null;
+  return (
+    <>
+      {open && (
+        <PaneResizeHandle
+          label="Resize terminal"
+          controls={id}
+          containerRef={containerRef}
+          orientation="horizontal"
+          pane="after"
+          value={height}
+          min={TERMINAL_DOCK_MIN_HEIGHT}
+          max={TERMINAL_DOCK_MAX_HEIGHT}
+          defaultValue={TERMINAL_DOCK_DEFAULT_HEIGHT}
+          onChange={setHeight}
+          onCommit={setPersistedHeight}
+          className="terminal-dock-resize-handle"
+        />
+      )}
+      <section
+        id={id}
+        className="terminal-dock"
+        aria-label="Terminal"
+        hidden={!open}
+        style={{ "--terminal-dock-height": `${height}px` } as CSSProperties}
+      >
+        <Suspense fallback={<WorkspaceToolFallback />}>
+          <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
+        </Suspense>
+      </section>
     </>
   );
 }
@@ -187,6 +281,7 @@ function ConversationPane({
   detachedChat = null,
   detailState,
   chat,
+  checkoutBranch = null,
   resizeHandle,
   tools,
   owner,
@@ -197,6 +292,7 @@ function ConversationPane({
   const containerRef = resizeHandle?.containerRef as
     | RefObject<HTMLDivElement | null>
     | undefined;
+  const chatRef = useRef<HTMLDivElement>(null);
   const style = resizeHandle
     ? {
         "--conversation-pane-tools-height": `${resizeHandle.value}px`,
@@ -208,12 +304,21 @@ function ConversationPane({
       className={`conversation-pane-workspace${tools ? " has-tools" : ""}`}
       style={style}
     >
-      <div className="conversation-pane-chat">
+      <div ref={chatRef} className="conversation-pane-chat">
         {detachedChat
           ? <DetachedConversationPlaceholder {...detachedChat} />
           : detailState
           ? <ConversationDetailState {...detailState} embedded />
-          : <ChatWorkspace {...chat} embedded />}
+          : (
+            <CheckoutBranchControlProvider
+              value={checkoutBranch
+                ? { ...checkoutBranch, respondsToHeaderRequests: owner === "primary" }
+                : null}
+            >
+              <ChatWorkspace {...chat} embedded />
+            </CheckoutBranchControlProvider>
+          )}
+        <TerminalDock tools={tools} containerRef={chatRef} />
       </div>
       <WorkspaceToolSurface
         resizeHandle={resizeHandle}
@@ -235,11 +340,13 @@ function WorkspaceSceneView({
   detachedChat = null,
   detailState,
   chat,
+  checkoutBranch = null,
   splitScene = null,
   resizeHandle,
   tools,
 }: WorkspaceSceneProps): JSX.Element {
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
+  const chatColumnRef = useRef<HTMLDivElement>(null);
   return (
     <>
       {view === "settings" ? (
@@ -265,6 +372,7 @@ function WorkspaceSceneView({
                 detachedChat={detachedChat}
                 detailState={detailState}
                 chat={chat}
+                checkoutBranch={checkoutBranch}
                 resizeHandle={resizeHandle}
                 tools={tools}
               />
@@ -272,12 +380,23 @@ function WorkspaceSceneView({
           }))}
         />
         </Suspense>
-      ) : detachedChat ? (
-        <DetachedConversationPlaceholder {...detachedChat} />
-      ) : detailState ? (
-        <ConversationDetailState {...detailState} />
       ) : (
-        <ChatWorkspace {...chat} />
+        <div ref={chatColumnRef} className="workspace-chat-column">
+          {detachedChat ? (
+            <DetachedConversationPlaceholder {...detachedChat} />
+          ) : detailState ? (
+            <ConversationDetailState {...detailState} />
+          ) : (
+            <CheckoutBranchControlProvider
+              value={checkoutBranch
+                ? { ...checkoutBranch, respondsToHeaderRequests: true }
+                : null}
+            >
+              <ChatWorkspace {...chat} />
+            </CheckoutBranchControlProvider>
+          )}
+          <TerminalDock tools={tools} containerRef={chatColumnRef} />
+        </div>
       )}
 
       {!splitScene && (

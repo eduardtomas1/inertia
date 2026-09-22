@@ -568,7 +568,7 @@ function SkillsSection({
   );
 }
 
-function SubagentsSection({
+export function SubagentsSection({
   subagents,
   turns,
   now,

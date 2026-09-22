@@ -269,12 +269,9 @@ test("positions a completed answer at the viewport start by default", async () =
     })).toBeLessThanOrEqual(4);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
-    const environment = page.getByRole("region", { name: "Environment details" });
-    await expect(environment).toBeVisible();
-    await expect(environment.getByText("Checking…", { exact: true }))
-      .toHaveCount(0);
-    await expect(environment.getByText("Checking branch…", { exact: true }))
-      .toHaveCount(0);
+    const checkout = page.getByRole("group", { name: "Chat checkout context" });
+    await expect(checkout).toBeVisible();
+    await expect(checkout.getByText(/^Checking/u)).toHaveCount(0);
     const evidence = test.info().outputPath("inertia-final-answer-anchor.png");
     await page.screenshot({ animations: "disabled", path: evidence });
     await test.info().attach("inertia-final-answer-anchor", {

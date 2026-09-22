@@ -1,7 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import WorkspaceBranchMenu from "../../src/renderer/src/components/WorkspaceBranchMenu";
-import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
+import {
+  CheckoutBranchControlProvider,
+  CheckoutBranchSlot,
+} from "../../src/renderer/src/components/CheckoutBranchControl";
 import type { Project } from "../../src/shared/contracts";
 
 const project: Project = {
@@ -195,23 +198,23 @@ describe("branch menu interaction", () => {
     expect(callbacks.onClose).not.toHaveBeenCalled();
   });
 
-  it("dismisses old checkout state on project navigation without letting late completion close the new menu", async () => {
+  it("dismisses old checkout strip state on project navigation without letting late completion close the new menu", async () => {
     const callbacks = props();
     let finish!: () => void;
     callbacks.onSwitchBranch.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
-    const header = (target: Project) => <WorkspaceHeader {...callbacks} project={target}
-      view="workspace" activeTool={null} sidebarCollapsed={false} theme="dark" actions={[]}
-      onOpenSidebar={vi.fn()} onToggleTools={vi.fn()} onOpenEnvironment={vi.fn()} onCycleTheme={vi.fn()}
-      onOpenSettings={vi.fn()} onOpenConnectionsSettings={vi.fn()} onOpenProject={vi.fn()}
-      onCommit={vi.fn()} onOpenPullRequest={vi.fn()} onPull={vi.fn()} onPush={vi.fn()} onRunAction={vi.fn()} />;
+    const header = (target: Project) => (
+      <CheckoutBranchControlProvider value={{ ...callbacks, project: target }}>
+        <CheckoutBranchSlot branch="main" />
+      </CheckoutBranchControlProvider>
+    );
     const view = render(header(project));
-    fireEvent.click(screen.getByRole("button", { name: /^main$/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "Branch main" }));
     const search = await screen.findByRole("searchbox");
     fireEvent.change(search, { target: { value: "topic" } });
     fireEvent.keyDown(search, { key: "Enter" });
     view.rerender(header({ ...project, id: "22222222-2222-4222-8222-222222222222" }));
     expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^main$/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Branch main" }));
     expect(await screen.findByRole("searchbox")).toHaveValue("");
     await act(async () => { finish(); await Promise.resolve(); });
     expect(screen.getByRole("menu", { name: "Branches" })).toBeInTheDocument();

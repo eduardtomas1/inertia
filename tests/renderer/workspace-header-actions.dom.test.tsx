@@ -15,13 +15,13 @@ function props(): HeaderProps {
       color: "#6366f1", status: "ready", createdAt: "2026-09-09T00:00:00.000Z",
       updatedAt: "2026-09-09T00:00:00.000Z",
     },
-    conversation: conversation("33333333-3333-4333-8333-333333333333"), view: "workspace", activeTool: null,
-    sidebarCollapsed: false, theme: "dark", gitStatus: null, branches: [],
+    conversation: conversation("33333333-3333-4333-8333-333333333333"), view: "workspace",
+    sidebarCollapsed: false, gitStatus: null, branches: [],
     actions: [{ id: "check", label: "Check workspace", command: "node --version", preview: false }],
     busy: false,
-    onOpenSidebar: vi.fn(), onToggleTools: vi.fn(), onOpenEnvironment: vi.fn(),
-    onCycleTheme: vi.fn(), onOpenSettings: vi.fn(), onOpenConnectionsSettings: vi.fn(),
-    onOpenProject: vi.fn(), onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
+    onOpenSidebar: vi.fn(), onOpenSettings: vi.fn(),
+    onOpenFolder: vi.fn(), onRevealFolder: vi.fn(), onOpenFiles: vi.fn(),
+    onRefreshBranches: vi.fn(), onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn(), onCreateConversationOnBranch: vi.fn(),
     onCreateConversationInWorktree: vi.fn(), onCreateConversationInIsolatedWorktree: vi.fn(),
     onCommit: vi.fn(), onOpenPullRequest: vi.fn(), onPull: vi.fn(), onPush: vi.fn(),
@@ -38,8 +38,8 @@ describe("workspace header project action ownership", () => {
   it("keeps the focused project action available when initial Git discovery completes", async () => {
     const callbacks = props();
     const view = render(<WorkspaceHeader {...callbacks} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
-    const action = screen.getByRole("menuitem", { name: /Check workspace/u });
+    fireEvent.click(await screen.findByRole("button", { name: "Project action options" }));
+    const action = await screen.findByRole("menuitem", { name: /Check workspace/u });
     await waitFor(() => expect(action).toHaveFocus());
 
     view.rerender(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
@@ -55,8 +55,9 @@ describe("workspace header project action ownership", () => {
   it.each(["project", "conversation"])("still dismisses project actions when the %s owner changes", async (owner) => {
     const callbacks = props();
     const view = render(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: /Check workspace/u })).toHaveFocus());
+    fireEvent.click(await screen.findByRole("button", { name: "Project action options" }));
+    const action = await screen.findByRole("menuitem", { name: /Check workspace/u });
+    await waitFor(() => expect(action).toHaveFocus());
 
     const nextId = "22222222-2222-4222-8222-222222222222";
     view.rerender(<WorkspaceHeader {...callbacks} gitStatus={gitStatus}
@@ -67,17 +68,27 @@ describe("workspace header project action ownership", () => {
     expect(callbacks.onRunAction).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { trigger: "main", menu: "Branches" },
-    { trigger: "More Git actions", menu: "Git actions" },
-  ])("still dismisses $menu when its Git root changes", async ({ trigger, menu }) => {
+  it("still dismisses Git actions when its Git root changes", async () => {
     const callbacks = props();
     const view = render(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
-    fireEvent.click(screen.getByRole("button", { name: trigger }));
-    expect(await screen.findByRole("menu", { name: menu })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "More Git actions" }));
+    expect(await screen.findByRole("menu", { name: "Git actions" })).toBeInTheDocument();
 
     view.rerender(<WorkspaceHeader {...callbacks} gitStatus={{ ...gitStatus, root: "/other-checkout" }} />);
 
-    expect(screen.queryByRole("menu", { name: menu })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "Git actions" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to a header Branches menu without a checkout strip and dismisses it when the Git root changes", async () => {
+    const callbacks = props();
+    const view = render(<WorkspaceHeader {...callbacks} gitStatus={gitStatus} />);
+    fireEvent.click(await screen.findByRole("button", { name: "More Git actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Switch branch/u }));
+    expect(await screen.findByRole("menu", { name: "Branches" })).toBeInTheDocument();
+    expect(callbacks.onRefreshBranches).toHaveBeenCalled();
+
+    view.rerender(<WorkspaceHeader {...callbacks} gitStatus={{ ...gitStatus, root: "/other-checkout" }} />);
+
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument());
   });
 });

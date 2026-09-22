@@ -9,6 +9,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -243,10 +244,8 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       await expect(navigation).toHaveCount(0);
     }
     const workspacePanel = page.locator(".workspace-panel");
-    if (await workspacePanel.isVisible()) {
-      await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-      await expect(workspacePanel).toBeHidden();
-    }
+    await closeWorkspaceTools(page);
+    await expect(workspacePanel).toBeHidden();
 
     const transcript = page.getByLabel("Thread transcript");
     const scrollToMiddle = async (): Promise<void> => {
@@ -528,10 +527,8 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       else await expect(scenarioNavigation).toBeHidden();
 
       const scenarioTools = page.locator(".workspace-panel");
-      if (await scenarioTools.isVisible() !== scenario.tools) {
-        if (scenario.tools) await page.getByRole("button", { name: "Open workspace tools" }).click();
-        else await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-      }
+      if (scenario.tools) await ensureWorkspaceTools(page);
+      else await closeWorkspaceTools(page);
       if (scenario.tools) await expect(scenarioTools).toBeVisible();
       else await expect(scenarioTools).toBeHidden();
 

@@ -9,7 +9,8 @@ import {
   expectComposerEndsAtDock,
 } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { openTerminalDock } from "./support/workspace-tools";
+import { setAppearance } from "./support/appearance";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -42,22 +43,19 @@ test.afterAll(async () => {
 });
 
 async function ensureTerminalTools(): Promise<void> {
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-  }
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
 }
 
 test("navigates settings, changes theme, and returns to chat", async () => {
   await ensureTerminalTools();
   const terminalPanel = page.locator("aside.terminal-panel").first();
   const terminalFontSize = await terminalPanel.getAttribute("data-terminal-font-size");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
-  const environmentSettings = page.getByRole("button", {
-    name: "Environment settings",
+  const sidebarSettings = page.getByRole("button", {
+    name: "Settings",
+    exact: true,
   });
-  await environmentSettings.focus();
-  await environmentSettings.press("Enter");
+  await sidebarSettings.focus();
+  await sidebarSettings.press("Enter");
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
@@ -327,16 +325,10 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   expect(rendererErrors).toEqual([]);
 });
 
-test("changes the visible theme on every quick-toggle click", async () => {
-  const html = page.locator("html");
-  const themeTrigger = page.getByRole("button", { name: /^Change theme \(current:/ });
-
-  for (let click = 0; click < 3; click += 1) {
-    const before = await html.getAttribute("data-theme");
-    await themeTrigger.click();
-    await expect.poll(() => html.getAttribute("data-theme")).not.toBe(before);
-  }
-
+test("changes the theme only from Settings", async () => {
+  await expect(page.getByRole("button", { name: /^Change theme/u })).toHaveCount(0);
+  await setAppearance(page, "light");
+  await setAppearance(page, "dark");
   expect(rendererErrors).toEqual([]);
 });
 

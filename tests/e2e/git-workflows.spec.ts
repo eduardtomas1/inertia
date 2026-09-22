@@ -224,7 +224,7 @@ test("fetch preserves local work and recovers after a remote failure", async () 
 
 test("branch search retains failed choices and keeps keyboard focus visible", async () => {
   const { page, workspaceDirectory } = app;
-  const trigger = page.locator('[data-header-menu="branch"] > button');
+  const trigger = page.getByRole("group", { name: "Chat checkout context" }).locator(".checkout-branch-button");
   await trigger.click();
   const menu = page.getByRole("menu", { name: "Branches" });
   const search = menu.getByRole("searchbox", { name: "Search branches" });
@@ -323,7 +323,7 @@ test(trackingScenario, async () => {
   // Fetch has its own guarded backend work before branch switching. Observe
   // that exact request's settlement, then keep the ordinary UI assertion bound.
   await fetchFromUi({ ...trackingIdentity, repositoryPath: "." });
-  const trigger = page.locator('[data-header-menu="branch"] > button');
+  const trigger = page.getByRole("group", { name: "Chat checkout context" }).locator(".checkout-branch-button");
   await trigger.click();
   const branches = page.getByRole("menu", { name: "Branches" });
   await branches.getByRole("searchbox").fill("remote-review");

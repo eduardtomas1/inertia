@@ -23,6 +23,7 @@ import type {
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import type { DesktopWindowContext } from "@shared/desktop";
+import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
@@ -271,12 +272,10 @@ export default function DetachedChatApp({
   const projectedConversationId = conversation?.id ?? null;
   const conversationTitle = conversation?.title ?? null;
   useEffect(() => {
-    const chatTitle = conversationTitle ?? "Detached chat";
-    document.title = `${chatTitle} — ${applicationProductName(window.location.protocol)}`;
-    const nativeTitle = chatTitle.trim();
+    const nativeTitle = detachedChatWindowTitle(conversationTitle ?? "");
+    document.title = `${nativeTitle} — ${applicationProductName(window.location.protocol)}`;
     if (
       !projectedConversationId
-      || !nativeTitle
       || nativeTitleRef.current === nativeTitle
     ) {
       return;

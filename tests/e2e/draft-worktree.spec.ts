@@ -6,9 +6,9 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 
 import { createAppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
 
-test("keeps Environment available while an isolated draft worktree materializes", async () => {
+test("keeps the right panel available while an isolated draft worktree materializes", async () => {
   const app = await createAppFixture({
     name: "isolated-draft",
     initialState: "empty",
@@ -57,20 +57,28 @@ test("keeps Environment available while an isolated draft worktree materializes"
     const workspaceTools = app.page.getByRole("complementary", {
       name: "Workspace tools",
     });
-    await expect(workspaceTools.getByRole("tab", {
-      name: "Environment",
-    })).toHaveAttribute("aria-selected", "true");
-    await expect(workspaceTools.getByRole("tab", { name: /Changes/u }))
-      .toHaveCount(0);
-    await expect(workspaceTools.getByRole("tab", { name: /Files/u }))
-      .toHaveCount(0);
-    await expect(workspaceTools).toContainText(
-      "Files, changes, and Terminal become available after the first message creates this isolated worktree.",
-    );
-    await expect(workspaceTools.getByText("Repository not checked"))
-      .toBeVisible();
-    await expect(workspaceTools.getByText("No Git repository", { exact: true }))
-      .toHaveCount(0);
+    const unavailableReason =
+      "Available after the first message creates this isolated worktree.";
+    await expect(workspaceTools).toBeVisible();
+    await expect(rightPanelToggle(app.page)).toBeEnabled();
+    await expect(workspaceTools.getByRole("tab")).toHaveCount(0);
+    const launcher = workspaceTools.getByRole("group", {
+      name: "Open a surface",
+    });
+    await expect(launcher).toBeVisible();
+    const terminalToggle = app.page.locator("[data-panel-layout-controls] .corner-toggle").first();
+    await expect(terminalToggle).toBeDisabled();
+    await expect(terminalToggle).toHaveAttribute("title", /available after the first message creates this isolated worktree/u);
+    for (const surface of ["Changes", "Files", "Browser"]) {
+      await expect(launcher.locator('[aria-disabled="true"]').filter({
+        hasText: surface,
+      })).toHaveAttribute("title", unavailableReason);
+    }
+    for (const surface of ["Agents", "Usage", "Goal", "Plan"]) {
+      await expect(launcher.getByRole("button", {
+        name: new RegExp(`^${surface}`, "u"),
+      })).toBeEnabled();
+    }
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
 
     const databasePath = join(
@@ -133,12 +141,10 @@ test("keeps Environment available while an isolated draft worktree materializes"
       stat(join(worktreePath!, ".git")).then((metadata) => metadata.isFile()),
     ).resolves.toBe(true);
 
-    await expect(workspaceTools.getByRole("tab", {
-      name: "Environment",
-    })).toHaveAttribute("aria-selected", "true");
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
-    await expect(workspaceTools.getByLabel("Choose workspace tool"))
-      .toBeVisible();
+    await expect(launcher.getByRole("button", { name: /^Files/u }))
+      .toBeEnabled();
+    await expect(launcher.locator('[aria-disabled="true"]')).toHaveCount(0);
     await selectWorkspaceTool(workspaceTools, "Files");
     await expect(
       workspaceTools.getByRole("tree", { name: "Files" }),

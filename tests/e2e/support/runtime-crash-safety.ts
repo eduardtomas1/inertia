@@ -22,10 +22,7 @@ import {
 } from "../../../src/node/runtime-owned-processes";
 import type { AppFixture, RuntimeTestSnapshot } from "./app-fixture";
 import { processExists } from "./electron-app-lifecycle";
-import {
-  ensureWorkspaceTools,
-  selectWorkspaceTool,
-} from "./workspace-tools";
+import { openTerminalDock } from "./workspace-tools";
 import {
   InterceptedRuntimeRecoveryError,
   installRuntimeRecoveryConsent,
@@ -321,13 +318,12 @@ export async function expectRuntimeCrashRecovery(
   const beforeRuntimeGeneration = await page.locator(".app-shell")
     .getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
-  const tools = await ensureWorkspaceTools(page);
   const terminal = page.locator("aside.terminal-panel").first();
   const restartTerminal = terminal.getByRole("button", { name: "Start again" });
   let retriedTerminalAdmission = false;
   await expect.poll(async () => {
-    if (await tools.getAttribute("data-active-workspace-tool") !== "terminal") {
-      await selectWorkspaceTool(tools, "Terminal");
+    if (!await page.locator(".workspace-chat-column > .terminal-dock").isVisible()) {
+      await openTerminalDock(page);
       return false;
     }
     if (await terminal.count() === 0) return false;
@@ -630,7 +626,10 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-  const newChat = page.getByRole("button", {
+  const newChat = page.getByRole("complementary", {
+    name: "Project navigation",
+    exact: true,
+  }).getByRole("button", {
     name: "New chat",
     exact: true,
   });

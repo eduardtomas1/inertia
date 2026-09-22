@@ -66,14 +66,20 @@ export async function initializeRuntimePersistence(
     if (priorBootLeasesCleared) {
       store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
     }
+    const testRecordLimit = process.env.NODE_ENV === "test"
+      ? Number(process.env.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS ?? 0)
+      : 0;
     conversationAttachments = await ConversationAttachmentStore.open(
       dataDirectory,
-      options.conversationAttachmentStoreOperations
-        ? {
-            operationRunner: options.conversationAttachmentStoreOperations,
-            readOperationRunner: options.conversationAttachmentStoreOperations,
-          }
-        : {},
+      {
+        ...(testRecordLimit > 0 ? { maxRecords: testRecordLimit } : {}),
+        ...(options.conversationAttachmentStoreOperations
+          ? {
+              operationRunner: options.conversationAttachmentStoreOperations,
+              readOperationRunner: options.conversationAttachmentStoreOperations,
+            }
+          : {}),
+      },
     );
     if (!runtimeSafetyLock) {
       await conversationAttachments.reconcile(store.attachments());

@@ -1,22 +1,9 @@
-export type WorkspaceShortcutTool =
-  | "environment"
-  | "changes"
-  | "files"
-  | "terminal"
-  | "goal"
-  | "plan"
-  | "preview";
-
 export interface GlobalShortcutActions {
   keybindings: AppKeybindings;
   createConversation: () => void;
   mobileNavigation: boolean;
   suspended: boolean;
-  setActiveTool: (
-    update: WorkspaceShortcutTool
-      | null
-      | ((tool: WorkspaceShortcutTool | null) => WorkspaceShortcutTool | null),
-  ) => void;
+  toggleTerminal: () => void;
   setPaletteOpen: (open: boolean) => void;
   setSidebarCollapsed: (
     update: boolean | ((collapsed: boolean) => boolean),
@@ -93,8 +80,7 @@ export function installGlobalShortcuts(
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);
-      actions.current.setActiveTool((tool) =>
-        tool === "terminal" ? null : "terminal");
+      actions.current.toggleTerminal();
     } else if (shortcut === "toggle-sidebar") {
       event.preventDefault();
       event.stopPropagation();

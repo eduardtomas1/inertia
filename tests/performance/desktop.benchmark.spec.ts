@@ -24,7 +24,11 @@ import {
   quitElectronAppBounded,
   waitForRuntimeProcessExit,
 } from "../e2e/support/electron-app-lifecycle";
-import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
+import {
+  openTerminalDock,
+  rightPanelToggle,
+  selectWorkspaceTool,
+} from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
 import {
@@ -1607,8 +1611,14 @@ async function openWorkspaceTools(page: Page): Promise<void> {
   if (await page.locator(".workspace-panel").isVisible().catch(() => false)) {
     return;
   }
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await rightPanelToggle(page).click();
   await page.locator(".workspace-panel").waitFor();
+}
+
+/** Closes the docked terminal's last session, which also hides the dock. */
+async function closeDockedTerminal(page: Page): Promise<void> {
+  const dock = await openTerminalDock(page);
+  await dock.getByRole("button", { name: /^Close Terminal \d+$/u }).first().click();
 }
 
 async function openSplitChat(page: Page): Promise<void> {
@@ -1638,12 +1648,10 @@ async function openAndCloseToolCycle(page: Page, electronApp: ElectronApplicatio
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
   await selectWorkspaceTool(tools, "Files");
   await tools.getByRole("tree", { name: "Files" }).waitFor();
-  await selectWorkspaceTool(tools, "Terminal");
-  const panels = tools.locator(".terminal-panel[data-terminal-id]");
+  const dock = await openTerminalDock(page);
+  const panels = dock.locator(".terminal-panel[data-terminal-id]");
   await panels.waitFor();
-  const closeButton = tools.getByRole("button", { name: "Close terminal" })
-    .first();
-  await closeButton.click();
+  await dock.getByRole("button", { name: /^Close Terminal \d+$/u }).first().click();
   try {
     await expect(panels).toHaveCount(
       0,
@@ -1947,9 +1955,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     await cold.page.getByRole("textbox", { name: "Message" }).first().waitFor();
 
     if (!await cold.page.locator(".workspace-panel").isVisible().catch(() => false)) {
-      await cold.page.getByRole("button", {
-        name: "Open workspace tools",
-      }).click();
+      await rightPanelToggle(cold.page).click();
     }
     const tools = cold.page.getByRole("complementary", { name: "Workspace tools" });
     const fileTreeStartedAt = performance.now();
@@ -1958,8 +1964,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const fileTreeMs = performance.now() - fileTreeStartedAt;
 
     const terminalStartedAt = performance.now();
-    await selectWorkspaceTool(tools, "Terminal");
-    await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
+    const dock = await openTerminalDock(cold.page);
+    await dock.locator(".terminal-panel[data-terminal-id]").waitFor();
     const terminalStartupMs = performance.now() - terminalStartedAt;
 
     const splitStartedAt = performance.now();
@@ -1973,25 +1979,17 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     );
 
     await closeSplitChat(cold.page);
-    await cold.page.getByRole("button", {
-      name: "Close workspace tools",
-    }).first().click();
+    await rightPanelToggle(cold.page).click();
     const memoryPanelsHidden = await rendererMemorySample(
       cold.electronApp,
       cold.page,
       "split-closed-tools-hidden",
     );
 
-    await openWorkspaceTools(cold.page);
-    await cold.page.getByRole("complementary", { name: "Workspace tools" })
-      .getByRole("button", { name: "Close terminal" })
-      .first()
-      .click();
+    await closeDockedTerminal(cold.page);
     const workspacePanel = cold.page.locator(".workspace-panel");
     if (await workspacePanel.isVisible().catch(() => false)) {
-      await cold.page.getByRole("button", { name: "Close workspace tools" })
-        .first()
-        .click();
+      await rightPanelToggle(cold.page).click();
     }
     await expect(workspacePanel).not.toBeVisible();
     await expect(cold.page.locator(".terminal-panel[data-terminal-id]"))

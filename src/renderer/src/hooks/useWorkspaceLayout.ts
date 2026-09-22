@@ -7,12 +7,34 @@ import {
   type RefObject,
 } from "react";
 
-import type { WorkspacePanelTab } from "../components/WorkspacePanel";
+import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
+import { useTerminalDock, type TerminalDockActions } from "./useTerminalDock";
 import {
   LAST_WORKSPACE_TOOL_KEY,
   type WorkspaceStartupSurface,
   workspacePanelTab,
 } from "../utils/workspaceStartup";
+import {
+  activeRightPanelSurface,
+  activateRightPanelSurface,
+  applyRightPanelTool,
+  closeAllRightPanelSurfaces,
+  closeOtherRightPanelSurfaces,
+  closeRightPanelSurface,
+  EMPTY_RIGHT_PANEL_STATE,
+  hideRightPanel,
+  legacyRightPanelState,
+  openRightPanelSurface,
+  parseRightPanelState,
+  RIGHT_PANEL_SIBLING_MIN_WIDTH,
+  rightPanelPresentation,
+  serializeRightPanelState,
+  showRightPanel,
+  toggleRightPanelSurface,
+  toggleRightPanelVisibility,
+  type RightPanelPresentation,
+  type RightPanelState,
+} from "../utils/rightPanelSurfaces";
 import { useMediaQuery } from "./useMediaQuery";
 import { usePersistedSize } from "./usePersistedSize";
 import type { AppView } from "../appView";
@@ -20,11 +42,11 @@ import type { AppView } from "../appView";
 const RESIZE_HANDLE_SIZE = 7;
 export const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
-const CHAT_MIN_WIDTH = 340;
+const CHAT_MIN_WIDTH = RIGHT_PANEL_SIBLING_MIN_WIDTH;
 const CHAT_MIN_HEIGHT = 320;
 export const TOOLS_MIN_WIDTH = 300;
 const TOOLS_MAX_WIDTH = 960;
-export const ENVIRONMENT_TOOLS_DEFAULT_WIDTH = 320;
+export const TOOLS_DEFAULT_WIDTH = 520;
 export const TOOLS_MIN_HEIGHT = 180;
 const TOOLS_MAX_HEIGHT = 720;
 
@@ -63,61 +85,57 @@ function useResizeObserverTarget<T extends Element>(
   }, []);
 }
 
-function initialWorkspaceTool(
-  preferred?: WorkspacePanelTab,
-): WorkspacePanelTab {
-  return preferred
-    ?? workspacePanelTab(window.localStorage.getItem(LAST_WORKSPACE_TOOL_KEY))
-    ?? "environment";
-}
-
-interface PersistedWorkspaceToolState {
+interface PersistedWorkspacePanelState {
   key: string | null;
-  activeTool: WorkspacePanelTab | null;
-  lastTool: WorkspacePanelTab;
+  panel: RightPanelState;
 }
 
-function workspaceToolStorageKeys(workspaceId: string | null): {
-  tool: string | null;
-  open: string | null;
+function workspacePanelStorageKeys(workspaceId: string | null): {
+  panel: string | null;
+  legacyTool: string | null;
+  legacyOpen: string | null;
 } {
-  if (!workspaceId) return { tool: null, open: null };
+  if (!workspaceId) return { panel: null, legacyTool: null, legacyOpen: null };
   const encoded = encodeURIComponent(workspaceId);
   return {
-    tool: `inertia:layout:workspace-tool:${encoded}:v1`,
-    open: `inertia:layout:workspace-open:${encoded}:v1`,
+    panel: `inertia:layout:workspace-panel:${encoded}:v1`,
+    legacyTool: `inertia:layout:workspace-tool:${encoded}:v1`,
+    legacyOpen: `inertia:layout:workspace-open:${encoded}:v1`,
   };
 }
 
-function readWorkspaceToolState(
+function startupPanelState(
+  surface: WorkspaceStartupSurface,
+  preferred?: WorkspacePanelTab,
+): RightPanelState {
+  if (surface !== "tools") return EMPTY_RIGHT_PANEL_STATE;
+  const tool = preferred
+    ?? workspacePanelTab(window.localStorage.getItem(LAST_WORKSPACE_TOOL_KEY));
+  return tool
+    ? { isOpen: true, surfaces: [tool], activeSurfaceId: tool }
+    : { ...EMPTY_RIGHT_PANEL_STATE, isOpen: true };
+}
+
+function readWorkspacePanelState(
   workspaceId: string | null,
   surface: WorkspaceStartupSurface,
   preferred?: WorkspacePanelTab,
-): PersistedWorkspaceToolState {
-  const storageKeys = workspaceToolStorageKeys(workspaceId);
-  const storedTool = storageKeys.tool
-    ? workspacePanelTab(window.localStorage.getItem(storageKeys.tool))
-    : null;
-  const fallbackTool = surface === "tools"
-    ? initialWorkspaceTool(preferred)
-    : "environment";
-  const lastTool = storedTool ?? fallbackTool;
-  const storedOpen = storageKeys.open
-    ? window.localStorage.getItem(storageKeys.open)
-    : null;
-  return {
-    key: workspaceId,
-    activeTool: !workspaceId
-      ? null
-      : storedOpen === "true"
-        ? lastTool
-        : storedOpen === "false"
-          ? null
-          : surface === "tools"
-            ? lastTool
-            : "environment",
-    lastTool,
-  };
+): PersistedWorkspacePanelState {
+  const keys = workspacePanelStorageKeys(workspaceId);
+  if (!keys.panel || !keys.legacyTool || !keys.legacyOpen) {
+    return { key: workspaceId, panel: EMPTY_RIGHT_PANEL_STATE };
+  }
+  const stored = parseRightPanelState(window.localStorage.getItem(keys.panel));
+  if (stored) return { key: workspaceId, panel: stored };
+  const legacyOpen = window.localStorage.getItem(keys.legacyOpen);
+  const legacyTool = window.localStorage.getItem(keys.legacyTool);
+  if (legacyOpen !== null || legacyTool !== null) {
+    return {
+      key: workspaceId,
+      panel: legacyRightPanelState(legacyTool, legacyOpen === "true"),
+    };
+  }
+  return { key: workspaceId, panel: startupPanelState(surface, preferred) };
 }
 
 export interface WorkspaceLayoutOptions {
@@ -129,16 +147,27 @@ export interface WorkspaceLayoutOptions {
   forceStackedTools?: boolean;
 }
 
-export interface WorkspaceLayout {
+export interface WorkspacePanelActions extends TerminalDockActions {
+  panel: RightPanelState;
+  activeTool: WorkspacePanelTab | null;
+  setActiveTool: React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>;
+  openSurface: (surface: WorkspacePanelTab) => void;
+  toggleSurface: (surface: WorkspacePanelTab) => void;
+  activateSurface: (surface: WorkspacePanelTab) => void;
+  closeSurface: (surface: WorkspacePanelTab) => void;
+  closeOtherSurfaces: (surface: WorkspacePanelTab) => void;
+  closeAllSurfaces: () => void;
+  toggleWorkspaceTools: () => void;
+}
+
+export interface WorkspaceLayout extends WorkspacePanelActions {
   sidebarOpen: boolean;
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  activeTool: WorkspacePanelTab | null;
-  setActiveTool: React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>;
-  toggleWorkspaceTools: () => void;
   showStartupSurface: (surface: WorkspaceStartupSurface) => void;
   stackedTools: boolean;
+  panelPresentation: RightPanelPresentation;
   mobileNavigation: boolean;
   toolsVisible: boolean;
   appShellRef: RefObject<HTMLDivElement | null>;
@@ -177,24 +206,23 @@ export function useWorkspaceLayout(
     ? options.workspaceId
     : null;
   const startupSurface = options.startupSurface ?? "summary";
-  const { tool: toolStorageKey, open: openStorageKey } =
-    workspaceToolStorageKeys(workspaceScope);
-  const [persistedToolState, setPersistedToolState] = useState(() =>
-    readWorkspaceToolState(
+  const panelStorageKey = workspacePanelStorageKeys(workspaceScope).panel;
+  const [persistedPanelState, setPersistedPanelState] = useState(() =>
+    readWorkspacePanelState(
       workspaceScope,
       startupSurface,
       options.initialTool,
     ));
-  const toolState = persistedToolState.key === workspaceScope
-    ? persistedToolState
-    : readWorkspaceToolState(
+  const panelState = persistedPanelState.key === workspaceScope
+    ? persistedPanelState.panel
+    : readWorkspacePanelState(
       workspaceScope,
       startupSurface,
       options.initialTool,
-    );
-  const activeToolState = toolState.activeTool;
-  const lastToolRef = useRef(toolState.lastTool);
-  lastToolRef.current = toolState.lastTool;
+    ).panel;
+  const activeToolState = workspaceScope
+    ? activeRightPanelSurface(panelState)
+    : null;
   const [persistedSidebarWidth, setPersistedSidebarWidth] = usePersistedSize(
     "inertia:layout:sidebar-width:v1",
     276,
@@ -202,12 +230,7 @@ export function useWorkspaceLayout(
   );
   const [persistedToolsWidth, setPersistedToolsWidth] = usePersistedSize(
     "inertia:layout:workspace-tools-width:v1",
-    520,
-    { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH },
-  );
-  const [persistedEnvironmentWidth, setPersistedEnvironmentWidth] = usePersistedSize(
-    "inertia:layout:environment-width:v1",
-    ENVIRONMENT_TOOLS_DEFAULT_WIDTH,
+    TOOLS_DEFAULT_WIDTH,
     { min: TOOLS_MIN_WIDTH, max: TOOLS_MAX_WIDTH },
   );
   const [persistedToolsHeight, setPersistedToolsHeight] = usePersistedSize(
@@ -217,19 +240,13 @@ export function useWorkspaceLayout(
   );
   const [sidebarWidth, setSidebarWidth] = useState(persistedSidebarWidth);
   const [toolsWidth, setToolsWidth] = useState(persistedToolsWidth);
-  const [environmentWidth, setEnvironmentWidth] = useState(
-    persistedEnvironmentWidth,
-  );
   const [toolsHeight, setToolsHeight] = useState(persistedToolsHeight);
   const [shellWidth, setShellWidth] = useState(() => window.innerWidth);
   const [workspaceBodySize, setWorkspaceBodySize] = useState(() => ({
     width: Math.max(0, window.innerWidth - 300),
     height: Math.max(0, window.innerHeight - 80),
   }));
-  const responsiveStackedTools = useMediaQuery("(max-width: 1024px)");
-  const stackedTools = Boolean(
-    options.forceStackedTools || responsiveStackedTools,
-  );
+  const stackedTools = Boolean(options.forceStackedTools);
   const mobileNavigation = useMediaQuery("(max-width: 760px)");
   const appShellRef = useRef<HTMLDivElement>(null);
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
@@ -239,10 +256,6 @@ export function useWorkspaceLayout(
     [persistedSidebarWidth],
   );
   useEffect(() => setToolsWidth(persistedToolsWidth), [persistedToolsWidth]);
-  useEffect(
-    () => setEnvironmentWidth(persistedEnvironmentWidth),
-    [persistedEnvironmentWidth],
-  );
   useEffect(
     () => setToolsHeight(persistedToolsHeight),
     [persistedToolsHeight],
@@ -254,8 +267,8 @@ export function useWorkspaceLayout(
     );
   }, [sidebarCollapsed]);
   useEffect(() => {
-    if (persistedToolState.key !== workspaceScope) {
-      setPersistedToolState(readWorkspaceToolState(
+    if (persistedPanelState.key !== workspaceScope) {
+      setPersistedPanelState(readWorkspacePanelState(
         workspaceScope,
         startupSurface,
         options.initialTool,
@@ -263,75 +276,91 @@ export function useWorkspaceLayout(
     }
   }, [
     options.initialTool,
-    persistedToolState.key,
+    persistedPanelState.key,
     startupSurface,
     workspaceScope,
   ]);
 
-  const setActiveTool = useMemo<
-    React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>
-  >(() => (update) => {
-    setPersistedToolState((current) => {
+  const updatePanel = useMemo(() => (
+    update: (current: RightPanelState) => RightPanelState,
+  ): void => {
+    setPersistedPanelState((current) => {
       const owned = current.key === workspaceScope
-        ? current
-        : readWorkspaceToolState(
+        ? current.panel
+        : readWorkspacePanelState(
             workspaceScope,
             startupSurface,
             options.initialTool,
-          );
-      const next = typeof update === "function"
-        ? update(owned.activeTool)
-        : update;
-      if (openStorageKey) {
-        window.localStorage.setItem(openStorageKey, String(next !== null));
+          ).panel;
+      const next = update(owned);
+      if (panelStorageKey) {
+        window.localStorage.setItem(panelStorageKey, serializeRightPanelState(next));
       }
-      if (next) {
-        if (toolStorageKey) window.localStorage.setItem(toolStorageKey, next);
-        window.localStorage.setItem(LAST_WORKSPACE_TOOL_KEY, next);
-      }
-      return {
-        key: workspaceScope,
-        activeTool: next,
-        lastTool: next ?? owned.lastTool,
-      };
+      const active = activeRightPanelSurface(next);
+      if (active) window.localStorage.setItem(LAST_WORKSPACE_TOOL_KEY, active);
+      return { key: workspaceScope, panel: next };
     });
-  }, [
-    openStorageKey,
-    options.initialTool,
-    startupSurface,
-    toolStorageKey,
-    workspaceScope,
-  ]);
+  }, [options.initialTool, panelStorageKey, startupSurface, workspaceScope]);
+
+  const panelActions = useMemo(() => ({
+    setActiveTool: ((update) => {
+      updatePanel((current) => applyRightPanelTool(
+        current,
+        typeof update === "function"
+          ? update(activeRightPanelSurface(current))
+          : update,
+      ));
+    }) as React.Dispatch<React.SetStateAction<WorkspacePanelTab | null>>,
+    openSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => openRightPanelSurface(current, surface)),
+    toggleSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => toggleRightPanelSurface(current, surface)),
+    activateSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => activateRightPanelSurface(current, surface)),
+    closeSurface: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => closeRightPanelSurface(current, surface)),
+    closeOtherSurfaces: (surface: WorkspacePanelTab) =>
+      updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
+    toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
+  }), [updatePanel]);
+  const terminalDock = useTerminalDock(workspaceScope);
 
   const showStartupSurface = useMemo(
     () => (surface: WorkspaceStartupSurface) => {
-      if (surface === "summary") {
-        setActiveTool("environment");
-        return;
-      }
-      setActiveTool(lastToolRef.current);
+      updatePanel((current) => {
+        if (surface === "summary") return hideRightPanel(current);
+        if (current.surfaces.length > 0) return showRightPanel(current);
+        return startupPanelState("tools");
+      });
     },
-    [setActiveTool],
+    [updatePanel],
   );
-
-  const toggleWorkspaceTools = useMemo(() => () => {
-    setActiveTool((current) => current ? null : lastToolRef.current);
-  }, [setActiveTool]);
 
   useResizeObserverTarget(appShellRef, (entry) => {
     setShellWidth(entry.contentRect.width);
   });
 
   useResizeObserverTarget(workspaceBodyRef, (entry) => {
+    const box = entry.borderBoxSize?.[0];
     setWorkspaceBodySize({
-      width: entry.contentRect.width,
-      height: entry.contentRect.height,
+      width: box?.inlineSize ?? entry.contentRect.width,
+      height: box?.blockSize ?? entry.contentRect.height,
     });
   });
 
   const toolsVisible =
-    view === "workspace" && Boolean(activeToolState && hasProject);
-  const minimumWorkspaceWidth = !stackedTools && toolsVisible
+    view === "workspace" && Boolean(workspaceScope && panelState.isOpen && hasProject);
+  const panelPresentation = stackedTools
+    ? "inline"
+    : rightPanelPresentation({
+        containerWidth: workspaceBodySize.width,
+        panelMinWidth: TOOLS_MIN_WIDTH,
+        handleWidth: RESIZE_HANDLE_SIZE,
+      });
+  const minimumWorkspaceWidth = !stackedTools
+    && toolsVisible
+    && panelPresentation === "inline"
     ? CHAT_MIN_WIDTH + TOOLS_MIN_WIDTH + RESIZE_HANDLE_SIZE + 18
     : 440;
   const sidebarDynamicMax = Math.max(
@@ -358,9 +387,8 @@ export function useWorkspaceLayout(
   const effectiveSidebarWidth = !mobileNavigation && sidebarCollapsed
     ? 0
     : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
-  const environmentActive = activeToolState === "environment";
   const effectiveToolsWidth = clamp(
-    environmentActive ? environmentWidth : toolsWidth,
+    toolsWidth,
     TOOLS_MIN_WIDTH,
     toolsDynamicMaxWidth,
   );
@@ -375,11 +403,13 @@ export function useWorkspaceLayout(
     setSidebarOpen,
     sidebarCollapsed,
     setSidebarCollapsed,
+    panel: panelState,
     activeTool: activeToolState,
-    setActiveTool,
-    toggleWorkspaceTools,
+    ...panelActions,
+    ...terminalDock,
     showStartupSurface,
     stackedTools,
+    panelPresentation,
     mobileNavigation,
     toolsVisible,
     appShellRef,
@@ -403,10 +433,8 @@ export function useWorkspaceLayout(
       maxWidth: toolsDynamicMaxWidth,
       maxHeight: toolsDynamicMaxHeight,
       onHeightChange: setToolsHeight,
-      onWidthChange: environmentActive ? setEnvironmentWidth : setToolsWidth,
-      onWidthCommit: environmentActive
-        ? setPersistedEnvironmentWidth
-        : setPersistedToolsWidth,
+      onWidthChange: setToolsWidth,
+      onWidthCommit: setPersistedToolsWidth,
       onHeightCommit: setPersistedToolsHeight,
     },
   }), [
@@ -414,19 +442,19 @@ export function useWorkspaceLayout(
     effectiveSidebarWidth,
     effectiveToolsHeight,
     effectiveToolsWidth,
-    environmentActive,
     mobileNavigation,
+    panelActions,
+    panelPresentation,
+    panelState,
     setPersistedSidebarWidth,
-    setPersistedEnvironmentWidth,
     setPersistedToolsHeight,
     setPersistedToolsWidth,
+    showStartupSurface,
     sidebarCollapsed,
     sidebarDynamicMax,
+    terminalDock,
     sidebarOpen,
-    setActiveTool,
-    showStartupSurface,
     stackedTools,
-    toggleWorkspaceTools,
     toolsDynamicMaxHeight,
     toolsDynamicMaxWidth,
     toolsVisible,

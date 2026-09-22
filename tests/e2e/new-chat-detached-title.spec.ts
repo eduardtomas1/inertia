@@ -33,8 +33,9 @@ for (const [storedTitle, windowTitle] of [
     try {
       const draft = "Keep my unsent message\nexactly as written.";
       await fixture.page.getByRole("textbox", { name: "Message" }).fill(draft);
+      await fixture.page.locator(".workspace-header .header-title-button").click();
       const opened = fixture.electronApp.waitForEvent("window");
-      await fixture.page.getByRole("button", { name: /Open .* in a new window/u }).click();
+      await fixture.page.getByRole("menuitem", { name: "Open chat in new window" }).click();
       const popup = await opened;
       await expect(popup.locator(".detached-chat-shell")).toBeVisible();
       await expect(popup.getByRole("textbox", { name: "Message" })).toHaveValue(draft);

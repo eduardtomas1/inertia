@@ -5,7 +5,6 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "@shared/contracts";
-import type { WorkspacePanelTab } from "../components/WorkspacePanel";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { workspaceRunPreviewUrl } from "../utils/environmentSummary";
 
@@ -24,7 +23,7 @@ interface ActivityActionsOptions {
   project: Project | null;
   conversationId: string | null;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
-  setActiveTool: (tool: WorkspacePanelTab | null) => void;
+  openTerminal: () => void;
   setActionError: (message: string | null) => void;
   activateContext?: (
     activity: PreviewWorkspaceRun,
@@ -54,7 +53,7 @@ export function useActivityActions({
   project,
   conversationId,
   run,
-  setActiveTool,
+  openTerminal,
   setActionError,
   activateContext,
   navigatePreview,
@@ -112,8 +111,8 @@ export function useActivityActions({
       projectId: project.id,
       conversationId,
     });
-    setActiveTool("terminal");
-  }, [conversationId, project, setActiveTool]);
+    openTerminal();
+  }, [conversationId, openTerminal, project]);
 
   const stopWorkspaceRun = useCallback((
     activity: Pick<WorkspaceRun, "id" | "label">,

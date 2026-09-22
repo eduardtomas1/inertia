@@ -1,4 +1,5 @@
-import type { WorkspacePanelTab } from "../components/WorkspacePanel";
+import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
+import { isRightPanelSurface, isWorkspaceBoundSurface } from "./rightPanelSurfaces";
 import type { WorkspaceStartupSurface } from "@shared/contracts";
 
 export type { WorkspaceStartupSurface } from "@shared/contracts";
@@ -7,25 +8,13 @@ const LEGACY_ACTIVE_TOOL_KEY = "inertia:layout:active-tool:v1";
 const LEGACY_MIGRATED_KEY = "inertia:layout:startup-surface-migrated:v1";
 export const LAST_WORKSPACE_TOOL_KEY = "inertia:layout:last-workspace-tool:v2";
 
-const WORKSPACE_TOOLS = new Set<WorkspacePanelTab>([
-  "environment",
-  "changes",
-  "files",
-  "terminal",
-  "goal",
-  "plan",
-  "preview",
-]);
-
 export interface LegacyWorkspaceStartupPreference {
   surface: WorkspaceStartupSurface;
-  tool: WorkspacePanelTab;
+  tool: WorkspacePanelTab | null;
 }
 
 export function workspacePanelTab(value: string | null): WorkspacePanelTab | null {
-  return value && WORKSPACE_TOOLS.has(value as WorkspacePanelTab)
-    ? value as WorkspacePanelTab
-    : null;
+  return isRightPanelSurface(value) ? value : null;
 }
 
 export function readLegacyWorkspaceStartup(
@@ -37,15 +26,26 @@ export function readLegacyWorkspaceStartup(
   const tool = workspacePanelTab(legacy);
   return {
     surface: tool ? "tools" : "summary",
-    tool: tool ?? "environment",
+    tool,
   };
+}
+
+export function forgetWorkspaceBoundLastTool(
+  storage: Pick<Storage, "getItem" | "removeItem">,
+): void {
+  const stored = storage.getItem(LAST_WORKSPACE_TOOL_KEY);
+  const tool = workspacePanelTab(stored);
+  // An unknown value, such as a terminal tab from before it docked, is stale.
+  if (stored !== null && (tool === null || isWorkspaceBoundSurface(tool))) {
+    storage.removeItem(LAST_WORKSPACE_TOOL_KEY);
+  }
 }
 
 export function finishLegacyWorkspaceStartupMigration(
   storage: Pick<Storage, "setItem" | "removeItem">,
   preference: LegacyWorkspaceStartupPreference,
 ): void {
-  storage.setItem(LAST_WORKSPACE_TOOL_KEY, preference.tool);
+  if (preference.tool) storage.setItem(LAST_WORKSPACE_TOOL_KEY, preference.tool);
   storage.setItem(LEGACY_MIGRATED_KEY, "true");
   storage.removeItem(LEGACY_ACTIVE_TOOL_KEY);
 }

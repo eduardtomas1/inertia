@@ -8,7 +8,12 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
+import {
+  closeWorkspaceTools,
+  ensureWorkspaceTools,
+  rightPanelToggle,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -82,52 +87,40 @@ test.afterAll(async () => {
 test("omits Runs and preserves adjacent toolbar navigation responsively", async () => {
   const verifyToolbar = async (): Promise<void> => {
     const header = page.locator(".workspace-header");
-    const environment = header.getByRole("button", {
-      name: "Open Environment",
+    const corner = page.locator("[data-panel-layout-controls]");
+    const terminal = corner.getByRole("button", {
+      name: "Toggle terminal",
     });
-    const theme = header.getByRole("button", {
-      name: /^Change theme/u,
-    });
-    const tools = header.getByRole("button", {
-      name: /workspace tools$/u,
-    });
+    const tools = rightPanelToggle(page);
 
     await expect(header.getByRole("button", { name: /^Open runs/u }))
       .toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Open runs/u }))
+      .toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "Runs" })).toHaveCount(0);
-    await expect(environment).toBeVisible();
-    await expect(theme).toBeVisible();
+    await expect(terminal).toBeVisible();
     await expect(tools).toBeVisible();
+    await expect(tools).toHaveAccessibleName(/^Toggle right panel/u);
 
-    await environment.click();
-    await expect(page.getByRole("tabpanel", { name: "Environment" }))
-      .toBeVisible();
-    await expect(environment).toHaveAttribute("aria-pressed", "true");
+    await closeWorkspaceTools(page);
+    await tools.click();
+    await expect(page.locator(".workspace-panel")).toBeVisible();
+    await expect(tools).toHaveAttribute("aria-pressed", "true");
 
-    await environment.focus();
-    await page.keyboard.press("Tab");
-    await expect(theme).toBeFocused();
+    await terminal.focus();
     await page.keyboard.press("Tab");
     await expect(tools).toBeFocused();
 
-    const gaps = await Promise.all([
-      environment.evaluate((button) => {
-        const current = button.getBoundingClientRect();
-        const next = button.closest(".environment-panel-anchor")
-          ?.nextElementSibling?.getBoundingClientRect();
-        return next ? next.left - current.right : Number.NaN;
-      }),
-      theme.evaluate((button) => {
-        const current = button.getBoundingClientRect();
-        const next = button.nextElementSibling?.getBoundingClientRect();
-        return next ? next.left - current.right : Number.NaN;
-      }),
-    ]);
-    for (const gap of gaps) {
-      expect(gap).toBeGreaterThanOrEqual(0);
-      expect(gap).toBeLessThanOrEqual(6);
-    }
+    const gap = await terminal.evaluate((button) => {
+      const current = button.getBoundingClientRect();
+      const next = button.nextElementSibling?.getBoundingClientRect();
+      return next ? next.left - current.right : Number.NaN;
+    });
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(6);
     await expectNoViewportOverflow();
+    await closeWorkspaceTools(page);
+    await expect(page.locator(".workspace-panel")).toBeHidden();
   };
 
   await resizeWindow(1440, 920);
@@ -137,7 +130,7 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps preview and failed-run actions in Environment", async () => {
+test("keeps preview and failed-run actions in the Run menu", async () => {
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
@@ -187,39 +180,45 @@ test("keeps preview and failed-run actions in Environment", async () => {
   try {
     await page.reload();
     await resizeWindow(420, 760);
-    const tools = await ensureWorkspaceTools(page);
-    await selectWorkspaceTool(tools, "Environment");
-    const environment = tools.getByRole("tabpanel", { name: "Environment" });
-    await environment.locator("details > summary").filter({
-      hasText: "Local Servers",
-    }).click();
-    await environment.locator("details > summary").filter({
-      hasText: "Active work",
-    }).click();
-    await expect(environment.getByText("Docs preview", { exact: false }))
+    const header = page.locator(".workspace-header");
+    const projectActionOptions = header.getByRole("group", {
+      name: "Project actions",
+    }).getByRole("button", { name: "Project action options" });
+    let runMenu: Locator;
+    if (await projectActionOptions.isVisible()) {
+      await projectActionOptions.click();
+      runMenu = page.getByRole("menu", { name: "Project actions" });
+    } else {
+      await header.getByRole("button", { name: "More header actions" }).click();
+      runMenu = page.getByRole("menu", { name: "Header actions" });
+      await runMenu.getByRole("menuitem", { name: "Project actions" }).click();
+    }
+    const running = runMenu.getByRole("group", { name: "Running" });
+    await expect(running.getByText("Docs preview", { exact: false }))
       .toBeVisible();
-    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+    await expect(running.getByText("Typecheck fixture", { exact: false }))
       .toBeVisible();
-    await expect(environment.getByText("Lint fixture", { exact: false }))
+    await expect(running.getByText("Lint fixture", { exact: false }))
       .toBeVisible();
     await expectNoViewportOverflow();
 
-    await environment.getByRole("button", {
+    await running.getByRole("menuitem", {
       name: "Acknowledge Typecheck fixture · npm run typecheck",
     }).click();
-    await expect(environment.getByText("Typecheck fixture", { exact: false }))
+    await expect(running.getByText("Typecheck fixture", { exact: false }))
       .toHaveCount(0);
-    await environment.getByRole("button", {
+    await running.getByRole("menuitem", {
       name: "Dismiss Lint fixture · npm run lint",
     }).click();
-    await expect(environment.getByText("Lint fixture", { exact: false }))
+    await expect(running.getByText("Lint fixture", { exact: false }))
       .toHaveCount(0);
 
-    const openPreview = environment.getByRole("button", {
+    const openPreview = running.getByRole("menuitem", {
       name: "Open preview for Docs preview · npm run preview",
     });
     await openPreview.focus();
     await page.keyboard.press("Enter");
+    await expect(runMenu).toHaveCount(0);
     await expect(page.getByRole("tab", { name: /Browser/u })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -391,10 +390,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       level: 1,
     })).toBeVisible();
 
-    if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-    }
-    await selectWorkspaceTool(page.locator(".workspace-panel"), "Goal");
+    await selectWorkspaceTool(await ensureWorkspaceTools(page), "Goal");
     const goalPanel = page.getByRole("region", {
       name: "Goals and agent workflows",
     });
@@ -603,12 +599,8 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       await expect(navigation).toBeHidden();
     }
     const workspacePanel = page.locator(".workspace-panel");
-    if (await workspacePanel.isVisible()) {
-      await page.getByRole("button", {
-        name: "Close workspace tools",
-      }).first().click();
-      await expect(workspacePanel).toBeHidden();
-    }
+    await closeWorkspaceTools(page);
+    await expect(workspacePanel).toBeHidden();
     await expect(compactMore).toBeVisible();
     await expect(composer.getByRole("group", { name: "Composer settings" }))
       .toBeHidden();

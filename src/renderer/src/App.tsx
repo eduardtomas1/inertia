@@ -58,12 +58,15 @@ import {
   cacheThemePreference,
   cachedColorTheme,
   cachedThemePreference,
-  nextQuickTheme,
 } from "./utils/theme";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
-import { finishLegacyWorkspaceStartupMigration, readLegacyWorkspaceStartup } from "./utils/workspaceStartup";
+import {
+  finishLegacyWorkspaceStartupMigration,
+  forgetWorkspaceBoundLastTool,
+  readLegacyWorkspaceStartup,
+} from "./utils/workspaceStartup";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
@@ -223,13 +226,12 @@ export default function App(): React.JSX.Element {
     workspaceId: project
       ? `${project.id}:${connection.snapshot?.activeConversationId ?? "draft"}`
       : null,
-    initialTool: legacyWorkspaceStartup?.tool,
+    initialTool: legacyWorkspaceStartup?.tool ?? undefined,
   });
   const {
     sidebarOpen,
     setSidebarOpen,
     setSidebarCollapsed,
-    toggleWorkspaceTools,
     showStartupSurface,
     mobileNavigation,
   } = workspaceLayout;
@@ -241,11 +243,6 @@ export default function App(): React.JSX.Element {
     : workspaceLayout;
   const sceneActiveTool = primarySceneLayout.activeTool;
   const sceneSetActiveTool = primarySceneLayout.setActiveTool;
-  const sceneToggleWorkspaceTools = splitActive
-    ? primaryPaneLayout.toggleWorkspaceTools
-    : toggleWorkspaceTools;
-  const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
-  const sceneOpenBrowser = () => sceneSetActiveTool("preview");
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -411,18 +408,9 @@ export default function App(): React.JSX.Element {
   });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
-  const sceneHeaderActiveTool = workspaceToolsUnavailable && sceneActiveTool
-    ? "environment"
-    : sceneActiveTool;
   useEffect(() => {
-    if (
-      workspaceToolsUnavailable
-      && sceneActiveTool
-      && sceneActiveTool !== "environment"
-    ) {
-      sceneSetActiveTool("environment");
-    }
-  }, [sceneActiveTool, sceneSetActiveTool, workspaceToolsUnavailable]);
+    if (workspaceToolsUnavailable) forgetWorkspaceBoundLastTool(window.localStorage);
+  }, [workspaceToolsUnavailable]);
   const workspaceTools = useStableController(
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
@@ -443,7 +431,6 @@ export default function App(): React.JSX.Element {
         !workspaceToolsUnavailable
         && (
           sceneActiveTool === "changes"
-          || sceneActiveTool === "environment"
           || sceneActiveTool === "files"
         ),
       gitStatusOnly: sceneActiveTool === "files",
@@ -659,7 +646,7 @@ export default function App(): React.JSX.Element {
       project,
       conversationId: conversation?.id ?? null,
       run,
-      setActiveTool: sceneSetActiveTool,
+      openTerminal: primarySceneLayout.openTerminal,
       setActionError,
       activateContext: primaryPreviewActions.activateContext,
       navigatePreview: desktopTools.navigatePreview,
@@ -709,7 +696,7 @@ export default function App(): React.JSX.Element {
     keybindings: settings.keybindings,
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
-    setActiveTool: sceneSetActiveTool,
+    toggleTerminal: primarySceneLayout.toggleTerminal,
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
@@ -804,11 +791,6 @@ export default function App(): React.JSX.Element {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });
   };
-  const cycleTheme = () => {
-    void updateSettings({
-      theme: nextQuickTheme(settings.theme, window.matchMedia("(prefers-color-scheme: dark)").matches),
-    }).catch(() => undefined);
-  };
   const refreshProvider = useCallback((providerId?: ProviderId) => {
     void run("provider.refresh", {
       type: "provider.refresh",
@@ -823,10 +805,6 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
   const openBackendSetup = useCallback((profileId: string) => {
     setSettingsTarget({ section: "backends", profileId });
-    navigateToView("settings");
-  }, [navigateToView]);
-  const openConnectionsSettings = useCallback(() => {
-    setSettingsTarget({ section: "connections" });
     navigateToView("settings");
   }, [navigateToView]);
   const openProjectSettings = useCallback((projectId: string) => {
@@ -888,6 +866,7 @@ export default function App(): React.JSX.Element {
       openProviderSetup,
       openBackendSetup,
       openSettings: () => navigateToView("settings"),
+      openUsageView: () => navigateToView("usage"),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
         if (!conversation || !canFollowUpSubagentTrace(
@@ -990,6 +969,7 @@ export default function App(): React.JSX.Element {
         openProviderSetup,
         openBackendSetup,
         openSettings: () => navigateToView("settings"),
+        openUsageView: () => navigateToView("usage"),
         openProjectPath,
         sendMessageToConversation,
         compactConversation: compactConversationById,
@@ -1022,8 +1002,8 @@ export default function App(): React.JSX.Element {
     },
     tools: workspaceScene.tools ? {
       ...workspaceScene.tools,
-      environment: {
-        ...workspaceScene.tools.environment,
+      runs: {
+        ...workspaceScene.tools.runs,
         onOpenRunPreview: openWorkspaceRunPreview,
       },
     } : null,
@@ -1083,10 +1063,7 @@ export default function App(): React.JSX.Element {
       detachedConversationIds={detachedChats.conversationIds}
       detachedChatLimitReached={detachedChats.atLimit}
       conversationSuppressedInMain={primaryConversationSuppressed}
-      sceneActiveTool={sceneHeaderActiveTool}
-      sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
-      sceneOpenEnvironment={sceneOpenEnvironment}
-      sceneOpenBrowser={sceneOpenBrowser}
+      scenePanel={primarySceneLayout}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       gitStatus={gitStatus}
       branches={branches} branchesLoading={workspaceTools.branchesLoading} branchesError={workspaceTools.branchesError}
@@ -1122,15 +1099,16 @@ export default function App(): React.JSX.Element {
         dropConversationInSplit,
         openProviderSetup,
         openBackendSetup,
-        openConnectionsSettings,
         openProjectSettings,
         createConversation,
         updateSettings,
         openProjectPath,
-        cycleTheme,
         loadBranches,
         mutateBranch, mutateRemote: workspaceTools.mutateRemote,
         loadGit: () => loadGit({ authoritative: true }),
+        refreshGitStatus: () => {
+          void loadGit({ scope: "status" }).catch(() => undefined);
+        },
         loadCommitReview: workspaceTools.loadCommitReview,
         discardCommitReview: workspaceTools.discardCommitReview,
         commitReviewRevision: workspaceTools.commitReviewRevision,

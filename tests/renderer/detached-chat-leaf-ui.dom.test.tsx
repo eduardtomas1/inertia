@@ -174,30 +174,41 @@ describe("detached chat leaf controls", () => {
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
   });
 
-  it("keeps the header focus control available when the window limit is reached", () => {
+  it("keeps focusing a detached chat available from the header title menu at the window limit", async () => {
     const onOpenConversationInWindow = vi.fn();
     render(
       <WorkspaceHeader
         project={project}
         conversation={conversation}
-        conversationDetached
-        detachedChatLimitReached
         view="workspace"
-        activeTool={null}
         sidebarCollapsed={false}
-        theme="dark"
         gitStatus={null}
         branches={[]}
         actions={[]}
         busy={false}
+        conversationMenu={{
+          activeConversationId: conversation.id,
+          detachedChatLimitReached: true,
+          isDetached: true,
+          runs: [],
+          splitConversationIds: new Set(),
+          onAcknowledgeRun: noOp,
+          onArchiveConversation: noOp,
+          onCloseConversationSplit: noOp,
+          onDeleteConversation: noOp,
+          onDismissRun: noOp,
+          onOpenConversationInSplit: noOp,
+          onOpenConversationInWindow,
+          onPinConversation: noOp,
+          onRestoreConversation: noOp,
+          onSettleConversation: noOp,
+          onSnoozeConversation: noOp,
+        }}
         onOpenSidebar={noOp}
-        onToggleTools={noOp}
-        onOpenEnvironment={noOp}
-        onCycleTheme={noOp}
         onOpenSettings={noOp}
-        onOpenConnectionsSettings={noOp}
-        onOpenProject={noOp}
-        onOpenConversationInWindow={onOpenConversationInWindow}
+        onOpenFolder={noOp}
+        onRevealFolder={noOp}
+        onOpenFiles={noOp}
         onRefreshBranches={noOp}
         onSwitchBranch={noOp}
         onCreateBranch={noOp}
@@ -212,9 +223,8 @@ describe("detached chat leaf controls", () => {
       />,
     );
 
-    const focus = screen.getByRole("button", {
-      name: "Focus chat window for Detachable ownership",
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Detachable ownership" }));
+    const focus = await screen.findByRole("menuitem", { name: "Focus chat window" });
     expect(focus).toBeEnabled();
     fireEvent.click(focus);
     expect(onOpenConversationInWindow).toHaveBeenCalledWith(conversation);
@@ -239,6 +249,8 @@ describe("detached chat leaf controls", () => {
             projectName: "Inertia",
             toolsOpen: false,
             onToggleTools: noOp,
+            terminalOpen: false,
+            onToggleTerminal: noOp,
             onOpenInWindow: openPrimary,
           },
           {
@@ -248,6 +260,8 @@ describe("detached chat leaf controls", () => {
             projectName: "Desktop",
             toolsOpen: false,
             onToggleTools: noOp,
+            terminalOpen: false,
+            onToggleTerminal: noOp,
             onOpenInWindow: openSecondary,
           },
         ]}

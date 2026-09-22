@@ -6,6 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import type { AgentRunState } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
+import { closeWorkspaceTools } from "./support/workspace-tools";
 
 test("projects exact live run states in the real Electron shell", async ({
   browserName: _browserName,
@@ -126,10 +127,8 @@ test("projects exact live run states in the real Electron shell", async ({
     const workspacePanel = app.page.getByRole("complementary", {
       name: "Workspace tools",
     });
-    if (await workspacePanel.isVisible()) {
-      await app.page.getByRole("button", { name: "Close workspace tools" }).click();
-      await expect(workspacePanel).toBeHidden();
-    }
+    await closeWorkspaceTools(app.page);
+    await expect(workspacePanel).toBeHidden();
     for (const state of states) {
       const row = sidebar.locator(".activity-thread").filter({ hasText: state.title });
       await expect(row.locator('[data-work-status="working"]')).toBeVisible();
@@ -160,10 +159,8 @@ test("projects exact live run states in the real Electron shell", async ({
     await expect(retryingTurn.locator(".turn-working-status"))
       .toContainText("Claude Agent SDK · Anthropic retrying");
     await app.resizeWindow(1100, 760);
-    if (await workspacePanel.isVisible()) {
-      await app.page.getByRole("button", { name: "Close workspace tools" }).click();
-      await expect(workspacePanel).toBeHidden();
-    }
+    await closeWorkspaceTools(app.page);
+    await expect(workspacePanel).toBeHidden();
     await app.page.evaluate(() => {
       document.documentElement.dataset.theme = "light";
       document.documentElement.style.colorScheme = "light";

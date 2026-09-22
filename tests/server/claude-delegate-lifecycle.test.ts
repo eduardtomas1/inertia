@@ -201,6 +201,42 @@ describe("Claude delegated lifecycle", () => {
     });
   });
 
+  it("reports a mid-turn exit once the parent resumed after a provisional result", () => {
+    const rootAssistant = {
+      type: "assistant",
+      parent_tool_use_id: null,
+      session_id: "session-1",
+      uuid: "assistant-1",
+      message: { role: "assistant", content: [] },
+    } as unknown as SDKMessage;
+    const childAssistant = {
+      ...rootAssistant,
+      parent_tool_use_id: "tool-1",
+      uuid: "assistant-child",
+    } as unknown as SDKMessage;
+
+    const waiting = new ClaudeDelegateLifecycle();
+    waiting.observe(claudeBackgroundTasks(["shell-1"]));
+    waiting.observe(claudeSuccessResult("Waiting for the shell", "completed"));
+    waiting.observe(claudeBackgroundTasks([]));
+    // Delegated output does not prove the parent itself resumed.
+    waiting.observe(childAssistant);
+    expect(waiting.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
+
+    const resumed = new ClaudeDelegateLifecycle();
+    resumed.observe(claudeBackgroundTasks(["shell-1"]));
+    resumed.observe(claudeSuccessResult("Waiting for the shell", "completed"));
+    resumed.observe(claudeBackgroundTasks([]));
+    resumed.observe(rootAssistant);
+    expect(resumed.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+
+    // A newer provisional result starts a new wait for the parent.
+    resumed.observe(claudeBackgroundTasks(["shell-2"]));
+    resumed.observe(claudeSuccessResult("Waiting again", "completed"));
+    resumed.observe(claudeBackgroundTasks([]));
+    expect(resumed.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
+  });
+
   it("requires a fresh parent result after the background level clears", () => {
     const lifecycle = new ClaudeDelegateLifecycle();
     lifecycle.observe(claudeBackgroundTasks(["agent-1"]));

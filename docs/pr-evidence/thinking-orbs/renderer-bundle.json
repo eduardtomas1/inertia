@@ -1,0 +1,27 @@
+{
+  "baseline": "origin/main 1d0dc603",
+  "platform": "Linux x64, npx electron-vite build",
+  "measuredBytes": {
+    "mainWorkbenchFirstLoadJavaScript": { "before": 824393, "after": 826137, "delta": 1744, "budgetRaise": 1744 },
+    "detachedChatFirstLoadJavaScript": { "before": 631742, "after": 633433, "delta": 1691, "budgetRaise": 1691 },
+    "settingsJavaScript": { "before": 48706, "after": 55645, "delta": 6939, "budgetRaise": 6939 },
+    "deferredWelcomeGuideJavaScript": { "before": 13135, "after": 15268, "delta": 2133, "budgetRaise": 2133 },
+    "coreJavaScript": { "before": 2136785, "after": 2150669, "delta": 13884, "budgetRaise": 13884 },
+    "deferredWorkingOrbJavaScript": { "before": null, "after": 21815, "delta": 21815, "newBudget": 22528 },
+    "transcriptJavaScript": { "before": 540477, "after": 547520, "delta": 7043, "budgetRaise": 0 },
+    "entryCss": { "before": 346332, "after": 347978, "delta": 1646, "budgetRaise": 0 }
+  },
+  "notes": [
+    "The OrbCanvas chunk (vendored engine, shared loop, painter) loads only when a non-Classic style is active or the Settings picker is shown; the gate fails if it enters the entry, workbench or detached closures, and it is subtracted from coreJavaScript.",
+    "The first-load growth is the settings contract, its normaliser and the context provider shared by both chat routes."
+  ],
+  "paintCostCdp": {
+    "method": "Performance.getMetrics over 4 s after 1.5 s settle, 1440x920 window, DPR 1, Linux x64",
+    "chatClassicGrid": { "taskMsPerS": 122.6, "scriptMsPerS": 9.0, "styleMsPerS": 45.3 },
+    "chatSevenSmallOrbsNoGlow": { "taskMsPerS": 93.8, "scriptMsPerS": 24.8 },
+    "chatSevenSmallOrbsGlow": { "taskMsPerS": 72.2, "scriptMsPerS": 33.5 },
+    "pickerTen44pxOrbsInk": { "taskMsPerS": 172.2, "scriptMsPerS": 94.3 },
+    "pickerTen44pxOrbsAccent": { "taskMsPerS": 266.0, "scriptMsPerS": 162.6 },
+    "pickerTen44pxOrbsLilacGlow": { "taskMsPerS": 231.9, "scriptMsPerS": 169.0 }
+  }
+}

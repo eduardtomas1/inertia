@@ -708,9 +708,10 @@ function startOpenCodeRun(
       if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
         cleanupConfirmed = false;
       }
+      const serverStopDetail = redactHostMcp(serverDiagnostic(serverOutput));
       const rawError = redactHostMcp(terminalError ?? safeError(
         error,
-        redactHostMcp(serverDiagnostic(serverOutput)),
+        serverStopDetail,
       ));
       outcome = cancelRequested
         ? { status: "cancelled" }
@@ -723,6 +724,7 @@ function startOpenCodeRun(
               "sdk/exception",
               child,
               options.input.cwd,
+              serverStopDetail,
             ),
           };
     }

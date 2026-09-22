@@ -231,6 +231,19 @@ export function isClaudeNotificationResult(result: SDKResultMessage): boolean {
   )?.kind === "task-notification";
 }
 
+export function isClaudeUnansweredPromptResult(
+  result: SDKResultMessage,
+  sawOutputText: boolean,
+  compacting: boolean,
+  promptText: string,
+): boolean {
+  return isClaudeQueuedCompletionAck(result)
+    && (result as { local_command?: unknown }).local_command === undefined
+    && !sawOutputText
+    && !compacting
+    && !promptText.trimStart().startsWith("/");
+}
+
 /** Only root work can release a bound armed after delegated work settled. */
 export function claudeMessageResumesParent(
   message: SDKMessage,

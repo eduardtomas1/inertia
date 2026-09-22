@@ -40,7 +40,7 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
@@ -691,8 +691,7 @@ function startClaudeRun(
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;
         }
-        if (commandLifecycle?.state === "completed" && commandLifecycle.command_uuid === prompt.uuid
-          && delegateLifecycle.awaitsUnansweredPrompt()) {
+        if (commandLifecycle?.state === "completed" && commandLifecycle.command_uuid === prompt.uuid && delegateLifecycle.awaitsUnansweredPrompt()) {
           terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (message.type === "result" && lifecycle.turnEnded === false
@@ -850,13 +849,7 @@ function startClaudeRun(
           "Claude Agent SDK exited before correlating every accepted follow-up.",
         );
       }
-      if (
-        isClaudeQueuedCompletionAck(finalMessage)
-        && finalMessage.local_command === undefined
-        && !messageProjector.sawOutputText
-        && options.input.operation?.kind !== "compact"
-        && !promptText.trimStart().startsWith("/")
-      ) {
+      if (isClaudeUnansweredPromptResult(finalMessage, messageProjector.sawOutputText, options.input.operation?.kind === "compact", promptText)) {
         const error = routeFailure(claudeLifecycleFailure("prompt-unanswered"));
         return finishResult("failed", error, claudeFailure(error, "result/unanswered"));
       }

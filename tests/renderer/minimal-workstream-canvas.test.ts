@@ -41,13 +41,16 @@ describe("Minimal Workstream conversation canvas", () => {
   it("keeps optional workspace tools secondary without a permanent divider rail", () => {
     const panel = cssBlock(css, "\n.workspace-panel {\n");
     const tabs = cssBlock(css, ".workspace-panel-tabs {");
-    const scopedTabs = cssBlock(css, ".workspace-panel > .workspace-panel-tabs {");
+    const stackedTabs = cssBlock(css, ".workspace-panel.is-stacked > .workspace-panel-tabs {");
+    const header = cssBlock(css, "\n.workspace-header {\n");
 
     expect(panel).toContain("background: var(--workspace-tools-surface)");
     expect(panel).toContain("border-left: 0");
-    expect(tabs).toContain("border-bottom: 1px solid var(--workspace-tools-separator)");
-    expect(scopedTabs).toContain("background: var(--workspace-tools-surface)");
-    expect(scopedTabs).toContain("box-shadow: none");
+    expect(tabs).toContain("height: 52px");
+    expect(header).toContain("height: 52px");
+    expect(tabs).not.toContain("border-bottom");
+    expect(header).not.toContain("border-bottom");
+    expect(stackedTabs).toContain("border-bottom: 1px solid var(--workspace-tools-separator)");
     expect(css).toMatch(
       /\.sidebar-resize-handle::after,\s*\.workspace-tools-resize-handle::after\s*\{[^}]*background:\s*transparent;/su,
     );
@@ -64,15 +67,19 @@ describe("Minimal Workstream conversation canvas", () => {
     expect(controls).toContain("background: transparent");
   });
 
-  it("retains the established vertical and stacked split behavior", () => {
+  it("keeps the chat readable beside the panel and overlays a sheet when there is no room", () => {
     const desktop = cssBlock(css, ".workspace-body {");
+    const inline = cssBlock(css, ".workspace-body.has-tools {");
+    const sheet = cssBlock(css, ".workspace-body > .workspace-panel.is-sheet {\n  width");
 
     expect(desktop).toContain("display: flex");
+    expect(inline).toContain("padding-right: var(--workspace-tools-width)");
     expect(css).toMatch(
-      /@media \(max-width:\s*1024px\)[\s\S]*?\.workspace-body\s*\{[^}]*flex-direction:\s*column;/u,
+      /\.workspace-body > \.workspace-panel\.is-inline,\s*\.workspace-body > \.workspace-panel\.is-sheet\s*\{[^}]*position:\s*absolute;/su,
     );
+    expect(sheet).toContain("max-width: calc(100% - 24px)");
     expect(css).toMatch(
-      /\.workspace-body\.has-tools > \.chat-workspace\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*220px;/su,
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.workspace-body > \.workspace-panel\.is-sheet:not\(\[hidden\]\)\s*\{[^}]*animation:/su,
     );
   });
 });

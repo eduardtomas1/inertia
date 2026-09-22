@@ -19,7 +19,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
     createConversation: vi.fn(),
     mobileNavigation: false,
     suspended: false,
-    setActiveTool: vi.fn(),
+    toggleTerminal: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -57,7 +57,7 @@ function StableListenerHarness(): React.JSX.Element {
     createConversation: vi.fn(),
     mobileNavigation: false,
     suspended: false,
-    setActiveTool: vi.fn(),
+    toggleTerminal: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -77,7 +77,7 @@ function ImmediateShortcutOwner({ createConversation }: {
     createConversation,
     mobileNavigation: false,
     suspended: false,
-    setActiveTool: vi.fn(),
+    toggleTerminal: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -118,12 +118,12 @@ function ImmediateNewChatHarness({
 
 function SuspendedShortcutHarness({
   createConversation,
-  setActiveTool,
+  toggleTerminal,
   setPaletteOpen,
   setSidebarCollapsed,
 }: {
   createConversation: () => void;
-  setActiveTool: () => void;
+  toggleTerminal: () => void;
   setPaletteOpen: () => void;
   setSidebarCollapsed: () => void;
 }): React.JSX.Element {
@@ -132,7 +132,7 @@ function SuspendedShortcutHarness({
     createConversation,
     mobileNavigation: false,
     suspended: true,
-    setActiveTool,
+    toggleTerminal,
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen: vi.fn(),
@@ -209,13 +209,13 @@ describe("global shortcut DOM integration", () => {
   it("consumes app shortcuts without acting while a modal owns focus", async () => {
     const add = vi.spyOn(window, "addEventListener");
     const createConversation = vi.fn();
-    const setActiveTool = vi.fn();
+    const toggleTerminal = vi.fn();
     const setPaletteOpen = vi.fn();
     const setSidebarCollapsed = vi.fn();
     render(
       <SuspendedShortcutHarness
         createConversation={createConversation}
-        setActiveTool={setActiveTool}
+        toggleTerminal={toggleTerminal}
         setPaletteOpen={setPaletteOpen}
         setSidebarCollapsed={setSidebarCollapsed}
       />,
@@ -239,7 +239,7 @@ describe("global shortcut DOM integration", () => {
     }
 
     expect(createConversation).not.toHaveBeenCalled();
-    expect(setActiveTool).not.toHaveBeenCalled();
+    expect(toggleTerminal).not.toHaveBeenCalled();
     expect(setPaletteOpen).not.toHaveBeenCalled();
     expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
@@ -247,7 +247,7 @@ describe("global shortcut DOM integration", () => {
   it("does not run background shortcuts from inside the command palette", async () => {
     const add = vi.spyOn(window, "addEventListener");
     const createConversation = vi.fn();
-    const setActiveTool = vi.fn();
+    const toggleTerminal = vi.fn();
     const setPaletteOpen = vi.fn();
     const setSidebarCollapsed = vi.fn();
 
@@ -257,7 +257,7 @@ describe("global shortcut DOM integration", () => {
         createConversation,
         mobileNavigation: false,
         suspended: false,
-        setActiveTool,
+        toggleTerminal,
         setPaletteOpen,
         setSidebarCollapsed,
         setSidebarOpen: vi.fn(),
@@ -305,7 +305,7 @@ describe("global shortcut DOM integration", () => {
     expect(escapedFocusEvent.defaultPrevented).toBe(true);
 
     expect(createConversation).not.toHaveBeenCalled();
-    expect(setActiveTool).not.toHaveBeenCalled();
+    expect(toggleTerminal).not.toHaveBeenCalled();
     expect(setPaletteOpen).not.toHaveBeenCalled();
     expect(setSidebarCollapsed).not.toHaveBeenCalled();
   });
@@ -317,7 +317,7 @@ describe("terminal and platform shortcut ownership", () => {
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, setActiveTool: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke,
     } };
     render(<div className="xterm"><textarea aria-label="Shell input" /></div>);
@@ -335,7 +335,7 @@ describe("terminal and platform shortcut ownership", () => {
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, setActiveTool: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke,
     } };
     const dispose = installGlobalShortcuts(window, actions, "darwin");

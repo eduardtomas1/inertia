@@ -45,14 +45,7 @@ test("wires the packaged Private Connect state through the desktop settings boun
   await expect(diagnostics.getByText("1", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  const indicator = page.getByRole("button", {
-    name: /^Connections & devices/u,
-  });
-  await expect(indicator).toBeVisible();
-  await indicator.click();
-  await expect(page.getByRole("heading", {
-    name: "Connections & devices",
-    exact: true,
-  })).toBeVisible();
+  // Devices are reached only from Settings; no header or sidebar shortcut.
+  await expect(page.getByRole("button", { name: /^Connections & devices/u })).toHaveCount(0);
   expect(app.rendererErrors).toEqual([]);
 });

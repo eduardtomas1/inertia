@@ -268,6 +268,7 @@ export function createTurnInteractionCommandHandler(
                 resolvedAttachments,
                 retentionAbort.signal,
                 retentionId,
+                () => dependencies.store.evictableAttachmentIds(),
               );
               attachments = await awaitMessageSendPreparation(
                 retention,
@@ -694,6 +695,7 @@ export function createTurnInteractionCommandHandler(
           resolvedAttachments,
           retentionAbort.signal,
           attachmentRetentionId,
+          () => dependencies.store.evictableAttachmentIds(),
         );
         let retentionCompleted = false;
         try {
@@ -740,7 +742,12 @@ export function createTurnInteractionCommandHandler(
         messageSendStage = "turn-persistence";
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
         let durableTurnPersisted = false;
+        let deriveInitialTitle = false;
         try {
+          // A real first-message title can itself equal an untitled placeholder.
+          // Capture history before queue/createMessage persists this message.
+          deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")
+            && !dependencies.store.hasConversationMessages(conversation.id);
           if (pendingCheckpoint) {
             checkpointId = dependencies.store.addCheckpoint({
               conversationId: conversation.id,
@@ -839,9 +846,9 @@ export function createTurnInteractionCommandHandler(
             );
           }
           const currentTitle = dependencies.store.conversation(conversation.id).title;
-          if (currentTitle === "New chat" || currentTitle === "New thread") {
+          if (deriveInitialTitle && (currentTitle === "New chat" || currentTitle === "New thread")) {
             dependencies.store.updateConversation(conversation.id, {
-              title: Array.from(command.payload.content.slice(0, 128)).slice(0, 64).join(""),
+              title: Array.from(command.payload.content.replace(/\s+/gu, " ").trim().slice(0, 128)).slice(0, 64).join("") || "New chat",
             });
           }
           dependencies.send(socket, queued

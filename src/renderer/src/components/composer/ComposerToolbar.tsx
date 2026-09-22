@@ -3,7 +3,6 @@ import {
   ChevronDown,
   Command,
   FolderGit2,
-  GitBranch,
   LoaderCircle,
   MessagesSquare,
   Paperclip,
@@ -38,6 +37,7 @@ import {
   contextUsageQualityForTurn,
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
+import { CheckoutBranchSlot } from "../CheckoutBranchControl";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
@@ -534,13 +534,7 @@ export function ComposerToolbar({
               <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
             </span>
           )}
-          <span
-            className="composer-checkout-branch"
-            title={visibleCheckoutBranch}
-          >
-            <GitBranch size={12} aria-hidden="true" />
-            <code translate="no">{visibleCheckoutBranch}</code>
-          </span>
+          <CheckoutBranchSlot branch={visibleCheckoutBranch} />
         </div>
       )}
     </div>

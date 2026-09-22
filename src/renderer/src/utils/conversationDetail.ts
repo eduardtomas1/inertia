@@ -5,6 +5,7 @@ import type {
   ConversationDetailViewState,
   ConversationShell,
 } from "@shared/contracts";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 
 export function mergeConversationShell(
   detail: ConversationDetail,
@@ -24,7 +25,8 @@ export function mergeConversationShell(
   if (turnIndex < 0) return { ...detail, conversation };
   const turn = detail.agentTurns[turnIndex]!;
   if (
-    turn.status === latestTurn.status
+    (isAgentTurnTerminalStatus(turn.status) && !isAgentTurnTerminalStatus(latestTurn.status))
+    || turn.status === latestTurn.status
     && turn.runState === latestTurn.runState
     && turn.startedAt === latestTurn.startedAt
     && turn.completedAt === latestTurn.completedAt

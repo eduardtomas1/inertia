@@ -907,6 +907,7 @@ export class RuntimeStore {
 
   attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.transcriptRepository.referencedAttachmentIds(candidateIds); }
+  evictableAttachmentIds(): string[] { return this.transcriptRepository.evictableAttachmentIds(); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }

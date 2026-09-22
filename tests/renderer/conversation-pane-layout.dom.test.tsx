@@ -30,7 +30,7 @@ describe("useConversationPaneLayout", () => {
   });
 
   it("projects the new conversation's tool state on its first render", () => {
-    window.localStorage.setItem(toolKey("alpha"), "terminal");
+    window.localStorage.setItem(toolKey("alpha"), "files");
     window.localStorage.setItem(openKey("alpha"), "true");
     window.localStorage.setItem(toolKey("beta"), "preview");
     window.localStorage.setItem(openKey("beta"), "true");
@@ -52,7 +52,7 @@ describe("useConversationPaneLayout", () => {
       { initialProps: { conversationId: "alpha" } },
     );
 
-    expect(hook.result.current.activeTool).toBe("terminal");
+    expect(hook.result.current.activeTool).toBe("files");
     observations.length = 0;
     hook.rerender({ conversationId: "beta" });
 
@@ -98,7 +98,7 @@ describe("useConversationPaneLayout", () => {
     expect(hook.result.current.activeTool).toBeNull();
   });
 
-  it("opens Environment first without borrowing another task's last panel", () => {
+  it("opens the launcher first without borrowing another task's last panel", () => {
     window.localStorage.setItem(
       "inertia:layout:last-workspace-tool:v2",
       "terminal",
@@ -106,10 +106,16 @@ describe("useConversationPaneLayout", () => {
     const hook = renderHook(() => useConversationPaneLayout("alpha"));
 
     expect(hook.result.current.activeTool).toBeNull();
+    expect(hook.result.current.toolsVisible).toBe(false);
     act(() => hook.result.current.toggleWorkspaceTools());
 
-    expect(hook.result.current.activeTool).toBe("environment");
-    expect(window.localStorage.getItem(toolKey("alpha")))
-      .toBe("environment");
+    expect(hook.result.current.activeTool).toBeNull();
+    expect(hook.result.current.toolsVisible).toBe(true);
+    expect(window.localStorage.getItem("inertia:layout:split-pane-panel:alpha:v1"))
+      .toBe(JSON.stringify({ isOpen: true, activeSurfaceId: null, surfaces: [] }));
+
+    act(() => hook.result.current.openSurface("files"));
+    expect(hook.result.current.activeTool).toBe("files");
+    expect(window.localStorage.getItem(toolKey("alpha"))).toBeNull();
   });
 });

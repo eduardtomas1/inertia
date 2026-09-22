@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { copyFile, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 let app: AppFixture;
 test.afterAll(async () => { await app?.close(); });
@@ -17,6 +18,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
   await expect(page.locator(".composer-attachments img")).toHaveCount(1);
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Review these example attachments.");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Agents");
   const recent = page.getByRole("list", { name: "Recent attachments" });
   await expect(recent).toBeVisible();
   const image = recent.locator("img");

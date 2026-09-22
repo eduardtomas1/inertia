@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 test("keeps offscreen gallery originals unloaded and opens a retained 40-megapixel image by keyboard", async () => {
   const largeId = randomUUID();
@@ -45,6 +46,8 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   try {
     const { page } = app;
     await app.resizeWindow(1440, 920);
+    // Recent attachments live in the right panel's Agents surface.
+    await selectWorkspaceTool(await ensureWorkspaceTools(page), "Agents");
     await page.getByRole("button", { name: "Show all 60+" }).click();
     const gallery = page.getByRole("list", { name: "All attachments" });
     await expect(gallery.getByRole("listitem")).toHaveCount(60);

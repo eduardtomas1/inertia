@@ -163,4 +163,64 @@ describe("targeted attachment reference lookup", () => {
       store.close();
     }
   });
+
+  it("orders evictable attachments oldest first and protects every non-terminal turn", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-attachment-evictions-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory, {
+      recoverInterruptedRuns: false,
+    });
+    try {
+      const conversation = store.createConversation(
+        store.createProject("Evictions", directory).id,
+        "Evictions",
+      );
+      const [oldest, reused, untracked, followUp, queued] = Array.from(
+        { length: 5 },
+        () => randomUUID(),
+      );
+      const at = (second: number): string =>
+        new Date(Date.UTC(2026, 8, 22, 8, 0, second)).toISOString();
+      const turn = (userMessageId: string, requestedAt: string) => store.createAgentTurn({
+        conversationId: conversation.id,
+        requestedAt,
+        runId: randomUUID(),
+        userMessageId,
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfileId: "codex-local",
+        model: "gpt-test",
+        reasoningEffort: "",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: 0,
+        association: "authoritative",
+      });
+      const completedMessage = store.createMessage(conversation.id, "Old", "user", [
+        attachment(oldest!), attachment(reused!),
+      ] as never, null, at(1));
+      const completed = turn(completedMessage.id, at(1));
+      store.updateAgentTurnLifecycle(completed.id, { status: "completed", updatedAt: at(2) });
+      store.createMessage(conversation.id, "Untracked", "user", [
+        attachment(untracked!),
+      ] as never, null, at(3));
+      const runningMessage = store.createMessage(conversation.id, "Running", "user", [], null, at(4));
+      const running = turn(runningMessage.id, at(4));
+      store.updateAgentTurnLifecycle(running.id, { status: "running", updatedAt: at(5) });
+      store.createAcknowledgedFollowUpMessage(conversation.id, running.id, "Steered", at(6), at(6), [
+        attachment(followUp!), attachment(reused!),
+      ] as never);
+      const queuedMessage = store.createMessage(conversation.id, "Queued", "user", [
+        attachment(queued!),
+      ] as never, null, at(7));
+      turn(queuedMessage.id, at(7));
+
+      expect(store.evictableAttachmentIds()).toEqual([oldest, untracked]);
+
+      store.updateAgentTurnLifecycle(running.id, { status: "interrupted", updatedAt: at(8) });
+      expect(store.evictableAttachmentIds()).toEqual([oldest, reused, untracked, followUp]);
+    } finally {
+      store.close();
+    }
+  });
 });

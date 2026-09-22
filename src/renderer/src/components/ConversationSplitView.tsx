@@ -10,6 +10,7 @@ import {
   Columns2,
   GripVertical,
   PanelBottom,
+  TerminalSquare,
   PictureInPicture2,
   Rows2,
   X,
@@ -42,6 +43,8 @@ export interface SplitPaneView {
   conversationId?: string;
   toolsOpen: boolean;
   onToggleTools: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
   onOpenInWindow?: () => void;
 }
 
@@ -189,6 +192,15 @@ export function ConversationSplitView({
                     <PictureInPicture2 size={14} />
                   </IconButton>
                 )}
+                <IconButton
+                  label={`${details.terminalOpen ? "Close" : "Open"} terminal for ${
+                    details.title
+                  }`}
+                  aria-pressed={details.terminalOpen}
+                  onClick={details.onToggleTerminal}
+                >
+                  <TerminalSquare size={14} />
+                </IconButton>
                 <IconButton
                   label={`${details.toolsOpen ? "Close" : "Open"} tools for ${
                     details.title

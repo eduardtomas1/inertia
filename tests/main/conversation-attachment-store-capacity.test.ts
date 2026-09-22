@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE,
   ConversationAttachmentStorageFullError,
 } from "../../src/node/conversation-attachment-store-capacity";
+import { runConversationAttachmentStoreChild } from "../../src/node/conversation-attachment-store-child";
 
 const roots: string[] = [];
 const stores: ConversationAttachmentStore[] = [];
@@ -29,12 +30,29 @@ afterEach(async () => {
 
 async function openStore(
   limits: { maxRecords?: number; maxBytes?: number },
+  directory?: string,
 ): Promise<ConversationAttachmentStore> {
-  const directory = await mkdtemp(join(tmpdir(), "inertia-attachment-capacity-"));
-  roots.push(directory);
-  const store = await ConversationAttachmentStore.open(directory, limits);
+  const root = directory ?? await mkdtemp(join(tmpdir(), "inertia-attachment-capacity-"));
+  if (!directory) roots.push(root);
+  const store = await ConversationAttachmentStore.open(root, limits);
   stores.push(store);
   return store;
+}
+
+async function seededHistory(count: number, size: number) {
+  const root = await mkdtemp(join(tmpdir(), "inertia-attachment-history-"));
+  roots.push(root);
+  const directory = join(root, "conversation-attachments");
+  await mkdir(directory, { mode: 0o700 });
+  const references = Array.from({ length: count }, () => {
+    const id = randomUUID();
+    return { id, name: "image.png", path: id, mimeType: "image/png" as const, size };
+  });
+  for (const { id } of references) {
+    await mkdir(join(directory, id), { mode: 0o700 });
+    await writeFile(join(directory, id, `${id}.png`), png, { mode: 0o600 });
+  }
+  return { root, references };
 }
 
 function image(id: string = randomUUID()): ConversationAttachmentPayload {
@@ -118,5 +136,55 @@ describe("durable conversation attachment capacity", () => {
       .rejects.toBeInstanceOf(ConversationAttachmentStorageFullError);
     await expect(store.retain([image()]))
       .rejects.toBeInstanceOf(ConversationAttachmentStorageFullError);
+  });
+
+  it("keeps every settled image below the default budget and evicts only past it", async () => {
+    const { root: directory, references } = await seededHistory(4_095, 256 * 1024);
+    const reads: string[] = [];
+    const store = await ConversationAttachmentStore.open(directory, {
+      readOperationRunner(operation, signal) {
+        reads.push(operation.id);
+        return runConversationAttachmentStoreChild(operation, signal);
+      },
+    });
+    stores.push(store);
+    const startedAt = performance.now();
+    await store.reconcile(references);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(reads).toEqual([]);
+    await expect(store.usage()).resolves.toEqual({ records: 4_095, bytes: 4_095 * 256 * 1024 });
+    const order = () => references.map(({ id }) => id);
+
+    const [belowBudget] = await store.retain([image()], undefined, randomUUID(), order);
+    await expect(readFile(belowBudget!.path)).resolves.toEqual(png);
+    await expect(store.usage()).resolves.toEqual({ records: 4_096, bytes: 4_095 * 256 * 1024 + png.length });
+    await expect(readFile(join(directory, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`)))
+      .resolves.toEqual(png);
+
+    await store.retain([image()], undefined, randomUUID(), order);
+    await expect(store.usage()).resolves.toEqual({ records: 4_096, bytes: 4_094 * 256 * 1024 + 2 * png.length });
+    await expect(readFile(join(directory, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`)))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(directory, "conversation-attachments", references[1]!.id, `${references[1]!.id}.png`)))
+      .resolves.toEqual(png);
+  }, 60_000);
+
+  it("evicts the oldest history once the default 2 GiB byte budget would be exceeded", async () => {
+    const { root: directory, references } = await seededHistory(4, 512 * 1024 * 1024 - 1_024);
+    const store = await openStore({}, directory);
+    await store.reconcile(references);
+    const order = () => references.map(({ id }) => id);
+
+    const [fits] = await store.retain([image()], undefined, randomUUID(), order);
+    await expect(readFile(fits!.path)).resolves.toEqual(png);
+    await expect(store.usage()).resolves.toMatchObject({ records: 5 });
+
+    const large = { ...image(), bytes: Buffer.alloc(8 * 1024, 1) };
+    large.attachment = { ...large.attachment, size: large.bytes.length };
+    await store.retain([large], undefined, randomUUID(), order);
+    await expect(store.usage()).resolves.toEqual({
+      records: 5,
+      bytes: 3 * (512 * 1024 * 1024 - 1_024) + png.length + large.bytes.length,
+    });
   });
 });

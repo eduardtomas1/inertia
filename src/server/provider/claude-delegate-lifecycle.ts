@@ -11,7 +11,7 @@ export type ClaudeDelegateCompletion =
   | {
       kind: "incomplete";
       reason: "missing-result" | "delegates-abandoned" | "parent-not-resumed"
-        | "prompt-refused" | "prompt-cancelled" | "prompt-discarded";
+        | "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | "prompt-unanswered";
     };
 
 /**
@@ -35,6 +35,7 @@ export class ClaudeDelegateLifecycle {
   private parentResumedAfterProvisional = false;
   private promptUuid: string | null = null;
   private promptPending = false;
+  private promptCompletedUnanswered = false;
   private promptFailure: "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | undefined;
 
   expectPrompt(uuid: string): void {
@@ -49,6 +50,7 @@ export class ClaudeDelegateLifecycle {
     if (command) {
       if (command.command_uuid !== this.promptUuid) return { turnEnded: false };
       this.promptPending = command.state === "queued" || command.state === "started";
+      if (command.state === "completed") this.promptCompletedUnanswered = !this.latestResult;
       if (command.state === "refused" || command.state === "cancelled" || command.state === "discarded") {
         this.promptFailure = `prompt-${command.state}`;
         return { turnEnded: true };
@@ -68,11 +70,10 @@ export class ClaudeDelegateLifecycle {
 
     if (message.type === "result") {
       const answersPrompt = claudeResultUserMessageIds(message).includes(this.promptUuid ?? "");
-      const answersNotification = claudeObjectValue(
-        (message as { origin?: unknown }).origin,
-      )?.kind === "task-notification";
+      const answersNotification = isClaudeNotificationResult(message);
       if (
-        (isClaudeQueuedCompletionAck(message) && (this.latestResult || (this.promptPending && !answersPrompt)))
+        (isClaudeQueuedCompletionAck(message)
+          && (this.latestResult || answersNotification || (this.promptPending && !answersPrompt)))
         || (!this.latestResult && answersNotification && !answersPrompt)
       ) {
         // This result belongs to queued background work, never to the prompt.
@@ -88,6 +89,7 @@ export class ClaudeDelegateLifecycle {
         ),
       };
       this.latestResult = candidate;
+      this.promptCompletedUnanswered = false;
       this.parentResumedAfterProvisional = false;
       return {
         turnEnded: !candidate.deferred
@@ -142,7 +144,10 @@ export class ClaudeDelegateLifecycle {
     if (this.promptFailure) return { kind: "incomplete", reason: this.promptFailure };
     const candidate = this.latestResult;
     if (!candidate) {
-      return { kind: "incomplete", reason: "missing-result" };
+      return {
+        kind: "incomplete",
+        reason: this.promptCompletedUnanswered ? "prompt-unanswered" : "missing-result",
+      };
     }
     if (!this.endedAtAuthoritativeIdle && this.liveBackgroundTaskIds.size > 0) {
       return { kind: "incomplete", reason: "delegates-abandoned" };
@@ -163,8 +168,13 @@ export class ClaudeDelegateLifecycle {
     this.endedAtAuthoritativeIdle = false;
     this.parentResumedAfterProvisional = false;
     this.promptPending = false;
+    this.promptCompletedUnanswered = false;
     this.promptUuid = null;
     this.promptFailure = undefined;
+  }
+
+  awaitsUnansweredPrompt(): boolean {
+    return this.promptCompletedUnanswered && !this.latestResult;
   }
 
   hasProvisionalResult(): boolean {
@@ -213,6 +223,25 @@ export function isClaudeQueuedCompletionAck(result: SDKResultMessage): boolean {
     && !result.is_error
     && result.num_turns === 0
     && result.result === "";
+}
+
+export function isClaudeNotificationResult(result: SDKResultMessage): boolean {
+  return claudeObjectValue(
+    (result as { origin?: unknown }).origin,
+  )?.kind === "task-notification";
+}
+
+export function isClaudeUnansweredPromptResult(
+  result: SDKResultMessage,
+  sawOutputText: boolean,
+  compacting: boolean,
+  promptText: string,
+): boolean {
+  return isClaudeQueuedCompletionAck(result)
+    && (result as { local_command?: unknown }).local_command === undefined
+    && !sawOutputText
+    && !compacting
+    && !promptText.trimStart().startsWith("/");
 }
 
 /** Only root work can release a bound armed after delegated work settled. */

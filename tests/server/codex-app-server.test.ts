@@ -2125,6 +2125,28 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
+  it("answers the prompt instead of a turn Codex started before responding to turn/start", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "stale-turn-before-response";
+    const manager = trackedManager(fake.command);
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-stale-turn",
+      cwd: fake.root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true),
+      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed", text: "Hello from Codex" });
+    await manager.disposeAll();
+  });
+
   it("fails deterministically when Codex offers only unsupported decisions", async () => {
     const fake = createFakeAppServer(roots, true);
     const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");

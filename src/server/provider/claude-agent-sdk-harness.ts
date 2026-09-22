@@ -40,10 +40,11 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
-import { ClaudeDelegateLifecycle, isClaudeQueuedCompletionAck, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
+import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
 import { claudeQuestions } from "./claude-questions";
 import {
   claudePrompt,
@@ -160,6 +161,7 @@ async function nextClaudeMessage(
   timeoutMs: number | null,
 ): Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT> {
   if (timeoutMs === null) return await iterator.next();
+  if (timeoutMs <= 0) return CLAUDE_MESSAGE_DRAIN_TIMEOUT;
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>((resolve) => {
     timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);
@@ -252,7 +254,7 @@ function startClaudeRun(
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
   const abortController = new AbortController();
-  const skillAbortController = new AbortController();
+  const preparationAbortController = new AbortController();
   const delegateLifecycle = new ClaudeDelegateLifecycle();
   const promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
@@ -486,7 +488,7 @@ function startClaudeRun(
       if (!promptReservation) return finishResult("cancelled");
       let prompt: SDKUserMessage;
       try {
-        prompt = await claudePrompt(promptText, initialImagePaths);
+        prompt = await claudePrompt(promptText, initialImagePaths, preparationAbortController.signal);
       } catch (error) {
         promptChannel.release(promptReservation);
         throw error;
@@ -502,7 +504,7 @@ function startClaudeRun(
       const skillDeadline = createClaudeSkillDeadline(
         CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,
         "Claude selected-skill staging timed out.",
-        skillAbortController.signal,
+        preparationAbortController.signal,
       );
       const staging = stageClaudeSkillPlugin(
         selectedClaudeSkills,
@@ -593,15 +595,14 @@ function startClaudeRun(
       acceptingFollowUps = true;
       emitter.status("running");
       messageIterator = query[Symbol.asyncIterator]();
-      let drainTerminalSubagents = false;
+      let terminalDrainDeadline: number | null = null;
       let announcedShortenedEvent = false;
       while (true) {
         const next = await nextClaudeMessage(
           messageIterator,
-          drainTerminalSubagents ? terminalSubagentDrainTimeoutMs : null,
+          terminalDrainDeadline === null ? null : terminalDrainDeadline - performance.now(),
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
-        drainTerminalSubagents = false;
         // One legitimately large update is shortened for Inertia's view
         // instead of failing the turn (#338). Claude keeps the full content.
         const observed = eventBudget.observe(next.value);
@@ -677,10 +678,22 @@ function startClaudeRun(
           emitter.session(sessionId);
         }
         const hadLiveTaskTrace = subagentTracker.hasLiveTasks();
+        if (claudeMessageResumesParent(message, prompt.uuid, pendingFollowUpIds)) terminalDrainDeadline = null;
         const lifecycle = delegateLifecycle.observe(message, hadLiveTaskTrace);
         subagentTracker.observe(message);
         const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
         messageProjector.observe(message, provesRequestedCompaction);
+        const commandLifecycle = !childOwned ? claudeCommandLifecycleMessage(message) : null;
+        if (commandLifecycle && (commandLifecycle.state === "refused"
+          || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
+          if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+            throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+          }
+          if (commandLifecycle.command_uuid === prompt.uuid) break;
+        }
+        if (commandLifecycle?.state === "completed" && commandLifecycle.command_uuid === prompt.uuid && delegateLifecycle.awaitsUnansweredPrompt()) {
+          terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
+        }
         if (message.type === "result" && lifecycle.turnEnded === false
           && delegateLifecycle.hasProvisionalResult()) {
           // A result emitted while delegated work is live is the parent's
@@ -696,7 +709,7 @@ function startClaudeRun(
           // Once the provider says the roster is empty, or the exact typed
           // trace settles, the parent should auto-resume promptly. Bound a
           // missing resume edge without imposing a timeout on live long work.
-          drainTerminalSubagents = true;
+          terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (
           lifecycle.turnEnded
@@ -709,10 +722,11 @@ function startClaudeRun(
           && pendingFollowUpIds.size === 0
           && hasLiveTaskTrace
         ) {
-          drainTerminalSubagents = true;
+          terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (message.type === "result") {
-          if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
+          if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0
+            && !(isClaudeQueuedCompletionAck(message) && isClaudeNotificationResult(message))) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
               if (isClaudeQueuedCompletionAck(message)) continue;
@@ -732,7 +746,7 @@ function startClaudeRun(
             }
           }
           if (lifecycle.turnEnded && !hasLiveTaskTrace) break;
-          if (lifecycle.turnEnded) drainTerminalSubagents = true;
+          if (lifecycle.turnEnded) terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
           continue;
         }
       }
@@ -741,11 +755,6 @@ function startClaudeRun(
         throw new Error("Claude did not confirm the selected isolated skills.");
       }
       if (cancelRequested) return finishResult("cancelled");
-      if (pendingFollowUpIds.size > 0) {
-        throw new Error(
-          "Claude Agent SDK exited before correlating every accepted follow-up.",
-        );
-      }
       if (options.input.operation?.kind === "compact"
         && (messageProjector.compactFailure
           || !messageProjector.compactSucceeded)) {
@@ -773,12 +782,29 @@ function startClaudeRun(
           projectedFailure?.message
             ?? claudeLifecycleFailure(completion.reason),
         );
+        // The stream ended without a thrown error, so this is the only place
+        // the CLI's own reason for exiting can reach the failure details.
+        const technicalDetail = sanitizeProviderActivityDetail(
+          redactExactCredentials(ownedProcess.stderrTail(), launchCredentials),
+          {
+            workspaceRoot: options.input.cwd,
+            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
+          },
+        );
         return finishResult(
           "failed",
           error,
           projectedFailure
-            ? { ...projectedFailure, message: error }
-            : claudeFailure(error, `lifecycle/${completion.reason}`),
+            ? {
+                ...projectedFailure,
+                message: error,
+                ...(technicalDetail ? { technicalDetail } : {}),
+              }
+            : claudeFailure(
+                error,
+                `lifecycle/${completion.reason}`,
+                technicalDetail ?? undefined,
+              ),
         );
       }
       const finalMessage = completion.result;
@@ -817,6 +843,15 @@ function startClaudeRun(
                 technicalDetail ?? undefined,
               ),
         );
+      }
+      if (pendingFollowUpIds.size > 0) {
+        throw new Error(
+          "Claude Agent SDK exited before correlating every accepted follow-up.",
+        );
+      }
+      if (isClaudeUnansweredPromptResult(finalMessage, messageProjector.sawOutputText, options.input.operation?.kind === "compact", promptText)) {
+        const error = routeFailure(claudeLifecycleFailure("prompt-unanswered"));
+        return finishResult("failed", error, claudeFailure(error, "result/unanswered"));
       }
       if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {
         messageProjector.emitTerminalText(finalMessage.result, finalMessage.uuid);
@@ -959,8 +994,8 @@ function startClaudeRun(
     if (cancelRequested && !force) return;
     cancelRequested = true;
     hostToolRuntime?.settle();
-    skillAbortController.abort(
-      new Error("Claude selected-skill staging was cancelled."),
+    preparationAbortController.abort(
+      new Error("Claude input preparation was cancelled."),
     );
     acceptingFollowUps = false;
     promptChannel.cancel();
@@ -1008,7 +1043,7 @@ function startClaudeRun(
         if (!reservation) return false;
         let followUp: SDKUserMessage;
         try {
-          followUp = await claudePrompt(text, input.imagePaths);
+          followUp = await claudePrompt(text, input.imagePaths, preparationAbortController.signal);
         } catch (error) {
           promptChannel.release(reservation);
           throw error;
@@ -1094,6 +1129,8 @@ function claudeLifecycleFailure(
       return "Claude Agent SDK exited before the parent resumed after delegated work.";
     case "missing-result":
       return "Claude Agent SDK exited without a final result.";
+    case "prompt-unanswered":
+      return "Claude finished the request without returning an answer.";
   }
 }
 

@@ -2036,7 +2036,7 @@ describe("workspace pane authority", () => {
     }) => useActivityActions({
       ...owner,
       run: vi.fn(),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError: vi.fn(),
     }), {
       initialProps: {
@@ -2059,7 +2059,7 @@ describe("workspace pane authority", () => {
       project,
       conversationId: project.id === alpha.id ? alphaChat.id : betaChat.id,
       run: vi.fn(),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError: vi.fn(),
     }), { initialProps: alpha });
 
@@ -2080,7 +2080,7 @@ describe("workspace pane authority", () => {
       project: alpha,
       conversationId: alphaChat.id,
       run,
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError: vi.fn(),
     }));
 
@@ -2113,7 +2113,7 @@ describe("workspace pane authority", () => {
       project: alpha,
       conversationId: alphaChat.id,
       run,
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError: vi.fn(),
     }));
     const failedRun = {
@@ -2155,7 +2155,7 @@ describe("workspace pane authority", () => {
       run: vi.fn(async () => {
         throw failure;
       }),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError,
     }));
 
@@ -2195,7 +2195,7 @@ describe("workspace pane authority", () => {
     }) => useActivityActions({
       ...owner,
       run: vi.fn(),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError: vi.fn(),
       activateContext,
       navigatePreview,
@@ -2227,7 +2227,7 @@ describe("workspace pane authority", () => {
       project: alpha,
       conversationId: alphaChat.id,
       run: vi.fn(),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError,
       activateContext,
       navigatePreview,
@@ -2258,7 +2258,7 @@ describe("workspace pane authority", () => {
       project: alpha,
       conversationId: alphaChat.id,
       run: vi.fn(),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError,
       activateContext,
       navigatePreview,
@@ -2302,7 +2302,7 @@ describe("workspace pane authority", () => {
       run: vi.fn(async () => {
         throw failure;
       }),
-      setActiveTool: vi.fn(),
+      openTerminal: vi.fn(),
       setActionError,
     }));
 

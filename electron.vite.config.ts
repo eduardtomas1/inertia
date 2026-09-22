@@ -91,6 +91,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve("src/main/index.ts"),
+          "linux-file-icon-worker": resolve("src/main/linux-file-icon-worker.ts"),
           "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
           "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),
           "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),
@@ -186,7 +187,7 @@ export default defineConfig({
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
-              "WelcomeGuide", "SnapshotSettings",
+              "WelcomeGuide", "SnapshotSettings", "WorkspaceHeaderActions",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

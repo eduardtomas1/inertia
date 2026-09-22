@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
+import { setAppearance } from "./support/appearance";
 
 const quotaObservedAt = Date.now();
 const quotaResetEpoch = Math.floor(quotaObservedAt / 1000);
@@ -110,8 +111,10 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await expect(codex.locator(".limits-account-trigger")).toHaveCount(2);
   await page.locator(".usage-view").evaluate((element) => element.scrollTo(0, 0));
   await app.expectNoViewportOverflow(); await capture("limits-light");
-  await page.getByRole("button", { name: "Change theme (current: light)" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark"); await capture("limits-dark");
+  await setAppearance(page, "dark", "Usage");
+  await page.getByRole("button", { name: "Limits", exact: true }).click();
+  if (await codex.getAttribute("data-open") === null) await codex.getByRole("button", { name: "Show Codex accounts", exact: true }).click();
+  await page.locator(".usage-view").evaluate((element) => element.scrollTo(0, 0)); await capture("limits-dark");
   await codex.locator(".limits-account-trigger").first().focus(); await page.keyboard.press("Enter");
   await expect(page.getByText("Email hidden", { exact: false })).toBeVisible();
   await expect(page.getByText("work@example.test", { exact: true })).toHaveCount(0);
@@ -134,7 +137,7 @@ test("inspects pooled accounts, private details and composer limits in light, da
   await page.locator(".usage-view").evaluate((element) => element.scrollTo(0, 0));
   await app.expectNoViewportOverflow(); await capture("limits-narrow");
   await app.resizeWindow(1280, 820);
-  await page.getByRole("button", { name: /Change theme \(current: dark\)/ }).click();
+  await setAppearance(page, "light", null);
   // Reproduce opening Limits during restart discovery on a slower machine.
   // This stays below the normal provider detection deadline and must not turn
   // the native account plus its hub copy into two unverified accounts.

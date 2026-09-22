@@ -259,6 +259,50 @@ describe("conversation detail projection", () => {
     expect(merged.messages).toBe(loadedDetail.messages);
   });
 
+  it("keeps a loaded terminal turn when the shell snapshot still reports it running", () => {
+    const completedAt = "2026-07-25T10:00:40.000Z";
+    const completedTurn: AgentTurn = {
+      ...agentTurn,
+      status: "completed",
+      terminalReason: "provider-completed",
+      completedAt,
+      updatedAt: completedAt,
+    };
+    const staleShell: ConversationShell = {
+      ...shell,
+      status: "running",
+      latestTurn: {
+        id: agentTurn.id,
+        runId: agentTurn.runId,
+        status: "running",
+        runState: agentTurn.runState,
+        providerId: agentTurn.providerId,
+        harnessId: agentTurn.harnessId,
+        backendProfileId: agentTurn.backendProfileId,
+        modelSelection: agentTurn.modelSelection,
+        continuationIdentity: agentTurn.continuationIdentity,
+        model: agentTurn.model,
+        reasoningEffort: agentTurn.reasoningEffort,
+        requestedAt: agentTurn.requestedAt,
+        startedAt: agentTurn.startedAt,
+        completedAt: null,
+        terminalReason: null,
+        updatedAt: "2026-07-25T10:00:20.000Z",
+      },
+    };
+    const loadedDetail = { ...detail, agentTurns: [completedTurn] };
+
+    const merged = mergeConversationShell(loadedDetail, staleShell);
+    expect(merged.agentTurns[0]).toBe(completedTurn);
+    const resolved = resolveConversationDetail(
+      { conversationId: conversation.id, state: "loading" },
+      conversation.id,
+      { kind: "conversation.detail", conversationId: conversation.id, state: "ready", detail: loadedDetail },
+      staleShell,
+    );
+    expect(resolved?.state === "ready" && resolved.detail.agentTurns[0]?.status).toBe("completed");
+  });
+
   it("resolves a matching load and ignores a stale response from another conversation", () => {
     const loading: ConversationDetailViewState = {
       conversationId: conversation.id,

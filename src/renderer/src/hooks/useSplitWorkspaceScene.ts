@@ -87,6 +87,7 @@ interface SplitWorkspaceActions
     | "openProviderSetup"
     | "openBackendSetup"
     | "openSettings"
+    | "openUsageView"
     | "openProjectPath"
   > {
   sendMessageToConversation: (
@@ -172,6 +173,7 @@ export function useSplitWorkspaceScene({
     request,
     subscribe: connection.subscribe,
     targetConversationId: splitConversation?.id ?? null,
+    subscriptionOwner: owner,
     enabled: Boolean(splitConversation),
     autoOpenPlan: false,
     onOpenPlan: () => undefined,
@@ -235,7 +237,6 @@ export function useSplitWorkspaceScene({
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
     loadGitOnMount:
       layout.activeTool === "changes"
-      || layout.activeTool === "environment"
       || layout.activeTool === "files",
     gitStatusOnly: layout.activeTool === "files",
     loadFilesOnMount: layout.activeTool === "files",
@@ -264,7 +265,7 @@ export function useSplitWorkspaceScene({
     project: splitProject,
     conversationId: splitConversation?.id ?? null,
     run,
-    setActiveTool: layout.setActiveTool,
+    openTerminal: layout.openTerminal,
     setActionError,
     activateContext: activatePreviewContext,
     navigatePreview: desktopTools.navigatePreview,
@@ -450,6 +451,8 @@ export function useSplitWorkspaceScene({
       projectName: splitProject.name,
       toolsOpen: layout.activeTool !== null,
       onToggleTools: layout.toggleWorkspaceTools,
+      terminalOpen: layout.terminalOpen,
+      onToggleTerminal: layout.toggleTerminal,
       scene: {
         detailState: model.detailState,
         chat: {
@@ -462,6 +465,8 @@ export function useSplitWorkspaceScene({
     };
   }, [
     layout.activeTool,
+    layout.terminalOpen,
+    layout.toggleTerminal,
     layout.toggleWorkspaceTools,
     model,
     owner,

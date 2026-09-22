@@ -25,6 +25,10 @@ import {
   type RuntimeClientAuthority,
 } from "./runtime-client-authority";
 import type { MessageSearchTarget } from "../../shared/message-search";
+import {
+  RUNTIME_DETAIL_SUBSCRIPTION_OWNERS,
+  type RuntimeDetailSubscriptionOwner,
+} from "../../shared/runtime-detail-subscriptions";
 
 export interface RuntimeSyncHydration {
   beforeFreshSnapshot?(): void;
@@ -34,8 +38,6 @@ export interface RuntimeSyncHydration {
   plans: Iterable<AgentPlan>;
 }
 
-type RuntimeSubscriptionOwner = "primary" | "secondary";
-
 interface PendingMessageFocus {
   target: MessageSearchTarget;
   expires: number;
@@ -44,7 +46,7 @@ interface PendingMessageFocus {
 interface RuntimeClientSubscription extends RuntimeDetailSubscription {
   authority: RuntimeClientAuthority;
   mountedConversations: Record<
-    RuntimeSubscriptionOwner,
+    RuntimeDetailSubscriptionOwner,
     string | null
   >;
 }
@@ -115,12 +117,19 @@ export class RuntimeSyncHub<Socket> {
       : resumeRequest.kind === "resume"
         ? [...resumeRequest.conversationIds]
         : [];
+    const resumedOwners = authority.kind === "main" && resumeRequest.kind === "resume"
+      ? resumeRequest.conversationOwners ?? RUNTIME_DETAIL_SUBSCRIPTION_OWNERS
+      : RUNTIME_DETAIL_SUBSCRIPTION_OWNERS;
+    const resumedConversationFor = (owner: RuntimeDetailSubscriptionOwner): string | null =>
+      resumedConversationIds[resumedOwners.indexOf(owner)] ?? null;
     const subscription: RuntimeClientSubscription = {
       authority,
       conversationIds: resumedConversationIds,
       mountedConversations: {
-        primary: resumedConversationIds[0] ?? null,
-        secondary: resumedConversationIds[1] ?? null,
+        primary: resumedConversationFor("primary"),
+        secondary: resumedConversationFor("secondary"),
+        tertiary: resumedConversationFor("tertiary"),
+        quaternary: resumedConversationFor("quaternary"),
       },
     };
     const replay = resumeRequest.kind === "resume"
@@ -213,7 +222,7 @@ export class RuntimeSyncHub<Socket> {
 
   setConversationSubscription(
     socket: Socket,
-    owner: RuntimeSubscriptionOwner,
+    owner: RuntimeDetailSubscriptionOwner,
     conversationId: string | null,
   ): void {
     const subscription = this.clients.get(socket);
@@ -222,6 +231,8 @@ export class RuntimeSyncHub<Socket> {
       subscription.mountedConversations = {
         primary: subscription.authority.conversationId,
         secondary: null,
+        tertiary: null,
+        quaternary: null,
       };
       subscription.conversationIds = [
         subscription.authority.conversationId,
@@ -229,10 +240,8 @@ export class RuntimeSyncHub<Socket> {
       return;
     }
     subscription.mountedConversations[owner] = conversationId;
-    subscription.conversationIds = [
-      subscription.mountedConversations.primary,
-      subscription.mountedConversations.secondary,
-    ].filter((id, index, ids): id is string =>
+    subscription.conversationIds = RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.map((paneOwner) =>
+      subscription.mountedConversations[paneOwner]).filter((id, index, ids): id is string =>
       id !== null && ids.indexOf(id) === index);
   }
 

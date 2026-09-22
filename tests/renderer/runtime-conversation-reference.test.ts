@@ -110,7 +110,10 @@ describe("runtime conversation references", () => {
       + "    workspaceToolsUnavailable,",
     );
     expect(sceneSource).toContain("tools: project ?");
-    expect(sceneSource).toContain('{ tabs: ["environment"] as const }');
+    expect(sceneSource).toContain("for (const surface of WORKSPACE_BOUND_SURFACES) {");
+    expect(sceneSource).toContain(
+      '"Available after the first message creates this isolated worktree."',
+    );
     expect(sceneSource).toContain("gitLoading: workspaceTools.gitLoading");
     expect(sceneSource).toContain("gitError: workspaceTools.gitError");
   });
@@ -121,7 +124,7 @@ describe("runtime conversation references", () => {
     );
     expect(appSource).toContain(
       'sceneActiveTool === "changes"\n'
-      + '          || sceneActiveTool === "environment"',
+      + '          || sceneActiveTool === "files"',
     );
     expect(appSource).not.toContain(
       "loadGitOnMount: !workspaceToolsUnavailable,",

@@ -394,8 +394,15 @@ describe("model chooser active route", () => {
   });
 
   it("windows a 750-route catalog within render and keyboard latency budgets", async () => {
+    let routeKeyReads = 0;
     const routes = Array.from({ length: 750 }, (_, index) =>
       catalogRoute(index));
+    for (const route of routes) {
+      const key = route.key;
+      Object.defineProperty(route, "key", {
+        get() { routeKeyReads += 1; return key; },
+      });
+    }
     render(
       <ModelChooser
         routes={routes}
@@ -429,6 +436,8 @@ describe("model chooser active route", () => {
     expect(elapsed).toBeLessThan(750);
 
     const search = screen.getByRole("combobox", { name: "Search models" });
+    routeKeyReads = 0;
+    let endElapsed: number | undefined;
     const endStartedAt = performance.now();
     fireEvent.keyDown(search, { key: "End" });
     await waitFor(() => {
@@ -437,8 +446,13 @@ describe("model chooser active route", () => {
       expect(document.getElementById(activeId!)).toHaveTextContent(
         "Team Model 749",
       );
+      // Stop when the requested row is available. waitFor's async wrapper
+      // drains another timer turn after success; that delay is not navigation.
+      endElapsed = performance.now() - endStartedAt;
     });
-    expect(performance.now() - endStartedAt).toBeLessThan(500);
+    expect(endElapsed).toBeLessThan(500);
+    // Moving within an unchanged catalog must not rebuild every virtual key.
+    expect(routeKeyReads).toBeLessThan(routes.length);
     expect(resultList.querySelectorAll(":scope > li").length)
       .toBeLessThanOrEqual(24);
 

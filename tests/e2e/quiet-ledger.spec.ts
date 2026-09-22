@@ -16,7 +16,11 @@ import {
   verifyDesktopMarkdownControls,
   verifyNarrowDesktopMarkdownControls,
 } from "./support/markdown-controls";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import {
+  closeWorkspaceTools,
+  ensureWorkspaceTools,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 import { verifyMobileNavigationControls } from "./support/layout-assertions";
 
@@ -115,10 +119,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       await expect(navigation).toBeVisible();
     }
     const workspacePanel = page.locator(".workspace-panel");
-    if (await workspacePanel.isVisible()) {
-      await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-      await expect(workspacePanel).toBeHidden();
-    }
+    await closeWorkspaceTools(page);
+    await expect(workspacePanel).toBeHidden();
     const activeTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
     await revealTurn(activeTurn, active.turn.id);
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
@@ -223,12 +225,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
     await captureElementScenario("streaming-caret-code", activeTurn);
 
-    if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-    }
-    const previewTools = page.getByRole("complementary", {
-      name: "Workspace tools",
-    });
+    const previewTools = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(previewTools, "Browser");
     const hostilePreviewUrl = `${app.previewUrl}approval-overlay`;
     await previewTools.getByRole("textbox", {
@@ -249,9 +246,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect.poll(
       () => app.nativePreviewIsVisible(hostilePreviewUrl),
     ).toBe(false);
-    await previewTools.getByRole("button", {
-      name: "Close workspace tools",
-    }).click();
+    await closeWorkspaceTools(page);
     await publishFixtureEvent({
       type: "agent.input.requested",
       request: providerInputRequest,
@@ -756,7 +751,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     // rendered branch result before asking the runtime to prove that every
     // owned process has stopped; recycling during that refresh would be a
     // lifecycle race rather than the reconnect behavior this scenario owns.
-    await expect(page.locator('[data-header-menu="branch"] > button')).toHaveCount(1);
+    await expect(page.getByRole("group", { name: "Chat checkout context" })
+      .getByRole("button", { name: /^Branch /u })).toHaveCount(1);
 
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")

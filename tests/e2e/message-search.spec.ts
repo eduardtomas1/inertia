@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test, type Page, type TestInfo, type WebSocketRoute } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { setAppearance } from "./support/appearance";
 
 let app: AppFixture;
 let page: Page;
@@ -119,7 +120,7 @@ test("finds chunked content in an unloaded chat, jumps to an old virtual row and
   await app.expectNoViewportOverflow();
   await evidence(page, info, "matching-turn");
 
-  await page.getByRole("button", { name: /^Change theme \(current:/ }).click();
+  await setAppearance(page, "light");
   await app.resizeWindow(1000, 740);
   await search();
   await app.expectNoViewportOverflow();
@@ -206,8 +207,9 @@ test("retains detached focus while the owning runtime client reconnects", async 
   const input = await search();
   await input.press("Enter");
   await expect(finalAnswer(page)).toBeFocused();
+  await page.locator(".workspace-header").getByRole("button", { name: targetTitle, exact: true }).click();
   const opened = app.electronApp.waitForEvent("window");
-  await page.getByRole("button", { name: `Open ${targetTitle} in a new window` }).click();
+  await page.getByRole("menuitem", { name: "Open chat in new window" }).click();
   const popup = await opened;
   await popup.getByRole("textbox", { name: "Message" }).waitFor();
   let acceptSocket!: (route: WebSocketRoute) => void;

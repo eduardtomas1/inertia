@@ -5,7 +5,12 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import {
+  ensureWorkspaceTools,
+  openTerminalDock,
+  rightPanelToggle,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -38,24 +43,18 @@ test.afterAll(async () => {
   await app.close();
 });
 
-async function ensureWorkspaceTools(): Promise<void> {
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-  }
-}
-
 function quotePosix(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 test("switches workspace tools, opens multiple terminals, and loads a safe native preview", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   await expect(page.getByLabel("Workspace changes")).toBeVisible();
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   await expect(page.getByRole("region", { name: "Project files" })).toBeVisible();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await page.getByRole("button", { name: "New terminal" }).click();
   const secondTerminalTab = page.getByRole("tab", { name: "Terminal 2", exact: true });
   await expect(secondTerminalTab).toBeVisible();
@@ -106,11 +105,11 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await page.getByRole("button", { name: "Go", exact: true }).click();
   await expect.poll(() => electronApp.evaluate(({ webContents }, url) => webContents.getAllWebContents().some((contents) => contents.getURL() === url), previewUrl)).toBe(true);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Plan");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
-  await page.locator(".workspace-panel").getByRole("button", { name: "Close workspace tools" }).click();
+  await rightPanelToggle(page).click();
   await expect(page.locator(".workspace-panel")).toBeHidden();
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await rightPanelToggle(page).click();
   await expect(page.getByRole("tab", { name: /Terminal 2/ })).toBeVisible();
   await expect(liveTerminals).toHaveCount(2);
   const terminalIdsAfter = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
@@ -122,8 +121,8 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
     "online",
     { timeout: 15_000 },
   );
-  await ensureWorkspaceTools();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await ensureWorkspaceTools(page);
+  await openTerminalDock(page);
   await expect(liveTerminals).toHaveCount(2);
   await expect(page.locator(
     '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
@@ -183,7 +182,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
 
 test("keeps hostile native previews beneath trusted workspace overlays", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const hostilePreviewUrl = `${previewUrl}trusted-overlays`;
   await page.getByRole("textbox", { name: "Preview address" })
@@ -201,19 +200,31 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
     },
   });
 
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Agents");
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "Agents" })).toBeVisible();
   const localServer = new URL(hostilePreviewUrl);
-  await page.getByText("Local Servers", { exact: true }).click();
-  await expect(page.getByRole("button", {
-    name: localServer.origin,
-    exact: true,
-  })).toHaveCount(0);
-  await expect(page.getByText("No validated local service ports are active."))
-    .toBeVisible();
+  const projectActions = page.locator(".workspace-header")
+    .getByRole("group", { name: "Project actions" });
+  await expect(projectActions).toBeVisible();
+  await expect(projectActions.getByRole("button", { name: /running$/u }))
+    .toHaveCount(0);
+  const projectActionOptions = projectActions.getByRole("button", {
+    name: "Project action options",
+  });
+  if (await projectActionOptions.isVisible()) {
+    await projectActionOptions.click();
+    const projectActionsMenu = page.getByRole("menu", { name: "Project actions" });
+    await expect(projectActionsMenu).toBeVisible();
+    await expect(projectActionsMenu.getByRole("group", { name: "Running" }))
+      .toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(projectActionsMenu).toHaveCount(0);
+  }
+  await expect(page.getByRole("menuitem", { name: localServer.origin }))
+    .toHaveCount(0);
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
@@ -225,28 +236,28 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await page.keyboard.press(
     process.platform === "darwin" ? "Meta+K" : "Control+K",
   );
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  // Suspension is committed in a layout effect during the same render that
+  // mounts the overlay, so an observable trusted dialog already implies the
+  // hidden preview. Ordering against that dialog is the actual requirement;
+  // reading the bounds straight after the keypress only raced the renderer's
+  // commit and reported the still-visible preview on slow runners.
   await expect(page.getByRole("dialog", { name: "Search Inertia" }))
     .toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   await page.getByRole("button", { name: "Close search" }).click();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);
 
   const commitButton = page.locator(
-    ".workspace-header .primary-header-button",
+    '.workspace-header .header-split[aria-label="Git actions"] .header-split-primary',
   );
-  await expect(commitButton).toBeEnabled();
+  await expect(commitButton).toHaveAccessibleName("Commit");
+  await expect(commitButton).not.toHaveAttribute("aria-disabled", "true");
   await commitButton.click();
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   const commitDialog = page.getByRole("dialog", { name: "Commit changes" });
   await expect(commitDialog).toBeVisible();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(false);
+  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
   // Visibility precedes the dialog's deferred focus handoff from the native
   // preview. Verify keyboard readiness before sending a one-shot Escape.
   await expect(commitDialog.getByRole("textbox", { name: "Commit message" }))
@@ -260,7 +271,7 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
 
 test("keeps app shortcuts active while the native preview owns focus", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const focusedPreviewUrl = `${previewUrl}shortcut-focus`;
   await page.getByRole("textbox", { name: "Preview address" })
@@ -331,10 +342,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
       .click();
   }
 
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await ensureWorkspaceTools();
-  }
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Files");
   const panel = page.getByRole("region", { name: "Project files" });
   const tree = panel.getByRole("tree", { name: "Files" });
   await expect(tree).toBeVisible();

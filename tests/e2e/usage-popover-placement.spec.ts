@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { ensureWorkspaceTools } from "./support/workspace-tools";
 
-test("contains usage details and the Limits shortcut in a stacked workspace", async ({ browserName: _browserName }, testInfo) => {
+test("contains usage details and the Limits shortcut in a constrained workspace", async ({ browserName: _browserName }, testInfo) => {
   const app = await createAppFixture({ name: "usage-popover-placement",
     initialState: "conversation", windowDisplay: "primary" });
   try {
@@ -16,9 +17,7 @@ test("contains usage details and the Limits shortcut in a stacked workspace", as
       finally { store.close(); }
       await app.page.reload();
       await expect(app.page.getByRole("textbox", { name: "Message" })).toBeVisible();
-      if (!await app.page.locator(".workspace-panel:visible").count()) {
-        await app.page.getByRole("button", { name: "Open workspace tools", exact: true }).click();
-      }
+      await ensureWorkspaceTools(app.page);
       // A 760px request is constrained to 684px on the native CI display.
       await app.resizeWindow(1024, 684);
       await expect(app.page.locator("html")).toHaveAttribute("data-theme", theme);
@@ -34,7 +33,7 @@ test("contains usage details and the Limits shortcut in a stacked workspace", as
         const tools = document.querySelector<HTMLElement>(".workspace-panel")!.getBoundingClientRect();
         return {
           bounds: bounds.toJSON(), workspace: workspace.toJSON(), chat: chat.toJSON(),
-          stacked: chat.bottom <= tools.top + 1,
+          besideTools: chat.right <= tools.left + 1,
           insideViewport: bounds.top >= -1 && bounds.right <= window.innerWidth + 1
             && bounds.bottom <= window.innerHeight + 1 && bounds.left >= -1,
           insideWorkspace: bounds.top >= workspace.top - 1 && bounds.right <= workspace.right + 1
@@ -48,7 +47,7 @@ test("contains usage details and the Limits shortcut in a stacked workspace", as
       await writeFile(geometryPath, JSON.stringify(geometry, null, 2));
       await testInfo.attach(`usage-${theme}-geometry`, { path: geometryPath, contentType: "application/json" });
       await app.page.screenshot({ path: testInfo.outputPath(`usage-${theme}.png`), animations: "disabled" });
-      expect(geometry).toMatchObject({ stacked: true, insideViewport: true, insideWorkspace: true, insideChat: true });
+      expect(geometry).toMatchObject({ besideTools: true, insideViewport: true, insideWorkspace: true, insideChat: true });
       const hide = popover.getByRole("button", { name: "Hide usage", exact: true });
       await hide.focus();
       await expect(hide).toBeInViewport();

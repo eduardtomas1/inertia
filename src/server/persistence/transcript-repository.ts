@@ -2,6 +2,7 @@ import { readContinuationHistory } from "./continuation-history";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
+import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -290,6 +291,22 @@ export class TranscriptRepository {
           ORDER BY messages.created_at ASC, messages.id ASC
         `).all(conversationId)) as Array<Pick<MessageRow, "attachments_json">>;
     return projectAttachments(rows);
+  }
+
+  evictableAttachmentIds(): string[] {
+    const rows = this.context.database.prepare(`
+      SELECT messages.attachments_json, EXISTS (
+        SELECT 1 FROM agent_turns
+        WHERE (agent_turns.id = messages.turn_id OR agent_turns.user_message_id = messages.id)
+          AND agent_turns.status IN (SELECT value FROM json_each(?))
+      ) AS active
+      FROM messages
+      WHERE messages.attachments_json <> '[]'
+      ORDER BY messages.created_at ASC, messages.id ASC
+    `).all(JSON.stringify(AGENT_TURN_STATUSES.filter((status) => !isAgentTurnTerminalStatus(status)))) as Array<
+      Pick<MessageRow, "attachments_json"> & { active: number }>;
+    const active = new Set(projectAttachments(rows.filter((row) => row.active === 1)).map(({ id }) => id));
+    return [...new Set(projectAttachments(rows).map(({ id }) => id))].filter((id) => !active.has(id));
   }
 
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> {

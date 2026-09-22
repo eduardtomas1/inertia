@@ -314,8 +314,8 @@ describe("durable conversation attachment storage", () => {
     finishCleanupStop();
     await expect(reconciling).resolves.toBeUndefined();
     await expect(usage).resolves.toEqual({
-      bytes: 512 * 1024 * 1024,
-      records: 256,
+      bytes: 2 * 1024 * 1024 * 1024,
+      records: 4_096,
     });
     await vi.waitFor(async () => {
       await expect(readdir(store.directory)).resolves.toEqual([]);
@@ -1101,10 +1101,15 @@ describe("durable conversation attachment storage", () => {
       .rejects.toThrow();
   });
 
-  it("removes private interrupted records with explicitly invalid metadata", async () => {
+  it("keeps referenced records with invalid metadata until a retry repairs them", async () => {
     const dataDirectory = await root();
+    const reads: string[] = [];
     const store = await openTestStore(dataDirectory, {
       reconciliationBatchEntries: 1,
+      readOperationRunner(operation, signal) {
+        reads.push(operation.id);
+        return runConversationAttachmentStoreChild(operation, signal);
+      },
     });
     const payload = image("55555555-5555-4555-8555-555555555555");
     const other = image("66666666-6666-4666-8666-666666666666");
@@ -1121,50 +1126,21 @@ describe("durable conversation attachment storage", () => {
 
     await expect(store.reconcile([payload.attachment, other.attachment]))
       .resolves.toBeUndefined();
-    // Removal and the final directory scan can finish in separate batches.
-    // Wait for settled capacity before reading records or admitting a new write.
-    await vi.waitFor(async () => {
-      await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
-      await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
-      await expect(store.preview(other.attachment.id)).resolves.toBeNull();
-    }, { timeout: 5_000 });
+    expect(reads).toEqual([]);
+    await expect(store.usage()).resolves.toEqual({ bytes: 2 * png.length, records: 2 });
+    await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
     await expect(store.retain([payload])).resolves.toHaveLength(1);
+    await expect(store.preview(payload.attachment.id)).resolves.toMatchObject({ bytes: png });
+    await expect(store.usage()).resolves.toEqual({ bytes: 2 * png.length, records: 2 });
   });
 
   it("preserves private referenced bytes when metadata cannot be read", async () => {
     const dataDirectory = await root();
-    let foregroundReadStarted = false;
-    let foregroundReadStopped = false;
-    const nativeReadFailures: unknown[] = [];
-    let settleNativeRead!: () => void;
-    const nativeReadCompleted = new Promise<void>((resolveNativeRead) => {
-      settleNativeRead = resolveNativeRead;
-    });
+    const reads: string[] = [];
     const store = await ConversationAttachmentStore.open(dataDirectory, {
       readOperationRunner(operation, signal) {
-        if (!foregroundReadStarted) {
-          // Force the first batch to yield at its existing deadline. The
-          // background retry below still performs the real native read.
-          foregroundReadStarted = true;
-          if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
-          const result = new Promise<never>((_resolve, reject) => {
-            const onAbort = (): void => reject(signal.reason);
-            signal.addEventListener("abort", onAbort, { once: true });
-            if (signal.aborted) onAbort();
-          });
-          return {
-            result,
-            stopped: result.then(undefined, () => { foregroundReadStopped = true; }),
-          };
-        }
-        const reading = runConversationAttachmentStoreChild(operation, signal);
-        return {
-          ...reading,
-          result: reading.result.catch((error: unknown) => {
-            nativeReadFailures.push(error);
-            throw error;
-          }).finally(settleNativeRead),
-        };
+        reads.push(operation.id);
+        return runConversationAttachmentStoreChild(operation, signal);
       },
     });
     const payload = image("56565656-5656-4656-8656-565656565656");
@@ -1174,23 +1150,14 @@ describe("durable conversation attachment storage", () => {
       await mkdir(record, { mode: 0o700 });
       await writeFile(content, png, { mode: 0o600 });
 
-      // Missing metadata is an unsuccessful helper read, not its explicit
-      // missing/invalid receipt. Keep those outcomes distinct in maintenance.
       await expect(store.reconcile([payload.attachment])).resolves.toBeUndefined();
-      expect(foregroundReadStopped).toBe(true);
-      await nativeReadCompleted;
-      expect(nativeReadFailures).toEqual([
-        expect.objectContaining({ message: expect.stringMatching(/read failed/u) }),
-      ]);
-      await vi.waitFor(async () => {
-        await expect(store.retain([payload])).rejects.toThrow(/reconciliation failed/u);
-      });
+      expect(reads).toEqual([]);
+      await expect(store.usage()).resolves.toEqual({ bytes: png.length, records: 1 });
+      await expect(store.preview(payload.attachment.id)).rejects.toThrow(/read failed/u);
+      await expect(store.retain([payload])).rejects.toThrow(/read failed/u);
       await expect(readFile(content)).resolves.toEqual(png);
       await expect(readdir(record)).resolves.toEqual([`${payload.attachment.id}.png`]);
-      await expect(store.usage()).resolves.toEqual({
-        bytes: 512 * 1024 * 1024,
-        records: 256,
-      });
+      await expect(store.retain([image()])).resolves.toHaveLength(1);
     } finally {
       await store.close();
     }
@@ -1199,7 +1166,7 @@ describe("durable conversation attachment storage", () => {
   it.each([
     "Conversation attachment persistence timed out.",
     "Conversation attachment storage could not complete the operation.",
-  ])("preserves referenced bytes when a maintenance read fails: %s", async (failure) => {
+  ])("preserves referenced bytes when a lazy read fails: %s", async (failure) => {
     const dataDirectory = await root();
     let injectReadFailure = false;
     let failedReadStopped = false;
@@ -1215,7 +1182,6 @@ describe("durable conversation attachment storage", () => {
           return runConversationAttachmentStoreChild(operation, signal);
         }
         readFailures += 1;
-        expect(signal?.aborted).toBe(false);
         return {
           result: Promise.reject(new Error(failure)),
           stopped: Promise.resolve().then(() => { failedReadStopped = true; }),
@@ -1226,21 +1192,19 @@ describe("durable conversation attachment storage", () => {
       const retentionId = "77777777-7777-4777-8777-777777777777";
       const [retained] = await store.retain([image()], undefined, retentionId);
       store.acceptRetention(retentionId);
-      await expect(readFile(retained!.path)).resolves.toEqual(png);
       await expect(store.preview(retained!.id)).resolves.toMatchObject({ bytes: png });
 
       injectReadFailure = true;
-      await expect(store.reconcile([retained!])).rejects.toThrow(failure);
+      await expect(store.reconcile([retained!])).resolves.toBeUndefined();
+      expect(readFailures).toBe(0);
+      await expect(store.preview(retained!.id)).rejects.toThrow(failure);
+      await expect(store.retain([image(retained!.id)])).rejects.toThrow(failure);
 
-      expect(readFailures).toBe(1);
+      expect(readFailures).toBe(2);
       expect(failedReadStopped).toBe(true);
       expect(removals).toEqual([]);
       await expect(readFile(retained!.path)).resolves.toEqual(png);
-      await expect(store.usage()).resolves.toEqual({
-        bytes: 512 * 1024 * 1024,
-        records: 256,
-      });
-      await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
+      await expect(store.usage()).resolves.toEqual({ bytes: png.length, records: 1 });
       injectReadFailure = false;
       await expect(store.preview(retained!.id)).resolves.toMatchObject({ bytes: png });
     } finally {
@@ -1252,55 +1216,24 @@ describe("durable conversation attachment storage", () => {
     "retains referenced records that cannot be read with private permissions",
     async () => {
       const dataDirectory = await root();
-      let holdFirstMaintenanceRead = false;
-      let observingMaintenance = false;
-      let foregroundReadStopped = false;
-      let nativeReadFailure: unknown;
-      let settleNativeRead!: () => void;
-      const nativeReadCompleted = new Promise<void>((resolve) => { settleNativeRead = resolve; });
+      const reads: string[] = [];
       const store = await openTestStore(dataDirectory, {
         readOperationRunner(operation, signal) {
-          if (holdFirstMaintenanceRead) {
-            holdFirstMaintenanceRead = false;
-            if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
-            const result = new Promise<never>((_resolve, reject) => {
-              const onAbort = (): void => reject(signal.reason);
-              signal.addEventListener("abort", onAbort, { once: true });
-              if (signal.aborted) onAbort();
-            });
-            return {
-              result,
-              stopped: result.then(undefined, () => { foregroundReadStopped = true; }),
-            };
-          }
-          const reading = runConversationAttachmentStoreChild(operation, signal);
-          if (!observingMaintenance) return reading;
-          return {
-            ...reading,
-            result: reading.result.catch((error: unknown) => {
-              nativeReadFailure = error;
-              throw error;
-            }).finally(settleNativeRead),
-          };
+          reads.push(operation.id);
+          return runConversationAttachmentStoreChild(operation, signal);
         },
       });
       try {
         const [retained] = await store.retain([image()]);
         await chmod(retained!.path, 0o644);
+        reads.length = 0;
 
-        await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
-        holdFirstMaintenanceRead = true;
-        observingMaintenance = true;
-        // A yielded foreground batch is not a completed reconciliation. The
-        // background retry must report unsafe storage and keep writes blocked.
         await expect(store.reconcile([retained!])).resolves.toBeUndefined();
-        expect(foregroundReadStopped).toBe(true);
-        await nativeReadCompleted;
-        expect(nativeReadFailure).toMatchObject({ message: expect.stringMatching(/unsafe/u) });
-        await vi.waitFor(async () => {
-          await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
-        });
+        expect(reads).toEqual([]);
+        await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
+        await expect(store.retain([image(retained!.id)])).rejects.toThrow(/unsafe/u);
         await expect(readFile(retained!.path)).resolves.toEqual(png);
+        await expect(store.usage()).resolves.toEqual({ bytes: png.length, records: 1 });
       } finally {
         await store.close();
       }

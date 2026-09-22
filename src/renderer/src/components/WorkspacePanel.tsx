@@ -1,24 +1,34 @@
 import {
+  lazy,
+  Suspense,
+  useEffect,
   useId,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import {
-  Boxes,
-  ChevronDown,
+  Bot,
   Files,
   Flag,
+  Gauge,
   GitCompareArrows,
   Globe2,
   ListChecks,
-  Settings,
-  TerminalSquare,
+  Plus,
   X,
 } from "lucide-react";
-import { IconButton } from "./ui";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
+import {
+  RIGHT_PANEL_SURFACE_META,
+  RIGHT_PANEL_SURFACES,
+  surfaceShortcutActionForKey,
+} from "../utils/rightPanelSurfaces";
+import type { SurfaceAction } from "./WorkspacePanelLauncher";
+import { FocusFirstMenuItem } from "./workspace-header/FocusFirstMenuItem";
+import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
+import { navigateMenuItems } from "../utils/menuKeyboard";
 import {
   nextSidebarNavigationIndex,
   type SidebarNavigationKey,
@@ -26,207 +36,282 @@ import {
 
 export type { WorkspacePanelTab } from "./workspacePanelTypes";
 
+export type WorkspacePanelPresentation = "inline" | "sheet" | "stacked";
+
 export type WorkspacePanelProps = {
-  activeTab: WorkspacePanelTab;
-  onTabChange: (tab: WorkspacePanelTab) => void;
-  children: ReactNode;
-  tabs?: readonly WorkspacePanelTab[];
+  surfaces: readonly WorkspacePanelTab[];
+  activeSurface: WorkspacePanelTab | null;
+  unavailable?: Partial<Record<WorkspacePanelTab, string>>;
   badges?: Partial<Record<WorkspacePanelTab, number>>;
-  onClose?: () => void;
-  onOpenSettings?: () => void;
+  liveAgentCount?: number;
+  presentation?: WorkspacePanelPresentation;
   visible?: boolean;
+  children: ReactNode;
+  onActivateSurface: (surface: WorkspacePanelTab) => void;
+  onOpenSurface: (surface: WorkspacePanelTab) => void;
+  onCloseSurface: (surface: WorkspacePanelTab) => void;
+  onClosePanel?: () => void;
 };
 
-const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Element }> = {
-  environment: { label: "Environment", icon: <Boxes size={15} aria-hidden="true" /> },
-  changes: { label: "Changes", icon: <GitCompareArrows size={15} aria-hidden="true" /> },
-  files: { label: "Files", icon: <Files size={15} aria-hidden="true" /> },
-  terminal: { label: "Terminal", icon: <TerminalSquare size={15} aria-hidden="true" /> },
-  goal: { label: "Goal", icon: <Flag size={15} aria-hidden="true" /> },
-  plan: { label: "Plan", icon: <ListChecks size={15} aria-hidden="true" /> },
-  preview: { label: "Browser", icon: <Globe2 size={15} aria-hidden="true" /> },
+const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
+  changes: <GitCompareArrows size={14} aria-hidden="true" />,
+  files: <Files size={14} aria-hidden="true" />,
+  preview: <Globe2 size={14} aria-hidden="true" />,
+  agents: <Bot size={14} aria-hidden="true" />,
+  usage: <Gauge size={14} aria-hidden="true" />,
+  goal: <Flag size={14} aria-hidden="true" />,
+  plan: <ListChecks size={14} aria-hidden="true" />,
 };
 
-const defaultTabs: readonly WorkspacePanelTab[] = [
-  "environment",
-  "changes",
-  "files",
-  "terminal",
-  "goal",
-  "plan",
-  "preview",
-];
+const loadWorkspacePanelLauncher = () => import("./WorkspacePanelLauncher");
+const RightPanelLauncher = lazy(async () => ({
+  default: (await loadWorkspacePanelLauncher()).RightPanelLauncher,
+}));
+const AddSurfaceMenuItems = lazy(async () => ({
+  default: (await loadWorkspacePanelLauncher()).AddSurfaceMenuItems,
+}));
+
+function surfaceActions(
+  unavailable: Partial<Record<WorkspacePanelTab, string>>,
+  badges: Partial<Record<WorkspacePanelTab, number>>,
+  liveAgentCount: number,
+): SurfaceAction[] {
+  return RIGHT_PANEL_SURFACES.map((surface) => ({
+    surface,
+    ...RIGHT_PANEL_SURFACE_META[surface],
+    available: !unavailable[surface],
+    ...(unavailable[surface] ? { reason: unavailable[surface] } : {}),
+    badge: surface === "agents" ? liveAgentCount : badges[surface] ?? 0,
+  }));
+}
 
 export function WorkspacePanel({
-  activeTab,
-  onTabChange,
-  children,
-  tabs = defaultTabs,
-  badges,
-  onClose,
-  onOpenSettings,
+  surfaces,
+  activeSurface,
+  unavailable = {},
+  badges = {},
+  liveAgentCount = 0,
+  presentation = "inline",
   visible = true,
+  children,
+  onActivateSurface,
+  onOpenSurface,
+  onCloseSurface,
+  onClosePanel,
 }: WorkspacePanelProps): React.JSX.Element {
-  const activeMeta = tabMeta[activeTab];
   const panelId = useId();
   const panelRef = useRef<HTMLElement>(null);
-  const environmentToolMenuRef = useRef<HTMLDetailsElement>(null);
+  const visibleSurfaces = surfaces.filter((surface) => !unavailable[surface]);
+  const selected = activeSurface && visibleSurfaces.includes(activeSurface)
+    ? activeSurface
+    : null;
+  const actions = surfaceActions(unavailable, badges, liveAgentCount);
+  const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
+    useDismissibleMenu<"add">();
+  const wasVisibleRef = useRef(visible);
+  useEffect(() => {
+    const opened = visible && !wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+    if (!opened || selected) return;
+    const frame = window.requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && !active.closest("[data-panel-layout-controls]")) return;
+      panelRef.current
+        ?.querySelector<HTMLElement>(".workspace-panel-launcher")
+        ?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selected, visible]);
 
-  const selectWorkspaceTool = (
-    tab: WorkspacePanelTab,
-    keyboardActivated: boolean,
-  ): void => {
-    environmentToolMenuRef.current?.removeAttribute("open");
-    onTabChange(tab);
-    if (!keyboardActivated) return;
+  const focusTab = (surface: WorkspacePanelTab): void => {
     window.requestAnimationFrame(() => {
       panelRef.current
-        ?.querySelector<HTMLElement>(`[data-workspace-tab="${tab}"]`)
+        ?.querySelector<HTMLElement>(`[data-workspace-tab="${surface}"]`)
         ?.focus();
     });
   };
 
+  const openSurface = (surface: WorkspacePanelTab): void => {
+    dismissMenu("context-change");
+    onOpenSurface(surface);
+    focusTab(surface);
+  };
+
+  const closeSurface = (surface: WorkspacePanelTab, keyboard: boolean): void => {
+    const index = visibleSurfaces.indexOf(surface);
+    onCloseSurface(surface);
+    if (!keyboard) return;
+    const remaining = visibleSurfaces.filter((entry) => entry !== surface);
+    const fallback = remaining[Math.min(index, remaining.length - 1)];
+    if (fallback) focusTab(fallback);
+    else {
+      window.requestAnimationFrame(() => {
+        panelRef.current?.querySelector<HTMLElement>(".workspace-panel-launcher")?.focus();
+      });
+    }
+  };
+
   const handleTabKeyDown = (
     event: ReactKeyboardEvent<HTMLButtonElement>,
-    currentTab: WorkspacePanelTab,
+    surface: WorkspacePanelTab,
   ): void => {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      closeSurface(surface, true);
+      return;
+    }
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const currentIndex = tabs.indexOf(currentTab);
-    if (currentIndex < 0 || tabs.length === 0) return;
+    const currentIndex = visibleSurfaces.indexOf(surface);
+    if (currentIndex < 0) return;
     event.preventDefault();
     const key = (event.key === "ArrowLeft"
       ? "ArrowUp"
       : event.key === "ArrowRight" ? "ArrowDown" : event.key
     ) as SidebarNavigationKey;
-    const nextIndex = nextSidebarNavigationIndex(
-      currentIndex,
-      key,
-      tabs.length,
-    );
-    const nextTab = tabs[nextIndex];
-    if (nextTab) selectWorkspaceTool(nextTab, true);
+    const nextSurface = visibleSurfaces[
+      nextSidebarNavigationIndex(currentIndex, key, visibleSurfaces.length)
+    ];
+    if (nextSurface) {
+      onActivateSurface(nextSurface);
+      focusTab(nextSurface);
+    }
+  };
+
+  const handleAddMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const action = surfaceShortcutActionForKey(actions, event.nativeEvent);
+    if (action) {
+      event.preventDefault();
+      event.stopPropagation();
+      openSurface(action.surface);
+      return;
+    }
+    navigateMenuItems(event, '[role="menuitem"]:not([aria-disabled="true"])');
   };
 
   return (
     <aside
       ref={panelRef}
-      className="workspace-panel"
+      className={`workspace-panel is-${presentation}`}
       aria-label="Workspace tools"
-      data-active-workspace-tool={activeTab}
+      data-active-workspace-tool={selected ?? "launcher"}
       hidden={!visible}
+      onKeyDown={(event) => {
+        if (
+          presentation === "sheet"
+          && event.key === "Escape"
+          && !event.defaultPrevented
+          && onClosePanel
+        ) {
+          event.preventDefault();
+          onClosePanel();
+          window.requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>('[data-panel-layout-controls] [data-right-panel-toggle]')?.focus();
+          });
+        }
+      }}
     >
-      {activeTab === "environment" ? (
-        <header className="workspace-panel-environment-header">
-          <div className="workspace-panel-environment-title">
-            <div className="workspace-panel-environment-tablist" role="tablist" aria-label="Workspace tools">
-              <button
-                type="button"
-                role="tab"
-                id={`${panelId}-tab-environment`}
-                aria-selected="true"
-                aria-controls={`${panelId}-content`}
-                data-workspace-tab="environment"
-                onFocus={() => prefetchWorkspaceTool("environment")}
-                onKeyDown={(event) => handleTabKeyDown(event, "environment")}
-              >
-                Environment
-              </button>
-            </div>
-            {tabs.some((tab) => tab !== "environment") && (
-              <details
-                ref={environmentToolMenuRef}
-                className="workspace-panel-tool-chooser"
-                onBlur={(event) => {
-                  if (event.currentTarget.contains(event.relatedTarget)) return;
-                  environmentToolMenuRef.current?.removeAttribute("open");
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  environmentToolMenuRef.current?.removeAttribute("open");
-                  environmentToolMenuRef.current?.querySelector("summary")?.focus();
-                }}
-              >
-                <summary aria-label="Choose workspace tool" title="Choose workspace tool">
-                  <ChevronDown size={11} aria-hidden="true" />
-                </summary>
-                <div role="group" aria-label="Other workspace tools">
-                  {tabs.filter((tab) => tab !== "environment").map((tab) => {
-                    const meta = tabMeta[tab];
-                    return (
-                      <button
-                        type="button"
-                        onFocus={() => prefetchWorkspaceTool(tab)}
-                        onPointerEnter={() => prefetchWorkspaceTool(tab)}
-                        onClick={(event) => selectWorkspaceTool(tab, event.detail === 0)}
-                        key={tab}
-                      >
-                        {meta.icon}<span>{meta.label}</span>
-                      </button>
-                    );
-                  })}
+      <header className="workspace-panel-tabs drag-region">
+        {visibleSurfaces.length > 0 && (
+          <div className="workspace-panel-tablist no-drag" role="tablist" aria-label="Panel surfaces">
+            {visibleSurfaces.map((surface) => {
+              const meta = RIGHT_PANEL_SURFACE_META[surface];
+              const active = surface === selected;
+              const badge = surface === "agents" ? liveAgentCount : badges[surface] ?? 0;
+              return (
+                <div
+                  key={surface}
+                  className={active ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
+                  onMouseDown={(event) => {
+                    if (event.button === 1) event.preventDefault();
+                  }}
+                  onAuxClick={(event) => {
+                    if (event.button !== 1) return;
+                    event.preventDefault();
+                    closeSurface(surface, false);
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    id={`${panelId}-tab-${surface}`}
+                    aria-label={badge > 0 ? `${meta.label} ${badge}` : meta.label}
+                    aria-selected={active}
+                    aria-controls={`${panelId}-content`}
+                    aria-keyshortcuts="Delete"
+                    data-workspace-tab={surface}
+                    tabIndex={active || (!selected && surface === visibleSurfaces[0]) ? 0 : -1}
+                    title={meta.label}
+                    onFocus={() => prefetchWorkspaceTool(surface)}
+                    onPointerEnter={() => prefetchWorkspaceTool(surface)}
+                    onKeyDown={(event) => handleTabKeyDown(event, surface)}
+                    onClick={() => onActivateSurface(surface)}
+                  >
+                    {surfaceIcons[surface]}
+                    <span>{meta.label}</span>
+                    {badge > 0 && <span className="workspace-panel-badge" aria-hidden="true">{badge}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="workspace-panel-tab-close"
+                    aria-label={`Close ${meta.label}`}
+                    title={`Close ${meta.label}`}
+                    tabIndex={-1}
+                    onClick={() => closeSurface(surface, false)}
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </button>
                 </div>
-              </details>
-            )}
+              );
+            })}
           </div>
-          <div className="workspace-panel-environment-actions">
-            {onOpenSettings && (
-              <IconButton label="Environment settings" onClick={onOpenSettings}>
-                <Settings size={14} />
-              </IconButton>
-            )}
-          </div>
-        </header>
-      ) : (
-        <header className="workspace-panel-tabs">
-        <div
-          className="workspace-panel-tablist"
-          role="tablist"
-          aria-label="Workspace tools"
-        >
-          {tabs.map((tab) => {
-            const meta = tabMeta[tab];
-            const active = tab === activeTab;
-            const badge = badges?.[tab];
-            const hasBadge = typeof badge === "number" && badge > 0;
-            return (
-              <button
-                type="button"
-                role="tab"
-                id={`${panelId}-tab-${tab}`}
-                aria-label={hasBadge ? `${meta.label} ${badge}` : meta.label}
-                aria-selected={active}
-                aria-controls={`${panelId}-content`}
-                data-workspace-tab={tab}
-                tabIndex={active ? 0 : -1}
-                className={active ? "workspace-panel-tab is-active" : "workspace-panel-tab"}
-                onFocus={() => prefetchWorkspaceTool(tab)}
-                onPointerDown={() => prefetchWorkspaceTool(tab)}
-                onPointerEnter={() => prefetchWorkspaceTool(tab)}
-                onKeyDown={(event) => handleTabKeyDown(event, tab)}
-                onClick={(event) => selectWorkspaceTool(tab, event.detail === 0)}
-                key={tab}
-              >
-                {meta.icon}
-                <span>{meta.label}</span>
-                {hasBadge && <span className="workspace-panel-badge">{badge}</span>}
-              </button>
-            );
-          })}
-        </div>
-        {onClose && (
-          <IconButton label="Close workspace tools" onClick={onClose}>
-            <X size={16} />
-          </IconButton>
         )}
-        </header>
+        {visibleSurfaces.length > 0 && (
+          <div className="workspace-panel-add-anchor no-drag">
+            <button
+              ref={(node) => setMenuTrigger("add", node)}
+              type="button"
+              className="workspace-panel-add"
+              aria-label="Add panel surface"
+              title="Add panel surface"
+              aria-haspopup="menu"
+              aria-expanded={menu === "add"}
+              aria-controls={`${panelId}-add-menu`}
+              onFocus={() => void loadWorkspacePanelLauncher()}
+              onPointerEnter={() => void loadWorkspacePanelLauncher()}
+              onClick={() => toggleMenu("add")}
+            >
+              <Plus size={14} aria-hidden="true" />
+            </button>
+            {menu === "add" && (
+              <div
+                ref={(node) => setMenuPopover("add", node)}
+                id={`${panelId}-add-menu`}
+                className="header-popover workspace-panel-add-menu"
+                role="menu"
+                aria-label="Add panel surface"
+                onKeyDownCapture={handleAddMenuKeyDown}
+              >
+                <Suspense fallback={<p className="header-menu-hint-text" role="status">Loading…</p>}>
+                  <AddSurfaceMenuItems actions={actions} onOpen={openSurface} />
+                  <FocusFirstMenuItem menuId={`${panelId}-add-menu`} />
+                </Suspense>
+              </div>
+            )}
+          </div>
+        )}
+      </header>
+      {!selected && (
+        <Suspense fallback={<div className="workspace-panel-launcher" aria-busy="true" />}>
+          <RightPanelLauncher actions={actions} onOpen={openSurface} />
+        </Suspense>
       )}
       <div
         className="workspace-panel-content"
         id={`${panelId}-content`}
         role="tabpanel"
-        aria-labelledby={`${panelId}-tab-${activeTab}`}
-        aria-label={`${activeMeta.label} panel`}
+        hidden={!selected}
+        aria-labelledby={selected ? `${panelId}-tab-${selected}` : undefined}
+        aria-label={selected ? `${RIGHT_PANEL_SURFACE_META[selected].label} panel` : undefined}
       >
         {children}
       </div>

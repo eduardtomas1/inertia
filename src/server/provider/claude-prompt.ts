@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 
 import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderSteerInput } from "./contracts";
+import { readBoundedProviderImage, throwIfProviderImageAborted } from "./provider-image-read";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const PROMPT_RESERVATION_OVERHEAD_BYTES = 4 * 1024;
@@ -11,24 +11,23 @@ const PROMPT_RESERVATION_OVERHEAD_BYTES = 4 * 1024;
 export async function claudePrompt(
   prompt: string,
   imagePaths: readonly string[],
+  signal?: AbortSignal,
 ): Promise<SDKUserMessage> {
-  const images = await Promise.all(imagePaths.map(async (path) => {
+  throwIfProviderImageAborted("Claude", signal);
+  const images: Array<{ data: Buffer; mediaType: NonNullable<ReturnType<typeof imageMediaType>> }> = [];
+  let imageBytes = 0;
+  for (const path of imagePaths) {
     const mediaType = imageMediaType(path);
     if (!mediaType) {
       throw new Error(
         `Claude does not support the attached image type: ${extname(path) || "unknown"}.`,
       );
     }
-    const data = await readFile(path);
-    return { data, mediaType };
-  }));
-  const imageBytes = images.reduce(
-    (total, { data }) => total + data.byteLength,
-    0,
-  );
-  if (imageBytes > MAX_IMAGE_BYTES) {
-    throw new Error("Claude image attachments exceed the 20 MB safety limit.");
+    const data = await readBoundedProviderImage("Claude", path, imageBytes, signal);
+    imageBytes += data.byteLength;
+    images.push({ data, mediaType });
   }
+  throwIfProviderImageAborted("Claude", signal);
   const content: Array<Record<string, unknown>> = images.map(
     ({ data, mediaType }) => ({
       type: "image",
@@ -47,6 +46,7 @@ export async function claudePrompt(
       content,
     } as unknown as SDKUserMessage["message"],
     parent_tool_use_id: null,
+    origin: { kind: "human" },
   };
 }
 

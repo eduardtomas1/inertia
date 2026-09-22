@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import {
-  chmod,
   lstat,
   mkdir,
   open,
@@ -10,6 +9,8 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+import { FILE_OPEN_DIRECTORY, FILE_OPEN_NO_FOLLOW } from "../../../node/platform-file-open-flags";
 
 const GENERATED_DIRECTORY = "runtime-generated-attachments";
 const MAX_GENERATED_RECORDS = 256;
@@ -46,8 +47,9 @@ function wait(delayMs: number): Promise<void> {
   return new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
 }
 
-async function unlinkGenerated(path: string): Promise<void> {
+async function unlinkGenerated(path: string, verifyRoot: () => Promise<void>): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    await verifyRoot();
     try {
       await unlink(path);
       return;
@@ -60,33 +62,55 @@ async function unlinkGenerated(path: string): Promise<void> {
   }
 }
 
-async function secureGeneratedDirectory(dataDirectory: string): Promise<string> {
+function sameDirectory(left: BigIntStats, right: BigIntStats): boolean {
+  return right.isDirectory() && !right.isSymbolicLink()
+    && left.dev === right.dev && left.ino === right.ino
+    && (process.platform === "win32" || ((right.mode & 0o777n) === 0o700n
+      && right.uid === left.uid
+      && (typeof process.getuid !== "function" || right.uid === BigInt(process.getuid()))));
+}
+
+async function verifyGeneratedDirectory(directory: string, authority: BigIntStats): Promise<void> {
+  const named = await lstat(directory, { bigint: true });
+  if (!sameDirectory(authority, named) || await realpath(directory) !== directory) {
+    throw new Error("Generated attachment storage authority changed.");
+  }
+}
+
+async function secureGeneratedDirectory(dataDirectory: string): Promise<{
+  directory: string;
+  authority: BigIntStats;
+}> {
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
   const parent = await realpath(dataDirectory);
   const requested = join(parent, GENERATED_DIRECTORY);
   await mkdir(requested, { recursive: true, mode: 0o700 });
-  const named = await lstat(requested);
+  const named = await lstat(requested, { bigint: true });
   if (!named.isDirectory() || named.isSymbolicLink()) {
     throw new Error("Generated attachment storage is not a safe directory.");
   }
-  if (process.platform !== "win32") await chmod(requested, 0o700);
+  if (process.platform !== "win32") {
+    const handle = await open(requested,
+      constants.O_RDONLY | FILE_OPEN_DIRECTORY | FILE_OPEN_NO_FOLLOW);
+    try {
+      const pinned = await handle.stat({ bigint: true });
+      if (!pinned.isDirectory() || pinned.dev !== named.dev || pinned.ino !== named.ino) {
+        throw new Error("Generated attachment storage authority changed.");
+      }
+      await handle.chmod(0o700);
+    } finally {
+      await handle.close();
+    }
+  }
   const canonical = await realpath(requested);
-  const verified = await lstat(canonical);
+  const verified = await lstat(requested, { bigint: true });
   if (
-    dirname(canonical) !== parent
+    canonical !== requested
+    || dirname(canonical) !== parent
     || !contained(parent, canonical)
-    || !verified.isDirectory()
-    || verified.isSymbolicLink()
-    || (
-      process.platform !== "win32"
-      && (verified.mode & 0o777) !== 0o700
-    )
-    || (
-      typeof process.getuid === "function"
-      && verified.uid !== process.getuid()
-    )
+    || !sameDirectory(named, verified)
   ) throw new Error("Generated attachment storage could not be secured.");
-  return canonical;
+  return { directory: canonical, authority: verified };
 }
 
 export class PrivateGeneratedAttachmentStore {
@@ -97,6 +121,7 @@ export class PrivateGeneratedAttachmentStore {
 
   private constructor(
     readonly directory: string,
+    private readonly directoryAuthority: BigIntStats,
     limits: PrivateGeneratedAttachmentStoreLimits,
     records: Map<string, number>,
   ) {
@@ -115,7 +140,8 @@ export class PrivateGeneratedAttachmentStore {
     dataDirectory: string,
     limits: PrivateGeneratedAttachmentStoreLimits = {},
   ): Promise<PrivateGeneratedAttachmentStore> {
-    const directory = await secureGeneratedDirectory(resolve(dataDirectory));
+    const { directory, authority } = await secureGeneratedDirectory(resolve(dataDirectory));
+    const verifyRoot = async (): Promise<void> => await verifyGeneratedDirectory(directory, authority);
     const records = new Map<string, number>();
     for (const name of await readdir(directory)) {
       if (OS_METADATA_NAMES.has(name.toLowerCase())) {
@@ -131,13 +157,14 @@ export class PrivateGeneratedAttachmentStore {
         if (limits.preserveExisting) {
           throw new Error("Generated attachment storage contains an unsafe entry.");
         }
-        await unlinkGenerated(path);
+        await unlinkGenerated(path, verifyRoot);
         continue;
       }
       if (limits.preserveExisting) records.set(path, info.size);
-      else await unlinkGenerated(path);
+      else await unlinkGenerated(path, verifyRoot);
     }
-    const store = new PrivateGeneratedAttachmentStore(directory, limits, records);
+    await verifyRoot();
+    const store = new PrivateGeneratedAttachmentStore(directory, authority, limits, records);
     const usage = store.usage();
     if (usage.records > store.maxRecords || usage.bytes > store.maxBytes) {
       throw new Error("Generated attachment storage exceeds its safe capacity.");
@@ -154,6 +181,7 @@ export class PrivateGeneratedAttachmentStore {
 
   async writeJpeg(bytes: Uint8Array): Promise<string> {
     return await this.serialize(async () => {
+      await this.verifyRoot();
       const usage = this.usage();
       if (
         usage.records + 1 > this.maxRecords
@@ -166,10 +194,12 @@ export class PrivateGeneratedAttachmentStore {
         0o600,
       );
       try {
+        await this.verifyRoot();
         await file.writeFile(bytes);
+        await this.verifyRoot();
       } catch (error) {
         await file.close().catch(() => undefined);
-        await unlinkGenerated(path).catch(() => undefined);
+        await unlinkGenerated(path, () => this.verifyRoot()).catch(() => undefined);
         throw error;
       } finally {
         await file.close().catch(() => undefined);
@@ -190,7 +220,7 @@ export class PrivateGeneratedAttachmentStore {
         if (this.records.has(path)) owned.push(path);
       }
       const settled = await Promise.allSettled(owned.map(async (path) => {
-        await unlinkGenerated(path);
+        await unlinkGenerated(path, () => this.verifyRoot());
         this.records.delete(path);
       }));
       const failed = settled.find(
@@ -200,6 +230,10 @@ export class PrivateGeneratedAttachmentStore {
         throw failed.reason;
       }
     });
+  }
+
+  private async verifyRoot(): Promise<void> {
+    await verifyGeneratedDirectory(this.directory, this.directoryAuthority);
   }
 
   private async serialize<T>(operation: () => Promise<T>): Promise<T> {

@@ -458,13 +458,16 @@ function startOpenCodeRun(
       }
 
       if (sessionId) {
-        await initialize(
+        const resumed = await initialize(
           "session resume",
           async (signal) => await client!.session.get(
             { sessionID: sessionId!, directory: options.input.cwd },
             { signal, throwOnError: true },
           ),
         );
+        if (resumed.data.id !== sessionId) {
+          throw new Error("OpenCode did not confirm the exact session selected for this run.");
+        }
         await initialize(
           "session permission update",
           async (signal) => await client!.session.update(
@@ -505,6 +508,9 @@ function startOpenCodeRun(
           { signal, throwOnError: true },
         ),
       );
+      if (session.data.id !== sessionId) {
+        throw new Error("OpenCode did not confirm the exact session selected for this run.");
+      }
       const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
       // OpenCode image support is model-negotiated. Publish the exact-run
       // observation before any attachment can cross the provider boundary.
@@ -702,9 +708,10 @@ function startOpenCodeRun(
       if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
         cleanupConfirmed = false;
       }
+      const serverStopDetail = redactHostMcp(serverDiagnostic(serverOutput));
       const rawError = redactHostMcp(terminalError ?? safeError(
         error,
-        redactHostMcp(serverDiagnostic(serverOutput)),
+        serverStopDetail,
       ));
       outcome = cancelRequested
         ? { status: "cancelled" }
@@ -717,6 +724,7 @@ function startOpenCodeRun(
               "sdk/exception",
               child,
               options.input.cwd,
+              serverStopDetail,
             ),
           };
     }

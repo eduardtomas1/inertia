@@ -9,7 +9,7 @@ import {
 } from "./portable-provider-fixture";
 import { executableProcessExists } from "./executable-process";
 
-export function fakeAppServer(roots: string[]): { root: string; command: string; capturePath: string } {
+export function fakeAppServer(roots: string[], holdErrorCapture = false): { root: string; command: string; capturePath: string } {
   const root = portableFixtureRoot("app server");
   roots.push(root);
   const command = portableNodeExecutable(root, "codex");
@@ -20,6 +20,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
 const capture = (value) => fs.appendFileSync(process.env.INERTIA_APP_SERVER_CAPTURE, JSON.stringify(value) + "\\n");
+const heldErrors = [];
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const sendBatch = (values) => process.stdout.write(values.map((value) => JSON.stringify(value)).join("\\n") + "\\n");
 if (process.env.INERTIA_APP_SERVER_SCENARIO === "transport-observed") {
@@ -93,7 +94,14 @@ send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status:
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
 const message = JSON.parse(line);
-capture(message);
+// Hold receipt evidence until explicitly released; force cleanup need not wait
+// for the rejected peer to record its response.
+if (message.method === "fixture/releaseErrorCapture") {
+  heldErrors.splice(0).forEach(capture);
+  return;
+}
+if (${holdErrorCapture} && message.error) heldErrors.push(message);
+else capture(message);
 if (message.method === "initialize") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "rpc-timeout") return;
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "metadata-line-overflow") {
@@ -258,6 +266,12 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-turn-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: "stale-turn", status: "inProgress", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } },
+    ]);
+  }
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(

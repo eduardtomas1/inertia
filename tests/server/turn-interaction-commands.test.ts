@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -24,6 +25,8 @@ import {
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import type { TurnAdmissionLease } from "../../src/server/runtime/turns/turn-controller-types";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
+import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
+import { CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE } from "../../src/node/conversation-attachment-store-capacity";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const execFileAsync = promisify(execFile);
@@ -185,6 +188,7 @@ function dependencies(options: {
         },
       })),
       conversationPath: vi.fn(() => options.conversationPath ?? tmpdir()),
+      hasConversationMessages: vi.fn(() => false),
       checkpointCount: options.checkpointCount ?? vi.fn(() => 0),
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
@@ -609,6 +613,64 @@ describe("new-turn admission recovery", () => {
 });
 
 describe("attachment send handoff", () => {
+  it.each([
+    ["New\nchat", "New chat", false],
+    ["New\tthread", "New thread", false],
+    ["New\nchat", "New chat", true],
+    ["New\tthread", "New thread", true],
+  ] as const)("keeps the first title for %j as %j (providers: %s)", async (content, expectedTitle, enableProviders) => {
+    let hasMessages = false;
+    const runtime = dependencies({
+      queue: vi.fn(() => {
+        hasMessages = true;
+        return queuedTurn();
+      }),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders,
+    });
+    const original = runtime.store.conversation(conversationId);
+    let title = "New chat";
+    vi.mocked(runtime.store.conversation).mockImplementation(() => ({ ...original, title }));
+    vi.mocked(runtime.store.hasConversationMessages).mockImplementation(() => hasMessages);
+    vi.mocked(runtime.store.createMessage).mockImplementation(() => {
+      hasMessages = true;
+      return { id: "message-id" } as ReturnType<typeof runtime.store.createMessage>;
+    });
+    vi.mocked(runtime.store.updateConversation).mockImplementation((_id, update) => {
+      title = update.title!;
+      return { ...original, title };
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const first = messageCommand();
+    first.payload.content = content;
+    await handler({} as never, first);
+    expect(title).toBe(expectedTitle);
+    expect(hasMessages).toBe(true);
+    const followUp = messageCommand();
+    followUp.requestId = "77777777-7777-4777-8777-777777777777";
+    followUp.payload.content = "Do not rename this conversation";
+    await handler({} as never, followUp);
+    expect(title).toBe(expectedTitle);
+    expect(runtime.store.updateConversation).toHaveBeenCalledOnce();
+  });
+
+  it("creates a single-line title from a multiline first message", async () => {
+    const runtime = dependencies({
+      queue: vi.fn(() => null),
+      relinquishAll: vi.fn(async () => undefined),
+      enableProviders: false,
+    });
+    const original = runtime.store.conversation(conversationId);
+    vi.mocked(runtime.store.conversation).mockReturnValue({ ...original, title: "New chat" });
+    const command = messageCommand();
+    command.payload.content = "Please fix this:\n\n- first issue\r\n- second issue";
+    await expect(createTurnInteractionCommandHandler(runtime)({} as never, command))
+      .resolves.toBe("handled");
+    expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
+      title: "Please fix this: - first issue - second issue",
+    });
+  });
+
   it("preserves a manual title entered during attachment preparation", async () => {
     const runtime = dependencies({
       queue: vi.fn(() => null),
@@ -1842,5 +1904,152 @@ describe("message attachment ownership transfer", () => {
       "renderer acknowledgement failed",
     );
     expect(relinquishAll).not.toHaveBeenCalled();
+  });
+});
+
+describe("image messages against a full durable attachment store", () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY2BgYPgPAAEEAQB9ssjfAAAAAElFTkSuQmCC",
+    "base64",
+  );
+  const payload = (id: string = randomUUID()) => ({
+    attachment: { id, name: "image.png", path: `/private/runtime/${id}.png`, mimeType: "image/png" as const, size: png.length },
+    bytes: png,
+  });
+
+  async function fullStore(
+    history: string[] | ((ids: string[]) => string[]) = (ids) => ids,
+  ) {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-full-attachment-store-"));
+    const store = await ConversationAttachmentStore.open(directory, { maxRecords: 3 });
+    const retentionId = randomUUID();
+    const settled = (await store.retain([payload(), payload(), payload()], undefined, retentionId))
+      .map(({ id }) => id);
+    store.acceptRetention(retentionId);
+    const evictable = typeof history === "function" ? history(settled) : history;
+    return {
+      store,
+      settled,
+      evictable,
+      cleanup: async () => {
+        await store.close();
+        await rm(directory, { recursive: true, force: true });
+      },
+    };
+  }
+
+  function wire(
+    full: Awaited<ReturnType<typeof fullStore>>,
+    payloads: ReturnType<typeof payload>[],
+    queue: ReturnType<typeof vi.fn> = vi.fn(),
+  ): TurnInteractionCommandDependencies {
+    const handlerDependencies = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      resolvedPayloads: payloads,
+    });
+    handlerDependencies.conversationAttachments = full.store;
+    Object.assign(handlerDependencies.store, {
+      evictableAttachmentIds: vi.fn(() => full.evictable),
+    });
+    return handlerDependencies;
+  }
+
+  function imageCommand(
+    payloads: ReturnType<typeof payload>[],
+  ): Extract<ClientCommand, { type: "message.send" }> {
+    return {
+      type: "message.send",
+      requestId: randomUUID(),
+      payload: {
+        conversationId,
+        content: "Please inspect the attached image.",
+        attachments: payloads.map(({ attachment }) => ({ ...attachment, path: attachment.id })),
+      },
+    };
+  }
+
+  it.each([1, 2])("steers %i image follow-up(s) into a running turn by evicting settled history", async (count) => {
+    const full = await fullStore();
+    try {
+      const payloads = Array.from({ length: count }, () => payload());
+      const handlerDependencies = wire(full, payloads);
+      vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+      vi.mocked(handlerDependencies.turns.steer).mockImplementation(async (
+        _lease, input, attachments, acknowledge,
+      ) => {
+        expect(input.imagePaths).toHaveLength(count);
+        for (const path of input.imagePaths) {
+          await expect(readFile(path)).resolves.toEqual(png);
+        }
+        acknowledge?.();
+        return {
+          id: randomUUID(),
+          conversationId,
+          turnId: "88888888-8888-4888-8888-888888888888",
+          role: "user",
+          content: input.content,
+          attachments: [...(attachments ?? [])],
+          createdAt: "2026-09-22T09:53:19.126Z",
+        };
+      });
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        imageCommand(payloads),
+      )).resolves.toBe("handled");
+
+      expect(handlerDependencies.turns.steer).toHaveBeenCalledOnce();
+      for (const evicted of full.settled.slice(0, count)) {
+        await expect(full.store.preview(evicted)).resolves.toBeNull();
+      }
+      for (const kept of full.settled.slice(count)) {
+        await expect(full.store.preview(kept)).resolves.not.toBeNull();
+      }
+    } finally {
+      await full.cleanup();
+    }
+  });
+
+  it("starts a normal image follow-up after the turn completed", async () => {
+    const full = await fullStore();
+    try {
+      const payloads = [payload()];
+      const queue = vi.fn(() => queuedTurn());
+      const handlerDependencies = wire(full, payloads, queue);
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        imageCommand(payloads),
+      )).resolves.toBe("handled");
+
+      const [request] = queue.mock.calls[0] as unknown as [{ imagePaths: string[] }];
+      expect(request.imagePaths).toHaveLength(1);
+      await expect(readFile(request.imagePaths[0]!)).resolves.toEqual(png);
+      await expect(full.store.preview(full.settled[0]!)).resolves.toBeNull();
+    } finally {
+      await full.cleanup();
+    }
+  });
+
+  it("explains a full store whose attachments all belong to running chats", async () => {
+    const full = await fullStore([]);
+    try {
+      const payloads = [payload()];
+      const handlerDependencies = wire(full, payloads);
+      vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        imageCommand(payloads),
+      )).rejects.toThrow(CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE);
+
+      expect(handlerDependencies.turns.steer).not.toHaveBeenCalled();
+      for (const kept of full.settled) {
+        await expect(full.store.preview(kept)).resolves.not.toBeNull();
+      }
+    } finally {
+      await full.cleanup();
+    }
   });
 });

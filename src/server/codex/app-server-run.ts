@@ -64,7 +64,7 @@ interface PendingClientRequest {
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
   recordFailure: boolean;
-  onResponseFrame?: () => void;
+  onResponseFrame?: (result?: JsonObject) => void;
 }
 
 export function startCodexAppServerRun(
@@ -96,6 +96,7 @@ export function startCodexAppServerRun(
   let nextRequestId = 1;
   let providerThreadId = options.sessionId;
   let activeTurnId: string | undefined;
+  let requestedTurnId: string | null | undefined;
   let cancelRequested = false;
   let settled = false;
   let spawned = false;
@@ -282,7 +283,9 @@ export function startCodexAppServerRun(
     events?.settleInteractions();
     ownedTerminationArmed = true;
     void (async () => {
-      let finalStatus = status;
+      // Capture an earlier user cancellation at terminal acceptance. A later
+      // cancellation cannot rewrite this outcome while owned cleanup drains.
+      let finalStatus: CodexAppServerResult["status"] = cancelRequested ? "cancelled" : status;
       let cleanupConfirmed = true;
       try {
         // A terminal App Server turn has no further process work to preserve.
@@ -357,7 +360,7 @@ export function startCodexAppServerRun(
   const request = (
     method: string,
     params: JsonObject,
-    onResponseFrame?: () => void,
+    onResponseFrame?: (result?: JsonObject) => void,
     recordFailure = true,
     timeoutMs = options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS,
     useCancellationReserve = false,
@@ -488,6 +491,7 @@ export function startCodexAppServerRun(
     setActiveTurnId: (turnId) => {
       activeTurnId = turnId;
     },
+    requestedTurnId: () => requestedTurnId,
     cancelRequested: () => cancelRequested,
     lastError: () => lastError,
     setLastError: (message) => {
@@ -503,7 +507,21 @@ export function startCodexAppServerRun(
       terminalEvent = event;
     },
     writeMessage,
-    cancel,
+    cancel: (reason) => {
+      if (!cancelRequested && reason === "malformed-protocol") {
+        // Rejecting unsafe provider output is a failed turn, not a user
+        // cancellation. Accept it before a later interrupt/completion races
+        // cleanup; finish still joins the same owned process-tree proof.
+        rememberFailure(
+          "malformed-protocol",
+          "Codex sent an invalid App Server request.",
+          lastError,
+        );
+        finish("failed", child.exitCode, child.signalCode);
+      } else {
+        cancel();
+      }
+    },
     finish,
     rememberFailure,
   });
@@ -546,7 +564,7 @@ export function startCodexAppServerRun(
       if (!pending) return;
       clearTimeout(pending.timeout);
       pendingRequests.delete(id);
-      pending.onResponseFrame?.();
+      pending.onResponseFrame?.(objectValue(message.result));
       const error = objectValue(message.error);
       if (error) {
         const errorMessage =
@@ -669,6 +687,9 @@ export function startCodexAppServerRun(
       activeTurnId: () => activeTurnId,
       setActiveTurnId: (turnId) => {
         activeTurnId = turnId;
+      },
+      setRequestedTurnId: (turnId) => {
+        requestedTurnId = turnId;
       },
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
@@ -827,13 +848,14 @@ interface OpenCodexTurnOptions {
   request: (
     method: string,
     params: JsonObject,
-    onResponseFrame?: () => void,
+    onResponseFrame?: (result?: JsonObject) => void,
     recordFailure?: boolean,
   ) => Promise<JsonObject>;
   notify: (method: string, params?: JsonObject) => void;
   setProviderThreadId: (threadId: string) => void;
   activeTurnId: () => string | undefined;
   setActiveTurnId: (turnId: string | undefined) => void;
+  setRequestedTurnId?: (turnId: string | null | undefined) => void;
   phase: () => CodexRunPhase;
   hasObservedTurn: (turnId: string) => boolean;
   goalProjectionSequence: () => number;
@@ -869,6 +891,7 @@ export async function openCodexTurn({
   setProviderThreadId,
   activeTurnId,
   setActiveTurnId,
+  setRequestedTurnId,
   phase,
   hasObservedTurn,
   goalProjectionSequence,
@@ -1054,6 +1077,7 @@ export async function openCodexTurn({
     input.push({ type: "localImage", path });
   }
   setPhase("starting-turn");
+  setRequestedTurnId?.(null);
   const started = await request("turn/start", {
     threadId: openedThreadId,
     input,
@@ -1078,6 +1102,8 @@ export async function openCodexTurn({
         },
       },
     } : {}),
+  }, (result) => {
+    setRequestedTurnId?.(boundedText(objectValue(result?.turn)?.id, 512));
   });
   if (isSettled()) return;
   const turn = objectValue(started.turn);

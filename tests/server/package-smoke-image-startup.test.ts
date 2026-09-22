@@ -30,16 +30,43 @@ async function oldProfile() {
     mimeType: "image/png", size: png.length,
   }, bytes: png }], undefined, retentionId);
   seeder.acceptRetention(retentionId);
+  const orphans = [".orphan-first", ".orphan-second"];
+  for (const orphan of orphans) await writeFile(join(seeder.directory, orphan), "orphan");
   await seeder.close();
-  return { root, input, historical: historical! };
+  return { root, input, historical: historical!, orphans };
 }
 
-it("waits for pending startup reconciliation without changing ordinary retention admission or historical bytes", async () => {
+type RemoveRunner = NonNullable<Parameters<typeof ConversationAttachmentStore.open>[1]>["operationRunner"];
+
+function delayedRemoval(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    const abort = (): void => { clearTimeout(timer); reject(signal?.reason); };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+function slowRemovals(
+  delayMs: number,
+  observe: (attempt: number, operation: Parameters<NonNullable<RemoveRunner>>[0], signal: AbortSignal | undefined) =>
+    { result: Promise<void>; stopped: Promise<void> } | null = () => null,
+): NonNullable<RemoveRunner> {
+  let attempts = 0;
+  return (operation, signal) => {
+    if (operation.operation !== "remove") return runConversationAttachmentStoreChild(operation, signal);
+    const custom = observe(++attempts, operation, signal);
+    if (custom) return custom;
+    const result = delayedRemoval(delayMs, signal)
+      .then(() => runConversationAttachmentStoreChild(operation, signal).result);
+    return { result, stopped: result.then(() => undefined, () => undefined) };
+  };
+}
+
+it("waits for pending startup cleanup without changing ordinary retention admission or historical bytes", async () => {
   const f = await oldProfile();
   const candidate = await ConversationAttachmentStore.open(f.root, { reconciliationBatchEntries: 1 });
   stores.push(candidate);
-  // Hold the scheduled 25 ms continuation, not filesystem work or native
-  // child events. This recreates the worker's immediate-after-ready caller.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await candidate.reconcile([f.historical]);
   await expect(candidate.retain([{ attachment: f.historical, bytes: png }]))
@@ -52,13 +79,13 @@ it("waits for pending startup reconciliation without changing ordinary retention
     markAdmission(); return originalRetain(...args);
   });
   const smoking = runPackagedImageRetentionSmoke(f.input, result, candidate);
-  // Let actual file I/O complete without advancing the held continuation.
   await admissionStarted;
   await expect(readFile(result)).rejects.toMatchObject({ code: "ENOENT" });
   expect(await readFile(f.historical.path)).toEqual(png);
-  await vi.advanceTimersByTimeAsync(25);
-  await candidate.usage();
-  await vi.advanceTimersByTimeAsync(25);
+  for (let step = 0; step < 4; step += 1) {
+    await vi.advanceTimersByTimeAsync(25);
+    await candidate.usage();
+  }
   await smoking;
   expect(JSON.parse(await readFile(result, "utf8"))).toEqual({ ok: true });
   expect(await readFile(f.historical.path)).toEqual(png);
@@ -66,34 +93,36 @@ it("waits for pending startup reconciliation without changing ordinary retention
   vi.useRealTimers();
 });
 
-it("keeps startup bounded and completes real 300 ms background reads without reducing their delay", async () => {
+it("keeps startup bounded without reading history and completes slow background cleanup", async () => {
   const f = await oldProfile();
-  let attempts = 0;
+  let reads = 0;
   let aborted = 0;
   let completed = 0;
-  const receipts: Promise<void>[] = [];
   const candidate = await ConversationAttachmentStore.open(f.root, {
     readOperationRunner: (operation, signal) => {
-      attempts++;
-      const child = runConversationAttachmentStoreChild({ ...operation,
-        stallBeforeRecordRevalidateMs: 300,
-      }, signal);
-      receipts.push(child.stopped);
-      void child.result.then(() => { completed++; }, () => { if (signal?.aborted) aborted++; });
-      return child;
+      reads++;
+      return runConversationAttachmentStoreChild(operation, signal);
     },
+    operationRunner: slowRemovals(300, (_attempt, operation, signal) => {
+      const result = delayedRemoval(300, signal)
+        .then(() => runConversationAttachmentStoreChild(operation, signal).result);
+      void result.then(() => { completed++; }, () => { if (signal?.aborted) aborted++; });
+      return { result, stopped: result.then(() => undefined, () => undefined) };
+    }),
   });
   stores.push(candidate);
+  const startedAt = Date.now();
   await candidate.reconcile([f.historical]);
+  expect(Date.now() - startedAt).toBeLessThan(1_000);
+  expect(reads).toBe(0);
   expect(aborted).toBe(1);
   expect(completed).toBe(0);
-  expect(attempts).toBe(1);
   const result = join(f.root, "slow-result.json");
   const controller = new AbortController();
   const smoking = runPackagedImageRetentionSmoke(f.input, result, candidate, controller.signal)
     .catch((error: unknown) => error);
   try {
-    await vi.waitFor(() => expect(completed).toBeGreaterThanOrEqual(1), { timeout: 2_000 });
+    await vi.waitFor(() => expect(completed).toBe(2), { timeout: 5_000 });
     expect(await smoking).toBeUndefined();
     expect(aborted).toBe(1);
     expect(JSON.parse(await readFile(result, "utf8"))).toEqual({ ok: true });
@@ -101,7 +130,6 @@ it("keeps startup bounded and completes real 300 ms background reads without red
   } finally {
     controller.abort(); await smoking;
     await candidate.close(); stores.splice(stores.indexOf(candidate), 1);
-    await Promise.all(receipts);
   }
 });
 
@@ -123,36 +151,29 @@ it("cancels the real preview child through the smoke's optional signal without d
   expect(await readFile(f.historical.path)).toEqual(png);
 });
 
-it("cancels an admitted background helper on store close and waits for its exact stop confirmation", async () => {
+it("cancels an admitted background cleanup helper on store close and waits for its exact stop confirmation", async () => {
   const f = await oldProfile();
   let attempts = 0;
-  let backgroundReady = false;
   let backgroundSignal: AbortSignal | undefined;
   let actualStop: Promise<void> | undefined;
   let releaseConfirmation!: () => void;
   const confirmation = new Promise<void>((resolve) => { releaseConfirmation = resolve; });
   const candidate = await ConversationAttachmentStore.open(f.root, {
-    readOperationRunner: (operation, signal) => {
-      const attempt = ++attempts;
-      const child = runConversationAttachmentStoreChild({ ...operation,
-        stallBeforeRecordRevalidateMs: 2_000,
-      }, signal);
-      if (attempt !== 2) return child;
+    operationRunner: slowRemovals(300, (attempt, _operation, signal) => {
+      attempts = attempt;
+      if (attempt !== 2) return null;
       backgroundSignal = signal;
-      actualStop = child.stopped;
-      void child.ready?.then((ready) => { backgroundReady = ready; });
-      // The actual child must stop first. Hold only its confirmation delivery
-      // to prove store.close does not treat cancellation as completed cleanup.
-      return { ...child, stopped: child.stopped.then(() => confirmation) };
-    },
+      const result = delayedRemoval(60_000, signal);
+      actualStop = result.then(() => undefined, () => undefined);
+      return { result, stopped: actualStop.then(() => confirmation) };
+    }),
   });
   stores.push(candidate);
   try {
     await candidate.reconcile([f.historical]);
-    await vi.waitFor(() => expect(backgroundReady).toBe(true), { timeout: 2_000 });
+    await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 2_000 });
     await new Promise<void>((resolve) => setTimeout(resolve, 300));
     expect(backgroundSignal?.aborted).toBe(false);
-    expect(attempts).toBe(2);
     let closed = false;
     const closing = candidate.close().then(() => { closed = true; });
     expect(backgroundSignal?.aborted).toBe(true);
@@ -168,27 +189,20 @@ it("cancels an admitted background helper on store close and waits for its exact
   }
 });
 
-it("fails closed on a background read error after the admission deadline without deleting historical bytes", async () => {
+it("fails closed on a background cleanup error after the admission deadline without deleting historical bytes", async () => {
   const f = await oldProfile();
-  let attempts = 0;
   let backgroundFailed = false;
   const removals: string[] = [];
   const failure = new Error("Background store helper returned an invalid receipt.");
   const candidate = await ConversationAttachmentStore.open(f.root, {
-    operationRunner: (operation, signal) => {
+    operationRunner: slowRemovals(300, (attempt, operation, signal) => {
       if (operation.operation === "remove") removals.push(operation.name);
-      return runConversationAttachmentStoreChild(operation, signal);
-    },
-    readOperationRunner: (operation, signal) => {
-      const attempt = ++attempts;
-      const child = runConversationAttachmentStoreChild({ ...operation,
-        stallBeforeRecordRevalidateMs: 300,
-      }, signal);
-      if (attempt === 1) return child;
-      return { ...child, result: child.result.then(() => {
+      if (attempt === 1) return null;
+      const result = delayedRemoval(10, signal).then(() => {
         backgroundFailed = true; throw failure;
-      }) };
-    },
+      });
+      return { result, stopped: result.then(() => undefined, () => undefined) };
+    }),
   });
   stores.push(candidate);
   await candidate.reconcile([f.historical]);
@@ -197,8 +211,7 @@ it("fails closed on a background read error after the admission deadline without
     await expect(candidate.retain([{ attachment: f.historical, bytes: png }]))
       .rejects.toThrow("Conversation attachment storage reconciliation failed.");
   });
-  expect(attempts).toBe(2);
-  expect(removals).toEqual([]);
+  expect(removals.every((name) => f.orphans.includes(name))).toBe(true);
   expect(await readFile(f.historical.path)).toEqual(png);
   await candidate.close(); stores.splice(stores.indexOf(candidate), 1);
 });

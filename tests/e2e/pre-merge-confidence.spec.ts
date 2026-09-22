@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 const pullRequestUrl = "https://github.com/eduardtomas1/inertia/pull/160";
@@ -135,10 +135,7 @@ test.afterAll(async () => {
 
 test("keeps exact-head green and blocking evidence legible across real Electron layouts", async ({ browserName: _browserName }, testInfo) => {
   await app.resizeWindow(1440, 920);
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Open workspace tools" }).click();
-  }
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   await page.getByRole("button", { name: "Confidence", exact: true }).click();
   const dialog = page.locator(".pre-merge-dialog");
   await expect(dialog).toHaveAttribute("data-state", "passed");

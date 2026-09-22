@@ -31,6 +31,7 @@ import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AgentsSurfaceProps } from "./AgentsSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
+import { useChatMinimumHeight } from "../hooks/useChatMinimumHeight";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
@@ -293,6 +294,8 @@ function ConversationPane({
     | RefObject<HTMLDivElement | null>
     | undefined;
   const chatRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+  useChatMinimumHeight(paneRef, chatRef);
   const style = resizeHandle
     ? {
         "--conversation-pane-tools-height": `${resizeHandle.value}px`,
@@ -300,7 +303,10 @@ function ConversationPane({
     : undefined;
   return (
     <div
-      ref={containerRef}
+      ref={(node) => {
+        paneRef.current = node;
+        if (containerRef) containerRef.current = node;
+      }}
       className={`conversation-pane-workspace${tools ? " has-tools" : ""}`}
       style={style}
     >
@@ -347,6 +353,7 @@ function WorkspaceSceneView({
 }: WorkspaceSceneProps): JSX.Element {
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
   const chatColumnRef = useRef<HTMLDivElement>(null);
+  useChatMinimumHeight(chatColumnRef);
   return (
     <>
       {view === "settings" ? (

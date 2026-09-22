@@ -6165,7 +6165,10 @@ button.header-breadcrumb-project:hover {
 .terminal-dock {
   display: flex;
   min-height: 0;
-  flex: 0 0 min(var(--terminal-dock-height, 260px), calc(100% - 180px));
+  flex: 0 0 min(
+    var(--terminal-dock-height, 260px),
+    calc(100% - max(180px, var(--chat-minimum-height, 0px)))
+  );
   flex-direction: column;
   border-top: 1px solid var(--panel-border);
   background: var(--surface);
@@ -14719,6 +14722,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 .conversation-pane-workspace {
+  --pane-chat-reserve: max(180px, var(--chat-minimum-height, 0px));
   display: flex;
   width: 100%;
   min-width: 0;
@@ -14728,10 +14732,14 @@ button.sent-attachment-open:focus-visible {
   overflow: hidden;
 }
 
+.conversation-pane-workspace:has(> .conversation-pane-chat > .terminal-dock:not([hidden])) {
+  --pane-chat-reserve: calc(max(180px, var(--chat-minimum-height, 0px)) + 38px);
+}
+
 .conversation-pane-chat {
   display: flex;
   min-width: 0;
-  min-height: 180px;
+  min-height: var(--pane-chat-reserve);
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
@@ -14750,7 +14758,7 @@ button.sent-attachment-open:focus-visible {
   min-height: 0;
   flex: 0 0 min(
     var(--conversation-pane-tools-height, 260px),
-    calc(100% - 180px)
+    calc(100% - var(--pane-chat-reserve) - 7px)
   );
   border-top: 0;
   border-left: 0;

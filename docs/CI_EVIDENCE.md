@@ -1,5 +1,9 @@
 # CI evidence lanes and timing record
 
+For the 20 September follow-up, baseline-rejection diagnostics, opt-in
+compatibility analysis and attempt-aware timings, see [CI speed study](CI_SPEED_STUDY.md).
+The strict compatibility policy and job graph remain unchanged by that study.
+
 The original implementation baseline was MAIN
 `c9740a517da9636df343902cb4e08d851d9e33c9`; the final integration comparison is
 MAIN `27bbc985a97d9e1857c33ce1585feae597d75ead`. Historical measurements below

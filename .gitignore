@@ -76,3 +76,6 @@ security_best_practices_report.md
 security-best-practices-report.md
 security-threat-model.md
 *-threat-model.md
+
+# Compact CI timing evidence
+ci-test-timings/

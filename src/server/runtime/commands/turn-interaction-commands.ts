@@ -268,6 +268,7 @@ export function createTurnInteractionCommandHandler(
                 resolvedAttachments,
                 retentionAbort.signal,
                 retentionId,
+                () => dependencies.store.evictableAttachmentIds(),
               );
               attachments = await awaitMessageSendPreparation(
                 retention,
@@ -694,6 +695,7 @@ export function createTurnInteractionCommandHandler(
           resolvedAttachments,
           retentionAbort.signal,
           attachmentRetentionId,
+          () => dependencies.store.evictableAttachmentIds(),
         );
         let retentionCompleted = false;
         try {

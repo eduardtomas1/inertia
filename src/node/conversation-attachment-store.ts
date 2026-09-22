@@ -39,6 +39,8 @@ import {
 } from "./conversation-attachment-store-child.js";
 import { ConversationAttachmentStoreTerminationTracker } from
   "./conversation-attachment-store-termination.js";
+import { attachmentUsage, ConversationAttachmentStorageFullError, conversationAttachmentEvictions,
+  type ConversationAttachmentEvictionOrder, type ConversationAttachmentUsage } from "./conversation-attachment-store-capacity.js";
 
 export type {
   ConversationAttachmentStoreOperation,
@@ -46,8 +48,8 @@ export type {
 } from "./conversation-attachment-store-child.js";
 
 const STORE_DIRECTORY = "conversation-attachments";
-const MAX_PERSISTED_RECORDS = 256;
-const MAX_PERSISTED_BYTES = 512 * 1024 * 1024;
+const MAX_PERSISTED_RECORDS = 4_096;
+const MAX_PERSISTED_BYTES = 2 * 1024 * 1024 * 1024;
 const RECONCILIATION_BATCH_ENTRIES = 32;
 const RECONCILIATION_BATCH_TIMEOUT_MS = 250;
 const MAX_PARALLEL_CLEANUPS = 8;
@@ -374,6 +376,7 @@ export class ConversationAttachmentStore {
     payloads: readonly ConversationAttachmentPayload[],
     signal?: AbortSignal,
     retentionId = randomUUID(),
+    evictionOrder?: ConversationAttachmentEvictionOrder,
   ): Promise<ChatAttachment[]> {
     this.assertOpen();
     if (!UUID_PATTERN.test(retentionId)) {
@@ -424,13 +427,16 @@ export class ConversationAttachmentStore {
       if ([...unique.keys()].some((id) => this.pendingRecordBytes.has(id))) {
         throw new Error("Conversation attachment storage is still cleaning up.");
       }
-      const usage = await this.loadUsage();
+      await this.loadUsage();
       signal?.throwIfAborted();
       const newPayloads: ConversationAttachmentPayload[] = [];
       for (const payload of unique.values()) {
         const current = await this.inspect(payload.attachment.id, signal);
         signal?.throwIfAborted();
         if (!current) {
+          if (this.records?.has(payload.attachment.id)) await this.removeRecord(payload.attachment.id, signal);
+          this.records?.delete(payload.attachment.id);
+          this.authoritativeRecords.delete(payload.attachment.id);
           newPayloads.push(payload);
           continue;
         }
@@ -447,13 +453,8 @@ export class ConversationAttachmentStore {
         (total, { bytes }) => total + bytes.byteLength,
         0,
       );
-      const reserved = this.reservedUsage();
-      if (
-        usage.records + reserved.records + newPayloads.length > this.maxRecords
-        || usage.bytes + reserved.bytes + newBytes > this.maxBytes
-      ) {
-        throw new Error("Conversation attachment storage is full.");
-      }
+      await this.admitCapacity(attachmentUsage(this.records), newPayloads.length, newBytes, unique, evictionOrder);
+      signal?.throwIfAborted();
       if (newPayloads.length > 0) {
         const pendingIds = new Set<string>();
         for (const { attachment } of newPayloads) {
@@ -770,9 +771,8 @@ export class ConversationAttachmentStore {
           state.retryNames.push(name);
           break;
         }
-        processed += 1;
         try {
-          await this.reconcileEntry(state, name, operationSignal);
+          if (await this.reconcileEntry(state, name, operationSignal)) processed += 1;
         } catch (error) {
           state.retryNames.push(name);
           if (background || !deadline.signal.aborted) throw error;
@@ -788,36 +788,20 @@ export class ConversationAttachmentStore {
     state: AttachmentReconciliationState,
     name: string,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.activeStagingRecords.has(name)) {
       state.retryNames.push(name);
-      return;
+      return false;
     }
-    if (!UUID_PATTERN.test(name)) {
-      await this.removeContainedEntry(name, signal);
-      return;
+    const expected = UUID_PATTERN.test(name) ? state.references.get(name) : undefined;
+    if (expected) {
+      state.records.set(name, expected.size);
+      return false;
     }
-    const expected = state.references.get(name);
-    if (!expected) {
-      await this.removeRecord(name, signal);
-      state.records.delete(name);
-      return;
-    }
-    const current = await this.inspectForMaintenance(name, signal);
-    if (!current) {
-      state.records.delete(name);
-      return;
-    }
-    if (
-      current.attachment.name !== expected.name
-      || current.attachment.mimeType !== expected.mimeType
-      || current.attachment.size !== expected.size
-    ) {
-      await this.removeRecord(name, signal);
-      state.records.delete(name);
-      return;
-    }
-    state.records.set(name, current.attachment.size);
+    if (UUID_PATTERN.test(name)) await this.removeRecord(name, signal);
+    else await this.removeContainedEntry(name, signal);
+    state.records.delete(name);
+    return true;
   }
 
   private scheduleReconciliation(state: AttachmentReconciliationState): void {
@@ -857,8 +841,8 @@ export class ConversationAttachmentStore {
     await state.directory.close().catch(() => undefined);
   }
 
-  private async loadUsage(): Promise<{ bytes: number; records: number }> {
-    if (this.records) return this.usageFromRecords();
+  private async loadUsage(): Promise<ConversationAttachmentUsage> {
+    if (this.records) return attachmentUsage(this.records);
     const records = new Map<string, number>();
     for (const name of await readdir(this.directory)) {
       if (this.activeStagingRecords.has(name)) continue;
@@ -872,7 +856,7 @@ export class ConversationAttachmentStore {
     }
     this.records = records;
     this.reconcilePendingRecords(records);
-    return this.usageFromRecords();
+    return attachmentUsage(this.records);
   }
 
   private async inspect(
@@ -1141,22 +1125,24 @@ export class ConversationAttachmentStore {
     await this.confirmOperationStopped(cleanup.stopped);
   }
 
-  private usageFromRecords(): { bytes: number; records: number } {
-    const records = this.records ?? new Map<string, number>();
-    return {
-      records: records.size,
-      bytes: [...records.values()].reduce((total, size) => total + size, 0),
-    };
-  }
-
-  private reservedUsage(): { bytes: number; records: number } {
-    return {
-      bytes: [...this.pendingRecordBytes.values()].reduce(
-        (total, bytes) => total + bytes,
-        0,
-      ),
-      records: this.pendingRecordBytes.size,
-    };
+  private async admitCapacity(usage: ConversationAttachmentUsage, newRecords: number, newBytes: number,
+    batch: ReadonlyMap<string, unknown>, evictionOrder?: ConversationAttachmentEvictionOrder): Promise<void> {
+    const { records: reservedRecords, bytes: reservedBytes } = attachmentUsage(this.pendingRecordBytes);
+    const excessRecords = usage.records + reservedRecords + newRecords - this.maxRecords;
+    const excessBytes = usage.bytes + reservedBytes + newBytes - this.maxBytes;
+    if (excessRecords <= 0 && excessBytes <= 0) return;
+    const victims = this.records && evictionOrder && conversationAttachmentEvictions({
+      order: evictionOrder(), sizes: this.records, excessRecords, excessBytes,
+      evictable: (id) => this.authoritativeRecords.has(id) && !batch.has(id)
+        && !this.recordRetentions.has(id) && !this.pendingRecordBytes.has(id),
+    });
+    if (!victims) throw new ConversationAttachmentStorageFullError();
+    const cleanup = await this.cleanupRecords(victims);
+    for (const id of cleanup.removed) {
+      this.records?.delete(id);
+      this.authoritativeRecords.delete(id);
+    }
+    if (cleanup.failure) throw cleanup.failure;
   }
 
   private clearPendingRecord(id: string): void {

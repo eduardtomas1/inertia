@@ -245,7 +245,7 @@ describe("working indicator settings", () => {
   it("has exactly one control per dimension with unique accessible names", () => {
     const { view } = renderSettings();
     const section = view.container.querySelector(".working-indicator-settings")!;
-    const names = [...section.querySelectorAll("button, input")].map((element) =>
+    const names = [...section.querySelectorAll("button, input:not([aria-hidden='true'])")].map((element) =>
       element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "");
     expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(names.length);
@@ -254,15 +254,20 @@ describe("working indicator settings", () => {
     expect(groups).toEqual(["Working indicator", "Colour", "Speed"]);
     expect([...section.querySelectorAll('[role="switch"]')].map((element) => element.getAttribute("aria-label")))
       .toEqual(["Glow", "Use for tool and step activity"]);
-    expect(section.querySelectorAll('input[type="color"]')).toHaveLength(1);
+    const inputs = section.querySelectorAll('input[type="color"]');
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toHaveAttribute("aria-hidden", "true");
+    expect(inputs[0]).toHaveAttribute("tabindex", "-1");
+    expect(names.filter((name) => /custom/iu.test(name))).toEqual(["Custom colour, #ff5fd2"]);
+    expect(section.querySelectorAll('[data-indicator-color="custom"]')).toHaveLength(1);
     expect(section.querySelectorAll("[aria-pressed]")).toHaveLength(0);
     expect(section.textContent).not.toMatch(/neon|preset/iu);
   });
 
   it("disables glow for theme ink and validates custom colours", () => {
-    const { onUpdate } = renderSettings();
+    const { view, onUpdate } = renderSettings();
     expect(screen.getByRole("switch", { name: "Glow" })).toBeDisabled();
-    const input = screen.getByLabelText("Custom indicator colour") as HTMLInputElement;
+    const input = view.container.querySelector('input[type="color"]') as HTMLInputElement;
     fireEvent.input(input, { target: { value: "#12AB9F" } });
     expect(onUpdate).not.toHaveBeenCalled();
     act(() => {
@@ -271,8 +276,22 @@ describe("working indicator settings", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({
       workingIndicator: { ...DEFAULT_WORKING_INDICATOR, color: "custom", customColor: "#12ab9f" },
     });
-    expect(screen.getByRole("radio", { name: "Custom" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Custom colour, #12ab9f" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Glow" })).toBeEnabled();
+  });
+
+  it("opens the native picker from the single Custom swatch but not while arrowing past it", () => {
+    const { view } = renderSettings();
+    const input = view.container.querySelector('input[type="color"]') as HTMLInputElement;
+    const showPicker = vi.fn();
+    Object.defineProperty(input, "showPicker", { configurable: true, value: showPicker });
+    const rose = screen.getByRole("radio", { name: "Rose" });
+    rose.focus();
+    fireEvent.keyDown(rose, { key: "ArrowRight" });
+    expect(screen.getByRole("radio", { name: "Custom colour, #ff5fd2" })).toHaveAttribute("aria-checked", "true");
+    expect(showPicker).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("radio", { name: "Custom colour, #ff5fd2" }));
+    expect(showPicker).toHaveBeenCalledTimes(1);
   });
 
   it("reverts the optimistic value when saving fails", async () => {

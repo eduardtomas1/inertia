@@ -66,8 +66,7 @@
 }
 
 .working-indicator-option:focus-visible,
-.working-indicator-swatch:focus-visible,
-.working-indicator-color-input:focus-visible {
+.working-indicator-swatch:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -112,6 +111,7 @@
 }
 
 .working-indicator-colors {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -130,6 +130,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  padding: 5px;
 }
 
 .working-indicator-row .working-indicator-swatch {
@@ -164,18 +165,21 @@
 
 .working-indicator-swatch[data-indicator-color="custom"] {
   --indicator-swatch:
-    radial-gradient(circle, var(--indicator-custom) 0 42%, transparent 44%),
+    radial-gradient(circle, var(--indicator-custom) 0 60%, transparent 62%),
     conic-gradient(#ff5f5f, #ffd35f, #5fff8a, #5fd7ff, #7a5fff, #ff5fd2, #ff5f5f);
 }
 
 .working-indicator-color-input {
-  width: 30px;
-  height: 22px;
-  padding: 0 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-strong);
-  cursor: pointer;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .working-indicator-switches .setting-row {

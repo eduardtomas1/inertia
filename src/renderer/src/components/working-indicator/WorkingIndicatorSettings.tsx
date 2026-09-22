@@ -163,6 +163,16 @@ export function WorkingIndicatorSettings({
     });
   };
 
+  const openColorPicker = (): void => {
+    const input = colorInput.current;
+    if (!input || input.disabled) return;
+    try {
+      input.showPicker();
+    } catch {
+      input.click();
+    }
+  };
+
   const commitDraftColor = (raw: string): void => {
     setDraftColor(null);
     const customColor = normalizeHexColor(raw);
@@ -242,26 +252,38 @@ export function WorkingIndicatorSettings({
               aria-labelledby="working-indicator-color-label"
               {...colors.groupProps}
             >
-              {WORKING_INDICATOR_COLORS.map((color) => (
-                <button
-                  type="button"
-                  key={color}
-                  className="working-indicator-swatch"
-                  data-indicator-color={color}
-                  aria-label={COLOR_LABELS[color]}
-                  title={COLOR_LABELS[color]}
-                  disabled={disabled}
-                  style={color === "custom" ? { "--indicator-custom": preview.customColor } as React.CSSProperties : undefined}
-                  {...colors.radioProps(color)}
-                />
-              ))}
+              {WORKING_INDICATOR_COLORS.map((color) => {
+                const radio = colors.radioProps(color);
+                const label = color === "custom"
+                  ? `${COLOR_LABELS.custom} colour, ${preview.customColor}`
+                  : COLOR_LABELS[color];
+                return (
+                  <button
+                    type="button"
+                    key={color}
+                    className="working-indicator-swatch"
+                    data-indicator-color={color}
+                    aria-label={label}
+                    title={label}
+                    disabled={disabled}
+                    style={color === "custom" ? { "--indicator-custom": preview.customColor } as React.CSSProperties : undefined}
+                    {...radio}
+                    onClick={color === "custom"
+                      ? () => {
+                          radio.onClick();
+                          openColorPicker();
+                        }
+                      : radio.onClick}
+                  />
+                );
+              })}
             </div>
             <input
               ref={colorInput}
               type="color"
               className="working-indicator-color-input"
-              aria-label="Custom indicator colour"
-              title="Choose a custom colour"
+              aria-hidden="true"
+              tabIndex={-1}
               value={draftColor ?? value.customColor}
               disabled={disabled}
               onChange={(event) => setDraftColor(event.currentTarget.value)}

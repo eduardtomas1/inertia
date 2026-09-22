@@ -2,7 +2,8 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import { openTerminalDock, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
+import { setAppearance } from "./support/appearance";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -25,205 +26,135 @@ test.afterAll(async () => {
 async function ensureWorkspaceTools(): Promise<void> {
   const panel = page.locator(".workspace-panel");
   if (await panel.isVisible().catch(() => false)) return;
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await rightPanelToggle(page).click();
   await expect(panel).toBeVisible();
 }
 
-test("opens Environment by default with reachable responsive geometry", async ({ browserName: _browserName }, testInfo) => {
-  const themeButton = page.getByRole("button", { name: /Change theme/u });
+async function panelGeometry(): Promise<{
+  frame: DOMRectLike;
+  header: DOMRectLike;
+  chat: DOMRectLike;
+  panel: DOMRectLike;
+  sheet: boolean;
+} | null> {
+  return await page.evaluate(() => {
+    const rect = (selector: string) => {
+      const bounds = document.querySelector(selector)?.getBoundingClientRect();
+      return bounds
+        ? { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom }
+        : null;
+    };
+    const frame = rect(".workspace-frame");
+    const header = rect(".workspace-header");
+    const chat = rect(".chat-workspace");
+    const panel = rect(".workspace-panel");
+    return frame && header && chat && panel ? {
+      frame,
+      header,
+      chat,
+      panel,
+      sheet: document.querySelector(".workspace-panel")?.classList.contains("is-sheet") ?? false,
+    } : null;
+  });
+}
+
+interface DOMRectLike {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+test("starts with the chat alone and hosts surfaces in a responsive right panel", async ({ browserName: _browserName }, testInfo) => {
+  const toggle = rightPanelToggle(page);
+  const panel = page.locator(".workspace-panel");
+  await resizeWindow(1440, 920);
+  await expect(panel).toBeHidden();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  const header = page.locator(".workspace-header");
+  await expect(header.getByRole("group", { name: "Open checkout" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Toggle terminal/u })).toBeVisible();
+
   for (const theme of ["dark", "light"] as const) {
-    if (!new RegExp(`current: ${theme}`, "u").test(await themeButton.getAttribute("aria-label") ?? "")) {
-      await themeButton.click();
-    }
-    await expect(themeButton).toHaveAttribute("aria-label", new RegExp(`current: ${theme}`, "u"));
+    await resizeWindow(1440, 920);
+    await setAppearance(page, theme);
 
     for (const size of [
-      { width: 1440, height: 920, label: "wide" },
-      { width: 760, height: 600, label: "compact" },
+      { width: 1440, height: 920, label: "wide", sheet: false },
+      { width: 900, height: 700, label: "sheet", sheet: true },
+      { width: 760, height: 600, label: "compact", sheet: false },
     ]) {
       await resizeWindow(size.width, size.height);
-      const environmentTab = page.getByRole("tab", { name: "Environment" });
-      const environmentPanel = page.getByRole("tabpanel", { name: "Environment" });
-      await expect(environmentTab).toHaveAttribute("aria-selected", "true");
-      await expect(environmentPanel).toBeVisible();
-      await expect(environmentPanel.getByRole("button", { name: /Changes/u })).toBeVisible();
-      await expect(environmentPanel.locator("details > summary").filter({
-        hasText: /Worktree|Project directory/u,
-      })).toBeVisible();
-      await expect(environmentPanel.getByText("Commit and Push", { exact: true })).toBeVisible();
-      await expect(environmentPanel.getByText("Local Servers", { exact: true })).toBeVisible();
-      await expect(environmentPanel.getByRole("heading", { name: "Repository" })).toBeVisible();
-      await expect(environmentPanel.getByRole("heading", { name: "Editor" })).toBeVisible();
-      await expect(environmentPanel.getByText("Ready", { exact: true })).toHaveCount(0);
-      await expect(environmentPanel.getByText("Usage", { exact: true })).toBeVisible();
-      await expect(environmentPanel.getByText("Recap", { exact: true })).toHaveCount(0);
-      await expect(environmentPanel.getByRole("heading", { name: "Recent attachments" })).toHaveCount(0);
+      await ensureWorkspaceTools();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await selectWorkspaceTool(panel, "Changes");
+      await expect(page.getByRole("tab", { name: /^Changes/u })).toHaveAttribute("aria-selected", "true");
       await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
       await expectNoViewportOverflow();
 
-      const geometry = await page.evaluate(() => {
-        const frame = document.querySelector(".workspace-frame")?.getBoundingClientRect();
-        const chat = document.querySelector(".chat-workspace")?.getBoundingClientRect();
-        const environment = document.querySelector(".environment-panel")?.getBoundingClientRect();
-        return frame && chat && environment ? {
-          frame: { left: frame.left, top: frame.top, right: frame.right, bottom: frame.bottom },
-          chat: { left: chat.left, top: chat.top, right: chat.right, bottom: chat.bottom },
-          environment: { left: environment.left, top: environment.top, right: environment.right, bottom: environment.bottom },
-        } : null;
-      });
+      const geometry = await panelGeometry();
       expect(geometry).not.toBeNull();
       if (geometry) {
-        expect(geometry.environment.left).toBeGreaterThanOrEqual(geometry.frame.left);
-        expect(geometry.environment.top).toBeGreaterThanOrEqual(geometry.frame.top);
-        expect(geometry.environment.right).toBeLessThanOrEqual(geometry.frame.right + 1);
-        expect(geometry.environment.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
-        if (size.width > 1024) {
-          expect(geometry.chat.right).toBeLessThanOrEqual(geometry.environment.left + 1);
-          expect(geometry.environment.right - geometry.environment.left)
-            .toBeCloseTo(320, 0);
+        expect(geometry.panel.left).toBeGreaterThanOrEqual(geometry.frame.left);
+        expect(geometry.panel.top).toBeGreaterThanOrEqual(geometry.frame.top - 1);
+        expect(geometry.panel.right).toBeLessThanOrEqual(geometry.frame.right + 1);
+        expect(geometry.panel.bottom).toBeLessThanOrEqual(geometry.frame.bottom + 1);
+        expect(geometry.sheet).toBe(size.sheet);
+        if (size.sheet) {
+          expect(geometry.panel.left).toBeLessThan(geometry.chat.right);
+          expect(geometry.chat.right - geometry.chat.left).toBeGreaterThanOrEqual(360);
         } else {
-          expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.environment.top + 1);
+          expect(geometry.chat.right).toBeLessThanOrEqual(geometry.panel.left + 1);
+          expect(geometry.header.right).toBeLessThanOrEqual(geometry.panel.left + 1);
+          expect(geometry.chat.right - geometry.chat.left).toBeGreaterThanOrEqual(359);
         }
       }
 
-      const label = `environment-default-${theme}-${size.label}`;
+      const label = `right-panel-${theme}-${size.label}`;
       const screenshotPath = testInfo.outputPath(`${label}.png`);
       await page.screenshot({ animations: "disabled", path: screenshotPath });
-      await testInfo.attach(label, {
-        path: screenshotPath,
-        contentType: "image/png",
-      });
+      await testInfo.attach(label, { path: screenshotPath, contentType: "image/png" });
 
-      if (size.label === "wide") {
-        const panelBounds = await page.locator(".workspace-panel").boundingBox();
-        expect(panelBounds).not.toBeNull();
-        if (panelBounds) {
-          const comparisonLabel = `environment-codex-match-${theme}`;
-          const comparisonPath = testInfo.outputPath(`${comparisonLabel}.png`);
-          await page.screenshot({
-            animations: "disabled",
-            clip: {
-              x: panelBounds.x,
-              y: panelBounds.y,
-              width: panelBounds.width,
-              height: Math.min(634, panelBounds.height),
-            },
-            path: comparisonPath,
-          });
-          await testInfo.attach(comparisonLabel, {
-            path: comparisonPath,
-            contentType: "image/png",
-          });
-        }
-
-        const primaryDisclosures = environmentPanel.locator(
-          ".environment-primary-list > details > summary",
-        );
-        await expect(primaryDisclosures).toHaveCount(4);
-        const workspaceDisclosure = primaryDisclosures.nth(0);
-        const branchDisclosure = primaryDisclosures.nth(1);
-        const commitDisclosure = primaryDisclosures.nth(2);
-        const serverDisclosure = primaryDisclosures.nth(3);
-        const usageDisclosure = environmentPanel.locator(
-          ".environment-usage-section details > summary",
-        );
-        await expect(environmentPanel.locator(".environment-usage-section details")).toHaveAttribute("open", "");
-
-        if (theme === "dark") {
-          const changes = environmentPanel.getByRole("button", { name: /Changes/u });
-          await expect(changes).toBeEnabled();
-          const repository = environmentPanel.getByRole("button", {
-            name: /Open active workspace Inertia externally/u,
-          });
-          await changes.focus();
-          await page.keyboard.press("Tab");
-          await expect(workspaceDisclosure).toBeFocused();
-          await page.keyboard.press("Tab");
-          await expect(branchDisclosure).toBeFocused();
-          await page.keyboard.press("Tab");
-          await expect(commitDisclosure).toBeFocused();
-          await page.keyboard.press("Tab");
-          await expect(serverDisclosure).toBeFocused();
-          await page.keyboard.press("Tab");
-          await expect(usageDisclosure).toBeFocused();
-          await page.keyboard.press("Tab");
-          const usageRefresh = environmentPanel.locator(".environment-usage-refresh:not(:disabled)");
-          if (await usageRefresh.count() > 0) {
-            await expect(usageRefresh).toBeFocused();
-            await page.keyboard.press("Tab");
-          }
-          await expect(repository).toBeFocused();
-        }
-
-        for (const disclosure of [
-          workspaceDisclosure,
-          branchDisclosure,
-          commitDisclosure,
-          serverDisclosure,
-        ]) {
-          await disclosure.click();
-        }
-        await expect(environmentPanel.locator("code")).toContainText("/");
-        await expect(environmentPanel.getByRole("button", {
-          name: "Review",
-          exact: true,
-        })).toBeVisible();
-        await expect(environmentPanel.getByText("No validated local service ports are active."))
-          .toBeVisible();
-        const expandedLabel = `environment-expanded-${theme}`;
-        const expandedPath = testInfo.outputPath(`${expandedLabel}.png`);
-        const expandedBounds = await page.locator(".workspace-panel").boundingBox();
-        expect(expandedBounds).not.toBeNull();
-        if (expandedBounds) {
-          await page.mouse.move(1, 1);
-          await page.screenshot({
-            animations: "disabled",
-            clip: {
-              x: expandedBounds.x,
-              y: expandedBounds.y,
-              width: expandedBounds.width,
-              height: Math.min(634, expandedBounds.height),
-            },
-            path: expandedPath,
-          });
-          await testInfo.attach(expandedLabel, {
-            path: expandedPath,
-            contentType: "image/png",
-          });
-        }
-        for (const disclosure of [
-          workspaceDisclosure,
-          branchDisclosure,
-          commitDisclosure,
-          serverDisclosure,
-        ]) {
-          await disclosure.click();
-        }
-
-        if (theme === "dark") {
-          const changes = environmentPanel.getByRole("button", { name: /Changes/u });
-          await changes.focus();
-          await changes.press("Enter");
-          await expect(page.getByRole("tab", { name: /Changes/u })).toBeFocused();
-          await page.keyboard.press("Home");
-          await expect(page.getByRole("tab", { name: "Environment" }))
-            .toBeFocused();
-        }
+      if (size.sheet) {
+        await page.getByRole("tab", { name: /^Changes/u }).focus();
+        await page.keyboard.press("Escape");
+        await expect(panel).toBeHidden();
+        await expect(toggle).toBeFocused();
+      } else if (size.label === "wide" && theme === "dark") {
+        await page.getByRole("tab", { name: /^Changes/u }).focus();
+        await page.keyboard.press("Delete");
+        await expect(panel).toBeHidden();
+        await toggle.focus();
+        await page.keyboard.press("Enter");
+        const launcher = panel.getByRole("group", { name: "Open a surface" });
+        await expect(launcher).toBeFocused();
+        await page.keyboard.press("u");
+        await expect(page.getByRole("tab", { name: "Usage" })).toBeFocused();
+        await expect(page.getByRole("region", { name: "Usage", exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Add panel surface" }).click();
+        const addMenu = page.getByRole("menu", { name: "Add panel surface" });
+        await expect(addMenu.getByRole("menuitem").first()).toBeFocused();
+        await page.keyboard.press("a");
+        await expect(page.getByRole("tab", { name: /^Agents/u })).toHaveAttribute("aria-selected", "true");
+        await expect(page.getByRole("heading", { name: "Delegated work" })).toBeVisible();
+        await page.getByRole("button", { name: "Close Agents" }).click();
+        await page.getByRole("button", { name: "Close Usage" }).click();
+        await expect(panel).toBeHidden();
+      } else {
+        await toggle.click();
+        await expect(panel).toBeHidden();
       }
     }
   }
-  if (!/current: dark/u.test(await themeButton.getAttribute("aria-label") ?? "")) {
-    await themeButton.click();
-  }
-  await expect(themeButton).toHaveAttribute("aria-label", /current: dark/u);
   await resizeWindow(1440, 920);
+  await setAppearance(page, "dark");
   expect(rendererErrors).toEqual([]);
 });
 
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
 
   const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
   const sidebarBefore = Number(await sidebarHandle.getAttribute("aria-valuenow"));
@@ -260,6 +191,7 @@ test("resizes and persists the internal workspace panes", async () => {
 test("collapses and restores both workspace sides without losing layout", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
   await navigationToggle.click();
   await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toHaveCount(0);
@@ -267,7 +199,7 @@ test("collapses and restores both workspace sides without losing layout", async 
   await navigationToggle.click();
   await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
 
-  const toolsToggle = page.getByRole("button", { name: "Close workspace tools" }).first();
+  const toolsToggle = rightPanelToggle(page);
   await toolsToggle.click();
   await expect(page.locator(".workspace-panel")).toBeHidden();
   await expect.poll(() => page.evaluate(() => ({
@@ -275,7 +207,7 @@ test("collapses and restores both workspace sides without losing layout", async 
     lastTool: window.localStorage.getItem(
       "inertia:layout:last-workspace-tool:v2",
     ),
-  }))).toEqual({ legacy: null, lastTool: "terminal" });
+  }))).toEqual({ legacy: null, lastTool: "files" });
   const readingCanvas = await page.evaluate(() => {
     const workspaceBody = document.querySelector<HTMLElement>(".workspace-body");
     const chat = document.querySelector<HTMLElement>(".chat-workspace");
@@ -299,7 +231,7 @@ test("collapses and restores both workspace sides without losing layout", async 
   expect(readingCanvas?.hasTools).toBe(false);
   expect(readingCanvas?.chatBackground).toBe(readingCanvas?.canvasBackground);
   expect(Math.abs((readingCanvas?.chatCenter ?? 0) - (readingCanvas?.turnCenter ?? 0))).toBeLessThanOrEqual(1);
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
+  await toolsToggle.click();
   await expect(page.locator(".workspace-panel")).toBeVisible();
   await expect(page.locator(".workspace-body")).toHaveClass(/has-tools/u);
   await expectNoViewportOverflow();
@@ -308,7 +240,7 @@ test("collapses and restores both workspace sides without losing layout", async 
 
 for (const size of [
   { width: 1440, height: 920, label: "wide" },
-  { width: 1024, height: 760, label: "stacked" },
+  { width: 1024, height: 760, label: "medium" },
   { width: 760, height: 600, label: "compact" },
 ]) {
   test(`keeps the ${size.label} layout reachable without overlap`, async () => {
@@ -362,8 +294,9 @@ for (const size of [
       expect(geometry.frame.top).toBeGreaterThanOrEqual(0);
       expect(geometry.frame.right).toBeLessThanOrEqual(size.width + 1);
       expect(geometry.frame.bottom).toBeLessThanOrEqual(size.height + 1);
-      if (size.width > 1024) expect(geometry.chat.right).toBeLessThanOrEqual(geometry.tools.left + 1);
-      else expect(geometry.chat.bottom).toBeLessThanOrEqual(geometry.tools.top + 1);
+      const sheet = await page.locator(".workspace-panel").evaluate((element) => element.classList.contains("is-sheet"));
+      if (sheet) expect(geometry.tools.left).toBeGreaterThan(geometry.chat.left);
+      else expect(geometry.chat.right).toBeLessThanOrEqual(geometry.tools.left + 1);
     }
     if (size.width <= 760) {
       const transcriptHeight = await page.getByLabel("Thread transcript").evaluate((element) => element.getBoundingClientRect().height);

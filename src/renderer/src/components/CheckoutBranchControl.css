@@ -1,0 +1,59 @@
+.checkout-branch-anchor {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  margin: -2px -5px;
+}
+
+.checkout-branch-button {
+  max-width: 100%;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+.checkout-branch-button:hover,
+.checkout-branch-button[aria-expanded="true"] {
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.checkout-branch-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.checkout-branch-button.is-detached {
+  color: var(--warning);
+}
+
+.checkout-branch-chevron {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+.checkout-branch-portal {
+  position: fixed;
+  z-index: 70;
+  width: min(380px, calc(100vw - 24px));
+  height: 0;
+}
+
+.checkout-branch-portal > .header-popover {
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkout-branch-button {
+    transition: none;
+  }
+}

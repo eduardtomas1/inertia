@@ -4,6 +4,12 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import {
+  closeWorkspaceTools,
+  ensureWorkspaceTools,
+  rightPanelToggle,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -44,16 +50,9 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   await app.resizeWindow(1_440, 920);
   await page.keyboard.press("Escape");
 
-  const browserButton = page.getByRole("button", {
-    name: "Open Browser",
-    exact: true,
-  });
-  await expect(browserButton).toHaveAttribute("aria-pressed", "false");
-  await browserButton.click();
-  const workspaceTools = page.getByRole("complementary", {
-    name: "Workspace tools",
-  });
-  await expect(workspaceTools).toBeVisible();
+  await expect(rightPanelToggle(page)).toHaveAttribute("aria-pressed", "false");
+  const workspaceTools = await ensureWorkspaceTools(page);
+  await selectWorkspaceTool(workspaceTools, "Browser");
   await expect(workspaceTools.getByRole("tab", { name: "Browser" }))
     .toHaveAttribute("aria-selected", "true");
   await expect(workspaceTools.locator(".preview-tabs").getByRole("tab"))
@@ -69,12 +68,9 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     contentType: "image/png",
   });
 
-  await workspaceTools.getByRole("button", {
-    name: "Close workspace tools",
-  }).click();
+  await closeWorkspaceTools(page);
   ({ page } = await app.restart());
-  await expect(page.getByRole("button", { name: "Open Browser", exact: true }))
-    .toHaveAttribute("aria-pressed", "false");
+  await expect(rightPanelToggle(page)).toHaveAttribute("aria-pressed", "false");
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
@@ -91,10 +87,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     conversationId,
   )).toMatchObject({ ok: false, code: "unavailable" });
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(page.getByRole("button", {
-    name: "Open Browser",
-    exact: true,
-  })).toBeVisible();
+  await expect(rightPanelToggle(page)).toBeVisible();
 
   const agentUrl = `${app.previewUrl}agent-browser-page`;
   const agentFirst = await app.electronApp.evaluate(
@@ -114,10 +107,8 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   );
   expect(agentFirst).toMatchObject({ ok: true });
 
-  await page.getByRole("button", { name: "Open Browser", exact: true }).click();
-  const sharedTools = page.getByRole("complementary", {
-    name: "Workspace tools",
-  });
+  const sharedTools = await ensureWorkspaceTools(page);
+  await selectWorkspaceTool(sharedTools, "Browser");
   await expect(sharedTools.getByRole("textbox", {
     name: "Preview address",
   })).toHaveValue(agentUrl);
@@ -157,9 +148,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     contentType: "image/png",
   });
 
-  await sharedTools.getByRole("button", {
-    name: "Close workspace tools",
-  }).click();
+  await closeWorkspaceTools(page);
   ({ page } = await app.restart());
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(

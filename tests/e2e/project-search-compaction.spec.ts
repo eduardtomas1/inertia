@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { closeWorkspaceTools } from "./support/workspace-tools";
 
 test("uses the command palette surface for project search and keeps keyboard focus inside", async () => {
   const app = await createAppFixture({ name: "project-search", initialState: "conversation", windowDisplay: "primary" });
@@ -67,11 +68,8 @@ test("shows animated provider compaction and honors reduced motion", async ({ br
     await app.page.reload();
     const status = app.page.locator('[data-active-agent-phase="compacting"] .turn-working-status');
     await expect(status).toHaveText("Compacting context…");
-    const tools = app.page.getByRole("button", { name: "Close workspace tools" });
-    if (await tools.isVisible()) {
-      await tools.click();
-      await expect(app.page.locator(".workspace-panel")).toBeHidden();
-    }
+    await closeWorkspaceTools(app.page);
+    await expect(app.page.locator(".workspace-panel")).toBeHidden();
     const icon = status.locator(".context-compaction-icon > g");
     await expect.poll(() => icon.evaluate((node) => node.getAnimations().some((animation) => animation.playState === "running"))).toBe(true);
     const screenshot = testInfo.outputPath("inertia-context-compaction.png");

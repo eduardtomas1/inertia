@@ -15,7 +15,13 @@ import {
 } from "./support/app-fixture";
 import { expectRuntimeCrashRecovery } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
-import { selectWorkspaceTool } from "./support/workspace-tools";
+import {
+  closeWorkspaceTools,
+  ensureWorkspaceTools,
+  openTerminalDock,
+  rightPanelToggle,
+  selectWorkspaceTool,
+} from "./support/workspace-tools";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
 import { capturePageWebSockets, holdMessageSendAcknowledgement } from "./support/browser-websocket-fixture";
@@ -160,8 +166,8 @@ test("starts without a demo and adds the first real project", async () => {
     level: 3,
   })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
+  await expect(rightPanelToggle(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".workspace-panel")).toBeHidden();
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(1);
 
@@ -175,18 +181,16 @@ test("starts without a demo and adds the first real project", async () => {
   };
   expect(conversationCount()).toBe(0);
 
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await openTerminalDock(page);
   await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
   expect(conversationCount()).toBe(0);
-  await page.locator(".workspace-panel")
-    .getByRole("button", { name: "Close workspace tools" })
-    .click();
+  await closeWorkspaceTools(page);
 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expect.poll(conversationCount).toBe(1);
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await expect(rightPanelToggle(page)).toHaveAttribute("aria-pressed", "false");
+  await openTerminalDock(page);
   await expect(page.locator(
     '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
   ).first()).toBeVisible();
@@ -196,7 +200,7 @@ test("starts without a demo and adds the first real project", async () => {
     ["branch", "--show-current"],
     { cwd: workspaceDirectory },
   )).stdout.trim();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   const changesPanel = page.getByRole("tabpanel", { name: "Changes" });
   await expect(changesPanel.locator(
     `.workspace-repository-scope-branch[title=${JSON.stringify(currentBranch)}]`,
@@ -601,12 +605,12 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
   await expectIsolatedConversation(count);
   const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspaceDirectory })).stdout.trim();
-  const workspaceHeader = page.locator(".workspace-header");
-  await expect(workspaceHeader.getByRole("button", {
+  const checkoutContext = page.getByRole("group", { name: "Chat checkout context" });
+  await expect(checkoutContext.getByRole("button", {
     name: /Checkout context differs/u,
   })).toHaveCount(0);
-  const currentBranchTrigger = workspaceHeader.getByRole("button", {
-    name: currentBranch,
+  const currentBranchTrigger = checkoutContext.getByRole("button", {
+    name: `Branch ${currentBranch}`,
     exact: true,
   });
   await currentBranchTrigger.click();

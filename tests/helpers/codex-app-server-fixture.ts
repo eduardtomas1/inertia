@@ -266,6 +266,12 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-turn-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: "stale-turn", status: "inProgress", items: [], error: null } } },
+      { method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } },
+    ]);
+  }
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(

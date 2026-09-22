@@ -11,6 +11,7 @@ import type {
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { setAppearance } from "./support/appearance";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -294,7 +295,8 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   });
   await page.getByRole("button", { name: "Close daily work" }).click();
   await expect(dailyWorkDialog).toBeHidden();
-  await page.getByRole("button", { name: /^Connections & devices/u }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Connections & devices", exact: true }).click();
   await expect(page.getByRole("button", {
     name: "Connections & devices",
     exact: true,
@@ -308,11 +310,6 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   const usageSections = page.getByRole("group", { name: "Usage section" });
   await expect(usageSections).toHaveCSS("display", "flex");
   await expect(usageSections.getByRole("button", { name: "History", exact: true })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  const environmentSummary = page.getByRole("dialog", { name: "Environment summary" });
-  if (await environmentSummary.isVisible()) {
-    await page.getByRole("button", { name: "Close environment summary" }).click();
-    await expect(environmentSummary).toBeHidden();
-  }
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
@@ -422,8 +419,13 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await page.getByRole("button", { name: "Model", exact: true }).click();
   await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
 
-  await page.getByRole("button", { name: "Change theme (current: light)" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "true");
+  await setAppearance(page, "dark", "Usage");
+  await page.getByRole("button", { name: "Model", exact: true }).click();
+  await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
+  await projectNavigation.click();
+  await expect(projectNavigation).toHaveAttribute("aria-pressed", "false");
   const darkPath = testInfo.outputPath("usage-dashboard-dark.png");
   await page.screenshot({ path: darkPath, animations: "disabled" });
   await testInfo.attach("Usage dashboard · dark", {
@@ -461,9 +463,17 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expectNoViewportOverflow();
   await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
 
+  // The narrow sidebar closes when it navigates, so switch theme while wide.
+  await projectNavigation.click();
+  await setAppearance(page, "light", "Usage");
+  await page.getByRole("button", { name: "Model", exact: true }).click();
+  await projectNavigation.click();
   await resizeWindow(680, 800);
-  await page.getByRole("button", { name: "Change theme (current: dark)" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.locator(".usage-view").evaluate((view) => view.scrollTo(0, 0));
+  await projectNavigation.click();
+  await expect(page.locator(".sidebar")).toHaveClass(/\bis-open\b/u);
+  await page.locator(".sidebar").getByRole("button", { name: "Close navigation" }).click();
+  await expect(page.locator(".sidebar")).not.toHaveClass(/\bis-open\b/u);
   await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
   await expectNoViewportOverflow();
   const compactGeometry = await page.locator(".usage-view").evaluate((view) => {

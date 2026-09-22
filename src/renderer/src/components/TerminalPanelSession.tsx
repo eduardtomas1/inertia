@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -45,6 +46,8 @@ type TerminalSessionProps = TerminalPanelProps & {
   ) => boolean | void;
   onTerminalReplaced: (replacement: TerminalReplacement) => boolean;
   onProviderResumeStarted: (terminalId: string, conversationId: string) => void;
+  /** Tab-bar slot for this session's controls; null keeps its own header. */
+  actionsHost?: HTMLElement | null;
 };
 const MAX_PENDING_TERMINAL_OUTPUT = 256 * 1_024 + 256;
 const MAX_PENDING_TERMINAL_EXITS = 8;
@@ -71,6 +74,7 @@ export function TerminalSession({
   onTerminalReplaced,
   onProviderResumeStarted,
   onClose,
+  actionsHost = null,
   visible = true,
 }: TerminalSessionProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1012,20 +1016,30 @@ export function TerminalSession({
       data-terminal-state={sessionState}
       data-terminal-font-size={fontSize}
     >
-      <div className="terminal-header">
-        <div className="terminal-title">
-          <TerminalSquare size={16} />
-          <span>Terminal</span>
-          <span className="terminal-project">{projectName}</span>
-        </div>
-        <div className="terminal-actions">
-          <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={15} /></IconButton>
+      {actionsHost ? createPortal(
+        <>
+          <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
           <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
-            <RotateCcw size={15} />
+            <RotateCcw size={14} />
           </IconButton>
-          <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
+        </>,
+        actionsHost,
+      ) : (
+        <div className="terminal-header">
+          <div className="terminal-title">
+            <TerminalSquare size={16} />
+            <span>Terminal</span>
+            <span className="terminal-project">{projectName}</span>
+          </div>
+          <div className="terminal-actions">
+            <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={15} /></IconButton>
+            <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
+              <RotateCcw size={15} />
+            </IconButton>
+            <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
+          </div>
         </div>
-      </div>
+      )}
       {selectedResumeOption && (
         <Suspense fallback={(
           <div className="terminal-resume-status" role="status">

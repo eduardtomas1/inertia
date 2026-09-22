@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { createAppFixture } from "./support/app-fixture";
+import { closeWorkspaceTools } from "./support/workspace-tools";
 
 function fixturePixels(): number[] {
   const canvas = createCanvas(800, 500); const ctx = canvas.getContext("2d");
@@ -41,8 +42,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
   } });
   try {
     const page = app.page; await app.resizeWindow(1100, 760);
-    const tools = page.getByRole("button", { name: "Close workspace tools" }); if (await tools.isVisible()) await tools.click();
-    const environment = page.getByRole("button", { name: "Close environment summary" }); if (await environment.isVisible()) await environment.click();
+    await closeWorkspaceTools(page);
     const separator = page.getByRole("separator", { name: "Compacted context 173K → 5.69K tokens" });
     await expect(separator).toBeVisible();
     await page.reload(); await expect(separator).toBeVisible();

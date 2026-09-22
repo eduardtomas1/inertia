@@ -16,6 +16,7 @@ import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelF
 import type { AppFixture } from "./support/app-fixture";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { seedModelChooserNativeMetadata } from "./support/model-catalog-fixture";
+import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,10 +79,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   }
   const workspaceHeader = page.locator(".workspace-header");
-  const closeTools = workspaceHeader.getByRole("button", { name: "Close workspace tools" });
-  if (await closeTools.isVisible() && await closeTools.isEnabled()) {
-    await closeTools.click();
-  }
+  await closeWorkspaceTools(page);
   const composer = page.getByLabel("Message", { exact: true });
   await composer.fill("@sam");
   await expect(page.getByRole("listbox", { name: "Project files" }).getByRole("option").first()).toHaveAttribute("aria-selected", "true");
@@ -360,8 +358,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(workspaceHeader.getByRole("button", {
-    name: currentBranch,
+  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
+    name: `Branch ${currentBranch}`,
     exact: true,
   })).toBeVisible();
   await expect.poll(() => {
@@ -398,8 +396,8 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(workspaceHeader.getByRole("button", {
-    name: currentBranch,
+  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
+    name: `Branch ${currentBranch}`,
     exact: true,
   })).toBeVisible();
   await expect.poll(() => {
@@ -603,8 +601,6 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
   await resizeWindow(1440, 720);
-  if (!await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    await workspaceHeader.getByRole("button", { name: "Open workspace tools" }).click();
-  }
+  await ensureWorkspaceTools(page);
   expect(rendererErrors).toEqual([]);
 });

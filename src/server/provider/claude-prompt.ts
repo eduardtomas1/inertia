@@ -46,6 +46,7 @@ export async function claudePrompt(
       content,
     } as unknown as SDKUserMessage["message"],
     parent_tool_use_id: null,
+    origin: { kind: "human" },
   };
 }
 

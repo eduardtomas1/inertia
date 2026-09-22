@@ -108,6 +108,28 @@ describe("Claude delegated lifecycle", () => {
     expect(notification.observe({ ...(ack as object), origin: { kind: "task-notification" } } as SDKMessage))
       .toEqual({ turnEnded: false });
     expect(notification.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+
+    const echoed = new ClaudeDelegateLifecycle();
+    echoed.expectPrompt(promptUuid);
+    echoed.observe(lifecycleFrame("queued"));
+    echoed.observe(lifecycleFrame("started"));
+    expect(echoed.observe({
+      ...(ack as object),
+      origin: { kind: "task-notification" },
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: false });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(false);
+    expect(echoed.observe(lifecycleFrame("completed"))).toEqual({ turnEnded: false });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(true);
+    expect(echoed.complete()).toEqual({ kind: "incomplete", reason: "prompt-unanswered" });
+    expect(echoed.observe({
+      ...claudeSuccessResult("PONG", "completed"),
+      user_message_uuid: promptUuid,
+      user_message_uuids: [promptUuid],
+    } as SDKMessage)).toEqual({ turnEnded: true });
+    expect(echoed.awaitsUnansweredPrompt()).toBe(false);
+    expect(echoed.complete()).toMatchObject({ kind: "result", result: { result: "PONG" } });
   });
 
   it.each(["refused", "cancelled", "discarded"])("ends a %s prompt even without a preceding acknowledgement", (state) => {
@@ -177,6 +199,42 @@ describe("Claude delegated lifecycle", () => {
       kind: "incomplete",
       reason: "missing-result",
     });
+  });
+
+  it("reports a mid-turn exit once the parent resumed after a provisional result", () => {
+    const rootAssistant = {
+      type: "assistant",
+      parent_tool_use_id: null,
+      session_id: "session-1",
+      uuid: "assistant-1",
+      message: { role: "assistant", content: [] },
+    } as unknown as SDKMessage;
+    const childAssistant = {
+      ...rootAssistant,
+      parent_tool_use_id: "tool-1",
+      uuid: "assistant-child",
+    } as unknown as SDKMessage;
+
+    const waiting = new ClaudeDelegateLifecycle();
+    waiting.observe(claudeBackgroundTasks(["shell-1"]));
+    waiting.observe(claudeSuccessResult("Waiting for the shell", "completed"));
+    waiting.observe(claudeBackgroundTasks([]));
+    // Delegated output does not prove the parent itself resumed.
+    waiting.observe(childAssistant);
+    expect(waiting.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
+
+    const resumed = new ClaudeDelegateLifecycle();
+    resumed.observe(claudeBackgroundTasks(["shell-1"]));
+    resumed.observe(claudeSuccessResult("Waiting for the shell", "completed"));
+    resumed.observe(claudeBackgroundTasks([]));
+    resumed.observe(rootAssistant);
+    expect(resumed.complete()).toEqual({ kind: "incomplete", reason: "missing-result" });
+
+    // A newer provisional result starts a new wait for the parent.
+    resumed.observe(claudeBackgroundTasks(["shell-2"]));
+    resumed.observe(claudeSuccessResult("Waiting again", "completed"));
+    resumed.observe(claudeBackgroundTasks([]));
+    expect(resumed.complete()).toEqual({ kind: "incomplete", reason: "parent-not-resumed" });
   });
 
   it("requires a fresh parent result after the background level clears", () => {

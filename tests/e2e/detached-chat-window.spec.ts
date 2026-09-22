@@ -109,10 +109,12 @@ test.afterAll(async () => {
 });
 
 async function openDetachedWindow(title: string): Promise<Page> {
-  const opened = app.electronApp.waitForEvent("window");
-  await page.getByRole("button", {
-    name: `Open ${title} in a new window`,
+  await page.locator(".workspace-header").getByRole("button", {
+    name: title,
+    exact: true,
   }).click();
+  const opened = app.electronApp.waitForEvent("window");
+  await page.getByRole("menuitem", { name: "Open chat in new window" }).click();
   const popup = await opened;
   await popup.locator(".detached-chat-shell").waitFor();
   return popup;

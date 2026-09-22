@@ -65,6 +65,8 @@ function pane(
     projectName,
     toolsOpen: false,
     onToggleTools: () => undefined,
+    terminalOpen: false,
+    onToggleTerminal: () => undefined,
     ...details,
   };
 }

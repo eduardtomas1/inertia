@@ -9,6 +9,7 @@ import {
 } from "./support/app-fixture";
 import { installRuntimeRecoveryConsent } from
   "./support/runtime-crash-safety";
+import { closeWorkspaceTools } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -270,10 +271,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     const image = element as HTMLImageElement;
     return { complete: image.complete, width: image.naturalWidth };
   })).toEqual({ complete: true, width: 1 });
-  const closeEnvironment = page.getByRole("button", {
-    name: "Close environment summary",
-  });
-  if (await closeEnvironment.isVisible()) await closeEnvironment.click();
+  await closeWorkspaceTools(page);
   const sentScreenshotPath = testInfo.outputPath(
     "sent-attachment-persisted-1440x920.png",
   );

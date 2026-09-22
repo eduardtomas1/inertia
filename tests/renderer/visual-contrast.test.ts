@@ -276,10 +276,6 @@ describe("visual contrast system", () => {
     expect(css).toMatch(
       /\.composer-context-request select\s*\{[^}]*background:\s*var\(--surface-strong\)/u,
     );
-    expect(cssBlock(".private-connect-indicator.is-active"))
-      .toContain("color: var(--success-accent)");
-    expect(cssBlock(".private-connect-indicator.has-pending"))
-      .toContain("color: var(--warning-accent)");
     expect(css).toMatch(
       /\.new-branch-form input:focus-visible,[\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
     );

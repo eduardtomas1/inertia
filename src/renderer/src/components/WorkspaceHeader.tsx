@@ -1,49 +1,105 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Globe2, ListFilter, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
-import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
-import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { conversationContextMismatch } from "../lib/newConversation";
-import type { WorkspacePanelTab } from "./WorkspacePanel";
-import { IconButton } from "./ui";
-import { usePrivateConnectState } from "../hooks/usePrivateConnectState";
-import type { HeaderGitActionId } from "../utils/headerGitActions";
-import { primaryHeaderGitAction } from "../utils/primaryHeaderGitAction";
 import {
-  loadCommitDialog,
-} from "./lazySurfaceLoaders";
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  ChevronDown,
+  Ellipsis,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+} from "lucide-react";
+import type {
+  Conversation,
+  GitBranchInfo,
+  GitStatusSnapshot,
+  Project,
+  ProjectAction,
+} from "@shared/contracts";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import type { AppView } from "../appView";
 import { navigateMenuItems } from "../utils/menuKeyboard";
+import { sidebarThreadView } from "../utils/sidebarModel";
+import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
+import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
+import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
+import { ProjectIcon } from "./ProjectIcon";
+import { loadThreadActions } from "./sidebar/threadActionLoader";
+import { IconButton } from "./ui";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
+const WorkspaceHeaderActions = lazy(async () => ({
+  default: (await import("./workspace-header/WorkspaceHeaderActions")).WorkspaceHeaderActions,
+}));
 
-const loadWorkspaceGitActionMenu = () => import("./WorkspaceGitActionMenu");
-const WorkspaceGitActionMenu = lazy(loadWorkspaceGitActionMenu);
+export const HEADER_ACTIONS_COLLAPSE_WIDTH = 520;
+
+export function headerActionsCollapsed(input: {
+  containerWidth: number;
+  compact: boolean;
+}): boolean {
+  return input.compact || input.containerWidth < HEADER_ACTIONS_COLLAPSE_WIDTH;
+}
+
+export function resolveRenameCommit(input: {
+  readonly title: string;
+  readonly originalTitle: string;
+}): { action: "commit"; title: string } | { action: "reject-empty" } | { action: "noop" } {
+  const trimmed = input.title.trim();
+  if (trimmed.length === 0) return { action: "reject-empty" };
+  if (trimmed === input.originalTitle) return { action: "noop" };
+  return { action: "commit", title: trimmed };
+}
+
+export type HeaderConversationMenu = Omit<
+  ComponentProps<typeof ConversationActionsMenuComponent>,
+  | "anchor"
+  | "initialSubmenu"
+  | "activity"
+  | "conversation"
+  | "thread"
+  | "onDismiss"
+  | "onSetPopover"
+  | "onStartRename"
+>;
 
 type WorkspaceHeaderProps = {
   project: Project | null;
   conversation: Conversation | null;
+  isServerConversation?: boolean;
   view: AppView;
-  activeTool: WorkspacePanelTab | null;
   sidebarCollapsed: boolean;
-  theme: ThemePreference;
+  compact?: boolean;
   gitStatus: GitStatusSnapshot | null;
+  gitNotice?: string | null;
   branches: GitBranchInfo[];
   branchesLoading?: boolean;
   branchesError?: string | null;
   actions: ProjectAction[];
+  runs?: WorkspaceRunsModel | null;
   busy: boolean;
-  conversationDetached?: boolean;
-  detachedChatLimitReached?: boolean;
+  checkoutPath?: string | null;
+  filesAvailable?: boolean;
+  conversationMenu?: HeaderConversationMenu | null;
   onOpenSidebar: () => void;
-  onToggleTools: () => void;
-  workspaceToolsUnavailableReason?: string | null;
-  onOpenEnvironment: () => void;
-  onOpenBrowser?: () => void;
-  onCycleTheme: () => void;
   onOpenSettings: () => void;
-  onOpenConnectionsSettings: () => void;
-  onOpenProject: () => void;
-  onOpenConversationInWindow?: (conversation: Conversation) => void;
+  onCreateConversationInProject?: () => void;
+  onRenameConversation?: (title: string) => void;
+  onOpenFolder: () => void;
+  onRevealFolder: () => void;
+  onOpenFiles: () => void;
+  onAddAction?: () => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string, remote?: boolean) => void | Promise<void>;
   onCreateBranch: (name: string) => void | Promise<void>;
@@ -52,37 +108,40 @@ type WorkspaceHeaderProps = {
   onCreateConversationInIsolatedWorktree: () => void;
   onCommit: () => void;
   onOpenPullRequest: () => void;
+  onPushAndCreatePullRequest?: () => void;
   onFetch?: () => void;
   onPull: () => void;
   onPush: () => void;
+  onRefreshGitStatus?: () => void;
   onRunAction: (action: ProjectAction) => void;
 };
 
 export function WorkspaceHeader({
   project,
   conversation,
+  isServerConversation = Boolean(conversation),
   view,
-  activeTool,
   sidebarCollapsed,
-  theme,
+  compact = false,
   gitStatus,
+  gitNotice = null,
   branches,
   branchesLoading,
   branchesError,
   actions,
+  runs = null,
   busy,
-  conversationDetached = false,
-  detachedChatLimitReached = false,
+  checkoutPath = null,
+  filesAvailable = true,
+  conversationMenu = null,
   onOpenSidebar,
-  onToggleTools,
-  workspaceToolsUnavailableReason = null,
-  onOpenEnvironment,
-  onOpenBrowser,
-  onCycleTheme,
   onOpenSettings,
-  onOpenConnectionsSettings,
-  onOpenProject,
-  onOpenConversationInWindow,
+  onCreateConversationInProject,
+  onRenameConversation,
+  onOpenFolder,
+  onRevealFolder,
+  onOpenFiles,
+  onAddAction,
   onRefreshBranches,
   onSwitchBranch,
   onCreateBranch,
@@ -91,307 +150,316 @@ export function WorkspaceHeader({
   onCreateConversationInIsolatedWorktree,
   onCommit,
   onOpenPullRequest,
+  onPushAndCreatePullRequest,
   onFetch,
   onPull,
   onPush,
+  onRefreshGitStatus,
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
-  const [menu, setMenu] = useState<"branch" | "action" | "git" | null>(null);
-  useEffect(() => setMenu(null), [project?.id, conversation?.id]);
-  useEffect(() => {
-    // Git discovery can finish after opening project actions. Only Git menus
-    // belong to that root; project/chat navigation still dismisses every menu.
-    setMenu((current) => current === "action" ? current : null);
-  }, [gitStatus?.root]);
-  const privateConnectLoad = usePrivateConnectState();
-  const privateConnect = privateConnectLoad.state;
-  const pendingPrivateConnectPairings = privateConnect?.pendingPairings.length ?? 0;
-  const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
+  const headerRef = useRef<HTMLElement>(null);
+  const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [headerWidth, setHeaderWidth] = useState(Number.POSITIVE_INFINITY);
+  const collapsed = headerActionsCollapsed({ containerWidth: headerWidth, compact });
+  const [titleAnchor, setTitleAnchor] = useState<{ x: number; y: number } | null>(null);
+  const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
+    useDismissibleMenu<"overflow" | "title" | "branches">();
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const renameCommittedRef = useRef(false);
+  const [actionsContainer] = useState(() => {
+    const container = document.createElement("div");
+    container.className = "header-actions-portal";
+    return container;
+  });
+  const ConversationActionsMenu = useLoadedSurface(loadThreadActions, menu === "title");
   useNativePreviewSuspension(menu !== null);
-  const headerActionsRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const node = headerRef.current;
+    if (!node) return;
+    const update = (): void => {
+      const style = window.getComputedStyle(node);
+      const width = node.clientWidth
+        - (Number.parseFloat(style.paddingLeft) || 0)
+        - (Number.parseFloat(style.paddingRight) || 0);
+      setHeaderWidth(width > 0 ? width : Number.POSITIVE_INFINITY);
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    dismissMenu("context-change");
+  }, [conversation?.id, dismissMenu, project?.id]);
+  const gitRoot = gitStatus?.root ?? null;
+  const openMenuRef = useRef(menu);
+  openMenuRef.current = menu;
+  useEffect(() => {
+    if (openMenuRef.current === "branches") dismissMenu("context-change");
+  }, [dismissMenu, gitRoot]);
+  useEffect(() => {
+    if (!collapsed && menu === "overflow") dismissMenu("context-change");
+  }, [collapsed, dismissMenu, menu]);
+  if (renaming && renaming.id !== conversation?.id) setRenaming(null);
+
+  const mountInlineActions = useCallback((node: HTMLDivElement | null) => {
+    if (node && !collapsed) node.appendChild(actionsContainer);
+  }, [actionsContainer, collapsed]);
+  const mountMenuActions = useCallback((node: HTMLDivElement | null) => {
+    if (node && collapsed) node.appendChild(actionsContainer);
+  }, [actionsContainer, collapsed]);
+
+  const workspaceActions = view === "workspace" && project !== null;
+  const showGit = workspaceActions && gitStatus?.isRepository === true;
+  const presentation = collapsed ? "menu" : "toolbar";
+  const closeOverflow = (): void => {
+    if (menu === "overflow") dismissMenu("selection");
+  };
+  const openBranches = (): void => {
+    if (requestCheckoutBranchMenu()) return;
+    onRefreshBranches();
+    if (menu !== "branches") toggleMenu("branches");
+  };
   const title = view === "home"
     ? "New chat"
     : view === "settings"
-    ? "Settings"
-    : view === "usage"
-      ? "Usage"
-      : conversation?.title ?? project?.name ?? "Workspace";
-  const eyebrow = view !== "workspace"
-    ? null
-    : project?.name && conversation ? project.name : "Inertia";
-  const contextMismatch = conversationContextMismatch(project, conversation, gitStatus);
-  const primaryGitAction = primaryHeaderGitAction(gitStatus);
-  const runGitAction = (action: HeaderGitActionId): void => {
-    if (menu === "git") {
-      headerActionsRef.current?.querySelector<HTMLElement>(
-        '[data-header-menu="git"] [aria-controls="workspace-header-git-menu"]',
-      )?.focus();
-    }
-    setMenu(null);
-    if (action === "commit") onCommit();
-    else if (action === "fetch") onFetch?.();
-    else if (action === "pull") onPull();
-    else if (action === "push") onPush();
-    else onOpenPullRequest();
+      ? "Settings"
+      : view === "usage"
+        ? "Usage"
+        : conversation?.title ?? project?.name ?? "Workspace";
+  const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;
+  const titleMenuAvailable = view === "workspace"
+    && conversation !== null
+    && isServerConversation
+    && conversationMenu !== null;
+
+  const startRename = (): void => {
+    if (!conversation || !onRenameConversation) return;
+    renameCommittedRef.current = false;
+    dismissMenu("context-change");
+    setRenaming({ id: conversation.id, title: conversation.title });
   };
-  useEffect(() => {
-    if (!menu) return;
-    const activeAnchor = headerActionsRef.current?.querySelector<HTMLElement>(
-      `[data-header-menu="${menu}"]`,
-    );
-    const focusTimer = window.setTimeout(() => {
-      if (menu !== "git") {
-        (activeAnchor?.querySelector<HTMLElement>('input[type="search"]')
-          ?? activeAnchor?.querySelector<HTMLElement>(
-            '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
-          ))?.focus();
-      }
-    }, 0);
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (
-        event.target instanceof Node
-        && !activeAnchor?.contains(event.target)
-      ) {
-        setMenu(null);
-      }
-    };
-    const closeOnFocusIn = (event: FocusEvent): void => {
-      const activeMenu = activeAnchor?.lastElementChild;
-      if (
-        activeMenu
-        && event.target instanceof Node
-        && !activeMenu.contains(event.target)
-      ) {
-        setMenu(null);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      const trigger = activeAnchor?.querySelector<HTMLElement>(
-        '[aria-expanded="true"]',
-      );
-      setMenu(null);
-      trigger?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown);
-    document.addEventListener("focusin", closeOnFocusIn);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.clearTimeout(focusTimer);
-      document.removeEventListener("pointerdown", closeOnPointerDown);
-      document.removeEventListener("focusin", closeOnFocusIn);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [menu]);
+  const commitRename = (value: string): void => {
+    setRenaming(null);
+    if (!conversation || !onRenameConversation) return;
+    const resolution = resolveRenameCommit({ title: value, originalTitle: conversation.title });
+    if (resolution.action === "commit") onRenameConversation(resolution.title);
+    window.requestAnimationFrame(() => titleButtonRef.current?.focus());
+  };
+  const handleRenameKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      renameCommittedRef.current = true;
+      commitRename(event.currentTarget.value);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      renameCommittedRef.current = true;
+      setRenaming(null);
+      window.requestAnimationFrame(() => titleButtonRef.current?.focus());
+    }
+  };
+  const handleTitleDoubleClick = (event: ReactMouseEvent<HTMLButtonElement>): void => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if ((event.target as HTMLElement).closest("[data-thread-title-chevron]")) return;
+    startRename();
+  };
+
+  const headerActions = workspaceActions ? (
+    <Suspense fallback={null}>
+      <WorkspaceHeaderActions
+        key={`${project.id}:${conversation?.id ?? "draft"}`}
+        presentation={presentation}
+        projectId={project.id}
+        projectName={project.name}
+        actions={actions}
+        runs={runs}
+        checkoutPath={checkoutPath}
+        filesAvailable={filesAvailable}
+        gitStatus={showGit ? gitStatus : null}
+        busy={busy}
+        gitNotice={gitNotice}
+        onRunAction={onRunAction}
+        {...(onAddAction ? { onAddAction } : {})}
+        onOpenFolder={onOpenFolder}
+        onRevealFolder={onRevealFolder}
+        onOpenFiles={onOpenFiles}
+        onCommit={onCommit}
+        onPush={onPush}
+        onPull={onPull}
+        {...(onFetch ? { onFetch } : {})}
+        onOpenPullRequest={onOpenPullRequest}
+        onPushAndCreatePullRequest={onPushAndCreatePullRequest ?? onPush}
+        onOpenBranches={openBranches}
+        {...(onRefreshGitStatus ? { onRefreshGitStatus } : {})}
+        onRequestMenuClose={closeOverflow}
+      />
+    </Suspense>
+  ) : null;
 
   return (
-    <header className="workspace-header drag-region">
+    <header ref={headerRef} className="workspace-header drag-region">
       <div className="header-leading no-drag">
         <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
-          {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
         </IconButton>
-        <div className="header-title-wrap">{eyebrow && <span className="header-eyebrow">{eyebrow}</span>}<h1>{title}</h1></div>
-      </div>
-
-      <div className="header-actions no-drag" ref={headerActionsRef}>
-        {privateConnect && (
-          <div className="header-popover-anchor private-connect-alert-anchor">
-            <button
-              type="button"
-              className={`header-button private-connect-indicator${
-                pendingPrivateConnectPairings > 0
-                  ? " has-pending"
-                  : privateConnect.activeSessions > 0
-                    ? " is-active"
-                    : ""
-              }`}
-              aria-label={pendingPrivateConnectPairings > 0
-                ? `Connections & devices, ${pendingPrivateConnectPairings} pairing ${pendingPrivateConnectPairings === 1 ? "approval" : "approvals"} waiting`
-                : privateConnect.activeSessions > 0
-                  ? `Connections & devices, ${privateConnect.activeSessions} active browsers`
-                  : `Connections & devices ${privateConnect.status}`}
-              onClick={onOpenConnectionsSettings}
-            >
-              <RadioTower size={14} />
-              <span>
-                {pendingPrivateConnectPairings > 0
-                  ? pendingPrivateConnectPairings === 1
-                    ? "Approve device"
-                    : `Approve ${pendingPrivateConnectPairings} devices`
-                  : privateConnect.activeSessions > 0
-                  ? `Devices · ${privateConnect.activeSessions} active`
-                  : "Devices"}
-              </span>
-            </button>
-            {pendingPrivateConnectPairing && (
-              <div className="private-connect-pairing-alert" role="alert" aria-label="Private Connect pairing approval">
-                <strong>{pendingPrivateConnectPairing.deviceLabel} wants to connect</strong>
-                <span>Code <code>{pendingPrivateConnectPairing.comparisonCode}</code></span>
-                <small>{pendingPrivateConnectPairing.tailnetLabel ?? "Tailnet identity unavailable"}</small>
-                {pendingPrivateConnectPairings > 1 && <small>+{pendingPrivateConnectPairings - 1} more waiting</small>}
-                <button type="button" onClick={onOpenConnectionsSettings}>Review access</button>
-              </div>
-            )}
-          </div>
-        )}
-        {view === "workspace" && project && (
-          <>
-            {actions.length > 0 && (
-              <div className="header-popover-anchor" data-header-menu="action">
-                <button type="button" className="header-button" aria-label="Add action" title="Add action" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
-                  <span className="header-plus-icon" aria-hidden="true" /><span>Add action</span>
-                </button>
-                {menu === "action" && (
-                  <div className="header-popover action-header-popover" id="workspace-header-action-menu" role="menu" aria-label="Project actions" onKeyDown={navigateMenuItems}>
-                    {actions.map((action) => <button type="button" role="menuitem" key={action.id} onClick={() => { setMenu(null); onRunAction(action); }}><strong>{action.label}</strong><small>{action.command}</small></button>)}
-                  </div>
-                )}
-              </div>
-            )}
-            {conversation && onOpenConversationInWindow && (
-              <button
-                type="button"
-                className={`header-button detached-chat-header-button${
-                  conversationDetached ? " is-open" : ""
-                }`}
-                aria-label={conversationDetached
-                  ? `Focus chat window for ${conversation.title}`
-                  : `Open ${conversation.title} in a new window`}
-                title={!conversationDetached && detachedChatLimitReached
-                  ? "Close a chat window before opening another."
-                  : conversationDetached
-                    ? "Focus chat window"
-                    : "Open chat in new window"}
-                disabled={!conversationDetached && detachedChatLimitReached}
-                onClick={() => onOpenConversationInWindow(conversation)}
-              >
-                <PictureInPicture2 size={14} />
-                <span>{conversationDetached ? "Focus window" : "New window"}</span>
-              </button>
-            )}
-            <button type="button" className="header-button" onClick={onOpenProject}><FolderOpen size={14} /><span>Open</span></button>
-            {gitStatus?.isRepository && (
-              <div className="header-popover-anchor" data-header-menu="branch">
+        <nav className="header-breadcrumb" aria-label="Chat breadcrumb">
+          {showProjectCrumb && (
+            <>
+              {onCreateConversationInProject ? (
                 <button
                   type="button"
-                  className={`header-button${contextMismatch ? " has-context-mismatch" : ""}`}
-                  aria-expanded={menu === "branch"}
-                  aria-haspopup="menu"
-                  aria-controls="workspace-header-branch-menu"
-                  aria-label={contextMismatch ? `Checkout context differs, current branch ${gitStatus.branch ?? "detached"}` : undefined}
-                  onClick={() => { const next = menu === "branch" ? null : "branch"; setMenu(next); if (next) onRefreshBranches(); }}
+                  className="header-breadcrumb-project"
+                  aria-label={`New chat in ${project.name}`}
+                  title={`New chat in ${project.name}`}
+                  onClick={onCreateConversationInProject}
                 >
-                  <GitBranch size={14} /><span>{gitStatus.branch ?? "Detached"}</span>{contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}<ChevronDown size={12} />
+                  <ProjectIcon project={project} size={14} />
+                  <span>{project.name}</span>
                 </button>
-                {menu === "branch" && (
-                  <Suspense fallback={<div className="header-popover" role="status">Loading branches…</div>}>
-                    <WorkspaceBranchMenu project={project} conversation={conversation} gitStatus={gitStatus}
-                      branches={branches} branchesLoading={branchesLoading} branchesError={branchesError} busy={busy}
-                      onClose={() => {
-                        headerActionsRef.current?.querySelector<HTMLElement>('[data-header-menu="branch"] > button')?.focus();
-                        setMenu(null);
-                      }} onRefreshBranches={onRefreshBranches} onSwitchBranch={onSwitchBranch}
-                      onCreateBranch={onCreateBranch} onCreateConversationInWorktree={onCreateConversationInWorktree}
-                      onCreateConversationOnBranch={onCreateConversationOnBranch}
-                      onCreateConversationInIsolatedWorktree={onCreateConversationInIsolatedWorktree} />
-                  </Suspense>
-                )}
-              </div>
-            )}
-            {gitStatus?.isRepository && activeTool !== "changes" && (
-              <div className="header-popover-anchor" data-header-menu="git">
-                <div className="git-control">
-                  {primaryGitAction && (
-                    <button
-                      type="button"
-                      className="header-button primary-header-button git-primary"
-                      aria-label={primaryGitAction.label}
-                      onFocus={() => {
-                        if (primaryGitAction.id === "commit") void loadCommitDialog();
-                      }}
-                      onClick={() => runGitAction(primaryGitAction.id)}
-                      disabled={busy}
-                    >
-                      <span className="git-symbol" aria-hidden="true">{primaryGitAction.id === "commit" ? "●" : primaryGitAction.id === "pull" ? "↓" : "↑"}</span><span>{primaryGitAction.label}</span>
-                    </button>
-                  )}
+              ) : (
+                <span className="header-breadcrumb-project">
+                  <ProjectIcon project={project} size={14} />
+                  <span>{project.name}</span>
+                </span>
+              )}
+              <span className="header-breadcrumb-separator" aria-hidden="true">/</span>
+            </>
+          )}
+          <div className="header-title-wrap">
+            {renaming ? (
+              <input
+                autoFocus
+                className="header-title-input"
+                aria-label="Chat title"
+                defaultValue={renaming.title}
+                maxLength={200}
+                onFocus={(event) => event.currentTarget.select()}
+                onBlur={(event) => {
+                  if (renameCommittedRef.current) return;
+                  commitRename(event.currentTarget.value);
+                }}
+                onKeyDown={handleRenameKeyDown}
+              />
+            ) : (
+              <h1>
+                {titleMenuAvailable ? (
                   <button
+                    ref={(node) => {
+                      titleButtonRef.current = node;
+                      setMenuTrigger("title", node);
+                    }}
                     type="button"
-                    className="header-button git-menu"
-                    aria-label="More Git actions"
-                    aria-expanded={menu === "git"}
+                    className="header-title-button"
+                    title="Chat actions · double-click to rename"
                     aria-haspopup="menu"
-                    aria-controls="workspace-header-git-menu"
-                    onFocus={() => void loadWorkspaceGitActionMenu()}
-                    onPointerEnter={() => void loadWorkspaceGitActionMenu()}
-                    onClick={() => {
-                      setMenu(menu === "git" ? null : "git");
+                    aria-expanded={menu === "title"}
+                    aria-controls={conversation ? `conversation-actions-${conversation.id}` : undefined}
+                    onClick={(event) => {
+                      if (event.detail > 1) return;
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      setTitleAnchor({ x: bounds.left, y: bounds.bottom + 4 });
+                      toggleMenu("title");
+                    }}
+                    onDoubleClick={handleTitleDoubleClick}
+                    onKeyDown={(event) => {
+                      if (event.key === "F2") {
+                        event.preventDefault();
+                        startRename();
+                      }
                     }}
                   >
-                    {!primaryGitAction && <GitBranch size={14} />}
-                    {!primaryGitAction && <span>Git</span>}
-                    <ChevronDown size={12} />
+                    <span className="header-title-text">{title}</span>
+                    <ChevronDown size={13} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
                   </button>
-                </div>
-                {menu === "git" && (
-                  <Suspense fallback={<div className="header-popover git-action-popover" role="status">Loading Git actions…</div>}>
-                    <WorkspaceGitActionMenu
-                      status={gitStatus}
-                      busy={busy}
-                      onAction={runGitAction}
-                    />
-                  </Suspense>
+                ) : (
+                  <span className="header-title-text">{title}</span>
                 )}
-              </div>
+              </h1>
             )}
+          </div>
+        </nav>
+      </div>
+
+      <div className="header-trailing no-drag" data-chat-header-actions>
+        {workspaceActions && (
+          <>
+            <div className="header-actions" ref={mountInlineActions} />
+            <div className="header-overflow-anchor" hidden={!collapsed}>
+              <IconButton
+                ref={(node) => setMenuTrigger("overflow", node)}
+                label="More header actions"
+                className="header-overflow-button"
+                aria-haspopup="menu"
+                aria-expanded={menu === "overflow"}
+                aria-controls="workspace-header-overflow-menu"
+                onClick={() => toggleMenu("overflow")}
+              >
+                <Ellipsis size={16} />
+              </IconButton>
+              <div
+                ref={(node) => setMenuPopover("overflow", node)}
+                id="workspace-header-overflow-menu"
+                className="header-popover header-overflow-popover"
+                role="menu"
+                aria-label="Header actions"
+                hidden={!collapsed || menu !== "overflow"}
+                onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]')}
+              >
+                <div ref={mountMenuActions} className="header-actions-menu-host" />
+              </div>
+            </div>
+            {createPortal(headerActions, actionsContainer)}
           </>
         )}
-        {view === "workspace" && project && (
-          conversation && onOpenBrowser && (
-            <IconButton
-              label="Open Browser"
-              aria-pressed={activeTool === "preview"}
-              onClick={() => {
-                setMenu(null);
-                onOpenBrowser();
-              }}
-            >
-              <Globe2 size={17} />
-            </IconButton>
-          )
-        )}
-        {view === "workspace" && project && (
-          <div className="header-popover-anchor environment-panel-anchor">
-            <IconButton
-              label="Open Environment"
-              aria-pressed={activeTool === "environment"}
-              onClick={() => {
-                setMenu(null);
-                onOpenEnvironment();
-              }}
-            >
-              <ListFilter size={17} />
-            </IconButton>
+        {showGit && menu === "branches" && project && (
+          <div
+            ref={(node) => setMenuPopover("branches", node)}
+            className="header-branch-anchor"
+            data-header-menu="branch"
+          >
+            <Suspense fallback={<div className="header-popover" role="status">Loading branches…</div>}>
+              <WorkspaceBranchMenu
+                project={project}
+                conversation={conversation}
+                gitStatus={gitStatus}
+                branches={branches}
+                branchesLoading={branchesLoading}
+                branchesError={branchesError}
+                busy={busy}
+                onClose={() => dismissMenu("selection")}
+                onRefreshBranches={onRefreshBranches}
+                onSwitchBranch={onSwitchBranch}
+                onCreateBranch={onCreateBranch}
+                onCreateConversationInWorktree={onCreateConversationInWorktree}
+                onCreateConversationOnBranch={onCreateConversationOnBranch}
+                onCreateConversationInIsolatedWorktree={onCreateConversationInIsolatedWorktree}
+              />
+            </Suspense>
           </div>
         )}
-        <IconButton label={`Change theme (current: ${theme})`} onClick={onCycleTheme}><SunMoon size={17} /></IconButton>
-        {view === "workspace" ? (
-          <IconButton
-            label={activeTool
-              ? "Close workspace tools"
-              : workspaceToolsUnavailableReason ?? "Open workspace tools"}
-            aria-pressed={Boolean(activeTool)}
-            onClick={onToggleTools}
-            disabled={!project || Boolean(workspaceToolsUnavailableReason && !activeTool)}
-          >
-            {activeTool ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-          </IconButton>
-        ) : view === "settings" ? (
+        {view === "settings" ? (
           <IconButton label="Settings" aria-current="page" onClick={onOpenSettings}><Settings size={17} /></IconButton>
-        ) : (
+        ) : view !== "workspace" ? (
           <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
-        )}
+        ) : null}
       </div>
+      {menu === "title" && ConversationActionsMenu && conversation && conversationMenu && (
+        <ConversationActionsMenu
+          {...conversationMenu}
+          {...(titleAnchor ? { anchor: titleAnchor } : {})}
+          activity={false}
+          conversation={conversation}
+          thread={sidebarThreadView(conversation, conversationMenu.activeConversationId)}
+          onDismiss={(reason) => dismissMenu(reason)}
+          onSetPopover={(node) => setMenuPopover("title", node)}
+          onStartRename={startRename}
+        />
+      )}
     </header>
   );
 }

@@ -72,6 +72,9 @@ function LayoutHarness({
         </div>
       )}
       <output aria-label="Active tool">{layout.activeTool ?? "none"}</output>
+      <output aria-label="Panel open">{String(layout.panel.isOpen)}</output>
+      <output aria-label="Surfaces">{layout.panel.surfaces.join(",")}</output>
+      <output aria-label="Panel presentation">{layout.panelPresentation}</output>
       <output aria-label="Stacked tools">{String(layout.stackedTools)}</output>
       <output aria-label="Tool width">{layout.tools.width}</output>
       <output aria-label="Sidebar maximum">{layout.sidebar.max}</output>
@@ -136,16 +139,27 @@ describe("workspace startup surface", () => {
     }));
   });
 
-  it("uses Environment as the stock workspace panel and preserves close/reopen state", async () => {
+  it("starts with the chat alone and reopens the launcher or the last surface", async () => {
     render(<LayoutHarness surface="summary" />);
-    await waitFor(() =>
-      expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment"));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("false");
 
+    fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("true");
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    expect(screen.getByLabelText("Surfaces")).toBeEmptyDOMElement();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
     fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
     expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    expect(screen.getByLabelText("Surfaces")).toHaveTextContent("changes");
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
-    expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes"));
+    expect(window.localStorage.getItem("inertia:layout:workspace-panel:conversation-1:v1"))
+      .toBe(JSON.stringify({ isOpen: true, activeSurfaceId: "changes", surfaces: ["changes"] }));
   });
 
   it("starts observing layout targets that mount after the hook's initial effect", async () => {
@@ -157,8 +171,10 @@ describe("workspace startup surface", () => {
       <LayoutHarness surface="summary" mountTargets={false} />,
     );
     expect(resizeObservers).toHaveLength(0);
-    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("352");
-    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("377");
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("420");
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("332");
+    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("357");
 
     view.rerender(<LayoutHarness surface="summary" mountTargets />);
     const shell = screen.getByTestId("app-shell-target");
@@ -180,7 +196,7 @@ describe("workspace startup surface", () => {
     });
 
     expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("420");
-    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("753");
+    expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("733");
   });
 
   it("can start with the last tool and force split-view tools to the bottom", async () => {
@@ -194,41 +210,54 @@ describe("workspace startup surface", () => {
     expect(screen.getByLabelText("Stacked tools")).toHaveTextContent("true");
   });
 
-  it("keeps Environment narrow without overwriting the other tool width", async () => {
+  it("keeps one persisted panel width across surfaces", () => {
     render(<LayoutHarness surface="summary" />);
-    await waitFor(() =>
-      expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment"));
-    expect(screen.getByLabelText("Tool width")).toHaveTextContent("320");
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Tool width")).toHaveTextContent("520");
 
     fireEvent.click(screen.getByRole("button", { name: "Resize to 360" }));
     expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
-    expect(window.localStorage.getItem("inertia:layout:environment-width:v1"))
+    expect(window.localStorage.getItem("inertia:layout:workspace-tools-width:v1"))
       .toBe("360");
 
-    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
-    expect(screen.getByLabelText("Tool width")).toHaveTextContent("520");
-    fireEvent.click(screen.getByRole("button", { name: "Resize to 610" }));
-    expect(window.localStorage.getItem("inertia:layout:workspace-tools-width:v1"))
-      .toBe("610");
-
     fireEvent.click(screen.getByRole("button", { name: "Prefer summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prefer tools" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
     expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
   });
 
-  it("keeps open and selected panel state scoped to each task", async () => {
+  it("overlays the panel as a sheet when the chat would drop below 360px", async () => {
+    render(<LayoutHarness surface="summary" />);
+    const body = screen.getByTestId("workspace-body-target");
+    await waitFor(() =>
+      expect(resizeObservers.some(({ targets }) => targets.has(body))).toBe(true));
+    const bodyObserver = resizeObservers.find(({ targets }) => targets.has(body))!;
+
+    act(() => bodyObserver.emit(body, 667, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+
+    act(() => bodyObserver.emit(body, 666, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("sheet");
+
+    act(() => bodyObserver.emit(body, 1100, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+  });
+
+  it("keeps open and selected panel state scoped to each task", () => {
     const view = render(
       <LayoutHarness surface="summary" workspaceId="conversation-a" />,
     );
-    expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
     fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
     expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
 
     view.rerender(
       <LayoutHarness surface="summary" workspaceId="conversation-b" />,
     );
-    expect(screen.getByLabelText("Active tool")).toHaveTextContent("environment");
-    fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
     expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("false");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("true");
 
     view.rerender(
       <LayoutHarness surface="summary" workspaceId="conversation-a" />,
@@ -238,5 +267,6 @@ describe("workspace startup surface", () => {
       <LayoutHarness surface="summary" workspaceId="conversation-b" />,
     );
     expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("true");
   });
 });

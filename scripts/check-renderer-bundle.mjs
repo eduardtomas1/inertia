@@ -51,8 +51,6 @@ const budgets = {
   // Reviewed production dependency batch adds exactly 1,156 emitted bytes
   // on identical application source. Preserve existing headroom; see
   // docs/pr-evidence/dependency-pr420/renderer-bundle.json.
-  // The one-surface composer adds 164 bytes to this route and to core
-  // (822,457 / 2,122,567 against main's 822,293 / 2,122,403 on one tree).
   mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 164,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;

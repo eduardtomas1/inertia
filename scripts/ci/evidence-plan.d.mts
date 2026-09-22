@@ -53,6 +53,13 @@ export const PLATFORMS: readonly NativePlatform[];
 export const EVIDENCE_JOBS: Readonly<Record<string, string>>;
 export function createEvidencePlan(options: EvidencePlanOptions): EvidencePlan;
 export function outputsForEvidencePlan(plan: EvidencePlan): string;
+export function compareEvidencePlans(current: EvidencePlan, proposed: EvidencePlan): {
+  currentBase: string | null; proposedBase: string | null;
+  currentFullCertification: boolean; proposedFullCertification: boolean;
+  proposedDomains: string[]; newlyOmittedChecks: string[]; newlyRequiredChecks: string[];
+  newlyOmittedSuites: string[]; newlyRequiredSuites: string[];
+  currentBenchmarks: boolean; proposedBenchmarks: boolean;
+};
 export function evaluateMergeEvidence(plan: EvidencePlan | null, evidence: {
   head: string;
   sourceHead: string;

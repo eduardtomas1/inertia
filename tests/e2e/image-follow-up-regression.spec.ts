@@ -111,6 +111,10 @@ function sha256(bytes: readonly number[]): string {
 
 async function pasteImages(page: Page, images: readonly number[][]): Promise<void> {
   const composer = page.getByRole("textbox", { name: "Message" });
+  // The composer ignores pasted files while it is still submitting the previous
+  // turn or importing an earlier batch, and the attachment button carries that
+  // same state. Wait for it so a paste cannot land in that window and vanish.
+  await expect(page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
   await composer.evaluate((textarea, files) => {
     const transfer = new DataTransfer();
     files.forEach((bytes, index) => transfer.items.add(new File(

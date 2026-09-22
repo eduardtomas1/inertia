@@ -174,3 +174,31 @@ describe("fail-closed exact-candidate aggregate", () => {
       .toContain("Plan event does not match the workflow context.");
   });
 });
+
+it("enumerates every shadow omission without changing canonical current-candidate obligations", async () => {
+  const { compareEvidencePlans } = await import("../../scripts/ci/evidence-plan.mjs");
+  const current = plan([], { event: "push", base: null });
+  const proposed = plan(["src/renderer/src/components/UsageLimitsPanel.tsx",
+    "tests/renderer/usage-limits-focus.dom.test.tsx"], { event: "push" });
+  const before = JSON.stringify(current);
+  const comparison = compareEvidencePlans(current, proposed);
+  expect(comparison.newlyOmittedChecks).toEqual([
+    "Node 22.13 minimum runtime", "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64",
+    "macOS arm64", "macOS x64", "Windows unit tests (1/4)", "Windows unit tests (2/4)",
+    "Windows unit tests (3/4)", "Windows unit tests (4/4)",
+  ]);
+  expect(comparison.newlyRequiredChecks).toEqual(["Linux core and portable conformance", "Linux interaction and lifecycle"]);
+  expect(comparison).toMatchObject({ currentBenchmarks: true, proposedBenchmarks: false });
+  expect(comparison.newlyOmittedSuites).toHaveLength(8);
+  expect(JSON.stringify(current)).toBe(before);
+  // Shadow evidence cannot satisfy the strict plan, nor can a different source
+  // or merge SHA be compared as if it were the candidate.
+  expect(evaluateMergeEvidence(current, evidence(proposed)).length).toBeGreaterThan(0);
+  expect(() => compareEvidencePlans(current, { ...proposed, head: base })).toThrow();
+  expect(() => compareEvidencePlans(current, { ...proposed, sourceHead: base })).toThrow();
+  for (const path of ["README.md", "package-lock.json", "src/node/runtime-owned-processes.ts", "unknown/path"]) {
+    const narrow = plan([path], { event: "push" });
+    const change = compareEvidencePlans(current, narrow);
+    if (path !== "README.md") expect(change.newlyOmittedChecks).toEqual([]);
+  }
+});

@@ -30,7 +30,8 @@ export default defineConfig({
   expect: { timeout: assertionTimeout },
   fullyParallel: false,
   workers,
-  reporter: "line",
+  reporter: process.env.INERTIA_CI_TIMINGS === "true"
+    ? [["line"], ["./scripts/ci/playwright-timings.mjs"]] : "line",
   use: {
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -47,7 +48,7 @@ export default defineConfig({
       grepInvert: runtimeRecoveryTag,
       workers,
       // Only this phase launches concurrent Electron instances. The hosted
-      // runners have four cores, so each instance gets proportional deadline
+      // runners differ in capacity, so each instance gets proportional deadline
       // headroom without weakening the single-worker geometry phase.
       timeout: testTimeout * workers,
       expect: { timeout: assertionTimeout * workers },

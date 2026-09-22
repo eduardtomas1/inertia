@@ -32,6 +32,7 @@ export class ClaudeDelegateLifecycle {
       }
     | undefined;
   private endedAtAuthoritativeIdle = false;
+  private parentResumedAfterProvisional = false;
   private promptUuid: string | null = null;
   private promptPending = false;
   private promptFailure: "prompt-refused" | "prompt-cancelled" | "prompt-discarded" | undefined;
@@ -53,6 +54,16 @@ export class ClaudeDelegateLifecycle {
         return { turnEnded: true };
       }
       return { turnEnded: false };
+    }
+
+    if (
+      message.type === "assistant"
+      && this.latestResult?.deferred
+      && (message as { parent_tool_use_id?: unknown }).parent_tool_use_id == null
+    ) {
+      // Root output after a provisional result proves the parent resumed. An
+      // exit before its next result is a mid-turn exit, not a missed resume.
+      this.parentResumedAfterProvisional = true;
     }
 
     if (message.type === "result") {
@@ -77,6 +88,7 @@ export class ClaudeDelegateLifecycle {
         ),
       };
       this.latestResult = candidate;
+      this.parentResumedAfterProvisional = false;
       return {
         turnEnded: !candidate.deferred
           && this.liveBackgroundTaskIds.size === 0,
@@ -136,7 +148,10 @@ export class ClaudeDelegateLifecycle {
       return { kind: "incomplete", reason: "delegates-abandoned" };
     }
     if (candidate.deferred) {
-      return { kind: "incomplete", reason: "parent-not-resumed" };
+      return {
+        kind: "incomplete",
+        reason: this.parentResumedAfterProvisional ? "missing-result" : "parent-not-resumed",
+      };
     }
     return { kind: "result", result: candidate.message };
   }
@@ -146,6 +161,7 @@ export class ClaudeDelegateLifecycle {
     this.observedBackgroundTaskLevel = false;
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
+    this.parentResumedAfterProvisional = false;
     this.promptPending = false;
     this.promptUuid = null;
     this.promptFailure = undefined;

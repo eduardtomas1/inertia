@@ -233,6 +233,7 @@ export function openCodeRuntimeFailure(
   terminalEvent: string,
   child?: ChildProcessWithoutNullStreams,
   workspaceRoot?: string,
+  serverOutput?: string,
 ): ProviderRunFailure {
   const normalized = rawError.toLowerCase();
   const reason: ProviderRunFailure["reason"] =
@@ -256,10 +257,17 @@ export function openCodeRuntimeFailure(
     "OpenCode stopped unexpectedly.",
     { workspaceRoot },
   );
-  const technicalDetail = sanitizeProviderActivityDetail(rawError, {
-    workspaceRoot,
-    maxChars: 16 * 1024,
-  });
+  // Server output explains an unexpected stop but never picks the reason:
+  // arbitrary log text must not reclassify the failure.
+  const technicalDetail = sanitizeProviderActivityDetail(
+    [rawError, serverOutput !== rawError ? serverOutput : undefined]
+      .filter(Boolean)
+      .join("\n\n"),
+    {
+      workspaceRoot,
+      maxChars: 16 * 1024,
+    },
+  );
   return {
     reason,
     message: safeMessage,

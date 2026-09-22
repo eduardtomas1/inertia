@@ -132,6 +132,41 @@ describe("Claude accepted follow-up settlement", () => {
     },
   );
 
+  it("does not treat a background notification's empty result as the follow-up answer", async () => {
+    const root = portableFixtureRoot("Claude follow-up notification acknowledgement");
+    roots.push(root);
+    let ready!: () => void;
+    const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+    let followUpMessage: SDKUserMessage | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const initial = (await iterator.next()).value!;
+        ready();
+        const followUp = (await iterator.next()).value!;
+        followUpMessage = followUp;
+        yield { ...claudeSuccessResult("Initial request complete", "completed"),
+          user_message_uuid: initial.uuid } as SDKMessage;
+        yield { ...claudeSuccessResult(""), num_turns: 0, origin: { kind: "task-notification" },
+          user_message_uuid: followUp.uuid, user_message_uuids: [followUp.uuid] } as SDKMessage;
+      })()),
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({ providerId: "claude", conversationId: "follow-up-notification-ack",
+        cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+      executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+    });
+    await initialConsumed;
+    if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+      .resolves.toBe(true);
+    await expect(run.result).resolves.toMatchObject({
+      status: "failed",
+      error: "Claude Agent SDK exited before correlating every accepted follow-up.",
+    });
+    expect(followUpMessage?.origin).toEqual({ kind: "human" });
+  });
+
   it("keeps local cancellation authoritative over a late follow-up refusal", async () => {
     const root = portableFixtureRoot("Claude cancelled follow-up refusal");
     roots.push(root);

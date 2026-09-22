@@ -1,8 +1,8 @@
 export type WorkspacePanelTab =
-  | "environment"
   | "changes"
   | "files"
-  | "terminal"
+  | "preview"
+  | "agents"
+  | "usage"
   | "goal"
-  | "plan"
-  | "preview";
+  | "plan";

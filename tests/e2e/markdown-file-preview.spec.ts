@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { closeWorkspaceTools } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let outsideFile: string;
@@ -109,10 +110,7 @@ test.afterAll(async () => {
 test("opens a rendered project Markdown file directly from the chat", async () => {
   const { page, rendererErrors } = app;
   const workspacePanel = page.locator(".workspace-panel:visible").first();
-  await expect(workspacePanel).toBeVisible();
-  await page.locator(
-    'button[aria-label="Close workspace tools"]:visible',
-  ).first().click();
+  await closeWorkspaceTools(page);
   await expect(page.locator(".workspace-panel:visible")).toHaveCount(0);
 
   await page.getByRole("link", { name: "project guide" }).click();

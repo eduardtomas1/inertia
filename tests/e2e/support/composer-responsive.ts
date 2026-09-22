@@ -95,17 +95,14 @@ export function createComposerResponsiveHelpers({
       const visiblePanel = page.locator(".workspace-panel:visible").first();
       const panelIsVisible = await visiblePanel.count() > 0;
       if (panelIsVisible === open) return;
+      await page.locator(
+        "[data-panel-layout-controls] [data-right-panel-toggle]",
+      ).click();
       if (open) {
-        await page.locator(
-          'button[aria-label="Open workspace tools"]:visible',
-        ).first().click();
         await page.locator(".workspace-panel:visible").first()
           .waitFor({ state: "visible" });
         return;
       }
-      await page.locator(
-        'button[aria-label="Close workspace tools"]:visible',
-      ).first().click();
       await page.locator(".workspace-panel:visible")
         .waitFor({ state: "hidden" });
     },

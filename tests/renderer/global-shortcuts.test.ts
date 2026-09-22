@@ -38,7 +38,7 @@ function actions(createConversation: () => void): GlobalShortcutActions {
     createConversation,
     mobileNavigation: false,
     suspended: false,
-    setActiveTool: vi.fn(),
+    toggleTerminal: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),

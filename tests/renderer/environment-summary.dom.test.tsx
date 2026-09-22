@@ -1,5 +1,4 @@
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -7,7 +6,6 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
@@ -15,11 +13,20 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   prefetchWorkspaceTool: vi.fn(),
 }));
 
-import { ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentPanel";
+import { AgentsSurface } from "../../src/renderer/src/components/AgentsSurface";
+import {
+  CheckoutBranchControlProvider,
+  CheckoutBranchSlot,
+} from "../../src/renderer/src/components/CheckoutBranchControl";
+import { UsageSurface } from "../../src/renderer/src/components/UsageSurface";
+import WorkspaceGitActionMenu from "../../src/renderer/src/components/WorkspaceGitActionMenu";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
-import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
+import { OpenInControl } from "../../src/renderer/src/components/workspace-header/OpenInControl";
+import { PanelLayoutControls } from "../../src/renderer/src/components/workspace-header/PanelLayoutControls";
+import { ProjectActionsControl } from "../../src/renderer/src/components/workspace-header/ProjectActionsControl";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
-import type { Conversation, Project } from "../../src/shared/contracts";
+import type { WorkspaceRunsModel } from "../../src/renderer/src/utils/workspaceRuns";
+import type { Project } from "../../src/shared/contracts";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 
 type EnvironmentRun = EnvironmentSummarySnapshot["checks"][number];
@@ -199,104 +206,61 @@ const project: Project = {
   updatedAt: "2026-07-29T10:00:00.000Z",
 };
 
-function HeaderHarness({
-  activeProject = null,
-  conversation = null,
-  activeTool = null,
-  workspaceToolsUnavailableReason = null,
-  onOpenSettings = vi.fn(),
-  onOpenConnectionsSettings = vi.fn(),
-  onOpenEnvironment = vi.fn(),
-  onOpenBrowser,
-}: {
-  activeProject?: Project | null;
-  conversation?: Conversation | null;
-  activeTool?: "environment" | "preview" | null;
-  workspaceToolsUnavailableReason?: string | null;
-  onOpenSettings?: () => void;
-  onOpenConnectionsSettings?: () => void;
-  onOpenEnvironment?: () => void;
-  onOpenBrowser?: () => void;
-}): React.JSX.Element {
+function runsModel(
+  overrides: Partial<WorkspaceRunsModel> = {},
+): WorkspaceRunsModel {
+  return {
+    localServers: summary.localServers,
+    checks: summary.checks,
+    onStopRun: vi.fn(),
+    onOpenRunPreview: vi.fn(),
+    onAcknowledgeRun: vi.fn(),
+    onDismissRun: vi.fn(),
+    ...overrides,
+  };
+}
+
+function agentsSurface(overrides: Partial<EnvironmentSummarySnapshot> = {}): React.JSX.Element {
+  const next = { ...summary, ...overrides };
   return (
-    <WorkspaceHeader
-      project={activeProject}
-      conversation={conversation}
-      view="workspace"
-      activeTool={activeTool}
-      sidebarCollapsed={false}
-      theme="dark"
-      gitStatus={null}
-      branches={[]}
-      actions={[]}
-      busy={false}
-      onOpenSidebar={vi.fn()}
-      onToggleTools={vi.fn()}
-      workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
-      onOpenEnvironment={onOpenEnvironment}
-      onOpenBrowser={onOpenBrowser}
-      onCycleTheme={vi.fn()}
-      onOpenSettings={onOpenSettings}
-      onOpenConnectionsSettings={onOpenConnectionsSettings}
-      onOpenProject={vi.fn()}
-      onRefreshBranches={vi.fn()}
-      onSwitchBranch={vi.fn()}
-      onCreateBranch={vi.fn()}
-      onCreateConversationOnBranch={vi.fn()}
-      onCreateConversationInWorktree={vi.fn()}
-      onCreateConversationInIsolatedWorktree={vi.fn()}
-      onCommit={vi.fn()}
-      onOpenPullRequest={vi.fn()}
-      onPull={vi.fn()}
-      onPush={vi.fn()}
-      onRunAction={vi.fn()}
+    <AgentsSurface
+      runtimeStatus={next.runtime.status}
+      attachments={next.attachments}
+      subagents={[]}
+      turns={[]}
     />
   );
 }
 
-const panelActions = () => ({
-  onOpenChanges: vi.fn(),
-  onOpenFiles: vi.fn(),
-  onOpenProject: vi.fn(),
-  onRevealProject: vi.fn(),
-  onRetryGit: vi.fn(),
-  onRefreshUsage: vi.fn(),
-  onStopRun: vi.fn(),
-  onOpenRunPreview: vi.fn(),
-  onAcknowledgeRun: vi.fn(),
-  onDismissRun: vi.fn(),
-});
-
-function EnvironmentFocusHarness(): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<"environment" | "changes" | "files">(
-    "environment",
-  );
+function RunControl({
+  runs,
+  actions = [],
+}: {
+  runs: WorkspaceRunsModel;
+  actions?: Parameters<typeof ProjectActionsControl>[0]["actions"];
+}): React.JSX.Element {
   return (
-    <WorkspacePanel
-      activeTab={activeTab}
-      onTabChange={(tab) => {
-        if (tab === "environment" || tab === "changes" || tab === "files") {
-          setActiveTab(tab);
-        }
-      }}
-      tabs={["environment", "changes", "files"]}
-    >
-      {activeTab === "environment" ? (
-        <EnvironmentPanel
-          summary={summary}
-          workspaceToolsAvailable
-          {...panelActions()}
-          onOpenChanges={() => setActiveTab("changes")}
-          onOpenFiles={() => setActiveTab("files")}
-        />
-      ) : <p>{activeTab}</p>}
-    </WorkspacePanel>
+    <ProjectActionsControl
+      presentation="toolbar"
+      projectId={project.id}
+      actions={actions}
+      runs={runs}
+      onRunAction={vi.fn()}
+      onAddAction={vi.fn()}
+    />
   );
 }
 
-describe("Environment panel", () => {
+async function openRunMenu(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Project action options" }));
+  const menu = await screen.findByRole("menu", { name: "Project actions" });
+  await within(menu).findByRole("group", { name: "Running" });
+  return menu;
+}
+
+describe("Environment content in its workspace surfaces", () => {
   beforeEach(() => {
-    window.localStorage.removeItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY);
+    window.localStorage.clear();
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
       media: "",
@@ -309,8 +273,8 @@ describe("Environment panel", () => {
     }));
   });
 
-  it("opens real recent-attachment previews by ID, shows thumbnail availability and closes on context change", async () => {
-    const view = render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...panelActions()} />);
+  it("opens real recent-attachment previews by ID from Agents and closes on context change", async () => {
+    const view = render(agentsSurface());
     const list = screen.getByRole("list", { name: "Recent attachments" });
     const imageButton = within(list).getByRole("button", { name: "Preview attachment reference.png" });
     const thumbnail = imageButton.querySelector("img")!;
@@ -330,427 +294,144 @@ describe("Environment panel", () => {
     expect(nativePreviewSuspended()).toBe(false);
     await userEvent.click(imageButton);
     await screen.findByRole("dialog", { name: "reference.png" });
-    view.rerender(<EnvironmentPanel summary={{ ...summary, attachments: [] }} workspaceToolsAvailable {...panelActions()} />);
+    view.rerender(agentsSurface({ attachments: [] }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByRole("list", { name: "Recent attachments" })).toBeNull();
     expect(nativePreviewSuspended()).toBe(false);
   });
 
-  it("renders the compact truthful hierarchy and repository-scoped actions", () => {
-    const actions = panelActions();
-    render(<EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />);
-
-    const panel = screen.getByLabelText("Environment details");
-    expect(within(panel).getByLabelText("9 insertions and 4 deletions")).toBeVisible();
-    expect(within(panel).getByText("Worktree")).toBeVisible();
-    expect(within(panel).getByText("2 repositories")).toBeVisible();
-    expect(within(panel).getByText("Local Servers")).toBeVisible();
-    expect(within(panel).getByText("Usage")).toBeVisible();
-    expect(within(panel).getByRole("heading", { name: "Repository" })).toBeVisible();
-    expect(within(panel).getByRole("heading", { name: "Editor" })).toBeVisible();
-    expect(within(panel).queryByText("Ready", { exact: true })).not.toBeInTheDocument();
-    expect(within(panel).queryByText("Recap", { exact: true })).not.toBeInTheDocument();
-
-    fireEvent.click(within(panel).getByText("Commit and Push").closest("summary")!);
-    fireEvent.click(within(panel).getAllByRole("button", { name: "Commit" })
-      .find((button) => !button.hasAttribute("disabled"))!);
-    expect(actions.onOpenChanges).toHaveBeenCalledWith(".", "commit");
-    expect(within(panel).getByRole("button", { name: "Push 1" })).toBeDisabled();
-
-    fireEvent.click(within(panel).getByText("Local Servers").closest("summary")!);
-    expect(within(panel).getByText("http://127.0.0.1:4173 · Docs chat (docs/preview) · npm run preview")).toBeVisible();
-    fireEvent.click(within(panel).getByRole("button", {
-      name: /Open preview for Docs preview/u,
-    }));
-    expect(actions.onOpenRunPreview).toHaveBeenCalledWith(summary.localServers[0]);
-
-    const usageSummary = within(panel).getByText("Usage").closest("summary")!;
-    expect(usageSummary.closest("details")).toHaveAttribute("open");
-    expect(within(usageSummary).getByLabelText(/Tightest provider limit, .+: 64% left/u)).toHaveTextContent("64% left");
-    expect(usageSummary).not.toHaveTextContent("72%");
-    expect(within(panel).queryByText("Context window")).not.toBeInTheDocument();
-    expect(within(panel).getAllByText("64% left")).toHaveLength(2);
-    expect(within(panel).getByText("Current")).toBeVisible();
-    expect(within(panel).getByText("reference.png")).toBeVisible();
-    expect(within(panel).getByText("requirements.pdf")).toBeVisible();
-    expect(within(panel).getByText("forecast.xlsx")).toBeVisible();
-    expect(panel.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
+  it("keeps delegated work and every recent attachment in the Agents surface", () => {
+    render(agentsSurface());
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(within(agents).getByRole("heading", { name: "Delegated work" })).toBeVisible();
+    expect(within(agents).getByText("No provider-reported subagents in this conversation.")).toBeVisible();
+    expect(within(agents).getByText("reference.png")).toBeVisible();
+    expect(within(agents).getByText("requirements.pdf")).toBeVisible();
+    expect(within(agents).getByText("forecast.xlsx")).toBeVisible();
+    expect(agents.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
   });
 
-  it("does not offer repository mutations without scoped Git authority", () => {
-    const actions = panelActions();
-    const repository = {
-      ...summary.repositories[0]!,
-      authorityRef: null,
-      commitAction: {
-        ...summary.repositories[0]!.commitAction!,
-        disabled: true,
-        detail: "Scoped Git access is unavailable. Refresh the workspace before changing this repository.",
-      },
-      pushAction: {
-        ...summary.repositories[0]!.pushAction!,
-        disabled: true,
-        detail: "Scoped Git access is unavailable. Refresh the workspace before changing this repository.",
-      },
-    };
-    render(
-      <EnvironmentPanel
-        summary={{ ...summary, repositories: [repository] }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-
-    fireEvent.click(screen.getByText("Commit and Push").closest("summary")!);
-    const commit = screen.getByRole("button", { name: "Commit" });
-    const push = screen.getByRole("button", { name: "Push 1" });
-    expect(commit).toBeDisabled();
-    expect(push).toBeDisabled();
-    expect(commit).toHaveAttribute("title", expect.stringContaining("Scoped Git access is unavailable"));
-    expect(push).toHaveAttribute("title", expect.stringContaining("Scoped Git access is unavailable"));
-    fireEvent.click(commit);
-    fireEvent.click(push);
-    expect(actions.onOpenChanges).not.toHaveBeenCalled();
-  });
-
-  it("routes the header Environment control and reflects its active state", () => {
-    const onOpenEnvironment = vi.fn();
-    const view = render(
-      <HeaderHarness activeProject={project} onOpenEnvironment={onOpenEnvironment} />,
-    );
-    const trigger = screen.getByRole("button", { name: "Open Environment" });
-    expect(trigger).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(trigger);
-    expect(onOpenEnvironment).toHaveBeenCalledOnce();
-
-    view.rerender(
-      <HeaderHarness activeProject={project} activeTool="environment" />,
-    );
-    expect(screen.getByRole("button", { name: "Open Environment" }))
-      .toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("opens Browser directly for the active chat and reflects its active state", () => {
-    const onOpenBrowser = vi.fn();
-    const conversation = {
-      id: "22222222-2222-4222-8222-222222222222",
-      title: "Browser chat",
-      worktreePath: null,
-    } as Conversation;
-    const view = render(
-      <HeaderHarness
-        activeProject={project}
-        conversation={conversation}
-        onOpenBrowser={onOpenBrowser}
-      />,
-    );
-    const trigger = screen.getByRole("button", { name: "Open Browser" });
-    expect(trigger).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(trigger);
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
-
-    view.rerender(
-      <HeaderHarness
-        activeProject={project}
-        conversation={conversation}
-        activeTool="preview"
-        onOpenBrowser={onOpenBrowser}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Open Browser" }))
-      .toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("does not offer Environment before a task has a project", () => {
-    render(<HeaderHarness />);
-    expect(screen.queryByRole("button", { name: "Open Environment" }))
-      .not.toBeInTheDocument();
-  });
-
-  it("distinguishes clean, loading, unknown, unavailable, and failed Git states", () => {
-    const actions = panelActions();
-    const view = render(
-      <EnvironmentPanel
-        summary={{ ...summary, gitState: "loading" }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Changes Checking…" })).toBeDisabled();
-    expect(screen.getByText("Checking branch…")).toBeVisible();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          changes: { ...summary.changes!, files: 0, insertions: 0, deletions: 0 },
-          gitState: "ready",
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Changes Clean" })).toBeEnabled();
-
-    for (const [gitState, label] of [
-      ["unknown", "Repository not checked"],
-      ["unavailable", "No Git repository"],
-    ] as const) {
-      view.rerender(
-        <EnvironmentPanel
-          summary={{ ...summary, branch: null, changes: null, gitState }}
-          workspaceToolsAvailable
-          {...actions}
-        />,
-      );
-      expect(screen.getByText(label)).toBeVisible();
-    }
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          changes: null,
-          gitState: "error",
-          gitNotice: "Permission denied.",
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Changes Unavailable" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(actions.onRetryGit).toHaveBeenCalledOnce();
-  });
-
-  it("promotes runtime status only when attention is required", () => {
-    const actions = panelActions();
-    const view = render(
-      <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />,
-    );
+  it("promotes runtime status in Agents only when attention is required", () => {
+    const view = render(agentsSurface());
     expect(screen.queryByText(/workspace runtime/iu)).not.toBeInTheDocument();
 
-    view.rerender(
-      <EnvironmentPanel
-        summary={{ ...summary, runtime: { status: "connecting" } }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
+    view.rerender(agentsSurface({ runtime: { status: "connecting" } }));
     expect(screen.getByRole("status")).toHaveTextContent("Connecting to workspace");
 
-    view.rerender(
-      <EnvironmentPanel
-        summary={{ ...summary, runtime: { status: "offline" } }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
+    view.rerender(agentsSurface({ runtime: { status: "offline" } }));
     expect(screen.getByRole("status")).toHaveTextContent("Workspace runtime unavailable");
   });
 
-  it("opens Usage by default and remembers when it is collapsed or reopened", () => {
-    const panel = () => <EnvironmentPanel summary={summary} workspaceToolsAvailable {...panelActions()} />;
-    const usage = () => screen.getByText("Usage").closest("details")!;
-    const first = render(panel());
-    expect(usage()).toHaveAttribute("open");
-    expect(within(usage()).getByText("Codex")).toBeVisible();
-
-    fireEvent.click(usage().querySelector("summary")!);
-    expect(usage()).not.toHaveAttribute("open");
-    expect(window.localStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY)).toBe("false");
-    first.unmount();
-
-    const second = render(panel());
-    expect(usage()).not.toHaveAttribute("open");
-    fireEvent.click(usage().querySelector("summary")!);
-    expect(usage()).toHaveAttribute("open");
-    expect(window.localStorage.getItem(ENVIRONMENT_USAGE_OPEN_STORAGE_KEY)).toBe("true");
-    second.unmount();
-
-    render(panel());
-    expect(usage()).toHaveAttribute("open");
-
-    act(() => {
-      window.dispatchEvent(new StorageEvent("storage", { key: ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, newValue: "false" }));
-    });
-    expect(usage()).not.toHaveAttribute("open");
-    act(() => {
-      window.dispatchEvent(new StorageEvent("storage", { key: ENVIRONMENT_USAGE_OPEN_STORAGE_KEY, newValue: "true" }));
-    });
-    expect(usage()).toHaveAttribute("open");
-  });
-
-  it("shows current, stale, refreshing, and unavailable Usage without inventing quota", () => {
-    const actions = panelActions();
-    const view = render(
-      <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />,
-    );
-    const usage = () => screen.getByText("Usage").closest("details")!;
-    const openUsage = () => {
-      if (!usage().hasAttribute("open")) {
-        fireEvent.click(usage().querySelector("summary")!);
-      }
-      return usage();
-    };
-    openUsage();
-    expect(within(usage()).getByText("Current")).toBeVisible();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          usage: {
-            ...summary.usage!,
-            context: {
-              ...summary.usage!.context,
-              quality: "stale",
-              valueLabel: "72% · stale",
-              accessibleLabel: "Context 72% remaining, stale",
-            },
-            quota: {
-              ...summary.usage!.quota,
-              freshness: "stale",
-              limits: [],
-            },
-          },
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(within(openUsage()).getByText("Stale")).toBeVisible();
-    fireEvent.click(within(openUsage()).getByRole("button", { name: "Refresh usage" }));
-    expect(actions.onRefreshUsage).toHaveBeenCalledOnce();
-
-    for (const freshness of ["stale", "refreshing"] as const) {
-      view.rerender(
-        <EnvironmentPanel
-          summary={{ ...summary, usage: { ...summary.usage!, quota: { ...summary.usage!.quota, freshness } } }}
-          workspaceToolsAvailable
-          {...actions}
-        />,
-      );
-      const collapsedSummary = openUsage().querySelector("summary")!;
-      expect(collapsedSummary).toHaveTextContent(`64% left · ${freshness}`);
-      expect(within(collapsedSummary).getByLabelText(new RegExp(`64% left, ${freshness}$`, "u"))).toBeInTheDocument();
-    }
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          usage: {
-            ...summary.usage!,
-            context: {
-              quality: "unavailable",
-              remainingPercent: null,
-              valueLabel: "Unavailable",
-              accessibleLabel: "Context usage unavailable",
-              updatedAt: null,
-            },
-            quota: {
-              ...summary.usage!.quota,
-              freshness: "refreshing",
-              limits: [],
-            },
-          },
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(within(openUsage()).getAllByText("Refreshing").length).toBeGreaterThan(0);
-    expect(within(openUsage()).getByRole("button", { name: "Refreshing" })).toBeDisabled();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{
-          ...summary,
-          usage: {
-            ...summary.usage!,
-            quota: {
-              ...summary.usage!.quota,
-              freshness: "unavailable",
-              source: "isolated",
-              limits: [],
-            },
-          },
-        }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(within(openUsage()).getByText("Unavailable for this backend"))
-      .toBeVisible();
-    expect(openUsage().querySelector("summary")).toHaveTextContent("Not shared");
-    expect(within(openUsage()).queryByRole("button", { name: "Refresh usage" }))
-      .not.toBeInTheDocument();
-
-    view.rerender(
-      <EnvironmentPanel
-        summary={{ ...summary, usage: null }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(within(openUsage()).getByText(/Usage is unavailable/iu)).toBeVisible();
-  });
-
-  it("shows only validated live servers and a truthful empty disclosure", () => {
-    const actions = panelActions();
-    render(
-      <EnvironmentPanel
-        summary={{ ...summary, localServers: [] }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    const localServers = screen.getByText("Local Servers").closest("details")!;
-    expect(localServers.querySelector("summary")).toHaveTextContent("0");
-    fireEvent.click(localServers.querySelector("summary")!);
-    expect(within(localServers).getByText("No validated local service ports are active."))
-      .toBeVisible();
-  });
-
-  it("moves keyboard focus to the selected workspace tool", async () => {
-    const user = userEvent.setup();
-    render(<EnvironmentFocusHarness />);
-    for (const scenario of [
-      { action: /Changes/u, tab: "Changes" },
-      { action: "Editor view", tab: "Files" },
-    ]) {
-      if (scenario.tab === "Files") {
-        await user.click(screen.getByRole("tab", { name: "Environment" }));
-      }
-      const action = within(screen.getByLabelText("Environment details"))
-        .getByRole("button", { name: scenario.action });
-      action.focus();
-      await user.keyboard("{Enter}");
-      const destination = screen.getByRole("tab", { name: scenario.tab });
-      expect(destination).toHaveAttribute("aria-selected", "true");
-      await waitFor(() => expect(destination).toHaveFocus());
-    }
-  });
-
-  it("keeps section labelling unique across split Environment panels", () => {
-    const actions = panelActions();
-    const view = render(
-      <>
-        <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
-        <EnvironmentPanel summary={summary} workspaceToolsAvailable {...actions} />
-      </>,
-    );
+  it("keeps section labelling unique across split Agents surfaces", () => {
+    const view = render(<>{agentsSurface()}{agentsSurface()}</>);
     const labels = [...view.container.querySelectorAll<HTMLElement>(
-      ".environment-panel [aria-labelledby]",
+      ".agents-surface [aria-labelledby]",
     )].map((element) => element.getAttribute("aria-labelledby"));
+    expect(labels.length).toBeGreaterThan(1);
     expect(labels).not.toContain(null);
     expect(new Set(labels).size).toBe(labels.length);
     for (const label of labels) expect(document.getElementById(label!)).not.toBeNull();
   });
 
-  it("preserves all run controls and sibling owner context", () => {
-    const actions = panelActions();
+  it("shows every provider limit with its window, reset and this chat's context in Usage", () => {
+    render(<UsageSurface usage={summary.usage} onRefreshUsage={vi.fn()} />);
+    const usage = screen.getByRole("region", { name: "Usage" });
+    expect(within(usage).getByRole("heading", { name: "Codex" })).toBeVisible();
+    expect(within(usage).getByText("Current")).toBeVisible();
+    const meter = within(usage).getByRole("meter", { name: "Five-hour limit remaining" });
+    expect(meter).toHaveAttribute("aria-valuenow", "64");
+    expect(within(usage).getByText("64% left")).toBeVisible();
+    expect(within(usage).getByText("Context window")).toBeVisible();
+    expect(within(usage).getByLabelText("Context 72% remaining")).toHaveTextContent("72%");
+    expect(within(usage).queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
+  });
+
+  it("shows current, stale, refreshing, and unavailable Usage without inventing quota", () => {
+    const onRefreshUsage = vi.fn();
+    const view = render(<UsageSurface usage={summary.usage} onRefreshUsage={onRefreshUsage} />);
+    expect(screen.getByText("Current")).toBeVisible();
+
+    view.rerender(
+      <UsageSurface
+        onRefreshUsage={onRefreshUsage}
+        usage={{
+          ...summary.usage!,
+          context: {
+            ...summary.usage!.context,
+            quality: "stale",
+            valueLabel: "72% · stale",
+            accessibleLabel: "Context 72% remaining, stale",
+          },
+          quota: { ...summary.usage!.quota, freshness: "stale", limits: [] },
+        }}
+      />,
+    );
+    expect(screen.getByText("Stale")).toBeVisible();
+    expect(screen.getByText("No provider limit windows are available.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    expect(onRefreshUsage).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <UsageSurface
+        onRefreshUsage={onRefreshUsage}
+        usage={{
+          ...summary.usage!,
+          quota: { ...summary.usage!.quota, freshness: "refreshing", limits: [] },
+        }}
+      />,
+    );
+    expect(screen.getByText("Refreshing provider limits…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Refreshing" })).toBeDisabled();
+
+    view.rerender(
+      <UsageSurface
+        onRefreshUsage={onRefreshUsage}
+        usage={{
+          ...summary.usage!,
+          quota: {
+            ...summary.usage!.quota,
+            freshness: "unavailable",
+            source: "isolated",
+            limits: [],
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Unavailable for this backend")).toBeVisible();
+    expect(screen.getByText(/not shared with this custom backend route/u)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
+
+    view.rerender(<UsageSurface usage={null} onRefreshUsage={onRefreshUsage} />);
+    expect(screen.getByText(/Usage is unavailable/iu)).toBeVisible();
+  });
+
+  it("moves local servers into Run with their status in text, not a dot", async () => {
+    const runs = runsModel();
+    render(<RunControl runs={runs} />);
+    expect(screen.getByRole("button", { name: "Add action, 1 running" })).toBeVisible();
+
+    const menu = await openRunMenu();
+    const server = within(menu).getByRole("group", {
+      name: "Docs preview · Docs chat (docs/preview) · npm run preview",
+    });
+    expect(within(server).getByText("Running · http://127.0.0.1:4173 · Docs chat (docs/preview) · npm run preview"))
+      .toBeVisible();
+    expect(document.querySelector(".header-live-dot, .header-run-state")).toBeNull();
+    fireEvent.click(within(server).getByRole("menuitem", { name: /Stop Docs preview · Docs chat/u }));
+    expect(runs.onStopRun).toHaveBeenCalledWith(summary.localServers[0]);
+    fireEvent.click(within(server).getByRole("menuitem", { name: /Open preview for Docs preview/u }));
+    expect(runs.onOpenRunPreview).toHaveBeenCalledWith(summary.localServers[0]);
+    expect(screen.queryByRole("menu", { name: "Project actions" })).not.toBeInTheDocument();
+  });
+
+  it("offers only Add action when no validated server or check is active", () => {
+    render(<RunControl runs={runsModel({ localServers: [], checks: [] })} />);
+    expect(screen.getByRole("button", { name: "Add action" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Project action options" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/running/iu)).not.toBeInTheDocument();
+  });
+
+  it("preserves all run controls and sibling owner context in Run", async () => {
     const failed = environmentRun({
       id: "failed-check",
       conversationId: "conversation-2",
@@ -760,31 +441,21 @@ describe("Environment panel", () => {
       canAcknowledge: true,
       canDismiss: true,
     });
-    render(
-      <EnvironmentPanel
-        summary={{ ...summary, checks: [failed] }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    fireEvent.click(screen.getByText("Active work").closest("summary")!);
-    fireEvent.click(screen.getByRole("button", {
+    const runs = runsModel({ checks: [failed] });
+    render(<RunControl runs={runs} />);
+    const menu = await openRunMenu();
+    fireEvent.click(within(menu).getByRole("menuitem", {
       name: "Acknowledge Typecheck · Release chat (codex/release)",
     }));
-    fireEvent.click(screen.getByRole("button", {
+    fireEvent.click(within(menu).getByRole("menuitem", {
       name: "Dismiss Typecheck · Release chat (codex/release)",
     }));
-    fireEvent.click(screen.getByText("Local Servers").closest("summary")!);
-    fireEvent.click(screen.getByRole("button", {
-      name: /Stop Docs preview · Docs chat/u,
-    }));
-    expect(actions.onAcknowledgeRun).toHaveBeenCalledWith(failed);
-    expect(actions.onDismissRun).toHaveBeenCalledWith(failed);
-    expect(actions.onStopRun).toHaveBeenCalledWith(summary.localServers[0]);
+    expect(runs.onAcknowledgeRun).toHaveBeenCalledWith(failed);
+    expect(runs.onDismissRun).toHaveBeenCalledWith(failed);
+    expect(within(menu).getByText(/Needs attention/u)).toBeVisible();
   });
 
-  it("moves focus to the next run action when a row disappears", () => {
-    const actions = panelActions();
+  it("moves focus to the next run action when a row disappears", async () => {
     const running = environmentRun({ id: "build", label: "Build", canStop: true });
     const failed = environmentRun({
       id: "typecheck",
@@ -792,89 +463,192 @@ describe("Environment panel", () => {
       status: "failed",
       canAcknowledge: true,
     });
-    const view = render(
-      <EnvironmentPanel
-        summary={{ ...summary, checks: [running, failed] }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    fireEvent.click(screen.getByText("Active work").closest("summary")!);
-    const stop = screen.getByRole("button", { name: "Stop Build" });
+    const runs = runsModel({ localServers: [], checks: [running, failed] });
+    const view = render(<RunControl runs={runs} />);
+    const menu = await openRunMenu();
+    const stop = within(menu).getByRole("menuitem", { name: "Stop Build" });
     stop.focus();
     fireEvent.click(stop);
-    view.rerender(
-      <EnvironmentPanel
-        summary={{ ...summary, checks: [failed] }}
-        workspaceToolsAvailable
-        {...actions}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Acknowledge Typecheck" }))
-      .toHaveFocus();
+    view.rerender(<RunControl runs={{ ...runs, checks: [failed] }} />);
+    expect(screen.getByRole("menuitem", { name: "Acknowledge Typecheck" })).toHaveFocus();
   });
 
-  it("does not steal focus after the user leaves a disappearing run action", () => {
-    const actions = panelActions();
+  it("does not steal focus after the user leaves a disappearing run action", async () => {
     const running = environmentRun({ id: "build", label: "Build", canStop: true });
+    const failed = environmentRun({
+      id: "typecheck",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+    });
+    const runs = runsModel({ localServers: [], checks: [running, failed] });
     const view = render(
       <>
-        <EnvironmentPanel
-          summary={{ ...summary, checks: [running] }}
-          workspaceToolsAvailable
-          {...actions}
-        />
+        <RunControl runs={runs} />
         <button type="button">Outside</button>
       </>,
     );
-    fireEvent.click(screen.getByText("Active work").closest("summary")!);
-    const stop = screen.getByRole("button", { name: "Stop Build" });
-    const outside = screen.getByRole("button", { name: "Outside" });
+    const menu = await openRunMenu();
+    const stop = within(menu).getByRole("menuitem", { name: "Stop Build" });
     stop.focus();
     fireEvent.click(stop);
-    outside.focus();
+    screen.getByRole("button", { name: "Outside" }).focus();
     view.rerender(
       <>
-        <EnvironmentPanel
-          summary={{ ...summary, checks: [] }}
-          workspaceToolsAvailable
-          {...actions}
-        />
+        <RunControl runs={{ ...runs, checks: [failed] }} />
         <button type="button">Outside</button>
       </>,
     );
     expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
   });
 
-  it("names detached state and the platform file manager truthfully", () => {
+  it("names the platform file manager truthfully in Open", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
-      value: { getPlatform: () => "darwin" },
+      value: { getPlatform: () => "darwin", copyText: vi.fn() },
     });
     try {
+      const onRevealFolder = vi.fn();
       render(
-        <EnvironmentPanel
-          summary={{ ...summary, branch: { label: "Branch", value: "Detached HEAD" } }}
-          workspaceToolsAvailable
-          {...panelActions()}
+        <OpenInControl
+          presentation="toolbar"
+          checkoutName="inertia"
+          checkoutPath={summary.openTarget?.path ?? null}
+          filesAvailable
+          onOpenFolder={vi.fn()}
+          onRevealFolder={onRevealFolder}
+          onOpenFiles={vi.fn()}
         />,
       );
-      expect(screen.getAllByText("Detached HEAD")[0]).toBeVisible();
-      expect(screen.getByRole("button", { name: "Open in Finder" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Choose where to open" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: /^Finder/u }));
+      expect(onRevealFolder).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Open inertia in Finder" })).toBeVisible();
     } finally {
       Reflect.deleteProperty(window, "inertia");
     }
   });
 
-  it("explains why provisional worktree tools are unavailable", () => {
-    const reason = "Workspace tools are available after the first message creates this isolated worktree.";
+  it("names detached state in the checkout strip branch selector", async () => {
+    const onRefreshBranches = vi.fn();
     render(
-      <HeaderHarness
-        activeProject={project}
-        workspaceToolsUnavailableReason={reason}
+      <CheckoutBranchControlProvider
+        value={{
+          project,
+          conversation: null,
+          gitStatus: {
+            isRepository: true,
+            root: project.path,
+            branch: null,
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+          branches: [],
+          busy: false,
+          onRefreshBranches,
+          onSwitchBranch: vi.fn(),
+          onCreateBranch: vi.fn(),
+          onCreateConversationOnBranch: vi.fn(),
+          onCreateConversationInWorktree: vi.fn(),
+          onCreateConversationInIsolatedWorktree: vi.fn(),
+        }}
+      >
+        <CheckoutBranchSlot branch="Detached HEAD" />
+      </CheckoutBranchControlProvider>,
+    );
+    const trigger = await screen.findByRole("button", {
+      name: "Detached HEAD, create or check out a branch",
+    });
+    expect(trigger).toHaveTextContent("Detached HEAD · Create branch");
+    fireEvent.click(trigger);
+    expect(onRefreshBranches).toHaveBeenCalledOnce();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("surfaces Git failures in the Git menu instead of a separate Environment row", () => {
+    render(
+      <WorkspaceGitActionMenu
+        status={{
+          isRepository: true,
+          root: project.path,
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          hasRemote: false,
+          files: [],
+          insertions: 0,
+          deletions: 0,
+        }}
+        busy={false}
+        notice="Permission denied."
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Permission denied.")).toHaveAttribute("role", "status");
+  });
+
+  it("does not offer workspace actions before a task has a project", () => {
+    render(
+      <WorkspaceHeader
+        project={null}
+        conversation={null}
+        view="workspace"
+        sidebarCollapsed={false}
+        gitStatus={null}
+        branches={[]}
+        actions={[]}
+        busy={false}
+        onOpenSidebar={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenFolder={vi.fn()}
+        onRevealFolder={vi.fn()}
+        onOpenFiles={vi.fn()}
+        onRefreshBranches={vi.fn()}
+        onSwitchBranch={vi.fn()}
+        onCreateBranch={vi.fn()}
+        onCreateConversationOnBranch={vi.fn()}
+        onCreateConversationInWorktree={vi.fn()}
+        onCreateConversationInIsolatedWorktree={vi.fn()}
+        onCommit={vi.fn()}
+        onOpenPullRequest={vi.fn()}
+        onPull={vi.fn()}
+        onPush={vi.fn()}
+        onRunAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "Project actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Open checkout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Git actions" })).not.toBeInTheDocument();
+  });
+
+  it("explains why provisional worktree tools are unavailable while the right panel stays reachable", () => {
+    const reason = "Workspace tools are available after the first message creates this isolated worktree.";
+    const onToggleRightPanel = vi.fn();
+    render(
+      <PanelLayoutControls
+        usage={null}
+        terminalAvailable={false}
+        terminalOpen={false}
+        terminalShortcutLabel={null}
+        terminalUnavailableLabel={reason}
+        rightPanelAvailable
+        rightPanelOpen={false}
+        liveAgentCount={0}
+        onToggleTerminal={vi.fn()}
+        onToggleRightPanel={onToggleRightPanel}
+        onOpenUsage={vi.fn()}
       />,
     );
     expect(screen.getByRole("button", { name: reason })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Open Environment" })).toBeEnabled();
+    const toggle = screen.getByRole("button", { name: "Toggle right panel" });
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(onToggleRightPanel).toHaveBeenCalledOnce();
   });
 });

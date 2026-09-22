@@ -5,7 +5,7 @@ import {
   headerGitActions,
   gitSyncSummary,
 } from "../../src/renderer/src/utils/headerGitActions";
-import { primaryHeaderGitAction } from "../../src/renderer/src/utils/primaryHeaderGitAction";
+import { resolveQuickAction } from "../../src/renderer/src/utils/gitActionsControl";
 
 function status(
   overrides: Partial<GitStatusSnapshot> = {},
@@ -48,7 +48,7 @@ describe("header Git action hierarchy", () => {
     });
     const actions = headerGitActions(current);
 
-    expect(primaryHeaderGitAction(current)?.id).toBe("commit");
+    expect(resolveQuickAction(current, false)).toMatchObject({ kind: "commit", label: "Commit" });
     expect(actions.find((action) => action.id === "pull")).toMatchObject({
       disabled: true,
       detail: "Commit or stash local changes before pulling.",
@@ -58,9 +58,9 @@ describe("header Git action hierarchy", () => {
   it("prioritizes pulling a clean checkout that is behind", () => {
     const current = status({ behind: 3 });
 
-    expect(primaryHeaderGitAction(current)).toMatchObject({
-      id: "pull",
-      label: "Pull 3",
+    expect(resolveQuickAction(current, false)).toMatchObject({
+      kind: "pull",
+      label: "Pull",
     });
   });
 
@@ -68,9 +68,9 @@ describe("header Git action hierarchy", () => {
     const current = status({ ahead: 2 });
     const actions = headerGitActions(current);
 
-    expect(primaryHeaderGitAction(current)).toMatchObject({
-      id: "push",
-      label: "Push 2",
+    expect(resolveQuickAction(current, false)).toMatchObject({
+      kind: "push_pull_request",
+      label: "Push & create PR",
     });
     expect(actions.find((action) => action.id === "pull-request")).toMatchObject({
       disabled: true,
@@ -82,7 +82,10 @@ describe("header Git action hierarchy", () => {
     const current = status();
     const actions = headerGitActions(current);
 
-    expect(primaryHeaderGitAction(current)).toBeNull();
+    expect(resolveQuickAction(current, false)).toMatchObject({
+      kind: "show_hint",
+      disabled: true,
+    });
     expect(actions.find((action) => action.id === "pull-request")).toMatchObject({
       disabled: false,
     });
@@ -127,7 +130,11 @@ describe("header Git action hierarchy", () => {
     });
     const actions = headerGitActions(current);
 
-    expect(primaryHeaderGitAction(current)).toBeNull();
+    expect(resolveQuickAction(current, false)).toMatchObject({
+      kind: "show_hint",
+      disabled: true,
+      hint: "Configure one unambiguous push remote before publishing.",
+    });
     expect(actions.find((action) => action.id === "push")).toMatchObject({
       disabled: true,
       detail: "Configure one unambiguous push remote before publishing.",
@@ -147,7 +154,7 @@ describe("header Git action hierarchy", () => {
     });
     const actions = headerGitActions(current);
 
-    expect(primaryHeaderGitAction(current)).toBeNull();
+    expect(resolveQuickAction(current, false)).toMatchObject({ disabled: true });
     expect(actions.find((action) => action.id === "pull-request")).toMatchObject({
       disabled: true,
       detail: "Add a Git remote first.",
@@ -167,7 +174,7 @@ describe("Git overview states", () => {
     expect(actions.find(({ id }) => id === "fetch")?.disabled).toBe(false);
     expect(actions.find(({ id }) => id === "pull")?.disabled).toBe(true);
     expect(actions.find(({ id }) => id === "commit")?.disabled).toBe(true);
-    expect(primaryHeaderGitAction(status({ truncated: true, ahead: 2 }))).toBeNull();
+    expect(resolveQuickAction(status({ truncated: true, ahead: 2 }), false)).toMatchObject({ disabled: true });
   });
   it("allows pushing existing commits with uncommitted work, but never when behind", () => {
     const dirty = [{ path: "file", status: "modified", insertions: 1, deletions: 0, untracked: false, staged: false, unstaged: true, indexStatus: ".", worktreeStatus: "M" }];

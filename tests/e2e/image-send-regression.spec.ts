@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 import { createAppFixture } from "./support/app-fixture";
+import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 import { observeImagePreviewFailure } from "./support/image-preview-failure-evidence";
@@ -237,6 +238,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
 
     await app.restart();
     await previewEvidence?.afterRestart();
+    await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Agents");
     for (const attachment of retained) {
       const path = join(app.testDirectory, "data", "conversation-attachments",
         attachment.id, `${attachment.id}.png`);

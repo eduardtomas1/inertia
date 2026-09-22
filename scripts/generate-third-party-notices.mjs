@@ -19,6 +19,7 @@ const fixtureTreePath = process.env.INERTIA_NOTICES_TREE_PATH;
 const vendoredNoticesPaths = [
   join(repositoryRoot, "resources", "provider-icon-notices.txt"),
   join(repositoryRoot, "resources", "runtime-process-guardian-notices.txt"),
+  join(repositoryRoot, "resources", "thinking-orbs-notices.txt"),
 ];
 
 function fail(message) {

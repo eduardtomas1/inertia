@@ -7,6 +7,7 @@ import type {
 } from "@shared/contracts";
 
 import type { AppView } from "../../appView";
+import type { ProjectAppearanceUpdate } from "../ProjectCustomizePanel";
 import type { ConnectionStatus } from "../../hooks/useInertiaConnection";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
 
@@ -56,4 +57,5 @@ export interface SidebarProps {
   ) => void;
   onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
   onRemoveProject: (project: Project) => void;
+  onUpdateProjectAppearance?: ProjectAppearanceUpdate;
 }

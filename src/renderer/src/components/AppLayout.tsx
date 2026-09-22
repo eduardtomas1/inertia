@@ -16,6 +16,7 @@ import type {
   WorkspaceRun,
 } from "@shared/contracts";
 import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
+import type { ProjectAppearancePatch } from "@shared/project-preferences";
 
 import type { useAppUpdate } from "../app-update";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
@@ -87,6 +88,7 @@ interface AppLayoutActions {
   run: (
     key: string,
     command: CommandWithoutId,
+    options?: { reportError?: boolean },
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
   openGlobalChat: () => void;
@@ -401,6 +403,12 @@ export function AppLayout({
         payload: { projectId: item.id, groupingMode },
       }).catch(() => undefined);
     },
+    updateProjectAppearance: async (item: Project, appearance: ProjectAppearancePatch) => {
+      await actions.run("project.update", {
+        type: "project.update",
+        payload: { projectId: item.id, appearance },
+      }, { reportError: false });
+    },
     setProjectGitRepositoryLimit: (
       item: Project,
       gitRepositoryLimit: number,
@@ -604,6 +612,7 @@ export function AppLayout({
               sidebarActions.setProjectGitRepositoryLimit
             }
             onRemoveProject={sidebarActions.removeProject}
+            onUpdateProjectAppearance={sidebarActions.updateProjectAppearance}
           />
         </Suspense>
       )}

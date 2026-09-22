@@ -34,7 +34,7 @@ import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
-import { ProjectIcon } from "./ProjectIcon";
+import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { agentRequestProviderName } from "../utils/agentInput";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -164,6 +164,7 @@ function SidebarView({
   onSetProjectGrouping,
   onSetProjectGitRepositoryLimit,
   onRemoveProject,
+  onUpdateProjectAppearance,
   appUpdate,
   projectScopeId,
   onProjectScopeChange,
@@ -759,7 +760,7 @@ function SidebarView({
           >
             <span className="activity-thread-projectline">
               {project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
-              <span className="activity-thread-project-meta" title={project?.path}>{projectLabel}</span>
+              <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
@@ -926,7 +927,8 @@ function SidebarView({
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
-        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
+        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}
+          onCustomize={connectionStatus === "online" ? onUpdateProjectAppearance : undefined} onOpenSettings={onOpenProjectSettings} onManage={(project, trigger) => {
           setMenuTrigger(`:${project.id}`, trigger);
           toggleMenu(`:${project.id}`);
         }} />

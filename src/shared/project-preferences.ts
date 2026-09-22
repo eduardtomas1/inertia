@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PROJECT_COLOR_EMPHASES, PROJECT_COLOR_NAMES } from "./project-colors";
 
 export const PROJECT_ICON_NAMES = ["folder", "code", "database", "globe", "terminal", "layers", "box", "sparkles"] as const;
 export const PROJECT_ICON_SIZE = 64;
@@ -20,14 +21,31 @@ export function isValidClaudeTurnBudgetUsd(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     && value <= MAX_CLAUDE_TURN_BUDGET_USD && /^\d+(?:\.\d{1,2})?$/u.test(String(value));
 }
+export const projectIconSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("symbol"), name: z.enum(PROJECT_ICON_NAMES) }),
+  z.strictObject({ kind: z.literal("image"), data: z.string().max(MAX_PROJECT_ICON_DATA_LENGTH).regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u).refine(boundedPng, "Use a normalized small PNG icon.") }),
+]);
+export const projectColorSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("palette"), name: z.enum(PROJECT_COLOR_NAMES) }),
+  z.strictObject({ kind: z.literal("custom"), value: z.string().regex(/^#[0-9a-fA-F]{6}$/u).transform((value) => value.toLowerCase()) }),
+]);
+const appearanceFields = {
+  color: projectColorSchema.nullable().default(null),
+  colorEmphasis: z.enum(PROJECT_COLOR_EMPHASES).default("icon"),
+  pinned: z.boolean().default(false),
+};
+export const projectAppearancePatchSchema = z.strictObject({
+  icon: projectIconSchema.nullable(),
+  color: projectColorSchema.nullable(),
+  colorEmphasis: z.enum(PROJECT_COLOR_EMPHASES),
+  pinned: z.boolean(),
+}).partial().refine((value) => Object.keys(value).length > 0, "Choose at least one appearance change.");
+export type ProjectAppearancePatch = z.infer<typeof projectAppearancePatchSchema>;
 export const projectPreferencesSchema = z.strictObject({
   workspace: z.enum(["local", "worktree"]).nullable(),
   autoPull: z.boolean(),
   browserAccess: z.boolean().nullable(),
-  icon: z.discriminatedUnion("kind", [
-    z.strictObject({ kind: z.literal("symbol"), name: z.enum(PROJECT_ICON_NAMES) }),
-    z.strictObject({ kind: z.literal("image"), data: z.string().max(MAX_PROJECT_ICON_DATA_LENGTH).regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u).refine(boundedPng, "Use a normalized small PNG icon.") }),
-  ]).nullable(),
+  icon: projectIconSchema.nullable(),
   actions: z.array(z.strictObject({
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(80),
@@ -39,13 +57,18 @@ export const projectPreferencesSchema = z.strictObject({
   // turns unexpectedly for subscription users. Preferences saved before this
   // key existed omit it, so it defaults instead of failing the strict parse.
   claudeMaxBudgetUsd: z.number().refine(isValidClaudeTurnBudgetUsd, "Use an amount from 0.01 to 10,000 USD with at most two decimals.").nullable().default(null),
+  ...appearanceFields,
 }).refine((value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 192 * 1024, "Project settings exceed the local command size limit.")
   .refine((value) => new Set(value.actions.map(({ id }) => id)).size === value.actions.length, "Project actions must have distinct identities.");
 
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null };
+  return { workspace: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+}
+
+export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {
+  return { ...(preferences ?? defaultProjectPreferences()), ...appearance };
 }
 
 /** Corrupt or older preferences must never block opening a project. */
@@ -54,6 +77,10 @@ export function parseProjectPreferences(value: unknown): ProjectPreferences {
     if (typeof value === "string" && value.length > 192 * 1024) return defaultProjectPreferences();
     const input = typeof value === "string" ? JSON.parse(value) : value;
     const result = projectPreferencesSchema.safeParse(input);
-    return result.success ? result.data : defaultProjectPreferences();
+    if (result.success) return result.data;
+    if (!input || typeof input !== "object" || Array.isArray(input)) return defaultProjectPreferences();
+    const salvaged = projectPreferencesSchema.safeParse(Object.fromEntries(Object.entries(input as Record<string, unknown>)
+      .filter(([key, field]) => !(key in appearanceFields) || appearanceFields[key as keyof typeof appearanceFields].safeParse(field).success)));
+    return salvaged.success ? salvaged.data : defaultProjectPreferences();
   } catch { return defaultProjectPreferences(); }
 }

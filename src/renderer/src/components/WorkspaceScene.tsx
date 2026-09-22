@@ -27,6 +27,7 @@ import {
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import type { SettingsViewProps } from "./SettingsView";
 import { LoadingMark } from "./ui";
+import type { Project } from "@shared/contracts";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AgentsSurfaceProps } from "./AgentsSurface";
@@ -137,6 +138,7 @@ export interface SplitPaneDetails {
   conversationId: string;
   title: string;
   projectName: string;
+  project?: Project | null;
   toolsOpen: boolean;
   onToggleTools: () => void;
   terminalOpen: boolean;

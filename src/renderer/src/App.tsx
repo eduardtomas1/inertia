@@ -306,9 +306,10 @@ export default function App(): React.JSX.Element {
   const runUserCommand = useCallback((
     key: string,
     command: CommandWithoutId,
+    options?: { reportError?: boolean },
   ) => {
     if (!commandMayChangeWorkspaceAuthority(command)) {
-      return run(key, command);
+      return run(key, command, options);
     }
     conversationSelectionGenerationRef.current += 1;
     return selectionCommandQueue(key, command);

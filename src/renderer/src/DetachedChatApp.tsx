@@ -31,6 +31,7 @@ import { ChatWorkspace } from "./components/ChatWorkspace";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
 import { ConversationDetailState } from "./components/ConversationDetailState";
+import { ProjectIcon, ProjectName } from "./components/ProjectIcon";
 import { IconButton, LoadingMark } from "./components/ui";
 import {
   withRequestId,
@@ -509,7 +510,10 @@ export default function DetachedChatApp({
     >
       <header className="detached-chat-header drag-region">
         <div className="detached-chat-title">
-          <span>{project?.name ?? "Inertia"}</span>
+          <span className="detached-chat-project">
+            {project && <ProjectIcon project={project} size={12} />}
+            <ProjectName project={project}>{project?.name ?? "Inertia"}</ProjectName>
+          </span>
           <h1>{conversation?.title ?? "Detached chat"}</h1>
         </div>
         <div className="detached-chat-window-actions no-drag">

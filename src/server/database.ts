@@ -6,7 +6,7 @@ import {
   type AgentPlan,
   type AgentReasoning,
   type AgentTurn,
-  type AppSettings,
+  type AppSettings, type AppSettingsUpdate,
   type AppSnapshot,
   type ChatAttachment,
   type ChatMessage,
@@ -1208,7 +1208,7 @@ export class RuntimeStore {
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }
-  updateSettings(update: Partial<AppSettings>): void {
+  updateSettings(update: AppSettingsUpdate): void {
     this.settingsRepository.update(update);
   }
 

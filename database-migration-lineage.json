@@ -642,6 +642,11 @@
       "version": 77,
       "name": "ReferenceWholeConversationContext",
       "digest": "d50069eb10d1be55a9d8278908ccf65f79285efc325e8ce3d3121ab485b3d971"
+    },
+    {
+      "version": 78,
+      "name": "PersistWorkingIndicator",
+      "digest": "24029a846c379da70172fc7697bbd7c08cb873e6572934c47d578f5517a01e61"
     }
   ]
 }

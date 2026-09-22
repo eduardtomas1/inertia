@@ -18,6 +18,10 @@ import {
   DEFAULT_APP_KEYBINDINGS,
   type AppKeybindings,
 } from "../keybindings";
+import {
+  DEFAULT_WORKING_INDICATOR,
+  type WorkingIndicatorSettings,
+} from "../working-indicator";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
@@ -192,6 +196,7 @@ export interface AppSettings {
   providerIdentityLabels: ProviderIdentityLabels;
   /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
   keybindings: AppKeybindings;
+  workingIndicator: WorkingIndicatorSettings;
   defaultReasoningEffort: string;
   defaultInteractionMode: InteractionMode;
   /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
@@ -199,6 +204,10 @@ export interface AppSettings {
   /** Public GitHub or GitLab repository URL used to load releases for Discord announcements. */
   discordReleaseRepositoryUrl: string;
 }
+
+export type AppSettingsUpdate = Omit<Partial<AppSettings>, "workingIndicator"> & {
+  workingIndicator?: Partial<WorkingIndicatorSettings>;
+};
 
 export interface Project {
   /** Optional only for snapshots created before project defaults shipped. */
@@ -345,6 +354,7 @@ export const defaultSettings: AppSettings = {
   desktopNotifications: true,
   providerIdentityLabels: {},
   keybindings: DEFAULT_APP_KEYBINDINGS,
+  workingIndicator: { ...DEFAULT_WORKING_INDICATOR },
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",
   codexBinaryPath: "",

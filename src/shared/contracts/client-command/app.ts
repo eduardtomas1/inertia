@@ -2,6 +2,11 @@ import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import {
+  WORKING_INDICATOR_COLORS,
+  WORKING_INDICATOR_SPEEDS,
+  WORKING_INDICATOR_STYLES,
+} from "../../working-indicator";
 import { RUNTIME_DETAIL_SUBSCRIPTION_OWNERS } from "../../runtime-detail-subscriptions";
 
 import {
@@ -390,6 +395,14 @@ export const configurationCommandSchemas = [
           defaultReasoningEffort: z.string().trim().max(40).optional(),
           defaultInteractionMode: interactionModeSchema.optional(),
           codexBinaryPath: z.string().trim().max(4096).optional(),
+          workingIndicator: z.object({
+            style: z.enum(WORKING_INDICATOR_STYLES).optional(),
+            color: z.enum(WORKING_INDICATOR_COLORS).optional(),
+            customColor: z.string().regex(/^#[0-9a-f]{6}$/u).optional(),
+            glow: z.boolean().optional(),
+            activity: z.boolean().optional(),
+            speed: z.enum(WORKING_INDICATOR_SPEEDS).optional(),
+          }).strict().optional(),
         })
         .strict(),
     })

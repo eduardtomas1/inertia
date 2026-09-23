@@ -141,6 +141,19 @@ describe("architecture checker", () => {
     );
   });
 
+  it("rejects production imports of relocated test fixtures", () => {
+    const root = fixture({
+      "tests/helpers/providers/legacy-cli-harness.ts": "export const fixture = true;\n",
+      "src/server/consumer.ts": [
+        'import { fixture } from "../../tests/helpers/providers/legacy-cli-harness";',
+        "export const value = fixture;",
+      ].join("\n"),
+    });
+    expect(rejectedCheck(root)).toContain(
+      "cannot resolve local module ../../tests/helpers/providers/legacy-cli-harness",
+    );
+  });
+
   it("finds cycles that cross aliases and runtime JavaScript suffixes", () => {
     const root = fixture({
       "src/shared/alpha.ts": [

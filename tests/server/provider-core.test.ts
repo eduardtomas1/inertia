@@ -1,11 +1,11 @@
+import { validateProviderRunInput } from "../../src/server/provider/adapters";
 import { describe, expect, it } from "vitest";
 
 import {
   buildProviderInvocation,
   normalizeProviderLine,
-  validateProviderRunInput,
   type ProviderParserState,
-} from "../../src/server/provider/adapters";
+} from "../helpers/providers/legacy-cli-adapters";
 import type { ProviderId, ProviderRunInput } from "../../src/server/provider/contracts";
 import { nativeProviderRunFields } from "./model-route-fixture";
 import {
@@ -61,6 +61,29 @@ describe("provider adapter seams", () => {
     expect(text).toEqual(["Done"]);
     expect(sessions).toEqual(["session-1"]);
     expect(activities).toEqual([["turn", "completed", "Turn completed"]]);
+  });
+
+  it("retains the legacy failure event and terminal evidence after fixture relocation", () => {
+    const state: ProviderParserState = {
+      sawText: false,
+      sawStreamingDelta: false,
+      hadErrorEvent: false,
+    };
+    const failures: string[] = [];
+    normalizeProviderLine(
+      "codex",
+      JSON.stringify({ type: "turn.failed", error: { message: "fixture failure" } }),
+      state,
+      () => undefined,
+      (_kind, phase, label) => { if (phase === "failed") failures.push(label); },
+      () => undefined,
+    );
+    expect(state).toMatchObject({
+      hadErrorEvent: true,
+      sawTerminalEvent: true,
+      failureText: "fixture failure",
+    });
+    expect(failures).toContain("Codex reported an error");
   });
 
   it("settles legacy initialization facts and reuses duration identities", () => {

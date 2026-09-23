@@ -26,7 +26,7 @@ import {
   ProviderManager,
 } from "../../src/server/providers";
 import { createLegacyCliAgentHarnessForTests } from
-  "../../src/server/provider/cli-agent-harness";
+  "../helpers/providers/legacy-cli-harness";
 import {
   providerRunTerminal,
   type ProviderDetection,

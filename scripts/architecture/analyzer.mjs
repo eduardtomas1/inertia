@@ -232,6 +232,9 @@ function moduleCandidates(basePath) {
       join(base, "index.tsx"),
       join(base, "index.mts"),
       join(base, "index.cts"),
+      ...[".js", ".jsx", ".mjs", ".cjs"].flatMap((suffix) => [
+        `${base}${suffix}`, join(base, `index${suffix}`),
+      ]),
     ],
   };
 }
@@ -290,12 +293,12 @@ function walkAst(node, visit) {
   }
 }
 
-function moduleSyntax(file, contents) {
+function moduleSyntax(file, contents, includeTypeQueries = false) {
   const ast = parse(contents, {
     sourceType: "module",
     plugins: [
-      "typescript",
-      ...(file.endsWith(".tsx") ? ["jsx"] : []),
+      ["typescript", { dts: /\.d\.[cm]?ts$/u.test(file) }],
+      ...(/\.[jt]sx$/u.test(file) ? ["jsx"] : []),
       "decorators-legacy",
       "explicitResourceManagement",
       "importAttributes",
@@ -303,6 +306,15 @@ function moduleSyntax(file, contents) {
   });
   const imports = [];
   walkAst(ast.program, (node) => {
+    if (includeTypeQueries && node.type === "TSImportType") {
+      imports.push({
+        kind: "type-query",
+        specifier: node.argument?.type === "StringLiteral" ? node.argument.value : null,
+        typeOnly: true,
+        line: node.loc?.start.line ?? 1,
+      });
+      return;
+    }
     if (node.type === "ImportDeclaration") {
       imports.push({
         kind: "import",
@@ -493,18 +505,8 @@ function pairedFacadeDirectory(file) {
   return entry ? resolve(parent, entry.name) : null;
 }
 
-export function analyzeSourceArchitecture({
-  workspaceRoot,
-  sourceDirectory = "src",
-  configPaths = ["tsconfig.node.json", "tsconfig.web.json"],
-  allowedLayers = DEFAULT_ALLOWED_SOURCE_LAYERS,
-}) {
+export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeTypeQueries = false }) {
   const absoluteWorkspaceRoot = resolve(workspaceRoot);
-  const absoluteSourceDirectory = resolve(
-    absoluteWorkspaceRoot,
-    sourceDirectory,
-  );
-  const files = typescriptFiles(absoluteSourceDirectory);
   const sourceFileByCanonicalPath = new Map(
     files.map((file) => [canonicalPath(file), file]),
   );
@@ -516,8 +518,7 @@ export function analyzeSourceArchitecture({
     return {
       files,
       edges: [],
-      facades: [],
-      cycles: [],
+      modules: new Map(),
       failures: [
         error instanceof Error
           ? error.message
@@ -531,7 +532,7 @@ export function analyzeSourceArchitecture({
     const contents = readFileSync(file, "utf8");
     let syntax;
     try {
-      syntax = moduleSyntax(file, contents);
+      syntax = moduleSyntax(file, contents, includeTypeQueries);
     } catch (error) {
       failures.push(
         `${workspacePath(absoluteWorkspaceRoot, file)} could not be parsed: ${
@@ -573,6 +574,25 @@ export function analyzeSourceArchitecture({
       }
     }
   }
+
+  return { files, edges, modules, failures };
+}
+
+export function analyzeSourceArchitecture({
+  workspaceRoot,
+  sourceDirectory = "src",
+  configPaths = ["tsconfig.node.json", "tsconfig.web.json"],
+  allowedLayers = DEFAULT_ALLOWED_SOURCE_LAYERS,
+}) {
+  const absoluteWorkspaceRoot = resolve(workspaceRoot);
+  const absoluteSourceDirectory = resolve(
+    absoluteWorkspaceRoot,
+    sourceDirectory,
+  );
+  const files = typescriptFiles(absoluteSourceDirectory);
+  const { edges, modules, failures } = analyzeModuleUsage({
+    workspaceRoot: absoluteWorkspaceRoot, files, configPaths,
+  });
 
   for (const file of files) {
     const layer = sourceLayer(absoluteSourceDirectory, file);

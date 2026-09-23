@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { ProjectIcon } from "../ProjectIcon";
+import { ProjectIcon, ProjectName } from "../ProjectIcon";
 import { useEffect, useRef, useState } from "react";
 import { ProjectSearchDialog } from "../ProjectSearchDialog";
 import type { NewChatProjectPicker } from "./types";
@@ -16,7 +16,7 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
         }}>
-        <ProjectIcon project={picker.selectedProject} size={13} /><span>{picker.selectedProject.name}</span><ChevronDown size={12} aria-hidden="true" />
+        <ProjectIcon project={picker.selectedProject} size={13} /><ProjectName project={picker.selectedProject}>{picker.selectedProject.name}</ProjectName><ChevronDown size={12} aria-hidden="true" />
       </button>
       {open && !picker.disabled && <ProjectSearchDialog projects={picker.projects} selectedId={picker.selectedProject.id}
         label="Choose project" trigger={trigger.current} onClose={() => setOpen(false)} onSelect={(id) => {

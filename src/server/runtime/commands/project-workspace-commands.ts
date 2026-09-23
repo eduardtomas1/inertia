@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 import type { ServerEvent } from "../../../shared/contracts";
 import { sourceLanguageForFile } from "../../../shared/source-language";
+import { applyProjectAppearance } from "../../../shared/project-preferences";
 import {
   hasNativeProviderTerminalSession,
   isProviderTerminalSessionId,
@@ -243,11 +244,14 @@ export function createProjectWorkspaceCommandHandler(
         }
       }
       case "project.update": {
-        const { projectId, expectedUpdatedAt, ...update } = command.payload;
-        if (expectedUpdatedAt !== undefined && dependencies.store.project(projectId).updatedAt !== expectedUpdatedAt) {
+        const { projectId, expectedUpdatedAt, appearance, ...update } = command.payload;
+        const current = dependencies.store.project(projectId);
+        if (expectedUpdatedAt !== undefined && current.updatedAt !== expectedUpdatedAt) {
           throw new RuntimeRequestError("This project changed in another view. Review the current settings and try again.");
         }
-        dependencies.store.updateProject(projectId, update);
+        dependencies.store.updateProject(projectId, appearance
+          ? { ...update, preferences: applyProjectAppearance(update.preferences ?? current.preferences, appearance) }
+          : update);
         return "mutation";
       }
       case "workspace.entries": {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
-import { defaultProjectPreferences, parseProjectPreferences, projectPreferencesSchema } from "../../src/shared/project-preferences";
+import { applyProjectAppearance, defaultProjectPreferences, parseProjectPreferences, projectAppearancePatchSchema, projectPreferencesSchema } from "../../src/shared/project-preferences";
 
 const roots: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -99,12 +99,13 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null });
+    const appearanceDefaults = { color: null, colorEmphasis: "icon", pinned: false };
+    expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...appearanceDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);
     try { database.prepare("UPDATE projects SET preferences_json = ? WHERE id = ?").run(JSON.stringify(legacy), project.id); } finally { database.close(); }
     const reopened = new RuntimeStore(path, root); stores.push(reopened);
-    expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null });
+    expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...appearanceDefaults });
     reopened.updateProject(project.id, { preferences: { ...reopened.project(project.id).preferences!, claudeMaxBudgetUsd: 2.5 } });
     expect(reopened.project(project.id).preferences).toMatchObject({ autoPull: true, claudeMaxBudgetUsd: 2.5 });
   });
@@ -120,5 +121,50 @@ describe("durable project and thread organization", () => {
     }
     // A corrupt limit falls back to defaults, like any other corrupt preference.
     expect(parseProjectPreferences(JSON.stringify({ ...defaults, autoPull: true, claudeMaxBudgetUsd: -5 }))).toEqual(defaults);
+  });
+
+  it("persists project colour, emphasis and pinning across restart without touching other defaults", () => {
+    const { store, project, path, root } = fixture();
+    const preferences = { ...defaultProjectPreferences(), autoPull: true, icon: { kind: "symbol" as const, name: "code" as const },
+      color: { kind: "palette" as const, name: "teal" as const }, colorEmphasis: "icon-and-name" as const, pinned: true };
+    store.updateProject(project.id, { preferences });
+    store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = new RuntimeStore(path, root); stores.push(reopened);
+    expect(reopened.project(project.id).preferences).toEqual(preferences);
+    reopened.updateProject(project.id, { preferences: applyProjectAppearance(reopened.project(project.id).preferences, { color: { kind: "custom", value: "#3a86ff" } }) });
+    expect(reopened.project(project.id).preferences).toEqual({ ...preferences, color: { kind: "custom", value: "#3a86ff" } });
+  });
+
+  it("validates project colours strictly and normalises custom hex case", () => {
+    const defaults = defaultProjectPreferences();
+    expect(defaults).toMatchObject({ color: null, colorEmphasis: "icon", pinned: false });
+    expect(projectPreferencesSchema.parse({ ...defaults, color: { kind: "custom", value: "#3A86FF" } }).color).toEqual({ kind: "custom", value: "#3a86ff" });
+    for (const color of [{ kind: "palette", name: "chartreuse" }, { kind: "custom", value: "#abc" }, { kind: "custom", value: "red" },
+      { kind: "custom", value: "#3a86ff", extra: true }, { kind: "gradient", value: "#3a86ff" }, "#3a86ff"]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, color }).success).toBe(false);
+    }
+    expect(projectPreferencesSchema.safeParse({ ...defaults, colorEmphasis: "row" }).success).toBe(false);
+    expect(projectPreferencesSchema.safeParse({ ...defaults, pinned: "yes" }).success).toBe(false);
+  });
+
+  it("resets only a corrupt appearance field and keeps every other stored preference", () => {
+    const stored = { ...defaultProjectPreferences(), autoPull: true, icon: { kind: "symbol", name: "globe" }, pinned: true,
+      color: { kind: "custom", value: "javascript:alert(1)" }, colorEmphasis: "everything" };
+    expect(parseProjectPreferences(JSON.stringify(stored))).toEqual({ ...defaultProjectPreferences(), autoPull: true,
+      icon: { kind: "symbol", name: "globe" }, pinned: true });
+    expect(parseProjectPreferences({ ...stored, actions: "broken" })).toEqual(defaultProjectPreferences());
+    expect(parseProjectPreferences([stored])).toEqual(defaultProjectPreferences());
+  });
+
+  it("accepts only non-empty, well-formed appearance patches and merges them over current preferences", () => {
+    expect(projectAppearancePatchSchema.safeParse({}).success).toBe(false);
+    expect(projectAppearancePatchSchema.safeParse({ color: { kind: "palette", name: "blue" } }).success).toBe(true);
+    expect(projectAppearancePatchSchema.safeParse({ color: null, pinned: false }).success).toBe(true);
+    expect(projectAppearancePatchSchema.safeParse({ actions: [] }).success).toBe(false);
+    expect(projectAppearancePatchSchema.safeParse({ colorEmphasis: "row" }).success).toBe(false);
+    const current = { ...defaultProjectPreferences(), autoPull: true, colorEmphasis: "icon-and-name" as const };
+    expect(applyProjectAppearance(current, { color: { kind: "palette", name: "red" } }))
+      .toEqual({ ...current, color: { kind: "palette", name: "red" } });
+    expect(applyProjectAppearance(undefined, { pinned: true })).toEqual({ ...defaultProjectPreferences(), pinned: true });
   });
 });

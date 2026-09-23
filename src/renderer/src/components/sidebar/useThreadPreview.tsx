@@ -4,7 +4,7 @@ import { FolderGit2, GitBranch } from "lucide-react";
 import type { Conversation, Project } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
-import { ProjectIcon } from "../ProjectIcon";
+import { ProjectIcon, ProjectName } from "../ProjectIcon";
 
 function ThreadPreview({ conversation, project, anchor, onEnter, onLeave }: {
   conversation: Conversation; project?: Project; anchor: HTMLElement;
@@ -22,7 +22,7 @@ function ThreadPreview({ conversation, project, anchor, onEnter, onLeave }: {
   return createPortal(<div ref={surface} role="tooltip" id={`thread-preview-${conversation.id}`}
     className="thread-hover-preview" onPointerEnter={onEnter} onPointerLeave={onLeave}>
     <strong>{conversation.title}</strong>
-    <span>{project ? <ProjectIcon project={project} size={13} /> : <FolderGit2 size={13} />}{project?.name ?? "Project unavailable"}</span>
+    <span>{project ? <ProjectIcon project={project} size={13} /> : <FolderGit2 size={13} />}<ProjectName project={project}>{project?.name ?? "Project unavailable"}</ProjectName></span>
     {conversation.branch && <span><GitBranch size={13} />{conversation.branch}</span>}
     <span><ProviderBrandIcon providerId={conversation.providerId} size={14} />{conversation.modelSelection.alias || conversation.model || "Provider default"}</span>
   </div>, document.body);

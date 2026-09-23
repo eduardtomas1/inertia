@@ -1,0 +1,183 @@
+{
+  "baseline": "d3bd5b18d08dfd8d7baba1fc1870d0857d350a94",
+  "platform": "Linux x64 / Node 22.23.2",
+  "method": "Production electron-vite builds of origin/main and this branch on the same machine and dependency graph. Budget increases equal the measured deltas, so every pre-existing ceiling keeps its main-branch headroom. The customisation panel, its controls and custom-colour contrast math are separate deferred chunks with their own caps.",
+  "changed": {
+    "deferredUsageLimitsJavaScript": {
+      "before": 19950,
+      "after": 19952,
+      "delta": 2
+    },
+    "deferredProjectSettingsJavaScript": {
+      "before": 12791,
+      "after": 13358,
+      "delta": 567
+    },
+    "deferredThreadActionsJavaScript": {
+      "before": 8005,
+      "after": 7978,
+      "delta": -27
+    },
+    "deferredProjectCustomizeJavaScript": {
+      "before": null,
+      "after": 11275,
+      "delta": 11275
+    },
+    "deferredProjectColorContrastJavaScript": {
+      "before": null,
+      "after": 1807,
+      "delta": 1807
+    },
+    "deferredIssueReportJavaScript": {
+      "before": 12520,
+      "after": 12521,
+      "delta": 1
+    },
+    "entryJavaScript": {
+      "before": 222496,
+      "after": 222477,
+      "delta": -19
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "before": 824393,
+      "after": 829368,
+      "delta": 4975
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "before": 631742,
+      "after": 636617,
+      "delta": 4875
+    },
+    "detachedChatCss": {
+      "before": 2677,
+      "after": 2920,
+      "delta": 243
+    },
+    "settingsJavaScript": {
+      "before": 48706,
+      "after": 48746,
+      "delta": 40
+    },
+    "filesFirstLoadJavaScript": {
+      "before": 105208,
+      "after": 105478,
+      "delta": 270
+    },
+    "deferredMarkdownJavaScript": {
+      "before": 431732,
+      "after": 431727,
+      "delta": -5
+    },
+    "transcriptJavaScript": {
+      "before": 540477,
+      "after": 540473,
+      "delta": -4
+    },
+    "detachedChatJavaScript": {
+      "before": 12513,
+      "after": 12237,
+      "delta": -276
+    },
+    "coreJavaScript": {
+      "before": 2136785,
+      "after": 2140748,
+      "delta": 3963
+    }
+  },
+  "before": {
+    "deferredLegacyPromptStashJavaScript": 1219,
+    "deferredUsageLimitsJavaScript": 19950,
+    "deferredWelcomeGuideJavaScript": 13135,
+    "deferredSnapshotSettingsJavaScript": 5017,
+    "deferredProjectSettingsJavaScript": 12791,
+    "deferredReviewNoteJavaScript": 1439,
+    "deferredThreadActionsJavaScript": 8005,
+    "deferredDiagnosticsJavaScript": 12330,
+    "deferredDiagnosticCatalogJavaScript": 9891,
+    "deferredIssueReportJavaScript": 12520,
+    "mascotFirstLoadJavaScript": 6049,
+    "mascotJavaScript": 6049,
+    "mascotSettingsJavaScript": 6647,
+    "entryJavaScript": 222496,
+    "mainWorkbenchFirstLoadJavaScript": 824393,
+    "detachedChatFirstLoadJavaScript": 631742,
+    "entryCss": 346332,
+    "colorThemesCss": 12470,
+    "detachedChatCss": 2677,
+    "settingsJavaScript": 48706,
+    "filesFirstLoadJavaScript": 105208,
+    "deferredMarkdownJavaScript": 431732,
+    "transcriptJavaScript": 540477,
+    "deferredFailureDiagnosticsJavaScript": 6375,
+    "deferredAttachmentPreviewJavaScript": 12333,
+    "deferredPreviewJavaScript": 8109,
+    "deferredBrowserEvidenceJavaScript": 3751,
+    "deferredSpreadsheetJavaScript": 487396,
+    "deferredDiscordSettingsJavaScript": 5395,
+    "deferredCanaryRollbackJavaScript": 2276,
+    "deferredLifecycleIntegritySettingsJavaScript": 4188,
+    "deferredSidebarUpdateControlJavaScript": 10797,
+    "deferredProviderAuthJavaScript": 10118,
+    "deferredProviderMaintenanceJavaScript": 3983,
+    "deferredComposerQueueJavaScript": 6957,
+    "deferredTerminalJavaScript": 26495,
+    "deferredGitMenusJavaScript": 9333,
+    "deferredWorkspaceHeaderActionsJavaScript": 18829,
+    "detachedChatJavaScript": 12513,
+    "preMergeConfidenceJavaScript": 22570,
+    "morphiconsJavaScript": 15829,
+    "morphingIconFeedbackJavaScript": 4221,
+    "coreJavaScript": 2136785,
+    "deferredPdfJavaScript": 437530,
+    "deferredPdfWorker": 1265413
+  },
+  "after": {
+    "deferredLegacyPromptStashJavaScript": 1219,
+    "deferredUsageLimitsJavaScript": 19952,
+    "deferredWelcomeGuideJavaScript": 13135,
+    "deferredSnapshotSettingsJavaScript": 5017,
+    "deferredProjectSettingsJavaScript": 13358,
+    "deferredReviewNoteJavaScript": 1439,
+    "deferredThreadActionsJavaScript": 7978,
+    "deferredProjectCustomizeJavaScript": 11275,
+    "deferredProjectColorContrastJavaScript": 1807,
+    "deferredDiagnosticsJavaScript": 12330,
+    "deferredDiagnosticCatalogJavaScript": 9891,
+    "deferredIssueReportJavaScript": 12521,
+    "mascotFirstLoadJavaScript": 6049,
+    "mascotJavaScript": 6049,
+    "mascotSettingsJavaScript": 6647,
+    "entryJavaScript": 222477,
+    "mainWorkbenchFirstLoadJavaScript": 829368,
+    "detachedChatFirstLoadJavaScript": 636617,
+    "entryCss": 346332,
+    "colorThemesCss": 12470,
+    "detachedChatCss": 2920,
+    "settingsJavaScript": 48746,
+    "filesFirstLoadJavaScript": 105478,
+    "deferredMarkdownJavaScript": 431727,
+    "transcriptJavaScript": 540473,
+    "deferredFailureDiagnosticsJavaScript": 6375,
+    "deferredAttachmentPreviewJavaScript": 12333,
+    "deferredPreviewJavaScript": 8109,
+    "deferredBrowserEvidenceJavaScript": 3751,
+    "deferredSpreadsheetJavaScript": 487396,
+    "deferredDiscordSettingsJavaScript": 5395,
+    "deferredCanaryRollbackJavaScript": 2276,
+    "deferredLifecycleIntegritySettingsJavaScript": 4188,
+    "deferredSidebarUpdateControlJavaScript": 10797,
+    "deferredProviderAuthJavaScript": 10118,
+    "deferredProviderMaintenanceJavaScript": 3983,
+    "deferredComposerQueueJavaScript": 6957,
+    "deferredTerminalJavaScript": 26495,
+    "deferredGitMenusJavaScript": 9333,
+    "deferredWorkspaceHeaderActionsJavaScript": 18829,
+    "detachedChatJavaScript": 12237,
+    "preMergeConfidenceJavaScript": 22570,
+    "morphiconsJavaScript": 15829,
+    "morphingIconFeedbackJavaScript": 4221,
+    "coreJavaScript": 2140748,
+    "deferredPdfJavaScript": 437530,
+    "deferredPdfWorker": 1265413
+  }
+}

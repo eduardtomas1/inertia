@@ -1,12 +1,13 @@
 import { useId, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectPreferences } from "../../../shared/project-preferences";
+import { defaultProjectPreferences, isValidClaudeTurnBudgetUsd, PROJECT_ICON_NAMES, type ProjectAppearancePatch, type ProjectPreferences } from "../../../shared/project-preferences";
 import { modelSelectionSchema } from "../../../shared/model-routing";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { ProjectSearchDialog } from "./ProjectSearchDialog";
-import { ProjectIcon } from "./ProjectIcon";
+import { ProjectIcon, ProjectName } from "./ProjectIcon";
+import { ProjectColorPicker, ProjectEmphasisPicker } from "./ProjectAppearanceControls";
 import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
 import { Switch } from "./ui";
@@ -81,6 +82,12 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
   const setPreference = <K extends keyof ProjectPreferences>(key: K, value: ProjectPreferences[K]): void => {
     void save({ preferences: { ...preferences, [key]: value } });
   };
+  const setAppearance = (appearance: ProjectAppearancePatch): void => {
+    if (!request || disabled) return;
+    setError(null);
+    request({ type: "project.update", payload: { projectId: project.id, appearance } })
+      .catch((failure: unknown) => setError(failure instanceof Error ? failure.message : "Could not save project settings."));
+  };
   return <>
     {error && <p className="project-settings-error" role="alert">{error}</p>}
     <section className="project-settings-card" aria-label="Project defaults">
@@ -102,7 +109,17 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           }} />
         </div>
         {iconsOpen && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={blocked}
-          onClick={() => { setPreference("icon", { kind: "symbol", name: icon }); setIconsOpen(false); }}><ProjectIcon project={{ color: project.color, preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={19} /></button>)}</div>}
+          onClick={() => { setPreference("icon", { kind: "symbol", name: icon }); setIconsOpen(false); }}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={19} /></button>)}</div>}
+      </Row>
+      <Row title="Project colour" description="Tint the project mark so its work is easy to spot when several chats run. Its chats inherit the colour.">
+        <div className="project-colour-preview" aria-hidden="true"><ProjectIcon project={project} size={16} /><ProjectName project={project}>{project.name}</ProjectName></div>
+        <ProjectColorPicker value={preferences.color} disabled={disabled || !request} onChange={(color) => setAppearance({ color })} />
+      </Row>
+      <Row title="Colour shows on" description="Tint only the icon, or the icon and the project name. Chat titles and messages keep their normal colour.">
+        <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={disabled || !request} onChange={(colorEmphasis) => setAppearance({ colorEmphasis })} />
+      </Row>
+      <Row title="Pin to top" description="Keep this project first in the project filter and project choosers.">
+        <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={disabled || !request} onChange={(pinned) => setAppearance({ pinned })} />
       </Row>
       <Row title="Model" description="New threads use this default. Existing threads keep their model and session.">
         <ProjectModelDefault projectId={project.id} providers={providers} backendDefaults={backendDefaults}
@@ -171,7 +188,7 @@ export function ProjectSettings(props: Props): React.JSX.Element {
   const selected = props.projects.find(({ id }) => id === selectedId);
   return <div className="project-settings">
     <header className="project-settings-heading"><div><h1>Projects</h1><p>Defaults for your next thread. Your existing work stays unchanged.</p></div>
-      <button ref={chooser} type="button" aria-label="Choose project" aria-haspopup="dialog" aria-expanded={chooserOpen} onClick={() => setChooserOpen(!chooserOpen)}><ProjectIcon project={selected} /><span>{selected?.name ?? "All projects"}</span><ChevronDown size={14} /></button>
+      <button ref={chooser} type="button" aria-label="Choose project" aria-haspopup="dialog" aria-expanded={chooserOpen} onClick={() => setChooserOpen(!chooserOpen)}>{selected ? <ProjectIcon project={selected} /> : <Folders size={15} aria-hidden="true" />}<ProjectName project={selected}>{selected?.name ?? "All projects"}</ProjectName><ChevronDown size={14} /></button>
     </header>
     {chooserOpen && <ProjectSearchDialog projects={props.projects} selectedId={selectedId} includeAll label="Choose project" trigger={chooser.current} onClose={() => setChooserOpen(false)} onSelect={setSelectedId} />}
     {selectedId && !selected && <p role="status">This project is no longer available. Choose another project.</p>}

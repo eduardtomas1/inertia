@@ -1,4 +1,4 @@
-import { Folder, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -7,6 +7,7 @@ import { useMessageSearch, type MessageSearchCommand } from "../hooks/useMessage
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton } from "./ui";
+import { ProjectIcon } from "./ProjectIcon";
 
 type CommandPaletteProps = {
   open: boolean;
@@ -96,7 +97,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
     ];
-    const projectItems: PaletteItem[] = projects.map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <Folder size={15} />, run: () => onSelectProject(project) }));
+    const projectItems: PaletteItem[] = projects.map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];

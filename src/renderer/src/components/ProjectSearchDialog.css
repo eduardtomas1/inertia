@@ -43,3 +43,6 @@
 @media (prefers-reduced-motion: reduce) {
   .project-search-popover .project-search-dialog { animation: none; }
 }
+.project-search-row .project-all-icon { color: var(--text-muted); flex-shrink: 0; }
+.project-search-row .project-search-pin { flex-shrink: 0; color: var(--text-muted); }
+.project-customize-loading { display: grid; place-items: center; min-height: 120px; outline: none; }

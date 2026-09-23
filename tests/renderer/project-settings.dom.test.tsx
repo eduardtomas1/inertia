@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSettings } from "../../src/renderer/src/components/ProjectSettings";
 import type { Project } from "../../src/shared/contracts";
@@ -86,5 +86,25 @@ describe("project settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: saved.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } } }));
+  });
+  it("sets colour, emphasis and pinning as server-merged appearance patches that never block other edits", async () => {
+    const view = setup();
+    const colours = screen.getByRole("radiogroup", { name: "Project colour" });
+    fireEvent.keyDown(within(colours).getByRole("radio", { name: "Default" }), { key: "End" });
+    expect(within(colours).getByRole("radio", { name: "Pink" })).toHaveFocus();
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      appearance: { color: { kind: "palette", name: "pink" } } } }));
+    expect(within(colours).getByRole("radio", { name: "Pink" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("radio", { name: "Icon and name" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Pin to top of project lists" }));
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { pinned: true } } }));
+    expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { colorEmphasis: "icon-and-name" } } });
+    view.request.mockRejectedValueOnce(new Error("The runtime is offline."));
+    fireEvent.click(within(colours).getByRole("radio", { name: "Teal" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The runtime is offline.");
+    const tinted = { ...project, updatedAt: "2026-09-09T08:02:00.000Z", preferences: { ...defaultProjectPreferences(), color: { kind: "palette" as const, name: "teal" as const }, colorEmphasis: "icon-and-name" as const } };
+    view.rerender(<ProjectSettings {...view.props} projects={[tinted, view.props.projects[1]!]} />);
+    expect(within(colours).getByRole("radio", { name: "Teal" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Choose project" }).querySelector(".project-name-tinted")).toHaveTextContent("Studio");
   });
 });

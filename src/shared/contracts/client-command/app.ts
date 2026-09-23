@@ -35,7 +35,7 @@ import {
   conversationCreatePayloadSchema,
 } from "./conversation-create";
 import { COLOR_THEME_IDS } from "../app";
-import { projectPreferencesSchema } from "../../project-preferences";
+import { projectAppearancePatchSchema, projectPreferencesSchema } from "../../project-preferences";
 import {
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
@@ -189,6 +189,7 @@ export const appCommandSchemas = [
         groupingMode: z.enum(["repository", "repository-path", "separate"]).nullable().optional(),
         gitRepositoryLimit: z.number().int().min(16).max(1_024).optional(),
         preferences: projectPreferencesSchema.optional(),
+        appearance: projectAppearancePatchSchema.optional(),
         expectedUpdatedAt: z.iso.datetime().optional(),
       }).strict(),
     })

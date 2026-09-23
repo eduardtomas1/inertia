@@ -34,7 +34,7 @@ import { sidebarThreadView } from "../utils/sidebarModel";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
-import { ProjectIcon } from "./ProjectIcon";
+import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { IconButton } from "./ui";
 
@@ -319,12 +319,12 @@ export function WorkspaceHeader({
                   onClick={onCreateConversationInProject}
                 >
                   <ProjectIcon project={project} size={14} />
-                  <span>{project.name}</span>
+                  <ProjectName project={project}>{project.name}</ProjectName>
                 </button>
               ) : (
                 <span className="header-breadcrumb-project">
                   <ProjectIcon project={project} size={14} />
-                  <span>{project.name}</span>
+                  <ProjectName project={project}>{project.name}</ProjectName>
                 </span>
               )}
               <span className="header-breadcrumb-separator" aria-hidden="true">/</span>

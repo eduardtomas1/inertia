@@ -26,6 +26,7 @@ function dependencies(
     workflows: {
       clearGoal: vi.fn(async () => cleared),
       refresh: vi.fn(),
+      state: vi.fn(() => ({ conversationId: clearCommand.payload.conversationId })),
     } as unknown as AgentWorkflowController,
     providerTerminalResumes: { isActive: vi.fn(() => false) },
     conversationWork: {
@@ -102,6 +103,26 @@ describe("agent workflow commands", () => {
       /End the active provider session/u,
     );
     expect(runtime.workflows.clearGoal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      blocker: "its provider terminal is active",
+      block: (runtime: AgentWorkflowCommandDependencies) => {
+        vi.mocked(runtime.providerTerminalResumes.isActive).mockReturnValue(true);
+      },
+    },
+    {
+      blocker: "another chat holds its checkout",
+      block: (runtime: AgentWorkflowCommandDependencies) => {
+        vi.mocked(runtime.conversationWork.reserve).mockReturnValue(false);
+      },
+    },
+  ])("loads saved workflow state instead of failing when $blocker", async ({ block }) => {
+    const runtime = dependencies(true);
+    block(runtime);
+    const handler = createAgentWorkflowCommandHandler(runtime);
+
     await expect(handler({} as never, {
       type: "agent.workflow.load",
       requestId: clearCommand.requestId,
@@ -109,8 +130,18 @@ describe("agent workflow commands", () => {
         conversationId: clearCommand.payload.conversationId,
         refresh: true,
       },
-    })).rejects.toThrow(/End the active provider session/u);
+    })).resolves.toBe("handled");
+
     expect(runtime.workflows.refresh).not.toHaveBeenCalled();
+    expect(runtime.conversationWork.release).not.toHaveBeenCalled();
+    expect(runtime.send).toHaveBeenCalledWith({}, {
+      type: "request.result",
+      requestId: clearCommand.requestId,
+      result: {
+        kind: "agent.workflow",
+        workflow: { conversationId: clearCommand.payload.conversationId },
+      },
+    });
   });
 
   it("holds provider-session authority until a native refresh settles", async () => {

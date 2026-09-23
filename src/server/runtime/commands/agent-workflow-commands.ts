@@ -24,19 +24,32 @@ export interface AgentWorkflowCommandDependencies {
 export function createAgentWorkflowCommandHandler(
   dependencies: AgentWorkflowCommandDependencies,
 ): RuntimeCommandHandler {
+  const reserveNativeSession = (conversationId: string): boolean => (
+    !dependencies.providerTerminalResumes.isActive(conversationId)
+    && dependencies.conversationWork.reserve(conversationId)
+  );
+
   const withNativeSessionReservation = async <T>(
     conversationId: string,
     blockedMessage: string,
     operation: () => Promise<T>,
   ): Promise<T> => {
-    if (
-      dependencies.providerTerminalResumes.isActive(conversationId)
-      || !dependencies.conversationWork.reserve(conversationId)
-    ) {
+    if (!reserveNativeSession(conversationId)) {
       throw new RuntimeRequestError(blockedMessage);
     }
     try {
       return await operation();
+    } finally {
+      dependencies.conversationWork.release(conversationId);
+    }
+  };
+
+  const refreshWorkflow = async (conversationId: string) => {
+    if (!reserveNativeSession(conversationId)) {
+      return dependencies.workflows.state(conversationId);
+    }
+    try {
+      return await dependencies.workflows.refresh(conversationId);
     } finally {
       dependencies.conversationWork.release(conversationId);
     }
@@ -52,13 +65,7 @@ export function createAgentWorkflowCommandHandler(
     switch (command.type) {
       case "agent.workflow.load": {
         const workflow = command.payload.refresh
-          ? await withNativeSessionReservation(
-              command.payload.conversationId,
-              "End the active provider session before refreshing this chat's native workflow.",
-              async () => await dependencies.workflows.refresh(
-                command.payload.conversationId,
-              ),
-            )
+          ? await refreshWorkflow(command.payload.conversationId)
           : dependencies.workflows.state(command.payload.conversationId);
         dependencies.send(socket, {
           type: "request.result",

@@ -838,7 +838,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(cleanupHandler).toContain("new RetryablePrivilegedCleanup({");
     expect(cleanupHandler).toContain("runtime: supervisorToStop");
     expect(cleanupHandler).toContain(
-      "disposeTemporaryAttachments: disposeImportedAttachments",
+      'disposeTemporaryAttachments: () => testCleanupOwners.observe("temporaryAttachments", disposeImportedAttachments)',
     );
     expect(cleanupHandler).toContain(
       "Retaining temporary attachments because runtime process exit was not confirmed",

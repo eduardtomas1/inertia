@@ -25,24 +25,35 @@ import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 function SentImageThumbnail({
   attachment,
+  visibleOnly,
 }: {
   attachment: AttachmentPreviewSource;
+  visibleOnly?: boolean;
 }): React.JSX.Element {
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
     "loading",
   );
-  const source = attachmentPreviewUrl(attachment);
+  const [visible, setVisible] = useState(false);
+  const observe = useCallback((node: HTMLSpanElement | null) => {
+    if (!node || !visibleOnly) return;
+    // The viewport observer also clips against the gallery's scrollport.
+    // Keep observing exits: native lazy loading retains every visited image.
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry!.isIntersecting));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [visibleOnly]);
+  const PlaceholderIcon = state === "unavailable" ? ImageOff : ImageIcon;
   return (
     <span
+      ref={observe}
       className="sent-attachment-thumbnail"
       data-thumbnail-state={state}
       aria-hidden="true"
     >
-      {state === "loading" && <ImageIcon size={18} />}
-      {state === "unavailable" && <ImageOff size={18} />}
-      {source && (
+      {state !== "ready" && <PlaceholderIcon size={18} />}
+      {(!visibleOnly || visible) && (
         <img
-          src={source}
+          src={attachmentPreviewUrl(attachment)}
           alt=""
           onLoad={() => setState("ready")}
           onError={() => setState("unavailable")}
@@ -55,9 +66,11 @@ function SentImageThumbnail({
 export function SentMessageAttachmentList({
   attachments,
   label = "Message attachments",
+  deferImages,
 }: {
   attachments: readonly AttachmentPreviewSource[];
   label?: string;
+  deferImages?: boolean;
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
     useState<AttachmentPreviewSource | null>(null);
@@ -87,7 +100,7 @@ export function SentMessageAttachmentList({
           const copy = (
             <>
               {kind === "image"
-                ? <SentImageThumbnail attachment={attachment} />
+                ? <SentImageThumbnail attachment={attachment} visibleOnly={deferImages} />
                 : (
                     <span
                       className="sent-attachment-thumbnail is-document"

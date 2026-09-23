@@ -713,8 +713,7 @@ test("applies every interface scale live and remains usable at common Linux disp
       const send = element.querySelector<HTMLElement>(
         '[aria-label="Send message"]',
       );
-      const inputBounds = element.querySelector(".composer-input-zone")
-        ?.getBoundingClientRect();
+      const inputBounds = element.getBoundingClientRect();
       const modelBounds = model?.getBoundingClientRect();
       const labelBounds = label?.getBoundingClientRect();
       const sendBounds = send?.getBoundingClientRect();

@@ -1,3 +1,43 @@
+export type TestCleanupOwner =
+  | "runtime" | "privateConnect" | "temporaryAttachments" | "durableAttachments";
+export type TestCleanupOwnerState = "not-started" | "pending" | "fulfilled" | "rejected";
+export type TestCleanupOwners = Record<TestCleanupOwner, TestCleanupOwnerState>;
+
+/** Observes settlement only; fulfilled does not mean cleanup was confirmed. */
+export function createTestCleanupOwnerObserver(enabled: boolean): {
+  observe<T>(owner: TestCleanupOwner, operation: () => Promise<T>): Promise<T>;
+  snapshot(): TestCleanupOwners | undefined;
+} {
+  const states: TestCleanupOwners = {
+    runtime: "not-started", privateConnect: "not-started",
+    temporaryAttachments: "not-started", durableAttachments: "not-started",
+  };
+  const attempts = new Map<TestCleanupOwner, object>();
+  return {
+    observe<T>(owner: TestCleanupOwner, operation: () => Promise<T>): Promise<T> {
+      if (!enabled) return operation();
+      const attempt = {};
+      attempts.set(owner, attempt);
+      states[owner] = "pending";
+      let pending: Promise<T>;
+      try { pending = operation(); }
+      catch (error) {
+        if (attempts.get(owner) === attempt) states[owner] = "rejected";
+        throw error;
+      }
+      void pending.then(
+        () => { if (attempts.get(owner) === attempt) states[owner] = "fulfilled"; },
+        () => { if (attempts.get(owner) === attempt) states[owner] = "rejected"; },
+      );
+      // Cleanup keeps the original promise, rejection and await ordering.
+      return pending;
+    },
+    snapshot: () => enabled ? { ...states } : undefined,
+  };
+}
+
+export const testCleanupOwners = createTestCleanupOwnerObserver(process.env.NODE_ENV === "test");
+
 export type TestPrivilegedCleanupPhase =
   | "idle"
   | "privileged-cleanup"
@@ -10,6 +50,7 @@ export interface TestPrivilegedCleanupReceipt {
   runtimePid: number | null;
   cleanupConfirmed: boolean | null;
   errorMessage: string | null;
+  owners?: TestCleanupOwners;
 }
 
 interface TestPrivilegedCleanupDependencies {
@@ -17,6 +58,7 @@ interface TestPrivilegedCleanupDependencies {
   cleanup: () => Promise<boolean>;
   unconfirmedMessage?: () => string | null;
   exit: () => void;
+  owners?: () => TestCleanupOwners | undefined;
 }
 
 export function createTestPrivilegedCleanupController(
@@ -33,7 +75,13 @@ export function createTestPrivilegedCleanupController(
     errorMessage: null,
   };
   let cleanup: Promise<TestPrivilegedCleanupReceipt> | null = null;
-  const snapshot = (): TestPrivilegedCleanupReceipt => ({ ...receipt });
+  const snapshot = (): TestPrivilegedCleanupReceipt => {
+    // Advisory observation must never replace the actual cleanup result.
+    try {
+      const owners = dependencies.owners?.();
+      return owners ? { ...receipt, owners } : { ...receipt };
+    } catch { return { ...receipt }; }
+  };
 
   const prepare = (): Promise<TestPrivilegedCleanupReceipt> => {
     if (cleanup) return cleanup;

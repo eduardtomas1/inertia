@@ -1,0 +1,46 @@
+{
+  "sourceEntries": [
+    {
+      "path": "src/renderer/src/workers/diff-parser.worker.ts",
+      "owner": "src/renderer/src/utils/diffParserPool.ts",
+      "reason": "Vite resolves new Worker(new URL(..., import.meta.url)); this is a source entry without an import edge."
+    }
+  ],
+  "resources": [
+    {
+      "owner": "electron.vite.config.ts",
+      "resources": "Named main/runtime/utility/worker entries and four per-window preloads",
+      "review": "Inputs are derived from each build config, including the separate runtime-status build. UtilityProcess and worker_threads launches use emitted basenames; the build roots retain all named entries."
+    },
+    {
+      "owner": "scripts/build-private-connect.mjs",
+      "resources": "out/private-connect including generated service-worker.js, public manifest and icons",
+      "review": "Separate HTML entry is derived from its Vite config. The generated worker is served by src/main/private-connect/gateway-server.ts and registered by src/renderer/private-connect/src/pwa.ts."
+    },
+    {
+      "owner": "scripts/build-runtime-process-guardian.mjs",
+      "resources": "resources/generated/runtime-process-guardian and windows-runtime-job-integrity.json",
+      "review": "Native guardian and Windows Job Object sources/build tools are runtime assets, not TypeScript graph candidates. Keep runtime-assets.ts resolution, integrity binding and package checks."
+    },
+    {
+      "owner": "src/server/runtime/attachments/document-attachment-context.ts",
+      "resources": "pdfjs-dist/legacy/build/pdf.worker.mjs and dynamically imported @napi-rs/canvas",
+      "review": "Package-resolved PDF worker and canvas are external runtime dependencies. Graph reachability does not authorize pruning packages or native binaries."
+    },
+    {
+      "owner": "scripts/run-electron-builder.mjs",
+      "resources": "package.json build resources, scripts/electron-builder.release.cjs, installer.nsh, AppRun hooks and platform icons",
+      "review": "Package metadata is included verbatim in JSON output. Release config, wrapper and helper scripts are tooling roots. Native launchers, fuses, signing, provenance, notices and packaging checks remain required."
+    },
+    {
+      "owner": "scripts/generate-color-themes.mjs",
+      "resources": "Generated themes, renderer CSS, public files and imported media",
+      "review": "Non-module assets are outside the TypeScript candidate list. Their import/build owners and dedicated generation checks remain authoritative."
+    },
+    {
+      "owner": "database-migration-lineage.json",
+      "resources": "Released migration implementations and source path/symbol pins",
+      "review": "Pins are emitted separately, never counted as artificial production roots. check:migrations and migration fixtures are required before changing historical code. Recovery journals and local-storage importers additionally require persisted-format review."
+    }
+  ]
+}

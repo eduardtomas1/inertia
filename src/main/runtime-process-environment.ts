@@ -340,6 +340,10 @@ export function runtimeProcessEnvironment(
   ) {
     sanitized.INERTIA_STREAMING_TRACE = "1";
   }
+  if (sanitized.NODE_ENV === "test"
+    && environmentValue(environment, "INERTIA_RUNTIME_SHUTDOWN_TRACE", platform) === "1") {
+    sanitized.INERTIA_RUNTIME_SHUTDOWN_TRACE = "1";
+  }
   const attachmentRecordLimit = environmentValue(environment, "INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS", platform);
   if (sanitized.NODE_ENV === "test" && attachmentRecordLimit && /^[1-9][0-9]{0,2}$/u.test(attachmentRecordLimit)) {
     sanitized.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS = attachmentRecordLimit;

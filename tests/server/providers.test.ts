@@ -17,7 +17,7 @@ import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-pos
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
-import { createLegacyCliAgentHarnessForTests } from "../../src/server/provider/cli-agent-harness";
+import { createLegacyCliAgentHarnessForTests } from "../helpers/providers/legacy-cli-harness";
 import {
   providerAuthLaunchEnvironment,
   providerAuthLoginArgs,

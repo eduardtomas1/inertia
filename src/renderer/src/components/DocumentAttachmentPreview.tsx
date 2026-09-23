@@ -46,6 +46,7 @@ import {
   trapModalFocus,
 } from "../utils/modalFocus";
 import { pdfCanvasLayout } from "../utils/pdfCanvasLayout";
+import { ZoomableAttachmentImage } from "./ZoomableAttachmentImage";
 
 export { pdfCanvasLayout };
 
@@ -418,10 +419,10 @@ export function AttachmentPreviewDialog({
               )
             : previewKind === "image"
               ? (
-                  <img
-                    src={previewUrl}
+                  <ZoomableAttachmentImage
+                    source={previewUrl}
                     alt={attachment.name}
-                    onError={markLoadFailed}
+                    onFailure={markLoadFailed}
                   />
                 )
               : previewKind === "pdf"

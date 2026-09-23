@@ -51,11 +51,11 @@ const budgets = {
   // Reviewed production dependency batch adds exactly 1,156 emitted bytes
   // on identical application source. Preserve existing headroom; see
   // docs/pr-evidence/dependency-pr420/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -74,8 +74,10 @@ const budgets = {
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte,
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,
+  deferredProjectCustomizeJavaScript: 11.125 * kibibyte,
+  deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
@@ -83,7 +85,10 @@ const budgets = {
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
-  deferredAttachmentPreviewJavaScript: 13 * kibibyte,
+  // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
+  // bytes to the same deferred chunk. Existing headroom is unchanged, and the
+  // lightbox still loads only when an attachment preview is opened.
+  deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418,
   deferredPreviewJavaScript: 8 * kibibyte,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
@@ -138,7 +143,9 @@ const budgets = {
   // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
   // same source/dependency baseline. Both first-load routes are unchanged.
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884,
+  // The expandable attachment gallery adds 1,017 core bytes on the same
+  // baseline; the zoomable lightbox stays in its deferred chunk above.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -579,6 +586,19 @@ const projectFeatureEntries = ["ProjectSettings", "ConversationActionsMenu", "Re
 const deferredProjectSettingsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[0]}`);
 const deferredThreadActionsJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[1]}`);
 const deferredReviewNoteJavaScriptBytes = await assetBytes(`assets/${projectFeatureEntries[2]}`);
+const [projectCustomizeEntry, projectColorContrastEntry] = ["ProjectCustomizePanel", "project-color-contrast"].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred project appearance surface: ${prefix}`);
+  if (entryJavaScriptClosure.has(entry) || mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
+    throw new Error(`Project appearance customisation must stay off the initial chat routes: ${prefix}`);
+  }
+  return entry;
+});
+const deferredProjectCustomizeJavaScriptBytes = await closureBytes(
+  await javaScriptClosure(projectCustomizeEntry),
+  new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]),
+);
+const deferredProjectColorContrastJavaScriptBytes = await assetBytes(`assets/${projectColorContrastEntry}`);
 const legacyPromptStashEntry = assetNames.find((name) => /^LegacyPromptStash-.*\.js$/u.test(name));
 if (!legacyPromptStashEntry) throw new Error("Missing deferred legacy prompt recovery");
 if (mainWorkbenchJavaScriptClosure.has(legacyPromptStashEntry) || detachedChatJavaScriptClosure.has(legacyPromptStashEntry)) {
@@ -620,6 +640,8 @@ const coreJavaScriptBytes =
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
+  - deferredProjectCustomizeJavaScriptBytes
+  - deferredProjectColorContrastJavaScriptBytes
   - deferredDiagnosticsJavaScriptBytes
   - deferredDiagnosticCatalogJavaScriptBytes
   - deferredIssueReportJavaScriptBytes
@@ -656,6 +678,8 @@ const measurements = {
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,
+  deferredProjectCustomizeJavaScript: deferredProjectCustomizeJavaScriptBytes,
+  deferredProjectColorContrastJavaScript: deferredProjectColorContrastJavaScriptBytes,
   deferredDiagnosticsJavaScript: deferredDiagnosticsJavaScriptBytes,
   deferredDiagnosticCatalogJavaScript: deferredDiagnosticCatalogJavaScriptBytes,
   deferredIssueReportJavaScript: deferredIssueReportJavaScriptBytes,

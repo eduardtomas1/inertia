@@ -93,6 +93,7 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     const send = app.page.getByRole("button", { name: "Send message" });
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       await expect(send).toBeVisible();
+      await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
       await composer.evaluate((textarea, bytes) => {
         const transfer = new DataTransfer();
         transfer.items.add(new File(
@@ -132,6 +133,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
   const app = activeApp = await createAppFixture({
     name: "native-attachment-lifecycle",
     initialState: "conversation",
+    additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" },
     windowDisplay: "primary",
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,

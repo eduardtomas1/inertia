@@ -2633,27 +2633,34 @@ button.header-breadcrumb-project:hover {
   text-align: center;
 }
 
-/* Follow the raised input's own border, above the inset controls drawer. */
-.composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+@property --ultra-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.composer[data-maximum-reasoning="true"]::after {
   position: absolute;
-  z-index: 1;
-  inset: -1px;
-  padding: 1px;
+  z-index: 2;
+  inset: 0 0 var(--composer-strip-offset, 0px);
+  padding: 1.5px;
   pointer-events: none;
   content: "";
-  border-radius: inherit;
-  background: linear-gradient(
-    105deg,
-    color-mix(in srgb, var(--accent) 10%, transparent) 0%,
-    var(--accent) 20%,
-    var(--accent-strong) 36%,
-    color-mix(in oklab, var(--accent-strong) 45%, var(--ultra-sweep)) 48%,
-    var(--ultra-sweep) 57%,
-    var(--accent-strong) 72%,
-    color-mix(in srgb, var(--accent) 10%, transparent) 100%
-  );
-  background-size: 300% 100%;
-  opacity: 0.9;
+  border-radius: var(--radius-composer);
+  background:
+    conic-gradient(
+      from var(--ultra-angle),
+      transparent 0deg 170deg,
+      color-mix(in srgb, var(--accent) 45%, transparent) 250deg,
+      var(--accent) 305deg,
+      var(--ultra-sweep) 338deg,
+      color-mix(in srgb, #fff 85%, var(--ultra-sweep)) 354deg,
+      transparent 360deg
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--accent) 24%, var(--composer-border)),
+      color-mix(in srgb, var(--accent) 24%, var(--composer-border))
+    );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -2662,23 +2669,70 @@ button.header-breadcrumb-project:hover {
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: ultra-reasoning-frame-flow 6s linear infinite;
+  animation: ultra-reasoning-comet 5.5s linear infinite;
+}
+
+.composer-ultra-glow {
+  display: none;
+}
+
+.composer[data-maximum-reasoning="true"] > .composer-ultra-glow {
+  position: absolute;
+  z-index: -3;
+  display: block;
+  inset: -6px -6px calc(var(--composer-strip-offset, 0px) - 6px);
+  pointer-events: none;
+  border-radius: calc(var(--radius-composer) + 6px);
+  background: conic-gradient(
+    from var(--ultra-angle),
+    transparent 0deg 230deg,
+    color-mix(in srgb, var(--accent) 35%, transparent) 300deg,
+    color-mix(in srgb, var(--ultra-sweep) 70%, transparent) 350deg,
+    transparent 360deg
+  );
+  filter: blur(12px);
+  opacity: 0.55;
+  animation: ultra-reasoning-comet 5.5s linear infinite;
+}
+
+.composer[data-maximum-reasoning="true"] .composer-reasoning-control .composer-setting-value {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--ultra-sweep) 55%,
+    var(--accent-strong) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-weight: 650;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 42%, transparent));
 }
 
 .app-shell[data-document-visible="false"]
-  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"]::after,
+.app-shell[data-document-visible="false"]
+  .composer[data-maximum-reasoning="true"] > .composer-ultra-glow {
   animation-play-state: paused;
 }
 
-@keyframes ultra-reasoning-frame-flow {
-  from { background-position: 130% 50%; }
-  to { background-position: -130% 50%; }
+@keyframes ultra-reasoning-comet {
+  to { --ultra-angle: 360deg; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer[data-maximum-reasoning="true"] .composer-input-zone::after {
+  .composer[data-maximum-reasoning="true"]::after {
     animation: none;
-    background-position: 50% 50%;
+    background: linear-gradient(
+      105deg,
+      var(--accent) 0%,
+      var(--ultra-sweep) 50%,
+      var(--accent-strong) 100%
+    );
+  }
+
+  .composer[data-maximum-reasoning="true"] > .composer-ultra-glow {
+    display: none;
   }
 }
 
@@ -4158,15 +4212,97 @@ button.header-breadcrumb-project:hover {
   background: color-mix(in srgb, var(--surface-muted) 72%, #0b0c10);
 }
 
-.attachment-preview-stage > img {
+.image-attachment-zoom {
   position: absolute;
   inset: 0;
+  display: grid;
+  box-sizing: border-box;
+  place-items: stretch;
+  overflow: hidden;
+  padding: clamp(8px, 2vw, 20px);
+  cursor: zoom-in;
+  touch-action: none;
+}
+
+.image-attachment-zoom[data-zoomed="true"] {
+  cursor: grab;
+}
+
+.image-attachment-zoom[data-zoomed="true"]:active {
+  cursor: grabbing;
+}
+
+.image-attachment-zoom:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+/* The zoom transform is solved against this box, so it must stay unpadded. */
+.image-attachment-zoom > img {
   display: block;
   width: 100%;
   height: 100%;
-  box-sizing: border-box;
-  padding: clamp(8px, 2vw, 20px);
+  min-width: 0;
+  min-height: 0;
   object-fit: contain;
+  transform-origin: center center;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+
+.image-attachment-zoom-controls {
+  position: absolute;
+  right: clamp(10px, 2vw, 18px);
+  bottom: clamp(10px, 2vw, 18px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+  cursor: default;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.image-attachment-zoom-controls button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.image-attachment-zoom-controls button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.image-attachment-zoom-controls button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+.image-attachment-zoom-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.image-attachment-zoom-controls output {
+  min-width: 46px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .pdf-attachment-preview {
@@ -6111,7 +6247,10 @@ button.header-breadcrumb-project:hover {
 .terminal-dock {
   display: flex;
   min-height: 0;
-  flex: 0 0 min(var(--terminal-dock-height, 260px), calc(100% - 180px));
+  flex: 0 0 min(
+    var(--terminal-dock-height, 260px),
+    calc(100% - max(180px, var(--chat-minimum-height, 0px)))
+  );
   flex-direction: column;
   border-top: 1px solid var(--panel-border);
   background: var(--surface);
@@ -11583,6 +11722,96 @@ button.sent-attachment-open:focus-visible {
 .agents-surface-attachments .sent-attachment-thumbnail { width: 48px; height: 42px; }
 .agents-surface-attachments .sent-attachment-copy strong { font-size: var(--ui-font-micro); font-weight: 500; }
 
+.environment-attachments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 8px 5px;
+}
+
+.environment-attachments-header h3 {
+  margin: 0;
+}
+
+.environment-attachments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--ui-font-micro);
+  cursor: pointer;
+}
+
+.environment-attachments-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.environment-attachments-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.environment-attachments-chevron {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.environment-attachments-toggle[aria-expanded="true"] .environment-attachments-chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded, the panel becomes a scrollable grid of every attachment in the
+   chat rather than the three most recent rows. */
+.environment-attachments[data-expanded="true"] .environment-attachments-gallery {
+  max-height: min(46vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachments {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachment-open {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  padding: 5px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachment-thumbnail {
+  width: 100%;
+  height: 62px;
+}
+
+/* The tile is too narrow for the metadata line, but it still describes the
+   preview button, so hide it visually rather than removing it. The tile is the
+   containing block above, so the hidden text cannot escape the scroller. */
+.environment-attachments[data-expanded="true"] .sent-attachment-copy small {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .environment-attachments-chevron {
+    transition: none;
+  }
+}
+
 @container (max-width: 420px) {
   .sent-attachments {
     grid-template-columns: minmax(0, 1fr);
@@ -14665,6 +14894,7 @@ button.sent-attachment-open:focus-visible {
 }
 
 .conversation-pane-workspace {
+  --pane-chat-reserve: max(180px, var(--chat-minimum-height, 0px));
   display: flex;
   width: 100%;
   min-width: 0;
@@ -14674,10 +14904,14 @@ button.sent-attachment-open:focus-visible {
   overflow: hidden;
 }
 
+.conversation-pane-workspace:has(> .conversation-pane-chat > .terminal-dock:not([hidden])) {
+  --pane-chat-reserve: calc(max(180px, var(--chat-minimum-height, 0px)) + 38px);
+}
+
 .conversation-pane-chat {
   display: flex;
   min-width: 0;
-  min-height: 180px;
+  min-height: var(--pane-chat-reserve);
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
@@ -14696,7 +14930,7 @@ button.sent-attachment-open:focus-visible {
   min-height: 0;
   flex: 0 0 min(
     var(--conversation-pane-tools-height, 260px),
-    calc(100% - 180px)
+    calc(100% - var(--pane-chat-reserve) - 7px)
   );
   border-top: 0;
   border-left: 0;

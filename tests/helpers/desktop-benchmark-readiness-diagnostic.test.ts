@@ -118,11 +118,18 @@ describe("benchmark readiness evidence", () => {
     try {
       const address = server.address();
       if (typeof address === "string" || address === null) throw new Error("Missing test address");
+      // Failure evidence is fixed scalars: never retain endpoints or frames.
+      const evidence = { listenerFamily: address.family === "IPv4" ? "IPv4"
+        : address.family === "IPv6" ? "IPv6" : "unknown",
+      accepted: false, welcomeSent: false, peerClosed: false };
       const closed = new Promise<void>((resolveClose) => server.once("connection", (socket) => {
-        socket.once("close", resolveClose);
+        evidence.accepted = true;
+        socket.once("close", () => { evidence.peerClosed = true; resolveClose(); });
         socket.send(JSON.stringify(welcome()));
+        evidence.welcomeSent = true;
       }));
-      await expect(readBenchmarkRuntimeReadiness(`ws://127.0.0.1:${address.port}`, 1000)).resolves.toMatchObject({
+      const result = await readBenchmarkRuntimeReadiness(`ws://127.0.0.1:${address.port}`, 1000);
+      expect(result, JSON.stringify(evidence)).toMatchObject({
         outcome: "captured", value: { provider: { authState: "unknown" } },
       });
       await closed;

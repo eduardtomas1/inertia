@@ -1,13 +1,15 @@
 // @inertia-e2e-resource primary-display
 import { openLocalProjectFromDialog } from "./support/add-project";
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { expectComposerEndsAtDock, expectComposerReadinessContained, verifyMobileNavigationControls } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from "./support/runtime-connection-evidence";
 import {
   createComposerResponsiveHelpers,
   exerciseComposerQueue,
+  expectHoverBackground,
   fixtureCheckoutLabel,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
@@ -24,22 +26,10 @@ let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
-async function expectHoverBackground(button: Locator): Promise<string> {
-  await page.mouse.move(0, 0);
-  await expect.poll(() => button.evaluate((element) => element.matches(":hover"))).toBe(false);
-  const idleBackground = await button.evaluate((element) => getComputedStyle(element).backgroundColor);
-  await expect.poll(async () => {
-    await page.mouse.move(0, 0);
-    await button.hover();
-    return button.evaluate((element, idle) =>
-      element.matches(":hover") && getComputedStyle(element).backgroundColor !== idle,
-    idleBackground);
-  }).toBe(true);
-  return idleBackground;
-}
+const runtimeConnections = createRuntimeConnectionEvidence();
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation", windowDisplay: "primary" });
+  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation", windowDisplay: "primary", observePage: runtimeConnections.observe });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;
@@ -232,7 +222,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        backgroundColor: inputStyle?.backgroundColor,
+        surfaceBackground: getComputedStyle(element, "::before").backgroundImage,
+        inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
             ? "dock"
@@ -279,7 +270,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    expect(wideGeometry.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.0+)?\)/u);
+    expect(wideGeometry.surfaceBackground).toContain("linear-gradient");
+    expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
     expect(wideGeometry.permanentFooter).toBe(0);
@@ -287,11 +279,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("18px 105px");
-    expect(wideGeometry.inputPaddingBlock).toBe("16px 15px");
-    expect(wideGeometry.toolbarBorderTop).toBe("1px");
-    expect(wideGeometry.toolbarBackground)
-      .not.toBe(wideGeometry.textareaBackground);
+    expect(wideGeometry.inputPaddingInline).toBe("18px");
+    expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
+    expect(wideGeometry.toolbarBorderTop).toBe("0px");
+    expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
     expect(wideGeometry.checkoutText).toContain("Current checkout");
     expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
@@ -309,7 +300,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       expect(wideGeometry.optionMarkers.indexOf("reasoning")).toBe(1);
     }
     await expect(send).toBeDisabled();
-    await expectHoverBackground(model);
+    await expectHoverBackground(page, model);
     await model.focus();
     await expect(model).toBeFocused();
     expect(await model.evaluate(
@@ -360,10 +351,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes).toEqual(
-      settingGeometry.iconSizes.map(() => ({ width: 13, height: 13 })),
-    );
-    const accessIdleBackground = await expectHoverBackground(accessTrigger);
+    expect(settingGeometry.iconSizes[0]).toEqual({ width: 13, height: 13 });
+    expect(settingGeometry.iconSizes.slice(1)).toEqual(settingGeometry.iconSizes.slice(1).map(() => ({ width: 0, height: 0 })));
+    const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
       (button) => Number.parseFloat(getComputedStyle(button).outlineWidth),
@@ -794,5 +784,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     }
     await setWorkspaceTools(workspacePanelWasVisible);
   }
+  if (rendererErrors.length) await attachRuntimeConnectionEvidence(() => testInfo, runtimeConnections.snapshot);
   expect(rendererErrors).toEqual([]);
 });

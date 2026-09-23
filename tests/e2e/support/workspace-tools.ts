@@ -88,3 +88,32 @@ export async function openConversationPaneTool(
   await selectWorkspaceTool(tools, tab);
   return tools;
 }
+
+async function centreHitsItself(target: Locator): Promise<boolean> {
+  return await target.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      bounds.left + bounds.width / 2,
+      bounds.top + bounds.height / 2,
+    );
+    return hit !== null && element.contains(hit);
+  });
+}
+
+export async function expectPaneComposerClearOfTerminalHandle(pane: Locator): Promise<void> {
+  const attach = pane.getByRole("button", {
+    name: "Attach images, documents, or spreadsheets",
+  });
+  const handle = pane.getByRole("separator", { name: "Resize terminal" });
+  await expect(attach).toBeVisible();
+  await expect(handle).toBeVisible();
+  await expect.poll(() => centreHitsItself(attach)).toBe(true);
+  await expect.poll(() => centreHitsItself(handle)).toBe(true);
+  const handleTop = await handle.evaluate((element) => element.getBoundingClientRect().top);
+  const lowestControl = await pane.locator(".composer-region").evaluate((region) =>
+    Math.max(...Array.from(region.querySelectorAll("button, textarea, input, [role='button']"))
+      .map((control) => control.getBoundingClientRect())
+      .filter((bounds) => bounds.width > 0 && bounds.height > 0)
+      .map((bounds) => bounds.bottom)));
+  expect(lowestControl).toBeLessThanOrEqual(handleTop);
+}

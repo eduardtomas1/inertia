@@ -7,6 +7,8 @@ import {
 } from "./common";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
 
+export const MAX_AGENT_INPUT_QUESTIONS = 4;
+
 export const agentCommandSchemas = [
   z
     .object({
@@ -142,7 +144,7 @@ export const agentCommandSchemas = [
         answers: z.record(
           z.string().trim().min(1).max(120),
           z.array(z.string().min(1).max(4_000)).min(1).max(20),
-        ).refine((answers) => Object.keys(answers).length <= 3),
+        ).refine((answers) => Object.keys(answers).length <= MAX_AGENT_INPUT_QUESTIONS),
       }).strict(),
     })
     .strict(),

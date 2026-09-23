@@ -1165,6 +1165,7 @@ export const Composer = memo(function Composer({
           disabled={disabled}
           running={running}
           attachmentCount={attachments.length}
+          attachmentDisabled={disabled || sending || submitting || attachmentImporting}
           attachmentImporting={attachmentImporting}
           onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
           onRunAction={onRunAction}

@@ -1,5 +1,8 @@
 # PR #457 integration with reviewed main
 
+This records validation at `a0e20dbd`, before the subsequent
+[pending-attachment and availability follow-up](attachment-pending-admission.md).
+
 ## Exact integration
 
 On 2026-09-23, an ordinary, conflict-free merge combined PR head

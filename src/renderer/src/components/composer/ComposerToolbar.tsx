@@ -86,6 +86,7 @@ export interface ComposerToolbarProps {
   disabled: boolean;
   running: boolean;
   attachmentCount: number;
+  attachmentDisabled: boolean;
   attachmentImporting: boolean;
   onChooseAttachments: () => Promise<void>;
   imageInputUnavailableReason: string | null;
@@ -164,6 +165,7 @@ export function ComposerToolbar({
   disabled,
   running,
   attachmentCount,
+  attachmentDisabled,
   attachmentImporting,
   onChooseAttachments,
   imageInputUnavailableReason,
@@ -245,6 +247,7 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
+
       <div className="composer-primary-rail">
         <div className="composer-attach-actions" role="group" aria-label="Attach">
           <IconButton
@@ -259,9 +262,7 @@ export function ComposerToolbar({
                 : "Attach images, documents, or spreadsheets"}
             onClick={() => void onChooseAttachments()}
             disabled={
-              disabled
-              || attachmentImporting
-              || primaryAction === "submitting"
+              attachmentDisabled
               || attachmentCount >= MAX_CHAT_ATTACHMENTS
               || (running && imageInputUnavailableReason !== null)
             }

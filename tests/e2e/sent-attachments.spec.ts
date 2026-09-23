@@ -10,6 +10,7 @@ import {
 import { installRuntimeRecoveryConsent } from
   "./support/runtime-crash-safety";
 import { closeWorkspaceTools } from "./support/workspace-tools";
+import { observePendingAttachment } from "./support/pending-attachment-observation";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -282,19 +283,27 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   });
 
   const imageBytes = [...await readFile(attachmentImagePath)];
-  await page.getByRole("textbox", { name: "Message" }).evaluate((textarea, bytes) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File([new Uint8Array(bytes)], "pasted.png", { type: "image/png" }));
-    const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", { value: transfer });
-    textarea.dispatchEvent(event);
-  }, imageBytes);
+  const pendingObservation = await page.locator(".composer").evaluateHandle(
+    observePendingAttachment, "pasted.png",
+  );
+  try {
+    await page.getByRole("textbox", { name: "Message" }).evaluate((textarea, bytes) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], "pasted.png", { type: "image/png" }));
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: transfer });
+      textarea.dispatchEvent(event);
+    }, imageBytes);
+    await expect.poll(() => pendingObservation.evaluate((observation) => observation.read()))
+      .toEqual({ visible: true, imageCount: 0 });
+  } finally {
+    await pendingObservation.evaluate((observation) => observation.dispose()).catch(() => undefined);
+    await pendingObservation.dispose().catch(() => undefined);
+  }
   await expect(attachments.getByText("pasted.png", { exact: true })).toBeVisible();
   const pendingPastedAttachment = attachments.locator(
     '[data-attachment-pending="true"]',
   ).filter({ hasText: "pasted.png" });
-  await expect(pendingPastedAttachment).toBeVisible();
-  await expect(pendingPastedAttachment.locator("img")).toHaveCount(0);
   const pastedPreview = attachments.locator("img");
   await expect(pastedPreview).toHaveCount(1);
   await expect(pendingPastedAttachment).toHaveCount(0);

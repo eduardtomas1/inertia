@@ -69,7 +69,7 @@ export interface AppFixture {
 interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>; welcomeGuide?: boolean;
-  workspaceGit?: boolean;
+  workspaceGit?: boolean; observePage?: (page: Page) => void;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
@@ -827,7 +827,7 @@ export async function createAppFixture(
     electronApp = await electron.launch(launchOptions);
     observeElectronProcess(electronApp, appendDiagnostic);
     page = await waitForWorkbenchPage(electronApp);
-    observeElectronPage(page, rendererErrors, electronApp.process());
+    observeElectronPage(page, rendererErrors, electronApp.process(), options.observePage);
     if (options.windowDisplay === "primary") {
       await positionWorkbenchOnPrimary(electronApp, page);
     }
@@ -951,7 +951,7 @@ export async function createAppFixture(
       observeElectronProcess(nextApp, appendDiagnostic);
       try {
         const nextPage = await waitForWorkbenchPage(nextApp);
-        observeElectronPage(nextPage, rendererErrors, nextApp.process());
+        observeElectronPage(nextPage, rendererErrors, nextApp.process(), options.observePage);
         if (options.windowDisplay === "primary") {
           await positionWorkbenchOnPrimary(nextApp, nextPage);
         }

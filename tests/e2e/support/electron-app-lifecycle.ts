@@ -134,6 +134,7 @@ export function observeElectronPage(
   currentPage: Page,
   rendererErrors: string[],
   mainWindowChild?: ChildProcess,
+  observePage?: (page: Page) => void,
 ): void {
   if (mainWindowChild) {
     // This observes the owned main window's Playwright page, not completion of
@@ -172,6 +173,7 @@ export function observeElectronPage(
       `Request failed ${request.method()} ${request.resourceType()} ${rendererDiagnosticUrl(request.url())}: ${failure}`,
     );
   });
+  observePage?.(currentPage);
 }
 
 function boundedRendererDiagnostic(value: string): string {

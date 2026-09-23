@@ -6,6 +6,20 @@ import { RuntimeStore } from "../../../src/server/database";
 
 const execFileAsync = promisify(execFile);
 
+export async function expectHoverBackground(page: Page, button: Locator): Promise<string> {
+  await page.mouse.move(0, 0);
+  await expect.poll(() => button.evaluate((element) => element.matches(":hover"))).toBe(false);
+  const idleBackground = await button.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await expect.poll(async () => {
+    await page.mouse.move(0, 0);
+    await button.hover();
+    return button.evaluate((element, idle) =>
+      element.matches(":hover") && getComputedStyle(element).backgroundColor !== idle,
+    idleBackground);
+  }).toBe(true);
+  return idleBackground;
+}
+
 export async function fixtureCheckoutLabel(
   workspaceDirectory: string,
 ): Promise<string> {

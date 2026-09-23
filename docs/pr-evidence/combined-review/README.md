@@ -270,3 +270,101 @@ its 100ms margin. The final source is ready for one new exact-head hosted run;
 no existing run was blindly retried.
 
 Exact hosted validation is still required; no current Linux or macOS job-cap root cause is claimed.
+
+
+## Reversal cost and Windows connection evidence after 20bc2bbe
+
+The fourth combined run completed with two new failures. Intel macOS exceeded
+an unchanged 15-second limit in the positive subfolder staged reversal/undo
+case (15.029s); the other positive workspace variants took 12.4–14.2s. Windows
+x64 reached the composer scenario's final renderer-error assertion after all
+body and restoration checks completed, then reported Chromium
+`ERR_NO_BUFFER_SPACE` on a runtime WebSocket. Its retained trace has no network
+timeline or connection phase. These are separate failures. Both Linux jobs,
+Windows ARM64, macOS ARM64, all Windows unit shards and static gates passed.
+Passing previously failing gates does not establish their earlier causes.
+
+The reversal validation already captures the complete repository diff for its
+before-state fingerprint, then separately requests a file diff and, when the
+selection came from the full diff, the complete diff again. The candidate
+reuses that captured diff only when whitespace ignoring is disabled and its
+parsed fingerprint exactly equals the selected fingerprint. Scoped or
+whitespace-ignoring selections retain their original reads and fallback. A
+fresh root verification occurs at the reuse boundary. Fingerprint bytes/order,
+workspace/path authority, fresh file and index reads, after-state fingerprint,
+expected validation, pre-apply checks and rollback/recovery are unchanged. This
+is reuse inside one validation interval, not an atomic repository snapshot or
+cross-command cache.
+
+A transparent local child-process observer ran the original subfolder case
+with its complete assertions and original deadline. A balanced ABBA comparison
+used four fresh processes:
+
+| Variant | Git launches | Case duration |
+| --- | ---: | ---: |
+| Original A | 258 | 1664.9ms |
+| Candidate B | 226 | 1460.8ms |
+| Candidate B | 226 | 1449.4ms |
+| Original A | 258 | 1655.2ms |
+
+The candidate removes 32 Git launches and lowers local mean case duration by
+12.35%. These macOS ARM64 measurements do not identify the exact hosted Intel
+bottleneck or prove its 15-second margin. The original 14-case workspace matrix
+is unchanged. Replacement faults are injected at the broker verification after
+the capture reads have joined, so they cannot race a Git child retaining its
+working directory on Windows. Five new real-Git/broker controls reject a later unrelated-file
+change and replaced repository/workspace directories, and verify scoped and
+whitespace-ignoring reversal plus undo without changing unrelated files. All
+56 focused reversal checks across four files passed in 37.56s on the final
+test tree. Independent
+review found no actionable issue in the production change or these controls.
+
+The Windows follow-up adds passive, opt-in observation only to the affected
+composer scenario. A ring retains at most 32 scalar events for page/navigation,
+WebSocket requests/errors/closes and console network errors. It stores only
+fixed error codes, counts and relative delivery times; no URLs, credentials,
+headers, messages or frame payloads. Request and event-delivery navigation
+ordinals are distinct. Observed requests lacking an observed close are not
+counts of active connections: startup coverage is partial on every page and
+close events can be absent. The reporter adds no renderer RPC, polling, timer
+or await on the normal scenario path. A failed final error ledger gets one
+bounded 250ms attachment attempt, preserving the original strict assertion.
+Earlier body/finally failures still bypass this particular attachment.
+
+Six new controls exercise correlation, bounded storage, fixed-token projection,
+privacy, observer order, thrown/rejected reporting and a hung attachment. The
+42-test lifecycle/reporting cohort passed; after a review precision correction,
+all six new controls passed again, including unknown error names ending in
+underscore, digit or lowercase suffixes. Independent review then found no
+remaining issue. No Windows product fix or connection leak is claimed.
+
+A fresh bundle build and the real Electron composer scenario passed on macOS
+ARM64 in 9.5s. Temporary local assertions proved one observed page, all seven
+navigation events and eight WebSocket requests, with zero network errors. No
+close event was delivered before the snapshot, demonstrating why these are
+request observations rather than live-socket counts. The temporary assertions
+and scalar log were removed byte-for-byte before final validation. All original
+scenario assertions, timeouts, worker policy and zero retries were retained.
+
+
+Files changed in this follow-up:
+
+- `src/server/git/reversal.ts`: reuse the exact captured diff inside validation.
+- `tests/server/diff-reversal-captured-state.test.ts`: five freshness and fallback controls.
+- `tests/e2e/support/runtime-connection-evidence.ts`: bounded passive observations and attachment.
+- `tests/main/runtime-connection-evidence.test.ts`: six diagnostic controls.
+- `tests/e2e/composer-responsive.spec.ts`: opt in and attach only on the existing final error path.
+- `tests/e2e/support/app-fixture.ts`: optional page observer on initial launch and restart.
+- `tests/e2e/support/electron-app-lifecycle.ts`: invoke the optional observer after existing listeners.
+- `tests/e2e/support/composer-responsive.ts`: unchanged hover helper moved from its scenario.
+- `docs/pr-evidence/combined-review/README.md`: this evidence and its limits.
+
+
+The final Node 22.23.2 gate passed on the reviewed source: `check:quality`, the
+complete unit/integration/DOM suite with CI's maximum of two workers, and
+`build:bundle`. It passed 9,913 tests, 146 platform skips, 923 test files and
+seven separate child-process controls; the complete suite took 417.60s. All
+architecture, lint, type configurations and unchanged bundle budgets passed.
+Native Windows and Intel macOS were not available locally and require the next
+exact-head hosted run. The Windows cause, prior Linux cleanup/thumbnail causes
+and Intel main palette latency remain unproven. No existing CI run was retried.

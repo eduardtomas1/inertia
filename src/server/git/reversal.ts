@@ -111,11 +111,11 @@ async function completeLayerPatch(root: string, layer: "index" | "worktree", pat
   }
 }
 
-async function repositoryStateFingerprint(
+async function captureRepositoryState(
   root: string,
   secureFiles: RuntimeSecureFileBroker,
   secureRoot: SecureFileRootCapability,
-): Promise<string> {
+): Promise<{ fingerprint: string; combined: GitUnifiedDiff }> {
   const [combined, staged, unstaged, status] = await Promise.all([
     completeRepositoryDiff(
       root,
@@ -131,12 +131,23 @@ async function repositoryStateFingerprint(
       failureMessage: "Unable to validate the repository state.",
     }),
   ]);
-  return sha256([
-    combined.text,
-    staged,
-    unstaged,
-    status.stdout.toString("utf8"),
-  ].join("\0"));
+  return {
+    combined,
+    fingerprint: sha256([
+      combined.text,
+      staged,
+      unstaged,
+      status.stdout.toString("utf8"),
+    ].join("\0")),
+  };
+}
+
+async function repositoryStateFingerprint(
+  root: string,
+  secureFiles: RuntimeSecureFileBroker,
+  secureRoot: SecureFileRootCapability,
+): Promise<string> {
+  return (await captureRepositoryState(root, secureFiles, secureRoot)).fingerprint;
 }
 
 function selectedLineSignature(line: DiffLine): string {
@@ -298,21 +309,27 @@ async function buildReversalState(
     throw new GitError("invalid-input", "This file's Git state is not supported for selective reversal.");
   }
 
-  const stateBefore = await repositoryStateFingerprint(
+  const stateBefore = await captureRepositoryState(
     root,
     secureFiles,
     secureRoot,
   );
-  let current = await completeRepositoryDiff(
-    root,
-    selection.ignoreWhitespace,
-    [selection.filePath],
-    secureFiles,
-    secureRoot,
-  );
-  let structured = parseUnifiedDiff(current.text);
+  let structured = parseUnifiedDiff(stateBefore.combined.text);
+  if (!selection.ignoreWhitespace && structured.fingerprint === selection.fingerprint) {
+    // Reuse only within this validation bracket. Mutable file/index reads and
+    // the fresh after-state and pre-apply fingerprints remain authoritative.
+    await secureFiles.verifyRoot(secureRoot);
+  } else {
+    structured = parseUnifiedDiff((await completeRepositoryDiff(
+      root,
+      selection.ignoreWhitespace,
+      [selection.filePath],
+      secureFiles,
+      secureRoot,
+    )).text);
+  }
   if (structured.fingerprint !== selection.fingerprint) {
-    current = await completeRepositoryDiff(
+    const current = await completeRepositoryDiff(
       root,
       selection.ignoreWhitespace,
       undefined,
@@ -400,7 +417,7 @@ async function buildReversalState(
     secureFiles,
     secureRoot,
   );
-  if (stateAfter !== stateBefore) throw new GitError("conflict", "The repository changed while the reversal was being inspected. Refresh and try again.");
+  if (stateAfter !== stateBefore.fingerprint) throw new GitError("conflict", "The repository changed while the reversal was being inspected. Refresh and try again.");
   const affectedLayers: Array<"index" | "worktree"> = [
     ...(selectedIndexLines.length > 0 ? ["index" as const] : []),
     "worktree",

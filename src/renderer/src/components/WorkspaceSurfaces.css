@@ -29,7 +29,8 @@
 }
 
 .workspace-surface-heading h3,
-.workspace-surface-section > h3 {
+.workspace-surface-section > h3,
+.agents-surface-attachments .environment-attachments-header h3 {
   overflow: hidden;
   margin: 0;
   color: var(--text-muted);
@@ -43,6 +44,12 @@
 
 .workspace-surface-section > h3 {
   margin-bottom: 8px;
+}
+
+/* The attachments heading shares its row with the gallery toggle. */
+.agents-surface-attachments .environment-attachments-header {
+  min-width: 0;
+  margin: 0 0 8px;
 }
 
 .workspace-surface-heading small {

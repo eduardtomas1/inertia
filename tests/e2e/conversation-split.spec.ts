@@ -6,7 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
-import { openConversationPaneTool, openPaneTerminal } from "./support/workspace-tools";
+import { expectPaneComposerClearOfTerminalHandle, openConversationPaneTool, openPaneTerminal } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -318,6 +318,19 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .toHaveAttribute("title", "Terminal 1 · Inertia");
   await expect(secondaryTerminal.getByRole("tab", { name: "Terminal 1" }))
     .toHaveAttribute("title", "Terminal 1 · Companion");
+  const setUiScale = async (height: number, zoom: number, scale: string) => {
+    await app.resizeWindow(1440, height);
+    await page.evaluate((value) => { document.documentElement.dataset.interfaceScale = value; }, scale);
+    await app.electronApp.evaluate(({ BrowserWindow }, factor) => {
+      for (const window of BrowserWindow.getAllWindows()) window.webContents.setZoomFactor(factor);
+    }, zoom);
+  };
+  const originalScale = await page.evaluate(() => document.documentElement.dataset.interfaceScale ?? "default");
+  for (const [height, zoom, scale] of [[600, 1.25, "large"], [600, 1, "default"], [760, 1.25, "large"]] as const) {
+    await setUiScale(height, zoom, scale);
+    for (const pane of [primary, secondary]) await expectPaneComposerClearOfTerminalHandle(pane);
+  }
+  await setUiScale(920, 1, originalScale);
 
   const wideScreenshot = testInfo.outputPath(
     "cross-project-split-independent-tools.png",

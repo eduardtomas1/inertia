@@ -76,6 +76,89 @@ describe("right panel surface host", () => {
     vi.unstubAllGlobals();
   });
 
+  async function pendingPanelOpening() {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
+    const panel = (visible: boolean) => <>
+      <div data-panel-layout-controls>
+        <button>Toggle tools</button>
+        <button>Toggle terminal</button>
+        <button>Other toolbar control</button>
+      </div>
+      <WorkspacePanel
+        surfaces={[]}
+        activeSurface={null}
+        visible={visible}
+        onActivateSurface={() => undefined}
+        onOpenSurface={() => undefined}
+        onCloseSurface={() => undefined}
+        onClosePanel={() => undefined}
+      >
+        {null}
+      </WorkspacePanel>
+    </>;
+    const view = render(panel(false));
+    await waitFor(() => expect(view.container.querySelector(".workspace-panel-launcher"))
+      .toHaveAttribute("tabindex", "0"));
+    const opener = screen.getByRole("button", { name: "Toggle tools" });
+    opener.focus();
+    view.rerender(panel(true));
+    expect(frames.size).toBeGreaterThan(0);
+    return {
+      opener,
+      frames,
+      close: () => view.rerender(panel(false)),
+      unmount: view.unmount,
+      flush: () => act(() => {
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const frame of pending) frame(performance.now());
+      }),
+    };
+  }
+
+  it("focuses the launcher after opening when focus has not moved", async () => {
+    const opening = await pendingPanelOpening();
+    expect(opening.opener).toHaveFocus();
+    opening.flush();
+    expect(screen.getByRole("group", { name: "Open a surface" })).toHaveFocus();
+  });
+
+  it.each(["Toggle terminal", "Other toolbar control"])(
+    "preserves a newer %s focus while the panel opening frame is pending",
+    async (name) => {
+      const opening = await pendingPanelOpening();
+      const target = screen.getByRole("button", { name });
+      target.focus();
+      opening.flush();
+      expect(target).toHaveFocus();
+    },
+  );
+
+  it("preserves focus after navigating away from and back to the opener", async () => {
+    const opening = await pendingPanelOpening();
+    screen.getByRole("button", { name: "Toggle terminal" }).focus();
+    opening.opener.focus();
+    opening.flush();
+    expect(opening.opener).toHaveFocus();
+  });
+
+  it.each(["close", "unmount"] as const)(
+    "cancels pending opening focus on %s",
+    async (operation) => {
+      const opening = await pendingPanelOpening();
+      opening[operation]();
+      expect(opening.frames.size).toBe(0);
+      opening.flush();
+      if (operation === "close") expect(opening.opener).toHaveFocus();
+    },
+  );
+
   it("shows a launcher with one-letter shortcuts when no surface is open", async () => {
     const onChange = vi.fn();
     render(<SurfaceHost initial={{ ...EMPTY_RIGHT_PANEL_STATE, isOpen: true }} onChange={onChange} />);

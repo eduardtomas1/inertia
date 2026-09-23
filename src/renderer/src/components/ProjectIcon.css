@@ -1,1 +1,12 @@
 .project-custom-icon { object-fit: contain; flex-shrink: 0; border-radius: 3px; }
+svg.project-icon-symbol { flex-shrink: 0; }
+.has-project-tint, .project-name-tinted { --project-tint: var(--project-tint-light); }
+:root[data-theme="dark"] :is(.has-project-tint, .project-name-tinted) { --project-tint: var(--project-tint-dark); }
+svg.project-icon-symbol.has-project-tint { color: var(--project-tint); }
+.project-custom-icon.has-project-tint {
+  box-sizing: border-box;
+  padding: 1px;
+  border: 1.5px solid var(--project-tint);
+  border-radius: 4px;
+}
+.project-name-tinted.project-name-tinted { color: var(--project-tint); }

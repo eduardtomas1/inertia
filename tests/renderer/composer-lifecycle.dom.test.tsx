@@ -40,6 +40,7 @@ import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
+import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 
 import { composerProps, conversation, deferred, provider } from "./composer-fixtures";
 
@@ -632,9 +633,18 @@ describe("composer asynchronous ownership", () => {
       name: "Prompt presets",
     });
     const send = within(toolbar).getByRole("button", { name: "Send message" });
+    const model = within(toolbar).getByRole("button", { name: /^Choose model\./u });
+    const usage = within(toolbar).getByRole("group", { name: "Usage" });
+    const precedes = (first: Element, second: Element): boolean =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(precedes(attach, model)).toBe(true);
+    expect(precedes(model, presets)).toBe(true);
+    expect(precedes(presets, usage)).toBe(true);
+    expect(precedes(usage, send)).toBe(true);
     attach.focus();
     await userEvent.setup().tab();
-    expect(send).toHaveFocus();
+    expect(attach).not.toHaveFocus();
+    expect(toolbar.contains(document.activeElement)).toBe(true);
     expect(presets).not.toHaveAttribute("tabindex", "-1");
     expect(attach).not.toHaveAttribute("tabindex", "-1");
     expect(send).not.toHaveAttribute("tabindex", "-1");
@@ -885,6 +895,56 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(screen.queryByText("follow-up-reference.png"))
       .not.toBeInTheDocument());
   });
+
+  it.each(["initial", "follow-up"] as const)(
+    "keeps Attach unavailable while an active turn's %s send still blocks imports",
+    async (mode) => {
+      const current = conversation(`attachment-admission-${mode}`);
+      const sent = deferred<void>();
+      const imported = attachment(`after-${mode}-send`);
+      const commit = vi.fn(async () => undefined);
+      const onImportAttachments = vi.fn(async () => attachmentLease([imported], commit));
+      const onChooseAttachments = vi.fn(async () => null);
+      const onSend = vi.fn(() => sent.promise);
+      const props = composerProps(current, {
+        running: mode === "follow-up",
+        latestTurn: {
+          ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+          harnessId: "codex-app-server",
+        },
+        onSend, onImportAttachments, onChooseAttachments,
+      });
+      const view = render(<Composer {...props} />);
+      const input = screen.getByRole("textbox", { name: "Message" });
+      fireEvent.change(input, { target: { value: "Hold this send" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+      if (mode === "initial") {
+        // Running clears the local latch while the external send remains pending.
+        view.rerender(<Composer {...props} running sending />);
+      }
+      const attach = screen.getByRole("button", { name: "Attach follow-up images" });
+      const files = [new File(["image"], "source.png", { type: "image/png" })];
+      fireEvent.paste(input, { clipboardData: { files } });
+      fireEvent.click(attach);
+      expect(onImportAttachments).not.toHaveBeenCalled();
+      expect(onChooseAttachments).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
+      expect(attach).toBeDisabled();
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await act(async () => sent.resolve());
+      expect(attach).toBeDisabled();
+      view.rerender(<Composer {...props} running sending={false} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(COMPOSER_ACTION_STALE_FALLBACK_MS); });
+      vi.useRealTimers();
+      expect(attach).toBeEnabled();
+      fireEvent.paste(input, { clipboardData: { files } });
+      await waitFor(() => expect(commit).toHaveBeenCalledExactlyOnceWith([imported.id]));
+      expect(onImportAttachments).toHaveBeenCalledExactlyOnceWith(files);
+      expect(screen.getByText(imported.name)).toBeVisible();
+    },
+  );
 
   it("keeps non-image media unavailable during an active follow-up", async () => {
     const current = conversation("16161616-1616-4616-8616-161616161616");

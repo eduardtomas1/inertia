@@ -1,8 +1,8 @@
 import {
   lazy,
   Suspense,
-  useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -109,18 +109,25 @@ export function WorkspacePanel({
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"add">();
   const wasVisibleRef = useRef(visible);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const opened = visible && !wasVisibleRef.current;
     wasVisibleRef.current = visible;
     if (!opened || selected) return;
     const frame = window.requestAnimationFrame(() => {
+      document.removeEventListener("focusin", cancelOpeningFocus);
       const active = document.activeElement;
       if (active && active !== document.body && !active.closest("[data-panel-layout-controls]")) return;
       panelRef.current
         ?.querySelector<HTMLElement>(".workspace-panel-launcher")
         ?.focus({ preventScroll: true });
     });
-    return () => window.cancelAnimationFrame(frame);
+    // A newer focus choice supersedes opening focus, even if it returns to the opener.
+    const cancelOpeningFocus = () => window.cancelAnimationFrame(frame);
+    document.addEventListener("focusin", cancelOpeningFocus, { once: true });
+    return () => {
+      document.removeEventListener("focusin", cancelOpeningFocus);
+      window.cancelAnimationFrame(frame);
+    };
   }, [selected, visible]);
 
   const focusTab = (surface: WorkspacePanelTab): void => {

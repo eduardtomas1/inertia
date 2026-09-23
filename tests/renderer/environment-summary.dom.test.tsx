@@ -13,7 +13,7 @@ vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   prefetchWorkspaceTool: vi.fn(),
 }));
 
-import { AgentsSurface } from "../../src/renderer/src/components/AgentsSurface";
+import { AgentsSurface, ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY } from "../../src/renderer/src/components/AgentsSurface";
 import {
   CheckoutBranchControlProvider,
   CheckoutBranchSlot,
@@ -271,6 +271,59 @@ describe("Environment content in its workspace surfaces", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  it("keeps the attachment gallery collapsed until there is more than the recent set", () => {
+    render(agentsSurface());
+
+    expect(screen.getByRole("list", { name: "Recent attachments" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show all/u })).toBeNull();
+  });
+
+  it("expands the attachment gallery to scroll every attachment and remembers the choice", async () => {
+    const gallery = {
+      ...summary,
+      attachments: Array.from({ length: 9 }, (_, index) => ({
+        id: `gallery-${index}`,
+        name: `shot-${index}.png`,
+        mimeType: "image/png" as const,
+        size: 2048,
+      })),
+    };
+    const view = render(agentsSurface(gallery));
+    const section = document.querySelector(".environment-attachments")!;
+
+    expect(section).toHaveAttribute("data-expanded", "false");
+    expect(within(screen.getByRole("list", { name: "Recent attachments" }))
+      .getAllByRole("listitem")).toHaveLength(3);
+
+    const toggle = screen.getByRole("button", { name: "Show all 9" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!))
+      .toContainElement(screen.getByRole("list", { name: "Recent attachments" }));
+
+    await userEvent.click(toggle);
+
+    expect(section).toHaveAttribute("data-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(screen.getByRole("list", { name: "All attachments" }))
+      .getAllByRole("listitem")).toHaveLength(9);
+    expect(screen.queryByRole("list", { name: "Recent attachments" })).toBeNull();
+    expect(window.localStorage.getItem(ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY)).toBe("true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+
+    expect(section).toHaveAttribute("data-expanded", "false");
+    expect(window.localStorage.getItem(ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY)).toBe("false");
+
+    // A remembered expansion collapses again when the chat drops back to the
+    // recent set, so the toggle never claims to hide attachments that are gone.
+    await userEvent.click(screen.getByRole("button", { name: "Show all 9" }));
+    view.rerender(agentsSurface());
+
+    expect(document.querySelector(".environment-attachments"))
+      .toHaveAttribute("data-expanded", "false");
+    expect(screen.getByRole("list", { name: "Recent attachments" })).toBeInTheDocument();
   });
 
   it("opens real recent-attachment previews by ID from Agents and closes on context change", async () => {

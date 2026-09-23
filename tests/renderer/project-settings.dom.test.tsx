@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSettings } from "../../src/renderer/src/components/ProjectSettings";
-import type { Project } from "../../src/shared/contracts";
+import type { Project, ServerEvent } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import type { IssueReportSettingsProps } from "../../src/renderer/src/components/IssueReportSettings";
-import { provider, conversation } from "./composer-fixtures";
+import { provider, conversation, deferred } from "./composer-fixtures";
 
 const project: Project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
   repositoryIdentity: "git:/workspace/studio/.git", repositoryRoot: "/workspace/studio", repositoryRelativePath: "",
@@ -86,5 +86,92 @@ describe("project settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save spend limit" }));
     await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: saved.updatedAt, preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } } }));
+  });
+  it("waits for an appearance save before sending full preferences against the refreshed revision", async () => {
+    const pending = deferred<ServerEvent>();
+    const tinted: Project = { ...project, updatedAt: "2026-09-09T08:02:00.000Z",
+      preferences: { ...defaultProjectPreferences(), color: { kind: "palette", name: "pink" } } };
+    const request = vi.fn<IssueReportSettingsProps["request"]>().mockImplementation(async (command) => {
+      if (command.type === "project.update" && command.payload.appearance) return pending.promise;
+      if (command.type === "project.update" && command.payload.expectedUpdatedAt !== tinted.updatedAt) {
+        throw new Error("This project changed in another view.");
+      }
+      return { type: "request.ok", requestId: "saved" };
+    });
+    const view = setup({ request });
+    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("radio", { name: "Pink" }));
+      fireEvent.change(workspace, { target: { value: "worktree" } });
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(workspace).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Choose icon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add action" })).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      // Mutation snapshots arrive before request.ok, matching the runtime router.
+      view.rerender(<ProjectSettings {...view.props} projects={[tinted]} />);
+      pending.resolve({ type: "request.ok", requestId: "appearance-saved" });
+    });
+    expect(workspace).toBeEnabled();
+    fireEvent.change(workspace, { target: { value: "worktree" } });
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
+      projectId: project.id, expectedUpdatedAt: tinted.updatedAt,
+      preferences: { ...tinted.preferences!, workspace: "worktree" },
+    } }));
+    await waitFor(() => expect(workspace).toBeEnabled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("guards appearance changes during a full save and unlocks them after a failure", async () => {
+    const pending = deferred<ServerEvent>();
+    const request = vi.fn<IssueReportSettingsProps["request"]>()
+      .mockResolvedValue({ type: "request.ok", requestId: "saved" })
+      .mockReturnValueOnce(pending.promise);
+    setup({ request });
+    const workspace = screen.getByRole("combobox", { name: "Project default workspace" });
+    const colour = screen.getByRole("radio", { name: "Pink" });
+    const emphasis = screen.getByRole("radio", { name: "Icon and name" });
+    const pinned = screen.getByRole("switch", { name: "Pin to top of project lists" });
+    act(() => {
+      fireEvent.change(workspace, { target: { value: "worktree" } });
+      fireEvent.click(colour);
+      fireEvent.click(emphasis);
+      fireEvent.click(pinned);
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    for (const control of [colour, emphasis, pinned]) expect(control).toBeDisabled();
+    await act(async () => pending.reject(new Error("The runtime is offline.")));
+    expect(screen.getByRole("alert")).toHaveTextContent("The runtime is offline.");
+    for (const control of [workspace, colour, emphasis, pinned]) expect(control).toBeEnabled();
+    fireEvent.click(colour);
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith({ type: "project.update", payload: {
+      projectId: project.id, appearance: { color: { kind: "palette", name: "pink" } },
+    } }));
+    await waitFor(() => expect(colour).toBeEnabled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("sets colour, emphasis and pinning as server-merged appearance patches", async () => {
+    const view = setup();
+    const colours = screen.getByRole("radiogroup", { name: "Project colour" });
+    fireEvent.keyDown(within(colours).getByRole("radio", { name: "Default" }), { key: "End" });
+    expect(within(colours).getByRole("radio", { name: "Pink" })).toHaveFocus();
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      appearance: { color: { kind: "palette", name: "pink" } } } }));
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Pink" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("radio", { name: "Icon and name" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Pin to top of project lists" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("switch", { name: "Pin to top of project lists" }));
+    await waitFor(() => expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { pinned: true } } }));
+    expect(view.request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id, appearance: { colorEmphasis: "icon-and-name" } } });
+    await waitFor(() => expect(within(colours).getByRole("radio", { name: "Teal" })).toBeEnabled());
+    view.request.mockRejectedValueOnce(new Error("The runtime is offline."));
+    fireEvent.click(within(colours).getByRole("radio", { name: "Teal" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The runtime is offline.");
+    const tinted = { ...project, updatedAt: "2026-09-09T08:02:00.000Z", preferences: { ...defaultProjectPreferences(), color: { kind: "palette" as const, name: "teal" as const }, colorEmphasis: "icon-and-name" as const } };
+    view.rerender(<ProjectSettings {...view.props} projects={[tinted, view.props.projects[1]!]} />);
+    expect(within(colours).getByRole("radio", { name: "Teal" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Choose project" }).querySelector(".project-name-tinted")).toHaveTextContent("Studio");
   });
 });

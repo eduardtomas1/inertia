@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1316,7 +1316,235 @@ describe("transcript following motion", () => {
     }));
   });
 
-  it("keeps correcting delayed virtual measurements until reader intent", async () => {
+  describe("transcript resize following", () => {
+    afterEach(() => {
+      cleanup();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    async function resizeFollowing() {
+      const observers: TestResizeObserver[] = [];
+      class TestResizeObserver implements ResizeObserver {
+        readonly targets = new Set<Element>();
+        readonly disconnect = vi.fn(() => this.targets.clear());
+        constructor(private readonly callback: ResizeObserverCallback) {
+          observers.push(this);
+        }
+        observe(target: Element): void { this.targets.add(target); }
+        unobserve(target: Element): void { this.targets.delete(target); }
+        resize(target: Element): void {
+          if (!this.targets.has(target)) return;
+          this.callback([{
+            target,
+            contentRect: target.getBoundingClientRect(),
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+          }], this);
+        }
+      }
+      vi.stubGlobal("ResizeObserver", TestResizeObserver);
+      vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+      const props = workspaceProps(conversation("resize-follow"), async () => null);
+      const view = render(<ChatWorkspace {...props} />);
+      await screen.findByTestId("turn-anchor-projection");
+      const transcript = screen.getByLabelText("Thread transcript");
+      const content = view.container.querySelector<HTMLElement>(".response-timeline")!;
+      const composer = view.container.querySelector<HTMLElement>(".composer-region")!;
+      Object.defineProperties(transcript, {
+        clientHeight: { configurable: true, writable: true, value: 100 },
+        scrollHeight: { configurable: true, writable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 400 },
+      });
+      const scrollTo = vi.fn((options?: ScrollToOptions | number, y?: number) => {
+        const top = typeof options === "number" ? y ?? 0 : options?.top ?? 0;
+        transcript.scrollTop = Math.min(top, transcript.scrollHeight - transcript.clientHeight);
+      });
+      transcript.scrollTo = scrollTo;
+      return { props, view, transcript, content, composer, observers, scrollTo };
+    }
+
+    it("follows both resize targets with one observer and leaves history reading alone", async () => {
+      const { transcript, content, composer, observers, scrollTo } = await resizeFollowing();
+      expect(observers).toHaveLength(1);
+      const observer = observers[0]!;
+      expect(observer.targets).toEqual(new Set([content, composer]));
+
+      Object.defineProperty(transcript, "scrollHeight", { value: 800 });
+      act(() => observer.resize(content));
+      expect(transcript.scrollTop).toBe(700);
+      scrollTo.mockClear();
+      Object.defineProperty(transcript, "clientHeight", { value: 80 });
+      act(() => observer.resize(composer));
+      expect(transcript.scrollTop).toBe(720);
+      expect(scrollTo).toHaveBeenCalledOnce();
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 100;
+      fireEvent.scroll(transcript);
+      scrollTo.mockClear();
+      await act(async () => vi.advanceTimersByTime(750));
+      act(() => {
+        observer.resize(content);
+        observer.resize(composer);
+      });
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(100);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+    });
+
+    it("disconnects both targets on conversation switch and unmount", async () => {
+      const { props, view, content, composer, observers, scrollTo } = await resizeFollowing();
+      expect(observers).toHaveLength(1);
+      const previous = observers[0]!;
+      view.rerender(<ChatWorkspace {...props} conversation={conversation("resize-next")} />);
+      expect(previous.disconnect).toHaveBeenCalledOnce();
+      expect(previous.targets.size).toBe(0);
+      expect(observers).toHaveLength(2);
+      const current = observers[1]!;
+      expect(current.targets).toEqual(new Set([content, composer]));
+      scrollTo.mockClear();
+      act(() => {
+        previous.resize(content);
+        previous.resize(composer);
+      });
+      expect(scrollTo).not.toHaveBeenCalled();
+      act(() => {
+        current.resize(content);
+        current.resize(composer);
+      });
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+
+      view.unmount();
+      expect(current.disconnect).toHaveBeenCalledOnce();
+      expect(current.targets.size).toBe(0);
+      scrollTo.mockClear();
+      current.resize(content);
+      current.resize(composer);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("retained reader intent", () => {
+    afterEach(() => {
+      cleanup();
+      vi.useRealTimers();
+    });
+
+    async function guardedFollow() {
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+      const props = workspaceProps(conversation("guarded-follow"), async () => null);
+      const view = render(<ChatWorkspace {...props} />);
+      await screen.findByTestId("turn-anchor-projection");
+      const transcript = screen.getByLabelText("Thread transcript");
+      let height = 500;
+      Object.defineProperties(transcript, {
+        clientHeight: { configurable: true, value: 100 },
+        scrollHeight: { configurable: true, get: () => height },
+        scrollTop: { configurable: true, writable: true, value: 400 },
+      });
+      const scrollTo = vi.fn((options?: ScrollToOptions | number, y?: number) => {
+        const top = typeof options === "number" ? y ?? 0 : options?.top ?? 0;
+        transcript.scrollTop = Math.min(top, height - 100);
+      });
+      transcript.scrollTo = scrollTo;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.wheel(transcript, { deltaY: 50 });
+      fireEvent.scroll(transcript);
+      const grow = (streaming: boolean): void => {
+        height = 800;
+        view.rerender(<ChatWorkspace {...props} {...(streaming ? {
+          streaming: streamingSource("Last streaming update"),
+        } : {
+          messages: [{
+            id: "guarded-final",
+            conversationId: props.conversation!.id,
+            turnId: null,
+            role: "assistant" as const,
+            content: "Last persisted update",
+            attachments: [],
+            createdAt: "2026-08-02T10:00:01.000Z",
+          }],
+        })} />);
+      };
+      return { props, view, transcript, scrollTo, grow };
+    }
+
+    it.each([true, false])("follows the last content update when the guard expires (streaming: %s)", async (streaming) => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      grow(streaming);
+      await act(async () => vi.advanceTimersByTime(749));
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(400);
+      expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+
+      await act(async () => vi.advanceTimersByTime(1));
+      expect(transcript.scrollTop).toBe(700);
+      expect(scrollTo).toHaveBeenCalledWith({ top: 800, behavior: "auto" });
+    });
+
+    it.each(["wheel", "touch", "keyboard"])("renews the guard for fresh %s intent and preserves history reading", async (input) => {
+      const { transcript, scrollTo, grow } = await guardedFollow();
+      await act(async () => vi.advanceTimersByTime(500));
+      if (input === "wheel") fireEvent.wheel(transcript, { deltaY: -40 });
+      if (input === "touch") fireEvent.touchStart(transcript);
+      if (input === "keyboard") fireEvent.keyDown(transcript, { key: "PageUp" });
+      // A queued bottom event must not release the new gesture guard.
+      fireEvent.scroll(transcript);
+      grow(true);
+      await act(async () => vi.advanceTimersByTime(250));
+      expect(scrollTo).not.toHaveBeenCalled();
+      transcript.scrollTop = 100;
+      fireEvent.scroll(transcript);
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(transcript.scrollTop).toBe(100);
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+    });
+
+    it.each(["started", "positioned"] as const)("respects %s final-answer ownership when the guard expires", async (status) => {
+      const { props, scrollTo, grow } = await guardedFollow();
+      grow(false);
+      const conversationId = props.conversation!.id;
+      const callback = timelineCallbacks.get(conversationId)!;
+      act(() => {
+        callback({ status: "started", conversationId, answerId: "guarded-final" });
+        if (status === "positioned") {
+          callback({ status, conversationId, answerId: "guarded-final", followsLatest: false });
+        }
+        // Also cover expiry before the positioned navigation state commits.
+        vi.advanceTimersByTime(750);
+      });
+      expect(scrollTo).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTime(1_000));
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("clears the old conversation's correction on switch and on unmount", async () => {
+      const { props, view, transcript, scrollTo, grow } = await guardedFollow();
+      grow(true);
+      expect(vi.getTimerCount()).toBe(1);
+      view.rerender(<ChatWorkspace {...props} conversation={conversation("next-conversation")} />);
+      expect(vi.getTimerCount()).toBe(0);
+      scrollTo.mockClear();
+      await act(async () => vi.advanceTimersByTime(750));
+      expect(scrollTo).not.toHaveBeenCalled();
+
+      fireEvent.wheel(transcript);
+      expect(vi.getTimerCount()).toBe(1);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      await act(async () => vi.advanceTimersByTime(750));
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([null, 0, -40])("keeps fresh reader intent through an early scroll event (offset: %s)", async (earlyScrollOffset) => {
     const activeConversation = conversation("conversation-delayed-measurement");
     const scheduled = new Map<number, FrameRequestCallback>();
     let nextFrameId = 0;
@@ -1374,8 +1602,15 @@ describe("transcript following motion", () => {
     expect(scheduled.size).toBe(1);
 
     fireEvent.wheel(transcript);
+    // A queued correction or a small upward movement can still fall within
+    // the 120px follow tolerance after the reader has started navigating.
+    const readerScrollTop = 550 + (earlyScrollOffset ?? 0);
+    if (earlyScrollOffset !== null) {
+      scrollTop = readerScrollTop;
+      fireEvent.scroll(transcript);
+    }
     height = 800;
-    expect(scrollTop).toBe(550);
+    expect(scrollTop).toBe(readerScrollTop);
     expect(scheduled.size).toBe(0);
 
     scrollTo.mockClear();
@@ -1392,7 +1627,7 @@ describe("transcript following motion", () => {
     scheduled.delete(lateContentFrame[0]);
     lateContentFrame[1](32);
     expect(scrollTo).not.toHaveBeenCalled();
-    expect(scrollTop).toBe(550);
+    expect(scrollTop).toBe(readerScrollTop);
     expect(scheduled.size).toBe(0);
   });
 });

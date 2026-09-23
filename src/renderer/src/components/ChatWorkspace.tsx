@@ -703,49 +703,42 @@ export function ChatWorkspace({
   }, [performScrollToLatest]);
 
   useEffect(
-    () => followLatestContent(),
+    followLatestContent,
     [contentSignal, followLatestContent],
   );
 
   useEffect(() => {
-    const content = timelineRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (transcriptNavigationFollowsContent(navigationRef.current)) {
         performScrollToLatest("auto");
       }
     });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [conversationId, performScrollToLatest]);
-
-  useEffect(() => {
-    const composer = composerRegionRef.current;
-    if (!composer || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (transcriptNavigationFollowsContent(navigationRef.current)) {
-        performScrollToLatest("auto");
-      }
-    });
-    observer.observe(composer);
+    for (const element of [timelineRef.current, composerRegionRef.current]) {
+      if (element) observer.observe(element);
+    }
     return () => observer.disconnect();
   }, [conversationId, performScrollToLatest]);
 
   const noteReaderIntent = useCallback((): void => {
     clearPendingFinalAnswerNavigation();
+    clearReaderIntent();
     readerIntentRef.current = true;
     if (followCorrectionFrameRef.current !== null) {
       window.cancelAnimationFrame(followCorrectionFrameRef.current);
       followCorrectionFrameRef.current = null;
     }
-    if (readerIntentReleaseTimerRef.current !== null) {
-      window.clearTimeout(readerIntentReleaseTimerRef.current);
-    }
+    const intentConversationId = navigationRef.current.conversationId;
     readerIntentReleaseTimerRef.current = window.setTimeout(() => {
-      readerIntentRef.current = false;
-      readerIntentReleaseTimerRef.current = null;
+      clearReaderIntent();
+      // Content may have finished growing while the gesture guard blocked
+      // following. Retry only if this conversation still owns following.
+      if (
+        navigationRef.current.conversationId === intentConversationId
+        && transcriptNavigationFollowsContent(navigationRef.current)
+      ) performScrollToLatest("auto");
     }, READER_INTENT_GUARD_MS);
-  }, [clearPendingFinalAnswerNavigation]);
+  }, [clearPendingFinalAnswerNavigation, clearReaderIntent, performScrollToLatest]);
 
   const noteResponseTimelineNavigationIntent = useCallback((): void => {
     noteReaderIntent();
@@ -786,7 +779,10 @@ export function ChatWorkspace({
       return;
     }
     const intentional = readerIntentRef.current;
-    if (follows) clearReaderIntent();
+    // A queued programmatic scroll can still report the bottom after fresh
+    // wheel intent. Keep the bounded gesture guard until it expires: neither
+    // that event nor a small upward movement within the follow tolerance
+    // proves that the reader has finished navigating.
     dispatchNavigation({
       type: "reader.scrolled",
       conversationId: conversationId ?? "",

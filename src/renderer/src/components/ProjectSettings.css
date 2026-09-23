@@ -2,8 +2,8 @@
 .project-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .project-settings-heading h1 { margin: 0; color: var(--text); font-size: 23px; font-weight: 550; letter-spacing: -.025em; }
 .project-settings-heading p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
-.project-settings button:not([role="switch"]) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text-soft); font-size: 12px; }
-.project-settings button:not([role="switch"]):hover { background: var(--surface-hover); color: var(--text); }
+.project-settings button:not([role="switch"], [role="radio"]) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text-soft); font-size: 12px; }
+.project-settings button:not([role="switch"], [role="radio"]):hover { background: var(--surface-hover); color: var(--text); }
 .project-settings button:disabled { opacity: .5; cursor: not-allowed; }
 .project-settings button:focus-visible, .project-settings input:focus-visible, .project-settings select:focus-visible, .project-settings textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .project-settings-heading > button { max-width: 260px; flex-shrink: 0; }
@@ -19,6 +19,10 @@
 .project-name-form, .project-budget-form { display: flex; gap: 6px; width: 100%; max-width: 290px; }
 .project-setting-field-error { max-width: 290px; margin: 0; color: var(--danger); font-size: 11px; }
 .project-icon-controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.project-colour-preview { display: inline-flex; align-items: center; gap: 7px; max-width: 290px; color: var(--text-soft); font-size: 12px; }
+.project-colour-preview > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-setting-control > .project-color-picker { justify-items: end; max-width: 290px; }
+.project-setting-control .project-swatches, .project-setting-control .project-color-custom { justify-content: flex-end; }
 .project-icon-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; }
 .project-model-controls { display: flex; flex-wrap: wrap; gap: 7px; width: 100%; max-width: 290px; }
 .project-settings-group-title { margin: 27px 16px 11px; color: var(--text-muted); font-size: 12px; font-weight: 500; }
@@ -38,4 +42,6 @@
   .project-setting-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .project-setting-control { align-items: flex-start; }
   .project-icon-controls { justify-content: flex-start; }
+  .project-setting-control > .project-color-picker { justify-items: start; }
+  .project-setting-control .project-swatches, .project-setting-control .project-color-custom { justify-content: flex-start; }
 }

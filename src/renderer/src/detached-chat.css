@@ -47,6 +47,24 @@
   white-space: nowrap;
 }
 
+.detached-chat-title > .detached-chat-project {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.detached-chat-project > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detached-chat-project > svg,
+.detached-chat-project > img {
+  flex: 0 0 auto;
+}
+
 .detached-chat-title h1 {
   overflow: hidden;
   margin: 0;

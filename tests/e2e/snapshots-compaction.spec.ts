@@ -6,6 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { createAppFixture } from "./support/app-fixture";
 import { closeWorkspaceTools } from "./support/workspace-tools";
+import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 
 function fixturePixels(): number[] {
   const canvas = createCanvas(800, 500); const ctx = canvas.getContext("2d");
@@ -40,6 +41,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
       store.updateSettings({ theme });
     } finally { store.close(); }
   } });
+  let bodyFailure: { error: unknown } | undefined;
   try {
     const page = app.page; await app.resizeWindow(1100, 760);
     await closeWorkspaceTools(page);
@@ -108,7 +110,8 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await page.getByRole("complementary", { name: "Settings sections" }).getByRole("button", { name: "Snapshots", exact: true }).click();
     await expect(page.getByRole("combobox", { name: "Capture shortcut" })).toHaveValue("accelerator");
     expect(app.rendererErrors).toEqual([]);
-  } finally { await app.close(); }
+  } catch (error) { bodyFailure = { error }; throw error; }
+  finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
 });
 
 test("loads snapshot native bindings in the Electron utility runtime without desktop access", async () => {

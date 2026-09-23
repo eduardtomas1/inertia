@@ -31,6 +31,8 @@ import {
 } from "../utils/splitLayout";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton } from "./ui";
+import type { Project } from "@shared/contracts";
+import { ProjectIcon, ProjectName } from "./ProjectIcon";
 
 const GUTTER_PX = 7;
 const POSITION_NAMES = ["Primary", "Second", "Third", "Fourth"];
@@ -40,6 +42,7 @@ export interface SplitPaneView {
   content: ReactNode;
   title: string;
   projectName: string;
+  project?: Project | null;
   conversationId?: string;
   toolsOpen: boolean;
   onToggleTools: () => void;
@@ -181,7 +184,8 @@ export function ConversationSplitView({
                   className="conversation-split-grip"
                 />
               )}
-              <span title={details.projectName}>{details.projectName}</span>
+              {details.project && <ProjectIcon project={details.project} size={12} />}
+              <ProjectName project={details.project} title={details.projectName}>{details.projectName}</ProjectName>
               <strong title={details.title}>{details.title}</strong>
               <span className="conversation-split-actions">
                 {details.onOpenInWindow && (

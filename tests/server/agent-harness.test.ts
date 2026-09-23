@@ -17,7 +17,7 @@ import { providerRunTerminal } from "../../src/server/provider/contracts";
 import {
   LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS,
   createLegacyCliAgentHarnessForTests,
-} from "../../src/server/provider/cli-agent-harness";
+} from "../helpers/providers/legacy-cli-harness";
 import { CODEX_APP_SERVER_HARNESS_CAPABILITIES } from "../../src/server/provider/codex-app-server-harness";
 import { nativeProviderRunFields } from "./model-route-fixture";
 

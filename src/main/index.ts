@@ -127,7 +127,7 @@ import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
   type MainWindowState } from "./main-window-state.js";
 import { handleStartupFailure } from "./startup-failure.js";
 import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
-import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
+import { testCleanupOwners, createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 import { installedUpdateTestFixture } from "./test-installed-update.js";
 const installedUpdateFixture = installedUpdateTestFixture();
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
@@ -899,8 +899,8 @@ function runPrivilegedCleanup(): Promise<boolean> {
     systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);
     const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
     const retainedAttachments = conversationAttachments; privilegedCleanupOwners = new RetryablePrivilegedCleanup({
-      retryUnconfirmed: process.platform === "linux", runtime: supervisorToStop,
-      privateConnect: privateConnectHostToStop,
+      retryUnconfirmed: process.platform === "linux", runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
+      privateConnect: privateConnectHostToStop && { shutdown: () => testCleanupOwners.observe("privateConnect", () => privateConnectHostToStop.shutdown()) },
       onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
       onRuntimeError: (error) => {
         runtimeDiagnostics?.record("runtime.failure", { phase: "stopping",
@@ -909,10 +909,10 @@ function runPrivilegedCleanup(): Promise<boolean> {
       },
       onPrivateConnectStopped: () => { if (privateConnectHost === privateConnectHostToStop) privateConnectHost = null; },
       onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
-      disposeTemporaryAttachments: disposeImportedAttachments,
+      disposeTemporaryAttachments: () => testCleanupOwners.observe("temporaryAttachments", disposeImportedAttachments),
       onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
       onUnconfirmedRuntimeExit: () => console.warn("Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them."),
-      closeDurableAttachments: async () => await closeConversationAttachmentAccess(retainedAttachments),
+      closeDurableAttachments: async () => await testCleanupOwners.observe("durableAttachments", () => closeConversationAttachmentAccess(retainedAttachments)),
       onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
     });
   }
@@ -1206,7 +1206,7 @@ async function bootstrap(): Promise<void> {
           ?? Promise.reject(new Error("The test runtime is not running")),
         agentBrowser: (id: Parameters<PreviewBroker["perform"]>[0], command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
-          cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
+          owners: testCleanupOwners.snapshot, cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);

@@ -449,6 +449,7 @@ export function useSplitWorkspaceScene({
       conversationId: splitConversation.id,
       title: splitConversation.title,
       projectName: splitProject.name,
+      project: splitProject,
       toolsOpen: layout.activeTool !== null,
       onToggleTools: layout.toggleWorkspaceTools,
       terminalOpen: layout.terminalOpen,

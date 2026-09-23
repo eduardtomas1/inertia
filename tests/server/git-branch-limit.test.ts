@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,12 +20,12 @@ function fixture(selectable: number, aliases: number): string {
   git(root, "config", "user.email", "git@example.invalid");
   git(root, "commit", "--allow-empty", "-m", "Initial");
   const head = git(root, "rev-parse", "HEAD");
-  // The fixture tests enumeration, not durability of these thousand seed refs.
-  execFileSync("git", ["-c", "core.fsync=none", "update-ref", "--stdin"], {
-    cwd: root, timeout: 10_000, maxBuffer: 1024 * 1024,
-    input: Array.from({ length: selectable - 1 }, (_, index) =>
-      `create refs/remotes/origin/topic-${String(index).padStart(4, "0")} ${head}\n`).join(""),
-  });
+  // Seed Git's packed-ref representation directly: enumerating these refs is
+  // the behavior under test, not a thousand loose-ref filesystem mutations.
+  // The current branch and symbolic aliases remain real loose refs.
+  writeFileSync(join(root, ".git", "packed-refs"), "# pack-refs with: sorted\n"
+    + Array.from({ length: selectable - 1 }, (_, index) =>
+      `${head} refs/remotes/origin/topic-${String(index).padStart(4, "0")}\n`).join(""));
   for (let index = 0; index < aliases; index += 1) {
     git(root, "symbolic-ref", `refs/remotes/origin/HEAD${index ? `-${index}` : ""}`, "refs/remotes/origin/topic-0000");
   }

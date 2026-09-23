@@ -3,14 +3,14 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
-} from "../process-lifecycle";
+} from "../../../src/server/process-lifecycle";
 import {
   buildProviderInvocation,
   normalizeProviderLine,
-  providerFailureMessage,
   type ProviderInvocation,
   type ProviderParserState,
-} from "./adapters";
+} from "./legacy-cli-adapters";
+import { providerFailureMessage } from "../../../src/server/provider/adapters";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -18,19 +18,19 @@ import {
   type AgentHarnessId,
   type AgentHarnessRun,
   type AgentHarnessStartOptions,
-} from "./agent-harness";
+} from "../../../src/server/provider/agent-harness";
 import {
   providerRunTerminal,
   type ProviderId,
   type ProviderRunInput,
   type ProviderRunResult,
-} from "./contracts";
-import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
-import { providerProcessInvocation } from "./process";
+} from "../../../src/server/provider/contracts";
+import { CappedProviderBuffer, ProviderNdjsonDecoder } from "../../../src/server/provider/io";
+import { providerProcessInvocation } from "../../../src/server/provider/process";
 import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
-} from "../../node/runtime-owned-processes";
+} from "../../../src/node/runtime-owned-processes";
 
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;

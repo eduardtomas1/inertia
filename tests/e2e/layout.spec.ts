@@ -37,7 +37,13 @@ async function panelGeometry(): Promise<{
   panel: DOMRectLike;
   sheet: boolean;
 } | null> {
-  return await page.evaluate(() => {
+  return await page.evaluate(async () => {
+    // Sheet entrance motion translates the panel beyond its final frame bounds.
+    // Measure after that finite motion finishes; keep the containment checks strict.
+    const panelElement = document.querySelector(".workspace-panel");
+    await Promise.all((panelElement?.getAnimations() ?? [])
+      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => undefined)));
     const rect = (selector: string) => {
       const bounds = document.querySelector(selector)?.getBoundingClientRect();
       return bounds

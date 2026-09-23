@@ -2,9 +2,11 @@
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { readFile, rm } from "node:fs/promises";
+import { copyFileSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { TEST_SHUTDOWN_TRACE_BYTES, TEST_SHUTDOWN_TRACE_FILE } from "../../src/server/runtime/test-shutdown-trace";
 import {
   ensureWorkspaceTools,
   openTerminalDock,
@@ -22,7 +24,8 @@ let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "terminal", initialState: "conversation" });
+  app = await createAppFixture({ name: "terminal", initialState: "conversation",
+    additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" } });
   electronApp = app.electronApp;
   page = app.page;
   workspaceDirectory = app.workspaceDirectory;
@@ -166,7 +169,16 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   })).toHaveCount(0);
 
   const runtimeBeforeRecycle = await app.runtimeSnapshot();
-  await app.recycleRuntime();
+  try { await app.recycleRuntime(); } catch (error) {
+    try {
+      const source = join(app.testDirectory, "data", TEST_SHUTDOWN_TRACE_FILE);
+      const metadata = lstatSync(source);
+      if (metadata.isFile() && metadata.size <= TEST_SHUTDOWN_TRACE_BYTES) {
+        copyFileSync(source, test.info().outputPath(TEST_SHUTDOWN_TRACE_FILE));
+      }
+    } catch { /* Retain the original recycle failure if evidence is unavailable. */ }
+    throw error;
+  }
   await expect.poll(async () => {
     const current = await app.runtimeSnapshot();
     return current.phase === "ready"

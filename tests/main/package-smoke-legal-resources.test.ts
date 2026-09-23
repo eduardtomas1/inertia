@@ -13,7 +13,13 @@ const electronLicense = `Copyright (c) Electron contributors
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files.
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.`;
-const legalFiles = {
+// Only macOS packages its own Chromium credits; elsewhere Electron's copy
+// beside the executable is the verified one.
+const chromiumCreditsInResources = process.platform === "darwin";
+const chromiumCredits = chromiumCreditsInResources
+  ? "electron/LICENSES.chromium.html"
+  : "LICENSES.chromium.html";
+const legalFiles: Record<string, string> = {
   "THIRD_PARTY_NOTICES.txt": `INERTIA THIRD-PARTY NOTICES
 PACKAGES
 VENDORED COMPONENT LICENSE AND NOTICE TEXTS
@@ -21,10 +27,10 @@ PACKAGE LICENSE AND NOTICE TEXTS
 Copyright fixture contributors`,
   "LICENSE.txt": "Apache License\nVersion 2.0, January 2004\nEND OF TERMS AND CONDITIONS",
   "electron/LICENSE.txt": electronLicense,
-  "electron/LICENSES.chromium.html": `<!doctype html><html><head><title>Credits</title></head>
+  [chromiumCredits]: `<!doctype html><html><head><title>Credits</title></head>
 <body><div class="license"><pre>${electronLicense}</pre></div>`,
 };
-type LegalPath = keyof typeof legalFiles;
+type LegalPath = string;
 
 async function verifier() {
   return await import(pathToFileURL(resolve("scripts/package-smoke-legal-resources.mjs")).href) as {
@@ -34,12 +40,19 @@ async function verifier() {
   };
 }
 
+/** The verified layout: resources hold every file except, off macOS, the
+ *  Chromium credits Electron already places beside the executable. */
+function legalPath(root: string, resources: string, name: string): string {
+  return join(name === chromiumCredits && !chromiumCreditsInResources ? root : resources, name);
+}
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "inertia-package-legal-"));
   roots.push(root);
   const resources = join(root, "package resources");
+  await mkdir(resources, { recursive: true });
   for (const [name, content] of Object.entries(legalFiles)) {
-    const path = join(resources, name);
+    const path = legalPath(root, resources, name);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content);
   }
@@ -86,9 +99,9 @@ it("verifies all four artifact-only resources and reports hashes of their actual
 });
 
 it.each(Object.keys(legalFiles) as LegalPath[])("rejects absent, empty and wrong-content %s", async (name) => {
-  const { resources } = await fixture();
+  const { root, resources } = await fixture();
   const { verifyPackagedLegalResources } = await verifier();
-  const path = join(resources, name);
+  const path = legalPath(root, resources, name);
   await rm(path);
   await expect(verifyPackagedLegalResources(resources)).rejects.toThrow(`legal resource ${name}`);
   for (const content of ["", "packaging warning: source file missing", legalFiles[name].slice(0, 24)]) {
@@ -101,10 +114,10 @@ it.each([
   ["THIRD_PARTY_NOTICES.txt", 16 * 1024 * 1024],
   ["LICENSE.txt", 64 * 1024],
   ["electron/LICENSE.txt", 64 * 1024],
-  ["electron/LICENSES.chromium.html", 64 * 1024 * 1024],
+  [chromiumCredits, 64 * 1024 * 1024],
 ] as const)("rejects oversized %s without reading the sparse payload", async (name, maximumBytes) => {
-  const { resources } = await fixture();
-  await truncate(join(resources, name), maximumBytes + 1);
+  const { root, resources } = await fixture();
+  await truncate(legalPath(root, resources, name), maximumBytes + 1);
   const { verifyPackagedLegalResources } = await verifier();
   await expect(verifyPackagedLegalResources(resources)).rejects.toThrow(`legal resource ${name}`);
 });

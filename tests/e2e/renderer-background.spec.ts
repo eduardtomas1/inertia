@@ -265,7 +265,7 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
     const resumed = await sample(page, electronApp, "resumed", testInfo);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect.poll(() => page.evaluate(() => document.getAnimations().some(
-      (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-frame-flow",
+      (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-comet",
     ))).toBe(false);
     const profileTurns = turns + (mature ? 40 * 22 : 0);
     const report = JSON.stringify({ turns, mature, seedDurationMs, generatedProfileTurns: profileTurns, generatedProfileConversations: mature ? 41 : 1,
@@ -303,8 +303,8 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       expect(measurement.start.visibility).toBe("visible");
       expect(measurement.end.visibility).toBe("visible");
       expect(measurement.end.mountedRows).toBeLessThan(24);
-      const start = measurement.start.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
-      const end = measurement.end.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
+      const start = measurement.start.animations.find((animation) => animation.name === "ultra-reasoning-comet");
+      const end = measurement.end.animations.find((animation) => animation.name === "ultra-reasoning-comet");
       expect(start?.state).toBe("running");
       expect(end?.state).toBe("running");
       expect(Number(end?.time) - Number(start?.time)).toBeGreaterThan(4_000);

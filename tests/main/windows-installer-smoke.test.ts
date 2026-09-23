@@ -191,6 +191,36 @@ test("keeps cold process discovery inside the existing total drain deadline", as
   expect(snapshot).toHaveBeenCalledOnce();
 });
 
+test("retains discovery phase stderr in the original bounded timeout error", async () => {
+  const { runBounded } = await installerSmokeModule();
+  const markers = [
+    "INERTIA_INSTALL_ROOT_PHASE|script-entered|0|0|0",
+    "INERTIA_INSTALL_ROOT_PHASE|cim-start|10|0|0",
+    "INERTIA_INSTALL_ROOT_PHASE|path-lookup-start|25|1|1",
+  ];
+  // Allow cold Node startup on Windows before this deliberate timeout.
+  const error = await runBounded(process.execPath, ["-e", [
+    'process.stderr.write("#< CLIXML\\n");',
+    `process.stderr.write(${JSON.stringify(markers.join("\n") + "\n")});`,
+    "setInterval(() => {}, 1000);",
+  ].join("")], { label: "Discovery phase timeout control", timeoutMs: 5_000 }).catch(
+    (cause: unknown) => cause,
+  );
+  expect(error).toMatchObject({ name: "BoundedProcessTimeoutError", cleanupConfirmed: true });
+  expect((error as Error).message).toContain("complete process tree was terminated");
+  for (const marker of markers) expect((error as Error).message).toContain(marker);
+});
+
+test("keeps discovery phase stderr out of successful process JSON", async () => {
+  const { runBounded } = await installerSmokeModule();
+  const result = await runBounded(process.execPath, ["-e", [
+    'process.stderr.write("INERTIA_INSTALL_ROOT_PHASE|query-complete|30|256|200\\n");',
+    'process.stdout.write(JSON.stringify({ processes: [] }));',
+    'process.stderr.write("INERTIA_INSTALL_ROOT_PHASE|json-written|31|256|200\\n");',
+  ].join("")], { label: "Discovery phase JSON control", timeoutMs: 5_000 });
+  expect(JSON.parse(result)).toEqual({ processes: [] });
+});
+
 test("gives later drain probes only the remaining budget and never probes past it", async () => {
   const { waitForInstallRootProcessDrain } = await installerSmokeModule();
   let elapsed = 0;

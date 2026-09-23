@@ -275,7 +275,7 @@ function exportIsTypeOnly(node) {
 function walkAst(node, visit) {
   if (!node || typeof node !== "object") return;
   visit(node);
-  for (const [key, value] of Object.entries(node)) {
+  for (const key of Object.keys(node)) {
     if (
       key === "loc"
       || key === "start"
@@ -285,6 +285,7 @@ function walkAst(node, visit) {
     ) {
       continue;
     }
+    const value = node[key];
     if (Array.isArray(value)) {
       for (const child of value) walkAst(child, visit);
     } else if (value && typeof value === "object") {

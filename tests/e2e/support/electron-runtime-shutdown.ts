@@ -5,8 +5,29 @@ import type { ElectronPrivilegedCleanupReceipt } from
 
 interface ElectronTestRuntimeShutdown {
   preparePrivilegedCleanup?: () => Promise<ElectronPrivilegedCleanupReceipt>;
-  privilegedCleanupSnapshot?: () => ElectronPrivilegedCleanupReceipt;
+  privilegedCleanupSnapshot?: () => ElectronPrivilegedCleanupReceipt & { owners?: unknown };
   finishPreparedQuit?: () => ElectronPrivilegedCleanupReceipt;
+}
+
+export function formatElectronPrivilegedCleanupPhase(
+  receipt: (ElectronPrivilegedCleanupReceipt & { owners?: unknown }) | null,
+): string {
+  const phase = receipt?.phase ?? "controller-unavailable";
+  // Fixed scalar evidence only; never serialize arbitrary inspector values.
+  try {
+    const owners = receipt?.owners;
+    if (owners === undefined) return phase;
+    if (!owners || typeof owners !== "object") return `${phase};owners=unavailable`;
+    const summary: string[] = [];
+    for (const owner of ["runtime", "privateConnect", "temporaryAttachments", "durableAttachments"] as const) {
+      const state: unknown = Reflect.get(owners, owner);
+      if (state !== "not-started" && state !== "pending" && state !== "fulfilled" && state !== "rejected") {
+        return `${phase};owners=unavailable`;
+      }
+      summary.push(`${owner}:${state}`);
+    }
+    return `${phase};owners=${summary.join(",")}`;
+  } catch { return `${phase};owners=unavailable`; }
 }
 
 export async function prepareElectronPrivilegedCleanup(
@@ -38,7 +59,9 @@ export async function readElectronPrivilegedCleanupPhase(
     ) as ElectronTestRuntimeShutdown | undefined;
     return runtime?.privilegedCleanupSnapshot?.() ?? null;
   });
-  return receipt?.phase ?? "controller-unavailable";
+  // This RPC is only read after preparation failed. Keep the authoritative
+  // receipt phase/result unchanged; enrich only the fixture's failure text.
+  return formatElectronPrivilegedCleanupPhase(receipt);
 }
 
 export async function finishElectronPreparedQuit(

@@ -183,3 +183,90 @@ Only tests and evidence documents changed from `8574a3a6`; the earlier provider
 portable and packaged checks remain scoped evidence for unchanged product code.
 The Linux ARM shutdown and intermediate benchmark socket failures remain
 unexplained. The exact newly published head still requires hosted validation.
+
+
+## Failure-led local validation after ee128d56
+
+The third combined run failed on three distinct gates. Intel macOS completed the
+full source-inventory test in 16.36 seconds, exceeding its unchanged 15-second
+limit. Linux x64 first failed the dark snapshot thumbnail assertion
+(`naturalWidth` stayed zero instead of 800), then failed privileged cleanup in
+`finally`. The earlier claim that this dark test body completed was incorrect:
+it never reached preview, removal or the final settings reload. The runtime
+root stopped in about 20 milliseconds; the pending main cleanup owner remains
+unknown. macOS ARM64 exceeded the unchanged 50-minute job cap after unit,
+packaging and native tests passed. Its desktop benchmark had run only 44.5
+seconds when cancelled; this is not evidence of an individual benchmark hang.
+
+The inventory walker now iterates `Object.keys` and reads values after skipping
+metadata, avoiding the `Object.entries` pair allocations. Nine balanced fresh
+process comparisons of the original, retained candidate and a rejected
+alternative returned byte-identical complete reports. Local median wall/CPU
+fell from 1301.0/2311.4ms to 998.2/1973.4ms. Fourteen focused architecture and
+inventory tests and separate negative fixtures passed. A fixed 8-percent CPU
+availability experiment exceeded the original subprocess bound for both
+versions; it did not establish hosted Intel deadline margin. No assertion,
+source coverage or deadline was relaxed.
+
+Additional Linux ARM64 validation used an owned Ubuntu 24.04 container, Node
+22.23.2, fresh dependencies, CI desktop prerequisites, one display worker and
+zero retries. The original snapshot/image cohort passed all 25 repeated cases.
+A temporary main-owner observer passed six controls and all 79 display cases
+in CI order. It was removed, and a fresh packaged build plus all 79 clean display
+cases passed again in 9.9 minutes. These are non-reproductions, not proof of a
+fix for hosted Linux x64. Source audits found no established lifecycle cause.
+The complete local check sequence with CI unit concurrency also passed before
+the final diagnostic change: 9,895 tests, 146 skips and seven child-process
+controls, with all static, type and bundle gates intact.
+
+The retained diagnostic is much smaller than that temporary observer. It tracks
+only the settlement state of runtime, Private Connect, temporary attachment and
+durable attachment cleanup in the test environment. The existing failure-only
+phase RPC reports these fixed scalar states within its existing bound. It adds
+no RPC, timer, await, retry or cleanup authority. `fulfilled` is a promise state,
+not confirmation of cleanup; `not-started` can mean absent, skipped or not yet
+reached. Snapshot/detached-window prelude and final Windows lock cleanup remain
+outside these four labels. Original promises, receivers, errors, cached
+preparation and cleanup order are retained. The snapshot test also uses the
+existing failure helper so cleanup cannot hide its primary thumbnail failure.
+
+Independent source review found no substantive issue. Seven new controls cover
+held owners, rejection identity, stale observations, disabled tracking, false
+cleanup results, cached preparation and fixed-field formatting; the full
+focused cleanup/reporting cohort initially passed 64 tests. The first full run
+caught a stale source-text guard requiring the old unwrapped disposer. Its
+exact expected callback now includes the observation wrapper and still requires
+the original disposer; all runtime ownership and cleanup-order assertions are
+unchanged. The corrected focused cohort passed all 88 tests.
+
+A fresh Linux packaged build passed a real Electron control: four idle states,
+one cached preparation promise, confirmed actual cleanup, four fulfilled states,
+and the existing five-second phase RPC. Normal fixture shutdown then proved
+exit. The control passed in 1.7 seconds and was removed from the container; it
+introduced no product fault-injection hook. All three affected native snapshot
+scenarios also passed in 8.4 seconds with their original bounds and no retries.
+No Electron, provider or guardian processes remained after the checks.
+
+The final complete Node 22 check sequence (quality, full tests with the CI
+maximum of two workers, then bundle build) passed: 9,902 tests, 146 platform
+skips, 921 passing files and seven separate child-process controls. Unit duration
+was 419.23 seconds. Architecture, lint, all type configurations and unchanged
+bundle budgets passed. The earlier failed guard run is retained separately.
+
+A fresh inspection of the automatic run on exact main `558395da` also found
+an Intel desktop benchmark failure: command-palette first opening was 311.2ms
+against the unchanged 100ms target. Its other first-opening measurements were
+settings 62.6ms and the cold intent dialog 356.1ms. This is distinct from the
+combined macOS ARM64 job cap. Source review found no established cause and no
+demonstrated fix in this combined tree. The relevant loader, prefetch, shortcut
+and measurement logic is unchanged. A scheduled import start and preceding
+idle time do not establish that the palette module had finished loading.
+
+The unchanged desktop benchmark then passed on the fresh macOS ARM64 build
+with CI's three streaming samples and original limits (1.4 minutes). Palette
+first-open was 3.6ms, settings 23.6ms and the cold intent dialog 308.0ms. This
+local pass does not identify the cause of the Intel main failure or certify
+its 100ms margin. The final source is ready for one new exact-head hosted run;
+no existing run was blindly retried.
+
+Exact hosted validation is still required; no current Linux or macOS job-cap root cause is claimed.

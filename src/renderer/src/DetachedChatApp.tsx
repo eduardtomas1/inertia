@@ -66,6 +66,7 @@ import {
   cachedThemePreference,
 } from "./utils/theme";
 import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
+import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 
 type DetachedWindowContext = Extract<
   DesktopWindowContext,
@@ -503,6 +504,7 @@ export default function DetachedChatApp({
   );
   const visibleConversation = projection.detail?.conversation ?? conversation;
   return (
+    <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <div
       className="detached-chat-shell"
       data-interface-scale={settings.interfaceScale}
@@ -682,5 +684,6 @@ export default function DetachedChatApp({
         </div>
       )}
     </div>
+    </WorkingIndicatorProvider>
   );
 }

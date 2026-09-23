@@ -1,5 +1,6 @@
 import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
+import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
@@ -1034,6 +1035,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <UsageLimitsProvider request={request} status={connection.status}>
+    <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <AppLayout
       platform={platform}
@@ -1118,6 +1120,7 @@ export default function App(): React.JSX.Element {
         dismissActivity,
       }}
     />
+    </WorkingIndicatorProvider>
     </UsageLimitsProvider>
   );
 }

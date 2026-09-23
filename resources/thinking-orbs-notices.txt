@@ -1,0 +1,44 @@
+VENDORED THINKING ORBS ENGINE
+
+The optional "Working indicator" orbs draw geometry from the thinking-orbs
+engine by Jakub Antalik. The pure geometry modules are vendored in
+src/renderer/src/vendor/thinking-orbs; comments and the canvas painters were
+removed and nothing else in the math was changed. Source URLs, the pinned
+revision, and file hashes are recorded in
+src/renderer/src/vendor/thinking-orbs/README.md.
+
+thinking-orbs
+Source: https://github.com/Jakubantalik/thinking-orbs at commit
+de85557ca220332586d070d8788c0e1d6e877a0d
+License: MIT
+Copyright (c) 2026 Jakub Antalik
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ThinkingOrbs (design reference only)
+Source: https://github.com/haplollc/ThinkingOrbs at commit
+e2c07bbdec4db797fb302300ef0159b1806a909f
+License: MIT
+Copyright (c) 2026 Haplo LLC
+Copyright (c) 2026 Jakub Antalik (the original thinking-orbs designs and engine)
+
+The Swift port was consulted as a design reference for the phase-to-design
+vocabulary. No Swift source is included in Inertia. Its MIT license grants the
+same permissions, under the same conditions and warranty disclaimer, as the
+thinking-orbs license reproduced above.

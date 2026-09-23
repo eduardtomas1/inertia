@@ -11,6 +11,19 @@ import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { formatRelativeTime, formatWorkAge } from "../../lib/format";
 import type { SidebarThreadStatus } from "../../utils/sidebarModel";
 import { AgentPixelGrid } from "../AgentPixelGrid";
+import type { ConversationLatestTurnSummary } from "@shared/contracts/app";
+import { activeAgentPhase } from "../../utils/response-timeline/active-state";
+import { useLiveAgentPhase } from "../working-indicator/liveAgentPhases";
+import { WorkingOrb } from "../working-indicator/WorkingOrb";
+import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
+import {
+  orbMotionForPhase,
+  resolveOrbMotion,
+  usesOrbs,
+  workingOrbSyncKey,
+} from "../working-indicator/orbMotion";
+
+const NO_ACTIVITIES: readonly never[] = [];
 
 type SettledCueStatus = Exclude<SidebarThreadStatus, "idle" | "working">;
 
@@ -71,6 +84,7 @@ export function WorkStatusCue({
   label,
   updatedAt,
   workingSince,
+  latestTurn = null,
 }: {
   conversationId: string;
   status: SidebarThreadStatus;
@@ -78,7 +92,13 @@ export function WorkStatusCue({
   updatedAt: string;
   /** Start of the running workspace run, when the snapshot knows it. */
   workingSince: string | null;
+  latestTurn?: Pick<ConversationLatestTurnSummary, "id" | "status" | "runState"> | null;
 }): React.JSX.Element {
+  const indicator = useWorkingIndicator();
+  const livePhase = useLiveAgentPhase(
+    conversationId,
+    usesOrbs(indicator) && status === "working" ? latestTurn?.id : null,
+  );
   const arrived = useStatusArrival(conversationId, status);
   useCoarseClock(status === "working" && workingSince !== null);
 
@@ -100,7 +120,18 @@ export function WorkStatusCue({
         data-work-elapsed={showElapsed ? "" : undefined}
       >
         <span data-work-status="working">
-          <AgentPixelGrid animated rhythm="orbit" />
+          {usesOrbs(indicator) ? (
+            <WorkingOrb
+              size={14}
+              syncKey={workingOrbSyncKey(conversationId)}
+              {...resolveOrbMotion(indicator, orbMotionForPhase(livePhase ?? (latestTurn
+                ? activeAgentPhase({
+                    turn: { agentTurn: latestTurn, activities: NO_ACTIVITIES },
+                    streamingChannel: null,
+                  })
+                : "working")))}
+            />
+          ) : <AgentPixelGrid animated rhythm="orbit" />}
         </span>
         <span className="work-status-word">{label}</span>
         {showElapsed ? (

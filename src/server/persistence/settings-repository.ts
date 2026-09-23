@@ -1,12 +1,13 @@
 import {
   defaultSettings,
-  type AppSettings,
+  type AppSettingsUpdate,
 } from "../../shared/contracts";
 import { settingsFromState } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { StateRow } from "./rows";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
+import { parseWorkingIndicatorSettings } from "../../shared/working-indicator";
 
 type SettingsPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -19,9 +20,13 @@ export class SettingsRepository {
     return state;
   }
 
-  update(update: Partial<AppSettings>): void {
+  update(update: AppSettingsUpdate): void {
     const current = settingsFromState(this.state());
-    const next = { ...current, ...update };
+    const workingIndicator = parseWorkingIndicatorSettings({
+      ...current.workingIndicator,
+      ...update.workingIndicator,
+    });
+    const next = { ...current, ...update, workingIndicator };
     // A legacy whole-family selection still updates both halves atomically.
     const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
     const darkColorTheme = update.darkColorTheme ?? update.colorTheme ?? current.darkColorTheme ?? current.colorTheme;
@@ -41,7 +46,8 @@ export class SettingsRepository {
         default_reasoning_effort = ?,
         default_interaction_mode = ?,
         codex_binary_path = ?,
-        discord_release_repository_url = ?
+        discord_release_repository_url = ?,
+        working_indicator_json = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -78,6 +84,7 @@ export class SettingsRepository {
       next.defaultInteractionMode,
       next.codexBinaryPath,
       next.discordReleaseRepositoryUrl,
+      JSON.stringify(next.workingIndicator),
     );
   }
 

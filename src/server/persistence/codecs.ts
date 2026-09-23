@@ -38,6 +38,7 @@ import {
 } from "../../shared/continuation-policy";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
+import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -429,6 +430,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
+    workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
   };
 }
 

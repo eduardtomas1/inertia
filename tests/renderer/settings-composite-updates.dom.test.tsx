@@ -147,6 +147,49 @@ function settingsProps(
 }
 
 describe("Settings composite updates", () => {
+  it("rolls back a rejected working indicator save through the Appearance view", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    const onUpdate = vi.fn(async () => { throw new Error("offline"); });
+    render(<SettingsView {...settingsProps(onUpdate)} />);
+    fireEvent.click(screen.getByRole("button", { name: "General" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Weaving" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Classic" }))
+      .toHaveAttribute("aria-checked", "true"));
+    fireEvent.click(screen.getByRole("radio", { name: "Weaving" }));
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a newer indicator edit when an earlier save rejects", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: () => void;
+    const first = new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+    const second = new Promise<void>((resolve) => { resolveSecond = resolve; });
+    const onUpdate = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const props = settingsProps(onUpdate);
+    const view = render(<SettingsView {...props} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Weaving" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Lilac" }));
+    await act(async () => { rejectFirst(new Error("offline")); });
+    expect(screen.getByRole("radio", { name: "Weaving" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Lilac" })).toHaveAttribute("aria-checked", "true");
+    const saved = { ...defaultSettings.workingIndicator, style: "weaving" as const, color: "lilac" as const };
+    expect(onUpdate).toHaveBeenLastCalledWith({ workingIndicator: saved });
+    await act(async () => { resolveSecond(); });
+    view.rerender(<SettingsView {...props} settings={{ ...defaultSettings, workingIndicator: saved }} />);
+    // A later authoritative update must replace the acknowledged local draft.
+    view.rerender(<SettingsView {...props} settings={{ ...defaultSettings, workingIndicator: { ...saved, style: "searching" } }} />);
+    expect(screen.getByRole("radio", { name: "Searching" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("shows a finite actionable lifecycle state without exposing owner identities", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

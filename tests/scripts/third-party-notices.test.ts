@@ -68,6 +68,14 @@ describe("third-party notice generation", () => {
     expect(output).toContain("Copyright (c) 2025 opencode");
   });
 
+  it("includes the vendored thinking-orbs engine license in packaged notices", () => {
+    const output = generate([]);
+
+    expect(output).toContain("VENDORED THINKING ORBS ENGINE");
+    expect(output).toContain("Copyright (c) 2026 Jakub Antalik");
+    expect(output).toContain("Copyright (c) 2026 Haplo LLC");
+  });
+
   it("sorts packages and de-duplicates identical license text deterministically", () => {
     const packages = [
       { name: "zeta", version: "1.0.0", license: "MIT", files: { LICENSE: "Shared license\r\n" } },

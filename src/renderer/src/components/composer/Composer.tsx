@@ -65,9 +65,8 @@ export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // ordinary lifecycle boundaries still flush the exact pending owner/value.
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
-const unavailableCompaction = (): Promise<never> => Promise.reject(new Error(
-  "Compaction unavailable.",
-));
+const unavailableCompaction = (): Promise<never> =>
+  Promise.reject(new Error("Compaction unavailable."));
 
 export const Composer = memo(function Composer({
   conversation,

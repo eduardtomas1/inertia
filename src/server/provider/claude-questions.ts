@@ -1,3 +1,4 @@
+import { MAX_AGENT_INPUT_QUESTIONS } from "../../shared/contracts/client-command/agent";
 import type { AgentInputRequest } from "./interactions";
 import {
   interactionDisplayIdentity,
@@ -8,7 +9,6 @@ const MAX_QUESTION_CHARS = 16_384;
 const MAX_HEADER_CHARS = 256;
 const MAX_OPTION_LABEL_CHARS = 512;
 const MAX_OPTION_DESCRIPTION_CHARS = 4_096;
-const MAX_INPUT_QUESTIONS = 4;
 const MAX_INPUT_OPTIONS = 4;
 
 export function claudeQuestions(
@@ -23,8 +23,8 @@ export function claudeQuestions(
   if (questions.length === 0) {
     throw new Error("Claude sent an empty question request.");
   }
-  if (questions.length > MAX_INPUT_QUESTIONS) {
-    throw new Error(`Claude sent more than ${MAX_INPUT_QUESTIONS} questions.`);
+  if (questions.length > MAX_AGENT_INPUT_QUESTIONS) {
+    throw new Error(`Claude sent more than ${MAX_AGENT_INPUT_QUESTIONS} questions.`);
   }
   const identityPrefix = (toolUseId || requestId).slice(0, 96);
   const prompts = new Set<string>();

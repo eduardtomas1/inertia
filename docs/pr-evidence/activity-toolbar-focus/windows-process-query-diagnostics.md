@@ -2,6 +2,10 @@
 
 This is a diagnostic follow-up, not a proven fix for Windows process discovery.
 
+The validation below is historical, at `86ee5692` on base `be12f1e2`. See
+[the subsequent reviewed-main integration](main-integration.md) for current
+integrated results; native Windows execution is still unverified locally.
+
 ## Observed failure
 
 At PR head `c1ceb4e4b37006c41ac87e77903ba4191266d7c4`, [Windows x64 job 107064228955](https://github.com/eduardtomas1/inertia/actions/runs/35824739433/job/107064228955) passed the installed N-1 package smoke: ready 2,672 ms, shutdown 169 ms, post-exit cleanup 2 ms, with PDF/image/history persistence checks. Its following install-root process query timed out. The original `BoundedProcessTimeoutError` confirmed termination of the complete query process tree and retained only `#< CLIXML` from the child output.

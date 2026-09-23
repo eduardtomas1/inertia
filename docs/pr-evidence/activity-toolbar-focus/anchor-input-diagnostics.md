@@ -2,6 +2,10 @@
 
 This follow-up adds evidence for an unresolved hosted failure, not a proven product fix.
 
+The validation below is historical, at `c1ceb4e4` on base `be12f1e2`. See
+[the subsequent reviewed-main integration](main-integration.md) for current
+integrated results; the hosted cause remains unresolved.
+
 ## Failure and limits
 
 On PR head `9846a22195d65fd521966ce48271cdef9742f070`, [macOS ARM job 107050957549](https://github.com/eduardtomas1/inertia/actions/runs/35820397561/job/107050957549) failed the completed-answer scenario after Fill returned and Send initially resolved disabled. Click then exhausted its unchanged 30-second actionability deadline. The artifact contains a test call trace, but no renderer trace, DOM snapshot, or screenshot. It cannot distinguish a lost draft or admission gate from a renderer that stopped responding after that initial resolution.

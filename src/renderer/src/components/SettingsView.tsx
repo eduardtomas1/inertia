@@ -75,6 +75,7 @@ import {
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { ThemeLibrary } from "./ThemeLibrary";
+import { WorkingIndicatorSettings } from "./working-indicator/WorkingIndicatorSettings";
 import "./SettingsView.css";
 
 export type SettingsViewProps = {
@@ -602,6 +603,7 @@ export function SettingsView({
                   {(["compact", "default", "comfortable", "large"] as const).map((scale) => <button type="button" role="radio" aria-checked={settings.interfaceScale === scale} className={clsx(settings.interfaceScale === scale && "is-active")} disabled={disabled} key={scale} onClick={() => onUpdate({ interfaceScale: scale })}>{scale === "default" ? "Default" : scale[0].toUpperCase() + scale.slice(1)}</button>)}
                 </div>
               </div>
+              <WorkingIndicatorSettings settings={settings.workingIndicator} disabled={disabled} onUpdate={updateSettingsRequest} />
             </section>
 
             <section className="settings-card" aria-labelledby="workspace-heading">

@@ -19,5 +19,13 @@
     "react/refs": "off",
     "react/set-state-in-effect": "off",
     "react/static-components": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/renderer/src/vendor/thinking-orbs/**"],
+      "rules": {
+        "unicorn/no-new-array": "off"
+      }
+    }
+  ]
 }

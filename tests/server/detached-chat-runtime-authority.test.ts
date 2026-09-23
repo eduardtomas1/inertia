@@ -104,6 +104,12 @@ function snapshot(): AppSnapshot {
       theme: "dark",
       usageDisplayMode: "expanded",
       codexBinaryPath: "/secret/codex",
+      workingIndicator: {
+        ...defaultSettings.workingIndicator,
+        style: "automatic",
+        color: "lilac",
+        glow: true,
+      },
     },
     promptPresets: [{ id: "secret-preset" }] as unknown as NonNullable<AppSnapshot["promptPresets"]>,
     activeProjectId: OTHER_PROJECT,
@@ -157,6 +163,11 @@ describe("detached chat runtime authority", () => {
       theme: "dark",
       usageDisplayMode: "expanded",
       codexBinaryPath: "",
+      workingIndicator: {
+        style: "automatic",
+        color: "lilac",
+        glow: true,
+      },
     });
     expect(projected.activeConversationId).toBe(CONVERSATION);
     expect(projected.activeProjectId).toBe(PROJECT);
@@ -363,6 +374,11 @@ describe("detached chat runtime authority", () => {
       type: "settings.update",
       requestId: REQUEST,
       payload: { theme: "dark" },
+    })).not.toBeNull();
+    expect(rejection({
+      type: "settings.update",
+      requestId: REQUEST,
+      payload: { workingIndicator: { style: "automatic" } },
     })).not.toBeNull();
     expect(rejection({
       type: "provider.refresh",

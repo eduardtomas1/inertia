@@ -22,6 +22,15 @@ import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { AgentPixelGrid } from "../AgentPixelGrid";
+import { WorkingOrb } from "../working-indicator/WorkingOrb";
+import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
+import {
+  orbMotionForPhase,
+  resolveOrbMotion,
+  usesOrbs,
+  workingOrbSyncKey,
+} from "../working-indicator/orbMotion";
+import { usePublishLiveAgentPhase } from "../working-indicator/liveAgentPhases";
 import { SubagentDisclosure } from "../SubagentDisclosure";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -37,13 +46,27 @@ import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
 
-function AgentPixelLoader({
+export function AgentPixelLoader({
   animated,
   phase,
+  conversationId,
 }: {
   animated: boolean;
   phase: ActiveAgentPhase;
+  conversationId: string;
 }): React.JSX.Element {
+  const indicator = useWorkingIndicator();
+  if (usesOrbs(indicator)) {
+    const motion = resolveOrbMotion(indicator, orbMotionForPhase(phase));
+    return (
+      <WorkingOrb
+        size={18}
+        design={motion.design}
+        pace={motion.pace}
+        syncKey={workingOrbSyncKey(conversationId)}
+      />
+    );
+  }
   if (phase === "compacting") return <ContextCompactionIcon />;
   return <AgentPixelGrid animated={animated} phase={phase} />;
 }
@@ -162,6 +185,9 @@ export function AgentExecutionLayer({
     providerLabel,
     streamingChannel: props.streamingChannel ?? null,
   });
+  usePublishLiveAgentPhase(turn.isActive
+    ? { conversationId: props.conversationId, turnId: turn.id, phase: activePresentation.phase }
+    : null);
   return (
     <section
       className={clsx(
@@ -184,6 +210,7 @@ export function AgentExecutionLayer({
               <AgentPixelLoader
                 animated={activePresentation.animated}
                 phase={activePresentation.phase}
+                conversationId={props.conversationId}
               />
               <span className="turn-working-copy">
                 <strong>{activePresentation.label}</strong>

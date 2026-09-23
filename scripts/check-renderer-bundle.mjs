@@ -51,11 +51,11 @@ const budgets = {
   // Reviewed production dependency batch adds exactly 1,156 emitted bytes
   // on identical application source. Preserve existing headroom; see
   // docs/pr-evidence/dependency-pr420/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 164,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 164,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -65,11 +65,12 @@ const budgets = {
   // keeps Windows identical. Preserve headroom; see release-v0058 evidence.
   colorThemesCss: 12 * kibibyte + 552,
   detachedChatCss: 8 * kibibyte,
-  settingsJavaScript: 50 * kibibyte,
+  settingsJavaScript: 50 * kibibyte + 6_939,
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133,
+  deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
@@ -137,7 +138,7 @@ const budgets = {
   // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
   // same source/dependency baseline. Both first-load routes are unchanged.
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 164,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 164,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -596,6 +597,12 @@ if (mainWorkbenchJavaScriptClosure.has(welcomeGuideEntry) || detachedChatJavaScr
   throw new Error("The welcome guide must remain deferred from the initial workbench");
 }
 const deferredWelcomeGuideJavaScriptBytes = await closureBytes(await javaScriptClosure(welcomeGuideEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
+const workingOrbEntry = assetNames.find((name) => /^OrbCanvas-.*\.js$/u.test(name));
+if (!workingOrbEntry) throw new Error("Missing deferred working indicator orb renderer");
+if (entryJavaScriptClosure.has(workingOrbEntry) || mainWorkbenchJavaScriptClosure.has(workingOrbEntry) || detachedChatJavaScriptClosure.has(workingOrbEntry)) {
+  throw new Error("The working indicator orb renderer must stay off the initial chat routes");
+}
+const deferredWorkingOrbJavaScriptBytes = await closureBytes(await javaScriptClosure(workingOrbEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
 const snapshotSettingsEntry = assetNames.find((name) => /^SnapshotSettings-.*\.js$/u.test(name));
 if (!snapshotSettingsEntry) throw new Error("Missing deferred Snapshots settings");
 if (entryJavaScriptClosure.has(snapshotSettingsEntry) || mainWorkbenchJavaScriptClosure.has(snapshotSettingsEntry) || detachedChatJavaScriptClosure.has(snapshotSettingsEntry)) {
@@ -608,6 +615,7 @@ const coreJavaScriptBytes =
   - deferredLegacyPromptStashJavaScriptBytes
   - deferredUsageLimitsJavaScriptBytes
   - deferredWelcomeGuideJavaScriptBytes
+  - deferredWorkingOrbJavaScriptBytes
   - deferredSnapshotSettingsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
@@ -643,6 +651,7 @@ const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
+  deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,

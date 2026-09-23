@@ -26,6 +26,7 @@ function projectedSettings(settings: AppSettings): AppSettings {
     confirmDestructiveActions: settings.confirmDestructiveActions,
     providerIdentityLabels: { ...settings.providerIdentityLabels },
     keybindings: { ...defaultSettings.keybindings },
+    workingIndicator: { ...settings.workingIndicator },
   };
 }
 

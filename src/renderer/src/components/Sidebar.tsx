@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
+import type { Conversation, ConversationShell, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon } from "./ProjectIcon";
@@ -768,6 +768,7 @@ function SidebarView({
                   label={statusLabels[model.status]}
                   updatedAt={conversation.updatedAt}
                   workingSince={workingSince}
+                  latestTurn={(conversation as Partial<ConversationShell>).latestTurn}
                 />
               </span>
             </span>

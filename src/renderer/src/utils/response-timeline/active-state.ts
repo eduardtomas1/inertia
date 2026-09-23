@@ -111,7 +111,10 @@ function latestRunningActivity(
  * reasoning is history, not proof that the provider is still thinking.
  */
 export function activeAgentPresentation(input: {
-  turn: Pick<ResponseTurn, "agentTurn" | "activities">;
+  turn: {
+    agentTurn: Pick<ResponseTurn["agentTurn"], "status" | "runState">;
+    activities: readonly AgentActivity[];
+  };
   providerLabel: string;
   streamingChannel: StreamingAgentChannel;
 }): ActiveAgentPresentation {
@@ -207,4 +210,14 @@ export function activeAgentPresentation(input: {
     detail: null,
     animated: true,
   };
+}
+
+export function activeAgentPhase(input: {
+  turn: {
+    agentTurn: Pick<ResponseTurn["agentTurn"], "status" | "runState">;
+    activities: readonly AgentActivity[];
+  };
+  streamingChannel: StreamingAgentChannel;
+}): ActiveAgentPhase {
+  return activeAgentPresentation({ ...input, providerLabel: "" }).phase;
 }

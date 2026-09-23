@@ -1316,6 +1316,117 @@ describe("transcript following motion", () => {
     }));
   });
 
+  describe("transcript resize following", () => {
+    afterEach(() => {
+      cleanup();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    async function resizeFollowing() {
+      const observers: TestResizeObserver[] = [];
+      class TestResizeObserver implements ResizeObserver {
+        readonly targets = new Set<Element>();
+        readonly disconnect = vi.fn(() => this.targets.clear());
+        constructor(private readonly callback: ResizeObserverCallback) {
+          observers.push(this);
+        }
+        observe(target: Element): void { this.targets.add(target); }
+        unobserve(target: Element): void { this.targets.delete(target); }
+        resize(target: Element): void {
+          if (!this.targets.has(target)) return;
+          this.callback([{
+            target,
+            contentRect: target.getBoundingClientRect(),
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+          }], this);
+        }
+      }
+      vi.stubGlobal("ResizeObserver", TestResizeObserver);
+      vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
+      const props = workspaceProps(conversation("resize-follow"), async () => null);
+      const view = render(<ChatWorkspace {...props} />);
+      await screen.findByTestId("turn-anchor-projection");
+      const transcript = screen.getByLabelText("Thread transcript");
+      const content = view.container.querySelector<HTMLElement>(".response-timeline")!;
+      const composer = view.container.querySelector<HTMLElement>(".composer-region")!;
+      Object.defineProperties(transcript, {
+        clientHeight: { configurable: true, writable: true, value: 100 },
+        scrollHeight: { configurable: true, writable: true, value: 500 },
+        scrollTop: { configurable: true, writable: true, value: 400 },
+      });
+      const scrollTo = vi.fn((options?: ScrollToOptions | number, y?: number) => {
+        const top = typeof options === "number" ? y ?? 0 : options?.top ?? 0;
+        transcript.scrollTop = Math.min(top, transcript.scrollHeight - transcript.clientHeight);
+      });
+      transcript.scrollTo = scrollTo;
+      return { props, view, transcript, content, composer, observers, scrollTo };
+    }
+
+    it("follows both resize targets with one observer and leaves history reading alone", async () => {
+      const { transcript, content, composer, observers, scrollTo } = await resizeFollowing();
+      expect(observers).toHaveLength(1);
+      const observer = observers[0]!;
+      expect(observer.targets).toEqual(new Set([content, composer]));
+
+      Object.defineProperty(transcript, "scrollHeight", { value: 800 });
+      act(() => observer.resize(content));
+      expect(transcript.scrollTop).toBe(700);
+      scrollTo.mockClear();
+      Object.defineProperty(transcript, "clientHeight", { value: 80 });
+      act(() => observer.resize(composer));
+      expect(transcript.scrollTop).toBe(720);
+      expect(scrollTo).toHaveBeenCalledOnce();
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.wheel(transcript, { deltaY: -400 });
+      transcript.scrollTop = 100;
+      fireEvent.scroll(transcript);
+      scrollTo.mockClear();
+      await act(async () => vi.advanceTimersByTime(750));
+      act(() => {
+        observer.resize(content);
+        observer.resize(composer);
+      });
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(transcript.scrollTop).toBe(100);
+      expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+    });
+
+    it("disconnects both targets on conversation switch and unmount", async () => {
+      const { props, view, content, composer, observers, scrollTo } = await resizeFollowing();
+      expect(observers).toHaveLength(1);
+      const previous = observers[0]!;
+      view.rerender(<ChatWorkspace {...props} conversation={conversation("resize-next")} />);
+      expect(previous.disconnect).toHaveBeenCalledOnce();
+      expect(previous.targets.size).toBe(0);
+      expect(observers).toHaveLength(2);
+      const current = observers[1]!;
+      expect(current.targets).toEqual(new Set([content, composer]));
+      scrollTo.mockClear();
+      act(() => {
+        previous.resize(content);
+        previous.resize(composer);
+      });
+      expect(scrollTo).not.toHaveBeenCalled();
+      act(() => {
+        current.resize(content);
+        current.resize(composer);
+      });
+      expect(scrollTo).toHaveBeenCalledTimes(2);
+
+      view.unmount();
+      expect(current.disconnect).toHaveBeenCalledOnce();
+      expect(current.targets.size).toBe(0);
+      scrollTo.mockClear();
+      current.resize(content);
+      current.resize(composer);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+  });
+
   describe("retained reader intent", () => {
     afterEach(() => {
       cleanup();

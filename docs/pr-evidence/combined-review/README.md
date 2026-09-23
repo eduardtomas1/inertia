@@ -144,3 +144,42 @@ affected native scenarios (queued/steered/later images and both project-colour
 scenarios) in 19.7s. The earlier portable and packaged checks remain evidence
 for the unchanged provider and packaging implementation; they were not rerun
 for this renderer-and-fixture follow-up.
+
+## Follow-up to the second combined CI run
+
+At `8574a3a6`, Windows ARM64 passed the corrected queued-image scenario. Linux
+x64, Windows x64, macOS ARM64, quality, lineage, minimum Node and all four Windows
+unit shards also passed. Linux ARM64 failed only after the native attachment
+send/restart test body completed: privileged cleanup could not confirm the
+replacement runtime's process-tree exit. macOS Intel remained in progress at
+the diagnostic review checkpoint.
+
+The [shutdown evidence report](../main-runtime-shutdown/terminal-shutdown-diagnostic.md)
+records the preserved failure and its limits. The affected image scenario now
+enables the existing worker shutdown trace. A bounded, allowlisted test helper
+collects any trace before fixture deletion, alongside existing runtime records.
+It preserves all cleanup errors, deadlines and process authority. Missing trace
+evidence is explicit and cannot identify the unfinished owner. This is an
+evidence improvement; the Linux ARM failure's cause remains unproven.
+
+
+The collector and existing failure-reporting cohort passed 34 tests; the
+native attachment lifecycle scenario passed in 21.6s. An intermediate full
+check passed 9,893 tests but failed the unchanged benchmark-readiness welcome
+test: observation returned `unavailable` after 10ms. A single focused diagnostic
+run passed all nine benchmark tests and showed a successful connection from
+IPv4 loopback to the fixture's IPv6 wildcard listener. It did not establish the
+cause of the full-suite failure. The fixture now includes only fixed scalar
+connection/welcome/close observations in a failed assertion; its listener,
+one-second deadline and required result are unchanged. The final focused
+cohort passed all 43 tests across three files. None of these passes establishes
+the cause of the earlier WebSocket failure.
+
+
+The final diagnostic tree passed `npm run check`: 9,895 tests, 146 platform
+skips, 920 passing files, plus seven separate child-process controls. All
+architecture, lint, type, build and unchanged bundle-budget gates passed.
+Only tests and evidence documents changed from `8574a3a6`; the earlier provider
+portable and packaged checks remain scoped evidence for unchanged product code.
+The Linux ARM shutdown and intermediate benchmark socket failures remain
+unexplained. The exact newly published head still requires hosted validation.

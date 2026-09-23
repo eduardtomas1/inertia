@@ -133,6 +133,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
   const app = activeApp = await createAppFixture({
     name: "native-attachment-lifecycle",
     initialState: "conversation",
+    additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" },
     windowDisplay: "primary",
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,

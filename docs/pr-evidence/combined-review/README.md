@@ -62,7 +62,7 @@ the original fixture was restored immediately. No production instrumentation,
 retry, delay, or admission relaxation was retained from that experiment.
 The earlier Windows N-1 first-install failure likewise has no established cause.
 
-## Fresh combined validation
+## Initial combined validation
 
 Source implementation: `7e416596f454e43c6c5855aad32254081b23cab5`, followed by
 formatting-only `1ad1a7e3c0cffdedfbc8bf1f053952d49f1ab997` to retain the existing
@@ -106,3 +106,41 @@ Native Windows, native Linux, Intel macOS, signing/notarization, and live provid
 services are not certified by these local checks. Hosted CI must validate the
 exact published combined head. Release signing, checksum and provenance
 requirements remain unchanged; no release or version changes are included.
+
+## Follow-up to the first combined CI run
+
+At `862fdf9f`, the quality, lineage, minimum Node, four Windows unit shards,
+Linux x64/ARM64, Windows x64 and macOS ARM64 jobs passed. Windows ARM64 failed
+at the queued two-image paste in `image-follow-up-regression.spec.ts`, before
+the later-paste stage. Its fake provider completed the held turn on a fixed
+2.5-second timer. A controlled native run with a three-second attachment import
+delay reproduced that exact missing-row failure. The fixture now releases the
+provider only after observing two queued images and the active Stop control.
+With the same three-second import delay, the corrected scenario passed in 30.2s.
+The temporary delay was removed; all digests, queue-drain, later-image, error,
+authority, and timeout checks remain.
+
+The hosted trace places paste dispatch approximately 181ms after Send, before
+the timer elapsed. It does not capture import/commit or admission timing, so it
+cannot prove that timer expiration during import caused the hosted failure.
+The controlled experiment establishes a fixture race and its correction; fresh
+hosted validation is still required. This does not explain the distinct earlier
+local later-paste failure.
+
+[Review feedback](https://github.com/eduardtomas1/inertia/pull/459#discussion_r4080424522)
+also found that Project Settings appearance writes bypassed its existing save
+lock. Appearance and full-preference edits now share `mutate`/`savingRef`, and
+both sets of controls disable during a save. Narrow appearance patches and
+optimistic field updates in the separate customisation panel are unchanged.
+Two DOM controls failed before the fix and now prove serialization in both
+directions, refreshed revision/preferences after success, and unlocking/error
+recovery after failure. All 17 project settings/appearance DOM tests passed.
+
+Both follow-ups received independent source review. The final follow-up tree
+passed `npm run check`: 9,870 tests, 146 platform skips, 919 passing files, plus
+seven separate child-process controls; architecture, lint, types, build and
+unchanged bundle budgets all passed. The fresh built app passed all three
+affected native scenarios (queued/steered/later images and both project-colour
+scenarios) in 19.7s. The earlier portable and packaged checks remain evidence
+for the unchanged provider and packaging implementation; they were not rerun
+for this renderer-and-fixture follow-up.

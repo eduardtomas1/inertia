@@ -2,6 +2,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createCanvas } from "@napi-rs/canvas";
 import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
@@ -20,6 +22,7 @@ test.afterEach(async () => {
 
 const followUpCodexAppServer = `
 const fs = require("node:fs");
+const path = require("node:path");
 const crypto = require("node:crypto");
 const readline = require("node:readline");
 const args = process.argv.slice(2);
@@ -84,12 +87,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (text.includes("Keep working")) {
     held = turnId;
     answer(turnId, "working-" + turnIndex, "working-on-turn-" + turnIndex);
-    if (text.includes("briefly")) setTimeout(() => {
-      if (held !== turnId) return;
-      held = null;
-      answer(turnId, "released-" + turnIndex, "\\n\\nreleased-turn-" + turnIndex);
-      complete(turnId, "completed");
-    }, 2500);
+    if (text.includes("briefly")) {
+      // Slow imports must not lose their active-turn authority to a fixture timer.
+      const release = setInterval(() => {
+        if (held !== turnId) { clearInterval(release); return; }
+        if (!fs.existsSync(path.join(__dirname, "release-queued-turn"))) return;
+        clearInterval(release);
+        held = null;
+        answer(turnId, "released-" + turnIndex, "\\n\\nreleased-turn-" + turnIndex);
+        complete(turnId, "completed");
+      }, 50);
+    }
     return;
   }
   answer(turnId, "image-answer-" + turnIndex, "image-sha256:" + digests(message.params.input));
@@ -175,6 +183,8 @@ test("queued, steered, and later image follow-ups keep working once durable atta
     await composer.fill("Queue these images.");
     await composer.press("Tab");
     await expect(page.getByRole("list", { name: "Queued messages" })).toContainText("2 images");
+    await expect(page.getByRole("button", { name: "Stop agent" })).toBeVisible();
+    await writeFile(join(app.workspaceDirectory, "release-queued-turn"), "release", { flag: "wx" });
     await expect(page.getByText(`image-sha256:${queued.map(sha256).join(",")}`, { exact: true }))
       .toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("list", { name: "Queued messages" })).toHaveCount(0);

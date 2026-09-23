@@ -1,9 +1,10 @@
 # Pre-release regression audit, 2026-09-23
 
-This audit found and repaired two regressions in the changes since v0.0.61:
-OpenCode startup diagnostics could expose opaque launch credentials, and split
-pane tool buttons reported a closed panel while its empty launcher was open.
-Both defects were reproduced with new tests before the production changes.
+This pre-release audit repairs three defects: OpenCode
+startup diagnostics could expose launch credentials; goal workflow updates could
+steal focus and redirect budget typing; and split-pane tool buttons reported a
+closed panel while its empty launcher was open. All three have regression
+controls that failed before their corresponding production fixes.
 No actual credential exposure was observed; all credential controls use synthetic
 values and local fixture processes.
 
@@ -71,24 +72,62 @@ server password. A failing local child that prints those values demonstrated
 that they survive in the persistence-bound failure result.
 
 The harness now collects credential values from the actual owned launch
-environment, including the generated server password, and applies the existing
-exact-value scrubber before its existing diagnostic sanitization. Host-tool
+environment and explicitly includes the actual server password regardless of
+length. It deduplicates and sorts the values longest first, then applies the
+existing exact-value scrubber before diagnostic sanitization. Host-tool
 redaction, useful failure text, bounds, classification and cleanup requirements
 remain in place. No environment, protocol, authority or dependency change is
 needed.
 
-`opencode-failure-credentials.test.ts` exercises both supplied and generated
-server passwords through real child startup failure. Both cases failed before
-the fix and pass afterward, retaining the neutral failure summary, useful
-context and confirmed cleanup while replacing the printed values.
+`opencode-failure-credentials.test.ts` exercises supplied long, generated, seven-
+character, one-character and empty-fallback passwords, plus a short password
+inside a longer API key. PR review identified that the initial generic collector
+omitted configured passwords shorter than eight characters. Three additional
+controls failed before the explicit-password union, while four other controls
+passed. The generic arbitrary-environment heuristic is unchanged. Host-tool
+redaction still runs first, and useful failure context and cleanup assertions
+remain intact.
 
 The adjacent process-tree cleanup catch was also traced. Terminator exceptions
 are wrapped in a fixed `ProcessTreeTerminationError` message; the underlying
 cause is not published. The ownership-retirement path uses the privileged
-journal, not provider text. A third real-server test kills the child and injects
+journal, not provider text. A separate real-server test kills the child and injects
 a credential-bearing terminator error: the final cleanup failure and emitted
 status omit the underlying cause and retain `cleanupConfirmed: false`. This
 control passes without an additional cleanup-path production change.
+
+### Goal workflow refresh could redirect input focus (P2)
+
+CI run `35892516435` failed the macOS ARM lifecycle sentinel at the exact
+request-text assertion in `goal-reliability.spec.ts:179`. Its saved snapshot
+contains `/goal Ship the reliable goal flow12000` and the expected first-action
+provider output. The provider had started; the expected objective did not match.
+The artifact preserves test actions but no browser focus-event sequence, so it
+does not prove which refresh or focus event caused that hosted result.
+
+The goal control is byte-identical between v0.0.61 and the audited main head;
+this focus defect predates the reviewed release interval. Source review found
+that every new workflow or goal object scheduled another
+animation frame to focus Objective or the first action. Three deterministic DOM
+controls reproduced focus being stolen from Budget during refresh, and from
+explicit budget/outside focus before the opening frame. The submission control
+requires an unchanged objective and the separate 12,000-token budget.
+
+The goal disclosure now consumes one opening-focus intent in a layout effect,
+before later user interaction. Same-owner data updates cannot rearm it. If the
+target is initially disabled or unavailable, explicit focus or pointer intent
+cancels it; otherwise a readiness change may fulfill it once. Closing rearms it.
+The first resolved owner is adopted, while change or loss of an established
+owner still clears drafts and dismisses the disclosure before another focus.
+Controls also cover asynchronous arrival, disabled readiness, focus out and
+back, reopening, owner changes and recovery-budget focus.
+
+The native fixture, exact-text assertions, worker count and all deadlines remain
+unchanged. The final focus implementation fits the existing renderer budgets;
+its first deferred-frame draft exceeded the core limit and was simplified before
+publication. Shared intent event names and native-label predicates avoid
+repeating equivalent code. This is a reproduced product defect consistent with
+the hosted snapshot, not a claim to have captured that run's exact event order.
 
 ### Split-pane tools toggle state (P2)
 
@@ -113,7 +152,7 @@ line-by-line certification of the entire repository.
 | Provider lifecycle | Claude resumed prompt/notification ownership and zero-ack handling; four-answer bounds; Codex stale pre-response turn identity; OpenCode failure classification, process ownership and diagnostic publication. Credential defect repaired above; no other demonstrated regression. |
 | Attachment capacity | Serialized mutation/retention, same-batch and nonterminal protection, durable transcript eviction, follow-up ownership and startup reconciliation. No demonstrated loss or admission bypass. |
 | Git reversal | Reused repository diff requires an unchanged complete fingerprint and ordinary whitespace semantics; secure roots, file/index reads and pre-apply checks remain fresh. No authority relaxation found. |
-| Renderer integration | Header controls and responsive portals; right-panel persistence and split ownership; terminal scope; toolbar focus; transcript wheel intent and observer cleanup; composer attachment admission; gallery visibility, zoom and modal lifecycle. Split-panel state defect repaired above. |
+| Renderer integration | Header controls and responsive portals; right-panel persistence and split ownership; terminal scope; toolbar focus; transcript wheel intent and observer cleanup; composer attachment admission; gallery visibility, zoom and modal lifecycle. Goal-focus and split-panel state defects repaired above. |
 | Appearance and indicators | Partial project appearance commands, update revisions and field salvage; deferred contrast cache; working-indicator settings/migration; reduced motion, visibility and shared animation cleanup; cross-window phase identity and expiry. No demonstrated regression. |
 | Persistence and IPC | New append-only working-indicator migration, settings validation and boundary routing; detached title normalization and first-message history behavior. Privileged operations remain outside the renderer. |
 | Runtime diagnostics | Shutdown observers retain original promises, fixture opt-in and bounded scalar evidence. No changed deadline, cleanup result or production authority. |
@@ -128,7 +167,7 @@ fixtures. Prior CI failures and their cause limits remain documented in
 `docs/pr-evidence/combined-review/README.md`; this audit does not reinterpret a
 local passing run as an explanation of a hosted failure.
 
-## Fresh verification
+## Initial reviewed-head verification (`3487e28e`)
 
 Environment: local macOS ARM64, Node.js 22, reviewed `npm ci` dependency graph.
 Existing assertions, deadlines, worker configuration, sample policies and bundle
@@ -167,3 +206,35 @@ Native Windows, Linux, Intel macOS, packaged desktop scenarios, release signing,
 notarization and live provider services were not newly exercised in this audit.
 The coordinator owns exact-head hosted CI, merge and resulting-main validation.
 No release, version, tag, asset, icon or unrelated branch changes are included.
+
+## Follow-up verification
+
+The initial CI failed one macOS lifecycle scenario, and GitHub review found the
+short-password gap described above. Both are addressed by independently reviewed
+source and deterministic controls. The earlier passing full/portable results
+above apply to the initial published source; final follow-up results follow.
+
+- Before fixes: three short-password cases failed/four passed; three goal-focus
+  controls failed/thirteen existing checks passed.
+- Focused provider, registration, goal-panel and focus neighbors: 108 passed on
+  the first focus draft; final compact-focus verification is recorded below.
+- Final compact focused cohort: 31 passed. Fresh build passed all unchanged budgets (core 2107.3/2107.4 KiB), and all four native runtime-recovery scenarios passed in 46.4s with one worker. Pre-integration quality/full/build passed 9,932 tests plus seven child controls, with 146 skips and 925 passing files (413.02s). The separate portable suite passed 1,627 tests across 114 files, with nine skips (152.86s).
+
+After integrating main `26d80b8a`, all 44 focused checks passed. The complete final quality/full/build gate passed 9,939 tests plus seven child controls, with 146 skips and 925 passing files (416.52s). All bundle budgets remained unchanged and passed. On the freshly built integrated source, all four native runtime-recovery scenarios passed again in 44.6s with one worker and zero retries.
+
+Changed files beyond the original audit: `ChatGoalControl.tsx`, its DOM tests,
+`opencode-sdk-harness.ts`, its credential controls, and this evidence report.
+All source changes were reviewed independently. Local native evidence is macOS
+ARM64 only; exact-head hosted CI remains required before merge.
+
+## Integration after PR #460
+
+After PR #460 passed all six native platforms and current main was green, the
+coordinator squash-merged it as `26d80b8aee023391516f770ba8a189e701c1ba4c`.
+The audit branch ordinarily merged that main commit without conflicts as
+`6f1ea0d43f76623d8c22944540b9c9863b53440c`. This adds only the already-reviewed
+workflow command, its tests and its evidence document. All seven audit source/
+test blobs and both workflow source/test blobs remain byte-identical to their
+independently reviewed versions. The final delivery gate validates this combined
+source; provider code and portable controls are unchanged from the portable
+result above.

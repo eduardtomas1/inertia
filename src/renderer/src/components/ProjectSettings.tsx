@@ -83,10 +83,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
     void save({ preferences: { ...preferences, [key]: value } });
   };
   const setAppearance = (appearance: ProjectAppearancePatch): void => {
-    if (!request || disabled) return;
-    setError(null);
-    request({ type: "project.update", payload: { projectId: project.id, appearance } })
-      .catch((failure: unknown) => setError(failure instanceof Error ? failure.message : "Could not save project settings."));
+    void mutate({ type: "project.update", payload: { projectId: project.id, appearance } });
   };
   return <>
     {error && <p className="project-settings-error" role="alert">{error}</p>}
@@ -113,13 +110,13 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       </Row>
       <Row title="Project colour" description="Tint the project mark so its work is easy to spot when several chats run. Its chats inherit the colour.">
         <div className="project-colour-preview" aria-hidden="true"><ProjectIcon project={project} size={16} /><ProjectName project={project}>{project.name}</ProjectName></div>
-        <ProjectColorPicker value={preferences.color} disabled={disabled || !request} onChange={(color) => setAppearance({ color })} />
+        <ProjectColorPicker value={preferences.color} disabled={blocked} onChange={(color) => setAppearance({ color })} />
       </Row>
       <Row title="Colour shows on" description="Tint only the icon, or the icon and the project name. Chat titles and messages keep their normal colour.">
-        <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={disabled || !request} onChange={(colorEmphasis) => setAppearance({ colorEmphasis })} />
+        <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={blocked} onChange={(colorEmphasis) => setAppearance({ colorEmphasis })} />
       </Row>
       <Row title="Pin to top" description="Keep this project first in the project filter and project choosers.">
-        <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={disabled || !request} onChange={(pinned) => setAppearance({ pinned })} />
+        <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={blocked} onChange={(pinned) => setAppearance({ pinned })} />
       </Row>
       <Row title="Model" description="New threads use this default. Existing threads keep their model and session.">
         <ProjectModelDefault projectId={project.id} providers={providers} backendDefaults={backendDefaults}

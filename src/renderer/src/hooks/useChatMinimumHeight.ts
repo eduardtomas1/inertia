@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 
 const CHAT_MINIMUM_HEIGHT_PROPERTY = "--chat-minimum-height";
 
@@ -28,9 +28,20 @@ export function useChatMinimumHeight(
   hostRef: RefObject<HTMLElement | null>,
   scopeRef: RefObject<HTMLElement | null> = hostRef,
 ): void {
+  const binding = useRef<{
+    host: HTMLElement;
+    scope: HTMLElement;
+    stop: () => void;
+  } | null>(null);
   useLayoutEffect(() => {
     const host = hostRef.current;
     const scope = scopeRef.current;
+    const previous = binding.current;
+    // Ref objects survive Settings/split navigation; their DOM nodes do not.
+    // Inspect each commit but keep observers while the actual pair is unchanged.
+    if (previous?.host === host && previous.scope === scope) return;
+    previous?.stop();
+    binding.current = null;
     if (!host || !scope || typeof ResizeObserver === "undefined") return;
     let workspace: Element | null = null;
     const measure = (): void => {
@@ -57,10 +68,18 @@ export function useChatMinimumHeight(
       measure();
     };
     bind();
-    return () => {
-      childrenObserver.disconnect();
-      resizeObserver.disconnect();
-      host.style.removeProperty(CHAT_MINIMUM_HEIGHT_PROPERTY);
+    binding.current = {
+      host,
+      scope,
+      stop: () => {
+        childrenObserver.disconnect();
+        resizeObserver.disconnect();
+        host.style.removeProperty(CHAT_MINIMUM_HEIGHT_PROPERTY);
+      },
     };
-  }, [hostRef, scopeRef]);
+  });
+  useLayoutEffect(() => () => {
+    binding.current?.stop();
+    binding.current = null;
+  }, []);
 }

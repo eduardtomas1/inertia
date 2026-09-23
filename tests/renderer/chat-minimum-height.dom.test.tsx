@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import {
@@ -7,7 +7,7 @@ import {
   useChatMinimumHeight,
 } from "../../src/renderer/src/hooks/useChatMinimumHeight";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function stubHeight(element: Element, height: number): void {
   vi.spyOn(element, "getBoundingClientRect").mockReturnValue(
@@ -72,4 +72,72 @@ it("publishes the reserve on the host and clears it when the chat workspace leav
     expect(host.style.getPropertyValue("--chat-minimum-height")).toBe("");
   });
   view.unmount();
+});
+
+function ReplaceableHost({
+  scene = "chat",
+  scopeKey = "original",
+}: {
+  scene?: "chat" | "settings" | "split";
+  scopeKey?: string;
+}): React.JSX.Element {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const scopeRef = useRef<HTMLDivElement>(null);
+  const mountScope = useCallback((node: HTMLDivElement | null) => {
+    scopeRef.current = node;
+    if (node) node.append(workspaceFixture().workspace);
+  }, []);
+  useChatMinimumHeight(hostRef, scopeRef);
+  return scene === "chat"
+    ? <div ref={hostRef} data-testid="host"><div key={scopeKey} ref={mountScope} data-testid="scope" /></div>
+    : <section>{scene}</section>;
+}
+
+it.each(["settings", "split"] as const)("binds the host when starting in %s and then entering chat", (scene) => {
+  const view = render(<ReplaceableHost scene={scene} />);
+  view.rerender(<ReplaceableHost />);
+  const host = view.getByTestId("host");
+  expect(host.style.getPropertyValue("--chat-minimum-height")).toBe("257px");
+  view.unmount();
+  expect(host.style.getPropertyValue("--chat-minimum-height")).toBe("");
+});
+
+it.each(["settings", "split"] as const)("rebinds a replacement chat host after visiting %s", (scene) => {
+  const view = render(<ReplaceableHost />);
+  const original = view.getByTestId("host");
+  expect(original.style.getPropertyValue("--chat-minimum-height")).toBe("257px");
+  view.rerender(<ReplaceableHost scene={scene} />);
+  expect(original.style.getPropertyValue("--chat-minimum-height")).toBe("");
+  view.rerender(<ReplaceableHost />);
+  const replacement = view.getByTestId("host");
+  expect(replacement).not.toBe(original);
+  expect(replacement.style.getPropertyValue("--chat-minimum-height")).toBe("257px");
+});
+
+it("rebinds a replaced scope, retains observers on ordinary renders and cleans up both bindings", () => {
+  const observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+  vi.stubGlobal("ResizeObserver", class {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    constructor() { observers.push(this); }
+  });
+  const view = render(<ReplaceableHost />);
+  const host = view.getByTestId("host");
+  const originalScope = view.getByTestId("scope");
+  expect(observers).toHaveLength(1);
+  const disconnects = observers[0]!.disconnect.mock.calls.length;
+  view.rerender(<ReplaceableHost />);
+  expect(observers).toHaveLength(1);
+  expect(observers[0]!.disconnect).toHaveBeenCalledTimes(disconnects);
+  view.rerender(<ReplaceableHost scopeKey="replacement" />);
+  expect(view.getByTestId("host")).toBe(host);
+  expect(view.getByTestId("scope")).not.toBe(originalScope);
+  expect(observers).toHaveLength(2);
+  expect(observers[0]!.disconnect).toHaveBeenCalledTimes(disconnects + 1);
+  const composer = view.getByTestId("scope").querySelector(".chat-workspace")!.lastElementChild!;
+  expect(observers[1]!.observe).toHaveBeenCalledWith(composer);
+  expect(host.style.getPropertyValue("--chat-minimum-height")).toBe("257px");
+  view.unmount();
+  expect(host.style.getPropertyValue("--chat-minimum-height")).toBe("");
+  expect(observers[1]!.disconnect).toHaveBeenCalledTimes(2);
 });

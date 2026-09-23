@@ -387,7 +387,10 @@ function startOpenCodeRun(
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
       const environment = ownedOpenCodeEnvironment(options.environment, credentials);
-      launchCredentials = launchCredentialValues(environment);
+      launchCredentials = [...new Set([
+        ...launchCredentialValues(environment),
+        credentials.password,
+      ])].sort((left, right) => right.length - left.length);
       const started = await startOwnedOpenCodeServer(
         options.executable,
         options.input.cwd,

@@ -2,6 +2,7 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -131,11 +132,13 @@ export function ChatGoalControl({
   const headingId = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
+  const initialFocusPending = useRef(true);
   const [objective, setObjective] = useState("");
   const [tokenBudget, setTokenBudget] = useState("");
   const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const source = workflow?.goalCapability.kind ?? null;
+  const nativeGoal = source === "codex-native";
   const goal = workflow ? currentRouteGoal(workflow) : null;
   const recoveryBudgetFloor = Math.max(
     goal?.tokensUsed ?? 0,
@@ -149,12 +152,15 @@ export function ChatGoalControl({
   const label = source ? routeLabel(source) : "Goal";
   const stateLabel = goal ? statusLabel(goal.status) : null;
   const controlsBusy = busy || executionStatus === "starting";
-  const ownerKey = `${workflow?.conversationId ?? ""}:${source ?? ""}`;
+  const ownerKey = workflow ? `${workflow.conversationId}:${source}` : null;
   const ownerKeyRef = useRef(ownerKey);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (ownerKeyRef.current === ownerKey) return;
+    const previousOwner = ownerKeyRef.current;
     ownerKeyRef.current = ownerKey;
+    if (previousOwner === null) return;
+    initialFocusPending.current = false;
     setObjective("");
     setTokenBudget("");
     setRecoveryBudget("");
@@ -174,14 +180,27 @@ export function ChatGoalControl({
     };
   }, [onDismiss, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const frame = window.requestAnimationFrame(() => {
-      if (workflow && !goal) inputRef.current?.focus();
-      else firstActionRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [goal, open, workflow]);
+  useLayoutEffect(() => {
+    if (!open) {
+      initialFocusPending.current = true;
+      return;
+    }
+    if (!initialFocusPending.current) return;
+    const cancelInitialFocus = (): void => {
+      initialFocusPending.current = false;
+    };
+    const target = inputRef.current ?? firstActionRef.current;
+    if (target && !target.disabled) {
+      cancelInitialFocus();
+      target.focus();
+      return;
+    }
+    const intentEvents = ["focusin", "pointerdown"];
+    for (const event of intentEvents) document.addEventListener(event, cancelInitialFocus, true);
+    return () => {
+      for (const event of intentEvents) document.removeEventListener(event, cancelInitialFocus, true);
+    };
+  }, [controlsBusy, goal, loading, open, submitting, workflow]);
 
   const createGoal = async (): Promise<void> => {
     const nextObjective = objective.trim();
@@ -315,7 +334,7 @@ export function ChatGoalControl({
                 <span>{stateLabel}</span>
                 <p>{goal.objective}</p>
                 <small>
-                  {source === "codex-native"
+                  {nativeGoal
                     ? "Owned by and shared with this Codex thread."
                     : goal.tokenBudget === null
                       ? "Saved in Inertia only; it is not shared with the provider."
@@ -403,7 +422,7 @@ export function ChatGoalControl({
                 <button
                   type="button"
                   className="is-danger"
-                  aria-label={source === "codex-native"
+                  aria-label={nativeGoal
                     ? "Clear Codex goal"
                     : "Clear local objective"}
                   disabled={controlsBusy || submitting}
@@ -417,7 +436,7 @@ export function ChatGoalControl({
           ) : (
             <form
               className="chat-goal-form"
-              aria-label={source === "codex-native"
+              aria-label={nativeGoal
                 ? "Create Codex goal"
                 : "Create local objective"}
               onSubmit={(event) => {
@@ -438,7 +457,7 @@ export function ChatGoalControl({
               />
               <div className="chat-goal-budget">
                 <label htmlFor={budgetId}>
-                  {source === "codex-native"
+                  {nativeGoal
                     ? "Token budget (optional)"
                     : "Token target (optional)"}
                 </label>
@@ -459,7 +478,7 @@ export function ChatGoalControl({
               </div>
               <div className="chat-goal-notes">
                 <small>
-                  {source === "codex-native"
+                  {nativeGoal
                     ? "This becomes the native goal for this Codex thread."
                     : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
                 </small>
@@ -477,7 +496,7 @@ export function ChatGoalControl({
                 }
               >
                 <Flag size={13} aria-hidden="true" />
-                {source === "codex-native" ? "Set Codex goal" : "Save local objective"}
+                {nativeGoal ? "Set Codex goal" : "Save local objective"}
               </button>
             </form>
           )}

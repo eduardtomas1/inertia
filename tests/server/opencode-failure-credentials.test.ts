@@ -10,7 +10,14 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(removePortableFixture)); });
 
-it.each([false, true])("redacts launch credentials from startup failure detail (generated server password: %s)", async (generated) => {
+it.each([
+  { label: "supplied long password", password: "inertia-fixture-opaque-server-value" },
+  { label: "generated password", password: undefined },
+  { label: "seven-character password", password: "q7Z2p9A" },
+  { label: "one-character password", password: "~" },
+  { label: "empty password fallback", password: "" },
+  { label: "password within a longer credential", password: "q7Z2p9A", apiKey: "fixture-q7Z2p9A-provider-value" },
+])("redacts launch credentials from startup failure detail ($label)", async ({ password, apiKey }) => {
   const root = portableFixtureRoot("OpenCode diagnostic credentials");
   roots.push(root);
   const executable = portableNodeExecutable(root, "opencode");
@@ -21,8 +28,8 @@ it.each([false, true])("redacts launch credentials from startup failure detail (
     process.exitCode = 7;
   `);
   const environment = {
-    OPENAI_API_KEY: "inertia-fixture-opaque-provider-value",
-    ...(generated ? {} : { OPENCODE_SERVER_PASSWORD: "inertia-fixture-opaque-server-value" }),
+    OPENAI_API_KEY: apiKey ?? "inertia-fixture-opaque-provider-value",
+    ...(password === undefined ? {} : { OPENCODE_SERVER_PASSWORD: password }),
   };
   const run = createOpenCodeSdkHarness().start({
     input: nativeProviderRunInput({ providerId: "opencode", conversationId: "failure-credentials",

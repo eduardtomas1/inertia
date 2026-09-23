@@ -3,7 +3,6 @@ import {
   chmodSync,
   copyFileSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -23,6 +22,7 @@ import { RuntimeGenerationLeaseJournal } from
 import { RuntimeOwnedProcessJournal } from
   "../../src/node/runtime-owned-processes";
 import {
+  linuxGuardianTerminalAuthority,
   readLinuxGuardianReadyAsync,
   signalLinuxGuardianExact,
 } from "../../src/node/runtime-owned-process-linux";
@@ -106,13 +106,16 @@ async function completedGuardian(
   if (!("startTimeTicks" in claim.process)) {
     throw new Error("Missing Linux guardian identity.");
   }
+  const claimedIdentity = claim.process;
   expect(signalLinuxGuardianExact(claim.process, guardianPath, "claim")).toBe(true);
   expect(journal.own(ownershipId)).not.toBeNull();
   if (durableState === "retiring") expect(journal.retire(ownershipId)).toBe(true);
   expect(signalLinuxGuardianExact(claim.process, guardianPath, "exec")).toBe(true);
   await vi.waitFor(() => {
-    expect(readFileSync(`/proc/${guardian.pid}/comm`, "utf8").trim())
-      .toBe("inertia-exdone");
+    // The terminal name is published before the final sandbox and self-stop.
+    expect(linuxGuardianTerminalAuthority(
+      claimedIdentity, guardianPath, "/proc", "inertia-exdone",
+    )).toBe(true);
   });
   return { guardian, journal };
 }

@@ -46,7 +46,14 @@ export function createAgentWorkflowCommandHandler(
 
   const refreshWorkflow = async (conversationId: string) => {
     if (!reserveNativeSession(conversationId)) {
-      return dependencies.workflows.state(conversationId);
+      const saved = dependencies.workflows.state(conversationId);
+      return saved.goalCapability.kind === "codex-native"
+        ? {
+            ...saved,
+            goalRefreshWarning: saved.goalRefreshWarning
+              ?? "Showing saved native goal data while this checkout is busy. It may be out of date.",
+          }
+        : saved;
     }
     try {
       return await dependencies.workflows.refresh(conversationId);

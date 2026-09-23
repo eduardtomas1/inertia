@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ClientCommand } from "../../src/shared/contracts";
+import type { AgentWorkflowState, ClientCommand } from "../../src/shared/contracts";
 import type { AgentWorkflowController } from "../../src/server/runtime/agent-workflow-controller";
+import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createAgentWorkflowCommandHandler,
   type AgentWorkflowCommandDependencies,
@@ -19,6 +20,26 @@ const clearCommand: Extract<
   },
 };
 
+const refreshCommand: Extract<ClientCommand, { type: "agent.workflow.load" }> = {
+  type: "agent.workflow.load",
+  requestId: clearCommand.requestId,
+  payload: { conversationId: clearCommand.payload.conversationId, refresh: true },
+};
+
+function savedWorkflow(native = false): AgentWorkflowState {
+  return {
+    conversationId: clearCommand.payload.conversationId,
+    goals: [], skills: [],
+    goalCapability: native
+      ? { kind: "codex-native", available: true, label: "Codex native goal" }
+      : { kind: "inertia-local", available: true, label: "Inertia local goal", reason: "Local route" },
+    skillsCapability: { kind: "unavailable", available: false, label: "Skills unavailable", reason: "Fixture" },
+    goalRefreshWarning: null,
+    skillDiscovery: { truncated: false, warningCount: 0, synchronizedAt: null },
+    refreshedAt: "2030-01-01T00:00:00.000Z",
+  };
+}
+
 function dependencies(
   cleared: boolean,
 ): AgentWorkflowCommandDependencies {
@@ -26,7 +47,7 @@ function dependencies(
     workflows: {
       clearGoal: vi.fn(async () => cleared),
       refresh: vi.fn(),
-      state: vi.fn(() => ({ conversationId: clearCommand.payload.conversationId })),
+      state: vi.fn(() => savedWorkflow()),
     } as unknown as AgentWorkflowController,
     providerTerminalResumes: { isActive: vi.fn(() => false) },
     conversationWork: {
@@ -105,43 +126,79 @@ describe("agent workflow commands", () => {
     expect(runtime.workflows.clearGoal).not.toHaveBeenCalled();
   });
 
-  it.each([
-    {
-      blocker: "its provider terminal is active",
-      block: (runtime: AgentWorkflowCommandDependencies) => {
-        vi.mocked(runtime.providerTerminalResumes.isActive).mockReturnValue(true);
-      },
-    },
-    {
-      blocker: "another chat holds its checkout",
-      block: (runtime: AgentWorkflowCommandDependencies) => {
-        vi.mocked(runtime.conversationWork.reserve).mockReturnValue(false);
-      },
-    },
-  ])("loads saved workflow state instead of failing when $blocker", async ({ block }) => {
-    const runtime = dependencies(true);
-    block(runtime);
-    const handler = createAgentWorkflowCommandHandler(runtime);
+  describe.each([
+    { native: true },
+    { native: false },
+  ])("saved refresh fallback (native=$native)", ({ native }) => {
+    it.each([
+      { terminalActive: true, blocker: "its provider terminal is active" },
+      { terminalActive: false, blocker: "another chat holds its checkout" },
+    ])("returns truthful saved state when $blocker", async ({ terminalActive }) => {
+      const runtime = dependencies(true);
+      const saved = Object.freeze(savedWorkflow(native));
+      vi.mocked(runtime.workflows.state).mockReturnValue(saved);
+      vi.mocked(runtime.providerTerminalResumes.isActive).mockReturnValue(terminalActive);
+      vi.mocked(runtime.conversationWork.reserve).mockReturnValue(false);
+      const handler = createAgentWorkflowCommandHandler(runtime);
 
-    await expect(handler({} as never, {
-      type: "agent.workflow.load",
-      requestId: clearCommand.requestId,
-      payload: {
-        conversationId: clearCommand.payload.conversationId,
-        refresh: true,
-      },
-    })).resolves.toBe("handled");
+      await expect(handler({} as never, refreshCommand)).resolves.toBe("handled");
 
-    expect(runtime.workflows.refresh).not.toHaveBeenCalled();
-    expect(runtime.conversationWork.release).not.toHaveBeenCalled();
-    expect(runtime.send).toHaveBeenCalledWith({}, {
-      type: "request.result",
-      requestId: clearCommand.requestId,
-      result: {
-        kind: "agent.workflow",
-        workflow: { conversationId: clearCommand.payload.conversationId },
-      },
+      expect(runtime.workflows.state).toHaveBeenCalledWith(refreshCommand.payload.conversationId);
+      expect(runtime.workflows.refresh).not.toHaveBeenCalled();
+      expect(runtime.conversationWork.release).not.toHaveBeenCalled();
+      expect(runtime.conversationWork.reserve).toHaveBeenCalledTimes(terminalActive ? 0 : 1);
+      expect(runtime.send).toHaveBeenCalledWith({}, {
+        type: "request.result",
+        requestId: refreshCommand.requestId,
+        result: {
+          kind: "agent.workflow",
+          workflow: {
+            ...saved,
+            goalRefreshWarning: native
+              ? "Showing saved native goal data while this checkout is busy. It may be out of date."
+              : null,
+          },
+        },
+      });
+      expect(saved.goalRefreshWarning).toBeNull();
     });
+  });
+
+  it("preserves an existing native refresh warning without mutating saved state", async () => {
+    const runtime = dependencies(true);
+    const saved = Object.freeze({ ...savedWorkflow(true), goalRefreshWarning: "Existing provider warning" });
+    vi.mocked(runtime.workflows.state).mockReturnValue(saved);
+    vi.mocked(runtime.conversationWork.reserve).mockReturnValue(false);
+    await createAgentWorkflowCommandHandler(runtime)({} as never, refreshCommand);
+    expect(runtime.send).toHaveBeenCalledWith({}, expect.objectContaining({
+      result: { kind: "agent.workflow", workflow: saved },
+    }));
+    expect(saved.goalRefreshWarning).toBe("Existing provider warning");
+  });
+
+  it("keeps the other conversation's real shared-checkout reservation intact", async () => {
+    const runtime = dependencies(true);
+    const authority = new ConversationWorkAuthority(() => ({ projectId: "project-1", checkoutPath: process.cwd() }));
+    runtime.conversationWork = authority;
+    const release = vi.spyOn(authority, "release");
+    expect(authority.reserve("other-conversation")).toBe(true);
+    await expect(createAgentWorkflowCommandHandler(runtime)({} as never, refreshCommand)).resolves.toBe("handled");
+    expect(runtime.workflows.refresh).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(authority.reserve(refreshCommand.payload.conversationId)).toBe(false);
+    authority.release("other-conversation");
+    expect(authority.reserve(refreshCommand.payload.conversationId)).toBe(true);
+    authority.release(refreshCommand.payload.conversationId);
+  });
+
+  it("releases an admitted refresh on rejection without replacing its error", async () => {
+    const runtime = dependencies(true);
+    const failure = new Error("Refresh failed");
+    vi.mocked(runtime.workflows.refresh).mockRejectedValue(failure);
+    await expect(createAgentWorkflowCommandHandler(runtime)({} as never, refreshCommand)).rejects.toBe(failure);
+    expect(runtime.conversationWork.release).toHaveBeenCalledExactlyOnceWith(refreshCommand.payload.conversationId);
+    expect(runtime.workflows.state).not.toHaveBeenCalled();
+    expect(runtime.send).not.toHaveBeenCalled();
   });
 
   it("holds provider-session authority until a native refresh settles", async () => {

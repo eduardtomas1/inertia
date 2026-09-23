@@ -165,31 +165,34 @@ async function expectContained(popover: Locator): Promise<{
       horizontal: positioned?.dataset.popoverHorizontal,
     };
   });
+  await popover.evaluate(async (element) => {
+    await Promise.all(element.getAnimations()
+      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => undefined)));
+    // Textarea autosizing runs in ResizeObserver; popover placement follows
+    // in rAF. Animation completion alone does not settle that layout work.
+    await new Promise<void>((resolve) => requestAnimationFrame(() =>
+      requestAnimationFrame(() => resolve())));
+  });
+  let geometry: Awaited<ReturnType<typeof inspect>> = null;
   try {
-    await expect.poll(inspect, { timeout: 3_000 }).toMatchObject({
+    await expect.poll(async () => {
+      geometry = await inspect();
+      return geometry;
+    }, { timeout: 3_000 }).toMatchObject({
       insideWorkspace: true,
       insidePane: true,
       insideViewport: true,
     });
   } catch {
-    const finalGeometry = await inspect();
-    expect(finalGeometry, JSON.stringify(finalGeometry)).toMatchObject({
+    geometry = await inspect();
+    expect(geometry, JSON.stringify(geometry)).toMatchObject({
       insideWorkspace: true,
       insidePane: true,
       insideViewport: true,
     });
   }
-  await popover.evaluate(async (element) => {
-    await Promise.all(element.getAnimations()
-      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
-      .map((animation) => animation.finished.catch(() => undefined)));
-  });
-  const geometry = await inspect();
-  expect(geometry, JSON.stringify(geometry)).toMatchObject({
-    insideWorkspace: true,
-    insidePane: true,
-    insideViewport: true,
-  });
+  // Return the same geometry that passed, rather than a later unpolled read.
   if (!geometry) throw new Error("The composer popover was not attached.");
   return geometry;
 }
@@ -310,6 +313,18 @@ test("keeps every composer utility popover inside both split panes", async (
   await expect(separator).toHaveAttribute("aria-valuenow", "30");
   const bottomLeft = await expectContained(menu);
   expect(bottomLeft.internallyScrollable).toBe(true);
+  // Exercise a late textarea resize with the menu already open and placed.
+  // Its observer schedules placement in a later frame, just as pane resizing
+  // can autosize the draft after an earlier containment sample has passed.
+  const textarea = primary.locator(".composer textarea");
+  const previousHeight = await textarea.evaluate((element) => {
+    const height = element.style.height;
+    element.style.height = "49px";
+    return height;
+  });
+  expect((await expectContained(menu)).internallyScrollable).toBe(true);
+  await textarea.evaluate((element, height) => { element.style.height = height; }, previousHeight);
+  await expectContained(menu);
   await capture(testInfo, "pr-221-popover-bottom-left-scratch");
   await page.keyboard.press("Escape");
 

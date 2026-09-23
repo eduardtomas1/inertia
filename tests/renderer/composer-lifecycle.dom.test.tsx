@@ -632,9 +632,18 @@ describe("composer asynchronous ownership", () => {
       name: "Prompt presets",
     });
     const send = within(toolbar).getByRole("button", { name: "Send message" });
+    const model = within(toolbar).getByRole("button", { name: /^Choose model\./u });
+    const usage = within(toolbar).getByRole("group", { name: "Usage" });
+    const precedes = (first: Element, second: Element): boolean =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(precedes(attach, model)).toBe(true);
+    expect(precedes(model, presets)).toBe(true);
+    expect(precedes(presets, usage)).toBe(true);
+    expect(precedes(usage, send)).toBe(true);
     attach.focus();
     await userEvent.setup().tab();
-    expect(send).toHaveFocus();
+    expect(attach).not.toHaveFocus();
+    expect(toolbar.contains(document.activeElement)).toBe(true);
     expect(presets).not.toHaveAttribute("tabindex", "-1");
     expect(attach).not.toHaveAttribute("tabindex", "-1");
     expect(send).not.toHaveAttribute("tabindex", "-1");

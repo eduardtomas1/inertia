@@ -438,21 +438,37 @@ describe("visual contrast system", () => {
 
   it("animates only maximum reasoning composer frames and honors reduced motion", () => {
     const ultraFrame = cssBlock(
-      '.composer[data-maximum-reasoning="true"] .composer-input-zone::after',
+      '.composer[data-maximum-reasoning="true"]::after',
     );
     expect(ultraFrame).toContain("pointer-events: none");
-    expect(ultraFrame).toContain("animation: ultra-reasoning-frame-flow 6s linear infinite");
+    expect(ultraFrame).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
+    expect(ultraFrame).toContain("conic-gradient(");
+    expect(ultraFrame).toContain("from var(--ultra-angle)");
     expect(ultraFrame).toContain("mask-composite: exclude");
-    expect(ultraFrame).toContain("border-radius: inherit");
+    expect(ultraFrame).toContain("border-radius: var(--radius-composer)");
+    expect(ultraFrame).toContain("inset: 0 0 var(--composer-strip-offset, 0px)");
+    expect(css).toMatch(/@property --ultra-angle\s*\{[^}]*syntax:\s*"<angle>";[^}]*inherits:\s*false;/su);
+    const glow = cssBlock('.composer[data-maximum-reasoning="true"] > .composer-ultra-glow');
+    expect(glow).toContain("pointer-events: none");
+    expect(glow).toContain("animation: ultra-reasoning-comet 5.5s linear infinite");
+    expect(css).toMatch(/\.composer-ultra-glow\s*\{[^}]*display:\s*none;/su);
     expect(css).not.toMatch(
-      /\.composer\[data-maximum-reasoning="true"\](?: \.composer)?::after/u,
+      /\.composer-input-zone::after/u,
     );
     expect(css).toMatch(
-      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\] \.composer-input-zone::after\s*\{[^}]*animation-play-state:\s*paused;/u,
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after,[\s\S]*?\.composer-ultra-glow\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] \.composer-input-zone::after\s*\{[^}]*animation:\s*none;/u,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after\s*\{[^}]*animation:\s*none;/u,
     );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-ultra-glow\s*\{[^}]*display:\s*none;/u,
+    );
+    const label = cssBlock(
+      '.composer[data-maximum-reasoning="true"] .composer-reasoning-control .composer-setting-value',
+    );
+    expect(label).toContain("background-clip: text");
+    expect(label).toContain("color: transparent");
   });
 });
 
@@ -632,14 +648,14 @@ describe("composer primary action contrast", () => {
     await cascadeWindow.happyDOM.close();
   });
   const { document } = cascadeWindow;
-  // Mirrors ComposerToolbar: the attach button and the primary send/stop
-  // action share `.icon-button` inside `.composer-input-actions`.
   document.body.innerHTML = [
     '<div class="composer-shell"><div class="composer"><div class="composer-toolbar">',
     '<div class="composer-input-actions" role="group">',
-    '<button type="button" class="icon-button" data-role="attach"></button>',
     '<button type="button" class="icon-button send-button" data-role="primary"></button>',
-    "</div></div></div></div>",
+    "</div>",
+    '<div class="composer-primary-rail"><div class="composer-attach-actions" role="group">',
+    '<button type="button" class="icon-button" data-role="attach"></button>',
+    "</div></div></div></div></div>",
   ].join("");
   const attach = document.querySelector('[data-role="attach"]')!;
   const primary = document.querySelector('[data-role="primary"]')!;

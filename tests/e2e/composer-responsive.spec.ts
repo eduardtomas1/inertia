@@ -232,7 +232,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        backgroundColor: inputStyle?.backgroundColor,
+        surfaceBackground: getComputedStyle(element, "::before").backgroundImage,
+        inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
             ? "dock"
@@ -279,7 +280,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    expect(wideGeometry.backgroundColor).not.toMatch(/rgba\([^)]*,\s*0(?:\.0+)?\)/u);
+    expect(wideGeometry.surfaceBackground).toContain("linear-gradient");
+    expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
     expect(wideGeometry.permanentFooter).toBe(0);
@@ -287,11 +289,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("18px 105px");
-    expect(wideGeometry.inputPaddingBlock).toBe("16px 15px");
-    expect(wideGeometry.toolbarBorderTop).toBe("1px");
-    expect(wideGeometry.toolbarBackground)
-      .not.toBe(wideGeometry.textareaBackground);
+    expect(wideGeometry.inputPaddingInline).toBe("18px");
+    expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
+    expect(wideGeometry.toolbarBorderTop).toBe("0px");
+    expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
     expect(wideGeometry.checkoutText).toContain("Current checkout");
     expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
@@ -360,9 +361,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes).toEqual(
-      settingGeometry.iconSizes.map(() => ({ width: 13, height: 13 })),
-    );
+    expect(settingGeometry.iconSizes[0]).toEqual({ width: 13, height: 13 });
+    expect(settingGeometry.iconSizes.slice(1)).toEqual(settingGeometry.iconSizes.slice(1).map(() => ({ width: 0, height: 0 })));
     const accessIdleBackground = await expectHoverBackground(accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(

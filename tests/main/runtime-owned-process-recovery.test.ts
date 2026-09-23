@@ -35,7 +35,7 @@ import {
 } from "../../src/node/runtime-owned-processes";
 import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from "../helpers/prepared-runtime-owned-process-registry";
 import {
-  readLinuxGuardianReadyAsync,
+  linuxGuardianTerminalAuthority, readLinuxGuardianReadyAsync,
   signalLinuxGuardianExact,
 } from "../../src/node/runtime-owned-process-linux";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
@@ -157,13 +157,13 @@ async function completedLinuxGuardian(
   if (!("startTimeTicks" in claim.process)) {
     throw new Error("Missing Linux guardian identity");
   }
+  const claimedIdentity = claim.process;
   expect(signalLinuxGuardianExact(claim.process, guardianPath, "claim")).toBe(true);
   if (durableState !== "preauth") expect(journal.own(ownershipId)).not.toBeNull();
   if (durableState === "retiring") expect(journal.retire(ownershipId)).toBe(true);
   expect(signalLinuxGuardianExact(claim.process, guardianPath, "exec")).toBe(true);
   await vi.waitFor(() => {
-    expect(readFileSync(`/proc/${guardian.pid}/comm`, "utf8").trim())
-      .toBe("inertia-exdone");
+    expect(linuxGuardianTerminalAuthority(claimedIdentity, guardianPath, "/proc", "inertia-exdone")).toBe(true);
   });
   return { guardian, journal };
 }

@@ -38,7 +38,8 @@ import { createProviderInfoRefresh, providerInstallationVerifier } from "./provi
 import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
-import { runRuntimeShutdownPhases } from "./runtime-shutdown";
+import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "./runtime-shutdown";
+import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
 import {
@@ -1196,42 +1197,48 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       // Publish the shared result before shutdown callbacks run. Admission is
       // already closed, and every caller must observe the same cleanup proof.
       closing = Promise.resolve().then(async () => {
+        const shutdownTrace = createTestShutdownTrace(dataDirectory);
         runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
         projectIdentities.dispose();
         snapshotBroadcasts.close();
         secureFileAuthorities.clear();
-        await runRuntimeShutdownPhases({
-          quiesceRuntimeWork: async ({ deadlineAt }) => {
-            turnGitArtifacts.beginShutdown(deadlineAt);
-            await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
-              await gitScanCoordinator.cancelAndDrainWhile(async () => {
-                await updatePreparation.drainTracked();
-                await projectIdentities.drain();
+        try {
+          await runRuntimeShutdownPhases({
+            quiesceRuntimeWork: ({ deadlineAt }) => shutdownTrace.observe("commands", async () => {
+              turnGitArtifacts.beginShutdown(deadlineAt);
+              await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
+                await gitScanCoordinator.cancelAndDrainWhile(async () => {
+                  await updatePreparation.drainTracked();
+                  await projectIdentities.drain();
+                });
               });
-            });
-          },
-          independentDrains: [
-            () => initializedConversationAttachments.close(),
-            ({ deadlineAt }) => terminals.disposeAll(deadlineAt),
-            () => providerMaintenance.dispose(),
-          ],
-          stopIsolatedRuns: () => isolatedRuns.dispose(cause),
-          disposeTurnsAndProviders: () => turns.dispose(cause),
-          settleArtifacts: async () => {
-            await artifactReconciliation;
-            await turnGitArtifacts.settleShutdown();
-          },
-          terminateClients: () => runtimeSync.terminateAll((client) => client.terminate()),
-          closeServer: async () => {
-            const results = await Promise.allSettled([
-              webSocketBoundary.close(),
-              new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-            ]);
-            const failed = results.find((result) => result.status === "rejected");
-            if (failed) throw failed.reason;
-          },
-          closeStore: () => store.backupAndClose(),
-        });
+            }),
+            independentDrains: [
+              () => shutdownTrace.observe("attachments", () => initializedConversationAttachments.close()),
+              ({ deadlineAt }) => shutdownTrace.observe("terminals", () => terminals.disposeAll(deadlineAt)),
+              () => shutdownTrace.observe("maintenance", () => providerMaintenance.dispose()),
+            ],
+            stopIsolatedRuns: () => shutdownTrace.observe("isolated-runs", () => isolatedRuns.dispose(cause)),
+            disposeTurnsAndProviders: () => shutdownTrace.observe("turns-providers", () => turns.dispose(cause)),
+            settleArtifacts: async () => {
+              await shutdownTrace.observe("artifact-reconciliation", () => artifactReconciliation);
+              await shutdownTrace.observe("artifact-settlement", () => turnGitArtifacts.settleShutdown());
+            },
+            terminateClients: () => shutdownTrace.observe("clients", () => runtimeSync.terminateAll((client) => client.terminate())),
+            closeServer: async () => {
+              const results = await Promise.allSettled([
+                shutdownTrace.observe("websocket", () => webSocketBoundary.close()),
+                shutdownTrace.observe("http-server", () => new Promise<void>((resolveClose) => server.close(() => resolveClose()))),
+              ]);
+              const failed = results.find((result) => result.status === "rejected");
+              if (failed) throw failed.reason;
+            },
+            closeStore: () => shutdownTrace.observe("store", () => store.backupAndClose()),
+          });
+        } catch (error) {
+          shutdownTrace.failure(error instanceof RuntimeShutdownDeadlineError ? error.phase : null);
+          throw error;
+        }
       });
       return closing;
     },

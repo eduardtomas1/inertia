@@ -1,0 +1,45 @@
+.working-orb {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  background: none;
+}
+
+.working-orb-canvas {
+  position: absolute;
+  display: block;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.activity-thread-status-label:has(.working-orb) {
+  box-sizing: content-box;
+  margin: -6px 0 -6px -6px;
+  padding: 6px 0 6px 6px;
+}
+
+.agent-activity.is-running .agent-activity-icon[data-activity-indicator="orb"]::after,
+.subagent-status-mark[data-live="true"][data-status-indicator="orb"]::after,
+.turn-activity-group-mark[data-running="true"][data-group-indicator="orb"]::after {
+  content: none;
+  animation: none;
+}
+
+.subagent-status-mark[data-status-indicator="orb"]::before {
+  content: none;
+}
+
+.turn-reasoning-step.is-active[data-step-indicator="orb"]::before {
+  content: none;
+  animation: none;
+}
+
+.turn-reasoning-step-orb {
+  position: absolute;
+  top: calc(0.52em + 2.5px - 6px);
+  left: -3.5px;
+}

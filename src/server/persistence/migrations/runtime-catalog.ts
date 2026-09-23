@@ -31,7 +31,7 @@ import { projectPreferencesMigration } from "./project-preferences";
 import { appearanceThemePairMigration } from "./appearance-theme-pair";
 import { providerUsageLimitsMigration } from "./provider-usage-limits";
 import { messageChronologyMigration, privateConnectMessageOriginMigration } from "./message-metadata";
-import { nativeAntigravityProviderMigration } from "./native-antigravity-provider"; import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat";
+import { nativeAntigravityProviderMigration } from "./native-antigravity-provider"; import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat"; import { workingIndicatorMigration } from "./working-indicator";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -1238,7 +1238,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       appearanceThemePairMigration,
       providerUsageLimitsMigration,
       privateConnectMessageOriginMigration,
-      nativeAntigravityProviderMigration, conversationContextWholeChatMigration,
+      nativeAntigravityProviderMigration, conversationContextWholeChatMigration, workingIndicatorMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

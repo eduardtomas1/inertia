@@ -2,6 +2,13 @@ import { Check, Search } from "lucide-react";
 
 import type { WelcomeShortcut } from "../../utils/welcomeGuide";
 import { AgentPixelGrid } from "../AgentPixelGrid";
+import { WorkingOrb } from "../working-indicator/WorkingOrb";
+import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
+import {
+  orbMotionForPhase,
+  resolveOrbMotion,
+  usesOrbs,
+} from "../working-indicator/orbMotion";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import type { WelcomeTopicId } from "./welcomeGuideModel";
 
@@ -43,13 +50,15 @@ function SplitDemo(): React.JSX.Element {
 }
 
 function WorkDemo(): React.JSX.Element {
+  const indicator = useWorkingIndicator();
+  const orb = usesOrbs(indicator) ? resolveOrbMotion(indicator, orbMotionForPhase("working")) : null;
   return (
     <>
       <span className="d-row is-live">
         <ProviderBrandIcon providerId="claude" decorative size={14} />
         <span className="d-row-text"><b>Fix login</b><small>inertia · main</small></span>
         <span className="d-status">
-          <span className="is-busy"><AgentPixelGrid animated rhythm="orbit" /><em>Working · 3m</em></span>
+          <span className="is-busy">{orb ? <WorkingOrb size={14} design={orb.design} pace={orb.pace} /> : <AgentPixelGrid animated rhythm="orbit" />}<em>Working · 3m</em></span>
           <span className="is-done"><Check size={12} /><em>Completed</em></span>
         </span>
       </span>

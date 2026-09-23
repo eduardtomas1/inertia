@@ -49,4 +49,27 @@ describe("packaged license notices", () => {
     expect(notice).toContain("Copyright © 2005-2020 Rich Felker, et al.");
     expect(notice).toContain("Permission is hereby granted, free of charge");
   });
+
+  it("includes the vendored thinking-orbs engine notice", async () => {
+    const generator = await readFile(
+      resolve(root, "scripts/generate-third-party-notices.mjs"),
+      "utf8",
+    );
+    const notice = await readFile(
+      resolve(root, "resources/thinking-orbs-notices.txt"),
+      "utf8",
+    );
+    const vendoredLicense = await readFile(
+      resolve(root, "src/renderer/src/vendor/thinking-orbs/LICENSE"),
+      "utf8",
+    );
+
+    expect(generator).toContain('"thinking-orbs-notices.txt"');
+    expect(notice).toContain("Copyright (c) 2026 Jakub Antalik");
+    expect(notice).toContain("de85557ca220332586d070d8788c0e1d6e877a0d");
+    expect(notice).toContain("Copyright (c) 2026 Haplo LLC");
+    expect(notice).toContain("e2c07bbdec4db797fb302300ef0159b1806a909f");
+    expect(notice).toContain("Permission is hereby granted, free of charge");
+    expect(vendoredLicense).toContain("Copyright (c) 2026 Jakub Antalik");
+  });
 });

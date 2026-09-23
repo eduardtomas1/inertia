@@ -2135,6 +2135,7 @@ describe("runtime migration catalog", () => {
       { version: 75 },
       { version: 76 },
       { version: 77 },
+      { version: 78 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2159,6 +2160,9 @@ describe("runtime migration catalog", () => {
     expect(appStateColumns.has("discord_release_provider")).toBe(false);
     expect(appStateColumns.has("discord_release_model")).toBe(false);
     expect(appStateColumns.has("discord_release_reasoning_effort")).toBe(false);
+    expect((migrated.prepare(
+      "SELECT working_indicator_json AS workingIndicator FROM app_state WHERE id = 1",
+    ).get() as { workingIndicator: string }).workingIndicator).toBe("{}");
     migrated.close();
   });
 });

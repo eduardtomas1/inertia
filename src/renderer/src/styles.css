@@ -4212,15 +4212,97 @@ button.header-breadcrumb-project:hover {
   background: color-mix(in srgb, var(--surface-muted) 72%, #0b0c10);
 }
 
-.attachment-preview-stage > img {
+.image-attachment-zoom {
   position: absolute;
   inset: 0;
+  display: grid;
+  box-sizing: border-box;
+  place-items: stretch;
+  overflow: hidden;
+  padding: clamp(8px, 2vw, 20px);
+  cursor: zoom-in;
+  touch-action: none;
+}
+
+.image-attachment-zoom[data-zoomed="true"] {
+  cursor: grab;
+}
+
+.image-attachment-zoom[data-zoomed="true"]:active {
+  cursor: grabbing;
+}
+
+.image-attachment-zoom:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+/* The zoom transform is solved against this box, so it must stay unpadded. */
+.image-attachment-zoom > img {
   display: block;
   width: 100%;
   height: 100%;
-  box-sizing: border-box;
-  padding: clamp(8px, 2vw, 20px);
+  min-width: 0;
+  min-height: 0;
   object-fit: contain;
+  transform-origin: center center;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+
+.image-attachment-zoom-controls {
+  position: absolute;
+  right: clamp(10px, 2vw, 18px);
+  bottom: clamp(10px, 2vw, 18px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+  cursor: default;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.image-attachment-zoom-controls button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.image-attachment-zoom-controls button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.image-attachment-zoom-controls button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+.image-attachment-zoom-controls button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.image-attachment-zoom-controls output {
+  min-width: 46px;
+  color: var(--text-soft);
+  font-size: var(--ui-font-micro);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .pdf-attachment-preview {
@@ -11639,6 +11721,96 @@ button.sent-attachment-open:focus-visible {
 .agents-surface-attachments .sent-attachment-open { grid-template-columns: 48px minmax(0, 1fr); gap: 9px; }
 .agents-surface-attachments .sent-attachment-thumbnail { width: 48px; height: 42px; }
 .agents-surface-attachments .sent-attachment-copy strong { font-size: var(--ui-font-micro); font-weight: 500; }
+
+.environment-attachments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 8px 5px;
+}
+
+.environment-attachments-header h3 {
+  margin: 0;
+}
+
+.environment-attachments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--ui-font-micro);
+  cursor: pointer;
+}
+
+.environment-attachments-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.environment-attachments-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.environment-attachments-chevron {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.environment-attachments-toggle[aria-expanded="true"] .environment-attachments-chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded, the panel becomes a scrollable grid of every attachment in the
+   chat rather than the three most recent rows. */
+.environment-attachments[data-expanded="true"] .environment-attachments-gallery {
+  max-height: min(46vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachments {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachment-open {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  padding: 5px;
+}
+
+.environment-attachments[data-expanded="true"] .sent-attachment-thumbnail {
+  width: 100%;
+  height: 62px;
+}
+
+/* The tile is too narrow for the metadata line, but it still describes the
+   preview button, so hide it visually rather than removing it. The tile is the
+   containing block above, so the hidden text cannot escape the scroller. */
+.environment-attachments[data-expanded="true"] .sent-attachment-copy small {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .environment-attachments-chevron {
+    transition: none;
+  }
+}
 
 @container (max-width: 420px) {
   .sent-attachments {

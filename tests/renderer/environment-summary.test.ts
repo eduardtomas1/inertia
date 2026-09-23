@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildEnvironmentSummary } from "../../src/renderer/src/utils/environmentSummary";
+import {
+  ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT,
+  buildEnvironmentSummary,
+} from "../../src/renderer/src/utils/environmentSummary";
 import type {
   ChatMessage,
   ProviderInfo,
@@ -212,7 +215,51 @@ const owners = {
   ],
 };
 
+function attachmentGallerySummary(messages: readonly ChatMessage[]) {
+  return buildEnvironmentSummary({
+    projectId: "project-1",
+    projectName: "Inertia",
+    conversationId: "conversation-1",
+    connectionStatus: "online",
+    gitStatus: null,
+    workspaceGitStatus: null,
+    runs: [],
+    subagents: [],
+    messages,
+  });
+}
+
 describe("environment summary projection", () => {
+  it("collects the newest attachments for the gallery and caps the scan", () => {
+    const messages = Array.from(
+      { length: ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT + 8 },
+      (_, index) => message(`m-${index}`, `shot-${index}.png`),
+    );
+    const summary = attachmentGallerySummary(messages);
+
+    expect(summary.attachments).toHaveLength(
+      ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT,
+    );
+    // Newest first, so the last message leads and the oldest fall off.
+    expect(summary.attachments[0]!.name)
+      .toBe(`shot-${messages.length - 1}.png`);
+    expect(summary.attachments.map(({ name }) => name)).not.toContain(
+      "shot-0.png",
+    );
+    expect(JSON.stringify(summary)).not.toContain("/private/");
+  });
+
+  it("reuses the attachment projection while the transcript is unchanged", () => {
+    const messages = [message("m-1", "reference.png")];
+
+    const first = attachmentGallerySummary(messages);
+    const second = attachmentGallerySummary(messages);
+
+    expect(second.attachments).toBe(first.attachments);
+    expect(attachmentGallerySummary([...messages]).attachments)
+      .not.toBe(first.attachments);
+  });
+
   it("projects real workspace, Git, attachments, active work, and validated services", () => {
     const summary = buildEnvironmentSummary({
       projectId: "project-1",

@@ -51,6 +51,27 @@ test("recent attachments show real thumbnails, open retained previews and handle
     await expect(preview).toBeVisible();
     await expect.poll(() => preview.locator(".attachment-preview-stage img").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(512);
     await capture(`recent-image-preview-${theme}`);
+    const stage = preview.getByRole("group", { name: /^Zoomable preview of / });
+    const level = stage.getByLabel("Zoom level");
+    await expect(level).toHaveText("100%");
+    await expect(stage).toHaveAttribute("data-zoomed", "false");
+    await expect(stage.getByRole("button", { name: "Zoom out" })).toBeDisabled();
+    // Zooming has to scale the rendered image, not just the reported level.
+    const fitted = (await stage.locator("img").boundingBox())!;
+    await stage.getByRole("button", { name: "Zoom in" }).click();
+    await stage.getByRole("button", { name: "Zoom in" }).click();
+    await expect(level).toHaveText("225%");
+    await expect(stage).toHaveAttribute("data-zoomed", "true");
+    const magnified = (await stage.locator("img").boundingBox())!;
+    expect(magnified.width).toBeGreaterThan(fitted.width * 2);
+    // The magnified image still covers the stage it is clipped by.
+    const clip = (await preview.locator(".attachment-preview-stage").boundingBox())!;
+    expect(magnified.x).toBeLessThanOrEqual(clip.x + 1);
+    expect(magnified.x + magnified.width).toBeGreaterThanOrEqual(clip.x + clip.width - 1);
+    await capture(`recent-image-zoom-${theme}`);
+    await stage.getByRole("button", { name: "Reset zoom" }).click();
+    await expect(level).toHaveText("100%");
+    await expect(stage).toHaveAttribute("data-zoomed", "false");
     await page.keyboard.press("Escape"); await expect(preview).toBeHidden();
     await expect(recent.getByRole("button", { name: /Preview attachment .*\.png$/u })).toBeFocused();
   }
@@ -74,4 +95,57 @@ test("recent attachments show real thumbnails, open retained previews and handle
   expect(app.rendererErrors.length).toBeGreaterThan(0);
   expect(app.rendererErrors.every((error) => error === "HTTP 404 GET image inertia://bundle/attachment-preview/redacted"
     || error === "Failed to load resource: the server responded with a status of 404 (Not Found) (inertia://bundle/attachment-preview/redacted:1:1)")).toBe(true);
+  await page.keyboard.press("Escape");
+
+  // Past the recent set the panel expands into a scrollable gallery of every
+  // attachment in the chat. Distinct icon sizes keep the imports distinct.
+  const gallerySources = [
+    "1024x1024", "256x256", "192x192", "128x128",
+    "64x64", "48x48", "32x32", "24x24",
+  ];
+  const galleryPaths: string[] = [];
+  for (const name of gallerySources) {
+    const target = join(app.testDirectory, `gallery-${name}.png`);
+    await copyFile(resolve(`resources/icons/${name}.png`), target);
+    galleryPaths.push(target);
+  }
+  await app.electronApp.evaluate(({ dialog }, paths) => {
+    Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: false, filePaths: paths, bookmarks: [] }));
+  }, galleryPaths);
+  await page.getByRole("button", { name: "Attach images, documents, or spreadsheets" }).click();
+  await expect(page.locator(".composer-attachments img")).toHaveCount(gallerySources.length);
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("More media for the gallery.");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(recent.getByRole("listitem")).toHaveCount(3);
+  const expand = page.getByRole("button", { name: "Show all 10" });
+  await expect(expand).toBeVisible();
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expand.click();
+  const gallery = page.getByRole("list", { name: "All attachments" });
+  await expect(gallery.getByRole("listitem")).toHaveCount(10);
+  await app.expectNoViewportOverflow();
+  // Newest first; check while the leading tile is still in the scrollport.
+  await expect.poll(() => gallery.locator("img").first().evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(24);
+  // The gallery stays inside a bounded scroller instead of stretching the
+  // panel. Whether it actually overflows depends on the window, so assert the
+  // bound and that scrolling is offered exactly when the tiles outgrow it.
+  const scroll = page.locator(".environment-attachments-gallery");
+  const scroller = await scroll.evaluate((node) => {
+    const style = getComputedStyle(node);
+    node.scrollTop = node.scrollHeight;
+    return {
+      overflowY: style.overflowY,
+      maxHeight: Number.parseFloat(style.maxHeight),
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      scrollTop: node.scrollTop,
+    };
+  });
+  expect(scroller.overflowY).toBe("auto");
+  expect(scroller.clientHeight).toBeLessThanOrEqual(scroller.maxHeight + 1);
+  expect(scroller.scrollTop > 0)
+    .toBe(scroller.scrollHeight > scroller.clientHeight);
+  await capture("recent-attachments-gallery-light");
+  await page.getByRole("button", { name: "Show fewer" }).click();
+  await expect(page.getByRole("list", { name: "Recent attachments" })).toBeVisible();
 });

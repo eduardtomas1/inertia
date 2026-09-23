@@ -322,9 +322,21 @@ function repositorySummaries(
   }];
 }
 
+/** Rows the collapsed environment panel shows before it is expanded. */
+export const ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT = 3;
+/** Upper bound on the expanded gallery, newest first. */
+export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = 60;
+
+// Collecting the whole gallery costs a scan of the transcript, and the scene
+// model rebuilds for reasons unrelated to messages. One cached entry keyed on
+// the message list keeps that scan — and the array identity — stable.
+let cachedAttachmentMessages: readonly ChatMessage[] | null = null;
+let cachedAttachments: EnvironmentSummarySnapshot["attachments"] = [];
+
 function recentAttachments(
   messages: readonly ChatMessage[],
 ): EnvironmentSummarySnapshot["attachments"] {
+  if (messages === cachedAttachmentMessages) return cachedAttachments;
   const seen = new Set<string>();
   const attachments: EnvironmentSummarySnapshot["attachments"] = [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -341,9 +353,12 @@ function recentAttachments(
       // The secure preview resolves this ID in main. Paths and snapshot context
       // remain excluded from the environment summary.
       attachments.push({ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size });
-      if (attachments.length === 3) return attachments;
+      if (attachments.length === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT) break;
     }
+    if (attachments.length === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT) break;
   }
+  cachedAttachmentMessages = messages;
+  cachedAttachments = attachments;
   return attachments;
 }
 

@@ -85,7 +85,10 @@ const budgets = {
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
-  deferredAttachmentPreviewJavaScript: 13 * kibibyte,
+  // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
+  // bytes to the same deferred chunk. Existing headroom is unchanged, and the
+  // lightbox still loads only when an attachment preview is opened.
+  deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418,
   deferredPreviewJavaScript: 8 * kibibyte,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
@@ -140,7 +143,9 @@ const budgets = {
   // The lazy sidebar's focused-only aurora scheduler adds 722 bytes on the
   // same source/dependency baseline. Both first-load routes are unchanged.
   // Preserve headroom; see release-v0058/aurora-renderer-bundle.json.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164,
+  // The expandable attachment gallery adds 1,017 core bytes on the same
+  // baseline; the zoomable lightbox stays in its deferred chunk above.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

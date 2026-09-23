@@ -8,6 +8,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
+import { createAnchorInputDiagnostic, observeAnchorInput } from "./support/anchor-input-diagnostic";
 
 const delayedAnswerGate = "inertia-anchor-answer-ready";
 
@@ -231,14 +232,19 @@ test("positions a completed answer at the viewport start by default", async () =
     initialState: "conversation",
     codexAppServerSource: delayedAnchorAppServer,
   });
+  const request = "Position this completed answer for reading.";
+  const inputDiagnostic = createAnchorInputDiagnostic(
+    (command) => app.page.evaluate(observeAnchorInput, command), request,
+  );
   let bodyFailure: { error: unknown } | undefined;
   try {
     await app.resizeWindow(1440, 920);
     const { page } = app;
     const composer = page.getByRole("region", { name: "Message composer" });
-    const request = "Position this completed answer for reading.";
+    await inputDiagnostic.install();
     await composer.getByRole("textbox", { name: "Message" })
       .fill(request);
+    inputDiagnostic.afterFill();
     await composer.getByRole("button", { name: "Send message" }).click();
     // Prove the active turn reached the renderer before allowing the fixture
     // to complete. Otherwise a loaded host can deliver the terminal snapshot
@@ -291,9 +297,13 @@ test("positions a completed answer at the viewport start by default", async () =
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     bodyFailure = { error };
-    await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
+    await Promise.all([
+      inputDiagnostic.attach(test.info()),
+      attachImageSendFailureDiagnostics(test.info(), app),
+    ]).catch(() => undefined);
     throw error;
   } finally {
+    inputDiagnostic.dispose();
     await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });

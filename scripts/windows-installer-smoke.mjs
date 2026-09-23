@@ -551,30 +551,56 @@ async function smokeInstalledApplication(
   );
 }
 
+// At most 17 short stderr markers: static phases, capped elapsed/count values,
+// and four path checkpoints. The bounded runner retains these on failure while
+// keeping successful stdout as the original strict JSON. No process identity
+// or path is added to this evidence; later unsampled work remains ambiguous.
 const INSTALL_ROOT_PROCESS_SNAPSHOT_SCRIPT = `
 $ErrorActionPreference = "Stop"
+$diagnosticClock = [Diagnostics.Stopwatch]::StartNew()
+$seen = 0
+$paths = 0
+function Write-InertiaDiscoveryPhase([string]$phase) {
+  try {
+    [Console]::Error.WriteLine(("INERTIA_INSTALL_ROOT_PHASE|{0}|{1}|{2}|{3}" -f
+      $phase, [Math]::Min(60000, $diagnosticClock.ElapsedMilliseconds), $seen, $paths))
+  } catch { }
+}
+Write-InertiaDiscoveryPhase "script-entered"
 $env:PSModulePath = [IO.Path]::Combine($PSHOME, "Modules")
+Write-InertiaDiscoveryPhase "module-path-set"
 $rootPath = [IO.Path]::GetFullPath($env:INERTIA_INSTALLER_SMOKE_ROOT).TrimEnd([char[]]'\\/')
+Write-InertiaDiscoveryPhase "root-lookup-start"
 $rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
 if ($rootItem -isnot [IO.DirectoryInfo] -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
   throw "unsafe install root"
 }
 $root = [IO.Path]::GetFullPath($rootItem.FullName).TrimEnd([char[]]'\\/')
 $prefix = $root + [IO.Path]::DirectorySeparatorChar
+Write-InertiaDiscoveryPhase "root-verified"
+Write-InertiaDiscoveryPhase "cim-start"
 $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
+  $seen = [Math]::Min(1000000, $seen + 1)
+  if ($seen -eq 1) { Write-InertiaDiscoveryPhase "cim-yielded" }
   $rawPath = [string]$_.ExecutablePath
   if ([String]::IsNullOrEmpty($rawPath)) { return }
+  $paths = [Math]::Min(1000000, $paths + 1)
+  $recordPath = @(1, 16, 64, 256) -contains $paths
+  if ($paths -eq 257) { Write-InertiaDiscoveryPhase "checkpoints-exhausted" }
+  if ($recordPath) { Write-InertiaDiscoveryPhase "path-lookup-start" }
   try {
     $pathItem = Get-Item -LiteralPath $rawPath -Force -ErrorAction Stop
     if ($pathItem -isnot [IO.FileInfo]) { throw "unsafe process path" }
     $path = [IO.Path]::GetFullPath($pathItem.FullName)
   } catch {
+    if ($recordPath) { Write-InertiaDiscoveryPhase "path-lookup-rejected" }
     if (
       $rawPath.StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase) -or
       $rawPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
     ) { throw }
     return
   }
+  if ($recordPath) { Write-InertiaDiscoveryPhase "path-lookup-complete" }
   if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
     [ordered]@{
       processId = [int]$_.ProcessId
@@ -583,9 +609,11 @@ $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForE
     }
   }
 })
+Write-InertiaDiscoveryPhase "query-complete"
 [Console]::Out.Write((ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{
   processes = $processes
 })))
+Write-InertiaDiscoveryPhase "json-written"
 `.trim();
 
 export async function windowsInstallRootProcesses(

@@ -111,6 +111,7 @@ function sha256(bytes: readonly number[]): string {
 
 async function pasteImages(page: Page, images: readonly number[][]): Promise<void> {
   const composer = page.getByRole("textbox", { name: "Message" });
+  await expect(page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
   await composer.evaluate((textarea, files) => {
     const transfer = new DataTransfer();
     files.forEach((bytes, index) => transfer.items.add(new File(

@@ -106,9 +106,6 @@ test("omits Runs and preserves adjacent toolbar navigation responsively", async 
     await tools.click();
     await expect(page.locator(".workspace-panel")).toBeVisible();
     await expect(tools).toHaveAttribute("aria-pressed", "true");
-    await page.evaluate(() => new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    }));
 
     await terminal.focus();
     await page.keyboard.press("Tab");

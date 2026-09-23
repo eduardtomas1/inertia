@@ -238,3 +238,71 @@ test blobs and both workflow source/test blobs remain byte-identical to their
 independently reviewed versions. The final delivery gate validates this combined
 source; provider code and portable controls are unchanged from the portable
 result above.
+
+## Native fixture follow-up
+
+Additional local validation of main `26d80b8a` ran the complete isolated native
+phase at the existing two-worker setting. The terminal-resume scenario passed
+its content assertions but failed strict detached-process cleanup. A temporary
+fixed-label observer reproduced the same teardown failure in composer-commands.
+The initiating ordinary owned child was Claude's SDK metadata process, with the
+guardian reporting `drain-fork-taint/none` after a stop request. The observer
+retained only fixed caller/reason labels and was removed after diagnosis.
+
+These fake-Codex fixtures enable general provider discovery while overriding
+only Codex. An installed runnable Claude can therefore start unrelated metadata
+work, which fixture shutdown cancels. Both scenarios now use the existing
+`claudeAuthSource: "process.exit(1);"` option to control Claude's signed-out
+state, as other provider fixtures already do. Their Codex interactions,
+assertions, deadlines and worker count are unchanged. This is targeted fixture
+control, not complete isolation from every installed provider: discovery still
+probes and ranks available executable candidates.
+
+The diagnostic pair failed composer teardown before this change; with the
+controlled Claude fixture, both scenarios passed in 8.8 seconds and no Claude
+SDK child was observed. All six unchanged metadata natural-close and
+cancellation controls also passed, including the required unconfirmed-cleanup
+result for cancelled forked work. Production process authority and guardian
+semantics are unchanged. Independent source review found no issue in the two
+fixture additions.
+
+The first complete follow-up passed quality, 9,939 unit/integration/DOM tests
+plus seven child controls (146 skips, 925 passing files, 428.76s), and the fresh
+build with unchanged bundle budgets. Its isolated native phase passed the two
+corrected fixtures and both update-validator cases, but found one settings
+geometry failure: 96 passed, three skipped and one failed. The measured context
+ring was 25px wide while a separately captured Send button measured 0px.
+
+A controlled native test held the actual lazy Send-actions chunk, captured its
+visible fallback, then released the chunk and observed the replacement. The
+captured fallback was now detached and measured 0px; the current Send button
+still measured wider than 25px. This proves a reachable stale-handle measurement
+boundary, without establishing the exact sequence in the earlier failed run.
+The settings test now reads the current Send button inside the same synchronous
+DOM evaluation as the ring, requires exactly one live composer button, and
+retains every existing geometry bound. No retries or deadline changes were
+added. The temporary native control passed in 2.7s and was removed. All eight
+settings/composer/terminal focused scenarios then passed in 15.4s.
+
+Independent review approved the final settings correction. Final quality checks
+(including E2E typechecking) passed again, followed by the complete isolated
+native phase: 97 passed and three platform skips, with the unchanged two-worker
+configuration and zero retries. This includes both corrected Codex fixtures,
+all settings scenarios and both update-validator scenarios. The earlier passing
+9,939-test suite and build used identical product/unit/build inputs; only the
+settings E2E measurement changed afterward. Provider/portable inputs remain
+unchanged from the previously recorded 1,627-test pass.
+
+This follow-up changes only `tests/e2e/composer-commands.spec.ts`,
+`tests/e2e/terminal-resume.spec.ts`, `tests/e2e/settings.spec.ts`, and this report.
+Local native validation remains macOS ARM64; hosted checks cover the other
+platforms. Preserved local logs use `/tmp/inertia-pr461-fixture-final-` and
+`/tmp/inertia-pr461-native-corrected-` prefixes.
+
+This local fixture issue is separate from the hosted main run `35898522197`
+failure in the large-WAL update-validator scenario. Hosted functional assertions
+and privileged cleanup passed, but Electron remained alive after its exit call.
+The available native sample contains no stack, so that exit failure remains
+unexplained; neither these fixture additions nor the passing local scenarios
+are presented as its fix. The coordinator retains the exact-green-main merge
+requirement and monitors the resulting main after each authorized delivery.

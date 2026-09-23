@@ -450,7 +450,7 @@ export function useSplitWorkspaceScene({
       title: splitConversation.title,
       projectName: splitProject.name,
       project: splitProject,
-      toolsOpen: layout.activeTool !== null,
+      toolsOpen: layout.toolsVisible,
       onToggleTools: layout.toggleWorkspaceTools,
       terminalOpen: layout.terminalOpen,
       onToggleTerminal: layout.toggleTerminal,
@@ -465,7 +465,7 @@ export function useSplitWorkspaceScene({
       },
     };
   }, [
-    layout.activeTool,
+    layout.toolsVisible,
     layout.terminalOpen,
     layout.toggleTerminal,
     layout.toggleWorkspaceTools,

@@ -26,6 +26,8 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision } from "./interactions";
 import {
+  launchCredentialValues,
+  redactExactCredentials,
   sanitizeProviderActivityDetail,
   sanitizeProviderFailureSummary,
 } from "./activity-detail";
@@ -236,6 +238,7 @@ function startOpenCodeRun(
   let cancelRequested = false;
   let acceptingFollowUps = false;
   let terminalError: string | undefined;
+  let launchCredentials: string[] = [];
   let cancelOwnedRun: (force: boolean) => void = () => {};
   let activeV2Operations = 0;
   const usesV2PrimaryOperation = options.input.operation?.kind === "compact";
@@ -255,8 +258,8 @@ function startOpenCodeRun(
     runDeadlineTimer = undefined;
     eventInactivityTimer = undefined;
   };
-  const redactHostMcp = (value: string): string =>
-    hostTools?.redact(value) ?? value;
+  const redactDiagnostics = (value: string): string =>
+    redactExactCredentials(hostTools?.redact(value) ?? value, launchCredentials);
   const failDeadline = (message: string, terminalEvent: string): void => {
     if (cancelRequested || terminalError) return;
     terminalError = message;
@@ -281,7 +284,7 @@ function startOpenCodeRun(
     eventInactivityTimer.unref();
   };
   const failInteraction = (error: unknown): void => {
-    terminalError = redactHostMcp(
+    terminalError = redactDiagnostics(
       safeError(error, "OpenCode could not deliver an interactive response."),
     );
     failureState.terminal = openCodeRuntimeFailure(
@@ -383,10 +386,12 @@ function startOpenCodeRun(
     let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
+      const environment = ownedOpenCodeEnvironment(options.environment, credentials);
+      launchCredentials = launchCredentialValues(environment);
       const started = await startOwnedOpenCodeServer(
         options.executable,
         options.input.cwd,
-        ownedOpenCodeEnvironment(options.environment, credentials),
+        environment,
         serverOutput,
         terminateOwnedProcessTree,
         "OpenCode server process tree",
@@ -708,8 +713,8 @@ function startOpenCodeRun(
       if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
         cleanupConfirmed = false;
       }
-      const serverStopDetail = redactHostMcp(serverDiagnostic(serverOutput));
-      const rawError = redactHostMcp(terminalError ?? safeError(
+      const serverStopDetail = redactDiagnostics(serverDiagnostic(serverOutput));
+      const rawError = redactDiagnostics(terminalError ?? safeError(
         error,
         serverStopDetail,
       ));
@@ -738,7 +743,7 @@ function startOpenCodeRun(
       await hostTools?.cleanup(client);
     } catch (error) {
       cleanupConfirmed = false;
-      const rawCleanupError = redactHostMcp(safeError(
+      const rawCleanupError = redactDiagnostics(safeError(
         error,
         "OpenCode Inertia chat tools could not be cleaned up.",
       ));

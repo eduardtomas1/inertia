@@ -7,6 +7,7 @@ interface ElectronTestRuntimeShutdown {
   preparePrivilegedCleanup?: () => Promise<ElectronPrivilegedCleanupReceipt>;
   privilegedCleanupSnapshot?: () => ElectronPrivilegedCleanupReceipt & { owners?: unknown };
   finishPreparedQuit?: () => ElectronPrivilegedCleanupReceipt;
+  quit?: () => unknown;
 }
 
 export function formatElectronPrivilegedCleanupPhase(
@@ -67,17 +68,33 @@ export async function readElectronPrivilegedCleanupPhase(
 export async function finishElectronPreparedQuit(
   current: ElectronApplication | null,
 ): Promise<number | null> {
+  return await requestElectronQuit(current, "prepared");
+}
+
+export async function requestElectronApplicationQuit(
+  current: ElectronApplication,
+): Promise<number | null> {
+  return await requestElectronQuit(current, "application");
+}
+
+async function requestElectronQuit(
+  current: ElectronApplication | null,
+  mode: "prepared" | "application",
+): Promise<number | null> {
   if (!current) return null;
-  const receipt = await current.evaluate(({ BrowserWindow, app }) => {
+  return await current.evaluate(({ BrowserWindow, app }, quitMode) => {
     const runtime = Reflect.get(
       globalThis,
       "__inertiaTestRuntime",
     ) as ElectronTestRuntimeShutdown | undefined;
-    if (!runtime?.finishPreparedQuit) {
+    if (quitMode === "prepared" && !runtime?.finishPreparedQuit) {
       throw new Error("The test prepared-quit controller is unavailable.");
     }
-    // The prepared-quit controller still owns cleanup and final exit. Retain
-    // its outcome while observing the already-clean test exit below.
+    if (quitMode === "application" && !runtime?.quit) {
+      throw new Error("The test application-quit controller is unavailable.");
+    }
+    // Both paths retain their own cleanup and exit authority. The inspector
+    // is detached only when that path reaches process.exit after cleanup.
     const mark = (stage: string): void => {
       try { process.getBuiltinModule("node:fs").writeSync(2, `[Inertia test exit: ${stage}]\n`); } catch { /* advisory */ }
     };
@@ -97,8 +114,10 @@ export async function finishElectronPreparedQuit(
     try {
       app.prependOnceListener("quit", () => mark("app-quit-entered"));
       app.once("quit", () => mark("app-quit-tail-observed"));
-      app.once("browser-window-created", () => mark("window-created-after-cleanup"));
-      app.once("activate", () => mark("activated-after-cleanup"));
+      if (quitMode === "prepared") {
+        app.once("browser-window-created", () => mark("window-created-after-cleanup"));
+        app.once("activate", () => mark("activated-after-cleanup"));
+      }
     } catch { mark("quit-events-observer-unavailable"); }
     try {
       const exit = process.exit;
@@ -115,7 +134,10 @@ export async function finishElectronPreparedQuit(
         return result;
       };
     } catch { mark("process-exit-observer-unavailable"); }
-    return runtime.finishPreparedQuit();
-  });
-  return receipt.runtimePid;
+    if (quitMode === "application") {
+      runtime!.quit!();
+      return null;
+    }
+    return runtime!.finishPreparedQuit!().runtimePid;
+  }, mode);
 }

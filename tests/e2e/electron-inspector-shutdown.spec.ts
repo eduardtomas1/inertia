@@ -36,6 +36,35 @@ test("finishes a prepared quit with an attached main-process debugger", async ()
   }
 });
 
+test("restarts through application quit with an attached main-process debugger", async () => {
+  const fixture = await createAppFixture({ name: "inspector-restart", initialState: "conversation" });
+  const child = fixture.electronApp.process();
+  let debuggerSocket: WebSocket | undefined;
+  try {
+    const url = await fixture.electronApp.evaluate(() =>
+      process.getBuiltinModule("node:inspector").url());
+    expect(url).toBeTruthy();
+    debuggerSocket = new WebSocket(url!, { handshakeTimeout: 5_000, maxPayload: 64 * 1024 });
+    await once(debuggerSocket, "open");
+    const enabled = once(debuggerSocket, "message");
+    debuggerSocket.send(JSON.stringify({ id: 1, method: "Runtime.enable" }));
+    await enabled;
+    expect(debuggerSocket.readyState).toBe(WebSocket.OPEN);
+
+    const debuggerClosed = once(debuggerSocket, "close");
+    const { page } = await fixture.restart();
+    await debuggerClosed;
+    expect(child.exitCode).toBe(0);
+    expect(child.signalCode).toBeNull();
+    expect(debuggerSocket.readyState).toBe(WebSocket.CLOSED);
+    expect(fixture.electronApp.process().pid).not.toBe(child.pid);
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
+  } finally {
+    debuggerSocket?.terminate();
+    await fixture.close();
+  }
+});
+
 for (const activation of ["before-cleanup", "after-cleanup"] as const) {
   test(`rejects main-window recreation ${activation} starts`, async () => {
     test.skip(process.platform !== "darwin", "Exercises the macOS activation lifecycle.");

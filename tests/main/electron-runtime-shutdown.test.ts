@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, expect, it, vi } from "vitest";
-import { finishElectronPreparedQuit } from "../e2e/support/electron-runtime-shutdown";
+import { finishElectronPreparedQuit, requestElectronApplicationQuit } from "../e2e/support/electron-runtime-shutdown";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -18,14 +18,37 @@ function fixture(windows: unknown[], writeFails = false) {
   const finish = vi.fn(() => ({
     phase: "exit-requested", runtimePid: 434343, cleanupConfirmed: true, errorMessage: null,
   }));
-  vi.stubGlobal("__inertiaTestRuntime", { finishPreparedQuit: finish });
+  const quit = vi.fn();
+  vi.stubGlobal("__inertiaTestRuntime", { finishPreparedQuit: finish, quit });
   const app = new EventEmitter();
   const current = {
-    evaluate: async (operation: (electron: unknown) => unknown) =>
-      operation({ app, BrowserWindow: { getAllWindows: () => windows } }),
+    evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
+      operation({ app, BrowserWindow: { getAllWindows: () => windows } }, mode),
   } as unknown as ElectronApplication;
-  return { write, closeInspector, exit, exitFailure, finish, current, app };
+  return { write, closeInspector, exit, exitFailure, finish, quit, current, app };
 }
+
+it("keeps restart on application quit and detaches only at its final exit", async () => {
+  const f = fixture([]);
+  await expect(requestElectronApplicationQuit(f.current)).resolves.toBeNull();
+  expect(f.quit).toHaveBeenCalledOnce();
+  expect(f.finish).not.toHaveBeenCalled();
+  expect(f.closeInspector).not.toHaveBeenCalled();
+  expect(f.exit).not.toHaveBeenCalled();
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.closeInspector).toHaveBeenCalledOnce();
+  expect(f.exit).toHaveBeenCalledExactlyOnceWith(0);
+  expect(f.closeInspector.mock.invocationCallOrder[0]).toBeLessThan(f.exit.mock.invocationCallOrder[0]!);
+});
+
+it("does not detach or bypass an application quit that rejects cleanup", async () => {
+  const f = fixture([]);
+  f.quit.mockImplementation(() => { throw new Error("cleanup unconfirmed"); });
+  await expect(requestElectronApplicationQuit(f.current)).rejects.toThrow("cleanup unconfirmed");
+  expect(f.finish).not.toHaveBeenCalled();
+  expect(f.closeInspector).not.toHaveBeenCalled();
+  expect(f.exit).not.toHaveBeenCalled();
+});
 
 it.each([false, true])("forwards prepared exit and sole-window destruction unchanged (writer fails: %s)", async (writeFails) => {
   const destroy = vi.fn(function (this: unknown) { return this; });

@@ -8,6 +8,7 @@ interface LinuxShutdownNoticeOptions {
   showMessageBox(options: MessageBoxOptions): Promise<{ response: number }>;
   retryQuit(): void;
   focusWindow(): void;
+  canFocusWindow(): boolean;
   reportError(error: unknown): void;
 }
 
@@ -23,14 +24,17 @@ export class LinuxShutdownNotice {
     }
     if (this.pending) return this.pending;
     const pending = Promise.resolve().then(async () => {
+      const canFocusWindow = this.options.canFocusWindow();
       const result = await this.options.showMessageBox({
         type: "warning",
         title: "Inertia is still shutting down",
         message: `Inertia ${this.options.version} could not finish closing.`,
         detail: "The local service has not confirmed that all of its processes stopped. "
           + "Inertia is still running, even if its window is closed, and another version cannot open this workspace yet. "
-          + "Retry quit to check cleanup again, or show Inertia to view its status.",
-        buttons: ["Retry quit", "Show Inertia"],
+          + (canFocusWindow
+            ? "Retry quit to check cleanup again, or show Inertia to view its status."
+            : "Retry quit to check cleanup again."),
+        buttons: ["Retry quit", canFocusWindow ? "Show Inertia" : "Close"],
         defaultId: 1,
         cancelId: 1,
         noLink: true,
@@ -38,7 +42,7 @@ export class LinuxShutdownNotice {
       // A retry may immediately report a fresh failure; retire this notice first.
       if (this.pending === pending) this.pending = null;
       if (result.response === 0) this.options.retryQuit();
-      else this.options.focusWindow();
+      else if (canFocusWindow && this.options.canFocusWindow()) this.options.focusWindow();
     }).catch((error: unknown) => {
       this.options.reportError(error);
     }).finally(() => {
@@ -53,6 +57,7 @@ export function createLinuxLifecycleNotices(
   application: Pick<App, "getVersion" | "whenReady" | "quit">,
   nativeDialog: Pick<Dialog, "showMessageBox">,
   focusWindow: () => void,
+  canFocusWindow: () => boolean,
 ) {
   const notice = new LinuxShutdownNotice({
     platform: process.platform,
@@ -62,7 +67,7 @@ export function createLinuxLifecycleNotices(
       await application.whenReady();
       return await nativeDialog.showMessageBox(options);
     },
-    retryQuit: () => application.quit(), focusWindow,
+    retryQuit: () => application.quit(), focusWindow, canFocusWindow,
     reportError: (error) => console.error("Failed to show shutdown status", error),
   });
   return {

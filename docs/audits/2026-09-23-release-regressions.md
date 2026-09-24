@@ -1,10 +1,10 @@
 # Pre-release regression audit, 2026-09-23
 
-This pre-release audit repairs three defects: OpenCode
-startup diagnostics could expose launch credentials; goal workflow updates could
-steal focus and redirect budget typing; and split-pane tool buttons reported a
-closed panel while its empty launcher was open. All three have regression
-controls that failed before their corresponding production fixes.
+This pre-release audit repairs four defects: OpenCode startup diagnostics could
+expose launch credentials; goal workflow updates could steal focus and redirect
+budget typing; split-pane tool buttons reported a closed panel while its empty
+launcher was open; and activation could create a new main window after privileged
+shutdown cleanup. Each has a regression control that failed before its fix.
 No actual credential exposure was observed; all credential controls use synthetic
 values and local fixture processes.
 
@@ -12,7 +12,9 @@ values and local fixture processes.
 
 Release baseline: `v0.0.61`, `ad204b742f869ea7ea864909206421ba149ff564`.
 Audited main: `178940bbd95a660d8bbf12b755ecbd97022df973`.
-Audit branch: `codex/release-regression-audit`, based on that main commit.
+Audit branch: `codex/release-regression-audit`, originally based on that main
+commit and now including main `26d80b8aee023391516f770ba8a189e701c1ba4c`
+after PR #460.
 The release-to-main interval includes these ten merged changes:
 
 | PR | Area | Merge commit |
@@ -59,7 +61,8 @@ That change preserves blocked mutation authority, returns route-filtered saved
 state, and adds a response-only warning for blocked native refresh. Existing
 warnings survive and admitted refresh releases its reservation in `finally`.
 No integration finding or source overlap was found. Its implementation and
-validation remain owned by the coordinator; this branch does not contain it.
+validation remain owned by the coordinator. This branch subsequently integrated
+the merged change as recorded below.
 
 ## Confirmed repairs
 
@@ -306,3 +309,79 @@ The available native sample contains no stack, so that exit failure remains
 unexplained; neither these fixture additions nor the passing local scenarios
 are presented as its fix. The coordinator retains the exact-green-main merge
 requirement and monitors the resulting main after each authorized delivery.
+
+
+## Window creation during shutdown, 2026-09-24
+
+A deterministic real-Electron control confirmed a separate lifecycle defect:
+after the privileged cleanup receipt reported completion and confirmation,
+destroying the sole window and emitting macOS activation created another main
+window. The before-control recorded one new window after cleanup. There is no
+evidence that the original hosted exit stall actually took this activation path.
+
+Main-window creation now closes admission at the entry to privileged cleanup.
+The latch remains closed across unconfirmed cleanup retries. Existing creation
+coalescing retains its pending-first priority, retained windows can still be
+focused, and an already-started creation rechecks admission after asynchronous
+setup before constructing a window. Normal macOS close/reopen before cleanup
+remains available. Linux shutdown notices retain Retry quit; when no retained
+window exists, the second action is Close rather than an unavailable Show Inertia.
+The notice rechecks window availability after the user's choice.
+
+Native regression cases cover both activation after confirmed cleanup and
+activation immediately before cleanup begins, while asynchronous window setup
+is pending. A positive control covers ordinary macOS window reopening with the
+runtime still ready. Local focused checks passed 81 existing lifecycle/startup/
+install tests and 56 final creation/notice/diagnostic controls. The corrected six
+native scenarios passed in 6.8 seconds, including both real update-validator
+cases and shutdown with an attached debugger.
+
+The prepared-exit observer additionally records fixed markers at app quit entry,
+a later quit listener, and return from Electron's captured exit function, plus
+activation/window creation after cleanup. Electron's replacement for process.exit
+can return after scheduling native shutdown; none of these markers proves OS
+exit. A bounded native control distinguished normal exit from a deliberately
+blocked exit listener; the normal case exited in 131ms, while the blocked case
+was correctly rejected by the unchanged five-second bound. The existing native
+sampler completed within its unchanged two-second limit in that control. This
+validates the diagnostic, without identifying the historical hosted stall.
+
+Intermediate failures are preserved: the first quality run exceeded the existing
+index.ts line ceiling, resolved by extracting the existing creation coordination;
+and an initial positive native control expected the nonexistent healthy phase
+"running" instead of "ready". The corrected case passed. The source was frozen
+before the final complete verification recorded below.
+
+Final verification used Node 22.23.2 and frozen source hashes, checked before
+and after every phase. All gates passed:
+
+- Quality: migration, architecture, lint and all type checks.
+- Full unit/integration/DOM suite at CI concurrency: 9,947 tests plus seven child
+  controls, 146 skips, 926 passing files, 431.61s, two workers.
+- Fresh application build with unchanged bundle budgets.
+- Complete isolated native phase: 100 passed, three platform skips, 3.3 minutes.
+- Complete display-sensitive native phase: 76 passed, three platform skips,
+  10.2 minutes, including the full background-rendering measurement.
+- All four native recovery scenarios: passed in 44.6 seconds with one worker.
+
+All native phases used their original worker configuration, deadlines and zero
+retries. Prior portable coverage of 1,627 passing tests remains applicable to
+unchanged provider/portable inputs. Local native execution is macOS ARM64;
+Linux and Windows notice/platform behavior still requires exact-head hosted CI.
+The final logs use `/tmp/inertia-pr461-shutdown-final-` and the source manifest is
+`/tmp/inertia-pr461-shutdown-reviewed-source-manifest.json`.
+
+A separate bounded compilation-cache screening ran 40 short test files in
+uncached/cold/cold/uncached order, with 420 tests passing in each run. End-to-end
+times were 3.889s, 3.639s, 3.702s and 3.743s; each cached run started with its own
+empty directory. This small screening result does not establish a material
+whole-suite or hosted improvement. No compilation-cache setting was adopted,
+and no workflow change or broader repeat was made for this experiment.
+
+The preceding head's CI run `35915517053` hit macOS ARM64's 50-minute job cap after
+its unit, native and desktop benchmark phases reported passing. Five other native
+platforms and all static/shard gates passed. That cancelled job remains non-green.
+Neither this admission fix nor the local passes demonstrate a remedy for that
+runtime overrun or establish the original main exit-stall cause. Exact-head hosted
+checks and the existing merge conditions still apply. No assertions, cleanup
+authority, deadlines, sample counts, worker policy or budgets were relaxed.

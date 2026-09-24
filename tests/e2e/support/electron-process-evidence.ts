@@ -9,6 +9,8 @@ type ProcessStage = "launcher-exit" | "launcher-close" | "main-window-page-close
   | "directory-remove-started" | "directory-remove-fulfilled"
   | "directory-remove-rejected" | "directory-remove-timed-out"
   | "window-destroy-entered" | "window-destroy-returned" | "process-exit-called"
+  | "app-quit-entered" | "app-quit-tail-observed" | "native-exit-returned"
+  | "window-created-after-cleanup" | "activated-after-cleanup" | "quit-events-observer-unavailable"
   | "window-identity-unavailable" | "window-observer-unavailable"
   | "process-exit-observer-unavailable" | "debugger-disconnect-wait"
   | "main-pid-advisory-present" | "main-pid-advisory-absent" | "main-pid-advisory-unknown";
@@ -58,6 +60,12 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
     ["[Inertia test exit: window-destroy-entered]", "window-destroy-entered"],
     ["[Inertia test exit: window-destroy-returned]", "window-destroy-returned"],
     ["[Inertia test exit: process-exit-called]", "process-exit-called"],
+    ["[Inertia test exit: app-quit-entered]", "app-quit-entered"],
+    ["[Inertia test exit: app-quit-tail-observed]", "app-quit-tail-observed"],
+    ["[Inertia test exit: native-exit-returned]", "native-exit-returned"],
+    ["[Inertia test exit: window-created-after-cleanup]", "window-created-after-cleanup"],
+    ["[Inertia test exit: activated-after-cleanup]", "activated-after-cleanup"],
+    ["[Inertia test exit: quit-events-observer-unavailable]", "quit-events-observer-unavailable"],
     ["[Inertia test exit: window-identity-unavailable]", "window-identity-unavailable"],
     ["[Inertia test exit: window-observer-unavailable]", "window-observer-unavailable"],
     ["[Inertia test exit: process-exit-observer-unavailable]", "process-exit-observer-unavailable"],

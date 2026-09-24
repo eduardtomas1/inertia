@@ -64,6 +64,7 @@ import {
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import { MainWindowCreation } from "./main-window-creation.js";
 import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
 import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
 import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
@@ -181,7 +182,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 let mainWindow: BrowserWindow | null = null;
 let mascotMain: MascotMain | null = null;
-let mainWindowCreation: Promise<void> | null = null;
+const mainWindowCreation = new MainWindowCreation();
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
@@ -194,7 +195,8 @@ let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let privilegedCleanupOwners: RetryablePrivilegedCleanup | null = null;
-const linuxLifecycleNotices = createLinuxLifecycleNotices(app, dialog, focusMainWindow);
+const linuxLifecycleNotices = createLinuxLifecycleNotices(app, dialog, focusMainWindow,
+  () => mainWindow !== null && !mainWindow.isDestroyed());
 let packageSmokeFilePath: string | null = null;
 let packageSmokeOwnerToken: string | null = null;
 const appHealthRegistry = new InertiaHealthRegistry();
@@ -751,6 +753,8 @@ async function createMainWindow(): Promise<void> {
   });
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
   await registerLinuxDesktopIcon(app, releaseChannel, iconPath);
+  // Cleanup may begin while an already-admitted creation is awaiting setup.
+  if (!mainWindowCreation.allowsCreation()) return;
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
   const backgroundColor = resolveWindowBackground(
@@ -863,17 +867,11 @@ async function createMainWindow(): Promise<void> {
 }
 
 function createWindow(): Promise<void> {
-  if (mainWindowCreation) return mainWindowCreation;
+  const pending = mainWindowCreation.current(); if (pending) return pending;
   if (mainWindow && !mainWindow.isDestroyed()) {
     return waitForThreadNotificationWindowLoad(mainWindow);
   }
-  const creation = createMainWindow();
-  mainWindowCreation = creation;
-  const clearCreation = (): void => {
-    if (mainWindowCreation === creation) mainWindowCreation = null;
-  };
-  void creation.then(clearCreation, clearCreation);
-  return creation;
+  return mainWindowCreation.run(createMainWindow);
 }
 
 function focusMainWindow(): void {
@@ -894,6 +892,7 @@ function finishQuitAfterCleanup(): void { finishPrivilegedExit({
   }); }
 let snapshotService: SnapshotService | null = null;
 function runPrivilegedCleanup(): Promise<boolean> {
+  mainWindowCreation.beginShutdown();
   if (privilegedCleanup) return privilegedCleanup;
   if (!privilegedCleanupOwners) {
     systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);

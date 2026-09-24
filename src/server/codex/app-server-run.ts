@@ -45,6 +45,8 @@ import type {
   CodexAppServerRun,
 } from "./types";
 import {
+  launchCredentialValues,
+  redactExactCredentials,
   sanitizeProviderActivityDetail,
 } from "../provider/activity-detail";
 import type {
@@ -212,8 +214,10 @@ export function startCodexAppServerRun(
       lastError,
       diagnostic.toString(),
     ].filter((value): value is string => Boolean(value));
+    // A custom backend token is materialized in the launch environment; the
+    // pattern scrubber alone misses JSON-shaped echoes of it.
     const technicalDetail = sanitizeProviderActivityDetail(
-      details.join("\n"),
+      redactExactCredentials(details.join("\n"), launchCredentialValues(options.environment)),
       { workspaceRoot: options.cwd },
     );
     return {

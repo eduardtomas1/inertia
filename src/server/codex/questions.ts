@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import { objectValue, type JsonObject } from "./protocol";
 import type { AgentInputQuestion, AgentInputRequest } from "../provider/interactions";
 
-const MAX_INPUT_QUESTIONS = 3;
-const MAX_INPUT_OPTIONS = 3;
+// Aligned with the Claude route (MAX_AGENT_INPUT_QUESTIONS and four options),
+// so the same request shape is not a fatal protocol error on one provider.
+const MAX_INPUT_QUESTIONS = 4;
+const MAX_INPUT_OPTIONS = 4;
 const MAX_QUESTION_ID_CHARS = 120;
 const MAX_QUESTION_HEADER_CHARS = 120;
 const MAX_QUESTION_TEXT_CHARS = 1_000;

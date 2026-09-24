@@ -1,4 +1,5 @@
 import { AcpSecretRedactor } from "./acp-redaction";
+import { acpStopReasonMessage } from "./acp-stop-reasons";
 import { acpPermissionDetail } from "./acp-permission-detail";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -632,10 +633,11 @@ function startCursorRun(
       ? finish("cancelled")
       : response.stopReason !== "end_turn"
         ? (() => {
-            const message = `Cursor stopped with reason: ${response.stopReason}.`;
+            const message = acpStopReasonMessage("Cursor", response.stopReason);
             return finish("failed", message, {
               reason: "provider-error",
               message,
+              technicalDetail: `Stop reason: ${response.stopReason}`,
               phase: "turn",
               terminalEvent: `session/prompt:${response.stopReason}`,
             });

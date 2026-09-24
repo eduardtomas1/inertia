@@ -424,7 +424,8 @@ if (message.method === "turn/start") {
         threadId,
         turnId,
         itemId: "input-item",
-        questions: Array.from({ length: 4 }, (_, index) => ({
+        // One more question than the shared MAX_AGENT_INPUT_QUESTIONS allows.
+        questions: Array.from({ length: 5 }, (_, index) => ({
           id: "question-" + index,
           question: "Prompt " + index,
           options: [{ id: "safe", label: "Safe" }],

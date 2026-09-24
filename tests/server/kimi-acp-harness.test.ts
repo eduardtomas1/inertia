@@ -1005,7 +1005,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       status: "failed",
       failure: {
         reason: "provider-error",
-        message: "Kimi Code stopped with reason: max_tokens.",
+        message: "Kimi Code hit its output token limit. Ask it to continue.",
         technicalDetail: "Stop reason: max_tokens",
         phase: "turn",
         terminalEvent: "session/prompt:max_tokens",

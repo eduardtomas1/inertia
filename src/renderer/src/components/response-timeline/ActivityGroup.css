@@ -178,7 +178,8 @@
     opacity: 0;
   }
 
-  .turn-activity-group-row > div > .agent-activity {
+  /* Restored completed history must not wait for a first paint to settle. */
+  .turn-activity-group-row > div > .agent-activity.is-running {
     transform: translateY(5px);
   }
 }

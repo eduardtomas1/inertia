@@ -109,11 +109,15 @@ export async function expectPaneComposerClearOfTerminalHandle(pane: Locator): Pr
   await expect(handle).toBeVisible();
   await expect.poll(() => centreHitsItself(attach)).toBe(true);
   await expect.poll(() => centreHitsItself(handle)).toBe(true);
-  const handleTop = await handle.evaluate((element) => element.getBoundingClientRect().top);
-  const lowestControl = await pane.locator(".composer-region").evaluate((region) =>
-    Math.max(...Array.from(region.querySelectorAll("button, textarea, input, [role='button']"))
-      .map((control) => control.getBoundingClientRect())
-      .filter((bounds) => bounds.width > 0 && bounds.height > 0)
-      .map((bounds) => bounds.bottom)));
-  expect(lowestControl).toBeLessThanOrEqual(handleTop);
+  // Zoom and scale changes settle over several frames; keep retrying the
+  // geometry read instead of trusting a single sample taken right after them.
+  await expect.poll(async () => {
+    const handleTop = await handle.evaluate((element) => element.getBoundingClientRect().top);
+    const lowestControl = await pane.locator(".composer-region").evaluate((region) =>
+      Math.max(...Array.from(region.querySelectorAll("button, textarea, input, [role='button']"))
+        .map((control) => control.getBoundingClientRect())
+        .filter((bounds) => bounds.width > 0 && bounds.height > 0)
+        .map((bounds) => bounds.bottom)));
+    return lowestControl - handleTop;
+  }).toBeLessThanOrEqual(0);
 }

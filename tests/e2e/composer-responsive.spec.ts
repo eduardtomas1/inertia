@@ -343,6 +343,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
             ? { width: bounds.width, height: bounds.height }
             : null;
         }),
+        iconDisplays: controls.map((control) => {
+          const icon = control.querySelector<SVGElement>(".composer-setting-icon");
+          return icon ? getComputedStyle(icon).display : null;
+        }),
       };
     });
     expect(settingGeometry.borderLeft).toBe("0px");
@@ -352,7 +356,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
     expect(settingGeometry.iconSizes[0]).toEqual({ width: 13, height: 13 });
-    expect(settingGeometry.iconSizes.slice(1)).toEqual(settingGeometry.iconSizes.slice(1).map(() => ({ width: 0, height: 0 })));
+    // Only the family's first icon is shown; the rest are hidden by rule, not
+    // merely collapsed to an empty box.
+    expect(settingGeometry.iconDisplays[0]).not.toBe("none");
+    expect(settingGeometry.iconDisplays.slice(1)).toEqual(settingGeometry.iconDisplays.slice(1).map(() => "none"));
     const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(

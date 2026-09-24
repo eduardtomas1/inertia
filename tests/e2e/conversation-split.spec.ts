@@ -326,11 +326,15 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     }, zoom);
   };
   const originalScale = await page.evaluate(() => document.documentElement.dataset.interfaceScale ?? "default");
-  for (const [height, zoom, scale] of [[600, 1.25, "large"], [600, 1, "default"], [760, 1.25, "large"]] as const) {
-    await setUiScale(height, zoom, scale);
-    for (const pane of [primary, secondary]) await expectPaneComposerClearOfTerminalHandle(pane);
+  try {
+    for (const [height, zoom, scale] of [[600, 1.25, "large"], [600, 1, "default"], [760, 1.25, "large"]] as const) {
+      await setUiScale(height, zoom, scale);
+      for (const pane of [primary, secondary]) await expectPaneComposerClearOfTerminalHandle(pane);
+    }
+  } finally {
+    // A failed geometry check must not leave zoom 1.25 for the rest of this test.
+    await setUiScale(920, 1, originalScale);
   }
-  await setUiScale(920, 1, originalScale);
 
   const wideScreenshot = testInfo.outputPath(
     "cross-project-split-independent-tools.png",

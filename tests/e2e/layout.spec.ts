@@ -2,7 +2,7 @@
 import { expect, test } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { openTerminalDock, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
+import { ensureWorkspaceTools, openTerminalDock, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
 
 let app!: AppFixture;
@@ -23,13 +23,6 @@ test.afterAll(async () => {
   await app.close();
 });
 
-async function ensureWorkspaceTools(): Promise<void> {
-  const panel = page.locator(".workspace-panel");
-  if (await panel.isVisible().catch(() => false)) return;
-  await rightPanelToggle(page).click();
-  await expect(panel).toBeVisible();
-}
-
 async function panelGeometry(): Promise<{
   frame: DOMRectLike;
   header: DOMRectLike;
@@ -40,10 +33,13 @@ async function panelGeometry(): Promise<{
   return await page.evaluate(async () => {
     // Sheet entrance motion translates the panel beyond its final frame bounds.
     // Measure after that finite motion finishes; keep the containment checks strict.
+    // An occluded window can stall the document timeline; never wait longer
+    // than the entrance motion itself before measuring.
     const panelElement = document.querySelector(".workspace-panel");
-    await Promise.all((panelElement?.getAnimations() ?? [])
+    const settled = Promise.all((panelElement?.getAnimations() ?? [])
       .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
       .map((animation) => animation.finished.catch(() => undefined)));
+    await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 2_000))]);
     const rect = (selector: string) => {
       const bounds = document.querySelector(selector)?.getBoundingClientRect();
       return bounds
@@ -91,7 +87,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
       { width: 760, height: 600, label: "compact", sheet: false },
     ]) {
       await resizeWindow(size.width, size.height);
-      await ensureWorkspaceTools();
+      await ensureWorkspaceTools(page);
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
       await selectWorkspaceTool(panel, "Changes");
       await expect(page.getByRole("tab", { name: /^Changes/u })).toHaveAttribute("aria-selected", "true");
@@ -159,7 +155,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
 
 test("resizes and persists the internal workspace panes", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await openTerminalDock(page);
 
   const sidebarHandle = page.getByRole("separator", { name: "Resize project navigation" });
@@ -196,7 +192,7 @@ test("resizes and persists the internal workspace panes", async () => {
 
 test("collapses and restores both workspace sides without losing layout", async () => {
   await resizeWindow(1440, 920);
-  await ensureWorkspaceTools();
+  await ensureWorkspaceTools(page);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   const navigationToggle = page.getByRole("button", { name: "Toggle project navigation" });
   await navigationToggle.click();
@@ -251,7 +247,7 @@ for (const size of [
 ]) {
   test(`keeps the ${size.label} layout reachable without overlap`, async () => {
     await resizeWindow(size.width, size.height);
-    await ensureWorkspaceTools();
+    await ensureWorkspaceTools(page);
     await expectNoViewportOverflow();
     await expect(page.locator(".workspace-header")).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();

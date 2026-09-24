@@ -66,7 +66,7 @@ test("keeps the right panel available while an isolated draft worktree materiali
       name: "Open a surface",
     });
     await expect(launcher).toBeVisible();
-    const terminalToggle = app.page.locator("[data-panel-layout-controls] .corner-toggle").first();
+    const terminalToggle = app.page.getByRole("button", { name: /^Toggle terminal/u });
     await expect(terminalToggle).toBeDisabled();
     await expect(terminalToggle).toHaveAttribute("title", /available after the first message creates this isolated worktree/u);
     for (const surface of ["Changes", "Files", "Browser"]) {

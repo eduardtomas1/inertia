@@ -25,6 +25,7 @@ import {
   waitForRuntimeProcessExit,
 } from "../e2e/support/electron-app-lifecycle";
 import {
+  ensureWorkspaceTools,
   openTerminalDock,
   rightPanelToggle,
   selectWorkspaceTool,
@@ -1607,14 +1608,6 @@ async function rendererMemorySample(
   }, { timeout: MEMORY_SAMPLE_TIMEOUT_MS });
 }
 
-async function openWorkspaceTools(page: Page): Promise<void> {
-  if (await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    return;
-  }
-  await rightPanelToggle(page).click();
-  await page.locator(".workspace-panel").waitFor();
-}
-
 /** Closes the docked terminal's last session, which also hides the dock. */
 async function closeDockedTerminal(page: Page): Promise<void> {
   const dock = await openTerminalDock(page);
@@ -1644,7 +1637,7 @@ async function closeSplitChat(page: Page): Promise<void> {
 }
 
 async function openAndCloseToolCycle(page: Page, electronApp: ElectronApplication): Promise<void> {
-  await openWorkspaceTools(page);
+  await ensureWorkspaceTools(page);
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
   await selectWorkspaceTool(tools, "Files");
   await tools.getByRole("tree", { name: "Files" }).waitFor();

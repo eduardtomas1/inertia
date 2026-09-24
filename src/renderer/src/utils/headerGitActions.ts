@@ -25,6 +25,13 @@ function pullRequestUnavailableDetail(
   return "Pull request creation is unavailable for this checkout.";
 }
 
+/** The remote half of the push preconditions, shared with the header quick action. */
+export function pushRemoteConfigured(status: GitStatusSnapshot): boolean {
+  return status.hasRemote
+    && Boolean(status.pullRequest?.remoteName)
+    && status.pullRequest?.unavailableReason !== "missing-remote";
+}
+
 export function headerGitActions(
   status: GitStatusSnapshot | null,
   busy = false,
@@ -41,9 +48,7 @@ export function headerGitActions(
     && !incomplete
     && !diverged;
   const canPush = Boolean(status.branch)
-    && status.hasRemote
-    && Boolean(status.pullRequest?.remoteName)
-    && status.pullRequest?.unavailableReason !== "missing-remote"
+    && pushRemoteConfigured(status)
     && !incomplete
     && status.behind === 0
     && (status.ahead > 0 || !status.upstream);

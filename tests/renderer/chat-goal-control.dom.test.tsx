@@ -204,6 +204,58 @@ describe("ChatGoalControl", () => {
     expect(opener).toHaveFocus();
   });
 
+  it("keeps typing in the composer when the opening target becomes enabled later", () => {
+    const flushFrame = controlAnimationFrames();
+    const state = workflow(nativeCapability);
+    const disclosure = openProps();
+    const content = (open: boolean, busy: boolean) => <>
+      <textarea aria-label="Composer" />
+      <ChatGoalControl {...props(state, { busy })} {...disclosure} open={open} />
+    </>;
+    // The composer already has focus when the goal surface opens over it.
+    const view = render(content(false, true));
+    const composer = screen.getByRole("textbox", { name: "Composer" });
+    composer.focus();
+    view.rerender(content(true, true));
+    flushFrame();
+    fireEvent.keyDown(composer, { key: "a" });
+    view.rerender(content(true, false));
+    flushFrame();
+    expect(composer).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Objective" })).not.toHaveFocus();
+  });
+
+  it("returns focus to the goal actions after a status action replaces the focused button", async () => {
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    const disclosure = openProps();
+    const active = goal("codex-native", "Ship the reliable goal flow");
+    const view = render(<ChatGoalControl {...props(workflow(nativeCapability, [active]), { onSetGoal })} {...disclosure} />);
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    await user.click(within(surface).getByRole("button", { name: "Pause" }));
+    expect(onSetGoal).toHaveBeenCalledWith({ source: "codex-native", status: "paused" });
+    const paused = goal("codex-native", "Ship the reliable goal flow", "paused");
+    view.rerender(<ChatGoalControl {...props(workflow(nativeCapability, [paused]), { onSetGoal })} {...disclosure} />);
+    expect(within(surface).getByRole("button", { name: "Mark active" })).toHaveFocus();
+  });
+
+  it("does not take focus when the goal status changes without a local action", () => {
+    const disclosure = openProps();
+    const active = goal("codex-native", "Ship the reliable goal flow");
+    const view = render(<>
+      <textarea aria-label="Composer" />
+      <ChatGoalControl {...props(workflow(nativeCapability, [active]))} {...disclosure} />
+    </>);
+    const composer = screen.getByRole("textbox", { name: "Composer" });
+    composer.focus();
+    const paused = goal("codex-native", "Ship the reliable goal flow", "paused");
+    view.rerender(<>
+      <textarea aria-label="Composer" />
+      <ChatGoalControl {...props(workflow(nativeCapability, [paused]))} {...disclosure} />
+    </>);
+    expect(composer).toHaveFocus();
+  });
+
   it("cancels a closed opening and rearms focus only on the next open", () => {
     const flushFrame = controlAnimationFrames();
     const state = workflow(nativeCapability);

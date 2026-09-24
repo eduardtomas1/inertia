@@ -12,7 +12,7 @@ export const loadProjectColorContrast = createSurfaceLoader(() => import("@share
 const customTints = new Map<string, ProjectColorTints>();
 const listeners = new Set<() => void>();
 let revision = 0;
-let contrastUnavailable = false;
+let contrastLoad: Promise<void> | null = null;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -37,7 +37,10 @@ export function projectColorTints(color: ProjectColor | null | undefined): Proje
   if (cached) return cached;
   const contrast = loadProjectColorContrast.peek();
   if (!contrast) {
-    if (!contrastUnavailable) void loadProjectColorContrast().then(publishLoaded, () => { contrastUnavailable = true; });
+    // One load at a time; a rejected chunk load is retried by the next request
+    // instead of leaving custom colours untinted for the rest of the session.
+    contrastLoad ??= loadProjectColorContrast().then(publishLoaded, () => undefined)
+      .finally(() => { contrastLoad = null; });
     return null;
   }
   const tints = { light: contrast.adaptProjectColor(value, "light"), dark: contrast.adaptProjectColor(value, "dark") };

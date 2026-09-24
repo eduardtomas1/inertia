@@ -2,6 +2,7 @@ import type { GitStatusSnapshot } from "@shared/contracts";
 
 import {
   headerGitActions,
+  pushRemoteConfigured,
   type HeaderGitAction,
   type HeaderGitActionId,
 } from "./headerGitActions";
@@ -27,12 +28,6 @@ const DEFAULT_BRANCH_NAMES = new Set(["main", "master", "trunk", "develop", "def
 
 export function isDefaultBranchName(branch: string | null): boolean {
   return branch !== null && DEFAULT_BRANCH_NAMES.has(branch);
-}
-
-function hasPrimaryRemote(status: GitStatusSnapshot): boolean {
-  return status.hasRemote
-    && Boolean(status.pullRequest?.remoteName)
-    && status.pullRequest?.unavailableReason !== "missing-remote";
 }
 
 function actionDetail(
@@ -98,7 +93,7 @@ export function resolveQuickAction(
   }
 
   if (!hasUpstream) {
-    if (!hasPrimaryRemote(status)) {
+    if (!pushRemoteConfigured(status)) {
       return {
         label: "Push",
         disabled: true,
@@ -123,7 +118,7 @@ export function resolveQuickAction(
   }
 
   if (isAhead) {
-    if (!hasPrimaryRemote(status)) {
+    if (!pushRemoteConfigured(status)) {
       return {
         label: "Push",
         disabled: true,

@@ -50,9 +50,12 @@ const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
 export function RightPanelLauncher({
   actions,
   onOpen,
+  active = true,
 }: {
   actions: readonly SurfaceAction[];
   onOpen: (surface: WorkspacePanelTab) => void;
+  /** False while the host panel is hidden; the shortcuts then stay disarmed. */
+  active?: boolean;
 }): React.JSX.Element {
   const [highlight, setHighlight] = useState(-1);
   const availableActions = actions.filter((action) => action.available);
@@ -66,6 +69,7 @@ export function RightPanelLauncher({
     onOpenRef.current = onOpen;
   });
   useEffect(() => {
+    if (!active) return;
     const handler = (event: KeyboardEvent): void => {
       const action = surfaceShortcutActionForKey(shortcutActionsRef.current, event);
       if (!action) return;
@@ -78,7 +82,7 @@ export function RightPanelLauncher({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  }, [active]);
   const focusOnMount = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const active = document.activeElement;
@@ -156,7 +160,6 @@ export function RightPanelLauncher({
           <div
             key={action.surface}
             className="is-unavailable"
-            tabIndex={0}
             aria-disabled="true"
             title={action.reason}
           >

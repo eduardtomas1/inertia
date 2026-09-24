@@ -243,6 +243,39 @@ describe("workspace startup surface", () => {
     expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
   });
 
+  it("returns to the inline panel once the sidebar can yield instead of staying a sheet", async () => {
+    // A wide persisted sidebar: in sheet mode it keeps 420px, which leaves the
+    // body under the inline threshold even though the inline layout would
+    // clamp the sidebar to 308px at a 1000px shell and fit the panel.
+    window.localStorage.setItem("inertia:layout:sidebar-width:v1", "420");
+    render(<LayoutHarness surface="summary" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("true");
+    const shell = screen.getByTestId("app-shell-target");
+    const body = screen.getByTestId("workspace-body-target");
+    await waitFor(() =>
+      expect(resizeObservers.some(({ targets }) => targets.has(body))).toBe(true));
+    const shellObserver = resizeObservers.find(({ targets }) => targets.has(shell))!;
+    const bodyObserver = resizeObservers.find(({ targets }) => targets.has(body))!;
+
+    // Narrow window: the sidebar wins, the panel becomes a sheet.
+    act(() => shellObserver.emit(shell, 890, 800));
+    act(() => bodyObserver.emit(body, 445, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("sheet");
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("420");
+
+    // The window grows to 1000px while the sheet still holds the 420px sidebar,
+    // so the measured body is only 573px. The inline layout would give 685px.
+    act(() => shellObserver.emit(shell, 1000, 800));
+    act(() => bodyObserver.emit(body, 573, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+    expect(screen.getByLabelText("Sidebar maximum")).toHaveTextContent("308");
+
+    // And the decision holds once the body is measured with the yielded sidebar.
+    act(() => bodyObserver.emit(body, 685, 800));
+    expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+  });
+
   it("keeps open and selected panel state scoped to each task", () => {
     const view = render(
       <LayoutHarness surface="summary" workspaceId="conversation-a" />,

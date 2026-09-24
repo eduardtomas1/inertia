@@ -1,6 +1,9 @@
 import { createOrbLoop, type OrbLoop, type OrbLoopEnvironment } from "./orbLoop";
 
-const THEME_ATTRIBUTES = ["data-theme", "data-color-theme", "style", "class"];
+// Theme changes land on the data attributes and inline color-scheme that
+// useTheme writes. The class list only carries transient resize markers, so
+// watching it would recolour every orb twice per pane drag.
+const THEME_ATTRIBUTES = ["data-theme", "data-color-theme", "style"];
 
 let colorProbe: CanvasRenderingContext2D | null | undefined;
 

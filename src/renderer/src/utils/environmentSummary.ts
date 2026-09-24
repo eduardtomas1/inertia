@@ -328,15 +328,19 @@ export const ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT = 3;
 export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = 60;
 
 // Collecting the whole gallery costs a scan of the transcript, and the scene
-// model rebuilds for reasons unrelated to messages. One cached entry keyed on
-// the message list keeps that scan — and the array identity — stable.
-let cachedAttachmentMessages: readonly ChatMessage[] | null = null;
-let cachedAttachments: EnvironmentSummarySnapshot["attachments"] = [];
+// model rebuilds for reasons unrelated to messages. The result is memoized per
+// message list, so the primary scene and every split pane keep their own
+// stable array identity and nothing outlives the list it was computed from.
+const attachmentGalleries = new WeakMap<
+  readonly ChatMessage[],
+  EnvironmentSummarySnapshot["attachments"]
+>();
 
 function recentAttachments(
   messages: readonly ChatMessage[],
 ): EnvironmentSummarySnapshot["attachments"] {
-  if (messages === cachedAttachmentMessages) return cachedAttachments;
+  const cached = attachmentGalleries.get(messages);
+  if (cached) return cached;
   const seen = new Set<string>();
   const attachments: EnvironmentSummarySnapshot["attachments"] = [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -357,8 +361,7 @@ function recentAttachments(
     }
     if (attachments.length === ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT) break;
   }
-  cachedAttachmentMessages = messages;
-  cachedAttachments = attachments;
+  attachmentGalleries.set(messages, attachments);
   return attachments;
 }
 

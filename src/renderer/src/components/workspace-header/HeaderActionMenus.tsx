@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Check,
   Copy,
@@ -18,6 +18,8 @@ import {
   workspaceRunStatusLabel,
   type WorkspaceRunsModel,
 } from "../../utils/workspaceRuns";
+
+const COPY_FEEDBACK_MS = 1_500;
 
 export type HeaderMenuPresentation = "toolbar" | "menu";
 
@@ -214,6 +216,11 @@ export function OpenInMenuItems({
   onOpen: (target: OpenInTarget) => void;
 }): React.JSX.Element {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (copyState === "idle") return;
+    const timer = window.setTimeout(() => setCopyState("idle"), COPY_FEEDBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
   const itemClass = presentation === "menu" ? "header-menu-item" : "header-action-item";
   const copyPath = async (): Promise<void> => {
     if (!checkoutPath) return;

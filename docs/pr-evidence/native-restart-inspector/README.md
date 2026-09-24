@@ -118,6 +118,40 @@ attempt evidence on failure, preserving it before directory removal. This adds
 no retry or shutdown intervention. Command, process settlement, assertions and
 the 15-second outer deadline are unchanged. The Intel cause remains unproven.
 
+## Keep background-history traffic on its native socket
+
+CI `36033359551` on `b7ea0636` passed both Linux and Windows Electron
+architectures, macOS ARM64 Electron, all package/unit jobs and static gates.
+Intel Electron alone failed the two 128-turn background-motion cases before
+sampling: the title was visible, but the feed did not appear within the existing
+15-second assertion deadline. The error contexts show “Loading conversation”;
+that label can represent detail loading or lazy timeline loading. They do not
+distinguish the two.
+
+The fixture routed every server message through Playwright solely to replace a
+small model catalog. Eight forwarded-message calls in the retained test traces
+remained pending until teardown; their completion on close does not establish
+renderer delivery. A local observation measured the history reply at 10.26 MB.
+Original local and six-times CPU-throttled controls passed, so they did not
+reproduce the exact hosted stall.
+
+The fixture now saves the same catalog through the existing provider metadata
+cache before seeding history and launching Electron. Providers remain disabled;
+no provider process, discovery or quota refresh is introduced. The native
+runtime WebSocket carries history without the test-driver round trip. Model ID,
+labels, high/ultra options and default reasoning remain identical. Existing
+cache hydration adds its normal `fastMode: null` and truthful cached metadata
+state; this does not change the selected provider-default reasoning values.
+Every history, mounted-row, motion, idle, sample and deadline assertion remains.
+
+A balanced A/B/B/A local hydration control at six-times renderer CPU throttling
+measured the old fixture at 2,697/2,608 ms and cached fixture at 1,157/1,155 ms.
+Both produced the same 128-turn feed, seven mounted rows, Maximum reasoning and
+zero renderer errors. Explicit Playwright forwarding fell from 10,292,162 bytes
+across eight frames to zero. This demonstrates an equivalent-output cost
+reduction and removes the test-only forwarding path seen pending in the trace;
+it does not establish the hosted stall's underlying browser cause.
+
 ## Validation
 
 Earlier restart correction, unchanged by the follow-up:
@@ -178,6 +212,19 @@ Current native-rendering and Git-timeout follow-up:
 - Final frozen Node 22.23.2 quality and full suite passed: 9,994 tests plus seven
   child controls, 146 skips, 932 passed files, 449.32 seconds at the original two
   workers. Fresh build and unchanged bundle budgets passed.
+
+Current background fixture validation:
+
+- Independent exact source review passed. All three original scenarios, seed
+  counts, assertions, five-second motion samples and deadlines are unchanged.
+- Final quality checks passed. All three complete background-motion scenarios
+  passed on macOS ARM64 and Linux ARM64, 3.0 minutes per platform, with one
+  worker and zero retries. This includes the mature profile and original motion
+  samples. Hosted Intel and Windows validation of this final fixture remains
+  required.
+- Product, unit-test and build inputs are unchanged from the preceding frozen
+  9,994-test plus seven-child-control/full-build validation; those results remain
+  applicable and were not repeated for this E2E-only change.
 
 ## Other preserved failures and limits
 

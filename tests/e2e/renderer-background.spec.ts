@@ -3,6 +3,7 @@ import { expect, test, type ElectronApplication, type Page, type TestInfo } from
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
+import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
 import { seedBackgroundHistoryProfile } from "../helpers/renderer-background-history";
@@ -132,6 +133,26 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
     name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const startedAt = performance.now();
+      const metadataStore = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+      const cachedAt = new Date().toISOString();
+      try {
+        metadataStore.saveProviderMetadata({
+          scope: providerNativeMetadataScope("codex"),
+          models: [{
+            id: "background-model", label: "Background model", description: "Renderer motion fixture",
+            isDefault: true, inputModalities: ["text"],
+            reasoningOptions: [
+              { value: "high", label: "High", description: "High reasoning" },
+              { value: "ultra", label: "Maximum", description: "Maximum reasoning" },
+            ],
+            defaultReasoningEffort: "high",
+          }],
+          modelsUpdatedAt: cachedAt, modelsLastAttemptedAt: cachedAt,
+          modelsProvenance: "provider", modelsStale: false,
+          rateLimits: [], rateLimitsUpdatedAt: null, rateLimitsLastAttemptedAt: null,
+          rateLimitsProvenance: null, rateLimitsStale: false,
+        });
+      } finally { metadataStore.close(); }
       const seeded = await test.step("Seed the complete background history profile", () =>
         seedBackgroundHistoryProfile(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, turns, mature));
       seedDurationMs = performance.now() - startedAt;
@@ -185,28 +206,8 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
         else throw new Error("The background fixture expects function interval callbacks.");
       }, delay) });
     });
-    // This fixture measures renderer motion, not provider discovery. Project a
-    // fixed catalog into every snapshot so cold control-process discovery cannot
-    // remove the selected maximum while idle/focus measurements are running.
-    await page.routeWebSocket(/ws:\/\/127\.0\.0\.1:/u, (socket) => {
-      socket.connectToServer().onMessage((message) => {
-        const frame = JSON.parse(String(message)) as ServerEvent;
-        const event = frame.type === "runtime.event" ? frame.event : frame;
-        if (event.type === "server.welcome" || event.type === "snapshot.updated") {
-          const provider = event.snapshot.providers.find(({ id }) => id === "codex");
-          if (provider) provider.models = [{
-            id: "background-model", label: "Background model", description: "Renderer motion fixture",
-            isDefault: true, inputModalities: ["text"],
-            reasoningOptions: [
-              { value: "high", label: "High", description: "High reasoning" },
-              { value: "ultra", label: "Maximum", description: "Maximum reasoning" },
-            ],
-            defaultReasoningEffort: "high",
-          }];
-        }
-        socket.send(JSON.stringify(frame));
-      });
-    });
+    // The persisted metadata fixture supplies the catalog while providers remain
+    // disabled. Keep the native runtime socket and its history replies unchanged.
     await page.reload();
     const focusSession = await page.context().newCDPSession(page);
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });

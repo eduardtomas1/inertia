@@ -90,7 +90,13 @@ const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
-const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
+// The hosted Intel macOS runner renders two to three times slower than the
+// other hosts (its unit suite takes twice as long), and its first-open samples
+// crossed 100ms on nightly runs whose lazy handoff was provably absent; a
+// lazy handoff there costs well over the wider bound.
+const CI_PREFETCHED_SURFACE_TARGET_MS = process.platform === "darwin" && process.arch === "x64"
+  ? 250
+  : 100;
 const AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX = 2;
 const AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES = 8;
 // Prove progressive rendering before the scenario deliberately leaves the live

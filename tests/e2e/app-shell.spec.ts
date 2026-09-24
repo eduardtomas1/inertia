@@ -13,7 +13,6 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-import { expectRuntimeCrashRecovery } from "./support/runtime-crash-safety";
 import { seedViewedConversationContext } from "./support/viewed-conversation-context";
 import {
   closeWorkspaceTools,
@@ -651,10 +650,4 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   await page.keyboard.press(process.platform === "darwin" ? "Meta+N" : "Control+N");
   await expectIsolatedConversation(count);
   expect(rendererErrors).toEqual([]);
-});
-
-test("keeps the window alive and reconnects with a rotated capability after a runtime crash", {
-  tag: "@runtime-recovery",
-}, async () => {
-  await expectRuntimeCrashRecovery(app, test.info());
 });

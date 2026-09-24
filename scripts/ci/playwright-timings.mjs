@@ -2,6 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { relative, resolve } from "node:path";
 
+const MAX_REPORTS_PER_PHASE = 16;
+
 // Reporting only: no retries, outcome rewriting, trace changes or selection.
 // Avoid serializing Playwright's config/environment, titles, errors, stdio and
 // attachments; this artifact needs only identity, discovery and elapsed time.
@@ -41,9 +43,22 @@ export default class PlaywrightTimings {
         attempts: test.results.map(({ retry, status, duration }) => ({ retry, status, durationMs: duration })),
       })),
     };
-    const directory = resolve("ci-test-timings");
+    const directory = resolve(this.config.rootDir, "ci-test-timings");
     mkdirSync(directory, { recursive: true });
-    writeFileSync(resolve(directory, `${phase}-${shard ? `${shard.current}-of-${shard.total}` : "all"}.json`),
-      `${JSON.stringify(report)}\n`);
+    const stem = `${phase}-${shard ? `${shard.current}-of-${shard.total}` : "all"}`;
+    const body = `${JSON.stringify(report)}\n`;
+    // A job may run the same project twice (a filtered smoke, then the full
+    // suite). Each invocation keeps its own report instead of replacing the
+    // previous one; exclusive creation makes the second write pick a new name.
+    for (let attempt = 1; attempt <= MAX_REPORTS_PER_PHASE; attempt += 1) {
+      const path = resolve(directory, attempt === 1 ? `${stem}.json` : `${stem}-${attempt}.json`);
+      try {
+        writeFileSync(path, body, { flag: "wx" });
+        return;
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+      }
+    }
+    throw new Error("Too many timing reports for one phase.");
   }
 }

@@ -22,11 +22,11 @@ it.each(PLATFORMS.filter(({ artifact }) => artifact.startsWith("linux-")))(
   },
 );
 
-it("stages the actual native artifacts before desktop tests without publishing them", () => {
+it("stages the actual native artifacts before package smoke without publishing them", () => {
   const steps = workflow.jobs.test.steps as Array<{ name: string; run?: string; env?: Record<string, string>; "continue-on-error"?: boolean }>;
   const stageIndex = steps.findIndex(({ name }) => name === "Validate native release asset staging");
   expect(stageIndex).toBeGreaterThan(steps.findIndex(({ name }) => name === "Package Linux AppImage and unpacked app"));
-  expect(stageIndex).toBeLessThan(steps.findIndex(({ run }) => run?.includes("playwright test")));
+  expect(stageIndex).toBeLessThan(steps.findIndex(({ run }) => run?.includes("npm run test:package-smoke")));
   const stage = steps[stageIndex]!;
   expect(stage.run).toContain('node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"');
   expect(stage.run).not.toMatch(/gh release|publish/u);
@@ -93,24 +93,61 @@ it("binds every checkout to the candidate and makes migration lineage part of th
   expect(source(".github/actions/install-dependencies/action.yml")).toContain('default: "22.23.2"');
 });
 
-it.each([["ci.yml", "test"], ["release-platforms.yml", "build"]])(
-  "%s proves exact packages before desktop tests and never continues on unconfirmed cleanup", (file, id) => {
-    const job = parse(source(`.github/workflows/${file}`)).jobs[id];
-    const steps = job.steps as Array<{ name: string; run?: string; if?: string }>;
-    const firstDesktop = steps.findIndex((step) => step.run?.includes("playwright test"));
-    const packageSmokes = steps.map((step, index) => ({ step, index }))
-      .filter(({ step }) => /npm run test:(?:package-smoke|release-container-smoke|windows-installer-smoke)/u.test(step.run ?? ""));
-    expect(packageSmokes.length).toBeGreaterThanOrEqual(5);
-    for (const { index } of packageSmokes) expect(index).toBeLessThan(firstDesktop);
-    for (const step of steps.filter((step) => step.run?.includes("playwright test"))) {
-      expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
-    }
-    expect(job.strategy["fail-fast"]).toBe(false);
-    expect(steps.filter((step) => step.run === "npm run build:packaged")).toHaveLength(1);
-  },
-);
+it("release builds prove exact packages before desktop tests and never continue on unconfirmed cleanup", () => {
+  const job = parse(source(".github/workflows/release-platforms.yml")).jobs.build;
+  const steps = job.steps as Array<{ name: string; run?: string; if?: string }>;
+  const firstDesktop = steps.findIndex((step) => step.run?.includes("playwright test"));
+  const packageSmokes = steps.map((step, index) => ({ step, index }))
+    .filter(({ step }) => /npm run test:(?:package-smoke|release-container-smoke|windows-installer-smoke)/u.test(step.run ?? ""));
+  expect(packageSmokes.length).toBeGreaterThanOrEqual(5);
+  for (const { index } of packageSmokes) expect(index).toBeLessThan(firstDesktop);
+  for (const step of steps.filter((step) => step.run?.includes("playwright test"))) {
+    expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
+  }
+  expect(job.strategy["fail-fast"]).toBe(false);
+  expect(steps.filter((step) => step.run === "npm run build:packaged")).toHaveLength(1);
+});
 
-it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "test"], ["release-platforms.yml", "build"]])(
+it("CI runs native package proof and desktop Electron projects as separate same-source jobs", () => {
+  const packageSteps = workflow.jobs.test.steps as Array<{ name: string; run?: string; if?: string }>;
+  const electronSteps = workflow.jobs.electron.steps as Array<{ name: string; run?: string; if?: string; uses?: string }>;
+  expect(packageSteps.some((step) => step.run?.includes("playwright test"))).toBe(false);
+  expect(packageSteps.filter((step) =>
+    /npm run test:(?:package-smoke|release-container-smoke|windows-installer-smoke)/u.test(step.run ?? "")).length)
+    .toBeGreaterThanOrEqual(5);
+  expect(packageSteps.filter((step) => step.run === "npm run build:packaged")).toHaveLength(1);
+  expect(electronSteps.filter((step) => step.run === "npm run build:packaged")).toHaveLength(1);
+  expect(electronSteps.some((step) => step.run?.includes("npm run test:package-smoke"))).toBe(false);
+  const projects = electronSteps.filter((step) => step.run?.includes("playwright test"))
+    .map((step) => /--project=([a-z-]+)/u.exec(step.run!)![1]);
+  // Every project once without Xvfb and once under it, in the documented order.
+  expect(projects).toEqual([
+    "display-sensitive", "isolated", "runtime-recovery",
+    "display-sensitive", "isolated", "runtime-recovery",
+  ]);
+  for (const step of electronSteps.filter((step) => step.run?.includes("playwright test"))) {
+    expect(step.if).not.toMatch(/always\(|failure\(|cancelled\(/u);
+  }
+  for (const id of ["test", "electron"]) {
+    const job = workflow.jobs[id];
+    expect(job.needs).toEqual(["classify", "gate"]);
+    expect(job["runs-on"]).toBe("${{ matrix.runner }}");
+    expect(job.strategy["fail-fast"]).toBe(false);
+    expect(job.strategy.matrix).toBe("${{ fromJSON(needs.classify.outputs.matrix_json) }}");
+    expect(job.strategy["max-parallel"]).toBe("${{ github.event_name == 'schedule' && 2 || 6 }}");
+    expect(job.steps[0].uses).toMatch(/^actions\/checkout@/u);
+    expect(job.steps.some((step: { uses?: string }) => step.uses === "./.github/actions/install-dependencies")).toBe(true);
+  }
+  expect(workflow.jobs.test["timeout-minutes"]).toBe("${{ matrix.timeout_minutes }}");
+  expect(workflow.jobs.electron["timeout-minutes"]).toBe("${{ matrix.electron_timeout_minutes }}");
+  expect(workflow.jobs.electron.name).toBe("${{ matrix.label }} Electron");
+  for (const platform of PLATFORMS) {
+    expect(platform.electron_timeout_minutes).toBeGreaterThanOrEqual(40);
+    expect(platform.electron_timeout_minutes).toBeLessThanOrEqual(platform.timeout_minutes);
+  }
+});
+
+it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "electron"], ["release-platforms.yml", "build"]])(
   "%s %s provides real private Secret Service prerequisites before Linux desktop tests", (file, id) => {
     const steps = parse(source(`.github/workflows/${file}`)).jobs[id].steps as Array<{ run?: string }>;
     const install = steps.findIndex((step) => step.run?.includes("apt-get install") && step.run.includes("gnome-keyring"));
@@ -138,7 +175,7 @@ it("isolates native and verifier dependency changes without suppressing security
 });
 
 it("retains compact timing evidence on success and failure without adding retries or changing selection", () => {
-  for (const id of ["pr-linux-lifecycle", "pr-windows-lifecycle", "pr-macos-lifecycle", "test"]) {
+  for (const id of ["pr-linux-lifecycle", "pr-windows-lifecycle", "pr-macos-lifecycle", "electron"]) {
     const job = workflow.jobs[id];
     expect(job.env.INERTIA_CI_TIMINGS).toBe("true");
     expect(job.env.INERTIA_CI_SOURCE_HEAD).toBe("${{ github.event.pull_request.head.sha || github.sha }}");

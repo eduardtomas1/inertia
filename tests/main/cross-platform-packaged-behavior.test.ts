@@ -175,9 +175,9 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it.each([
-    ["ci.yml", "test"],
+    ["ci.yml", "electron"],
     ["release-platforms.yml", "build"],
-  ])("keeps package proof before safely sequential native desktop phases in %s", async (filename, job) => {
+  ])("keeps native desktop phases safely sequential in %s %s", async (filename, job) => {
     const workflow = parse(await source(`.github/workflows/${filename}`)) as {
       jobs: Record<string, { steps: Array<{
         run?: string;
@@ -343,7 +343,9 @@ describe("cross-platform packaged behavior contract", () => {
       "Verify migrations, architecture, lint, and types",
     );
     expect(qualityGate).toContain("run: npm run check:quality");
-    expect(workflow.match(/needs: \[classify, gate\]/gu)).toHaveLength(7);
+    // node-22-minimum, four PR sentinels, the native package matrix, its
+    // Electron matrix and the Windows unit shards.
+    expect(workflow.match(/needs: \[classify, gate\]/gu)).toHaveLength(8);
 
     // macOS is the only platform whose unit signal is a plain suite run: Linux
     // gets the same suite through coverage, and Windows gets it sharded.
@@ -414,8 +416,8 @@ describe("cross-platform packaged behavior contract", () => {
     // all Windows jobs exclude the throwaway workspace without being able to
     // fail the run if the cmdlet is unavailable.
     expect(workflow.match(/Exclude the workspace from Microsoft Defender/gu))
-      .toHaveLength(3);
-    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(6);
+      .toHaveLength(4);
+    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(8);
 
     const packageJson = JSON.parse(await source("package.json")) as {
       build: { files: string[] };
@@ -516,7 +518,7 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(minimumRuntime).toContain("run: npm ci --engine-strict");
     expect(workflow.match(/uses: \.\/\.github\/actions\/install-dependencies/gu))
-      .toHaveLength(7);
+      .toHaveLength(8);
 
     const vitest = await source("vitest.config.ts");
     expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
@@ -836,7 +838,9 @@ describe("cross-platform packaged behavior contract", () => {
     const cleanupHandler = main.slice(cleanupStart, cleanupEnd);
     expect(cleanupStart).toBeGreaterThanOrEqual(0);
     expect(cleanupHandler).toContain("new RetryablePrivilegedCleanup({");
-    expect(cleanupHandler).toContain("runtime: supervisorToStop");
+    expect(cleanupHandler).toContain(
+      'runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) }',
+    );
     expect(cleanupHandler).toContain(
       'disposeTemporaryAttachments: () => testCleanupOwners.observe("temporaryAttachments", disposeImportedAttachments)',
     );

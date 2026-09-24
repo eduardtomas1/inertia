@@ -46,8 +46,7 @@ import type {
 } from "./types";
 import {
   launchCredentialValues,
-  redactExactCredentials,
-  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureDetail,
 } from "../provider/activity-detail";
 import type {
   ProviderGoalMutation,
@@ -216,8 +215,9 @@ export function startCodexAppServerRun(
     ].filter((value): value is string => Boolean(value));
     // A custom backend token is materialized in the launch environment; the
     // pattern scrubber alone misses JSON-shaped echoes of it.
-    const technicalDetail = sanitizeProviderActivityDetail(
-      redactExactCredentials(details.join("\n"), launchCredentialValues(options.environment)),
+    const technicalDetail = sanitizeProviderFailureDetail(
+      details.join("\n"),
+      launchCredentialValues(options.environment),
       { workspaceRoot: options.cwd },
     );
     return {

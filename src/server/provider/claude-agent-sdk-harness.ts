@@ -15,8 +15,7 @@ import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profile
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-  redactExactCredentials,
-  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureDetail,
 } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import {
@@ -783,12 +782,9 @@ function startClaudeRun(
         const error = routeFailure(lifecycleError);
         // The stream ended without a thrown error, so this is the only place
         // the CLI's own reason for exiting can reach the failure details.
-        const technicalDetail = routeDetail(lifecycleError, sanitizeProviderActivityDetail(
-          redactExactCredentials(ownedProcess.stderrTail(), launchCredentials),
-          {
-            workspaceRoot: options.input.cwd,
-            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-          },
+        const technicalDetail = routeDetail(lifecycleError, sanitizeProviderFailureDetail(
+          ownedProcess.stderrTail(), launchCredentials,
+          { workspaceRoot: options.input.cwd, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
         ));
         return finishResult(
           "failed",
@@ -812,10 +808,11 @@ function startClaudeRun(
         const resultReason = finalMessage.subtype === "success"
           ? finalMessage.terminal_reason ?? "api_error"
           : startupFailure?.reason ?? finalMessage.subtype;
-        const technicalDetail = sanitizeProviderActivityDetail(
-          redactExactCredentials((finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
+        const technicalDetail = sanitizeProviderFailureDetail(
+          (finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
             .filter((value): value is string => typeof value === "string")
-            .join("\n"), launchCredentials),
+            .join("\n"),
+          launchCredentials,
           {
             workspaceRoot: options.input.cwd,
             maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -869,8 +866,8 @@ function startClaudeRun(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
       );
       const message = routeFailure(rawError);
-      const technicalDetail = routeDetail(rawError, sanitizeProviderActivityDetail(
-        redactExactCredentials(ownedProcess.stderrTail(), launchCredentials),
+      const technicalDetail = routeDetail(rawError, sanitizeProviderFailureDetail(
+        ownedProcess.stderrTail(), launchCredentials,
         { workspaceRoot: options.input.cwd, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
       ));
       return finishResult("failed", message, {

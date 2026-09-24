@@ -2,8 +2,7 @@ import type { ModelBackendProfile } from "../../shared/contracts";
 import { providerFailureMessage } from "./adapters";
 import {
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-  redactExactCredentials,
-  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureDetail,
 } from "./activity-detail";
 
 /**
@@ -34,8 +33,9 @@ export function claudeRouteFailureDetail(input: {
   workspaceRoot: string;
 }): string | null {
   if (input.usesNativeAnthropic || input.message === input.rawError) return input.detail;
-  const cause = sanitizeProviderActivityDetail(
-    redactExactCredentials(input.rawError, input.launchCredentials),
+  const cause = sanitizeProviderFailureDetail(
+    input.rawError,
+    input.launchCredentials,
     { workspaceRoot: input.workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
   );
   if (!cause || cause === input.detail) return input.detail;

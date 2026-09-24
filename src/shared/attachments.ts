@@ -185,6 +185,19 @@ function attachmentNameExtension(name: string): string | null {
   return /\.([^.]+)$/u.exec(name.trim())?.[1]?.toLocaleLowerCase("en-US") ?? null;
 }
 
+/**
+ * Extensions the live import accepts, for native pickers: the pinned lookup's
+ * names plus the plain-text set. The follow-up picker stays images only.
+ */
+export function chatAttachmentPickerExtensions(mode: "images" | "all"): string[] {
+  const pinned = Object.keys(attachmentMimeByExtension);
+  if (mode === "images") {
+    return pinned.filter((extension) =>
+      chatAttachmentKind(attachmentMimeByExtension[extension]!) === "image");
+  }
+  return [...pinned, ...PLAIN_TEXT_ATTACHMENT_EXTENSIONS];
+}
+
 function isPlainTextAttachmentName(name: string): boolean {
   const extension = attachmentNameExtension(name);
   return extension !== null

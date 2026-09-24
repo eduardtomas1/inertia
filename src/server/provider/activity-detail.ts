@@ -96,6 +96,33 @@ export function credentialEncodings(credentials: readonly string[]): string[] {
     .sort((left, right) => right.length - left.length);
 }
 
+/**
+ * Failure detail built from provider output that can echo a launch credential
+ * (raw errors, stderr tails, result errors). Terminal controls are stripped
+ * first so a secret split by an escape sequence still matches, every encoding
+ * of each credential is redacted, and the usual sanitizer runs last. Provider
+ * paths use this instead of composing the steps themselves: composing them in
+ * the other order re-joins a split secret after the exact match has run.
+ */
+export function sanitizeProviderFailureDetail(
+  value: unknown,
+  launchCredentials: readonly string[],
+  options: {
+    workspaceRoot?: string;
+    homeDirectory?: string;
+    maxChars?: number;
+  } = {},
+): string | null {
+  if (typeof value !== "string") return null;
+  return sanitizeProviderActivityDetail(
+    redactExactCredentials(
+      stripTerminalControlSequences(value),
+      credentialEncodings(launchCredentials),
+    ),
+    options,
+  );
+}
+
 export function sanitizeProviderActivityDetail(
   value: unknown,
   options: {

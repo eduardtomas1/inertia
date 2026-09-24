@@ -272,25 +272,49 @@ export function enqueueComposerPrompt(
 }
 
 /**
- * Records that a send of this prompt was dispatched without a known outcome.
- * The prompt stays visible, but automatic sending skips it so an ambiguous
- * delivery cannot turn into a duplicate turn.
+ * Records, before the send crosses the runtime boundary, that a dispatch of
+ * this prompt is in flight. The prompt stays visible, but automatic sending
+ * skips it until the outcome is known: a renderer that reloads or crashes
+ * mid-send, or an ambiguous delivery, cannot turn into a duplicate turn.
+ * Returns false when nothing was recorded, in which case no send may start.
  */
 export function markComposerQueuedPromptDispatched(
   conversationId: string,
   promptId: string,
+): boolean {
+  return setDispatchedAt(conversationId, promptId, new Date().toISOString());
+}
+
+/** Restores automatic eligibility once the runtime is known not to have accepted the send. */
+export function clearComposerQueuedPromptDispatched(
+  conversationId: string,
+  promptId: string,
+): boolean {
+  return setDispatchedAt(conversationId, promptId, null);
+}
+
+function setDispatchedAt(
+  conversationId: string,
+  promptId: string,
+  dispatchedAt: string | null,
 ): boolean {
   try {
     const current = readComposerQueue(conversationId);
     if (!current.some(({ id }) => id === promptId)) return false;
     storeQueue(
       conversationId,
-      current.map((prompt) => prompt.id === promptId
-        ? { ...prompt, dispatchedAt: new Date().toISOString() }
-        : prompt),
+      current.map((prompt) => {
+        if (prompt.id !== promptId) return prompt;
+        const { dispatchedAt: previous, ...rest } = prompt;
+        void previous;
+        return dispatchedAt ? { ...rest, dispatchedAt } : rest;
+      }),
       true,
     );
-    return true;
+    // Prove the write landed: a full or blocked storage leaves the prompt
+    // unmarked, and an unmarked prompt must not be sent.
+    const written = readComposerQueue(conversationId).find(({ id }) => id === promptId);
+    return (written?.dispatchedAt ?? null) === dispatchedAt;
   } catch {
     return false;
   }

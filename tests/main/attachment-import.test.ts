@@ -201,14 +201,27 @@ describe("privileged attachment import validation", () => {
       .toThrow("Follow-up attachments must be images.");
     expect(() => validateAttachmentPickerName("all", "notes.pdf"))
       .not.toThrow();
-    expect(attachmentPickerConfiguration("all")).toEqual({
-      title: "Attach images, documents, or spreadsheets",
-      filterName: "Images, documents, and spreadsheets",
-      extensions: [
-        "png", "jpg", "jpeg", "webp", "gif",
-        "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
-      ],
+    const all = attachmentPickerConfiguration("all");
+    expect(all).toMatchObject({
+      title: "Attach images, documents, spreadsheets, or text files",
+      filterName: "Images, documents, spreadsheets, and text files",
     });
+    // The picker filter follows the live import allowlist: every pinned name
+    // plus the plain-text set, so a file the import accepts is selectable.
+    expect(all.extensions.slice(0, 13)).toEqual([
+      "png", "jpg", "jpeg", "webp", "gif",
+      "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
+    ]);
+    for (const extension of ["ts", "py", "yaml", "toml", "sql", "log"]) {
+      expect(all.extensions, extension).toContain(extension);
+      expect(attachmentPickerConfiguration("images").extensions, extension).not.toContain(extension);
+      expect(() => validateAttachmentPickerName("images", `file.${extension}`))
+        .toThrow("Follow-up attachments must be images.");
+    }
+    for (const extension of ["svg", "env", "pem", "exe"]) {
+      expect(all.extensions, extension).not.toContain(extension);
+    }
+    expect(new Set(all.extensions).size).toBe(all.extensions.length);
   });
   it("rejects an oversized selection instead of silently truncating it", () => {
     expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))

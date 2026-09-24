@@ -946,6 +946,12 @@ jobs:
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
 
+      # The guard test keeps its 90 s deadline for compile and native probes.
+      # Resolve electron-builder's checksum-verified compiler before Vitest so
+      # a cold tool download cannot consume that deadline.
+      - name: Prepare the checksum-verified NSIS test compiler
+        run: node -e "require('app-builder-lib/out/toolsets/windows').getMakeNsisPath(undefined).then(() => console.log('NSIS test compiler ready'))"
+
       - name: Run Windows unit-test shard
         run: npm run test:windows:shard -- --shard=${{ matrix.shard }}/4
 

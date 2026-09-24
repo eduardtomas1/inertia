@@ -19,7 +19,7 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
 import { attachElectronFixtureCloseFailure } from "./electron-failure-evidence";
 import { attachRuntimeCleanupEvidence } from "./runtime-shutdown-trace-evidence";
 import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
-  readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
+  readElectronPrivilegedCleanupPhase, requestElectronApplicationQuit } from "./electron-runtime-shutdown";
 import {
   createFixtureTemporaryDirectories, fixtureTemporaryEnvironment,
 } from "./fixture-temporary-directory";
@@ -926,13 +926,7 @@ export async function createAppFixture(
         ?? null;
       const quit = await quitElectronAppBounded(
         previousApp,
-        () => previousApp.evaluate(() => {
-          const runtime = Reflect.get(
-            globalThis,
-            "__inertiaTestRuntime",
-          ) as { quit?: () => unknown } | undefined;
-          return runtime?.quit?.();
-        }),
+        () => requestElectronApplicationQuit(previousApp),
         {
           childProcess: previousChild,
           quitRequestTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,

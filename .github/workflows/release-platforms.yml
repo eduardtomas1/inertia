@@ -212,6 +212,13 @@ jobs:
             npm test
           fi
 
+      # The guard test keeps its 90 s deadline for compile and native probes.
+      # Resolve electron-builder's checksum-verified compiler before Vitest so
+      # a cold tool download cannot consume that deadline.
+      - name: Prepare the checksum-verified NSIS test compiler
+        if: runner.os == 'Windows'
+        run: node -e "require('app-builder-lib/out/toolsets/windows').getMakeNsisPath(undefined).then(() => console.log('NSIS test compiler ready'))"
+
       - name: Run the complete Windows release unit suite
         if: runner.os == 'Windows'
         shell: pwsh

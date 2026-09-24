@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,10 +25,12 @@ import { executableProcessExists } from "../helpers/executable-process";
 
 const temporaryDirectories: string[] = [];
 const descendantPids: number[] = [];
+const preparedTimeoutCleanups: Array<() => Promise<void>> = [];
 const hostedWindowsCi =
   process.platform === "win32" && process.env.CI === "true";
 
 afterEach(async () => {
+  for (const cleanup of preparedTimeoutCleanups.splice(0)) await cleanup();
   for (const pid of descendantPids.splice(0)) {
     try {
       process.kill(pid, "SIGKILL");
@@ -46,6 +47,88 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
   const promise = new Promise<void>((settle) => { resolve = settle; });
   return { promise, resolve };
+}
+
+async function checkPreparedCallbackTimeout(releaseAfterTimeout: boolean): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-timeout-"));
+  temporaryDirectories.push(directory);
+  portableNodeExecutable(directory, "git");
+  writeNodeSubcommand(directory, "update-ref", `
+process.stdin.once("data", () => {
+  process.stdout.write("start: ok\\nprepare: ok\\n");
+});
+setInterval(() => {}, 1000);
+`);
+  const previousPath = process.env.PATH;
+  process.env.PATH = directory;
+  const started = deferred();
+  const release = deferred();
+  const callbackDone = deferred();
+  let callbackStarted = false;
+  let mutated = false;
+  let outcome: Promise<{ error: unknown }> | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  const schedule = globalThis.setTimeout;
+  let deadlineCaptured = false;
+  let clockRestored = false;
+  const restoreClock = () => {
+    if (clockRestored) return;
+    clockRestored = true;
+    globalThis.setTimeout = schedule;
+    vi.useRealTimers();
+  };
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, milliseconds?: number, ...args: unknown[]) => {
+    if (milliseconds !== 250 || deadlineCaptured) return schedule(callback, milliseconds, ...args);
+    deadlineCaptured = true;
+    return schedule(() => {
+      // Expire the real transaction callback at its unchanged logical deadline;
+      // native process-tree cleanup then runs with real timers on every path.
+      restoreClock();
+      callback(...args);
+    }, milliseconds);
+  }) as typeof setTimeout;
+  const expire = () => { if (vi.isFakeTimers()) vi.advanceTimersByTime(250); };
+  const cleanup = () => cleanupPromise ??= (async () => {
+    try {
+      expire();
+      await outcome;
+      release.resolve();
+      if (callbackStarted && releaseAfterTimeout) await callbackDone.promise;
+    } finally {
+      restoreClock();
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  })();
+  preparedTimeoutCleanups.push(cleanup);
+  try {
+    outcome = withPreparedGitRefUpdate(
+      directory, "refs/heads/main", "1".repeat(40), "0".repeat(40),
+      { deadlineAt: Date.now() + 250, failureMessage: "Git ref update failed." },
+      async (context) => {
+        callbackStarted = true;
+        started.resolve();
+        if (!releaseAfterTimeout) return await new Promise<void>(() => undefined);
+        try {
+          await release.promise;
+          context.mutate(() => { mutated = true; });
+        } finally { callbackDone.resolve(); }
+      },
+    ).then(() => ({ error: null }), (error: unknown) => ({ error }));
+    await Promise.race([
+      started.promise,
+      outcome.then(({ error }) => { throw error ?? new Error("Transaction settled before preparation."); }),
+    ]);
+    expect(deadlineCaptured).toBe(true);
+    expire();
+    expect((await outcome).error).toMatchObject({ code: "timeout" });
+    if (releaseAfterTimeout) {
+      release.resolve();
+      await callbackDone.promise;
+      expect(mutated).toBe(false);
+    }
+  } finally { await cleanup(); }
 }
 
 describe("Git inspection settlement", () => {
@@ -196,95 +279,11 @@ process.stdout.write(JSON.stringify({
   });
 
   it("settles a ref-update timeout when a prepared callback never settles", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-timeout-"));
-    temporaryDirectories.push(directory);
-    portableNodeExecutable(directory, "git");
-    writeNodeSubcommand(directory, "update-ref", `
-process.stdin.once("data", () => {
-  process.stdout.write("start: ok\\nprepare: ok\\n");
-});
-setInterval(() => {}, 1000);
-`);
-    const previousPath = process.env.PATH;
-    process.env.PATH = directory;
-    let callbackStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      callbackStarted = resolve;
-    });
-    try {
-      const running = withPreparedGitRefUpdate(
-        directory,
-        "refs/heads/main",
-        "1".repeat(40),
-        "0".repeat(40),
-        {
-          deadlineAt: Date.now() + 250,
-          failureMessage: "Git ref update failed.",
-        },
-        async () => {
-          callbackStarted();
-          await new Promise<void>(() => undefined);
-        },
-      );
-      await started;
-
-      await expect(running).rejects.toMatchObject({ code: "timeout" });
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-    }
+    await checkPreparedCallbackTimeout(false);
   });
 
   it("revokes delayed prepared mutations after a ref-update timeout", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "inertia-git-ref-revoked-"));
-    temporaryDirectories.push(directory);
-    portableNodeExecutable(directory, "git");
-    writeNodeSubcommand(directory, "update-ref", `
-process.stdin.once("data", () => {
-  process.stdout.write("start: ok\\nprepare: ok\\n");
-});
-setInterval(() => {}, 1000);
-`);
-    const previousPath = process.env.PATH;
-    process.env.PATH = directory;
-    let releaseCallback!: () => void;
-    const callbackGate = new Promise<void>((resolve) => {
-      releaseCallback = resolve;
-    });
-    let callbackStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      callbackStarted = resolve;
-    });
-    let mutated = false;
-    try {
-      const running = withPreparedGitRefUpdate(
-        directory,
-        "refs/heads/main",
-        "1".repeat(40),
-        "0".repeat(40),
-        {
-          deadlineAt: Date.now() + 250,
-          failureMessage: "Git ref update failed.",
-        },
-        async (context) => {
-          callbackStarted();
-          await callbackGate;
-          context.mutate(() => {
-            mutated = true;
-            return undefined;
-          });
-        },
-      );
-      await started;
-
-      await expect(running).rejects.toMatchObject({ code: "timeout" });
-      releaseCallback();
-      await delay(40);
-      expect(mutated).toBe(false);
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-    }
+    await checkPreparedCallbackTimeout(true);
   });
 
   it("cleans up an expired prepared callback through Git's abort handshake", async () => {

@@ -282,6 +282,13 @@ if (message.method === "turn/start") {
       { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
     ]);
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-flood-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      ...Array.from({ length: 256 }, (unused, index) => ({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "flood", delta: String(index) } })),
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]);
+  }
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") return;
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {

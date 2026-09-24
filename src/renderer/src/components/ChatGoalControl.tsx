@@ -168,9 +168,14 @@ export function ChatGoalControl({
     if (!open || !restoreActionFocus.current) return;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
+    // The updated goal can arrive before the mutation settles, while the
+    // replacement button is still disabled and cannot take focus. Stay armed
+    // until an enabled target exists.
+    const target = firstActionRef.current ?? inputRef.current;
+    if (!target || target.disabled) return;
     restoreActionFocus.current = false;
-    (firstActionRef.current ?? inputRef.current)?.focus();
-  }, [goalStatus, open, submitting]);
+    target.focus();
+  }, [controlsBusy, goalStatus, loading, open, submitting]);
 
   useLayoutEffect(() => {
     if (ownerKeyRef.current === ownerKey) return;

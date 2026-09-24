@@ -51,7 +51,10 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
-import { PreResponseTurnNotifications } from "./pre-response-turn-notifications";
+import {
+  MAX_PRE_RESPONSE_TURN_NOTIFICATIONS,
+  PreResponseTurnNotifications,
+} from "./pre-response-turn-notifications";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -637,7 +640,12 @@ export class CodexAppServerEvents {
       && !this.completedTurnIds.has(notificationTurnId)
       && notificationTurnId !== this.host.activeTurnId()
     ) {
-      this.preResponseTurnNotifications.hold(method, notificationTurnId, params);
+      if (!this.preResponseTurnNotifications.hold(method, notificationTurnId, params)) {
+        this.failMalformedProtocol(
+          "Codex sent too many notifications before the turn/start response.",
+          `Codex exceeded the ${MAX_PRE_RESPONSE_TURN_NOTIFICATIONS}-notification limit before the turn/start response.`,
+        );
+      }
       return;
     }
 

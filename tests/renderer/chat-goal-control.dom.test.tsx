@@ -239,6 +239,30 @@ describe("ChatGoalControl", () => {
     expect(within(surface).getByRole("button", { name: "Mark active" })).toHaveFocus();
   });
 
+  it("keeps the focus restore armed while the replacement button is still disabled", async () => {
+    const user = userEvent.setup();
+    let settle: (() => void) | undefined;
+    const onSetGoal = vi.fn(() => new Promise<void>((resolve) => { settle = resolve; }));
+    const disclosure = openProps();
+    const active = goal("codex-native", "Ship the reliable goal flow");
+    const view = render(<ChatGoalControl {...props(workflow(nativeCapability, [active]), { onSetGoal })} {...disclosure} />);
+    const surface = screen.getByRole("region", { name: "Codex goal" });
+    await user.click(within(surface).getByRole("button", { name: "Pause" }));
+    // The goal update arrives before the mutation settles, so the new button
+    // is still disabled and cannot take focus yet.
+    const paused = goal("codex-native", "Ship the reliable goal flow", "paused");
+    view.rerender(<ChatGoalControl {...props(workflow(nativeCapability, [paused]), { onSetGoal })} {...disclosure} />);
+    const markActive = within(surface).getByRole("button", { name: "Mark active" });
+    expect(markActive).toBeDisabled();
+    expect(document.body).toHaveFocus();
+    await act(async () => {
+      settle?.();
+      await Promise.resolve();
+    });
+    expect(markActive).toBeEnabled();
+    expect(markActive).toHaveFocus();
+  });
+
   it("does not take focus when the goal status changes without a local action", () => {
     const disclosure = openProps();
     const active = goal("codex-native", "Ship the reliable goal flow");

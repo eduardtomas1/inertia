@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 const MAX_REPORTS_PER_PHASE = 16;
 
@@ -43,7 +43,10 @@ export default class PlaywrightTimings {
         attempts: test.results.map(({ retry, status, duration }) => ({ retry, status, durationMs: duration })),
       })),
     };
-    const directory = resolve(this.config.rootDir, "ci-test-timings");
+    // config.rootDir is the resolved testDir (tests/e2e), not the workspace.
+    // CI uploads ci-test-timings/*.json from beside the config file.
+    const workspace = this.config.configFile ? dirname(this.config.configFile) : process.cwd();
+    const directory = resolve(workspace, "ci-test-timings");
     mkdirSync(directory, { recursive: true });
     const stem = `${phase}-${shard ? `${shard.current}-of-${shard.total}` : "all"}`;
     const body = `${JSON.stringify(report)}\n`;

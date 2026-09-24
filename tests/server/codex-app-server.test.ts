@@ -2175,6 +2175,29 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
+  it("fails closed when Codex floods notifications before the turn/start response", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "turn-flood-before-response";
+    const manager = trackedManager(fake.command, 500);
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-turn-flood",
+      cwd: fake.root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+    }), {});
+
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(manager.activeConversationIds()).toEqual([]);
+    await manager.disposeAll();
+  });
+
   it("fails deterministically when Codex offers only unsupported decisions", async () => {
     const fake = createFakeAppServer(roots, true);
     const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");

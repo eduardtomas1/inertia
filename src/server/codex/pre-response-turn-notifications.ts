@@ -1,6 +1,6 @@
 import type { JsonObject } from "./protocol";
 
-const MAX_HELD_NOTIFICATIONS = 256;
+export const MAX_PRE_RESPONSE_TURN_NOTIFICATIONS = 256;
 
 interface HeldTurnNotification {
   method: string;
@@ -18,9 +18,15 @@ interface HeldTurnNotification {
 export class PreResponseTurnNotifications {
   private readonly held: HeldTurnNotification[] = [];
 
-  hold(method: string, turnId: string, params: JsonObject): void {
-    if (this.held.length >= MAX_HELD_NOTIFICATIONS) this.held.shift();
+  /**
+   * Holds the notification, or returns false once the bound is reached. The
+   * caller then fails the run: evicting the oldest entry would drop
+   * turn/started and leave the replayed turn without its lifecycle markers.
+   */
+  hold(method: string, turnId: string, params: JsonObject): boolean {
+    if (this.held.length >= MAX_PRE_RESPONSE_TURN_NOTIFICATIONS) return false;
     this.held.push({ method, turnId, params });
+    return true;
   }
 
   /** Removes every held notification and returns those of the given turn. */

@@ -217,21 +217,26 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect(projectActions).toBeVisible();
   await expect(projectActions.getByRole("button", { name: /running$/u }))
     .toHaveCount(0);
-  // At 1440px the Run group is expanded, so the menu is always reachable here;
-  // assert on the open menu rather than after Escape has detached it.
+  // The options chevron exists only once the project has an action or a run.
+  // A hostile preview must create neither: without the chevron the group is
+  // the bare "Add action" control; with it, the open menu lists no running
+  // group and no item named after the preview origin.
   const projectActionOptions = projectActions.getByRole("button", {
     name: "Project action options",
   });
-  await expect(projectActionOptions).toBeVisible();
-  await projectActionOptions.click();
-  const projectActionsMenu = page.getByRole("menu", { name: "Project actions" });
-  await expect(projectActionsMenu).toBeVisible();
-  await expect(projectActionsMenu.getByRole("group", { name: "Running" }))
-    .toHaveCount(0);
-  await expect(projectActionsMenu.getByRole("menuitem", { name: localServer.origin }))
-    .toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(projectActionsMenu).toHaveCount(0);
+  if (await projectActionOptions.count() === 0) {
+    await expect(projectActions.getByRole("button", { name: "Add action" })).toBeVisible();
+  } else {
+    await projectActionOptions.click();
+    const projectActionsMenu = page.getByRole("menu", { name: "Project actions" });
+    await expect(projectActionsMenu).toBeVisible();
+    await expect(projectActionsMenu.getByRole("group", { name: "Running" }))
+      .toHaveCount(0);
+    await expect(projectActionsMenu.getByRole("menuitem", { name: localServer.origin }))
+      .toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(projectActionsMenu).toHaveCount(0);
+  }
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);

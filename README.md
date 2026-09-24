@@ -10,7 +10,7 @@
 
 [Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [User guide](docs/user/README.md) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
 
-![Inertia — project sidebar, conversation, and floating composer in dark mode](docs/screenshots/inertia-dark.png)
+![Inertia — project sidebar, conversation, and composer in dark mode](docs/screenshots/inertia-dark.png)
 
 Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Antigravity, Kimi Code, or OpenCode**.
 
@@ -24,18 +24,18 @@ Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type a
 
 ![Search saved messages and agent answers across projects](docs/screenshots/inertia-message-search.png)
 
-Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
+Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions. Pin favourite projects and give each one a colour to keep them easy to find.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
 ## One workspace for the coding loop
 
-- **Chat with context.** Attach images, documents, and spreadsheets; mention files or reference another chat; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
+- **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference another chat; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
 - **Capture a window.** Enable [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in Settings → Snapshots to attach a foreground screenshot with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
-- **Follow active work.** The Work tab shows agent pixels and elapsed time for running threads, with a brief cue when a thread needs input or finishes.
+- **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings, including thinking orbs or Automatic mode.
 - **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
@@ -43,6 +43,14 @@ Choose **All projects** to search by name or folder path, filter the sidebar, or
 Review changed files on the current branch, mark completed hunks, and commit only the paths you choose.
 
 ![Branch context, changed files, and hunk review in the Changes panel](docs/screenshots/inertia-git-workflow.png)
+
+Keep an objective in view alongside the latest conversation plan. Goals distinguish provider-native controls from local tracking, so progress and available actions stay explicit.
+
+![A tracked objective and conversation plan in the Goal panel](docs/screenshots/inertia-goals.png)
+
+Open image attachments without leaving the chat, zoom into details, and pan across larger images. Sent attachments stay close in the conversation’s gallery.
+
+![Zooming into an attached interface screenshot](docs/screenshots/inertia-image-preview.png)
 
 ## Local by default
 

@@ -2,6 +2,36 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.62 — 2026-09-24
+
+A clearer workspace, richer attachments, and more dependable agent conversations.
+
+### Workspace and context
+
+- Bring **Run, Open and Git** together in the workspace header, with files
+  and changes in the right panel and a unified composer below.
+- Give projects their own colours and pin favourites. Choose a **Working
+  indicator**, including thinking orbs and an Automatic mode.
+- Browse image attachments in a zoomable gallery. Attach plain-text source,
+  markup and configuration files, with clearer explanations for rejected or
+  unavailable attachments.
+- Keep image steering, queued messages and later follow-ups working when
+  durable attachment storage is full. Unconfirmed queued sends require an
+  explicit retry instead of risking a duplicate after reloading.
+
+### Reliability and privacy
+
+- Preserve Codex turn events that arrive before its start response, and keep
+  resumed Claude prompts from being lost behind background notifications.
+  Codex and Claude can present up to four questions with four options each.
+- Make provider failures more useful, including output limits and custom Claude
+  backends. Redact launch credentials from failure details, including encoded
+  values and values split by terminal formatting.
+- Keep goal controls from stealing typing focus, recover listed chats whose
+  details fail to load, and retain saved workflow state when a refresh is busy.
+- Restore detached chats to the correct owner after runtime recovery, keep
+  split-panel state accurate, and prevent windows reopening during shutdown.
+
 ## 0.0.61 — 2026-09-21
 
 A correctness update focused on reliable provider turns, preserving work and

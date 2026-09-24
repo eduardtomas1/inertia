@@ -50,7 +50,43 @@ replacement cache. Compiler lookup remains in the test. Compilation and native
 probe deadlines, the 90-second test deadline, assertions, worker policies and
 whole-job budgets remain unchanged. A fresh private-cache local preparation
 control downloaded and resolved the compiler, then resolved the same path warm.
-The actual Windows compiled guard still requires hosted validation.
+All four Windows unit shards, both Windows Electron jobs and both Windows
+package jobs passed on the follow-up head `22abbc65` in CI `36016227500`.
+
+## Mount hidden history after visible navigation
+
+The follow-up Linux x64 job `107689742531` timed out in the hidden variant's
+`page.reload()` before reaching the animation assertion. Its retained trace
+records the unchanged 30-second load wait, but no browser navigation events.
+Six observed shown/hidden local Linux ARM64 cases passed; they do not explain
+the hosted timeout.
+
+The hidden animation fixture now completes the same full reload while shown,
+with the previous conversation selected. It confirms the target turn is absent,
+hides the native window, then invokes the real sidebar selection handler to
+mount the history. Native visibility must remain false before and after the
+immediate pending/running-animation observation. All original load, history,
+identity, count and terminal-state assertions remain; the shown case is unchanged.
+
+This sequence still failed with exactly four pending transform transitions
+against the original CSS, and passed both cases with the correction. It removes
+hidden-page navigation from the animation setup while preserving a first hidden
+mount of the real React rows. It does not establish the hosted navigation cause.
+
+## Preserve evidence for the remaining Intel timeout
+
+Intel package/unit job `107689742472` timed out at the existing 15-second deadline
+in the fixed hung-attempt unit control; 9,993 other tests passed. The log did not
+identify the awaited operation. Independent source inspection found no proven
+missed-listener race. The wrapper's report-file waits and sequential process-tree
+settlement waits are separate from its command timeout; neither observation
+establishes what stalled on the runner.
+
+A temporary local phase control passed, reaching report close about 206 ms after
+report open. The test now reports only its fixed stage and bounded fixed-payload
+attempt evidence on failure, preserving it before directory removal. This adds
+no retry or shutdown intervention. Command, process settlement, assertions and
+the 15-second outer deadline are unchanged. The Intel cause remains unproven.
 
 ## Validation
 
@@ -80,6 +116,22 @@ Follow-up validation:
   and inspector/window controls: eight passed in 10.2 seconds, original workers,
   zero retries. All eight reviewed source/test/workflow inputs stayed unchanged.
 
+Current fixture/evidence follow-up:
+
+- Revised Linux ARM64 hidden-mount control failed against the original CSS at
+  the intended four-pending-transform assertion; corrected shown/hidden cases
+  passed. Both old and corrected fresh bundles passed unchanged budgets.
+- Final macOS activity lifecycle and Quiet Ledger: three passed in 15.7 seconds,
+  one worker and zero retries.
+- The complete repeated-lifecycle test file passed seven tests plus its seven
+  real child-suite controls. Two intentionally failing temporary controls
+  verified owner, terminal outcome and stage survive directory cleanup, both
+  before and after the normal evidence read. Temporary mutations were removed.
+- Exact two-file independent review found no remaining issue.
+- Final frozen Node 22 quality, 9,994 full tests plus seven child controls
+  (146 skips, 932 passed files) and fresh build passed; full-suite duration
+  462.06 seconds, original two workers and unchanged bundle budgets.
+
 ## Other preserved failures and limits
 
 Main `89b6ab0b74e4349bc26383954b9e4c503c891da3`, CI `35999329890`, attempt 3:
@@ -104,7 +156,8 @@ returning, without post-cleanup window creation or activation. All bounded
 samples timed out without stacks. In the attached-debugger restart scenario,
 the old process exited with code zero, the debugger closed, and the replacement
 composer became visible; the replacement's later prepared close stalled.
-This recurrence remains unresolved and is not claimed fixed by these changes.
+Mac ARM64 passed all phases on the following `22abbc65` run. The historical
+recurrence remains unexplained and is not claimed fixed by these changes.
 
 Full native trace archives, unit reports and raw logs are retained outside the
 repository. Local passes do not certify other platforms or explain the earlier

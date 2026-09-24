@@ -50,16 +50,29 @@ for (const startup of ["shown", "hidden"] as const) {
     }
     const durablePatches = store.conversationDetail(fixture.conversation.id)
       ?.activities.filter(({ title }) => title === "Patch updated") ?? [];
+    if (startup === "hidden") store.selectConversation(fixture.previousConversationId);
     store.close();
 
+    // Finish navigation while shown, then mount the restored rows while hidden.
+    // The full load gate remains separate from the compositor condition.
+    await app.page.reload();
     if (startup === "hidden") {
+      const history = app.page.locator(".activity-thread-select").filter({
+        hasText: "Quiet Ledger visual fixture",
+      });
+      await expect(history).toBeVisible();
+      await expect(app.page.locator('[data-turn-id="' + fixture.active.turn.id + '"]')).toHaveCount(0);
       await app.electronApp.evaluate(({ BrowserWindow }) => {
         const windows = BrowserWindow.getAllWindows();
         if (windows.length !== 1) throw new Error("Expected the sole fixture window.");
         windows[0]!.hide();
       });
+      expect(await app.electronApp.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(false);
+      // Dispatch the real navigation handler without waiting for a hidden
+      // compositor frame in Playwright's pointer actionability checks.
+      await history.dispatchEvent("click");
     }
-    await app.page.reload();
     await expect(app.page.getByRole("heading", {
       name: "Quiet Ledger visual fixture",
       level: 1,
@@ -86,7 +99,7 @@ for (const startup of ["shown", "hidden"] as const) {
     await expect(patchRows).toHaveCount(5);
     await expect(patchRows.locator(".lucide-wrench")).toHaveCount(5);
     if (startup === "hidden") {
-      // A native window that has not painted must not retain entrance work for
+      // Rows mounted in a hidden window must not retain entrance work for
       // completed history. Do not fast-forward, cancel or ignore pending work.
       const pending = await patchRows.evaluateAll((rows) => rows.flatMap((row) =>
         row.getAnimations({ subtree: true }).filter((animation) =>
@@ -96,6 +109,8 @@ for (const startup of ["shown", "hidden"] as const) {
             pending: animation.pending,
             currentTime: animation.currentTime,
           }))));
+      expect(await app.electronApp.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(false);
       expect(pending).toEqual([]);
       await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.show());
     }

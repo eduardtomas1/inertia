@@ -150,14 +150,31 @@ test("executes a selected local Vitest suite through the bounded runner without 
   }
 }, 30_000);
 
-test("bounds a hung attempt, retains typed start evidence, and confirms owned-tree cleanup", async () => {
+test("bounds a hung attempt, retains typed start evidence, and confirms owned-tree cleanup", async ({ onTestFailed }) => {
+  let phase = "module-import";
+  let outputPath: string | null = null;
+  let attemptEvidence: string | null = null;
+  onTestFailed(async () => {
+    const failedPhase = phase;
+    if (attemptEvidence === null && outputPath !== null) {
+      attemptEvidence = await readFile(outputPath, "utf8").catch(() => "unavailable");
+    }
+    // This fixture runs only a fixed interval payload. Retain its typed owner
+    // and terminal evidence if the outer deadline interrupts the awaited call.
+    process.stderr.write(`Lifecycle deadline fixture: ${JSON.stringify({
+      phase: failedPhase,
+      attemptEvidence: attemptEvidence?.slice(0, 4096) ?? null,
+    })}\n`);
+  });
   const { runLifecycleAttempt } = await repeatedLifecycleModule();
+  phase = "directory-create";
   const root = await mkdtemp(join(tmpdir(), "inertia-lifecycle-deadline-"));
-  const outputPath = join(root, "attempt.log");
+  outputPath = join(root, "attempt.log");
   const source = `
     setInterval(() => {}, 1000);
   `;
   try {
+    phase = "attempt-running";
     const result = await runLifecycleAttempt({
       args: ["-e", source],
       command: process.execPath,
@@ -165,12 +182,16 @@ test("bounds a hung attempt, retains typed start evidence, and confirms owned-tr
       outputPath,
       timeoutMs: 100,
     });
+    phase = "attempt-result";
     expect(result).toMatchObject({
       outcome: "timed-out",
       passed: false,
     });
     expect(result.durationMs).toBeLessThan(10_000);
+    phase = "evidence-read";
     const log = await readFile(outputPath, "utf8");
+    attemptEvidence = log;
+    phase = "evidence-assertions";
     const started = JSON.parse(log.split("\n")[0]!) as {
       event: string;
       owner: { pid: number; processGroupId: number | null };
@@ -188,6 +209,7 @@ test("bounds a hung attempt, retains typed start evidence, and confirms owned-tr
     });
     expect(log).toContain("Lifecycle attempt terminal outcome: timed-out");
     expect(started.owner.pid).toBeGreaterThan(1);
+    phase = "owned-process-settlement";
     await expect.poll(
       () => process.platform === "linux" && started.owner.processGroupId !== null
         ? linuxProcessGroupCanExecute(started.owner.processGroupId)
@@ -195,7 +217,14 @@ test("bounds a hung attempt, retains typed start evidence, and confirms owned-tr
       { timeout: 5_000 },
     ).toBe(false);
   } finally {
+    const interruptedPhase = phase;
+    if (attemptEvidence === null) {
+      phase = `evidence-retain-after-${interruptedPhase}`;
+      attemptEvidence = await readFile(outputPath, "utf8").catch(() => "unavailable");
+    }
+    phase = `directory-remove-after-${interruptedPhase}`;
     await rm(root, { force: true, recursive: true });
+    phase = interruptedPhase;
   }
 }, 15_000);
 

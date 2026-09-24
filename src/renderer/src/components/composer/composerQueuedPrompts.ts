@@ -113,11 +113,17 @@ function queuedPrompt(
     || (expected === "text" && attachments.length !== 0)
     || (expected === "media" && attachments.length === 0)
   ) return null;
+  if (
+    candidate.dispatchedAt !== undefined
+    && (typeof candidate.dispatchedAt !== "string"
+      || !Number.isFinite(Date.parse(candidate.dispatchedAt)))
+  ) return null;
   return {
     id: candidate.id,
     content: candidate.content,
     createdAt: candidate.createdAt,
     attachments,
+    ...(typeof candidate.dispatchedAt === "string" ? { dispatchedAt: candidate.dispatchedAt } : {}),
   };
 }
 
@@ -259,6 +265,31 @@ export function enqueueComposerPrompt(
       return false;
     }
     storeQueue(conversationId, [...current, candidate], true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Records that a send of this prompt was dispatched without a known outcome.
+ * The prompt stays visible, but automatic sending skips it so an ambiguous
+ * delivery cannot turn into a duplicate turn.
+ */
+export function markComposerQueuedPromptDispatched(
+  conversationId: string,
+  promptId: string,
+): boolean {
+  try {
+    const current = readComposerQueue(conversationId);
+    if (!current.some(({ id }) => id === promptId)) return false;
+    storeQueue(
+      conversationId,
+      current.map((prompt) => prompt.id === promptId
+        ? { ...prompt, dispatchedAt: new Date().toISOString() }
+        : prompt),
+      true,
+    );
     return true;
   } catch {
     return false;

@@ -4,11 +4,13 @@ import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
-  composerQueueLockName,
   composerQueueKey,
+  composerQueueLockName,
   enqueueComposerPrompt,
+  markComposerQueuedPromptDispatched,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
@@ -119,8 +121,13 @@ export function ComposerQueuedActions({
       try {
         await onSendQueued(queued.content, queued.attachments);
         removeQueued(promptId, false);
-      } catch {
-        // The workspace owns the error surface; keep the draft for retry.
+      } catch (error) {
+        // The workspace owns the error surface; keep the draft for retry. An
+        // unknown delivery may already be a queued turn on the runtime, so it
+        // is no longer sent automatically.
+        if (runtimeCommandDelivery(error) === "ambiguous") {
+          markComposerQueuedPromptDispatched(conversationId, promptId);
+        }
       } finally {
         if (
           conversationIdRef.current === conversationId
@@ -154,6 +161,7 @@ export function ComposerQueuedActions({
       || !latestTurnId
       || latestTurnStatus !== "completed"
       || !latestTurnAuthoritative
+      || queued.dispatchedAt
     ) return;
     const terminalKey = `${conversationId}:${latestTurnId}`;
     if (autoQueuedTurnRef.current === terminalKey) return;
@@ -195,8 +203,15 @@ export function ComposerQueuedActions({
               : `${queued.attachments.length} images`}
           </span>
         )}
-        <small className="composer-queue-count">
-          {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+        <small
+          className="composer-queue-count"
+          title={queued.dispatchedAt
+            ? "A previous send did not confirm. Check the transcript before sending again."
+            : undefined}
+        >
+          {queued.dispatchedAt
+            ? "Send unconfirmed"
+            : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
         </small>
         <button
           type="button"

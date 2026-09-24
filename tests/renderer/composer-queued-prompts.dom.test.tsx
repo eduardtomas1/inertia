@@ -6,6 +6,7 @@ import {
   composerQueueHasCapacity,
   composerQueueKey,
   enqueueComposerPrompt,
+  markComposerQueuedPromptDispatched,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
@@ -50,6 +51,22 @@ describe("composer queued prompt storage", () => {
     expect(JSON.parse(window.sessionStorage.getItem(
       composerMediaQueueKey(conversationId),
     ) ?? "[]")).toHaveLength(3);
+  });
+
+  it("keeps a dispatched prompt visible but marked so it is not auto-sent twice", () => {
+    expect(enqueueComposerPrompt(conversationId, "Ambiguous")).toBe(true);
+    const [queued] = readComposerQueue(conversationId);
+    expect(queued?.dispatchedAt).toBeUndefined();
+    expect(markComposerQueuedPromptDispatched(conversationId, queued!.id)).toBe(true);
+    expect(markComposerQueuedPromptDispatched(conversationId, "missing")).toBe(false);
+    const [marked] = readComposerQueue(conversationId);
+    expect(marked).toMatchObject({ id: queued!.id, content: "Ambiguous" });
+    expect(Number.isFinite(Date.parse(marked!.dispatchedAt ?? ""))).toBe(true);
+    // A corrupt marker invalidates only that entry.
+    window.localStorage.setItem(composerQueueKey(conversationId), JSON.stringify([
+      { ...marked, dispatchedAt: "not-a-date" },
+    ]));
+    expect(readComposerQueue(conversationId)).toEqual([]);
   });
 
   it("keeps durable text separate from renderer-session media", () => {

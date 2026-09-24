@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
@@ -63,7 +64,7 @@ function readablePdf(): Buffer {
 
 const pdf = readablePdf();
 
-function xrefStreamPdf(): Buffer {
+function xrefStreamPdf(options: { predictor?: "up" | "paeth" } = {}): Buffer {
   let prefix = Buffer.from("%PDF-1.5\n%\xe2\xe3\xcf\xd3\n", "binary");
   const offsets: number[] = [];
   const objects = [
@@ -86,15 +87,42 @@ function xrefStreamPdf(): Buffer {
     bytes.writeUInt16BE(field2, 5);
     return bytes;
   };
-  const xref = Buffer.concat([
+  const rows = [
     row(0, 0, 65_535),
     ...offsets.map((offset) => row(1, offset, 0)),
     row(1, xrefOffset, 0),
-  ]);
+  ];
+  // Writers such as Word, Acrobat and pdfTeX apply a PNG predictor to the
+  // cross-reference stream: each 7-byte row is prefixed with its filter type
+  // and stored as the difference from the previous row (Up) or the Paeth
+  // estimate, then deflated.
+  const predicted = options.predictor
+    ? Buffer.concat(rows.map((current, index) => {
+        const previous = index > 0 ? rows[index - 1]! : Buffer.alloc(7);
+        const filtered = Buffer.alloc(8);
+        filtered[0] = options.predictor === "up" ? 2 : 4;
+        for (let column = 0; column < 7; column += 1) {
+          const left = column > 0 ? current[column - 1]! : 0;
+          const up = previous[column]!;
+          const upLeft = column > 0 ? previous[column - 1]! : 0;
+          const estimate = left + up - upLeft;
+          const paeth = Math.abs(estimate - left) <= Math.abs(estimate - up)
+            && Math.abs(estimate - left) <= Math.abs(estimate - upLeft)
+            ? left
+            : Math.abs(estimate - up) <= Math.abs(estimate - upLeft) ? up : upLeft;
+          filtered[column + 1] = (current[column]! - (options.predictor === "up" ? up : paeth)) & 0xff;
+        }
+        return filtered;
+      }))
+    : null;
+  const xref = predicted ? deflateSync(predicted) : Buffer.concat(rows);
+  const encoding = predicted
+    ? ` /Filter /FlateDecode /DecodeParms << /Columns 7 /Predictor 12 >>`
+    : "";
   return Buffer.concat([
     prefix,
     Buffer.from(
-      `4 0 obj\n<< /Type /XRef /Size 5 /Root 1 0 R /W [1 4 2] /Length ${xref.byteLength} >>\nstream\n`,
+      `4 0 obj\n<< /Type /XRef /Size 5 /Root 1 0 R /W [1 4 2]${encoding} /Length ${xref.byteLength} >>\nstream\n`,
       "ascii",
     ),
     xref,
@@ -106,6 +134,8 @@ function xrefStreamPdf(): Buffer {
 }
 
 const modernPdf = xrefStreamPdf();
+const predictedPdf = xrefStreamPdf({ predictor: "up" });
+const paethPredictedPdf = xrefStreamPdf({ predictor: "paeth" });
 
 function spreadsheet(bookType: "xlsx" | "xls"): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -265,6 +295,8 @@ describe("privileged attachment import validation", () => {
     ["preview.webp", "image/webp", webp],
     ["notes.pdf", "application/pdf", pdf],
     ["modern.pdf", "application/pdf", modernPdf],
+    ["predicted.pdf", "application/pdf", predictedPdf],
+    ["paeth-predicted.pdf", "application/pdf", paethPredictedPdf],
     ["notes.txt", "text/plain", Buffer.from("Safe notes\n", "utf8")],
     ["notes.md", "text/markdown", Buffer.from("# Safe notes\n", "utf8")],
     ["notes.markdown", "text/plain", Buffer.from("# Safe notes\n", "utf8")],

@@ -1,6 +1,6 @@
 # v0.0.62 release preparation
 
-This preparation starts from main `c63936d90dbf8ff8ff7f12c75bd1dd4854ea6045`.
+This preparation integrates main `3f4287dfb8248532cad99085d391b77d8fb82c64`.
 The curated changelog covers the changes since the published `v0.0.61` tag,
 whose peeled commit is `67d81d24db60a2bbb5b6b361e44d9213737f8e52`.
 
@@ -29,6 +29,12 @@ provider protocols, dependencies, migrations, or CI and release gate limits.
   bundle budgets. Unit execution used the CI limit of two workers. The commands
   were `npm run check:quality`, `npm test -- --maxWorkers=2`, and
   `npm run build:bundle`, the same stages as `npm run check`.
+- After integrating #463, the focused installer smoke contracts passed
+  22 tests with one native Windows skip. The complete quality, full-test and
+  build gate also passed on the integrated candidate, with the same test counts
+  above and a full-test duration of 419.80 seconds. This is the only incoming
+  change since initial preparation; application, dependency and screenshot
+  inputs match the previously validated bytes.
 - Native dependency architecture passed for macOS ARM64.
 - The stable release configuration built the macOS ARM64 app, DMG and ZIP.
   Electron fuses, packaged application smoke, both final container smokes, and
@@ -62,5 +68,5 @@ this preparation commit.
 - This release preparation evidence report.
 
 Authenticated provider sessions, Windows, Linux, Intel macOS, and the final
-exact-tag hosted release workflow were not exercised locally. The user owns
-main CI repairs; this preparation is not a fix or a green certificate for main.
+exact-tag hosted release workflow were not exercised locally. Local results
+do not replace the required checks on the exact PR head, main commit or tag.

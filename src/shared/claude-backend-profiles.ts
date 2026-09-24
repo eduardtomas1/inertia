@@ -160,14 +160,6 @@ export function kimiCodingModelDisplayName(modelId: string): string {
     ?? modelId;
 }
 
-export function isKimiThroughClaudeSelection(selection: ModelSelection): boolean {
-  return (
-    (selection.harnessId === "claude-agent-sdk" || selection.harnessId === "claude-cli")
-    && selection.backendProfileDisplayName === "Kimi"
-    && isKimiCodingModelId(selection.modelId)
-  );
-}
-
 /**
  * Historical identity label built only from the persisted selection. It
  * deliberately does not consult the current profile registry, so deleting or

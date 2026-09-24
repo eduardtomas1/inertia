@@ -292,31 +292,6 @@ export async function stopPendingLinuxGuardianAsync(
     && result.stdout === "" && result.stderr === "";
 }
 
-export function readLinuxGuardianClaimed(
-  pid: number,
-  guardianPath: string,
-  expectedParentPid: number,
-  expectedExecutable?: LinuxGuardianExecutableIdentity,
-): LinuxProcessIdentity | null {
-  if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)
-    || (expectedExecutable
-      && !linuxGuardianExecutableMatches(guardianPath, expectedExecutable))) return null;
-  const result = spawnSync(guardianPath, ["claimed", String(pid)], {
-    encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
-    maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
-  });
-  if (result.error || result.status !== 0 || result.signal || result.stderr !== "") return null;
-  return parsedLinuxGuardianIdentity(
-    result.stdout,
-    pid,
-    guardianPath,
-    expectedParentPid,
-    false,
-    expectedExecutable,
-  );
-}
-
 async function readLinuxGuardianStateAsync(
   state: "claimed" | "owned",
   pid: number,

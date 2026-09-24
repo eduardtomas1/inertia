@@ -11,10 +11,7 @@ import {
   unlinkDirectRuntimeJournalLeaf,
   type DirectRuntimeJournalRoot,
 } from "../node/direct-runtime-journal.js";
-import {
-  appUpdateHandoffIdentityMatches,
-  type AppUpdateHandoffSnapshot,
-} from "./app-update-handoff.js";
+import type { AppUpdateHandoffSnapshot } from "./app-update-handoff.js";
 
 const RECEIPT_SCHEMA_VERSION = 1 as const;
 const RECEIPT_PREFIX = ".app-update-terminal-receipt-";
@@ -670,14 +667,4 @@ export async function retireWindowsUpdateSupervisorHelper(options: {
     return false;
   }
   return true;
-}
-
-export function windowsUpdateTerminalSnapshotMatches(
-  current: AppUpdateHandoffSnapshot,
-  expected: AppUpdateHandoffSnapshot,
-): boolean {
-  return current.checksum === expected.checksum
-    && current.revision === expected.revision
-    && current.phase === expected.phase
-    && appUpdateHandoffIdentityMatches(current, expected);
 }

@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { acpStopReasonMessage } from "./acp-stop-reasons";
 import { parseAcpSessionNotification, validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import { Transform, type TransformCallback } from "node:stream";
 
@@ -129,7 +130,7 @@ export function kimiStopFailure(stopReason: string): ProviderRunFailure {
   const safeStopReason = stopReason.slice(0, MAX_STOP_REASON_CHARS);
   return {
     reason: "provider-error",
-    message: `Kimi Code stopped with reason: ${safeStopReason}.`,
+    message: acpStopReasonMessage("Kimi Code", safeStopReason),
     technicalDetail: `Stop reason: ${safeStopReason}`,
     phase: "turn",
     terminalEvent: `session/prompt:${safeStopReason}`,

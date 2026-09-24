@@ -309,7 +309,7 @@ export function WorkspacePanel({
       </header>
       {!selected && (
         <Suspense fallback={<div className="workspace-panel-launcher" aria-busy="true" />}>
-          <RightPanelLauncher actions={actions} onOpen={openSurface} />
+          <RightPanelLauncher actions={actions} onOpen={openSurface} active={visible} />
         </Suspense>
       )}
       <div

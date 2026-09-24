@@ -130,6 +130,12 @@ export interface ComposerQueuedPrompt {
   content: string;
   createdAt: string;
   attachments: ChatAttachment[];
+  /**
+   * Set when a send was dispatched but its outcome never arrived (the socket
+   * dropped or the window reloaded mid-request). The runtime may already hold
+   * that turn, so only an explicit "Send now" retries it.
+   */
+  dispatchedAt?: string;
 }
 
 export type PromptPresetCommand = Extract<

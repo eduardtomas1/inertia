@@ -4,11 +4,14 @@ import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
-  composerQueueLockName,
+  clearComposerQueuedPromptDispatched,
   composerQueueKey,
+  composerQueueLockName,
   enqueueComposerPrompt,
+  markComposerQueuedPromptDispatched,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
@@ -107,20 +110,36 @@ export function ComposerQueuedActions({
     }
   }, [conversationId, onReleaseAttachment]);
 
-  const sendQueued = useCallback(async (promptId: string): Promise<void> => {
+  const sendQueued = useCallback(async (
+    promptId: string,
+    origin: "automatic" | "manual",
+  ): Promise<void> => {
     const dispatch = async (): Promise<void> => {
       if (queueSendingRef.current || !canSendQueuedNow) return;
       const queued = readComposerQueue(conversationId).find(
         ({ id }) => id === promptId,
       );
       if (!queued) return;
+      // Re-read under the lock: an earlier attempt in this or another window
+      // may have dispatched the prompt since the effect looked at it.
+      if (origin === "automatic" && queued.dispatchedAt) return;
+      // The intent is durable before the send crosses the boundary, so a
+      // renderer that reloads or crashes before the reply cannot send the
+      // same prompt again automatically. No record, no send.
+      if (!markComposerQueuedPromptDispatched(conversationId, promptId)) return;
       queueSendingRef.current = promptId;
       setQueueSendingId(promptId);
       try {
         await onSendQueued(queued.content, queued.attachments);
         removeQueued(promptId, false);
-      } catch {
+      } catch (error) {
         // The workspace owns the error surface; keep the draft for retry.
+        // Only a delivery the runtime is known not to have accepted restores
+        // automatic sending; an unknown outcome stays manual-retry only.
+        const delivery = runtimeCommandDelivery(error);
+        if (delivery === "not-sent" || delivery === "rejected") {
+          clearComposerQueuedPromptDispatched(conversationId, promptId);
+        }
       } finally {
         if (
           conversationIdRef.current === conversationId
@@ -154,11 +173,12 @@ export function ComposerQueuedActions({
       || !latestTurnId
       || latestTurnStatus !== "completed"
       || !latestTurnAuthoritative
+      || queued.dispatchedAt
     ) return;
     const terminalKey = `${conversationId}:${latestTurnId}`;
     if (autoQueuedTurnRef.current === terminalKey) return;
     autoQueuedTurnRef.current = terminalKey;
-    void sendQueued(queued.id);
+    void sendQueued(queued.id, "automatic");
   }, [
     canSendQueuedNow,
     conversationId,
@@ -172,6 +192,8 @@ export function ComposerQueuedActions({
 
   const queued = queuedPrompts[0] ?? null;
   if (!queued) return null;
+  const sending = queueSendingId === queued.id;
+  const unconfirmed = Boolean(queued.dispatchedAt) && !sending;
   const queueElement = (
     <div className="composer-queue" role="list" aria-label="Queued messages">
       <div
@@ -195,17 +217,24 @@ export function ComposerQueuedActions({
               : `${queued.attachments.length} images`}
           </span>
         )}
-        <small className="composer-queue-count">
-          {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+        <small
+          className="composer-queue-count"
+          title={unconfirmed
+            ? "A previous send did not confirm. Check the transcript before sending again."
+            : undefined}
+        >
+          {unconfirmed
+            ? "Send unconfirmed"
+            : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
         </small>
         <button
           type="button"
           className="composer-queue-send"
           aria-label="Send queued message now"
           disabled={!canSendQueuedNow || queueSendingId !== null}
-          onClick={() => void sendQueued(queued.id)}
+          onClick={() => void sendQueued(queued.id, "manual")}
         >
-          {queueSendingId === queued.id ? "Sending…" : "Send now"}
+          {sending ? "Sending…" : "Send now"}
         </button>
         <button
           type="button"

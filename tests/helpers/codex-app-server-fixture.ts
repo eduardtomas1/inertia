@@ -272,7 +272,25 @@ if (message.method === "turn/start") {
       { method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } },
     ]);
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-started-before-response") {
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "early-message", delta: "Hello from Codex" } },
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]);
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-flood-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      ...Array.from({ length: 256 }, (unused, index) => ({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "flood", delta: String(index) } })),
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]);
+  }
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") return;
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(
       "x".repeat(16 * 1024 * 1024 + 1) + "\\n"
@@ -280,7 +298,9 @@ if (message.method === "turn/start") {
       + JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }) + "\\n"
     );
   }
-  send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  if (process.env.INERTIA_APP_SERVER_SCENARIO !== "turn-started-before-response") {
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering"
@@ -411,7 +431,8 @@ if (message.method === "turn/start") {
         threadId,
         turnId,
         itemId: "input-item",
-        questions: Array.from({ length: 4 }, (_, index) => ({
+        // One more question than the shared MAX_AGENT_INPUT_QUESTIONS allows.
+        questions: Array.from({ length: 5 }, (_, index) => ({
           id: "question-" + index,
           question: "Prompt " + index,
           options: [{ id: "safe", label: "Safe" }],

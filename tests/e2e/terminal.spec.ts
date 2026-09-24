@@ -2,11 +2,10 @@
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { readFile, rm } from "node:fs/promises";
-import { copyFileSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { TEST_SHUTDOWN_TRACE_BYTES, TEST_SHUTDOWN_TRACE_FILE } from "../../src/server/runtime/test-shutdown-trace";
+import { attachRuntimeShutdownTrace } from "./support/runtime-shutdown-trace-evidence";
 import {
   ensureWorkspaceTools,
   openTerminalDock,
@@ -170,13 +169,8 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
 
   const runtimeBeforeRecycle = await app.runtimeSnapshot();
   try { await app.recycleRuntime(); } catch (error) {
-    try {
-      const source = join(app.testDirectory, "data", TEST_SHUTDOWN_TRACE_FILE);
-      const metadata = lstatSync(source);
-      if (metadata.isFile() && metadata.size <= TEST_SHUTDOWN_TRACE_BYTES) {
-        copyFileSync(source, test.info().outputPath(TEST_SHUTDOWN_TRACE_FILE));
-      }
-    } catch { /* Retain the original recycle failure if evidence is unavailable. */ }
+    // Validated, bounded and attached; the original recycle failure is kept.
+    await attachRuntimeShutdownTrace(() => test.info(), app.testDirectory, AbortSignal.timeout(500));
     throw error;
   }
   await expect.poll(async () => {
@@ -223,20 +217,26 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect(projectActions).toBeVisible();
   await expect(projectActions.getByRole("button", { name: /running$/u }))
     .toHaveCount(0);
+  // The options chevron exists only once the project has an action or a run.
+  // A hostile preview must create neither: without the chevron the group is
+  // the bare "Add action" control; with it, the open menu lists no running
+  // group and no item named after the preview origin.
   const projectActionOptions = projectActions.getByRole("button", {
     name: "Project action options",
   });
-  if (await projectActionOptions.isVisible()) {
+  if (await projectActionOptions.count() === 0) {
+    await expect(projectActions.getByRole("button", { name: "Add action" })).toBeVisible();
+  } else {
     await projectActionOptions.click();
     const projectActionsMenu = page.getByRole("menu", { name: "Project actions" });
     await expect(projectActionsMenu).toBeVisible();
     await expect(projectActionsMenu.getByRole("group", { name: "Running" }))
       .toHaveCount(0);
+    await expect(projectActionsMenu.getByRole("menuitem", { name: localServer.origin }))
+      .toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(projectActionsMenu).toHaveCount(0);
   }
-  await expect(page.getByRole("menuitem", { name: localServer.origin }))
-    .toHaveCount(0);
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);

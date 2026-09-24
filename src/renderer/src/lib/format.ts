@@ -36,12 +36,3 @@ export function projectNameFromPath(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
   return normalized.split(/[\\/]/).pop() || "Untitled project";
 }
-
-export function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase())
-    .join("");
-}

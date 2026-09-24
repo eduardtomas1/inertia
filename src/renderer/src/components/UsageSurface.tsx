@@ -126,7 +126,10 @@ export function UsageSurface({
               <li>
                 <span className="usage-surface-limit-row">
                   <span>Context window</span>
-                  <b aria-label={context.accessibleLabel}>{context.valueLabel}</b>
+                  <b>
+                    <span aria-hidden="true">{context.valueLabel}</span>
+                    <span className="visually-hidden">{context.accessibleLabel}</span>
+                  </b>
                 </span>
                 {context.remainingPercent !== null && (
                   <span className="usage-surface-track is-context" aria-hidden="true">

@@ -1,6 +1,7 @@
 import {
   boundedText,
   objectValue,
+  stringValue,
   type JsonObject,
 } from "./protocol";
 import { stableProviderActivityId } from "../provider/activity-lifecycle";
@@ -17,7 +18,8 @@ interface CodexRuntimeNotificationHost {
 export type CodexRuntimeNotificationOutcome =
   | "not-handled"
   | "handled"
-  | "active-thread-deleted";
+  | "active-thread-deleted"
+  | "active-thread-closed";
 
 const AUTO_REVIEW_FAILURE_STATUSES = new Set([
   "denied",
@@ -380,6 +382,8 @@ function projectThreadRuntime(
 ): CodexRuntimeNotificationOutcome {
   if (
     method !== "thread/deleted"
+    && method !== "thread/closed"
+    && method !== "thread/status/changed"
     && method !== "thread/reverted"
     && method !== "thread/environment/connected"
     && method !== "thread/environment/disconnected"
@@ -387,6 +391,20 @@ function projectThreadRuntime(
   ) return "not-handled";
   if (!ownsThread(host, params)) return "handled";
   if (method === "thread/deleted") return "active-thread-deleted";
+  if (method === "thread/closed") return "active-thread-closed";
+  if (method === "thread/status/changed") {
+    const status = stringValue(objectValue(params.status)?.type);
+    if (status === "systemError" || status === "notLoaded") {
+      host.emitActivity(
+        "system",
+        status === "systemError" ? "failed" : "info",
+        status === "systemError"
+          ? "Codex thread reported a system error"
+          : "Codex thread is no longer loaded",
+      );
+    }
+    return "handled";
+  }
   if (method === "thread/reverted") {
     host.emitActivity("system", "info", "Codex thread history was reverted");
     return "handled";

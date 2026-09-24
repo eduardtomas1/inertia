@@ -412,8 +412,9 @@ export function AttachmentPreviewDialog({
                   <FileText size={28} aria-hidden="true" />
                   <strong>Preview unavailable</strong>
                   <span>
-                    The secure preview could not be displayed. Re-add the file
-                    if it changed after upload.
+                    This attachment is no longer stored: it was removed to free
+                    space, or its file changed after upload. Re-add the file to
+                    send it again.
                   </span>
                 </div>
               )

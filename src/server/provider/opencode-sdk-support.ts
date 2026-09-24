@@ -5,7 +5,6 @@ import type {
   Agent,
   Event,
   Model,
-  PermissionRuleset,
   Provider,
 } from "@opencode-ai/sdk/v2";
 
@@ -90,21 +89,6 @@ export function resolveOpenCodeAgent(
     candidate.name === "plan" && candidate.mode !== "subagent");
   if (!agent) throw new Error("OpenCode does not advertise its native plan agent.");
   return agent;
-}
-
-export function openCodePermissions(
-  access: "full" | "supervised" | "auto-edit",
-): PermissionRuleset {
-  if (access === "full") {
-    return [{ permission: "*", pattern: "*", action: "allow" }];
-  }
-  return [
-    { permission: "*", pattern: "*", action: "ask" },
-    ...(access === "auto-edit"
-      ? [{ permission: "edit", pattern: "*", action: "allow" } as const]
-      : []),
-    { permission: "question", pattern: "*", action: "allow" },
-  ];
 }
 
 export function todoStep(value: unknown): AgentPlanStep[] {

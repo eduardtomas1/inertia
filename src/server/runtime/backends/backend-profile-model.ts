@@ -1,5 +1,4 @@
 import {
-  backendProfilePrimaryModel,
   persistedModelBackendProfileSchema,
   type BackendModelDefinition,
   type ModelBackendProfileView,
@@ -232,10 +231,4 @@ export function backendProbeForModel(
   modelId: string,
 ): BackendCompatibilityProbeResult | null {
   return record.probeResults.find((result) => result.modelId === modelId) ?? null;
-}
-
-export function primaryContextWindow(
-  profile: PersistedModelBackendProfile,
-): number | null {
-  return backendProfilePrimaryModel(profile).contextWindowTokens;
 }

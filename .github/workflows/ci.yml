@@ -36,6 +36,7 @@ jobs:
       pr_windows_lifecycle: ${{ steps.changes.outputs.pr_windows_lifecycle }}
       pr_macos_lifecycle: ${{ steps.changes.outputs.pr_macos_lifecycle }}
       test: ${{ steps.changes.outputs.test }}
+      electron: ${{ steps.changes.outputs.electron }}
       windows_unit: ${{ steps.changes.outputs.windows_unit }}
       renderer: ${{ steps.changes.outputs.renderer }}
       benchmarks: ${{ steps.changes.outputs.benchmarks }}
@@ -447,10 +448,7 @@ jobs:
       max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
     env:
       CI: "true"
-      INERTIA_CI_TIMINGS: "true"
-      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
       INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.artifact }}.json
-      INERTIA_DESKTOP_BENCHMARK_REPORT: performance-results/desktop-${{ matrix.artifact }}.json
       INERTIA_PACKAGE_BENCHMARK_REPORT: performance-results/package-${{ matrix.artifact }}.json
 
     steps:
@@ -732,6 +730,105 @@ jobs:
           mac_app="${{ matrix.app_path }}"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
 
+      - name: Keep failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-test-results-${{ matrix.artifact }}
+          path: |
+            test-results
+            coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep cross-platform performance evidence
+        if: always() && (needs.classify.outputs.benchmarks == 'true')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-${{ matrix.artifact }}
+          path: performance-results
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Keep nightly lifecycle repetition and flake evidence
+        if: always() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-lifecycle-${{ matrix.artifact }}
+          path: test-results/nightly-lifecycle
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail certification when any lifecycle repetition failed
+        if: always() && github.event_name == 'schedule' && steps.lifecycle_repeat.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "At least one retained lifecycle attempt failed or flaked." >&2
+          exit 1
+
+  # The desktop Electron projects were the longest phase of every native job
+  # (13 to 23 minutes of single-worker display-sensitive scenarios plus the
+  # isolated and recovery projects) and ran only after that platform's units,
+  # package and smoke had finished. They need the built bundle and the Electron
+  # binary, not the package, so they run here on their own runner from the same
+  # source, beside the package job instead of behind it. Package evidence is
+  # therefore never suppressed by a later display assertion, and a failed
+  # fixture cannot leave an unconfirmed runner for the package phases.
+  electron:
+    name: ${{ matrix.label }} Electron
+    if: needs.classify.outputs.electron == 'true'
+    runs-on: ${{ matrix.runner }}
+    needs: [classify, gate]
+    timeout-minutes: ${{ matrix.electron_timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.classify.outputs.matrix_json) }}
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
+    env:
+      CI: "true"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_CI_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      INERTIA_DESKTOP_BENCHMARK_REPORT: performance-results/desktop-${{ matrix.artifact }}.json
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Exclude the workspace from Microsoft Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+
+      - name: Install Linux guardian toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 dbus-daemon dbus-bin gnome-keyring at-spi2-core openbox xdotool
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
+
+      # Same bundle as the package job: generated notices, the runtime guardian
+      # built by prebuild:bundle and the renderer bundle gate, without the
+      # typecheck the quality gate already ran.
+      - name: Build the application bundle
+        id: application_bundle
+        run: npm run build:packaged
+
       # The shared dependency cache deliberately excludes Electron's platform
       # payload. Download it outside Playwright's hook deadline so a cold cache
       # cannot consume the first display-sensitive suite's startup budget.
@@ -743,8 +840,8 @@ jobs:
         if: runner.os != 'Linux'
         run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
-      # Package evidence is already complete. Do not continue native work
-      # after a failed phase whose fixture cleanup may be unconfirmed.
+      # Do not continue native work after a failed phase whose fixture cleanup
+      # may be unconfirmed.
       - name: Run isolated Electron end-to-end tests
         if: runner.os != 'Linux'
         env:
@@ -789,37 +886,19 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ci-test-results-${{ matrix.artifact }}
-          path: |
-            test-results
-            coverage/coverage-summary.json
+          name: ci-test-results-electron-${{ matrix.artifact }}
+          path: test-results
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Keep cross-platform performance evidence
+      - name: Keep desktop performance evidence
         if: always() && (needs.classify.outputs.benchmarks == 'true')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: performance-${{ matrix.artifact }}
+          name: performance-electron-${{ matrix.artifact }}
           path: performance-results
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Keep nightly lifecycle repetition and flake evidence
-        if: always() && github.event_name == 'schedule'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: nightly-lifecycle-${{ matrix.artifact }}
-          path: test-results/nightly-lifecycle
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Fail certification when any lifecycle repetition failed
-        if: always() && github.event_name == 'schedule' && steps.lifecycle_repeat.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "At least one retained lifecycle attempt failed or flaked." >&2
-          exit 1
 
       - name: Keep compact Electron timing evidence
         if: always()
@@ -882,7 +961,7 @@ jobs:
   merge-ready:
     name: merge-ready
     if: always()
-    needs: [classify, gate, lineage, node-22-minimum, pr-linux-core, pr-linux-lifecycle, pr-windows-lifecycle, pr-macos-lifecycle, test, windows-unit]
+    needs: [classify, gate, lineage, node-22-minimum, pr-linux-core, pr-linux-lifecycle, pr-windows-lifecycle, pr-macos-lifecycle, test, electron, windows-unit]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

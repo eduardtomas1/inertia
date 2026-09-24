@@ -24,11 +24,14 @@ export const GIT_PROCESS_TREE_TERMINATION_FAILURE =
 /** An error whose message is safe to show directly in the application UI. */
 export class GitError extends Error {
   readonly code: GitErrorCode;
+  /** The Git process exit status when the failure came from one; diagnostics record it. */
+  readonly exitCode: number | null;
 
-  constructor(code: GitErrorCode, message: string) {
+  constructor(code: GitErrorCode, message: string, exitCode: number | null = null) {
     super(message.slice(0, 240));
     this.name = "GitError";
     this.code = code;
+    this.exitCode = exitCode;
   }
 }
 

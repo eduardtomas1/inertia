@@ -2312,28 +2312,6 @@ button.header-breadcrumb-project:hover {
   color: var(--warning);
 }
 
-.header-button {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  border: 1px solid var(--interactive-border);
-  border-radius: 8px;
-  color: var(--text-soft);
-  background: var(--surface-strong);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
-  white-space: nowrap;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
-}
-
-.header-button:not(:disabled):hover {
-  border-color: var(--interactive-border-hover);
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
 .checkout-context-dot {
   width: 5px;
   height: 5px;
@@ -2357,10 +2335,6 @@ button.header-breadcrumb-project:hover {
   }
 }
 
-.header-popover-anchor {
-  position: relative;
-}
-
 .header-popover {
   position: absolute;
   z-index: 60;
@@ -2378,28 +2352,6 @@ button.header-breadcrumb-project:hover {
 
 .git-action-popover {
   width: 290px;
-}
-
-.git-action-popover-status {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 9px 9px;
-  border-bottom: 1px solid var(--border);
-}
-
-.git-action-popover-status strong,
-.git-action-popover-status span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-action-popover-status span {
-  color: var(--text-muted);
-  font-size: var(--ui-font-micro);
 }
 
 .git-action-popover > button {

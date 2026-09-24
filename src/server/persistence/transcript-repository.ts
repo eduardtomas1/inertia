@@ -12,7 +12,7 @@ import type {
 import {
   agentTurnFromRow,
   messageFromRow,
-  parseSnapshotAttachments as parseAttachments,
+  parseStoredAttachments as parseAttachments,
   rendererSafeAttachments,
   requireTimestamp,
 } from "./codecs";

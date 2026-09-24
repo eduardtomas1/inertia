@@ -25,6 +25,7 @@ import {
   waitForRuntimeProcessExit,
 } from "../e2e/support/electron-app-lifecycle";
 import {
+  ensureWorkspaceTools,
   openTerminalDock,
   rightPanelToggle,
   selectWorkspaceTool,
@@ -89,7 +90,13 @@ const CI_STREAM_FINAL_PAINT_CATASTROPHIC_MS = 1_500;
 const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
-const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
+// The hosted Intel macOS runner renders two to three times slower than the
+// other hosts (its unit suite takes twice as long), and its first-open samples
+// crossed 100ms on nightly runs whose lazy handoff was provably absent; a
+// lazy handoff there costs well over the wider bound.
+const CI_PREFETCHED_SURFACE_TARGET_MS = process.platform === "darwin" && process.arch === "x64"
+  ? 250
+  : 100;
 const AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX = 2;
 const AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES = 8;
 // Prove progressive rendering before the scenario deliberately leaves the live
@@ -1607,14 +1614,6 @@ async function rendererMemorySample(
   }, { timeout: MEMORY_SAMPLE_TIMEOUT_MS });
 }
 
-async function openWorkspaceTools(page: Page): Promise<void> {
-  if (await page.locator(".workspace-panel").isVisible().catch(() => false)) {
-    return;
-  }
-  await rightPanelToggle(page).click();
-  await page.locator(".workspace-panel").waitFor();
-}
-
 /** Closes the docked terminal's last session, which also hides the dock. */
 async function closeDockedTerminal(page: Page): Promise<void> {
   const dock = await openTerminalDock(page);
@@ -1644,7 +1643,7 @@ async function closeSplitChat(page: Page): Promise<void> {
 }
 
 async function openAndCloseToolCycle(page: Page, electronApp: ElectronApplication): Promise<void> {
-  await openWorkspaceTools(page);
+  await ensureWorkspaceTools(page);
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
   await selectWorkspaceTool(tools, "Files");
   await tools.getByRole("tree", { name: "Files" }).waitFor();

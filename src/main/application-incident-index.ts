@@ -6,6 +6,7 @@ import {
   diagnosticQuerySchema,
   diagnosticRecordSchema,
   parseDiagnosticIncident,
+  type DiagnosticIncident,
   type DiagnosticPage,
   type DiagnosticQuery,
   type DiagnosticRecord,
@@ -19,6 +20,15 @@ interface IncidentIndexOptions {
 }
 
 /** Main-owned bounded view over the existing runtime journal, never over SQLite. */
+function sameIncidentSubject(
+  previous: DiagnosticIncident["context"],
+  incident: DiagnosticIncident["context"],
+): boolean {
+  const { requestId: _previousRequest, ...previousSubject } = previous;
+  const { requestId: _incidentRequest, ...incidentSubject } = incident;
+  return JSON.stringify(previousSubject) === JSON.stringify(incidentSubject);
+}
+
 export class ApplicationIncidentIndex {
   private readonly records = new Map<string, DiagnosticRecord>();
   private readonly pending = new Map<string, DiagnosticRecord>();
@@ -54,12 +64,14 @@ export class ApplicationIncidentIndex {
     this.prune();
     const previous = this.records.get(incident.id);
     // Propagated observations may not relabel the original operation or revive
-    // an already recovered episode. Identity belongs to the producer, not UI focus.
+    // an already recovered episode. Identity belongs to the producer, not UI
+    // focus. A producer that reuses one identity for repeats of the same
+    // failing operation (command incidents) may name a new request each time;
+    // the record then carries the latest request and counts the occurrence.
     if (previous && (
       previous.code !== incident.code
-      || previous.correlationId !== incident.correlationId
       || previous.runtimeGeneration !== incident.runtimeGeneration
-      || JSON.stringify(previous.context) !== JSON.stringify(incident.context)
+      || !sameIncidentSubject(previous.context, incident.context)
       || Date.parse(previous.at) > at
       || (previous.outcome === "recovered" && incident.outcome !== "recovered")
     )) return null;

@@ -1,5 +1,4 @@
 import type {
-  AppSettings,
   ContinuationIdentity,
   HarnessBackendCompatibility,
   ModelSelection,
@@ -11,12 +10,6 @@ import {
   type ContinuationChangeKind,
   type ContinuationReasonCode,
 } from "../../../shared/continuation-policy";
-import {
-  buildNewConversationPayload,
-  type NewConversationLocation,
-  type NewConversationPayload,
-  withNewConversationModelSelection,
-} from "../lib/newConversation";
 
 type TransitionCompatibility = Pick<
   HarnessBackendCompatibility,
@@ -115,20 +108,4 @@ export function resolveModelRouteTransition(
     providerSessionDisposition: "retain-current-conversation",
     continuationAction: decision.action,
   };
-}
-
-/**
- * Builds the explicit new-conversation outcome from project and route data
- * only. Conversation IDs, continuation identities, and provider sessions are
- * intentionally outside the accepted transition shape.
- */
-export function buildModelRouteConversationPayload(
-  transition: Extract<ModelRouteTransition, { kind: "create-new-conversation" }>,
-  settings: AppSettings,
-  location: NewConversationLocation = { kind: "defaults" },
-): NewConversationPayload {
-  return withNewConversationModelSelection(
-    buildNewConversationPayload(transition.projectId, settings, location),
-    transition.selection,
-  );
 }

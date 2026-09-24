@@ -186,6 +186,17 @@ describe("right panel surface host", () => {
     expect(screen.queryByRole("group", { name: "Open a surface" })).not.toBeInTheDocument();
   });
 
+  it("keeps launcher shortcuts disarmed while the panel is hidden", async () => {
+    const onChange = vi.fn();
+    render(<SurfaceHost initial={{ ...EMPTY_RIGHT_PANEL_STATE, isOpen: false }} onChange={onChange} />);
+    // The launcher is mounted inside the hidden aside; a plain key press
+    // elsewhere in the window must not open a surface.
+    await screen.findByRole("group", { name: "Open a surface", hidden: true });
+    fireEvent.keyDown(document.body, { key: "d" });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  });
+
   it("ignores launcher shortcuts while typing and explains unavailable surfaces", async () => {
     render(
       <>

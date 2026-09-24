@@ -33,6 +33,31 @@ describe("chat attachment contract", () => {
     expect(isPotentialChatAttachment("notes.pdf", "image/png")).toBe(false);
   });
 
+  it("accepts plain-text source, markup and configuration names as text beside the pinned lookup", () => {
+    for (const name of ["config.yaml", "main.ts", "index.html", "query.sql", "Dockerfile.patch", "app.log", "rows.tsv"]) {
+      expect(chatAttachmentMimeTypeForName(name), name).toBe("text/plain");
+    }
+    // The lookup migration 56 pins is unchanged; the names it knows keep their own type.
+    expect(chatAttachmentMimeTypeForName("notes.txt")).toBe("text/plain");
+    expect(chatAttachmentMimeTypeForName("data.json")).toBe("application/json");
+    // Credentials, scriptable images and binary containers stay out.
+    for (const name of ["secrets.env", "server.pem", "id.key", "logo.svg", "app.exe", "archive.tar", "config.yaml."]) {
+      expect(chatAttachmentMimeTypeForName(name), name).toBeNull();
+    }
+    // Platforms declare these files with their own types, or none at all.
+    expect(isPotentialChatAttachment("config.yaml", "application/x-yaml")).toBe(true);
+    expect(isPotentialChatAttachment("config.yaml", "text/yaml")).toBe(true);
+    expect(isPotentialChatAttachment("main.ts", "video/mp2t")).toBe(true);
+    expect(isPotentialChatAttachment("script.py", "text/x-python")).toBe(true);
+    expect(isPotentialChatAttachment("script.py", "")).toBe(true);
+    expect(isPotentialChatAttachment("script.py", "application/octet-stream")).toBe(true);
+    expect(isPotentialChatAttachment("index.html", "image/png")).toBe(false);
+    expect(isPotentialChatAttachment("index.html", "application/pdf")).toBe(false);
+    expect(isPotentialChatAttachment("index.html", "application/zip")).toBe(false);
+    // The plain-text declared set does not widen the pinned names.
+    expect(isPotentialChatAttachment("notes.txt", "application/x-yaml")).toBe(false);
+  });
+
   it("accepts bounded document attachments but rejects unsupported and excessive input", () => {
     const attachment = {
       id: crypto.randomUUID(),

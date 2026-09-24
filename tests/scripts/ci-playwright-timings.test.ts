@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,11 +10,14 @@ it("reports actual discovery, failed/skipped attempts and exact identity without
   try {
     const testModule = pathToFileURL(resolve("node_modules/@playwright/test/index.mjs")).href;
     const reporter = resolve("scripts/ci/playwright-timings.mjs");
+    // A nested testDir proves the report lands beside the config file, where
+    // CI uploads it, and not under Playwright's rootDir (the test directory).
     await writeFile(join(root, "playwright.config.mjs"), `export default {
-      testDir: '.', workers: 1, retries: 0, reporter: [[${JSON.stringify(reporter)}]],
+      testDir: './specs', workers: 1, retries: 0, reporter: [[${JSON.stringify(reporter)}]],
       projects: [{name: 'isolated'}]
     };`);
-    await writeFile(join(root, "timing.spec.mjs"), `import { test, expect } from ${JSON.stringify(testModule)};
+    await mkdir(join(root, "specs"));
+    await writeFile(join(root, "specs", "timing.spec.mjs"), `import { test, expect } from ${JSON.stringify(testModule)};
       test('pass', () => { console.log('private test output'); });
       test('failure', () => { expect('private error').toBe('different'); });
       test.skip('skip', () => {});
@@ -33,6 +36,7 @@ it("reports actual discovery, failed/skipped attempts and exact identity without
     expect(report.tests.map((test: { attempts: Array<{ status: string }> }) => test.attempts[0]!.status))
       .toEqual(["passed", "failed", "skipped"]);
     expect(new Set(report.tests.map((test: { id: string }) => test.id)).size).toBe(3);
+    expect(report.tests.map((test: { file: string }) => test.file)).toEqual(Array(3).fill("timing.spec.mjs"));
     expect(raw).not.toContain("private");
     expect(raw).not.toContain(root);
     expect(raw).not.toContain("attachments");

@@ -35,10 +35,15 @@ const QUERY = Object.freeze({
 });
 
 const CAPABILITY_QUERY_KEYS = new Set<string>(Object.values(QUERY));
+// Every key the renderer's resume URL can carry (see runtimeSequencing.ts).
+// A detached window resumes with one conversationOwner per mounted pane; an
+// unknown key rejects the whole handshake, which left detached windows unable
+// to reconnect after any socket drop.
 const RUNTIME_RESUME_QUERY_KEYS = new Set([
   "runtimeGeneration",
   "afterSequence",
   "conversationId",
+  "conversationOwner",
 ]);
 
 export interface DetachedRuntimeAuthority {

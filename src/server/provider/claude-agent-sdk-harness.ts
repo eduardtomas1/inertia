@@ -15,8 +15,7 @@ import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profile
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-  redactExactCredentials,
-  sanitizeProviderActivityDetail,
+  sanitizeProviderFailureDetail,
 } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import {
@@ -39,7 +38,6 @@ import {
   type ProviderRunResult,
 } from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
-import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
@@ -64,6 +62,7 @@ import {
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeStartupFailure } from "./claude-startup-failure";
+import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
 import {
   readClaudeContextUsage,
 } from "./claude-usage";
@@ -453,15 +452,13 @@ function startClaudeRun(
   const usesNativeAnthropic = options.input.backendProfile.id
     === NATIVE_ANTHROPIC_PROFILE_ID;
   const launchCredentials = launchCredentialValues(claudeRunEnvironment(options.environment));
-  const routeFailure = (error: string): string => usesNativeAnthropic
-    ? error
-    : providerFailureMessage(
-        "claude",
-        undefined,
-        error,
-        "",
-        options.input.backendProfile,
-      );
+  const routeFailure = (error: string): string =>
+    claudeRouteFailureMessage(usesNativeAnthropic, error, options.input.backendProfile);
+  const routeDetail = (rawError: string, detail: string | null): string | null =>
+    claudeRouteFailureDetail({
+      usesNativeAnthropic, rawError, message: routeFailure(rawError), detail,
+      launchCredentials, workspaceRoot: options.input.cwd,
+    });
   const messageProjector = new ClaudeMessageProjector({
     emitter,
     text,
@@ -576,7 +573,9 @@ function startClaudeRun(
             : {}),
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
-          ...(claudeEffort(options.input.reasoningEffort) ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
+          // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
+          ...(usesNativeAnthropic && claudeEffort(options.input.reasoningEffort)
+            ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
           ...(stagedSkillPlugin
             ? {
                 plugins: [{
@@ -778,19 +777,15 @@ function startClaudeRun(
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
         const projectedFailure = messageProjector.preferredFailure();
-        const error = routeFailure(
-          projectedFailure?.message
-            ?? claudeLifecycleFailure(completion.reason),
-        );
+        const lifecycleError = projectedFailure?.message
+          ?? claudeLifecycleFailure(completion.reason);
+        const error = routeFailure(lifecycleError);
         // The stream ended without a thrown error, so this is the only place
         // the CLI's own reason for exiting can reach the failure details.
-        const technicalDetail = sanitizeProviderActivityDetail(
-          redactExactCredentials(ownedProcess.stderrTail(), launchCredentials),
-          {
-            workspaceRoot: options.input.cwd,
-            maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-          },
-        );
+        const technicalDetail = routeDetail(lifecycleError, sanitizeProviderFailureDetail(
+          ownedProcess.stderrTail(), launchCredentials,
+          { workspaceRoot: options.input.cwd, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
+        ));
         return finishResult(
           "failed",
           error,
@@ -813,10 +808,11 @@ function startClaudeRun(
         const resultReason = finalMessage.subtype === "success"
           ? finalMessage.terminal_reason ?? "api_error"
           : startupFailure?.reason ?? finalMessage.subtype;
-        const technicalDetail = sanitizeProviderActivityDetail(
-          redactExactCredentials((finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
+        const technicalDetail = sanitizeProviderFailureDetail(
+          (finalMessage.subtype === "success" ? [finalMessage.result] : finalMessage.errors)
             .filter((value): value is string => typeof value === "string")
-            .join("\n"), launchCredentials),
+            .join("\n"),
+          launchCredentials,
           {
             workspaceRoot: options.input.cwd,
             maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -870,10 +866,10 @@ function startClaudeRun(
         safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
       );
       const message = routeFailure(rawError);
-      const technicalDetail = sanitizeProviderActivityDetail(redactExactCredentials(ownedProcess.stderrTail(), launchCredentials), {
-        workspaceRoot: options.input.cwd,
-        maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS,
-      });
+      const technicalDetail = routeDetail(rawError, sanitizeProviderFailureDetail(
+        ownedProcess.stderrTail(), launchCredentials,
+        { workspaceRoot: options.input.cwd, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
+      ));
       return finishResult("failed", message, {
         ...claudeRuntimeFailure(rawError, message),
         ...(technicalDetail ? { technicalDetail } : {}),

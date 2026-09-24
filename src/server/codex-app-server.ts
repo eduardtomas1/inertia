@@ -1,7 +1,4 @@
-export {
-  CODEX_APP_SERVER_MAX_FRAME_BYTES,
-  CODEX_APP_SERVER_MAX_PROTOCOL_BYTES,
-} from "./codex/app-server-config";
+export { CODEX_APP_SERVER_MAX_FRAME_BYTES } from "./codex/app-server-config";
 export { startCodexAppServerRun } from "./codex/app-server-run";
 export type {
   CodexAppServerOptions,

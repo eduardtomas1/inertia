@@ -210,7 +210,12 @@ export function utf8Prefix(buffer: Buffer, maxBytes: number): string {
   return buffer.subarray(0, end).toString("utf8");
 }
 
-function classifyFailure(stderr: string, fallback: string): GitError {
+function classifyFailure(stderr: string, fallback: string, exitCode: number | null): GitError {
+  const classified = classifyStderr(stderr, fallback);
+  return new GitError(classified.code, classified.message, exitCode);
+}
+
+function classifyStderr(stderr: string, fallback: string): GitError {
   const detail = stderr.toLowerCase();
   if (
     detail.includes("not a git repository")
@@ -508,6 +513,7 @@ function runGitProcess(
             classifyFailure(
               result.stderr.toString("utf8"),
               options.failureMessage,
+              code,
             ),
           );
         }
@@ -778,6 +784,7 @@ function runPreparedGitRefTransaction(
         finish(classifyFailure(
           Buffer.concat(stderr).toString("utf8"),
           "Git did not acknowledge the aborted reference transaction.",
+          code,
         ));
       } else if (
         code === 0
@@ -794,6 +801,7 @@ function runPreparedGitRefTransaction(
         finish(classifyFailure(
           Buffer.concat(stderr).toString("utf8"),
           options.failureMessage,
+          code,
         ));
       }
     });

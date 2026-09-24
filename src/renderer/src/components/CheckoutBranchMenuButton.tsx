@@ -101,7 +101,7 @@ export default function CheckoutBranchMenuButton({
           setMenuTrigger("branch", node);
         }}
         type="button"
-        className={`composer-checkout-branch checkout-branch-button${detached ? " is-detached" : ""}${contextMismatch ? " has-context-mismatch" : ""}`}
+        className={`composer-checkout-branch checkout-branch-button${detached ? " is-detached" : ""}`}
         aria-label={label}
         title={detached ? "Detached HEAD · Create branch" : branch}
         aria-haspopup="menu"

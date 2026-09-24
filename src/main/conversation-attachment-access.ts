@@ -101,7 +101,7 @@ export async function resolveAttachmentPreviewResponse(
     : null;
   const retainedPreview = temporaryPreview
     ? null
-    : await retained?.then((store) => store.preview(id));
+    : await retained?.then((store) => store.preview(id)).catch(() => null);
   const preview: ValidatedAttachmentPreview | null = temporaryPreview
     ?? (retainedPreview
       ? {

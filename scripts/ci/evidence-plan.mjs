@@ -13,8 +13,10 @@ export const EVIDENCE_JOBS = Object.freeze({
   "pr-windows-lifecycle": "Windows x64 lifecycle sentinel",
   "pr-macos-lifecycle": "macOS arm64 lifecycle sentinel",
   test: "native matrix",
+  electron: "native Electron matrix",
   "windows-unit": "Windows unit shards",
 });
+export const ELECTRON_CHECK_SUFFIX = " Electron";
 
 export function createEvidencePlan({
   head, sourceHead = head, base = null, baselineReason = "comparison-base",
@@ -52,11 +54,16 @@ export function createEvidencePlan({
     "pr-windows-lifecycle": critical && provider && !platforms.includes("windows-x64"),
     "pr-macos-lifecycle": critical && provider && !platforms.includes("macos-arm64"),
     test: platforms.length > 0,
+    // Desktop Electron projects run beside, not after, the same platform's
+    // units and package proof. Both jobs build the same candidate from source.
+    electron: platforms.length > 0,
     "windows-unit": platforms.includes("windows-x64"),
   };
   const requiredJobs = Object.keys(jobs).filter((job) => jobs[job]);
   const requiredChecks = requiredJobs.flatMap((job) => job === "test"
     ? selectedPlatforms.map(({ label }) => label)
+    : job === "electron"
+      ? selectedPlatforms.map(({ label }) => `${label}${ELECTRON_CHECK_SUFFIX}`)
     : job === "windows-unit"
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
       : [EVIDENCE_JOBS[job]]);
@@ -74,7 +81,8 @@ export function createEvidencePlan({
       ...(jobs["pr-linux-lifecycle"] ? [domains.has("renderer_ui") ? "linux-full-electron" : "linux-core-bridge", "linux-recovery"] : []),
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
-      ...platforms.map((platform) => `${platform}:native-units-electron-package-smoke`),
+      ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
+      ...platforms.map((platform) => `${platform}:electron-display-isolated-recovery`),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },

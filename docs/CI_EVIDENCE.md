@@ -25,7 +25,7 @@ It does not select only tests whose filenames changed.
 | Draft feedback | Shared quality/lineage, full canonical Linux coverage for code, selected native interaction/provider sentinels; clean minimum Node when its contract changes | `merge-ready` deliberately fails: draft feedback is not merge approval. |
 | Merge validation | Quality/lineage once; canonical Linux coverage for code; contract-selected interaction, provider/native and package evidence | Ready-for-review and every subsequent head run the required plan. |
 | Main validation | Same policy over the accumulated unproven diff from a trusted compatible successful ancestor | Missing/uncertain baseline requires the complete matrix. |
-| Nightly certification | All six native targets, full units/portable contracts, Electron, packages, performance and retained three-attempt lifecycle checks | Native matrix limited to two simultaneous target jobs; every failed attempt still fails certification. |
+| Nightly certification | All six native targets, full units/portable contracts, Electron, packages, performance and retained three-attempt lifecycle checks | Each native matrix (package and Electron) is limited to two simultaneous target jobs; every failed attempt still fails certification. |
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
 Docs-only changes require quality and immutable migration lineage, but no
@@ -49,7 +49,10 @@ suite enforces unchanged all-source/per-area coverage thresholds once. Linux
 ARM64 runs the same complete unit suite without duplicate instrumentation;
 macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
 remain single-worker; Windows ARM64 retains its portable/native obligations.
-Windows Electron remains one worker, other isolated desktop projects two.
+Windows Electron remains one worker, other isolated desktop projects two. The
+desktop Electron projects run in a separate `<label> Electron` job per selected
+target (see package evidence below); the package job itself has no Playwright
+step.
 The isolated browser-evidence CPU budget remains in CI quality and on each
 release target, separate from instrumented coverage.
 
@@ -110,19 +113,58 @@ and [job evidence API](https://docs.github.com/en/rest/actions/workflow-jobs).
 
 ## Package evidence and preserved trust
 
-Each native target still builds once for its exact source/target/configuration.
-Package construction, identity/fuse/static-guardian checks, packaged launch,
-final-container smoke, Windows N-1 installed upgrade and applicable signature
-checks now precede desktop E2E. Thus the observed failure mode where a later
-display assertion suppressed package evidence is removed.
+Each selected native target runs two jobs from the same source checkout, each
+with its own `npm run build:packaged` for its exact source/target/configuration:
 
-Native phases remain sequential and stop after failure: no assumption that a
-failed fixture left a safe runner. A unit/build/package failure can still
-prevent later evidence. Fully independent downstream diagnostics would require
-isolated runners plus a measured, complete artifact identity and transfer
-protocol; that is deliberately not introduced here. Package-first ordering
-does not make a failed run release-ready or replace exact final signed-byte
-proof. Publisher/download/checksum/provenance/tag-revalidation logic is unchanged.
+- `<label>` (the `test` matrix): units or portable contracts, the platform
+  benchmark smoke, package construction, identity/fuse/static-guardian checks,
+  packaged launch, final-container smoke, Windows N-1 installed upgrade and
+  applicable signature checks. It contains no Playwright step.
+- `<label> Electron` (the `electron` matrix): the display-sensitive, isolated
+  and runtime-recovery Playwright projects, the provider-settings screenshots
+  on Linux x64, the desktop benchmark and the compact timing report.
+
+Both are required checks in the plan (`requiredChecks` lists the Electron
+label per selected platform) and both are enumerated by `merge-ready` from the
+REST job records. Neither transfers an artifact to the other: the Electron job
+runs against its own built bundle and the downloaded Electron binary, exactly
+as the Linux interaction sentinel already did, so no cross-job artifact
+identity or transfer protocol is introduced. Package evidence can no longer be
+suppressed by a later display assertion, and a failed Electron fixture cannot
+leave an unconfirmed runner for the package phases, because they never share
+one.
+
+Within each job the phases remain sequential and stop after failure: no
+assumption that a failed fixture left a safe runner. A unit/build/package
+failure can still prevent later package evidence in its own job. Package-first
+ordering does not make a failed run release-ready or replace exact final
+signed-byte proof. Publisher/download/checksum/provenance/tag-revalidation
+logic is unchanged, and the release workflow keeps its single sequential job
+per target.
+
+The split targets the measured critical path of main run
+[35883688368](https://github.com/eduardtomas1/inertia/actions/runs/35883688368)
+(23 September 2026, success, all six targets), where the Electron projects were
+the longest phase of every native job and ran only after that platform's units
+and package proof:
+
+| Job | Wall time | Units or portable | Package and smoke | Display | Isolated | Recovery |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| macOS x64 | 70.2 min | 19.7 | 7.2 | 22.6 | 10.9 | 1.7 |
+| Windows ARM64 | 56.3 min | 10.6 | 6.5 | 14.6 | 9.5 | 1.1 |
+| macOS arm64 | 49.0 min | 10.9 | 4.5 | 19.1 | 8.3 | 1.6 |
+| Linux x64 | 35.5 min | 9.0 | 2.9 | 13.7 | 5.4 | 1.0 |
+| Windows x64 | 35.4 min | (shards) | 6.1 | 13.6 | 8.4 | 1.0 |
+| Linux ARM64 | 30.7 min | 6.2 | 2.6 | 12.7 | 4.5 | 0.9 |
+
+With the two jobs in parallel the projected per-platform wall time is the
+longer of the two halves plus one repeated install and build (about two to
+nine minutes depending on the runner), for example roughly 42 minutes instead
+of 70 on macOS x64. This is a projection from those step timings, not a hosted
+measurement; the first full runs on this workflow supply the before/after
+comparison, and the runner budget rises by one install and build per target.
+Peak concurrency for a full run is four macOS jobs, within the five-slot
+hosted limit noted in the speed study.
 
 Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,
 never under PR/merge-group source. Missing secret is explicitly not exercised.

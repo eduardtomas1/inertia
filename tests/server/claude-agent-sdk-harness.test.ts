@@ -1332,9 +1332,9 @@ describe("Claude Agent SDK harness", () => {
       text: "Kimi response",
       sessionId: "77777777-7777-4777-8777-777777777777",
     });
+    expect(capturedOptions, "custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL only").not.toHaveProperty("effort");
     expect(capturedOptions).toMatchObject({
       model: "k3[1m]",
-      effort: "xhigh",
       env: expect.objectContaining({
         ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
         ANTHROPIC_MODEL: "k3[1m]",

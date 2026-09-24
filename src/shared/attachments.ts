@@ -148,16 +148,76 @@ export function chatAttachmentMimeTypeForName(
   return extension ? attachmentMimeByExtension[extension] ?? null : null;
 }
 
+/**
+ * Plain-text source, markup, data and configuration files that the live
+ * import boundary accepts as text/plain. The set is additive to the lookup
+ * migration 56 pins: rows written with these names are read by the live
+ * stored-attachment codec, and the frozen migration parser stays unchanged.
+ * Deliberately absent: SVG (an image format that can carry script), .env and
+ * key or certificate files (credentials), and every binary container. The
+ * import still proves the bytes are control-free UTF-8 before accepting them.
+ */
+const PLAIN_TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "log", "text", "rst", "tex", "tsv", "jsonl", "ndjson",
+  "yaml", "yml", "toml", "ini", "cfg", "conf", "properties", "xml", "html", "htm",
+  "css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "tsx", "vue", "svelte",
+  "py", "rb", "go", "rs", "java", "kt", "kts", "scala", "c", "h", "cc", "cpp", "hpp",
+  "cs", "swift", "php", "lua", "dart", "r", "pl", "ex", "exs", "erl", "hs", "clj",
+  "sh", "bash", "zsh", "ps1", "bat", "cmd", "sql", "graphql", "proto", "diff", "patch",
+]);
+
+// Declared types platforms report for the plain-text set beyond text/*.
+const PLAIN_TEXT_DECLARED_MIME_TYPES: ReadonlySet<string> = new Set([
+  "application/yaml", "application/x-yaml", "application/toml", "application/xml",
+  "application/xhtml+xml", "application/javascript", "application/x-javascript",
+  "application/ecmascript", "application/typescript", "application/x-typescript",
+  "application/x-sh", "application/x-shellscript", "application/x-csh",
+  "application/x-powershell", "application/x-bat", "application/x-msdos-program",
+  "application/sql", "application/x-sql", "application/x-httpd-php", "application/x-php",
+  "application/x-python", "application/x-python-code", "application/x-ruby",
+  "application/x-perl", "application/x-tex", "application/x-latex",
+  "application/x-ndjson", "application/jsonl", "application/graphql", "application/x-protobuf",
+  // Chromium classifies a .ts file by extension as an MPEG transport stream.
+  "video/mp2t",
+]);
+
+function attachmentNameExtension(name: string): string | null {
+  return /\.([^.]+)$/u.exec(name.trim())?.[1]?.toLocaleLowerCase("en-US") ?? null;
+}
+
+/**
+ * Extensions the live import accepts, for native pickers: the pinned lookup's
+ * names plus the plain-text set. The follow-up picker stays images only.
+ */
+export function chatAttachmentPickerExtensions(mode: "images" | "all"): string[] {
+  const pinned = Object.keys(attachmentMimeByExtension);
+  if (mode === "images") {
+    return pinned.filter((extension) =>
+      chatAttachmentKind(attachmentMimeByExtension[extension]!) === "image");
+  }
+  return [...pinned, ...PLAIN_TEXT_ATTACHMENT_EXTENSIONS];
+}
+
+function isPlainTextAttachmentName(name: string): boolean {
+  const extension = attachmentNameExtension(name);
+  return extension !== null
+    && !Object.hasOwn(attachmentMimeByExtension, extension)
+    && PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension);
+}
+
 // The original lookup above is pinned by released migration 56. Live import
-// boundaries use this own-property lookup; persisted codecs additionally require
-// a string MIME value in the explicit MIME allowlist.
+// boundaries use this own-property lookup, extended with the plain-text set;
+// persisted codecs additionally require a string MIME value in the explicit
+// MIME allowlist.
 export function safeChatAttachmentMimeTypeForName(
   name: string,
 ): ChatAttachmentMimeType | null {
-  const extension = /\.([^.]+)$/u.exec(name.trim())?.[1]?.toLocaleLowerCase("en-US");
-  return extension && Object.hasOwn(attachmentMimeByExtension, extension)
-    ? attachmentMimeByExtension[extension]!
-    : null;
+  const extension = attachmentNameExtension(name);
+  if (extension === null) return null;
+  if (Object.hasOwn(attachmentMimeByExtension, extension)) {
+    return attachmentMimeByExtension[extension]!;
+  }
+  return PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension) ? "text/plain" : null;
 }
 
 export function isPotentialChatAttachment(
@@ -174,7 +234,9 @@ export function isPotentialChatAttachment(
     || declared === inferred
     || declared === "application/octet-stream"
   ) return true;
-  return attachmentDeclaredMimeAliases[inferred]?.includes(declared) ?? false;
+  if (attachmentDeclaredMimeAliases[inferred]?.includes(declared)) return true;
+  return isPlainTextAttachmentName(name)
+    && (declared.startsWith("text/") || PLAIN_TEXT_DECLARED_MIME_TYPES.has(declared));
 }
 
 export function isSpreadsheetAttachmentMimeType(

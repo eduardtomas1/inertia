@@ -491,15 +491,6 @@ async function inspectAppImageFile(
   }
 }
 
-export async function appImageCandidateIdentity(
-  path: string,
-): Promise<AppImageCandidateIdentity> {
-  return (await inspectAppImageFile(
-    path,
-    "The AppImage update candidate",
-  )).identity;
-}
-
 async function cleanTransactionFiles(
   paths: TransactionPaths,
   original: FileIdentity,

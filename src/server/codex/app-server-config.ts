@@ -6,9 +6,6 @@ import type { CodexAppServerOptions } from "./types";
 
 export const CODEX_APP_SERVER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const CODEX_APP_SERVER_MAX_WINDOW_BYTES = 256 * 1024 * 1024;
-/** Retained compatibility name; this is now a refillable window, not a run cap. */
-export const CODEX_APP_SERVER_MAX_PROTOCOL_BYTES =
-  CODEX_APP_SERVER_MAX_WINDOW_BYTES;
 export const CODEX_APP_SERVER_PROTOCOL_WINDOW_MS = 60_000;
 export const CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES = 32 * 1024 * 1024;
 export const MAX_CODEX_TEXT_CHARS = 4 * 1024 * 1024;

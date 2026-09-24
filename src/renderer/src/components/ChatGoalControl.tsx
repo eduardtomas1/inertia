@@ -154,6 +154,28 @@ export function ChatGoalControl({
   const controlsBusy = busy || executionStatus === "starting";
   const ownerKey = workflow ? `${workflow.conversationId}:${source}` : null;
   const ownerKeyRef = useRef(ownerKey);
+  // A status action replaces the button that had focus (Pause becomes Resume,
+  // the recovery section unmounts). Only an action from this control arms a
+  // restore, so an external status change never takes focus from elsewhere.
+  const restoreActionFocus = useRef(false);
+  const goalStatus = goal?.status ?? null;
+
+  useLayoutEffect(() => {
+    if (!open) restoreActionFocus.current = false;
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !restoreActionFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    // The updated goal can arrive before the mutation settles, while the
+    // replacement button is still disabled and cannot take focus. Stay armed
+    // until an enabled target exists.
+    const target = firstActionRef.current ?? inputRef.current;
+    if (!target || target.disabled) return;
+    restoreActionFocus.current = false;
+    target.focus();
+  }, [controlsBusy, goalStatus, loading, open, submitting]);
 
   useLayoutEffect(() => {
     if (ownerKeyRef.current === ownerKey) return;
@@ -195,7 +217,9 @@ export function ChatGoalControl({
       target.focus();
       return;
     }
-    const intentEvents = ["focusin", "pointerdown"];
+    // Typing that continues in the already-focused composer is intent too;
+    // a later enabled target must not pull the caret out mid-word.
+    const intentEvents = ["focusin", "pointerdown", "keydown"];
     for (const event of intentEvents) document.addEventListener(event, cancelInitialFocus, true);
     return () => {
       for (const event of intentEvents) document.removeEventListener(event, cancelInitialFocus, true);
@@ -233,6 +257,7 @@ export function ChatGoalControl({
   const updateStatus = async (status: AgentGoalStatus): Promise<void> => {
     if (!source || submitting) return;
     setSubmitting(true);
+    restoreActionFocus.current = true;
     try {
       await onSetGoal({ source, status });
     } catch {
@@ -260,6 +285,7 @@ export function ChatGoalControl({
   ): Promise<void> => {
     if (!source || submitting) return;
     setSubmitting(true);
+    restoreActionFocus.current = true;
     try {
       await onSetGoal({
         source,

@@ -3,7 +3,7 @@ import {
   readFileSync,
   realpathSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 
 import {
   pinDirectRuntimeJournalRoot,
@@ -320,14 +320,4 @@ export async function launchWindowsUpdateSupervisor(
     throw error;
   }
   return admitted;
-}
-
-export function windowsUpdateSupervisorStagedPath(options: {
-  readonly dataDirectory: string;
-  readonly operationId: string;
-}): string {
-  return resolve(
-    options.dataDirectory,
-    windowsUpdateSupervisorExecutableName(options.operationId),
-  );
 }

@@ -17,14 +17,23 @@ it.each([
   { label: "one-character password", password: "~" },
   { label: "empty password fallback", password: "" },
   { label: "password within a longer credential", password: "q7Z2p9A", apiKey: "fixture-q7Z2p9A-provider-value" },
-])("redacts launch credentials from startup failure detail ($label)", async ({ password, apiKey }) => {
+  { label: "credentials split by terminal escapes", password: "q7Z2p9A-fixture-secret-value", output: "escape-split" },
+  { label: "basic-auth token, URL-encoded and base64 forms", password: "p@ss word#1/fixture", output: "encoded" },
+])("redacts launch credentials from startup failure detail ($label)", async ({ password, apiKey, output }) => {
   const root = portableFixtureRoot("OpenCode diagnostic credentials");
   roots.push(root);
   const executable = portableNodeExecutable(root, "opencode");
+  const printed = output === "escape-split"
+    ? `(value) => value.slice(0, 5) + "\\u001b[0m" + value.slice(5, 9) + "\\u0007" + value.slice(9)`
+    : output === "encoded"
+      ? `(value) => "Basic " + Buffer.from("opencode:" + value).toString("base64")
+        + " " + encodeURIComponent(value) + " " + Buffer.from(value).toString("base64")`
+      : "(value) => value";
   writeNodeSubcommand(root, "serve", `
+    const printed = ${printed};
     process.stderr.write("fixture startup failed\\n");
-    process.stderr.write("provider value " + process.env.OPENAI_API_KEY + "\\n");
-    process.stderr.write("server value " + process.env.OPENCODE_SERVER_PASSWORD + "\\n");
+    process.stderr.write("provider value " + printed(process.env.OPENAI_API_KEY) + "\\n");
+    process.stderr.write("server value " + printed(process.env.OPENCODE_SERVER_PASSWORD) + "\\n");
     process.exitCode = 7;
   `);
   const environment = {
@@ -42,10 +51,16 @@ it.each([
     failure: { terminalEvent: "sdk/exception" } });
   expect(result.failure?.technicalDetail).toContain("fixture startup failed");
   expect(result.failure?.technicalDetail).toContain("provider value [redacted]");
-  expect(result.failure?.technicalDetail).toContain("server value [redacted]");
-  expect(JSON.stringify(result)).not.toContain(environment.OPENAI_API_KEY);
-  if (environment.OPENCODE_SERVER_PASSWORD) {
-    expect(JSON.stringify(result)).not.toContain(environment.OPENCODE_SERVER_PASSWORD);
+  expect(result.failure?.technicalDetail).toContain(output === "encoded"
+    ? "server value Basic [redacted] [redacted] [redacted]"
+    : "server value [redacted]");
+  const serialized = JSON.stringify(result);
+  for (const secret of [environment.OPENAI_API_KEY, environment.OPENCODE_SERVER_PASSWORD]) {
+    if (!secret) continue;
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(encodeURIComponent(secret));
+    expect(serialized).not.toContain(Buffer.from(secret).toString("base64"));
+    expect(serialized).not.toContain(Buffer.from(`opencode:${secret}`).toString("base64"));
   }
 });
 

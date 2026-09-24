@@ -289,9 +289,3 @@ async function inspectRepositoryStatus(
       parsed.truncated || statusResult.truncated || statsResult.truncated,
   };
 }
-
-export function refreshRepositoryStatus(
-  repositoryPath: string,
-): Promise<GitRepositoryStatus> {
-  return getRepositoryStatus(repositoryPath);
-}

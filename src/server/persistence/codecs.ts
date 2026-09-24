@@ -31,6 +31,7 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentMimeTypeForName,
+  safeChatAttachmentMimeTypeForName,
 } from "../../shared/attachments";
 import {
   isContinuationReasonCode,
@@ -637,15 +638,62 @@ export function parseJsonArray(value: string): unknown[] {
   }
 }
 
-/** Extend live projection without changing migration 56's frozen attachment parser. */
-export function parseSnapshotAttachments(value: string): ChatAttachment[] {
-  const attachments = parseAttachments(value);
-  const sources = parseJsonArray(value).filter(isPersistedChatAttachment);
-  return attachments.map((attachment) => {
-    const source = sources.find(({ id }) => id === attachment.id);
-    const snapshot = snapshotSourceSchema.safeParse(source?.snapshot);
-    return snapshot.success ? { ...attachment, snapshot: snapshot.data } : attachment;
-  });
+/**
+ * Live stored-attachment identity. It mirrors the frozen check above but
+ * resolves names through the live import lookup, so plain-text names accepted
+ * after migration 56 read back; the frozen parser stays byte-identical for
+ * that migration's replay.
+ */
+function isStoredChatAttachment(
+  attachment: unknown,
+): attachment is ChatAttachment & { snapshot?: unknown } {
+  if (typeof attachment !== "object" || attachment === null || Array.isArray(attachment)) return false;
+  const candidate = attachment as Record<string, unknown>;
+  return typeof candidate.id === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(candidate.id)
+    && typeof candidate.name === "string"
+    && candidate.name.length >= 1
+    && candidate.name.length <= 255
+    && !/[\0-\x1f\x7f]/u.test(candidate.name)
+    && !/[\\/]/u.test(candidate.name)
+    && typeof candidate.mimeType === "string"
+    && (CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(candidate.mimeType)
+    && safeChatAttachmentMimeTypeForName(candidate.name) === candidate.mimeType
+    && typeof candidate.path === "string"
+    && candidate.path.length >= 1
+    && candidate.path.length <= 4_096
+    && !candidate.path.includes("\0")
+    && typeof candidate.size === "number"
+    && Number.isSafeInteger(candidate.size)
+    && candidate.size >= 1
+    && candidate.size <= MAX_CHAT_ATTACHMENT_BYTES;
+}
+
+/** Live projection of stored attachments, with snapshot sources, beside migration 56's frozen parser. */
+export function parseStoredAttachments(value: string): ChatAttachment[] {
+  const attachments: ChatAttachment[] = [];
+  const ids = new Set<string>();
+  let totalBytes = 0;
+  for (const attachment of parseJsonArray(value)) {
+    if (
+      !isStoredChatAttachment(attachment)
+      || ids.has(attachment.id)
+      || attachments.length >= MAX_CHAT_ATTACHMENTS
+      || totalBytes + attachment.size > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+    ) continue;
+    const snapshot = snapshotSourceSchema.safeParse(attachment.snapshot);
+    attachments.push({
+      id: attachment.id,
+      name: attachment.name,
+      path: attachment.path,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      ...(snapshot.success ? { snapshot: snapshot.data } : {}),
+    });
+    ids.add(attachment.id);
+    totalBytes += attachment.size;
+  }
+  return attachments;
 }
 
 export function rendererSafeAttachments(
@@ -670,7 +718,7 @@ export function messageFromRow(row: MessageRow): ChatMessage {
     role: row.role,
     content: row.content,
     attachments: rendererSafeAttachments(
-      parseSnapshotAttachments(row.attachments_json),
+      parseStoredAttachments(row.attachments_json),
     ),
     createdAt: row.created_at,
   };

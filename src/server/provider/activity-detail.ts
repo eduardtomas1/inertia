@@ -69,6 +69,60 @@ export function redactExactCredentials(value: string, credentials: readonly stri
   return credentials.reduce((text, credential) => text.replaceAll(credential, "[redacted]"), value);
 }
 
+/**
+ * Removes terminal escape sequences and C0/C1 control characters. Exact
+ * credential matching must run on this form: a child that colours or splits a
+ * secret with escape codes would otherwise pass the matcher and be re-joined by
+ * the later sanitizer.
+ */
+export function stripTerminalControlSequences(value: string): string {
+  let text = value.replace(/\r\n?/gu, "\n");
+  for (const pattern of ANSI_ESCAPE) text = text.replace(pattern, "");
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "");
+}
+
+/** Encodings under which a launch credential can appear verbatim in output. */
+export function credentialEncodings(credentials: readonly string[]): string[] {
+  const values = new Set<string>();
+  for (const credential of credentials) {
+    if (!credential) continue;
+    values.add(credential);
+    values.add(Buffer.from(credential, "utf8").toString("base64"));
+    values.add(Buffer.from(credential, "utf8").toString("base64url"));
+    values.add(encodeURIComponent(credential));
+    values.add(JSON.stringify(credential).slice(1, -1));
+  }
+  return [...values].filter((value) => value.length > 0)
+    .sort((left, right) => right.length - left.length);
+}
+
+/**
+ * Failure detail built from provider output that can echo a launch credential
+ * (raw errors, stderr tails, result errors). Terminal controls are stripped
+ * first so a secret split by an escape sequence still matches, every encoding
+ * of each credential is redacted, and the usual sanitizer runs last. Provider
+ * paths use this instead of composing the steps themselves: composing them in
+ * the other order re-joins a split secret after the exact match has run.
+ */
+export function sanitizeProviderFailureDetail(
+  value: unknown,
+  launchCredentials: readonly string[],
+  options: {
+    workspaceRoot?: string;
+    homeDirectory?: string;
+    maxChars?: number;
+  } = {},
+): string | null {
+  if (typeof value !== "string") return null;
+  return sanitizeProviderActivityDetail(
+    redactExactCredentials(
+      stripTerminalControlSequences(value),
+      credentialEncodings(launchCredentials),
+    ),
+    options,
+  );
+}
+
 export function sanitizeProviderActivityDetail(
   value: unknown,
   options: {
@@ -78,10 +132,8 @@ export function sanitizeProviderActivityDetail(
   } = {},
 ): string | null {
   if (typeof value !== "string") return null;
-  let text = value.replace(/\r\n?/gu, "\n");
-  for (const pattern of ANSI_ESCAPE) text = text.replace(pattern, "");
+  let text = stripTerminalControlSequences(value);
   text = text
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "")
     .replace(/<system(?:[_ -]?prompt)?\b[^>]*>[\s\S]*?<\/system(?:[_ -]?prompt)?>/giu, "system_prompt=[redacted]")
     .replace(
       /(?:^|\n)[ \t]*(?:-{2,}[ \t]*)?(?:developer|generated|internal|system)[_ -]?prompt(?:[ \t]*-{2,})?[ \t]*[:=][ \t]*(?:"[\s\S]*?"|'[\s\S]*?'|[^\n]*)/giu,

@@ -2,6 +2,8 @@ import { inflateSync } from "node:zlib";
 
 const MAX_PDF_XREF_ENTRIES = 100_000;
 const MAX_PDF_XREF_BYTES = 4 * 1024 * 1024;
+// /W widths are at most 8 bytes each across three fields.
+const MAX_PDF_XREF_PREDICTOR_COLUMNS = 24;
 const MAX_PDF_DICTIONARY_BYTES = 1024 * 1024;
 const MAX_PDF_OBJECT_DEPTH = 64;
 const MAX_PDF_INCREMENTAL_UPDATES = 32;
@@ -432,6 +434,81 @@ function decodeBigEndianInteger(bytes: Buffer, offset: number, width: number): n
   return value;
 }
 
+interface XrefPngPredictor {
+  readonly columns: number;
+}
+
+/**
+ * Accepts the PNG predictors (10 to 15) that common writers apply to
+ * cross-reference streams. Only the byte-per-sample layout those streams use
+ * is supported; TIFF prediction and multi-sample layouts still fail closed.
+ */
+function parseXrefPredictor(text: string | undefined): XrefPngPredictor | null {
+  if (!text || text === "null") return null;
+  if (!/^<<[\s\S]*>>$/u.test(text)) {
+    throw new Error("The PDF cross-reference predictor is unsupported.");
+  }
+  const parameter = (name: string, fallback: number): number => {
+    const match = new RegExp(`/${name}\\s+(\\d{1,6})(?![\\d.])`, "u").exec(text);
+    return match ? Number(match[1]) : fallback;
+  };
+  const predictor = parameter("Predictor", 1);
+  if (predictor === 1) return null;
+  if (
+    predictor < 10 || predictor > 15
+    || parameter("Colors", 1) !== 1
+    || parameter("BitsPerComponent", 8) !== 8
+  ) throw new Error("The PDF cross-reference predictor is unsupported.");
+  const columns = parameter("Columns", 1);
+  if (columns < 1 || columns > MAX_PDF_XREF_PREDICTOR_COLUMNS) {
+    throw new Error("The PDF cross-reference predictor is unsupported.");
+  }
+  return { columns };
+}
+
+function paethPredictor(left: number, up: number, upLeft: number): number {
+  const estimate = left + up - upLeft;
+  const distanceLeft = Math.abs(estimate - left);
+  const distanceUp = Math.abs(estimate - up);
+  const distanceUpLeft = Math.abs(estimate - upLeft);
+  if (distanceLeft <= distanceUp && distanceLeft <= distanceUpLeft) return left;
+  return distanceUp <= distanceUpLeft ? up : upLeft;
+}
+
+/** Reverses PNG row filtering for one-byte samples; every row names its filter. */
+function unfilterPngRows(data: Buffer, columns: number): Buffer {
+  const rowLength = columns + 1;
+  if (data.byteLength === 0 || data.byteLength % rowLength !== 0) {
+    throw new Error("The PDF cross-reference predictor rows are invalid.");
+  }
+  const rows = data.byteLength / rowLength;
+  const output = Buffer.alloc(rows * columns);
+  for (let row = 0; row < rows; row += 1) {
+    const filterType = data[row * rowLength]!;
+    const input = row * rowLength + 1;
+    const current = row * columns;
+    const previous = current - columns;
+    for (let column = 0; column < columns; column += 1) {
+      const raw = data[input + column]!;
+      const left = column > 0 ? output[current + column - 1]! : 0;
+      const up = row > 0 ? output[previous + column]! : 0;
+      const upLeft = row > 0 && column > 0 ? output[previous + column - 1]! : 0;
+      let value: number;
+      switch (filterType) {
+        case 0: value = raw; break;
+        case 1: value = raw + left; break;
+        case 2: value = raw + up; break;
+        case 3: value = raw + Math.floor((left + up) / 2); break;
+        case 4: value = raw + paethPredictor(left, up, upLeft); break;
+        default:
+          throw new Error("The PDF cross-reference predictor rows are invalid.");
+      }
+      output[current + column] = value & 0xff;
+    }
+  }
+  return output;
+}
+
 function xrefStreamPayload(
   bytes: Buffer,
   dictionary: ParsedDictionary,
@@ -461,18 +538,20 @@ function xrefStreamPayload(
     throw new Error("The PDF cross-reference stream length is inconsistent.");
   }
   const filter = dictionary.entries.get("Filter")?.toString("ascii").trim();
-  const decodeParameters = dictionary.entries.get("DecodeParms")
-    ?.toString("ascii").trim();
-  if (decodeParameters && decodeParameters !== "null") {
-    throw new Error("The PDF cross-reference predictor is unsupported.");
-  }
+  const predictor = parseXrefPredictor(
+    dictionary.entries.get("DecodeParms")?.toString("ascii").trim(),
+  );
   const payload = bytes.subarray(position, end);
-  if (!filter) return payload;
+  if (!filter) {
+    if (predictor) throw new Error("The PDF cross-reference predictor requires a filter.");
+    return payload;
+  }
   if (filter !== "/FlateDecode" && filter !== "/Fl") {
     throw new Error("The PDF cross-reference filter is unsupported.");
   }
   try {
-    return inflateSync(payload, { maxOutputLength: MAX_PDF_XREF_BYTES });
+    const inflated = inflateSync(payload, { maxOutputLength: MAX_PDF_XREF_BYTES });
+    return predictor ? unfilterPngRows(inflated, predictor.columns) : inflated;
   } catch {
     throw new Error("The PDF cross-reference stream cannot be decoded.");
   }

@@ -5,15 +5,12 @@ import {
 import { clampProviderPercent, providerTimestamp } from "./provider/usage-values";
 import {
   CODEX_CONTROL_MAX_FRAME_BYTES,
-  CODEX_CONTROL_MAX_PROTOCOL_BYTES,
   withCodexControlClient,
 } from "./codex/control-client";
 
 type JsonObject = Record<string, unknown>;
 
 export const CODEX_METADATA_MAX_FRAME_BYTES = CODEX_CONTROL_MAX_FRAME_BYTES;
-export const CODEX_METADATA_MAX_PROTOCOL_BYTES =
-  CODEX_CONTROL_MAX_PROTOCOL_BYTES;
 
 export interface CodexMetadata {
   models?: ProviderModel[];

@@ -395,7 +395,9 @@ describe("Environment content in its workspace surfaces", () => {
     expect(meter).toHaveAttribute("aria-valuenow", "64");
     expect(within(usage).getByText("64% left")).toBeVisible();
     expect(within(usage).getByText("Context window")).toBeVisible();
-    expect(within(usage).getByLabelText("Context 72% remaining")).toHaveTextContent("72%");
+    // The visible value is aria-hidden; the readable label sits beside it as
+    // visually hidden text instead of an aria-label on a generic element.
+    expect(within(usage).getByText("Context 72% remaining").closest("b")).toHaveTextContent("72%");
     expect(within(usage).queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
   });
 

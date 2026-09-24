@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
@@ -63,7 +64,7 @@ function readablePdf(): Buffer {
 
 const pdf = readablePdf();
 
-function xrefStreamPdf(): Buffer {
+function xrefStreamPdf(options: { predictor?: "up" | "paeth" } = {}): Buffer {
   let prefix = Buffer.from("%PDF-1.5\n%\xe2\xe3\xcf\xd3\n", "binary");
   const offsets: number[] = [];
   const objects = [
@@ -86,15 +87,42 @@ function xrefStreamPdf(): Buffer {
     bytes.writeUInt16BE(field2, 5);
     return bytes;
   };
-  const xref = Buffer.concat([
+  const rows = [
     row(0, 0, 65_535),
     ...offsets.map((offset) => row(1, offset, 0)),
     row(1, xrefOffset, 0),
-  ]);
+  ];
+  // Writers such as Word, Acrobat and pdfTeX apply a PNG predictor to the
+  // cross-reference stream: each 7-byte row is prefixed with its filter type
+  // and stored as the difference from the previous row (Up) or the Paeth
+  // estimate, then deflated.
+  const predicted = options.predictor
+    ? Buffer.concat(rows.map((current, index) => {
+        const previous = index > 0 ? rows[index - 1]! : Buffer.alloc(7);
+        const filtered = Buffer.alloc(8);
+        filtered[0] = options.predictor === "up" ? 2 : 4;
+        for (let column = 0; column < 7; column += 1) {
+          const left = column > 0 ? current[column - 1]! : 0;
+          const up = previous[column]!;
+          const upLeft = column > 0 ? previous[column - 1]! : 0;
+          const estimate = left + up - upLeft;
+          const paeth = Math.abs(estimate - left) <= Math.abs(estimate - up)
+            && Math.abs(estimate - left) <= Math.abs(estimate - upLeft)
+            ? left
+            : Math.abs(estimate - up) <= Math.abs(estimate - upLeft) ? up : upLeft;
+          filtered[column + 1] = (current[column]! - (options.predictor === "up" ? up : paeth)) & 0xff;
+        }
+        return filtered;
+      }))
+    : null;
+  const xref = predicted ? deflateSync(predicted) : Buffer.concat(rows);
+  const encoding = predicted
+    ? ` /Filter /FlateDecode /DecodeParms << /Columns 7 /Predictor 12 >>`
+    : "";
   return Buffer.concat([
     prefix,
     Buffer.from(
-      `4 0 obj\n<< /Type /XRef /Size 5 /Root 1 0 R /W [1 4 2] /Length ${xref.byteLength} >>\nstream\n`,
+      `4 0 obj\n<< /Type /XRef /Size 5 /Root 1 0 R /W [1 4 2]${encoding} /Length ${xref.byteLength} >>\nstream\n`,
       "ascii",
     ),
     xref,
@@ -106,6 +134,8 @@ function xrefStreamPdf(): Buffer {
 }
 
 const modernPdf = xrefStreamPdf();
+const predictedPdf = xrefStreamPdf({ predictor: "up" });
+const paethPredictedPdf = xrefStreamPdf({ predictor: "paeth" });
 
 function spreadsheet(bookType: "xlsx" | "xls"): Buffer {
   const workbook = XLSX.utils.book_new();
@@ -171,14 +201,27 @@ describe("privileged attachment import validation", () => {
       .toThrow("Follow-up attachments must be images.");
     expect(() => validateAttachmentPickerName("all", "notes.pdf"))
       .not.toThrow();
-    expect(attachmentPickerConfiguration("all")).toEqual({
-      title: "Attach images, documents, or spreadsheets",
-      filterName: "Images, documents, and spreadsheets",
-      extensions: [
-        "png", "jpg", "jpeg", "webp", "gif",
-        "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
-      ],
+    const all = attachmentPickerConfiguration("all");
+    expect(all).toMatchObject({
+      title: "Attach images, documents, spreadsheets, or text files",
+      filterName: "Images, documents, spreadsheets, and text files",
     });
+    // The picker filter follows the live import allowlist: every pinned name
+    // plus the plain-text set, so a file the import accepts is selectable.
+    expect(all.extensions.slice(0, 13)).toEqual([
+      "png", "jpg", "jpeg", "webp", "gif",
+      "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
+    ]);
+    for (const extension of ["ts", "py", "yaml", "toml", "sql", "log"]) {
+      expect(all.extensions, extension).toContain(extension);
+      expect(attachmentPickerConfiguration("images").extensions, extension).not.toContain(extension);
+      expect(() => validateAttachmentPickerName("images", `file.${extension}`))
+        .toThrow("Follow-up attachments must be images.");
+    }
+    for (const extension of ["svg", "env", "pem", "exe"]) {
+      expect(all.extensions, extension).not.toContain(extension);
+    }
+    expect(new Set(all.extensions).size).toBe(all.extensions.length);
   });
   it("rejects an oversized selection instead of silently truncating it", () => {
     expect(() => validateSelectedAttachmentCount(MAX_CHAT_ATTACHMENTS + 1))
@@ -265,6 +308,8 @@ describe("privileged attachment import validation", () => {
     ["preview.webp", "image/webp", webp],
     ["notes.pdf", "application/pdf", pdf],
     ["modern.pdf", "application/pdf", modernPdf],
+    ["predicted.pdf", "application/pdf", predictedPdf],
+    ["paeth-predicted.pdf", "application/pdf", paethPredictedPdf],
     ["notes.txt", "text/plain", Buffer.from("Safe notes\n", "utf8")],
     ["notes.md", "text/markdown", Buffer.from("# Safe notes\n", "utf8")],
     ["notes.markdown", "text/plain", Buffer.from("# Safe notes\n", "utf8")],
@@ -321,6 +366,11 @@ describe("privileged attachment import validation", () => {
     ["notes.txt", "text/plain; charset=utf-8", Buffer.from("safe\n")],
     ["rows.csv", "application/vnd.ms-excel", Buffer.from("name,value\nsafe,1\n")],
     ["notes.md", "application/x-markdown", Buffer.from("# Safe notes\n")],
+    ["config.yaml", "application/x-yaml", Buffer.from("safe: true\n")],
+    ["main.ts", "video/mp2t", Buffer.from("export const safe = true;\n")],
+    ["script.py", "text/x-python", Buffer.from("print('safe')\n")],
+    ["index.html", "text/html", Buffer.from("<p>safe</p>\n")],
+    ["app.log", "", Buffer.from("safe line\n")],
     ["forecast.xlsx", "application/zip", xlsx],
     ["forecast.xlsx", "application/x-xlsx", xlsx],
     ["forecast.xlsx", "application/octet-stream", xlsx],
@@ -527,6 +577,10 @@ describe("privileged attachment import validation", () => {
 
   it.each([
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
+    { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
+    { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
+    { name: "config.yaml", mimeType: "application/pdf", data: Buffer.from("safe: true\n") },
+    { name: "binary.yaml", mimeType: "application/x-yaml", data: Buffer.from([0x73, 0x00, 0x61]) },
     { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
     { name: "preview.png", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: png },

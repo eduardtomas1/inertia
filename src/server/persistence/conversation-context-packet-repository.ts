@@ -25,7 +25,7 @@ import {
 import { normalizeIdentityPath } from "../project-identity";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { neutralizeUntrustedAgentText, truncateUtf8 } from "../runtime/untrusted-agent-text";
-import { parseAttachments } from "./codecs";
+import { parseStoredAttachments as parseAttachments } from "./codecs";
 import type { ConversationRow, ProjectRow } from "./rows";
 import { conversationContextSourceRows, type ConversationContextSourceRow } from "./conversation-context-source";
 import { conversationContextTransportBudget, prepareConversationContextPacket } from "./conversation-context-transport";

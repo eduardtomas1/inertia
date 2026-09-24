@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -248,6 +249,7 @@ export function useWorkspaceLayout(
   }));
   const stackedTools = Boolean(options.forceStackedTools);
   const mobileNavigation = useMediaQuery("(max-width: 760px)");
+  const renderedSidebarWidthRef = useRef(0);
   const appShellRef = useRef<HTMLDivElement>(null);
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
 
@@ -351,17 +353,33 @@ export function useWorkspaceLayout(
 
   const toolsVisible =
     view === "workspace" && Boolean(workspaceScope && panelState.isOpen && hasProject);
+  const inlineMinimumWorkspaceWidth = CHAT_MIN_WIDTH + TOOLS_MIN_WIDTH + RESIZE_HANDLE_SIZE + 18;
+  const inlineSidebarMax = Math.max(
+    SIDEBAR_MIN_WIDTH,
+    Math.min(SIDEBAR_MAX_WIDTH, shellWidth - inlineMinimumWorkspaceWidth - RESIZE_HANDLE_SIZE),
+  );
+  const inlineSidebarWidth = !mobileNavigation && sidebarCollapsed
+    ? 0
+    : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, inlineSidebarMax);
+  // The measured body width reflects the sidebar width of the last commit. In
+  // sheet mode that sidebar may be wider than the inline layout would allow, so
+  // judge the presentation by the width the body would have once the sidebar
+  // yields to its inline clamp. Deciding from the raw measurement fed back into
+  // the sidebar clamp and left the panel stuck as a sheet after a window grew.
+  const inlineBodyWidth = workspaceBodySize.width + (mobileNavigation
+    ? 0
+    : Math.max(0, renderedSidebarWidthRef.current - inlineSidebarWidth));
   const panelPresentation = stackedTools
     ? "inline"
     : rightPanelPresentation({
-        containerWidth: workspaceBodySize.width,
+        containerWidth: inlineBodyWidth,
         panelMinWidth: TOOLS_MIN_WIDTH,
         handleWidth: RESIZE_HANDLE_SIZE,
       });
   const minimumWorkspaceWidth = !stackedTools
     && toolsVisible
     && panelPresentation === "inline"
-    ? CHAT_MIN_WIDTH + TOOLS_MIN_WIDTH + RESIZE_HANDLE_SIZE + 18
+    ? inlineMinimumWorkspaceWidth
     : 440;
   const sidebarDynamicMax = Math.max(
     SIDEBAR_MIN_WIDTH,
@@ -387,6 +405,9 @@ export function useWorkspaceLayout(
   const effectiveSidebarWidth = !mobileNavigation && sidebarCollapsed
     ? 0
     : clamp(sidebarWidth, SIDEBAR_MIN_WIDTH, sidebarDynamicMax);
+  useLayoutEffect(() => {
+    renderedSidebarWidthRef.current = effectiveSidebarWidth;
+  }, [effectiveSidebarWidth]);
   const effectiveToolsWidth = clamp(
     toolsWidth,
     TOOLS_MIN_WIDTH,

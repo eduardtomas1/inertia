@@ -52,16 +52,21 @@ describe("explainable CI plan", () => {
     expect(selected.platforms).toEqual([
       "linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-arm64", "macos-x64",
     ]);
-    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "windows-unit"]);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks).toEqual([
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
+      "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
+      "macOS arm64 Electron", "macOS x64 Electron",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
     expect(selected.omittedPlatforms).toEqual([]);
     expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
-    for (const missingName of ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"]) {
+    for (const missingName of [
+      "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
+      "Linux x64 Electron", "Windows ARM64 Electron", "macOS x64 Electron",
+    ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
       expect(evaluateMergeEvidence(selected, missingNative))
@@ -96,9 +101,10 @@ describe("explainable CI plan", () => {
   ])("keeps shared lifecycle and uncertain verifier changes broad: %s", (path) => {
     const selected = plan([path]);
     expect(selected.platforms).toEqual(PLATFORMS.map(({ artifact }: { artifact: string }) => artifact));
-    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "windows-unit"]);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
+    expect(selected.requiredChecks.filter((name: string) => name.endsWith(" Electron"))).toHaveLength(6);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -108,12 +114,13 @@ describe("explainable CI plan", () => {
   it("describes nightly documentation coverage and actual published upgrade proof truthfully", () => {
     const selected = plan(["README.md"], { event: "schedule" });
     expect(selected.suites).toContain("linux-all-source-coverage");
-    expect(selected.suites).toContain("linux-x64:native-units-electron-package-smoke");
+    expect(selected.suites).toContain("linux-x64:native-units-package-smoke");
+    expect(selected.suites).toContain("linux-x64:electron-display-isolated-recovery");
     expect(selected.suites.filter((suite) => suite.includes("upgrade"))).toEqual([
       "windows-x64:published-N-1-installed-upgrade",
       "windows-arm64:published-N-1-installed-upgrade",
     ]);
-    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "windows-unit"]);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
   });
 
   it("draft feedback is not the merge tier; ready and merge queue certify the same broad change", () => {
@@ -184,12 +191,15 @@ it("enumerates every shadow omission without changing canonical current-candidat
   const comparison = compareEvidencePlans(current, proposed);
   expect(comparison.newlyOmittedChecks).toEqual([
     "Node 22.13 minimum runtime", "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64",
-    "macOS arm64", "macOS x64", "Windows unit tests (1/4)", "Windows unit tests (2/4)",
+    "macOS arm64", "macOS x64",
+    "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
+    "macOS arm64 Electron", "macOS x64 Electron",
+    "Windows unit tests (1/4)", "Windows unit tests (2/4)",
     "Windows unit tests (3/4)", "Windows unit tests (4/4)",
   ]);
   expect(comparison.newlyRequiredChecks).toEqual(["Linux core and portable conformance", "Linux interaction and lifecycle"]);
   expect(comparison).toMatchObject({ currentBenchmarks: true, proposedBenchmarks: false });
-  expect(comparison.newlyOmittedSuites).toHaveLength(8);
+  expect(comparison.newlyOmittedSuites).toHaveLength(14);
   expect(JSON.stringify(current)).toBe(before);
   // Shadow evidence cannot satisfy the strict plan, nor can a different source
   // or merge SHA be compared as if it were the candidate.
@@ -199,6 +209,7 @@ it("enumerates every shadow omission without changing canonical current-candidat
   for (const path of ["README.md", "package-lock.json", "src/node/runtime-owned-processes.ts", "unknown/path"]) {
     const narrow = plan([path], { event: "push" });
     const change = compareEvidencePlans(current, narrow);
-    if (path !== "README.md") expect(change.newlyOmittedChecks).toEqual([]);
+    if (path === "README.md") expect(change.newlyOmittedChecks.length).toBeGreaterThan(0);
+    else expect(change.newlyOmittedChecks).toEqual([]);
   }
 });

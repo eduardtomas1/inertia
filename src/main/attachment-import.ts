@@ -11,6 +11,7 @@ import {
   MAX_TEXT_ATTACHMENT_BYTES,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentKind,
+  chatAttachmentPickerExtensions,
   chatAttachmentStorageExtension,
   isPotentialChatAttachment,
   isSpreadsheetAttachmentMimeType,
@@ -28,12 +29,6 @@ import { hasSafePdfAttachment } from "./attachment-pdf-validation.js";
 const UNSAFE_ATTACHMENT_CONTENT =
   "Attachment content does not match its safe file type.";
 
-const IMAGE_ATTACHMENT_EXTENSIONS = [
-  "png", "jpg", "jpeg", "webp", "gif",
-] as const;
-const DOCUMENT_ATTACHMENT_EXTENSIONS = [
-  "pdf", "txt", "md", "markdown", "csv", "json", "xlsx", "xls",
-] as const;
 const ZIP_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
 const ZIP_MAX_COMMENT_BYTES = 65_535;
 const MAX_SPREADSHEET_ARCHIVE_ENTRIES = 4_096;
@@ -68,19 +63,18 @@ export function attachmentPickerConfiguration(mode: AttachmentPickerMode): {
   filterName: string;
   extensions: string[];
 } {
+  // The filter is derived from the live import allowlist so every name the
+  // import accepts is also selectable; Electron shows only the listed types.
   return mode === "images"
     ? {
         title: "Attach follow-up images",
         filterName: "Images",
-        extensions: [...IMAGE_ATTACHMENT_EXTENSIONS],
+        extensions: chatAttachmentPickerExtensions("images"),
       }
     : {
-        title: "Attach images, documents, or spreadsheets",
-        filterName: "Images, documents, and spreadsheets",
-        extensions: [
-          ...IMAGE_ATTACHMENT_EXTENSIONS,
-          ...DOCUMENT_ATTACHMENT_EXTENSIONS,
-        ],
+        title: "Attach images, documents, spreadsheets, or text files",
+        filterName: "Images, documents, spreadsheets, and text files",
+        extensions: chatAttachmentPickerExtensions("all"),
       };
 }
 

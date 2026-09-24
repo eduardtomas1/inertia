@@ -806,6 +806,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     send,
     broadcastSnapshot: flushSnapshot,
     publicError,
+    onFailure: commandIncidents.noteFailure,
   });
   const dispatchCommand = async (socket: WebSocket, command: Parameters<typeof executeCommand>[1], authority: RuntimeClientAuthority): Promise<void> => {
     if (closed) {

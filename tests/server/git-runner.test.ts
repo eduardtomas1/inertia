@@ -680,6 +680,9 @@ process.stdin.on("data", (chunk) => {
         failureMessage: "Git status failed.",
       })).rejects.toMatchObject({
         code: "not-repository",
+        // The process exit status travels with the classified error so a
+        // diagnostics incident can record it without the message or stderr.
+        exitCode: 128,
       } satisfies Partial<GitError>);
     } finally {
       if (previousLang === undefined) delete process.env.LANG;

@@ -4,6 +4,7 @@ export interface NativePlatform {
   artifact: string;
   arch: string;
   timeout_minutes: number;
+  electron_timeout_minutes: number;
   package_script?: string;
   release_platform?: string;
   release_package_script?: string;
@@ -51,6 +52,7 @@ export interface JobEvidence {
 }
 export const PLATFORMS: readonly NativePlatform[];
 export const EVIDENCE_JOBS: Readonly<Record<string, string>>;
+export const ELECTRON_CHECK_SUFFIX: string;
 export function createEvidencePlan(options: EvidencePlanOptions): EvidencePlan;
 export function outputsForEvidencePlan(plan: EvidencePlan): string;
 export function compareEvidencePlans(current: EvidencePlan, proposed: EvidencePlan): {

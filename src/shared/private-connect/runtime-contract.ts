@@ -30,7 +30,6 @@ const safeContent = z.string().max(64 * 1024);
 const projectionValidator = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 
 export const privateConnectRuntimeScopeSchema = z.enum(["view", "prompt"]);
-export type PrivateConnectRuntimeScope = z.infer<typeof privateConnectRuntimeScopeSchema>;
 
 export const privateConnectRuntimeGrantsSchema = z.array(
   privateConnectRuntimeGrantSchema,
@@ -40,9 +39,6 @@ export const privateConnectRuntimeSafeProjectSchema = z.object({
   id: entityId,
   name: safeLabel,
 }).strict();
-export type PrivateConnectRuntimeProject = z.infer<
-  typeof privateConnectRuntimeSafeProjectSchema
->;
 
 export const privateConnectRuntimeSafeConversationSchema = z.object({
   id: entityId,

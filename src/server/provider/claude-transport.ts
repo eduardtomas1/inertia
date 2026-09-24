@@ -31,7 +31,10 @@ export class BoundedClaudeTransport extends Transform {
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
     try {
-      for (const byte of chunk) {
+      // Indexed access: iterating a Buffer allocates per byte and is an order
+      // of magnitude slower, which stalled every stream on large tool results.
+      for (let index = 0; index < chunk.length; index += 1) {
+        const byte = chunk[index]!;
         this.lineBytes += 1;
         if (this.lineBytes > this.limits.maxLineBytes) {
           throw new Error("Claude transport sent an oversized stdout line.");

@@ -45,7 +45,7 @@ describe("Codex App Server generated lifecycle surfaces", () => {
   });
 
   it("keeps an explicit disposition for every reviewed 0.152 notification", () => {
-    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(83);
+    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(84);
     expect(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS).toMatchObject({
       "autoApprovalReview/strictReviewRequired": "projected",
       "hook/completed": "projected",

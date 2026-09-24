@@ -1,10 +1,7 @@
 import type { ProviderId } from "../../../shared/contracts";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import type { ModelSearchRoute } from "./modelSearch";
-import {
-  nextSidebarNavigationIndex,
-  type SidebarNavigationKey,
-} from "./sidebarModel";
+import { nextSidebarNavigationIndex } from "./sidebarModel";
 
 export const MODEL_SOURCE_PROVIDER_ORDER = [
   "codex",
@@ -234,7 +231,6 @@ export function filterModelRoutesBySource<Route extends ModelSearchRoute>(
     && providerIdForHarness(route.harnessId) === filter.providerId);
 }
 
-export type ModelSourceRailNavigationKey = SidebarNavigationKey;
 export const nextModelSourceRailIndex = nextSidebarNavigationIndex;
 
 export type ModelSourceRailActivationEvent = Pick<

@@ -38,7 +38,6 @@ export {
 } from "./response-timeline/model";
 export {
   formatElapsed,
-  turnElapsedMs,
   turnExecutionElapsedMs,
   turnQueueElapsedMs,
   turnStatusLabel,

@@ -51,6 +51,12 @@ import {
 import { createStreamingAgentStore } from "./useStreamingAgentState";
 import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
+// A chat that is listed but unreadable is retried at these intervals before
+// its pane reports a failure the user can retry (issue #410).
+const MISSING_DETAIL_RETRY_DELAYS_MS: readonly number[] = [400, 1200, 3000];
+const MISSING_DETAIL_MESSAGE =
+  "This chat could not be loaded. It may have been deleted; refresh to try again.";
+
 const EMPTY_REASONINGS: AgentReasoning[] = [];
 const EMPTY_TURNS: AgentTurn[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
@@ -99,6 +105,12 @@ export interface ConversationProjectionOptions {
   subscriptionOwner?: RuntimeDetailSubscriptionOwner;
   /** Keeps a split pane dormant until a conversation exists. */
   enabled?: boolean;
+  /**
+   * Waits between reloads when the runtime answers "missing" for a chat the
+   * shell snapshot still lists. After the last wait the chat is reported as
+   * failed with a retry instead of staying disabled forever.
+   */
+  missingDetailRetryDelaysMs?: readonly number[];
   autoOpenPlan: boolean;
   onOpenPlan: (conversationId: string) => void;
   onTerminal: () => void;
@@ -112,6 +124,7 @@ export function useConversationProjection({
   targetConversationId,
   subscriptionOwner = targetConversationId === undefined ? "primary" : "secondary",
   enabled = true,
+  missingDetailRetryDelaysMs = MISSING_DETAIL_RETRY_DELAYS_MS,
   autoOpenPlan,
   onOpenPlan,
   onTerminal,
@@ -119,6 +132,10 @@ export function useConversationProjection({
   const [detailState, setDetailState] =
     useState<ConversationDetailViewState | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const missingRetryRef = useRef<{ conversationId: string; attempts: number } | null>(null);
+  // Read through a ref so a caller passing a fresh array cannot retrigger loads.
+  const missingRetryDelaysRef = useRef(missingDetailRetryDelaysMs);
+  missingRetryDelaysRef.current = missingDetailRetryDelaysMs;
   const [streamingStore] = useState(createStreamingAgentStore);
   const setStreaming = streamingStore.update;
   const [liveMessages, setLiveMessages] =
@@ -270,6 +287,7 @@ export function useConversationProjection({
 
     const generation = requestGenerationRef.current + 1;
     requestGenerationRef.current = generation;
+    let retryTimer: number | null = null;
     void request({
       type: "conversation.detail.load",
       payload: { conversationId },
@@ -294,6 +312,38 @@ export function useConversationProjection({
           result,
           shell,
         ));
+      if (result.state === "missing" && shell?.id === conversationId) {
+        // The shell still lists the chat but its detail is not readable: a
+        // just-created row, or a chat deleted under this pane. Retry a bounded
+        // number of times, then surface a failure with a retry action rather
+        // than leaving the composer disabled in a permanent "loading" state.
+        const retry = missingRetryRef.current?.conversationId === conversationId
+          ? missingRetryRef.current
+          : { conversationId, attempts: 0 };
+        const delay = missingRetryDelaysRef.current[retry.attempts];
+        if (delay === undefined) {
+          missingRetryRef.current = null;
+          setDetailState((current) => (
+            current?.conversationId === conversationId && current.state === "ready"
+              ? current
+              : {
+                  kind: "conversation.detail",
+                  conversationId,
+                  state: "failed",
+                  message: MISSING_DETAIL_MESSAGE,
+                }
+          ));
+        } else {
+          missingRetryRef.current = { conversationId, attempts: retry.attempts + 1 };
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            if (generation !== requestGenerationRef.current) return;
+            setDetailRefresh((current) => current + 1);
+          }, delay);
+        }
+      } else if (result.state === "ready") {
+        missingRetryRef.current = null;
+      }
       const hydration = freshHydrationRef.current;
       if (
         result.state === "ready"
@@ -362,6 +412,9 @@ export function useConversationProjection({
             }
       ));
     });
+    return () => {
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
   }, [
     detailRefresh,
     conversationId,

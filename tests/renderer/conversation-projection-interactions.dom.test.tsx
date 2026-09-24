@@ -312,6 +312,40 @@ describe("useConversationProjection pending interactions", () => {
       command.type === "conversation.detail.load")).toHaveLength(2);
   });
 
+  it("stops retrying a listed chat whose detail stays missing and reports a retryable failure", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: { kind: "conversation.detail", conversationId: primaryId, state: "missing" },
+        }
+      : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() =>
+      useConversationProjection({
+        snapshot,
+        status: "online",
+        request,
+        subscribe: source.subscribe,
+        enabled: true,
+        missingDetailRetryDelaysMs: [1, 1],
+        autoOpenPlan: false,
+        onOpenPlan: vi.fn(),
+        onTerminal: vi.fn(),
+      }));
+    // Never pinned to "loading" forever: the third answer ends the retries.
+    await waitFor(() => expect(hook.result.current.detailState).toMatchObject({
+      conversationId: primaryId,
+      state: "failed",
+      message: expect.stringContaining("could not be loaded"),
+    }));
+    expect(request.mock.calls.filter(([command]) =>
+      command.type === "conversation.detail.load")).toHaveLength(3);
+    expect(hook.result.current.detail).toBeNull();
+  });
+
   it("projects a follow-up without reloading or duplicating live commentary", async () => {
     const source = createEventSource();
     const request = vi.fn(async (

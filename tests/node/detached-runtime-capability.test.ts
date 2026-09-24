@@ -74,6 +74,8 @@ describe("detached runtime capability", () => {
     minted.searchParams.append("runtimeGeneration", RUNTIME_GENERATION);
     minted.searchParams.append("afterSequence", "42");
     minted.searchParams.append("conversationId", CONVERSATION_ID);
+    // The renderer names the owner of every mounted pane on a resume.
+    minted.searchParams.append("conversationOwner", "secondary");
 
     const verifier = registry();
     const accepted = verifier.verifyAndConsume(requestUrl(minted.toString()));
@@ -89,7 +91,7 @@ describe("detached runtime capability", () => {
       },
       runtimeRequestUrl:
         `${WEBSOCKET_PATH}?runtimeGeneration=${RUNTIME_GENERATION}`
-        + `&afterSequence=42&conversationId=${CONVERSATION_ID}`,
+        + `&afterSequence=42&conversationId=${CONVERSATION_ID}&conversationOwner=secondary`,
     });
     expect(verifier.verifyAndConsume(requestUrl(minted.toString())))
       .toEqual({ kind: "rejected", reason: "replayed" });

@@ -478,9 +478,15 @@ test("persists composer usage modes without losing the followed transcript", asy
   const ringGeometry = await compact.locator(".usage-popover-trigger .usage-context-ring").evaluate((ring) => {
     const bounds = ring.getBoundingClientRect();
     const value = ring.querySelector<SVGCircleElement>(".usage-context-ring-value");
+    // Read the current Send button atomically; its lazy fallback can be replaced.
+    const send = ring.closest(".composer")?.querySelectorAll(
+      '.composer-input-actions button[aria-label="Send message"]',
+    );
+    if (!ring.isConnected || send?.length !== 1) throw new Error("Expected one live composer Send button.");
     return {
       width: bounds.width,
       height: bounds.height,
+      sendWidth: send[0]!.getBoundingClientRect().width,
       animations: ring.getAnimations({ subtree: true }).length,
       strokeWidth: value ? getComputedStyle(value).strokeWidth : null,
     };
@@ -490,10 +496,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   expect(ringGeometry.height).toBe(ringGeometry.width);
   expect(ringGeometry.animations).toBe(0);
   expect(ringGeometry.strokeWidth).toBe("1.65px");
-  const sendWidth = await page.getByRole("button", { name: "Send message" }).evaluate(
-    (button) => button.getBoundingClientRect().width,
-  );
-  expect(ringGeometry.width).toBeLessThan(sendWidth);
+  expect(ringGeometry.width).toBeLessThan(ringGeometry.sendWidth);
   const contextRingScreenshot = testInfo.outputPath(
     "context-ring-near-limit-1440x920.png",
   );

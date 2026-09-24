@@ -68,7 +68,7 @@ export async function finishElectronPreparedQuit(
   current: ElectronApplication | null,
 ): Promise<number | null> {
   if (!current) return null;
-  const receipt = await current.evaluate(({ BrowserWindow }) => {
+  const receipt = await current.evaluate(({ BrowserWindow, app }) => {
     const runtime = Reflect.get(
       globalThis,
       "__inertiaTestRuntime",
@@ -95,6 +95,12 @@ export async function finishElectronPreparedQuit(
       } else { mark("window-identity-unavailable"); }
     } catch { mark("window-observer-unavailable"); }
     try {
+      app.prependOnceListener("quit", () => mark("app-quit-entered"));
+      app.once("quit", () => mark("app-quit-tail-observed"));
+      app.once("browser-window-created", () => mark("window-created-after-cleanup"));
+      app.once("activate", () => mark("activated-after-cleanup"));
+    } catch { mark("quit-events-observer-unavailable"); }
+    try {
       const exit = process.exit;
       process.exit = function (...args): never {
         // Node waits for attached debuggers inside process.exit. Detach the
@@ -102,7 +108,11 @@ export async function finishElectronPreparedQuit(
         // so Playwright's debugger cannot keep the clean process resident.
         process.getBuiltinModule("node:inspector").close();
         mark("process-exit-called");
-        return exit.apply(this, args);
+        const result = exit.apply(this, args);
+        // Electron replaces process.exit with app.exit, which may return after
+        // scheduling native shutdown. This marker is not proof of OS exit.
+        mark("native-exit-returned");
+        return result;
       };
     } catch { mark("process-exit-observer-unavailable"); }
     return runtime.finishPreparedQuit();

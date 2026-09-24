@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, expect, it, vi } from "vitest";
 import { finishElectronPreparedQuit } from "../e2e/support/electron-runtime-shutdown";
@@ -5,7 +6,7 @@ import { finishElectronPreparedQuit } from "../e2e/support/electron-runtime-shut
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function fixture(windows: unknown[], writeFails = false) {
-  const write = vi.fn(() => {
+  const write = vi.fn((_fd: number, _text: string) => {
     if (writeFails) throw new Error("private writer error");
     return 0;
   });
@@ -18,11 +19,12 @@ function fixture(windows: unknown[], writeFails = false) {
     phase: "exit-requested", runtimePid: 434343, cleanupConfirmed: true, errorMessage: null,
   }));
   vi.stubGlobal("__inertiaTestRuntime", { finishPreparedQuit: finish });
+  const app = new EventEmitter();
   const current = {
     evaluate: async (operation: (electron: unknown) => unknown) =>
-      operation({ BrowserWindow: { getAllWindows: () => windows } }),
+      operation({ app, BrowserWindow: { getAllWindows: () => windows } }),
   } as unknown as ElectronApplication;
-  return { write, closeInspector, exit, exitFailure, finish, current };
+  return { write, closeInspector, exit, exitFailure, finish, current, app };
 }
 
 it.each([false, true])("forwards prepared exit and sole-window destruction unchanged (writer fails: %s)", async (writeFails) => {
@@ -92,4 +94,31 @@ it("does not let unavailable instrumentation prevent the prepared quit", async (
   expect(window.destroy).toBe(destroy);
   expect(f.finish).toHaveBeenCalledOnce();
   expect(f.write.mock.calls).toEqual([[2, "[Inertia test exit: window-observer-unavailable]\n"]]);
+});
+
+it("distinguishes synchronous quit listeners from a returning Electron exit call", async () => {
+  const f = fixture([]);
+  f.app.once("quit", () => { f.write(2, "existing listener"); });
+  f.exit.mockImplementation(() => { f.app.emit("quit"); return undefined as never; });
+  await finishElectronPreparedQuit(f.current);
+  process.exit(0);
+  expect(f.write.mock.calls.map((call) => call[1])).toEqual([
+    "[Inertia test exit: window-identity-unavailable]\n",
+    "[Inertia test exit: process-exit-called]\n",
+    "[Inertia test exit: app-quit-entered]\n",
+    "existing listener",
+    "[Inertia test exit: app-quit-tail-observed]\n",
+    "[Inertia test exit: native-exit-returned]\n",
+  ]);
+});
+
+it("does not invent a completed quit-listener phase when a listener throws", async () => {
+  const f = fixture([]);
+  f.app.once("quit", () => { throw f.exitFailure; });
+  f.exit.mockImplementation(() => { f.app.emit("quit"); return undefined as never; });
+  await finishElectronPreparedQuit(f.current);
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.write.mock.calls.map((call) => call[1])).toContain("[Inertia test exit: app-quit-entered]\n");
+  expect(f.write.mock.calls.map((call) => call[1])).not.toContain("[Inertia test exit: app-quit-tail-observed]\n");
+  expect(f.write.mock.calls.map((call) => call[1])).not.toContain("[Inertia test exit: native-exit-returned]\n");
 });

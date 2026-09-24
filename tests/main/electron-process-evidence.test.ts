@@ -114,9 +114,15 @@ describe("bounded Electron process lifecycle evidence", () => {
     stderr.write("entered]\r\n[Inertia test exit: window-destroy-returned]\n");
     stderr.write("[Inertia test exit: process-exit-called]\nWaiting for the debugger to disconnect...\n");
     stderr.write("Waiting for the debugger to disconnect...\n");
+    for (const stage of ["app-quit-entered", "app-quit-tail-observed", "native-exit-returned",
+      "window-created-after-cleanup", "activated-after-cleanup", "quit-events-observer-unavailable"]) {
+      stderr.write(`[Inertia test exit: ${stage}]\n[Inertia test exit: ${stage}]\n`);
+    }
     expect(f.evidence.snapshot().stages.map(({ stage }) => stage)).toEqual([
       "quit-requested", "window-destroy-entered", "window-destroy-returned",
       "process-exit-called", "debugger-disconnect-wait",
+      "app-quit-entered", "app-quit-tail-observed", "native-exit-returned",
+      "window-created-after-cleanup", "activated-after-cleanup", "quit-events-observer-unavailable",
     ]);
     expect(JSON.stringify(f.evidence.snapshot())).not.toContain("private");
     f.evidence.stop();

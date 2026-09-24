@@ -70,6 +70,8 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "terminal-resume",
     initialState: "conversation",
+    // Keep unrelated installed Claude metadata out of this Codex fixture.
+    claudeAuthSource: "process.exit(1);",
     seedSecondProject: true,
     codexAppServerSource,
     codexResumeSource,

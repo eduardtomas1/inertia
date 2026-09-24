@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -6,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ChatGoalControl,
@@ -104,7 +105,149 @@ const localCapability = {
   reason: "This provider does not expose a native thread-goal API.",
 } as const;
 
+function controlAnimationFrames(): () => void {
+  let nextId = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frames.set(++nextId, callback);
+    return nextId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    frames.delete(id);
+  });
+  return () => act(() => {
+    const pending = [...frames.values()];
+    frames.clear();
+    for (const callback of pending) callback(0);
+  });
+}
+
+afterEach(() => vi.restoreAllMocks());
+
 describe("ChatGoalControl", () => {
+  it("keeps budget typing in its field when workflow data refreshes", async () => {
+    const flushFrame = controlAnimationFrames();
+    const user = userEvent.setup();
+    const onSetGoal = vi.fn(async () => undefined);
+    const disclosure = openProps();
+    const view = render(<ChatGoalControl {...props(workflow(nativeCapability), { onSetGoal })} {...disclosure} />);
+    const objective = screen.getByRole("textbox", { name: "Objective" });
+    const budget = screen.getByRole("spinbutton", { name: "Token budget (optional)" });
+    flushFrame();
+    expect(objective).toHaveFocus();
+    fireEvent.change(objective, { target: { value: "Ship the reliable goal flow" } });
+    budget.focus();
+    view.rerender(<ChatGoalControl {...props(workflow(nativeCapability), { onSetGoal })} {...disclosure} />);
+    flushFrame();
+    expect(budget).toHaveFocus();
+    await user.keyboard("12000");
+    await user.click(screen.getByRole("button", { name: "Set Codex goal" }));
+    expect(onSetGoal).toHaveBeenCalledWith({ source: "codex-native", objective: "Ship the reliable goal flow", status: "active", tokenBudget: 12000 });
+  });
+
+  it.each(["budget", "outside"])("preserves explicit %s focus before the initial frame", (target) => {
+    const flushFrame = controlAnimationFrames();
+    render(<><button>Other control</button><ChatGoalControl {...props(workflow(nativeCapability))} {...openProps()} /></>);
+    const selected = target === "budget"
+      ? screen.getByRole("spinbutton", { name: "Token budget (optional)" })
+      : screen.getByRole("button", { name: "Other control" });
+    selected.focus();
+    flushFrame();
+    expect(selected).toHaveFocus();
+  });
+
+  it("adopts an initially unknown workflow owner and focuses once when it arrives", () => {
+    const flushFrame = controlAnimationFrames();
+    const onDismiss = vi.fn();
+    const view = render(<ChatGoalControl {...props(null, { loading: true })} {...openProps(onDismiss)} />);
+    flushFrame();
+    expect(screen.getByRole("button", { name: "Retry" })).not.toHaveFocus();
+    view.rerender(<ChatGoalControl {...props(workflow(nativeCapability))} {...openProps(onDismiss)} />);
+    flushFrame();
+    expect(screen.getByRole("textbox", { name: "Objective" })).toHaveFocus();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("waits for an enabled opening target without consuming the focus intent", () => {
+    const flushFrame = controlAnimationFrames();
+    const state = workflow(nativeCapability);
+    const disclosure = openProps();
+    const view = render(<ChatGoalControl {...props(state, { busy: true })} {...disclosure} />);
+    const objective = screen.getByRole("textbox", { name: "Objective" });
+    flushFrame();
+    expect(objective).not.toHaveFocus();
+    view.rerender(<ChatGoalControl {...props(state)} {...disclosure} />);
+    flushFrame();
+    expect(objective).toHaveFocus();
+  });
+
+  it.each(["pointer", "focus out and back"])("respects %s intent while the opening target is disabled", (intent) => {
+    const flushFrame = controlAnimationFrames();
+    const state = workflow(nativeCapability);
+    const disclosure = openProps();
+    const content = (open: boolean, busy: boolean) => <>
+      <button>Opener</button><button>Other control</button>
+      <ChatGoalControl {...props(state, { busy })} {...disclosure} open={open} />
+    </>;
+    const view = render(content(false, true));
+    const opener = screen.getByRole("button", { name: "Opener" });
+    opener.focus();
+    view.rerender(content(true, true));
+    flushFrame();
+    if (intent === "pointer") fireEvent.pointerDown(opener);
+    else {
+      screen.getByRole("button", { name: "Other control" }).focus();
+      opener.focus();
+    }
+    view.rerender(content(true, false));
+    flushFrame();
+    expect(opener).toHaveFocus();
+  });
+
+  it("cancels a closed opening and rearms focus only on the next open", () => {
+    const flushFrame = controlAnimationFrames();
+    const state = workflow(nativeCapability);
+    const disclosure = openProps();
+    const view = render(<ChatGoalControl {...props(state)} {...disclosure} />);
+    view.rerender(<ChatGoalControl {...props(state)} {...disclosure} open={false} />);
+    flushFrame();
+    view.rerender(<ChatGoalControl {...props(state)} {...disclosure} />);
+    flushFrame();
+    expect(screen.getByRole("textbox", { name: "Objective" })).toHaveFocus();
+    view.unmount();
+    flushFrame();
+    expect(document.body).toHaveFocus();
+  });
+
+  it("clears drafts and preserves focus when an established owner changes", () => {
+    const flushFrame = controlAnimationFrames();
+    const onDismiss = vi.fn();
+    const content = (id: string) => <><button>Other control</button><ChatGoalControl {...props(workflow(nativeCapability, [], id))} {...openProps(onDismiss)} /></>;
+    const view = render(content(conversationId));
+    fireEvent.change(screen.getByRole("textbox", { name: "Objective" }), { target: { value: "Old owner draft" } });
+    const other = screen.getByRole("button", { name: "Other control" });
+    other.focus();
+    view.rerender(content("other-conversation"));
+    flushFrame();
+    expect(onDismiss).toHaveBeenCalledExactlyOnceWith("owner-change");
+    expect(screen.getByRole("textbox", { name: "Objective" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Objective" })).not.toHaveFocus();
+    expect(other).toHaveFocus();
+  });
+
+  it("keeps recovery-budget focus when the current goal is refreshed", () => {
+    const flushFrame = controlAnimationFrames();
+    const limited = goal("codex-native", "Resume safely", "budgetLimited");
+    const disclosure = openProps();
+    const view = render(<ChatGoalControl {...props(workflow(nativeCapability, [limited]))} {...disclosure} />);
+    flushFrame();
+    const budget = screen.getByRole("spinbutton", { name: "New token budget" });
+    budget.focus();
+    view.rerender(<ChatGoalControl {...props(workflow(nativeCapability, [{ ...limited, tokensUsed: 1 }]))} {...disclosure} />);
+    flushFrame();
+    expect(budget).toHaveFocus();
+  });
+
   it("creates only the current route's explicitly local objective", async () => {
     const user = userEvent.setup();
     const onSetGoal = vi.fn(async () => undefined);

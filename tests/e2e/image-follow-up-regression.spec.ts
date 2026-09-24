@@ -132,9 +132,12 @@ async function pasteImages(page: Page, images: readonly number[][]): Promise<voi
     textarea.dispatchEvent(event);
   }, images.map((bytes) => [...bytes]));
   for (let index = 1; index <= images.length; index += 1) {
-    await expect(page.getByRole("button", {
+    const remove = page.getByRole("button", {
       name: `Remove attachment follow-up-${index}.png`,
-    })).toBeVisible();
+    });
+    await expect(remove).toBeVisible();
+    // Imports render before privileged acknowledgement; Enter/Tab need readiness.
+    await expect(remove).toBeEnabled();
   }
 }
 

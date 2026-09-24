@@ -8,7 +8,7 @@ function fixture(platform: NodeJS.Platform = "linux", automated = false) {
   const options = {
     platform, automated, version: "0.0.51",
     showMessageBox: vi.fn(async () => ({ response: 1 })),
-    retryQuit: vi.fn(), focusWindow: vi.fn(), reportError: vi.fn(),
+    retryQuit: vi.fn(), focusWindow: vi.fn(), canFocusWindow: vi.fn(() => true), reportError: vi.fn(),
   };
   return { ...options, notice: new LinuxShutdownNotice(options) };
 }
@@ -23,6 +23,30 @@ describe("Linux unconfirmed shutdown notice", () => {
       cancelId: 1,
     }));
     expect(state.focusWindow).toHaveBeenCalledOnce();
+    expect(state.retryQuit).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1])("keeps retry and dismissal available without a retained window (choice %s)", async (response) => {
+    const state = fixture();
+    state.canFocusWindow.mockReturnValue(false);
+    state.showMessageBox.mockResolvedValue({ response });
+    await state.notice.show();
+    expect(state.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      buttons: ["Retry quit", "Close"], cancelId: 1,
+      detail: expect.not.stringContaining("show Inertia"),
+    }));
+    expect(state.retryQuit).toHaveBeenCalledTimes(response === 0 ? 1 : 0);
+    expect(state.focusWindow).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen a window lost while its notice was open", async () => {
+    const state = fixture();
+    state.showMessageBox.mockImplementation(async () => {
+      state.canFocusWindow.mockReturnValue(false);
+      return { response: 1 };
+    });
+    await state.notice.show();
+    expect(state.focusWindow).not.toHaveBeenCalled();
     expect(state.retryQuit).not.toHaveBeenCalled();
   });
 
@@ -95,7 +119,7 @@ describe("Linux lifecycle notice wiring", () => {
     const nativeDialog = { showMessageBox: vi.fn(() => new Promise<{
       response: number; checkboxChecked: boolean;
     }>((resolve) => { dismiss = () => resolve({ response: 0, checkboxChecked: false }); })) };
-    const notices = createLinuxLifecycleNotices(application, nativeDialog, vi.fn());
+    const notices = createLinuxLifecycleNotices(application, nativeDialog, vi.fn(), () => true);
     let settled = false;
     const pending = notices.reportSingletonContention({
       requestedVersion: "0.0.51", runningVersion: "0.0.47",
@@ -121,7 +145,7 @@ describe("Linux lifecycle notice wiring", () => {
     const nativeDialog = {
       showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })),
     };
-    const notices = createLinuxLifecycleNotices(application, nativeDialog, vi.fn());
+    const notices = createLinuxLifecycleNotices(application, nativeDialog, vi.fn(), () => true);
     await notices.reportSingletonContention({ requestedVersion: "0.0.51", runningVersion: null });
     expect(application.whenReady).not.toHaveBeenCalled();
     expect(nativeDialog.showMessageBox).not.toHaveBeenCalled();

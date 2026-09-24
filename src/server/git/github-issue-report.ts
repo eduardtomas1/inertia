@@ -1,4 +1,4 @@
-import { ISSUE_REPOSITORY, ISSUE_REPOSITORY_URL, REPORT_BODY_LIMIT } from "../../shared/issue-report";
+import { ISSUE_REPOSITORY, REPORT_BODY_LIMIT } from "../../shared/issue-report";
 import { resolveGitHubCli, type GitHubPullRequestDependencies } from "./github-pull-request";
 import { runRestrictedCli } from "../restricted-cli-runner";
 
@@ -52,4 +52,3 @@ export function githubIssuePublisher(cwd: string, lifetime: AbortSignal, depende
     },
   };
 }
-export const MANUAL_ISSUE_URL = `${ISSUE_REPOSITORY_URL}/new`;

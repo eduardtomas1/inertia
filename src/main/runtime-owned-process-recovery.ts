@@ -729,16 +729,3 @@ export function recoverPriorRuntimeGenerations(options: {
     return true;
   })();
 }
-
-export function finishRuntimeOwnedProcessSession(
-  dataDirectory: string,
-  runtimeGenerationId: string,
-): boolean {
-  if (!supportedRuntimeOwnedProcessPlatform(process.platform)) return true;
-  try {
-    return new RuntimeOwnedProcessJournal(dataDirectory)
-      .finishSession(runtimeGenerationId);
-  } catch {
-    return false;
-  }
-}

@@ -233,13 +233,6 @@ export function composerQueueHasCapacity(conversationId: string): boolean {
     < MAX_COMPOSER_QUEUED_PROMPTS;
 }
 
-export function composerQueuedAttachmentCount(conversationId: string): number {
-  return readComposerQueue(conversationId).reduce(
-    (total, prompt) => total + prompt.attachments.length,
-    0,
-  );
-}
-
 export function enqueueComposerPrompt(
   conversationId: string,
   content: string,

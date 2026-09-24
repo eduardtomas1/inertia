@@ -82,14 +82,6 @@ export function workspaceRunAttentionView(run: WorkspaceRun): WorkspaceRunAttent
   };
 }
 
-export function workspaceRunNeedsAttention(run: WorkspaceRun): boolean {
-  return workspaceRunAttentionView(run).needsAttention;
-}
-
-export function workspaceRunIsOperationallyVisible(run: WorkspaceRun): boolean {
-  return workspaceRunAttentionView(run).bucket !== "hidden";
-}
-
 function compareRunRecency(a: WorkspaceRun, b: WorkspaceRun): number {
   return b.startedAt.localeCompare(a.startedAt, "en") || b.id.localeCompare(a.id, "en");
 }

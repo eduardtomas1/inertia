@@ -54,6 +54,3 @@ export const privateConnectQuestionAnswersSchema = z
       ) <= PRIVATE_CONNECT_QUESTION_LIMITS.totalAnswerCharacters,
     { message: "The answers were too large." },
   );
-export type PrivateConnectQuestionAnswers = z.infer<
-  typeof privateConnectQuestionAnswersSchema
->;

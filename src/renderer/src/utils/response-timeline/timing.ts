@@ -63,14 +63,6 @@ export function turnExecutionElapsedMs(
   );
 }
 
-/** Backward-compatible alias: elapsed work never includes queue time. */
-export function turnElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive" | "agentTurn">,
-  now = Date.now(),
-): number {
-  return turnExecutionElapsedMs(turn, now) ?? 0;
-}
-
 export function turnStatusLabel(status: AgentTurnStatus): string {
   switch (status) {
     case "queued": return "Queued";

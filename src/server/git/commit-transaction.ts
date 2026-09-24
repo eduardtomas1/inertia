@@ -687,23 +687,6 @@ export async function releaseOwnedCommitReservation(
   await syncDirectory(lockPath);
 }
 
-export function requireStagePathAbsentSync(stagePath: string): void {
-  try {
-    lstatSync(stagePath);
-    throw new GitError(
-      "conflict",
-      "The reviewed commit private stage path was reused. Inspect it manually before continuing.",
-    );
-  } catch (error) {
-    if (
-      typeof error !== "object"
-      || error === null
-      || !("code" in error)
-      || error.code !== "ENOENT"
-    ) throw error;
-  }
-}
-
 export function parseCommitTransactionJournal(
   content: Buffer,
   indexPath: string,

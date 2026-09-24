@@ -141,9 +141,7 @@ describe("source usage inventory", () => {
       "src/server/codex/app-server-notifications.ts",
       "src/server/runtime/backends/kimi-claude-preset.ts",
     ]);
-    expect(report.unreferenced).toEqual([
-      "src/renderer/src/utils/composerToolReadiness.ts",
-    ]);
+    expect(report.unreferenced).toEqual([]);
     expect(report.production).toContain("src/server/provider/adapters.ts");
     expect(report.production).not.toContain("src/server/provider/cli-agent-harness.ts");
     expect(report.lazyImports.length).toBeGreaterThan(0);

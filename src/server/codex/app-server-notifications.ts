@@ -88,6 +88,3 @@ export const CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS = {
   "windowsSandbox/setupCompleted": "projected",
   "account/login/completed": "ignored",
 } as const;
-
-export type CodexAppServerNotificationMethod =
-  keyof typeof CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS;

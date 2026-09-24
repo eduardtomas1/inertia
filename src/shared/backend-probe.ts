@@ -292,12 +292,6 @@ export const backendCompatibilityProbeResultCollectionSchema = /* @__PURE__ */ (
   }
 }))();
 
-export interface BackendCompatibilityProbeResultCollection {
-  schemaVersion: 1;
-  results: readonly BackendCompatibilityProbeResult[];
-  admissionHighWater?: readonly BackendProbeAdmissionHighWater[];
-}
-
 /**
  * Task 24 consumes probe evidence only while this complete binding still
  * matches. Replacing an endpoint must change its endpoint identity and/or

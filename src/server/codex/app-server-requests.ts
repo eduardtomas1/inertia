@@ -19,8 +19,6 @@ export const CODEX_APP_SERVER_REQUEST_DISPOSITIONS = {
   execCommandApproval: "handled",
 } as const;
 
-export type CodexAppServerRequestMethod =
-  keyof typeof CODEX_APP_SERVER_REQUEST_DISPOSITIONS;
 
 interface CodexCurrentTimeRead {
   threadId: string;

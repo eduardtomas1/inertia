@@ -5,12 +5,10 @@ export function HeaderMenuGroup({
   label,
   icon,
   children,
-  disabled = false,
 }: {
   label: string;
   icon: ReactNode;
   children: ReactNode;
-  disabled?: boolean;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const groupId = useId();
@@ -23,12 +21,8 @@ export function HeaderMenuGroup({
         aria-haspopup="menu"
         aria-expanded={expanded}
         aria-controls={groupId}
-        aria-disabled={disabled || undefined}
-        onClick={() => {
-          if (!disabled) setExpanded((current) => !current);
-        }}
+        onClick={() => setExpanded((current) => !current)}
         onKeyDown={(event) => {
-          if (disabled) return;
           if (event.key === "ArrowRight" && !expanded) {
             event.preventDefault();
             setExpanded(true);

@@ -2,10 +2,7 @@ import { z } from "zod";
 import { PRIVATE_CONNECT_LIMITS } from "./limits";
 export { PRIVATE_CONNECT_LIMITS } from "./limits";
 
-import {
-  privateConnectConversationGrantSchema,
-  type PrivateConnectConversationGrant,
-} from "./grants";
+import type { PrivateConnectConversationGrant } from "./grants";
 import {
   privateConnectQuestionAnswersSchema,
   privateConnectSafeQuestionsSchema,
@@ -36,9 +33,6 @@ const timestamp = z.string().datetime({ offset: true });
 const entityId = z.string().trim().min(1).max(200);
 const validator = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
 const secret = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
-
-export const privateConnectConversationGrant =
-  privateConnectConversationGrantSchema;
 
 export const privateConnectInvitationSchema = z.object({
   protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
@@ -106,9 +100,6 @@ export const privateConnectSafeProjectSchema = z.object({
   id: entityId,
   name: z.string().max(240),
 }).strict();
-export type PrivateConnectSafeProject = z.infer<
-  typeof privateConnectSafeProjectSchema
->;
 
 export const privateConnectSafeConversationSchema = z.object({
   id: entityId,
@@ -121,9 +112,6 @@ export const privateConnectSafeConversationSchema = z.object({
   pendingLocalAction: z.boolean(),
   updatedAt: timestamp,
 }).strict();
-export type PrivateConnectSafeConversation = z.infer<
-  typeof privateConnectSafeConversationSchema
->;
 
 export const privateConnectSafeMessageSchema = z.object({
   id: entityId,
@@ -132,9 +120,6 @@ export const privateConnectSafeMessageSchema = z.object({
   content: z.string().max(64 * 1024),
   createdAt: timestamp,
 }).strict();
-export type PrivateConnectSafeMessage = z.infer<
-  typeof privateConnectSafeMessageSchema
->;
 
 export const privateConnectSafeActivitySchema = z.object({
   id: entityId,

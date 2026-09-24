@@ -992,8 +992,3 @@ export function identifyPreviewScripts(
       reason: match.reason,
     }));
 }
-
-export async function discoverPreviewScripts(workspacePath: string): Promise<PreviewScript[]> {
-  const discovered = await discoverPackageScripts(workspacePath);
-  return identifyPreviewScripts(discovered.scripts);
-}

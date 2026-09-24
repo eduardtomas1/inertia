@@ -385,3 +385,50 @@ Neither this admission fix nor the local passes demonstrate a remedy for that
 runtime overrun or establish the original main exit-stall cause. Exact-head hosted
 checks and the existing merge conditions still apply. No assertions, cleanup
 authority, deadlines, sample counts, worker policy or budgets were relaxed.
+
+
+## Image follow-up import readiness, 2026-09-24
+
+On head `9903be22`, CI run `35956534072` attempt 1 failed on Windows x64:
+the expected steered-image digest never appeared within the unchanged 15-second
+assertion. The display phase had 75 passes, three skips and this one failure.
+The remaining native jobs were cancelled externally and a second attempt was
+started on the same head. The first attempt's log is preserved locally. Its
+trace artifact was uploaded successfully, but was absent from a later artifact
+listing and its exact download API returned 404; the original event sequence
+could not be examined. No reason for that unavailability is inferred.
+
+Source review found a reachable test synchronization gap. The paste helper
+waited for a visible Remove attachment button. Composer renders that button
+while the privileged import acknowledgement is still pending, with the button
+disabled. Enter is consumed during this interval, but submission correctly
+returns without sending. A normal Send click waits for enabled actionability;
+a keyboard press does not. Queuing with Tab has the same readiness requirement.
+
+A controlled DOM test held the import acknowledgement and proved that the image
+was visible but disabled, Enter caused zero sends and preserved the draft, and
+one Enter after acknowledgement sent exactly the same image. It passed in
+708ms. A real Electron control then held only the response from the genuine
+attachment-commit IPC handler. Early Enter retained the draft without a digest
+response; after acknowledgement and readiness, the exact steered digest and the
+remaining queued/later image workflow passed. That control passed in 16.0s.
+Both temporary controls were removed, with copies and logs retained in `/tmp`.
+These controls demonstrate the reachable race, not the unavailable hosted trace
+sequence.
+
+The native paste helper now retains its visibility check and also waits for the
+same Remove button to become enabled before Enter or Tab. This covers both
+pending attachment adoption and the import's final cleanup. No product guard,
+provider fixture, digest assertion, worker count, retry policy or deadline
+changed. Independent review found no issue in the exact final diff.
+
+Final verification passed quality, 88 existing composer/snapshot DOM tests in
+3.23s, and all three native image follow-up/send scenarios in 47.9s, using the
+original display worker and zero retries. The earlier 9,947-test full suite,
+seven child controls, build and complete native phases exercised unchanged
+product/unit/build inputs; this follow-up changes only this E2E helper and the
+report. The final affected native scenarios were rerun after that helper change.
+Evidence: `/tmp/inertia-pr461-9903-windows-image-diagnosis.md`,
+`/tmp/inertia-image-steer-pending-control.log`,
+`/tmp/inertia-image-steer-native-control.log`, and
+`/tmp/inertia-pr461-image-readiness-{quality,composer,native}.log`.

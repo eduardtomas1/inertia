@@ -26,9 +26,11 @@ import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 function SentImageThumbnail({
   attachment,
   visibleOnly,
+  onUnavailable,
 }: {
   attachment: AttachmentPreviewSource;
   visibleOnly?: boolean;
+  onUnavailable?: (id: string) => void;
 }): React.JSX.Element {
   const [state, setState] = useState<"loading" | "ready" | "unavailable">(
     "loading",
@@ -56,7 +58,10 @@ function SentImageThumbnail({
           src={attachmentPreviewUrl(attachment)}
           alt=""
           onLoad={() => setState("ready")}
-          onError={() => setState("unavailable")}
+          onError={() => {
+            setState("unavailable");
+            onUnavailable?.(attachment.id);
+          }}
         />
       )}
     </span>
@@ -74,6 +79,12 @@ export function SentMessageAttachmentList({
 }): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
     useState<AttachmentPreviewSource | null>(null);
+  // Records evicted or unreadable previews so the row says so instead of
+  // showing a blank tile with no explanation.
+  const [unavailableIds, setUnavailableIds] = useState<ReadonlySet<string>>(() => new Set());
+  const markUnavailable = useCallback((id: string) => {
+    setUnavailableIds((current) => current.has(id) ? current : new Set([...current, id]));
+  }, []);
   const metadataIdPrefix = useId();
   const closePreview = useCallback(() => setPreviewAttachment(null), []);
 
@@ -97,10 +108,17 @@ export function SentMessageAttachmentList({
           const previewKind = attachmentPreviewKind(attachment);
           const typeLabel = chatAttachmentTypeLabel(attachment.mimeType);
           const metadataId = `${metadataIdPrefix}-${attachment.id}`;
+          const unavailable = unavailableIds.has(attachment.id);
           const copy = (
             <>
               {kind === "image"
-                ? <SentImageThumbnail attachment={attachment} visibleOnly={deferImages} />
+                ? (
+                    <SentImageThumbnail
+                      attachment={attachment}
+                      visibleOnly={deferImages}
+                      onUnavailable={markUnavailable}
+                    />
+                  )
                 : (
                     <span
                       className="sent-attachment-thumbnail is-document"
@@ -115,6 +133,7 @@ export function SentMessageAttachmentList({
                 <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
                 <small id={metadataId}>
                   {attachment.snapshot?.windowTitle ?? `${typeLabel} · ${formatAttachmentSize(attachment.size)}`}
+                  {unavailable && " · no longer stored"}
                 </small>
               </span>
             </>
@@ -124,6 +143,7 @@ export function SentMessageAttachmentList({
               className="sent-attachment"
               data-request-context-kind={kind}
               data-attachment-preview={previewKind}
+              data-attachment-unavailable={unavailable || undefined}
               key={attachment.id}
             >
               <button

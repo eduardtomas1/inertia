@@ -63,6 +63,9 @@ describe("sent message attachments", () => {
 
     fireEvent.error(thumbnailImage!);
     expect(thumbnail).toHaveAttribute("data-thumbnail-state", "unavailable");
+    // The row says so in readable text; the tile itself is aria-hidden.
+    expect(thumbnail!.closest("li")).toHaveAttribute("data-attachment-unavailable", "true");
+    expect(thumbnail!.closest("li")).toHaveTextContent("no longer stored");
     expect(thumbnail?.querySelector(".lucide-image-off")).not.toBeNull();
 
     trigger.focus();

@@ -36,6 +36,12 @@ interface ComposerAttachmentActionOptions {
   submittingRef: MutableRefObject<boolean>;
 }
 
+const MAX_NAMED_UNSUPPORTED_FILES = 3;
+const SUPPORTED_ATTACHMENT_TYPES = "PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX and XLS";
+/** Same wording the runtime uses when it refuses a document follow-up. */
+export const DOCUMENT_FOLLOW_UP_UNSUPPORTED =
+  "Follow-ups while the agent is working support images only. Documents were not attached.";
+
 export interface ComposerAttachmentActions {
   adoptAttachments(lease: ComposerAttachmentImportLease): Promise<ComposerAttachmentAdoptionResult>;
   chooseAttachments(): Promise<void>;
@@ -80,11 +86,31 @@ export function composerAttachmentActions({
       setAttachmentError(`${imageInputUnavailableReason} Images were not attached.`);
     }
   };
+  const reportDocumentsRejected = (
+    mimeTypes: readonly (Parameters<typeof chatAttachmentKind>[0] | null)[],
+  ): void => {
+    if (running && mimeTypes.some((mimeType) =>
+      mimeType !== null && chatAttachmentKind(mimeType) === "document")) {
+      setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+    }
+  };
+  // One unsupported file used to fail the whole batch in the main process
+  // with a bare "Invalid attachment."; name the files and import the rest.
+  const reportUnsupportedFiles = (files: readonly File[]): void => {
+    if (files.length === 0) return;
+    const names = files.slice(0, MAX_NAMED_UNSUPPORTED_FILES).map((file) => file.name);
+    const more = files.length - names.length;
+    setAttachmentError(
+      `Unsupported file type: ${names.join(", ")}${more > 0 ? ` and ${more} more` : ""}. `
+      + `Supported types: ${SUPPORTED_ATTACHMENT_TYPES}.`,
+    );
+  };
   const addAttachments = (
     incoming: readonly ChatAttachment[],
   ): string[] => {
     const permitted = incoming.filter(({ mimeType }) => permitsKind(mimeType));
     reportImagesRejected(incoming.map(({ mimeType }) => mimeType));
+    reportDocumentsRejected(incoming.map(({ mimeType }) => mimeType));
     const current = attachmentsRef.current;
     const merged = mergeComposerAttachments(current, permitted);
     const acceptedIds = new Set(merged.attachments.map(({ id }) => id));
@@ -209,17 +235,25 @@ export function composerAttachmentActions({
         MAX_CHAT_ATTACHMENTS - attachmentsRef.current.length,
       );
       const mimeTypes = files.map((file) => chatAttachmentMimeTypeForName(file.name));
+      const supported = files.filter((_file, index) => mimeTypes[index] !== null);
       const eligible = running || imageInputUnavailableReason
-        ? files.filter((_file, index) => permitsKind(mimeTypes[index] ?? null))
-        : files;
-      reportImagesRejected(mimeTypes);
+        ? supported.filter((file) => permitsKind(chatAttachmentMimeTypeForName(file.name)))
+        : supported;
+      // Reported after beginImport() clears the previous error, so a partial
+      // batch keeps its explanation while the supported files are imported.
+      const reportSkippedFiles = (): void => {
+        reportUnsupportedFiles(files.filter((_file, index) => mimeTypes[index] === null));
+        reportImagesRejected(mimeTypes);
+        reportDocumentsRejected(mimeTypes);
+        if (eligible.length > remaining) reportAttachmentLimit();
+      };
       const candidates = eligible.slice(0, remaining);
       if (candidates.length === 0) {
-        if (eligible.length > remaining) reportAttachmentLimit();
+        reportSkippedFiles();
         return;
       }
       const importSequence = beginImport();
-      if (eligible.length > remaining) reportAttachmentLimit();
+      reportSkippedFiles();
       try {
         const lease = await onImportAttachments(candidates);
         if (!lease) return;

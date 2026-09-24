@@ -37,7 +37,8 @@ interface ComposerAttachmentActionOptions {
 }
 
 const MAX_NAMED_UNSUPPORTED_FILES = 3;
-const SUPPORTED_ATTACHMENT_TYPES = "PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX and XLS";
+const SUPPORTED_ATTACHMENT_TYPES = "PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX, XLS "
+  + "and plain-text source, markup or configuration files";
 /** Same wording the runtime uses when it refuses a document follow-up. */
 export const DOCUMENT_FOLLOW_UP_UNSUPPORTED =
   "Follow-ups while the agent is working support images only. Documents were not attached.";

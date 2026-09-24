@@ -56,11 +56,14 @@ const budgets = {
   // add 1,357 / 1,023 eager bytes on the same dependency graph. Measured
   // 833,962 / 639,573 bytes on Linux x64 (macOS arm64 rounds to the same
   // KiB); allow 1,600 / 1,270 and retain ~0.25 KiB of headroom per route.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600,
+  // The plain-text attachment extension and declared-type tables in the shared
+  // attachments module add 535 bytes to each first-load route (834,497 /
+  // 640,108 measured on Linux x64); the import validator itself stays in main.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -152,7 +155,8 @@ const budgets = {
   // baseline; the zoomable lightbox stays in its deferred chunk above.
   // The same release-audit additions add 2,065 core bytes (2,160,000
   // measured on Linux x64); allow 2,310 and keep ~0.25 KiB of headroom.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310,
+  // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

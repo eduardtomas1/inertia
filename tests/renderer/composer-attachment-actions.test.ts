@@ -44,12 +44,13 @@ function actions(overrides: { running?: boolean; imageInputUnavailableReason?: s
 describe("composer attachment imports", () => {
   it("names unsupported files and still imports the supported ones", async () => {
     const { created, errors, onImportAttachments } = actions();
-    await created.importAttachments([file("notes.docx"), file("shot.png"), file("logo.svg")]);
+    await created.importAttachments([file("notes.docx"), file("shot.png"), file("logo.svg"), file("config.yaml")]);
     expect(onImportAttachments).toHaveBeenCalledOnce();
-    expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["shot.png"]);
+    expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["shot.png", "config.yaml"]);
     expect(errors.at(-1)).toBe(
       "Unsupported file type: notes.docx, logo.svg. "
-      + "Supported types: PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX and XLS.",
+      + "Supported types: PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CSV, JSON, XLSX, XLS "
+      + "and plain-text source, markup or configuration files.",
     );
   });
 

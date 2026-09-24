@@ -353,6 +353,11 @@ describe("privileged attachment import validation", () => {
     ["notes.txt", "text/plain; charset=utf-8", Buffer.from("safe\n")],
     ["rows.csv", "application/vnd.ms-excel", Buffer.from("name,value\nsafe,1\n")],
     ["notes.md", "application/x-markdown", Buffer.from("# Safe notes\n")],
+    ["config.yaml", "application/x-yaml", Buffer.from("safe: true\n")],
+    ["main.ts", "video/mp2t", Buffer.from("export const safe = true;\n")],
+    ["script.py", "text/x-python", Buffer.from("print('safe')\n")],
+    ["index.html", "text/html", Buffer.from("<p>safe</p>\n")],
+    ["app.log", "", Buffer.from("safe line\n")],
     ["forecast.xlsx", "application/zip", xlsx],
     ["forecast.xlsx", "application/x-xlsx", xlsx],
     ["forecast.xlsx", "application/octet-stream", xlsx],
@@ -559,6 +564,10 @@ describe("privileged attachment import validation", () => {
 
   it.each([
     { name: "script.svg", mimeType: "image/svg+xml", data: Buffer.from("<svg/>") },
+    { name: "secrets.env", mimeType: "text/plain", data: Buffer.from("TOKEN=safe\n") },
+    { name: "server.pem", mimeType: "application/x-pem-file", data: Buffer.from("-----BEGIN-----\n") },
+    { name: "config.yaml", mimeType: "application/pdf", data: Buffer.from("safe: true\n") },
+    { name: "binary.yaml", mimeType: "application/x-yaml", data: Buffer.from([0x73, 0x00, 0x61]) },
     { name: "archive.zip", mimeType: "application/zip", data: Buffer.from("PK") },
     { name: "preview.png", mimeType: "application/pdf", data: png },
     { name: "notes.pdf", mimeType: "application/pdf", data: png },

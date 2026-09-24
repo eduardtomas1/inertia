@@ -53,25 +53,55 @@ control downloaded and resolved the compiler, then resolved the same path warm.
 All four Windows unit shards, both Windows Electron jobs and both Windows
 package jobs passed on the follow-up head `22abbc65` in CI `36016227500`.
 
-## Mount hidden history after visible navigation
+## Separate native hidden rendering from full-app navigation
 
-The follow-up Linux x64 job `107689742531` timed out in the hidden variant's
-`page.reload()` before reaching the animation assertion. Its retained trace
-records the unchanged 30-second load wait, but no browser navigation events.
-Six observed shown/hidden local Linux ARM64 cases passed; they do not explain
-the hosted timeout.
+The first hidden variant timed out during a hidden `page.reload()` on Linux
+x64. Moving its reload before hide did not make the added interaction reliable:
+CI `36026529744` on `a8310bad` failed Linux ARM64 and Windows x64 in
+`history.dispatchEvent("click")`, and Linux x64 in the subsequent heading check.
+The retained traces contain no browser/CDP event stream that establishes the
+underlying stall. One local Linux window-manager control reproduced a dispatch
+timeout; subsequent controls passed. No focus or dispatch workaround is claimed.
 
-The hidden animation fixture now completes the same full reload while shown,
-with the previous conversation selected. It confirms the target turn is absent,
-hides the native window, then invokes the real sidebar selection handler to
-mount the history. Native visibility must remain false before and after the
-immediate pending/running-animation observation. All original load, history,
-identity, count and terminal-state assertions remain; the shown case is unchanged.
+The original shown full-app database/history/virtualization scenario is restored
+byte-for-byte. A separate native Electron scenario renders the actual production
+React `ActivityGroup` and global/component CSS. It waits for both native hide and
+`document.visibilityState === "hidden"` before the first React mount, without
+attaching a renderer debugger. Its input retains two running activities and 320
+completed patches with `settled=false`. It requires five mounted terminal patch
+rows, wrench icons, the exact collapsed summary and zero pending/running
+animations before showing the window, then checks the same state after showing.
+No animation is finished, cancelled or ignored. This is focused hidden-rendering
+coverage; it no longer performs hidden full-app sidebar navigation.
 
-This sequence still failed with exactly four pending transform transitions
-against the original CSS, and passed both cases with the correction. It removes
-hidden-page navigation from the animation setup while preserving a first hidden
-mount of the real React rows. It does not establish the hosted navigation cause.
+The final fixture fails against the original CSS with four pending transform
+transitions at time zero on both macOS ARM64 and Linux ARM64, and passes with the
+correction on both. It uses the existing 45-second display-test limit and one
+worker. Failure cleanup uses the existing complete-process-tree termination
+proof and preserves its private directory if cleanup cannot be confirmed.
+
+## Make prepared-transaction timeout tests independent of child startup
+
+The same run's Intel unit job timed out awaiting a prepared Git callback, then
+reported an unhandled transaction timeout and `git-unavailable` in the later
+locale test. The old test started a 250 ms deadline, awaited preparation before
+attaching a rejection handler, and restored its temporary PATH only afterward.
+A temporary 600 ms preparation-acknowledgement delay reproduced that complete
+failure cascade. The exact hosted startup delay was not measured.
+
+The two callback-timeout cases now wait for real child preparation with a
+controlled clock, then expire the unchanged logical 250 ms deadline. The test
+wrapper restores real time before invoking the production deadline callback,
+so native tree cleanup uses real time.
+An immediately handled outcome races preparation, and awaited afterEach cleanup
+expires any pending deadline, waits for settlement and restores PATH before
+fixture-directory deletion. Delayed mutation completion is awaited directly.
+The production Git runner and every timeout/revocation assertion are unchanged.
+
+The corrected delayed-acknowledgement control passes both cases and the following
+locale check. A never-prepared control hits its expected unchanged 15-second
+outer limit, then cleans up and lets the following locale check pass without an
+unhandled rejection. Temporary controls were removed.
 
 ## Preserve evidence for the remaining Intel timeout
 
@@ -116,7 +146,7 @@ Follow-up validation:
   and inspector/window controls: eight passed in 10.2 seconds, original workers,
   zero retries. All eight reviewed source/test/workflow inputs stayed unchanged.
 
-Current fixture/evidence follow-up:
+Earlier fixture/evidence follow-up (a8310bad):
 
 - Revised Linux ARM64 hidden-mount control failed against the original CSS at
   the intended four-pending-transform assertion; corrected shown/hidden cases
@@ -131,6 +161,23 @@ Current fixture/evidence follow-up:
 - Final frozen Node 22 quality, 9,994 full tests plus seven child controls
   (146 skips, 932 passed files) and fresh build passed; full-suite duration
   462.06 seconds, original two workers and unchanged bundle budgets.
+
+Current native-rendering and Git-timeout follow-up:
+
+- Exact final Git-runner file: 31 tests passed on macOS ARM64 and Linux ARM64.
+- Exact final display controls (shown history, native hidden component, Quiet
+  Ledger): three passed on each platform, 13.7 seconds on macOS and 13.6 seconds
+  on Linux, one worker and zero retries.
+- Final native fixture with old CSS: expected four-pending-transform failure on
+  both platforms. The original shown full-app test remains byte-identical.
+- Independent source review found no remaining issue after correcting the native
+  helper to require complete-tree cleanup proof.
+- A temporary forced-hang control reached the unchanged 40-second parent wait,
+  confirmed complete-tree cleanup and removed its private directory (40.6 seconds).
+  Temporary fixture edits and the control spec were removed.
+- Final frozen Node 22.23.2 quality and full suite passed: 9,994 tests plus seven
+  child controls, 146 skips, 932 passed files, 449.32 seconds at the original two
+  workers. Fresh build and unchanged bundle budgets passed.
 
 ## Other preserved failures and limits
 

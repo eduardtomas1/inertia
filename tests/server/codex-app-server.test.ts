@@ -2147,6 +2147,34 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
+  it.each([
+    ["turn-started-before-response", "Hello from Codex"],
+    ["turn-completed-before-response", "Hello from Codex"],
+  ])("keeps the requested turn's notifications that reach stdout before the turn/start response (%s)", async (scenario, text) => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = scenario;
+    const manager = trackedManager(fake.command);
+    const activities: string[] = [];
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: `conversation-${scenario}`,
+      cwd: fake.root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onActivity: (event) => { if (event.kind === "turn") activities.push(`${event.phase}:${event.label}`); },
+      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true),
+      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
+    });
+
+    await expect(result).resolves.toMatchObject({ status: "completed", text });
+    expect(activities.filter((entry) => entry === "started:Turn started")).toHaveLength(1);
+    await manager.disposeAll();
+  });
+
   it("fails deterministically when Codex offers only unsupported decisions", async () => {
     const fake = createFakeAppServer(roots, true);
     const writes = vi.spyOn(CodexJsonLineWriter.prototype, "write");

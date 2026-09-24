@@ -691,6 +691,8 @@ export function startCodexAppServerRun(
       setRequestedTurnId: (turnId) => {
         requestedTurnId = turnId;
       },
+      replayPreResponseTurnNotifications: (turnId) =>
+        events.replayPreResponseTurnNotifications(turnId),
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
       goalProjectionSequence: () => events.goalProjectionSequence(),
@@ -856,6 +858,7 @@ interface OpenCodexTurnOptions {
   activeTurnId: () => string | undefined;
   setActiveTurnId: (turnId: string | undefined) => void;
   setRequestedTurnId?: (turnId: string | null | undefined) => void;
+  replayPreResponseTurnNotifications?: (turnId: string) => void;
   phase: () => CodexRunPhase;
   hasObservedTurn: (turnId: string) => boolean;
   goalProjectionSequence: () => number;
@@ -892,6 +895,7 @@ export async function openCodexTurn({
   activeTurnId,
   setActiveTurnId,
   setRequestedTurnId,
+  replayPreResponseTurnNotifications,
   phase,
   hasObservedTurn,
   goalProjectionSequence,
@@ -1103,7 +1107,12 @@ export async function openCodexTurn({
       },
     } : {}),
   }, (result) => {
-    setRequestedTurnId?.(boundedText(objectValue(result?.turn)?.id, 512));
+    const respondedTurnId = boundedText(objectValue(result?.turn)?.id, 512);
+    setRequestedTurnId?.(respondedTurnId);
+    // Same stdout chunk or earlier: notifications for this turn that arrived
+    // before the response are applied now, so a turn that already started (or
+    // finished) is neither lost nor resurrected as running below.
+    if (respondedTurnId) replayPreResponseTurnNotifications?.(respondedTurnId);
   });
   if (isSettled()) return;
   const turn = objectValue(started.turn);

@@ -51,6 +51,7 @@ import {
 } from "./app-server-item-events";
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
+import { PreResponseTurnNotifications } from "./pre-response-turn-notifications";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -135,6 +136,7 @@ export class CodexAppServerEvents {
   private readonly itemActivities = new Map<string, CodexItemActivity>();
   private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
+  private readonly preResponseTurnNotifications = new PreResponseTurnNotifications();
   private readonly subagentProjection = new Map<
     string,
     CodexSubagentProjection
@@ -222,6 +224,13 @@ export class CodexAppServerEvents {
   hasObservedTurn(turnId: string): boolean {
     return this.host.activeTurnId() === turnId
       || this.completedTurnIds.has(turnId);
+  }
+
+  /** Replays the held notifications of the turn that turn/start returned. */
+  replayPreResponseTurnNotifications(turnId: string): void {
+    for (const { method, params } of this.preResponseTurnNotifications.take(turnId)) {
+      this.handleNotification(method, params);
+    }
   }
 
   goalProjectionSequence(): number {
@@ -526,18 +535,19 @@ export class CodexAppServerEvents {
       const message =
         `Codex exceeded the ${MAX_CODEX_PENDING_SERVER_REQUESTS}-request interaction limit.`;
       this.host.writeMessage({ id, error: { code: -32600, message } });
-      this.host.setLastError(message);
-      this.host.rememberFailure(
-        "malformed-protocol",
-        "Codex sent too many concurrent server requests.",
-        message,
-      );
-      this.emitActivity("system", "failed", message);
-      this.host.cancel("malformed-protocol");
+      this.failMalformedProtocol("Codex sent too many concurrent server requests.", message);
       return false;
     }
     this.pendingServerRequestIds.add(rpcRequestKey(id));
     return true;
+  }
+
+  /** Records a protocol violation, surfaces it once and cancels the run. */
+  private failMalformedProtocol(summary: string, message: string, label = message): void {
+    this.host.setLastError(message);
+    this.host.rememberFailure("malformed-protocol", summary, message);
+    this.emitActivity("system", "failed", label);
+    this.host.cancel("malformed-protocol");
   }
 
   private isOwnedProviderThread(threadId: string): boolean {
@@ -545,18 +555,11 @@ export class CodexAppServerEvents {
   }
 
   private rejectMalformedSubagent(message: string): void {
-    this.host.setLastError(message);
-    this.host.rememberFailure(
-      "malformed-protocol",
+    this.failMalformedProtocol(
       "Codex sent malformed delegated-agent lifecycle data.",
       message,
-    );
-    this.emitActivity(
-      "system",
-      "failed",
       "Codex sent malformed delegated-agent lifecycle data",
     );
-    this.host.cancel("malformed-protocol");
   }
 
   handleNotification(method: string, params: JsonObject): void {
@@ -591,44 +594,17 @@ export class CodexAppServerEvents {
       activeTurnId: this.host.activeTurnId,
       emitActivity: (...activity) => this.host.options.onActivity?.(...activity),
     }, method, params);
-    if (runtimeProjection === "active-thread-deleted") {
-      const message = "Codex deleted the active thread before the turn completed.";
+    if (runtimeProjection === "active-thread-deleted" || runtimeProjection === "active-thread-closed") {
+      const deleted = runtimeProjection === "active-thread-deleted";
+      const message = `Codex ${deleted ? "deleted" : "closed"} the active thread before the turn completed.`;
       this.host.setLastError(message);
-      this.host.setTerminalEvent("thread/deleted");
+      this.host.setTerminalEvent(deleted ? "thread/deleted" : "thread/closed");
       this.host.rememberFailure("codex-error", message);
       this.emitActivity("system", "failed", message);
       this.completeParentTurn("failed", 1);
       return;
     }
     if (runtimeProjection === "handled") return;
-
-    if (method === "thread/closed") {
-      if (notificationThreadId !== this.host.providerThreadId()) return;
-      const message = "Codex closed the active thread before the turn completed.";
-      this.host.setLastError(message);
-      this.host.setTerminalEvent("thread/closed");
-      this.host.rememberFailure("codex-error", message);
-      this.emitActivity("system", "failed", message);
-      this.completeParentTurn("failed", 1);
-      return;
-    }
-
-    if (method === "thread/status/changed") {
-      if (
-        notificationThreadId !== this.host.providerThreadId()
-      ) return;
-      const status = stringValue(objectValue(params.status)?.type);
-      if (status === "systemError" || status === "notLoaded") {
-        this.emitActivity(
-          "system",
-          status === "systemError" ? "failed" : "info",
-          status === "systemError"
-            ? "Codex thread reported a system error"
-            : "Codex thread is no longer loaded",
-        );
-      }
-      return;
-    }
 
     if (method === "hook/started" || method === "hook/completed") {
       if (
@@ -650,6 +626,18 @@ export class CodexAppServerEvents {
     if (method === "thread/goal/cleared") {
       const threadId = parseCodexGoalClearedNotification(params);
       if (threadId) this.projectGoalCleared(threadId);
+      return;
+    }
+
+    if (
+      notificationTurnId
+      && this.host.phase() === "starting-turn"
+      && this.host.requestedTurnId?.() === null
+      && notificationThreadId === this.host.providerThreadId()
+      && !this.completedTurnIds.has(notificationTurnId)
+      && notificationTurnId !== this.host.activeTurnId()
+    ) {
+      this.preResponseTurnNotifications.hold(method, notificationTurnId, params);
       return;
     }
 
@@ -1228,16 +1216,10 @@ export class CodexAppServerEvents {
   private trackStreamItem(items: Set<string>, itemId: string): boolean {
     if (items.has(itemId)) return true;
     if (items.size >= MAX_CODEX_TRACKED_ITEM_ACTIVITIES) {
-      const message =
-        `Codex exceeded the ${MAX_CODEX_TRACKED_ITEM_ACTIVITIES}-item streaming correlation limit.`;
-      this.host.setLastError(message);
-      this.host.rememberFailure(
-        "malformed-protocol",
+      this.failMalformedProtocol(
         "Codex sent too many concurrent streaming items.",
-        message,
+        `Codex exceeded the ${MAX_CODEX_TRACKED_ITEM_ACTIVITIES}-item streaming correlation limit.`,
       );
-      this.emitActivity("system", "failed", message);
-      this.host.cancel("malformed-protocol");
       return false;
     }
     items.add(itemId);

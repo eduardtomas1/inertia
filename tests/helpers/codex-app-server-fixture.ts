@@ -272,7 +272,18 @@ if (message.method === "turn/start") {
       { method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } },
     ]);
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-started-before-response") {
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") {
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } },
+      { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "early-message", delta: "Hello from Codex" } },
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]);
+  }
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "turn-completed-before-response") return;
   if (process.env.INERTIA_APP_SERVER_OVERSIZE === "1") {
     return process.stdout.write(
       "x".repeat(16 * 1024 * 1024 + 1) + "\\n"
@@ -280,7 +291,9 @@ if (message.method === "turn/start") {
       + JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } }) + "\\n"
     );
   }
-  send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  if (process.env.INERTIA_APP_SERVER_SCENARIO !== "turn-started-before-response") {
+    send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+  }
   if (
     process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-response-ordering"
     || process.env.INERTIA_APP_SERVER_SCENARIO === "goal-set-clear-response-ordering"

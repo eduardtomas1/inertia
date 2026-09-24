@@ -381,10 +381,15 @@ describe("Codex protocol seams", () => {
     });
 
     expect(parseCodexInputRequest("item/tool/requestUserInput", {
-      questions: [question(1), question(2), question(3), question(4)],
+      questions: [question(1, 4), question(2), question(3), question(4)],
+    })?.questions.map(({ id, options }) => [id, options.length])).toEqual([
+      ["question-1", 4], ["question-2", 1], ["question-3", 1], ["question-4", 1],
+    ]);
+    expect(parseCodexInputRequest("item/tool/requestUserInput", {
+      questions: [question(1), question(2), question(3), question(4), question(5)],
     })).toBeUndefined();
     expect(parseCodexInputRequest("item/tool/requestUserInput", {
-      questions: [question(1, 4)],
+      questions: [question(1, 5)],
     })).toBeUndefined();
     expect(parseCodexInputRequest("item/tool/requestUserInput", {
       questions: [question(1), null],

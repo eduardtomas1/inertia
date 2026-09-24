@@ -54,10 +54,26 @@ async function capture(page, filename) {
 }
 
 async function closeWorkspaceTools(page) {
-  const tools = page.locator(".workspace-panel").first();
-  if (!await tools.isVisible()) return;
-  await page.getByRole("button", { name: "Close workspace tools" }).first().click();
-  await tools.waitFor({ state: "hidden" });
+  const toggle = page.locator("[data-panel-layout-controls] [data-right-panel-toggle]");
+  if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
+  await page.locator(".workspace-panel").waitFor({ state: "hidden" });
+}
+
+async function selectWorkspaceSurface(page, name) {
+  const tools = page.locator(".workspace-panel");
+  const tab = tools.locator(`[data-workspace-tab="${name.toLowerCase()}"]`);
+  if (await tab.isVisible()) {
+    await tab.click();
+    return;
+  }
+  const launcher = tools.getByRole("group", { name: "Open a surface" });
+  if (await launcher.isVisible()) {
+    await launcher.getByRole("button", { name: new RegExp(`^${name}`, "u") }).click();
+  } else {
+    await tools.getByRole("button", { name: "Add panel surface" }).click();
+    await page.getByRole("menu", { name: "Add panel surface" })
+      .getByRole("menuitem", { name: new RegExp(`^${name}`, "u") }).click();
+  }
 }
 
 async function workspacePathReceipt(path) {
@@ -512,6 +528,22 @@ async function seedShowcaseData() {
       requestedAt,
       completedAt,
     );
+    database.prepare(`
+      INSERT INTO agent_plans (
+        conversation_id, run_id, turn_id, explanation, steps_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      conversationId,
+      runId,
+      turnId,
+      "A focused onboarding pass, with the final visual review still to do.",
+      JSON.stringify([
+        { step: "Simplify project navigation", status: "completed" },
+        { step: "Keep chat context independent in split view", status: "completed" },
+        { step: "Review keyboard access and both themes", status: "inProgress" },
+      ]),
+      completedAt,
+    );
     const metadataScope = {
       providerId: "codex",
       harnessId: "codex-app-server",
@@ -610,9 +642,9 @@ try {
   await page.getByRole("heading", { name: "Welcome to Inertia", level: 1 }).waitFor();
   await page.locator(".app-shell[data-runtime-generation]").waitFor();
   await sizeWindow();
-  await page.getByRole("tabpanel", { name: "Environment" }).waitFor();
+  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
   await closeWorkspaceTools(page);
-  await page.locator('[data-header-menu="branch"] > button').waitFor();
+  await page.getByRole("button", { name: "More Git actions", exact: true }).waitFor();
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("");
   await page.mouse.move(1100, 350);
@@ -624,24 +656,25 @@ try {
   await page.locator(".palette-message-snippet mark").first().waitFor();
   await capture(page, "inertia-message-search.png");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Open workspace tools", exact: true }).click();
+  await page.locator("[data-panel-layout-controls] [data-right-panel-toggle]").click();
   const tools = page.locator(".workspace-panel");
+  await tools.waitFor({ state: "visible" });
   const changesTab = tools.locator('[data-workspace-tab="changes"]');
-  if (await changesTab.isVisible()) {
-    await changesTab.click();
-  } else {
-    await tools.getByLabel("Choose workspace tool").click();
-    await tools.getByRole("button", { name: "Changes", exact: true }).click();
-  }
+  await selectWorkspaceSurface(page, "Changes");
   await page.locator(".diff-line.is-addition").filter({
     hasText: "export const welcome = 'calm, focused, and ready';",
   }).first().waitFor();
   const toolsResize = page.getByRole("separator", { name: "Resize workspace tools" });
   for (let step = 0; step < 6; step += 1) await toolsResize.press("Shift+ArrowLeft");
-  await tools.getByRole("heading", { name: "Changes", exact: true }).click();
+  await changesTab.click();
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-git-workflow.png");
   await toolsResize.press("Enter");
+  await selectWorkspaceSurface(page, "Goal");
+  await tools.getByText("Keep delegated work truthful, focused, and ready for review", { exact: true }).waitFor();
+  await tools.getByText("2 of 3 plan steps complete", { exact: true }).waitFor();
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-goals.png");
   await closeWorkspaceTools(page);
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
   await page.getByRole("combobox", { name: "Search projects" }).fill("Interface");
@@ -666,6 +699,23 @@ try {
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-light.png");
+
+  // Import only our own freshly captured demo images; never send a provider turn.
+  await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await app.evaluate(({ dialog }, paths) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths, bookmarks: [] });
+  }, [join(screenshotDirectory, "inertia-light.png"), join(screenshotDirectory, "inertia-dark.png")]);
+  await page.getByRole("button", { name: "Attach images, documents, or spreadsheets", exact: true }).click();
+  await page.getByRole("button", { name: "Preview attachment inertia-light.png", exact: true }).click();
+  const imageStage = page.getByRole("group", { name: "Zoomable preview of inertia-light.png", exact: true });
+  await imageStage.locator("img").waitFor();
+  await imageStage.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await imageStage.getByLabel("Zoom level").filter({ hasText: "150%" }).waitFor();
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-image-preview.png");
+  await page.keyboard.press("Escape");
 
 } finally {
   await app?.close().catch(() => undefined);

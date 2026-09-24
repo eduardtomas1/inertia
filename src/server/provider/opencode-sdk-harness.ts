@@ -26,10 +26,12 @@ import {
 } from "./contracts";
 import type { AgentApprovalDecision } from "./interactions";
 import {
+  credentialEncodings,
   launchCredentialValues,
   redactExactCredentials,
   sanitizeProviderActivityDetail,
   sanitizeProviderFailureSummary,
+  stripTerminalControlSequences,
 } from "./activity-detail";
 import {
   CappedProviderBuffer,
@@ -258,8 +260,10 @@ function startOpenCodeRun(
     runDeadlineTimer = undefined;
     eventInactivityTimer = undefined;
   };
-  const redactDiagnostics = (value: string): string =>
-    redactExactCredentials(hostTools?.redact(value) ?? value, launchCredentials);
+  const redactDiagnostics = (value: string): string => {
+    const text = stripTerminalControlSequences(value);
+    return redactExactCredentials(hostTools?.redact(text) ?? text, launchCredentials);
+  };
   const failDeadline = (message: string, terminalEvent: string): void => {
     if (cancelRequested || terminalError) return;
     terminalError = message;
@@ -387,10 +391,13 @@ function startOpenCodeRun(
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
       const environment = ownedOpenCodeEnvironment(options.environment, credentials);
-      launchCredentials = [...new Set([
+      launchCredentials = credentialEncodings([
         ...launchCredentialValues(environment),
         credentials.password,
-      ])].sort((left, right) => right.length - left.length);
+        // The owned client sends this exact token; a server echoing the
+        // Authorization header would print it rather than the password.
+        Buffer.from(`${credentials.username}:${credentials.password}`, "utf8").toString("base64"),
+      ]);
       const started = await startOwnedOpenCodeServer(
         options.executable,
         options.input.cwd,

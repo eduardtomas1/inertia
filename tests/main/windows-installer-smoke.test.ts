@@ -663,9 +663,12 @@ test("terminates the complete owned process tree on a gate timeout", async () =>
       "writeFileSync(process.argv[1], JSON.stringify({ root: process.pid, descendant: child.pid }));",
       "setInterval(() => {}, 1000);",
     ].join("");
+    // The gate must fire only after the fixture has started Node, spawned its
+    // descendant and written the pid file; a loaded Intel macOS runner needs
+    // more than 500 ms for that startup, which left nothing to read back.
     await expect(runBounded(process.execPath, ["-e", script, pidFile], {
       label: "Installer timeout fixture",
-      timeoutMs: 500,
+      timeoutMs: 3_000,
     })).rejects.toThrow("complete process tree was terminated");
     const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
       root: number;

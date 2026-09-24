@@ -117,19 +117,19 @@ export class SnapshotRepository {
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     const state = this.state();
+    // One index probe per conversation. The window-function form scanned and
+    // decoded every turn ever recorded on each coalesced shell snapshot.
     const latestTurns = new Map(
       (this.context.database.prepare(`
-        SELECT *
-        FROM (
-          SELECT
-            agent_turns.*,
-            ROW_NUMBER() OVER (
-              PARTITION BY conversation_id
-              ORDER BY requested_at DESC, id DESC
-            ) AS conversation_rank
-          FROM agent_turns
+        SELECT agent_turns.*
+        FROM conversations
+        JOIN agent_turns ON agent_turns.id = (
+          SELECT id
+          FROM agent_turns AS latest
+          WHERE latest.conversation_id = conversations.id
+          ORDER BY latest.requested_at DESC, latest.id DESC
+          LIMIT 1
         )
-        WHERE conversation_rank = 1
       `).all() as AgentTurnRow[])
         .map(agentTurnFromRow)
         .map((turn) => [turn.conversationId, turn] as const),

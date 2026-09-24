@@ -1,7 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { ClientCommand, ServerEvent } from "../../shared/contracts";
-import { diagnosticContextSchema, type DiagnosticContext } from "../../shared/application-diagnostics";
+import {
+  diagnosticContextSchema,
+  type DiagnosticContext,
+  type DiagnosticMetadata,
+} from "../../shared/application-diagnostics";
 import type { IncidentObservation } from "../../node/application-incidents";
 import { createIncidentReporter, type IncidentSink } from "../../node/application-incidents";
 import { sendRuntimeEvent } from "../runtime-protocol";
@@ -14,6 +18,19 @@ interface Operation {
   code: "command.failed" | "git.command-failed" | "terminal.command-failed";
   incidentId: string;
   reported: boolean;
+  metadata: DiagnosticMetadata;
+}
+
+/**
+ * The exit status a failed Git process reported, when the thrown error is the
+ * Git subsystem's own error type. Read structurally so this module needs no
+ * Git import; messages and stderr stay out of the incident.
+ */
+function failureExitCode(error: unknown): number | null {
+  if (!(error instanceof Error) || error.name !== "GitError" || !("exitCode" in error)) return null;
+  const exitCode = error.exitCode;
+  return typeof exitCode === "number" && Number.isInteger(exitCode)
+    && exitCode >= -255 && exitCode <= 255 ? exitCode : null;
 }
 
 /**
@@ -105,9 +122,17 @@ export class CommandIncidents {
       : command.type.startsWith("terminal.") ? "terminal.command-failed" : "command.failed";
     return this.operations.run({ requestId: command.requestId, context, code,
       incidentId: stableCommandIncidentId(this.generation, code, command.type, context),
-      reported: false,
+      reported: false, metadata: {},
     }, execute);
   }
+
+  /** Records what the failure itself established (a Git exit status) for the incident. */
+  readonly noteFailure = (command: ClientCommand, error: unknown): void => {
+    const operation = this.operations.getStore();
+    if (!operation || operation.requestId !== command.requestId) return;
+    const exitCode = failureExitCode(error);
+    if (exitCode !== null) operation.metadata = { ...operation.metadata, exitCode };
+  };
 
   observe(event: ServerEvent): ServerEvent {
     if (event.type !== "request.error") return event;
@@ -116,7 +141,8 @@ export class CommandIncidents {
     if (!operation.reported) {
       operation.reported = true;
       this.report({ id: operation.incidentId, correlationId: operation.requestId,
-        code: operation.code, outcome: "unknown", context: operation.context });
+        code: operation.code, outcome: "unknown", context: operation.context,
+        metadata: operation.metadata });
     }
     return { ...event, diagnosticId: operation.incidentId };
   }

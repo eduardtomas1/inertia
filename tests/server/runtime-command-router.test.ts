@@ -80,10 +80,12 @@ describe("runtime command router", () => {
     const unrelated = vi.fn<RuntimeCommandHandler>(
       async () => "handled",
     );
+    const failure = new Error("private detail");
     const owner = vi.fn<RuntimeCommandHandler>(async () => {
-      throw new Error("private detail");
+      throw failure;
     });
     const events: ServerEvent[] = [];
+    const order: string[] = [];
     const selected = command();
     const execute = createRuntimeCommandExecutor({
       handlers: [
@@ -94,14 +96,21 @@ describe("runtime command router", () => {
         ),
       ],
       broadcastSnapshot: vi.fn(),
-      send: (_socket, event) => events.push(event),
+      send: (_socket, event) => { order.push("send"); events.push(event); },
       publicError: () => "Safe failure.",
+      // The original failure is observed before its sanitized event is sent.
+      onFailure: (failedCommand, error) => {
+        order.push("failure");
+        expect(failedCommand).toBe(selected);
+        expect(error).toBe(failure);
+      },
     });
 
     await execute({} as WebSocket, selected);
 
     expect(unrelated).not.toHaveBeenCalled();
     expect(owner).toHaveBeenCalledOnce();
+    expect(order).toEqual(["failure", "send"]);
     expect(events).toEqual([{
       type: "request.error",
       requestId: selected.requestId,

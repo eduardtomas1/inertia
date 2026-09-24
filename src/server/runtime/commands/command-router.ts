@@ -24,6 +24,8 @@ export interface RuntimeCommandRouterOptions {
   send(socket: WebSocket, event: ServerEvent): void;
   broadcastSnapshot(): void;
   publicError(error: unknown): string;
+  /** Sees the original failure before its public request.error is sent. */
+  onFailure?(command: ClientCommand, error: unknown): void;
 }
 
 export const RUNTIME_COMMAND_TYPES = Object.freeze(
@@ -109,6 +111,7 @@ export function createRuntimeCommandExecutor(
         });
       }
     } catch (error) {
+      options.onFailure?.(command, error);
       options.send(socket, {
         type: "request.error",
         requestId: command.requestId,

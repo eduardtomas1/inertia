@@ -63,6 +63,42 @@ describe("command incidents", () => {
     });
   });
 
+  it("records the Git exit status a failed operation established, and nothing else from the error", () => {
+    const sink = vi.fn<(observation: IncidentObservation) => unknown>();
+    const incidents = new CommandIncidents(sink, generation);
+    const gitError = Object.assign(new Error("fatal: not a git repository (private path)"), {
+      name: "GitError", code: "not-repository", exitCode: 128,
+    });
+    const failed = command("git.status");
+    incidents.run(failed, () => {
+      incidents.noteFailure(failed, gitError);
+      return incidents.observe(requestError(failed));
+    });
+    expect(sink.mock.calls[0]![0]).toMatchObject({ code: "git.command-failed", metadata: { exitCode: 128 } });
+    expect(JSON.stringify(sink.mock.calls[0]![0])).not.toContain("private path");
+
+    // A signalled process, an out-of-range status, another request's error or
+    // a non-Git error leaves the metadata empty.
+    for (const error of [
+      Object.assign(new Error("x"), { name: "GitError", code: "timeout", exitCode: null }),
+      Object.assign(new Error("x"), { name: "GitError", code: "operation-failed", exitCode: 4_096 }),
+      Object.assign(new Error("x"), { exitCode: 1 }),
+    ]) {
+      const other = command("git.status");
+      incidents.run(other, () => {
+        incidents.noteFailure(other, error);
+        return incidents.observe(requestError(other));
+      });
+      expect(sink.mock.calls.at(-1)![0].metadata).toEqual({});
+    }
+    const stranger = command("git.status");
+    incidents.run(stranger, () => {
+      incidents.noteFailure(command("git.status"), gitError);
+      return incidents.observe(requestError(stranger));
+    });
+    expect(sink.mock.calls.at(-1)![0].metadata).toEqual({});
+  });
+
   it("leaves observations outside an operation and unrelated codes untouched", () => {
     const sink = vi.fn<(observation: IncidentObservation) => unknown>();
     const incidents = new CommandIncidents(sink, generation);

@@ -120,6 +120,9 @@ export class TurnProviderEventProjector {
         break;
       case "activity": {
         this.options.streams.closeAssistantSegment(active);
+        if (event.kind !== "reasoning" || event.phase !== "started") {
+          this.options.streams.flush(active, "reasoning");
+        }
         const activity = this.options.activities.record(
           active,
           event,
@@ -165,6 +168,7 @@ export class TurnProviderEventProjector {
         break;
       case "plan": {
         this.options.streams.closeAssistantSegment(active);
+        this.options.streams.flush(active, "reasoning");
         const plan: AgentPlan = {
           conversationId: active.conversation.id,
           runId: active.turn.runId,

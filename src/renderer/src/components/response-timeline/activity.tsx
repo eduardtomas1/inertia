@@ -65,8 +65,12 @@ import {
 } from "../working-indicator/orbMotion";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
-  latestReasoningLine,
+  advanceThinkingLine,
+  IDLE_THINKING_LINE,
   parseReasoningSummary,
+  reasoningLineAt,
+  reasoningLines,
+  thinkingLineWakeAt,
   type ReasoningLine,
 } from "../../utils/reasoningSummary";
 
@@ -704,48 +708,50 @@ export function shouldCollapseSuccessfulWorkOnSettlement(input: {
     && input.status === "completed";
 }
 
-export const THINKING_LINE_INTERVAL_MS = 1100;
-export const THINKING_LINE_MIN_LENGTH = 12;
-export const THINKING_LINE_FRAGMENT_INTERVAL_MS = 2_600;
-
-interface ThinkingLine {
-  current: ReasoningLine;
+export interface ThinkingLineView {
+  current: ReasoningLine | null;
   previous: ReasoningLine | null;
-  at: number;
+  holding: boolean;
 }
 
-export function thinkingLineDwellMs(
-  next: ReasoningLine,
-  shown: ThinkingLine,
-): number {
-  const text = next.text.trim();
-  const unfinished = next.id !== shown.current.id
-    && text.length < THINKING_LINE_MIN_LENGTH
-    && !/[.!?\u2026]$/u.test(text)
-    && shown.current.text.trim().length > 0;
-  return unfinished
-    ? THINKING_LINE_FRAGMENT_INTERVAL_MS
-    : THINKING_LINE_INTERVAL_MS;
-}
+const NO_REASONING_LINES: ReasoningLine[] = [];
 
-export function useThrottledReasoningLine(line: ReasoningLine): ThinkingLine {
-  const [shown, setShown] = useState<ThinkingLine>(() => ({
-    current: line,
-    previous: null,
-    at: Date.now(),
-  }));
+export function useReadableThinkingLine(
+  content: string,
+  active: boolean,
+): ThinkingLineView {
+  const [state, setState] = useState(IDLE_THINKING_LINE);
+  const reading = active || state.offset !== null;
+  const lines = useMemo(
+    () => reading ? reasoningLines(content) : NO_REASONING_LINES,
+    [content, reading],
+  );
+  const next = advanceThinkingLine(state, lines, {
+    active,
+    length: content.length,
+    now: Date.now(),
+  });
+  if (next !== state) setState(next);
+  const wakeAt = thinkingLineWakeAt(next, lines, active);
+  const length = content.length;
   useEffect(() => {
-    if (line.id === shown.current.id && line.text === shown.current.text) return;
+    if (wakeAt === null) return;
     const timer = window.setTimeout(() => {
-      setShown((state) => ({
-        current: line,
-        previous: line.id === state.current.id ? state.previous : state.current,
-        at: Date.now(),
+      setState((current) => advanceThinkingLine(current, lines, {
+        active,
+        length,
+        now: Date.now(),
       }));
-    }, Math.max(0, shown.at + thinkingLineDwellMs(line, shown) - Date.now()));
+    }, Math.max(0, wakeAt - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [line, shown]);
-  return shown;
+  }, [active, length, lines, wakeAt]);
+  return {
+    current: next.offset === null ? null : reasoningLineAt(lines, next.offset),
+    previous: next.previousOffset === null
+      ? null
+      : reasoningLineAt(lines, next.previousOffset),
+    holding: !active && next.offset !== null,
+  };
 }
 
 interface ReasoningSpan {
@@ -781,7 +787,7 @@ function ThinkingSummary({
   count,
 }: {
   live: boolean;
-  line: ThinkingLine;
+  line: ThinkingLineView;
   span: ReasoningSpan;
   count: string;
 }): React.JSX.Element {
@@ -799,7 +805,9 @@ function ThinkingSummary({
         {live && (
           <small className="turn-thinking-elapsed">
             <span className="turn-thinking-separator" aria-hidden="true">·</span>
-            <LiveElapsed startedAt={span.startedAt} />
+            {line.holding
+              ? <span>{formatElapsed(span.durationMs ?? 0, true)}</span>
+              : <LiveElapsed startedAt={span.startedAt} />}
           </small>
         )}
       </span>
@@ -807,13 +815,15 @@ function ThinkingSummary({
         ? (
             <span className="turn-thinking-line" aria-hidden="true">
               {line.previous && (
-                <span className="is-leaving" key={`previous:${line.previous.id}`}>
+                <span className="is-leaving" key={`previous:${line.previous.offset}`}>
                   {line.previous.text}
                 </span>
               )}
-              <span className="is-entering" key={`current:${line.current.id}`}>
-                {line.current.text}
-              </span>
+              {line.current && (
+                <span className="is-entering" key={`current:${line.current.offset}`}>
+                  {line.current.text}
+                </span>
+              )}
             </span>
           )
         : <small>{count}</small>}
@@ -983,11 +993,8 @@ export function WorkLog({
         : null,
     };
   }, [turn.id, turn.importantActivities]);
-  const reasoningLine = useMemo(
-    () => latestReasoningLine(reasoningContent),
-    [reasoningContent],
-  );
-  const thinkingLine = useThrottledReasoningLine(reasoningLine);
+  const thinkingLine = useReadableThinkingLine(reasoningContent, activeReasoning);
+  const thinkingLive = activeReasoning || (includesReasoning && thinkingLine.holding);
   const reasoningSpan = useReasoningSpan(activeReasoning);
   const activeTraceCount = [
     includesReasoning ? "reasoning summary" : null,
@@ -1014,8 +1021,9 @@ export function WorkLog({
           <details
             className={includesReasoning ? "turn-thinking" : undefined}
             data-thinking-state={includesReasoning
-              ? activeReasoning ? "live" : "folded"
+              ? thinkingLive ? "live" : "folded"
               : undefined}
+            data-thinking-hold={thinkingLive && !activeReasoning ? "" : undefined}
             data-agent-trace={activeReasoning
               ? "thinking"
               : includesReasoning
@@ -1032,7 +1040,7 @@ export function WorkLog({
               {includesReasoning
                 ? (
                     <ThinkingSummary
-                      live={activeReasoning}
+                      live={thinkingLive}
                       line={thinkingLine}
                       span={reasoningSpan}
                       count={activeTraceCount}

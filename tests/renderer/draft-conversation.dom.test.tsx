@@ -206,6 +206,36 @@ describe("useDraftConversation", () => {
     expect(navigate).toHaveBeenCalledTimes(2);
   });
 
+  it("reconciles a reference target whose creation reached the runtime but lost its reply", async () => {
+    const commands: CommandWithoutId[] = [];
+    const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> => {
+      commands.push(command);
+      if (command.type === "conversation.create") throw new Error("Disconnected");
+      return { type: "request.ok", requestId: "context" };
+    });
+    const hook = renderHook(({ current }) => useDraftConversation({
+      snapshot: current, settings: defaultSettings, run, sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }), { initialProps: { current: snapshot } });
+    act(() => hook.result.current.start(projectId));
+    const draft = hook.result.current.conversation!;
+    const command = { type: "conversation.context.create", payload: {
+      sourceConversationId: conversationId, targetConversationId: draft.id,
+      acknowledgedWorkspaceDifference: false,
+    } } as const;
+    await act(async () => {
+      await expect(hook.result.current.runConversationContextCommand("conversation.context.create", command)).rejects.toThrow("Disconnected");
+    });
+    hook.rerender({ current: { ...snapshot, conversations: [{ ...draft, latestTurn: null, pendingApproval: false, pendingInput: false }] } });
+    expect(hook.result.current.conversation?.id).toBe(draft.id);
+    await act(async () => { await hook.result.current.runConversationContextCommand("conversation.context.create", command); });
+    expect(commands.map(({ type }) => type)).toEqual([
+      "conversation.create", "conversation.select", "conversation.context.create",
+    ]);
+    expect(commands[1]).toMatchObject({ payload: { conversationId: draft.id } });
+    expect(hook.result.current.conversation).toBeNull();
+  });
+
   it("restores a draft's identity and composer storage after a cross-project search", () => {
     const values = new Map<string, string>();
     vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);

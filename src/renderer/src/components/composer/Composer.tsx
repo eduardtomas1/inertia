@@ -1055,7 +1055,8 @@ export const Composer = memo(function Composer({
           contextCards={conversationContextHandoffEnabled && (
             <>
               <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
-              <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
+              <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running}
+                onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />
               <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
             </>
           )}

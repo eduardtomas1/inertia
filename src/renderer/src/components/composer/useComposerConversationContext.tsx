@@ -184,9 +184,11 @@ export function useComposerConversationContext(input: {
 export function ComposerConversationContextStrip({
   controller,
   disabled,
+  onConfirmationClosed,
 }: {
   controller: ComposerConversationContextController;
   disabled: boolean;
+  onConfirmationClosed?: () => void;
 }): React.JSX.Element | null {
   if (!controller.enabled) return null;
   return (
@@ -205,7 +207,10 @@ export function ComposerConversationContextStrip({
       )}
       {controller.confirmation ? (
         <Suspense fallback={null}>
-          <ChatReferenceConfirmation source={controller.confirmation} onConfirm={controller.confirmReference} />
+          <ChatReferenceConfirmation source={controller.confirmation} onConfirm={(accepted) => {
+            controller.confirmReference(accepted);
+            onConfirmationClosed?.();
+          }} />
         </Suspense>
       ) : controller.referencing ? <p role="status">Adding chat reference…</p> : null}
       {controller.error && (

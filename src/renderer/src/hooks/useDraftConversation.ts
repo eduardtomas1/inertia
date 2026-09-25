@@ -118,6 +118,8 @@ export function useDraftConversation({
       : null;
   });
   const draftRef = useRef(draft);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const selectionWhenDraftOpenedRef = useRef(persistedConversationId);
   const independentDraftRef = useRef(false);
   const explicitModelRef = useRef(false);
@@ -445,10 +447,10 @@ export function useDraftConversation({
     replaceDraft(next);
   };
 
-  const materializeDraft = async (
+  const createDraftConversation = async (
     sendingDraft: DraftConversationState,
-    preserveDraftId = false,
-  ): Promise<DraftConversationState> => {
+    preserveDraftId: boolean,
+  ): Promise<string> => {
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
@@ -469,7 +471,18 @@ export function useDraftConversation({
     ) {
       throw new Error("The local service returned an unexpected chat response.");
     }
-    const conversationId = creation.result.conversationId;
+    return creation.result.conversationId;
+  };
+
+  const materializeDraft = async (
+    sendingDraft: DraftConversationState,
+    preserveDraftId = false,
+  ): Promise<DraftConversationState> => {
+    const conversationId = preserveDraftId && snapshotRef.current?.conversations.some(({ id, projectId }) => (
+      id === sendingDraft.conversation.id && projectId === sendingDraft.conversation.projectId
+    ))
+      ? sendingDraft.conversation.id
+      : await createDraftConversation(sendingDraft, preserveDraftId);
     const stillOwnsDraft =
       draftRef.current?.conversation.id === sendingDraft.conversation.id;
     if (preserveDraftId && (conversationId !== sendingDraft.conversation.id || draftRef.current !== sendingDraft)) {

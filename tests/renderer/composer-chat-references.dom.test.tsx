@@ -94,6 +94,26 @@ describe("composer chat references", () => {
     }));
   });
 
+  it("returns focus to the editor as soon as sharing is confirmed, before the reference settles", async () => {
+    const user = userEvent.setup();
+    const current = conversation("slow-cross-workspace-reference");
+    const pending = deferred<ServerEvent>();
+    const onCommand = vi.fn(() => pending.promise);
+    render(<Composer {...composerProps(current, {
+      contextSources: [{ ...sourceOption, workspaceRelation: "different-workspace", workspaceLabel: "/workspace/other" }],
+      onConversationContextCommand: onCommand,
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "Explain @Architect");
+    await user.click(await screen.findByRole("option", { name: /Architecture decisions/u }));
+    await user.click(await screen.findByRole("button", { name: "Share chat" }));
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+    expect(onCommand).toHaveBeenCalledOnce();
+    expect(editor).toHaveFocus();
+    await act(async () => { pending.resolve(packetResult(current.id)); });
+    expect(editor).toHaveFocus();
+  });
+
   it.each(["conversation", "project"])("cancels unconfirmed sharing when the %s changes", async (change) => {
     const user = userEvent.setup();
     const current = conversation(`reference-owner-${change}`);

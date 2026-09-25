@@ -64,6 +64,7 @@ import {
   usesActivityOrbs,
 } from "../working-indicator/orbMotion";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
+import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import {
   advanceThinkingLine,
   IDLE_THINKING_LINE,
@@ -681,6 +682,16 @@ function ExecutionStream({
             </div>
           );
         }
+        if (entry.kind === "compaction") {
+          return (
+            <div role="listitem" key={entry.id}>
+              <ContextCompactionActivityMarker
+                activities={entry.activities}
+                elapsed={<LiveElapsed startedAt={entry.createdAt} />}
+              />
+            </div>
+          );
+        }
         return (
           <div role="listitem" key={entry.id}>
             <ActivityGroup
@@ -936,6 +947,7 @@ export function WorkLog({
   const durableStream = useMemo(
     () => buildTurnExecutionStream(turn, {
       includeImportantActivities: turn.isActive,
+      includeCompactions: turn.isActive,
     }),
     [turn],
   );

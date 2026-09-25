@@ -2,6 +2,7 @@
 .context-compaction-icon > g {
   animation: context-compaction-pulse 2.4s ease-in-out infinite;
 }
+.composer-compact-notice.is-working .context-compaction-icon > g { animation: none; }
 @keyframes context-compaction-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }

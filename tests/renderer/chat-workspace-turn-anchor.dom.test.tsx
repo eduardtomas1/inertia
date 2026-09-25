@@ -52,6 +52,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
   return {
     Composer: memo(function MockComposer({
       onSend,
+      onCompact,
       running,
       promptHistory,
       onStop,
@@ -61,6 +62,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
         content: string,
         attachments: [],
       ): Promise<TranscriptMessageSendAcceptance | null | void>;
+      onCompact?: (instruction?: string) => Promise<unknown>;
       running: boolean;
       promptHistory?: readonly { id: string; content: string }[];
       onStop: () => Promise<void>;
@@ -107,6 +109,14 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           <button type="button" onClick={() => void onStop()}>
             Stop from composer mock
           </button>
+          {onCompact && (
+            <button
+              type="button"
+              onClick={() => void onCompact("keep the API decisions").catch(() => undefined)}
+            >
+              Compact from composer mock
+            </button>
+          )}
         </>
       );
     }),
@@ -122,6 +132,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       turnAnchorId,
       inputRequests,
       detailLoading,
+      compactingSince,
       onFinalAnswerAutoScroll,
       onReaderNavigationIntent,
       onTurnAnchorSettled,
@@ -132,6 +143,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       turnAnchorId: string | null;
       inputRequests: AgentInputRequest[];
       detailLoading?: boolean;
+      compactingSince?: string | null;
       onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
       onReaderNavigationIntent?: () => void;
       onTurnAnchorSettled?: (turnId: string) => void;
@@ -164,6 +176,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
           <div data-testid="timeline-detail-loading">
             {detailLoading ? "loading" : "ready"}
           </div>
+          <div data-testid="timeline-compacting">{compactingSince ?? "none"}</div>
           <div data-testid="timeline-turn-projection">
             {turns.map((turn) => (
               `${turn.conversationId}:${turn.id}:${turn.status}`
@@ -669,6 +682,58 @@ describe("draft turn anchoring", () => {
     expect(screen.getByTestId("timeline-turn-projection"))
       .toHaveTextContent(`${activeConversation.id}:${settledTurn.id}:completed`);
     expect(timelineLifecycle).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it("shows its own in-flight compaction in the timeline until the request settles", async () => {
+    const pending: Array<{
+      resolve: (value: { message: string; instructionForwarded: boolean }) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const onCompactConversation = vi.fn(() => new Promise<{
+      message: string;
+      instructionForwarded: boolean;
+    }>((resolve, reject) => pending.push({ resolve, reject })));
+    const first = conversation("conversation-compacting");
+    const view = render(
+      <ChatWorkspace
+        {...workspaceProps(first, async () => null)}
+        onCompactConversation={onCompactConversation}
+      />,
+    );
+    const compacting = await screen.findByTestId("timeline-compacting");
+    expect(compacting).toHaveTextContent("none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Compact from composer mock" }));
+    expect(onCompactConversation).toHaveBeenCalledWith("keep the API decisions");
+    const since = compacting.textContent ?? "";
+    expect(Number.isFinite(Date.parse(since))).toBe(true);
+
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-elsewhere"), async () => null)}
+        onCompactConversation={onCompactConversation}
+      />,
+    );
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+    view.rerender(
+      <ChatWorkspace
+        {...workspaceProps(first, async () => null)}
+        onCompactConversation={onCompactConversation}
+      />,
+    );
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent(since);
+
+    await act(async () => {
+      pending[0]!.resolve({ message: "Compacted.", instructionForwarded: true });
+    });
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Compact from composer mock" }));
+    expect(screen.getByTestId("timeline-compacting")).not.toHaveTextContent("none");
+    await act(async () => {
+      pending[1]!.reject(new Error("Provider not ready for compaction."));
+    });
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
   });
 
   it("removes the composer running state with a projected terminal shell", () => {

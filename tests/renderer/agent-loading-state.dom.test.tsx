@@ -558,6 +558,153 @@ describe("agent loading and trace DOM", () => {
     }
   });
 
+  it("marks automatic compaction where it happens with the thinking sweep, then settles it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
+    try {
+      const readFile = {
+        ...activity("Read file"),
+        id: "read-before-compaction",
+        status: "completed" as const,
+        createdAt: "2026-08-12T12:00:05.000Z",
+      };
+      const compacting = {
+        ...activity("Claude is compacting context", "status"),
+        id: "claude-compacting",
+        createdAt: "2026-08-12T12:00:06.000Z",
+      };
+      const tests = {
+        ...activity("npm test", "command"),
+        id: "command-after-compaction",
+        createdAt: "2026-08-12T12:00:09.000Z",
+      };
+      const { container, onStop, rerender } = renderState({
+        activities: [readFile, compacting, tests],
+      });
+      const stream = container.querySelector(".turn-execution-stream");
+      const live = screen.getByRole("separator", { name: "Compacting context" });
+      expect(stream).toContainElement(live);
+      expect(live).toHaveAttribute("data-compaction-state", "live");
+      expect(live.querySelector(".context-compaction-marker"))
+        .toHaveTextContent("Compacting context·4.0s");
+      expect(live.querySelector(".context-compaction-marker")).toHaveAttribute("aria-hidden", "true");
+      expect(live.closest("[role=status], [aria-live]")).toBeNull();
+      const rows = [...stream!.querySelectorAll('[role="listitem"]')];
+      expect(rows.map((row) => row.querySelector("[role=separator]") ? "compaction" : row.textContent))
+        .toEqual([expect.stringContaining("Read file"), "compaction", expect.stringContaining("npm test")]);
+
+      rerender(<ResponseTimeline {...stateProps({
+        activities: [
+          readFile,
+          { ...compacting, title: "Claude compacted context", status: "completed" },
+          {
+            ...compacting,
+            id: "claude-compact-boundary",
+            title: "Claude compacted context",
+            status: "completed",
+            detail: "Trigger: auto\nBefore: 173000 tokens\nAfter: 5690 tokens\nDuration: 1200 ms",
+            createdAt: "2026-08-12T12:00:07.000Z",
+          },
+          tests,
+        ],
+      }, onStop)} />);
+      const settled = screen.getByRole("separator", {
+        name: "Compacted context 173K → 5.69K tokens",
+      });
+      expect(settled).toHaveAttribute("data-compaction-state", "settled");
+      expect(settled.querySelector(".context-compaction-marker"))
+        .toHaveTextContent("Compacted context·173K → 5.69K tokens");
+      expect(screen.getAllByRole("separator")).toHaveLength(1);
+
+      const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+      const sweep = '.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,';
+      expect(styles).toMatch(/\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u);
+      expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+      expect(styles).toMatch(/@media \(forced-colors: active\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+      expect(styles.split(sweep)).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a settled turn's compaction visible outside its folded work", () => {
+    const compaction = {
+      ...activity("Context compaction", "status"),
+      id: "codex-compaction",
+      status: "completed" as const,
+      createdAt: "2026-08-12T12:00:06.000Z",
+    };
+    const { container } = renderState({
+      status: "failed",
+      activities: [
+        {
+          ...activity("Read file"),
+          id: "read-before-compaction",
+          status: "completed",
+          createdAt: "2026-08-12T12:00:05.000Z",
+        },
+        compaction,
+      ],
+    });
+    const marker = screen.getByRole("separator", { name: "Compacted context" });
+    expect(marker.parentElement).toHaveAttribute("data-turn-layer", "agent-execution");
+    expect(container.querySelector(".turn-work-log.is-settled details"))
+      .not.toHaveAttribute("open");
+
+    fireEvent.click(container.querySelector(".turn-work-log.is-settled details > summary")!);
+    expect(container.querySelector(".turn-work-log.is-settled details"))
+      .toHaveAttribute("open");
+    expect(screen.getAllByRole("separator", { name: "Compacted context" })).toHaveLength(1);
+  });
+
+  it("shows a manual compaction in the conversation until its receipt takes its place", () => {
+    const receipt = (id: string, createdAt: string): ChatMessage => ({
+      id,
+      conversationId,
+      turnId: null,
+      role: "system",
+      content: "/compact keep the API decisions",
+      attachments: [],
+      createdAt,
+      compaction: {
+        providerId: "claude",
+        beforeTokens: 173_000,
+        afterTokens: 5_690,
+        instructionForwarded: true,
+      },
+    });
+    const onStop = vi.fn<() => void>();
+    const settled = stateProps({ status: "completed" }, onStop);
+    const older = receipt("older-receipt", "2026-08-12T12:00:30.000Z");
+    const { container, rerender } = render(<ResponseTimeline
+      {...settled}
+      messages={[...settled.messages, older]}
+      compactingSince="2026-08-12T12:01:00.000Z"
+    />);
+    const pending = container.querySelector("[data-compaction-pending]");
+    expect(pending).not.toBeNull();
+    expect(pending?.querySelector("[role=separator]"))
+      .toHaveAttribute("data-compaction-state", "live");
+    expect(within(pending as HTMLElement).getByRole("separator", { name: "Compacting context" }))
+      .toBeInTheDocument();
+    expect(
+      container.querySelector('[data-turn-id="turn-agent-loading"]')!
+        .compareDocumentPosition(pending!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    rerender(<ResponseTimeline
+      {...settled}
+      messages={[...settled.messages, older, receipt("new-receipt", "2026-08-12T12:01:04.000Z")]}
+      compactingSince="2026-08-12T12:01:00.000Z"
+    />);
+    expect(container.querySelector("[data-compaction-pending]")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "Compacting context" })).toBeNull();
+    expect(screen.getAllByRole("separator", {
+      name: "Compacted context 173K → 5.69K tokens",
+    })).toHaveLength(2);
+    expect(screen.getAllByText("/compact keep the API decisions")).toHaveLength(2);
+  });
+
   it("presents retained reconnect text as historical until text owns the channel", () => {
     const input = {
       streamingText: [

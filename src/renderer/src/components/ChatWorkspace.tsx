@@ -9,6 +9,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from "react";
 import {
   ArrowDown,
@@ -405,6 +406,19 @@ export function ChatWorkspace({
     setChatGoal,
   ]);
   const conversationId = conversation?.id ?? null;
+  const [compacting, setCompacting] = useState<{
+    conversationId: string | null;
+    since: string;
+  } | null>(null);
+  const compactConversation = useCallback(async (instruction?: string) => {
+    const started = { conversationId, since: new Date().toISOString() };
+    setCompacting(started);
+    try {
+      return await onCompactConversation!(instruction);
+    } finally {
+      setCompacting((current) => current === started ? null : current);
+    }
+  }, [conversationId, onCompactConversation]);
   const [navigation, dispatchNavigation] = useReducer(
     transcriptNavigationReducer,
     conversationId,
@@ -967,6 +981,9 @@ export function ChatWorkspace({
               autoScrollToFinalAnswer={autoScrollToFinalAnswer
                 && transcriptNavigationFollowsContent(activeNavigation)}
               detailLoading={detailLoading}
+              compactingSince={compacting?.conversationId === conversationId
+                ? compacting.since
+                : null}
               turnAnchorId={turnAnchorId}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
@@ -1064,7 +1081,7 @@ export function ChatWorkspace({
           latestTurnSummary={latestTurnSummary}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSend={sendMessage}
-          {...(onCompactConversation ? { onCompact: onCompactConversation } : {})}
+          {...(onCompactConversation ? { onCompact: compactConversation } : {})}
           onListSkills={onListSkills}
           promptPresets={promptPresets}
           promptPresetsEnabled={promptPresetsEnabled}

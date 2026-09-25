@@ -70,6 +70,12 @@ export function isTranscriptActivity(activity: AgentActivity): boolean {
     || activityNeedsAttention(activity);
 }
 
+export function isCompactionActivity(activity: AgentActivity): boolean {
+  return activity.kind === "status"
+    && /\bcompact/iu.test(activity.title)
+    && !activityNeedsAttention(activity);
+}
+
 export type TurnExecutionStreamEntry =
   | {
       kind: "commentary";
@@ -90,11 +96,18 @@ export type TurnExecutionStreamEntry =
       id: string;
       createdAt: string;
       activities: AgentActivity[];
+    }
+  | {
+      kind: "compaction";
+      id: string;
+      createdAt: string;
+      activities: AgentActivity[];
     };
 
 interface BuildTurnExecutionStreamOptions {
   liveContent?: string;
   includeImportantActivities?: boolean;
+  includeCompactions?: boolean;
 }
 
 /**
@@ -127,7 +140,7 @@ export function buildTurnExecutionStream(
         order: number;
       }
     | {
-        kind: "activity";
+        kind: "activity" | "compaction";
         id: string;
         createdAt: string;
         activity: AgentActivity;
@@ -156,10 +169,11 @@ export function buildTurnExecutionStream(
     });
   }
   for (const activity of turn.activities) {
-    if (!isTranscriptActivity(activity)) continue;
+    const compaction = isCompactionActivity(activity);
+    if (compaction ? !options.includeCompactions : !isTranscriptActivity(activity)) continue;
     if (!includeImportant && activityNeedsAttention(activity)) continue;
     items.push({
-      kind: "activity",
+      kind: compaction ? "compaction" : "activity",
       id: activity.id,
       createdAt: activity.createdAt,
       activity,
@@ -191,14 +205,15 @@ export function buildTurnExecutionStream(
       stream.push(item);
       continue;
     }
+    const kind = item.kind === "compaction" ? "compaction" : "activity-group";
     const previous = stream.at(-1);
-    if (previous?.kind === "activity-group") {
+    if (previous?.kind === kind) {
       previous.activities.push(item.activity);
       continue;
     }
     stream.push({
-      kind: "activity-group",
-      id: `activity-group:${item.id}`,
+      kind,
+      id: `${kind}:${item.id}`,
       createdAt: item.createdAt,
       activities: [item.activity],
     });

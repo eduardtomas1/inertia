@@ -3,12 +3,37 @@
   "baseline": "origin/main da6afa9b renderer and shared sources",
   "unit": "bytes",
   "routes": {
-    "entryJavaScript": { "main": 222472, "branch": 222472, "limit": 222720 },
-    "mainWorkbenchFirstLoadJavaScript": { "main": 827981, "branch": 828487, "limit": 831840 },
-    "detachedChatFirstLoadJavaScript": { "main": 640141, "branch": 640647, "limitBefore": 640355, "limitAfter": 640861 },
-    "entryCss": { "main": 352585, "branch": 353274, "limit": 354304 },
-    "transcriptJavaScript": { "main": 547932, "branch": 550601, "limit": 614400 },
-    "coreJavaScript": { "main": 2154540, "branch": 2157725, "limit": 2157916 }
+    "entryJavaScript": {
+      "main": 222472,
+      "branch": 222472,
+      "limit": 222720
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "main": 827981,
+      "branch": 828487,
+      "limit": 831840
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "main": 640141,
+      "branch": 640647,
+      "limitBefore": 640355,
+      "limitAfter": 640861
+    },
+    "entryCss": {
+      "main": 352585,
+      "branch": 353274,
+      "limit": 354304
+    },
+    "transcriptJavaScript": {
+      "main": 547932,
+      "branch": 550707,
+      "limit": 614400
+    },
+    "coreJavaScript": {
+      "main": 2154540,
+      "branch": 2157831,
+      "limit": 2157916
+    }
   },
   "detachedChatFirstLoadDelta": {
     "thinkingProjection": 128,

@@ -4,18 +4,28 @@ The useful changes in each Inertia release, in plain language.
 
 ## 0.0.63 — 2026-09-25
 
+A clearer workspace, richer chat references and attachments, and more
+dependable agent conversations. This release also includes everything from
+0.0.62.
+
+### Workspace
+
+- Bring **Run, Open and Git** together in the workspace header, with files
+  and changes in the right panel and a unified composer below.
 - Open **Terminal** from the surface chooser, with multiple tabs and split
   terminals. Keep the same live sessions when moving between a surface and
   the bottom dock.
 - Browse sent images and documents in a dedicated **Attachments** surface,
   separate from Agents, with retained previews and keyboard access.
-- Keep fixed **Working indicator** styles on the Work tab and working cue.
-  Only Automatic replaces tool, reasoning and subagent activity icons.
-
 - Start new chats with the side panel closed and restore each chat’s own panel
   state when returning to it.
-- Keep attached chat-context cards and previews inside the composer, including
-  narrow layouts and enlarged text.
+- Give projects their own colours and pin favourites. Choose a **Working
+  indicator**, including thinking orbs and an Automatic mode. Fixed styles
+  stay on the Work tab and working cue; only Automatic replaces tool,
+  reasoning and subagent activity icons.
+
+### Chat references
+
 - Type `@this-chat` to hand the agent this chat's own earlier messages when it
   loses track. Reference up to three chats per message, each chat once.
 - Referenced chats carry more of the conversation: your opening request and
@@ -23,23 +33,21 @@ The useful changes in each Inertia release, in plain language.
   and end, and small references leave their unused room to larger ones.
 - Chat references shrink to fit beside large attachments instead of failing
   the send, and each sent message keeps an exact record of what was shared.
+- Reference a chat straight from a new draft, and confirm sharing from another
+  workspace inline without leaving the keyboard. Attached chat-context cards
+  and previews stay inside the composer, including narrow layouts and
+  enlarged text.
+
+### Conversations and attachments
+
 - Keep the **Thinking** strip readable with Claude. It no longer flickers,
   shows whole sentences long enough to read, and holds the current thought
   through short tool calls. The full reasoning stays in its summary.
 - Mark **context compaction** in the conversation where it happens, for both
   automatic compaction and `/compact`: it animates like Thinking while it
   runs, then stays as a centered "Compacted context" divider.
-
-## 0.0.62 — 2026-09-24
-
-A clearer workspace, richer attachments, and more dependable agent conversations.
-
-### Workspace and context
-
-- Bring **Run, Open and Git** together in the workspace header, with files
-  and changes in the right panel and a unified composer below.
-- Give projects their own colours and pin favourites. Choose a **Working
-  indicator**, including thinking orbs and an Automatic mode.
+- Keep a finished turn finished: the chat no longer flashes back to running
+  for a moment after an answer, and an image pasted right then is kept.
 - Browse image attachments in a zoomable gallery. Attach plain-text source,
   markup and configuration files, with clearer explanations for rejected or
   unavailable attachments.

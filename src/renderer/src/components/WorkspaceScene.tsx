@@ -2,8 +2,6 @@ import {
   lazy,
   memo,
   Suspense,
-  useEffect,
-  useId,
   useRef,
   useState,
   type ComponentProps,
@@ -30,23 +28,24 @@ import { LoadingMark } from "./ui";
 import type { Project } from "@shared/contracts";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
+import type { AttachmentsSurfaceProps } from "./AttachmentsSurface";
 import type { AgentsSurfaceProps } from "./AgentsSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useChatMinimumHeight } from "../hooks/useChatMinimumHeight";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
-import { usePersistedSize } from "../hooks/usePersistedSize";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
   loadConversationSplitView,
   loadAgentsSurface,
+  loadAttachmentsSurface,
   loadFilesPanel,
   loadGoalPanel,
   loadHistoricalDiffPanel,
   loadPlanPanel,
   loadPreviewPanel,
   loadSettingsView,
-  loadTerminalPanel,
+  loadWorkspaceTerminal,
   loadUsageSurface,
   loadWorkspaceChangesPanel,
 } from "./lazySurfaceLoaders";
@@ -72,6 +71,7 @@ const UsageSurface = lazySurface(
   loadUsageSurface,
   (module) => module.UsageSurface,
 );
+const AttachmentsSurface = lazySurface(loadAttachmentsSurface, (module) => module.AttachmentsSurface);
 const AgentsSurface = lazySurface(
   loadAgentsSurface,
   (module) => module.AgentsSurface,
@@ -91,9 +91,9 @@ const PreviewPanel = lazySurface(
   loadPreviewPanel,
   (module) => module.PreviewPanel,
 );
-const TerminalPanel = lazySurface(
-  loadTerminalPanel,
-  (module) => module.TerminalPanel,
+const WorkspaceTerminal = lazySurface(
+  loadWorkspaceTerminal,
+  (module) => module.WorkspaceTerminal,
 );
 const WorkspaceChangesPanel = lazySurface(
   loadWorkspaceChangesPanel,
@@ -113,13 +113,14 @@ export interface WorkspaceToolScene {
   panel: Omit<WorkspacePanelProps, "children">;
   usage: UsageSurfaceProps;
   agents: AgentsSurfaceProps;
+  attachments: AttachmentsSurfaceProps;
   runs: WorkspaceRunsModel;
   gitNotice: string | null;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
   changes: ComponentProps<typeof WorkspaceChangesPanel>;
   files: ComponentProps<typeof FilesPanel>;
   filesKey: string;
-  terminal: ComponentProps<typeof TerminalPanel>;
+  terminal: ComponentProps<typeof WorkspaceTerminal>["terminal"];
   terminalKey: string;
   goal: ComponentProps<typeof GoalPanel>;
   plan: ComponentProps<typeof PlanPanel>;
@@ -183,8 +184,10 @@ function WorkspaceToolSurface({
   resizeHandle,
   tools,
   owner,
+  terminalTarget,
 }: Pick<ConversationPaneScene, "resizeHandle" | "tools"> & {
   owner: WorkspacePreviewOwner;
+  terminalTarget: (node: HTMLDivElement | null) => void;
 }): JSX.Element {
   return (
     <>
@@ -193,6 +196,8 @@ function WorkspaceToolSurface({
         <Suspense fallback={<WorkspacePanelFallback {...tools.panel} />}>
           <WorkspacePanel {...tools.panel}>
             <Suspense fallback={<WorkspaceToolFallback />}>
+              {tools.activeTool === "terminal" && <div ref={terminalTarget} className="terminal-surface-slot" />}
+              {tools.activeTool === "attachments" && <AttachmentsSurface {...tools.attachments} />}
               {tools.activeTool === "usage" && (
                 <UsageSurface {...tools.usage} />
               )}
@@ -220,63 +225,29 @@ function WorkspaceToolSurface({
   );
 }
 
-const TERMINAL_DOCK_MIN_HEIGHT = 140;
-const TERMINAL_DOCK_MAX_HEIGHT = 640;
-const TERMINAL_DOCK_DEFAULT_HEIGHT = 260;
-
-/**
- * Docks the terminal under the chat, beside whatever the right panel shows.
- * Once opened it stays mounted while hidden so its sessions keep running.
- */
+/** Defer terminal layout and xterm until this workspace first opens a terminal. */
 function TerminalDock({
   tools,
   containerRef,
+  surfaceTarget,
 }: {
   tools: WorkspaceToolScene | null;
   containerRef: RefObject<HTMLDivElement | null>;
+  surfaceTarget: HTMLDivElement | null;
 }): JSX.Element | null {
-  const id = useId();
-  const [persistedHeight, setPersistedHeight] = usePersistedSize(
-    "inertia:layout:terminal-dock-height:v1",
-    TERMINAL_DOCK_DEFAULT_HEIGHT,
-    { min: TERMINAL_DOCK_MIN_HEIGHT, max: TERMINAL_DOCK_MAX_HEIGHT },
-  );
-  const [height, setHeight] = useState(persistedHeight);
-  useEffect(() => setHeight(persistedHeight), [persistedHeight]);
   const activatedKeyRef = useRef<string | null>(null);
-  const open = Boolean(tools?.terminal.visible);
-  if (tools && open) activatedKeyRef.current = tools.terminalKey;
+  if (tools?.terminal.visible) activatedKeyRef.current = tools.terminalKey;
   if (!tools || activatedKeyRef.current !== tools.terminalKey) return null;
   return (
-    <>
-      {open && (
-        <PaneResizeHandle
-          label="Resize terminal"
-          controls={id}
-          containerRef={containerRef}
-          orientation="horizontal"
-          pane="after"
-          value={height}
-          min={TERMINAL_DOCK_MIN_HEIGHT}
-          max={TERMINAL_DOCK_MAX_HEIGHT}
-          defaultValue={TERMINAL_DOCK_DEFAULT_HEIGHT}
-          onChange={setHeight}
-          onCommit={setPersistedHeight}
-          className="terminal-dock-resize-handle"
-        />
-      )}
-      <section
-        id={id}
-        className="terminal-dock"
-        aria-label="Terminal"
-        hidden={!open}
-        style={{ "--terminal-dock-height": `${height}px` } as CSSProperties}
-      >
-        <Suspense fallback={<WorkspaceToolFallback />}>
-          <TerminalPanel key={tools.terminalKey} {...tools.terminal} />
-        </Suspense>
-      </section>
-    </>
+    <Suspense fallback={null}>
+      <WorkspaceTerminal
+        terminal={tools.terminal}
+        terminalKey={tools.terminalKey}
+        inSurface={tools.activeTool === "terminal" && tools.panel.visible !== false}
+        containerRef={containerRef}
+        surfaceTarget={surfaceTarget}
+      />
+    </Suspense>
   );
 }
 
@@ -296,6 +267,7 @@ function ConversationPane({
     | RefObject<HTMLDivElement | null>
     | undefined;
   const chatRef = useRef<HTMLDivElement>(null);
+  const [terminalTarget, setTerminalTarget] = useState<HTMLDivElement | null>(null);
   const paneRef = useRef<HTMLDivElement>(null);
   useChatMinimumHeight(paneRef, chatRef);
   const style = resizeHandle
@@ -326,12 +298,13 @@ function ConversationPane({
               <ChatWorkspace {...chat} embedded />
             </CheckoutBranchControlProvider>
           )}
-        <TerminalDock tools={tools} containerRef={chatRef} />
+        <TerminalDock tools={tools} containerRef={chatRef} surfaceTarget={terminalTarget} />
       </div>
       <WorkspaceToolSurface
         resizeHandle={resizeHandle}
         tools={tools}
         owner={owner}
+        terminalTarget={setTerminalTarget}
       />
     </div>
   );
@@ -355,6 +328,7 @@ function WorkspaceSceneView({
 }: WorkspaceSceneProps): JSX.Element {
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
   const chatColumnRef = useRef<HTMLDivElement>(null);
+  const [terminalTarget, setTerminalTarget] = useState<HTMLDivElement | null>(null);
   useChatMinimumHeight(chatColumnRef);
   return (
     <>
@@ -404,7 +378,7 @@ function WorkspaceSceneView({
               <ChatWorkspace {...chat} />
             </CheckoutBranchControlProvider>
           )}
-          <TerminalDock tools={tools} containerRef={chatColumnRef} />
+          <TerminalDock tools={tools} containerRef={chatColumnRef} surfaceTarget={terminalTarget} />
         </div>
       )}
 
@@ -413,6 +387,7 @@ function WorkspaceSceneView({
           resizeHandle={resizeHandle}
           tools={tools}
           owner="primary"
+          terminalTarget={setTerminalTarget}
         />
       )}
     </>

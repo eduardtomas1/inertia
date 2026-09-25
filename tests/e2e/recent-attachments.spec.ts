@@ -18,8 +18,8 @@ test("recent attachments show real thumbnails, open retained previews and handle
   await expect(page.locator(".composer-attachments img")).toHaveCount(1);
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Review these example attachments.");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
-  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Agents");
-  const recent = page.getByRole("list", { name: "Recent attachments" });
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Attachments");
+  const recent = page.getByRole("list", { name: "Chat attachments" });
   await expect(recent).toBeVisible();
   const image = recent.locator("img");
   await expect.poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(512);
@@ -40,9 +40,9 @@ test("recent attachments show real thumbnails, open retained previews and handle
       const layout = await button.evaluate((node) => {
         const box = node.getBoundingClientRect(); const icon = node.querySelector(".sent-attachment-thumbnail")!.getBoundingClientRect();
         const text = node.querySelector(".sent-attachment-copy")!.getBoundingClientRect();
-        return { height: box.height, width: box.width, iconWidth: icon.width, gap: text.left - icon.right, overflow: node.scrollWidth > node.clientWidth };
+        return { height: box.height, width: box.width, iconHeight: icon.height, gap: text.top - icon.bottom, overflow: node.scrollWidth > node.clientWidth };
       });
-      expect(Math.round(layout.height * 100) / 100).toBeGreaterThanOrEqual(54); expect(layout.iconWidth).toBe(48); expect(layout.gap).toBe(9); expect(layout.overflow).toBe(false);
+      expect(Math.round(layout.height * 100) / 100).toBeGreaterThanOrEqual(54); expect(layout.iconHeight).toBe(62); expect(layout.gap).toBe(5); expect(layout.overflow).toBe(false);
     }
     await capture(`recent-attachments-${theme}`);
     await recent.getByRole("button", { name: /Preview attachment .*\.png$/u }).focus();
@@ -97,8 +97,8 @@ test("recent attachments show real thumbnails, open retained previews and handle
     || error === "Failed to load resource: the server responded with a status of 404 (Not Found) (inertia://bundle/attachment-preview/redacted:1:1)")).toBe(true);
   await page.keyboard.press("Escape");
 
-  // Past the recent set the panel expands into a scrollable gallery of every
-  // attachment in the chat. Distinct icon sizes keep the imports distinct.
+  // The dedicated surface immediately includes newly sent attachments.
+  // Distinct icon sizes keep the imports distinct.
   const gallerySources = [
     "1024x1024", "256x256", "192x192", "128x128",
     "64x64", "48x48", "32x32", "24x24",
@@ -116,12 +116,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
   await expect(page.locator(".composer-attachments img")).toHaveCount(gallerySources.length);
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("More media for the gallery.");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
-  await expect(recent.getByRole("listitem")).toHaveCount(3);
-  const expand = page.getByRole("button", { name: "Show all 10" });
-  await expect(expand).toBeVisible();
-  await expect(expand).toHaveAttribute("aria-expanded", "false");
-  await expand.click();
-  const gallery = page.getByRole("list", { name: "All attachments" });
+  const gallery = page.getByRole("list", { name: "Chat attachments" });
   await expect(gallery.getByRole("listitem")).toHaveCount(10);
   await app.expectNoViewportOverflow();
   // Newest first; check while the leading tile is still in the scrollport.
@@ -135,17 +130,17 @@ test("recent attachments show real thumbnails, open retained previews and handle
     node.scrollTop = node.scrollHeight;
     return {
       overflowY: style.overflowY,
-      maxHeight: Number.parseFloat(style.maxHeight),
+      availableHeight: node.closest(".attachments-surface")!.getBoundingClientRect().bottom - node.getBoundingClientRect().top,
       clientHeight: node.clientHeight,
       scrollHeight: node.scrollHeight,
       scrollTop: node.scrollTop,
     };
   });
   expect(scroller.overflowY).toBe("auto");
-  expect(scroller.clientHeight).toBeLessThanOrEqual(scroller.maxHeight + 1);
+  expect(scroller.clientHeight).toBeLessThanOrEqual(scroller.availableHeight + 1);
+  expect(scroller.availableHeight - scroller.clientHeight).toBeLessThanOrEqual(20);
   expect(scroller.scrollTop > 0)
     .toBe(scroller.scrollHeight > scroller.clientHeight);
   await capture("recent-attachments-gallery-light");
-  await page.getByRole("button", { name: "Show fewer" }).click();
-  await expect(page.getByRole("list", { name: "Recent attachments" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Chat attachments" })).toBeVisible();
 });

@@ -1,0 +1,35 @@
+{
+  "baseCommit": "3cd51121f93d87ae927fd2bc229d1739c6a1a928",
+  "node": "22.23.2",
+  "reason": "Current surfaces no longer construct legacy Environment workspace, branch, repository and subagent summaries. Git action helpers move from initial shared code into their actual deferred consumers. Terminal layout is loaded on first use; launcher and tab icons share one module.",
+  "allocation": "Transfer 2,900 bytes from each overlapping initial/core ceiling into the two deferred Git closures (2,850 + 50). No combined allowance increase; all other ceilings stay unchanged.",
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "emittedBytes": 828784,
+      "previousCeilingBytes": 834740.8,
+      "newCeilingBytes": 831840.8
+    },
+    "coreJavaScript": {
+      "emittedBytes": 2155904,
+      "previousCeilingBytes": 2160816.4,
+      "newCeilingBytes": 2157916.4
+    },
+    "deferredWorkspaceHeaderActionsJavaScript": {
+      "emittedBytes": 22021,
+      "previousCeilingBytes": 19200,
+      "newCeilingBytes": 22050
+    },
+    "deferredGitMenusJavaScript": {
+      "emittedBytes": 9340,
+      "previousCeilingBytes": 9333,
+      "newCeilingBytes": 9383
+    },
+    "deferredTerminalJavaScript": {
+      "emittedBytes": 26485,
+      "previousCeilingBytes": 26606,
+      "newCeilingBytes": 26606
+    }
+  },
+  "baselineLog": "/tmp/inertia-pr466-followup3-final-build.log",
+  "baselineLimit": "Baseline log reports rounded KiB on product/build inputs unchanged by final PR466 E2E-only follow-up. Candidate emitted bytes are exact; no exact-byte baseline size is claimed."
+}

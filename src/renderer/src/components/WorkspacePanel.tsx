@@ -7,17 +7,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import {
-  Bot,
-  Files,
-  Flag,
-  Gauge,
-  GitCompareArrows,
-  Globe2,
-  ListChecks,
-  Plus,
-  X,
-} from "lucide-react";
+import { Plus, X } from "lucide-react";
+import { surfaceIcons } from "./workspacePanelIcons";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import {
@@ -51,16 +42,6 @@ export type WorkspacePanelProps = {
   onOpenSurface: (surface: WorkspacePanelTab) => void;
   onCloseSurface: (surface: WorkspacePanelTab) => void;
   onClosePanel?: () => void;
-};
-
-const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
-  changes: <GitCompareArrows size={14} aria-hidden="true" />,
-  files: <Files size={14} aria-hidden="true" />,
-  preview: <Globe2 size={14} aria-hidden="true" />,
-  agents: <Bot size={14} aria-hidden="true" />,
-  usage: <Gauge size={14} aria-hidden="true" />,
-  goal: <Flag size={14} aria-hidden="true" />,
-  plan: <ListChecks size={14} aria-hidden="true" />,
 };
 
 const loadWorkspacePanelLauncher = () => import("./WorkspacePanelLauncher");

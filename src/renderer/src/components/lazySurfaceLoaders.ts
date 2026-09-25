@@ -7,6 +7,7 @@ export const loadCommandPalette = createSurfaceLoader(async () => ({
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
 export const loadConversationSplitView = createSurfaceLoader(() => import("./ConversationSplitView"));
 export const loadDailyWorkDialog = createSurfaceLoader(() => import("./DailyWorkDialog"));
+export const loadAttachmentsSurface = createSurfaceLoader(() => import("./AttachmentsSurface"));
 export const loadAgentsSurface = createSurfaceLoader(() => import("./AgentsSurface"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
@@ -23,6 +24,7 @@ export const loadSettingsView = createSurfaceLoader(async () => ({
 }));
 export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface"));
 export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
+export const loadWorkspaceTerminal = createSurfaceLoader(() => import("./WorkspaceTerminal"));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
 export const loadWelcomeGuide = createSurfaceLoader(() => import("./welcome-guide/WelcomeGuide"));
@@ -39,7 +41,12 @@ export function prefetchFrequentSurfaces(): void {
 }
 
 export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
-  if (tab === "usage") {
+  if (tab === "terminal") {
+    void loadWorkspaceTerminal();
+    void loadTerminalPanel();
+  } else if (tab === "attachments") {
+    void loadAttachmentsSurface();
+  } else if (tab === "usage") {
     void loadUsageSurface();
   } else if (tab === "agents") {
     void loadAgentsSurface();

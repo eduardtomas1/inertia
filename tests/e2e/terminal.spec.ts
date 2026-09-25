@@ -56,7 +56,8 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(page.getByLabel("Workspace changes")).toBeVisible();
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   await expect(page.getByRole("region", { name: "Project files" })).toBeVisible();
-  await openTerminalDock(page);
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await expect(page.locator(".terminal-surface-slot .terminal-panel[data-terminal-state=ready]")).toHaveCount(1);
   await page.getByRole("button", { name: "New terminal" }).click();
   const secondTerminalTab = page.getByRole("tab", { name: "Terminal 2", exact: true });
   await expect(secondTerminalTab).toBeVisible();
@@ -84,6 +85,8 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
     '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
   )).toHaveCount(2);
   const terminalIdsBefore = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
+  await openTerminalDock(page);
   const beforeReloadPath = join(workspaceDirectory, "terminal-before-reload.txt");
   const afterReloadPath = join(workspaceDirectory, "terminal-after-reload.txt");
   const terminalInput = page.locator(".xterm-helper-textarea:visible").first();
@@ -99,7 +102,20 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
       .catch(() => "")).toContain(marker);
   }
 
+  // Moving to a real surface keeps both shells, their split and process state.
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  const terminalSurface = page.locator(".terminal-surface-slot");
+  await expect(terminalSurface.locator(".terminal-panel[data-terminal-id]")).toHaveCount(2);
+  await expect(page.locator(".terminal-dock")).toBeHidden();
+  await expect(terminalSurface.locator(".terminal-session-grid")).toHaveClass(/is-split/);
+  expect(await terminalSurface.locator(".terminal-panel").evaluateAll((panels) =>
+    panels.map((panel) => panel.getAttribute("data-terminal-id")).sort(),
+  )).toEqual(terminalIdsBefore);
+  await expectNoViewportOverflow();
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  await expect(page.getByRole("tab", { name: "Terminal 1", exact: true })).toBeHidden();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await expect(terminalSurface.locator(".terminal-panel[data-terminal-state=ready]")).toHaveCount(2);
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const address = page.getByRole("textbox", { name: "Preview address" });

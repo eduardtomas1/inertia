@@ -4,6 +4,8 @@ export const RIGHT_PANEL_SURFACES = [
   "changes",
   "files",
   "preview",
+  "terminal",
+  "attachments",
   "agents",
   "usage",
   "goal",
@@ -17,6 +19,8 @@ export const RIGHT_PANEL_SURFACE_META: Record<
   changes: { label: "Changes", shortcut: "D" },
   files: { label: "Files", shortcut: "F" },
   preview: { label: "Browser", shortcut: "B" },
+  terminal: { label: "Terminal", shortcut: "T" },
+  attachments: { label: "Attachments", shortcut: "H" },
   agents: { label: "Agents", shortcut: "A" },
   usage: { label: "Usage", shortcut: "U" },
   goal: { label: "Goal", shortcut: "G" },
@@ -24,6 +28,7 @@ export const RIGHT_PANEL_SURFACE_META: Record<
 };
 
 export const WORKSPACE_BOUND_SURFACES = [
+  "terminal",
   "changes",
   "files",
   "preview",

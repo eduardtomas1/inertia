@@ -46,10 +46,9 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   try {
     const { page } = app;
     await app.resizeWindow(1440, 920);
-    // Recent attachments live in the right panel's Agents surface.
-    await selectWorkspaceTool(await ensureWorkspaceTools(page), "Agents");
-    await page.getByRole("button", { name: "Show all 60+" }).click();
-    const gallery = page.getByRole("list", { name: "All attachments" });
+    // Recent attachments live in the right panel's Attachments surface.
+    await selectWorkspaceTool(await ensureWorkspaceTools(page), "Attachments");
+    const gallery = page.getByRole("list", { name: "Chat attachments" });
     await expect(gallery.getByRole("listitem")).toHaveCount(60);
     const first = gallery.getByRole("button", { name: "Preview attachment gallery-59.png" });
     const last = gallery.getByRole("button", { name: "Preview attachment gallery-0.png" });

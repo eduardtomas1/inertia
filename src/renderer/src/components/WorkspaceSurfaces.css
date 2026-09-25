@@ -30,7 +30,7 @@
 
 .workspace-surface-heading h3,
 .workspace-surface-section > h3,
-.agents-surface-attachments .environment-attachments-header h3 {
+.attachments-surface-gallery .environment-attachments-header h3 {
   overflow: hidden;
   margin: 0;
   color: var(--text-muted);
@@ -46,8 +46,8 @@
   margin-bottom: 8px;
 }
 
-/* The attachments heading shares its row with the gallery toggle. */
-.agents-surface-attachments .environment-attachments-header {
+/* Keep the attachment heading aligned with the gallery tiles. */
+.attachments-surface-gallery .environment-attachments-header {
   min-width: 0;
   margin: 0 0 8px;
 }
@@ -215,6 +215,25 @@
 
 .agents-surface .goal-panel-section {
   margin: 0;
+}
+
+.attachments-surface .workspace-surface-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.attachments-surface-gallery {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.attachments-surface .environment-attachments[data-expanded="true"] .environment-attachments-gallery {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

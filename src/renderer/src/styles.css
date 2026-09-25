@@ -6208,6 +6208,16 @@ button.header-breadcrumb-project:hover {
   background: var(--surface);
 }
 
+.terminal-dock-slot,
+.terminal-surface-slot,
+.workspace-terminal-host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .terminal-dock[hidden] { display: none; }
 .terminal-dock-resize-handle.is-horizontal { flex: 0 0 7px; margin-block: -3px -4px; }
 .terminal-session-actions { display: flex; align-items: center; }

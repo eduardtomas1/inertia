@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT,
   buildEnvironmentSummary,
+  buildWorkspaceSurfaceSummary,
 } from "../../src/renderer/src/utils/environmentSummary";
 import type {
   ChatMessage,
@@ -216,7 +217,7 @@ const owners = {
 };
 
 function attachmentGallerySummary(messages: readonly ChatMessage[]) {
-  return buildEnvironmentSummary({
+  return buildWorkspaceSurfaceSummary({
     projectId: "project-1",
     projectName: "Inertia",
     conversationId: "conversation-1",

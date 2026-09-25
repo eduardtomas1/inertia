@@ -77,7 +77,7 @@ export async function selectWorkspaceTool(
 export async function openConversationPaneTool(
   pane: Locator,
   chatTitle: string,
-  tab: "Changes" | "Files" | "Goal" | "Browser",
+  tab: "Changes" | "Files" | "Goal" | "Browser" | "Terminal" | "Attachments",
 ): Promise<Locator> {
   const tools = pane.getByRole("complementary", { name: "Workspace tools" });
   if (!await tools.isVisible().catch(() => false)) {

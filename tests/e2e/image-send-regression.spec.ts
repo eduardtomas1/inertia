@@ -92,6 +92,9 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     const composer = app.page.getByRole("textbox", { name: "Message" });
     const send = app.page.getByRole("button", { name: "Send message" });
     for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // A final answer can render while the preceding turn still owns imports.
+      await expect(app.page.getByRole("region", { name: "Message composer", exact: true }))
+        .toHaveAttribute("aria-busy", "false");
       await expect(send).toBeVisible();
       await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
       await composer.evaluate((textarea, bytes) => {
@@ -155,6 +158,11 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
     const composer = app.page.getByRole("textbox", { name: "Message" });
     const retained: { name: string; digest: string; id: string }[] = [];
     for (const method of ["clipboard", "drop", "picker"] as const) {
+      // Wait for turn and send ownership to settle before the next import.
+      // Synthetic paste/drop bypass Playwright's normal button readiness wait.
+      await expect(app.page.getByRole("region", { name: "Message composer", exact: true }))
+        .toHaveAttribute("aria-busy", "false");
+      await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
       let bytes = [...png];
       let name = `${method}.png`;
       if (method === "clipboard") {
@@ -240,7 +248,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
 
     await app.restart();
     await previewEvidence?.afterRestart();
-    await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Agents");
+    await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
     for (const attachment of retained) {
       const path = join(app.testDirectory, "data", "conversation-attachments",
         attachment.id, `${attachment.id}.png`);
@@ -254,7 +262,7 @@ test("native clipboard, dropped, and selected screenshots survive send and resta
       }).getByRole("button", { name: previewName, exact: true });
       await expect(messagePreview).toHaveCount(1);
       await expect(app.page.getByRole("list", {
-        name: "Recent attachments", exact: true,
+        name: "Chat attachments", exact: true,
       }).getByRole("button", { name: previewName, exact: true })).toHaveCount(1);
       await messagePreview.click();
       const dialog = app.page.getByRole("dialog", {

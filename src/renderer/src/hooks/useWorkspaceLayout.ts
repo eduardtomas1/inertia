@@ -326,7 +326,7 @@ export function useWorkspaceLayout(
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);
-  const terminalDock = useTerminalDock(workspaceScope);
+  const terminalDock = useTerminalDock(workspaceScope, activeRightPanelSurface(panelState) === "terminal", panelActions.setActiveTool);
 
   const showStartupSurface = useMemo(
     () => (surface: WorkspaceStartupSurface) => {

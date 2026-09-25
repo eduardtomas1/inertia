@@ -6,14 +6,15 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
   loadCommitDialog: vi.fn(),
   prefetchWorkspaceTool: vi.fn(),
 }));
 
-import { AgentsSurface, ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY } from "../../src/renderer/src/components/AgentsSurface";
+import { AgentsSurface } from "../../src/renderer/src/components/AgentsSurface";
+import { AttachmentsSurface } from "../../src/renderer/src/components/AttachmentsSurface";
 import {
   CheckoutBranchControlProvider,
   CheckoutBranchSlot,
@@ -225,11 +226,14 @@ function agentsSurface(overrides: Partial<EnvironmentSummarySnapshot> = {}): Rea
   return (
     <AgentsSurface
       runtimeStatus={next.runtime.status}
-      attachments={next.attachments}
       subagents={[]}
       turns={[]}
     />
   );
+}
+
+function attachmentsSurface(overrides: Partial<EnvironmentSummarySnapshot> = {}): React.JSX.Element {
+  return <AttachmentsSurface attachments={(overrides.attachments ?? summary.attachments)} />;
 }
 
 function RunControl({
@@ -259,6 +263,7 @@ async function openRunMenu(): Promise<HTMLElement> {
 }
 
 describe("Environment content in its workspace surfaces", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     window.localStorage.clear();
     vi.stubGlobal("matchMedia", () => ({
@@ -273,62 +278,41 @@ describe("Environment content in its workspace surfaces", () => {
     }));
   });
 
-  it("keeps the attachment gallery collapsed until there is more than the recent set", () => {
-    render(agentsSurface());
-
-    expect(screen.getByRole("list", { name: "Recent attachments" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Show all/u })).toBeNull();
+  it("explains an empty chat and shows all available attachments without an expansion step", () => {
+    const view = render(attachmentsSurface({ attachments: [] }));
+    expect(screen.getByText("Attachments you send in this chat appear here.")).toBeVisible();
+    expect(screen.queryByRole("list")).toBeNull();
+    const attachments = Array.from({ length: 9 }, (_, index) => ({
+      id: `gallery-${index}`, name: `shot-${index}.png`, mimeType: "image/png" as const, size: 2048,
+    }));
+    view.rerender(attachmentsSurface({ attachments }));
+    expect(within(screen.getByRole("list", { name: "Chat attachments" })).getAllByRole("listitem")).toHaveLength(9);
+    expect(screen.getByRole("heading", { name: "9 attachments" })).toBeVisible();
+    expect(screen.queryByText("Attachments you send in this chat appear here.")).toBeNull();
   });
 
-  it("expands the attachment gallery to scroll every attachment and remembers the choice", async () => {
-    const gallery = {
-      ...summary,
-      attachments: Array.from({ length: 9 }, (_, index) => ({
-        id: `gallery-${index}`,
-        name: `shot-${index}.png`,
-        mimeType: "image/png" as const,
-        size: 2048,
-      })),
-    };
-    const view = render(agentsSurface(gallery));
-    const section = document.querySelector(".environment-attachments")!;
-
-    expect(section).toHaveAttribute("data-expanded", "false");
-    expect(within(screen.getByRole("list", { name: "Recent attachments" }))
-      .getAllByRole("listitem")).toHaveLength(3);
-
-    const toggle = screen.getByRole("button", { name: "Show all 9" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(document.getElementById(toggle.getAttribute("aria-controls")!))
-      .toContainElement(screen.getByRole("list", { name: "Recent attachments" }));
-
-    await userEvent.click(toggle);
-
-    expect(section).toHaveAttribute("data-expanded", "true");
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(within(screen.getByRole("list", { name: "All attachments" }))
-      .getAllByRole("listitem")).toHaveLength(9);
-    expect(screen.queryByRole("list", { name: "Recent attachments" })).toBeNull();
-    expect(window.localStorage.getItem(ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY)).toBe("true");
-
-    await userEvent.click(screen.getByRole("button", { name: "Show fewer" }));
-
-    expect(section).toHaveAttribute("data-expanded", "false");
-    expect(window.localStorage.getItem(ENVIRONMENT_ATTACHMENTS_EXPANDED_STORAGE_KEY)).toBe("false");
-
-    // A remembered expansion collapses again when the chat drops back to the
-    // recent set, so the toggle never claims to hide attachments that are gone.
-    await userEvent.click(screen.getByRole("button", { name: "Show all 9" }));
-    view.rerender(agentsSurface());
-
-    expect(document.querySelector(".environment-attachments"))
-      .toHaveAttribute("data-expanded", "false");
-    expect(screen.getByRole("list", { name: "Recent attachments" })).toBeInTheDocument();
+  it("labels the bounded gallery truthfully and keeps split attachment headings unique", () => {
+    const attachments = Array.from({ length: 60 }, (_, index) => ({
+      id: `gallery-${index}`, name: `shot-${index}.png`, mimeType: "image/png" as const, size: 2048,
+    }));
+    const view = render(<>{attachmentsSurface({ attachments })}{attachmentsSurface()}</>);
+    expect(screen.getByRole("heading", { name: "Newest 60 attachments" })).toBeVisible();
+    const labels = [...view.container.querySelectorAll(".environment-attachments")]
+      .map((element) => element.getAttribute("aria-labelledby"));
+    expect(new Set(labels).size).toBe(2);
+    for (const label of labels) expect(document.getElementById(label!)).not.toBeNull();
   });
 
-  it("opens real recent-attachment previews by ID from Agents and closes on context change", async () => {
-    const view = render(agentsSurface());
-    const list = screen.getByRole("list", { name: "Recent attachments" });
+  it("opens real recent-attachment previews by ID from Attachments and closes on context change", async () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(target: Element): void {
+        this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+      disconnect(): void {}
+    });
+    const view = render(attachmentsSurface());
+    const list = screen.getByRole("list", { name: "Chat attachments" });
     const imageButton = within(list).getByRole("button", { name: "Preview attachment reference.png" });
     const thumbnail = imageButton.querySelector("img")!;
     expect(thumbnail).toHaveAttribute("src", "inertia://bundle/attachment-preview/attachment-1");
@@ -347,21 +331,23 @@ describe("Environment content in its workspace surfaces", () => {
     expect(nativePreviewSuspended()).toBe(false);
     await userEvent.click(imageButton);
     await screen.findByRole("dialog", { name: "reference.png" });
-    view.rerender(agentsSurface({ attachments: [] }));
+    view.rerender(attachmentsSurface({ attachments: [] }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.queryByRole("list", { name: "Recent attachments" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Chat attachments" })).toBeNull();
     expect(nativePreviewSuspended()).toBe(false);
   });
 
-  it("keeps delegated work and every recent attachment in the Agents surface", () => {
-    render(agentsSurface());
+  it("separates delegated work from the dedicated attachment browser", () => {
+    render(<>{agentsSurface()}{attachmentsSurface()}</>);
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(within(agents).getByRole("heading", { name: "Delegated work" })).toBeVisible();
     expect(within(agents).getByText("No provider-reported subagents in this conversation.")).toBeVisible();
-    expect(within(agents).getByText("reference.png")).toBeVisible();
-    expect(within(agents).getByText("requirements.pdf")).toBeVisible();
-    expect(within(agents).getByText("forecast.xlsx")).toBeVisible();
-    expect(agents.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
+    expect(within(agents).queryByRole("list", { name: "Chat attachments" })).toBeNull();
+    const attachments = screen.getByRole("region", { name: "Attachments" });
+    expect(within(attachments).getByText("reference.png")).toBeVisible();
+    expect(within(attachments).getByText("requirements.pdf")).toBeVisible();
+    expect(within(attachments).getByText("forecast.xlsx")).toBeVisible();
+    expect(attachments.querySelector(".lucide-file-spreadsheet")).not.toBeNull();
   });
 
   it("promotes runtime status in Agents only when attention is required", () => {

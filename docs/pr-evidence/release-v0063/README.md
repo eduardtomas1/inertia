@@ -32,19 +32,27 @@ Node 22.23.2 and a fresh `npm ci`:
 Each merged PR also passed its own full six-platform CI, and main was green
 after each merge before the next one landed.
 
-## Not exercised locally
+## Packaging and README views
 
-- README screenshots were not recaptured. The capture script and the Electron
-  E2E fixture currently inherit the full user environment, so on a machine with
-  real provider CLIs installed they would run provider discovery against them.
-  #474 adds a test-mode opt-in that sandboxes discovery; until it merges these
-  launches stay on CI. The 0.0.63 changes shown in the README views are either
-  transient (thinking strip, compaction while running, the running-state fix)
-  or appear only after an interaction (chat reference chips), and the v0.0.62
-  screenshots were refreshed on 2026-09-24.
-- Local packaging, package smoke and Electron fuse checks were not repeated for
-  the same reason. The tag workflow builds, smokes and certifies all six native
-  targets and validates checksums and provenance before publishing.
+On the same main commit, macOS ARM64, with the stable release configuration
+(`INERTIA_RELEASE_PLATFORM=macos-arm64`, `INERTIA_RELEASE_CHANNEL=stable`):
+
+- `test:native-architecture` passed for darwin/arm64 (Claude manifest 0.3.276).
+- `package:release:mac` built `Inertia-0.0.63-arm64.dmg` and
+  `Inertia-0.0.63-arm64-mac.zip`.
+- `verify:fuses` passed for `release/mac-arm64/Inertia.app`.
+- `test:package-smoke` passed: runtime observed, PDF extraction and image
+  retention verified, launch to ready 2,573 ms, clean exit.
+- `test:release-container-smoke` passed for both the ZIP and the DMG.
+- `codesign --verify --deep --strict` reported the app valid on disk and
+  satisfying its designated requirement. These local packages use ad-hoc
+  signing; Developer ID signing and notarization were not exercised.
+- `screenshots:readme` captured all nine README views. Compared with the
+  committed v0.0.62 images, no pixel differs by more than the anti-aliasing
+  threshold, so the README screenshots are unchanged by this release.
+
+These launches run with `NODE_ENV=test`, where the runtime starts with
+providers disabled, so no provider CLI is discovered or executed.
 
 ## Publication boundary
 

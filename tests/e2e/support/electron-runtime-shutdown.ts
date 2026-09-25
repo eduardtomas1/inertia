@@ -5,13 +5,13 @@ import type { ElectronPrivilegedCleanupReceipt } from
 
 interface ElectronTestRuntimeShutdown {
   preparePrivilegedCleanup?: () => Promise<ElectronPrivilegedCleanupReceipt>;
-  privilegedCleanupSnapshot?: () => ElectronPrivilegedCleanupReceipt & { owners?: unknown };
+  privilegedCleanupSnapshot?: () => ElectronPrivilegedCleanupReceipt & { owners?: unknown; privateConnectStep?: unknown };
   finishPreparedQuit?: () => ElectronPrivilegedCleanupReceipt;
   quit?: () => unknown;
 }
 
 export function formatElectronPrivilegedCleanupPhase(
-  receipt: (ElectronPrivilegedCleanupReceipt & { owners?: unknown }) | null,
+  receipt: (ElectronPrivilegedCleanupReceipt & { owners?: unknown; privateConnectStep?: unknown }) | null,
 ): string {
   const phase = receipt?.phase ?? "controller-unavailable";
   // Fixed scalar evidence only; never serialize arbitrary inspector values.
@@ -27,7 +27,11 @@ export function formatElectronPrivilegedCleanupPhase(
       }
       summary.push(`${owner}:${state}`);
     }
-    return `${phase};owners=${summary.join(",")}`;
+    const step = receipt?.privateConnectStep;
+    const privateConnectStep = typeof step === "string" && /^[a-z-]{1,40}$/u.test(step)
+      ? `;privateConnectStep=${step}`
+      : "";
+    return `${phase};owners=${summary.join(",")}${privateConnectStep}`;
   } catch { return `${phase};owners=unavailable`; }
 }
 

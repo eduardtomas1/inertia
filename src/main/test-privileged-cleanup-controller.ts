@@ -51,6 +51,7 @@ export interface TestPrivilegedCleanupReceipt {
   cleanupConfirmed: boolean | null;
   errorMessage: string | null;
   owners?: TestCleanupOwners;
+  privateConnectStep?: string;
 }
 
 interface TestPrivilegedCleanupDependencies {
@@ -59,6 +60,7 @@ interface TestPrivilegedCleanupDependencies {
   unconfirmedMessage?: () => string | null;
   exit: () => void;
   owners?: () => TestCleanupOwners | undefined;
+  privateConnectStep?: () => string | undefined;
 }
 
 export function createTestPrivilegedCleanupController(
@@ -79,7 +81,10 @@ export function createTestPrivilegedCleanupController(
     // Advisory observation must never replace the actual cleanup result.
     try {
       const owners = dependencies.owners?.();
-      return owners ? { ...receipt, owners } : { ...receipt };
+      const privateConnectStep = owners ? dependencies.privateConnectStep?.() : undefined;
+      return owners
+        ? { ...receipt, owners, ...(privateConnectStep ? { privateConnectStep } : {}) }
+        : { ...receipt };
     } catch { return { ...receipt }; }
   };
 

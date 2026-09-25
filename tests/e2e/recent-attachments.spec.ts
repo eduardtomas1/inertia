@@ -1,11 +1,19 @@
 // @inertia-e2e-resource primary-display
-import { expect, test } from "@playwright/test";
+import { expect, test, type TestInfo } from "@playwright/test";
 import { copyFile, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 let app: AppFixture;
+// The second check uses the exact reloaded profile and missing retained file
+// from the first; it must never start with a reconstructed fixture.
+test.describe.configure({ mode: "serial" });
+async function capture(name: string, testInfo: TestInfo): Promise<void> {
+  await app.expectNoViewportOverflow(); const path = testInfo.outputPath(`${name}.png`);
+  await app.page.screenshot({ path, animations: "disabled" });
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
 test.afterAll(async () => { await app?.close(); });
 test("recent attachments show real thumbnails, open retained previews and handle a missing file", async ({ browserName: _browserName }, testInfo) => {
   app = await createAppFixture({ name: "recent-attachments", initialState: "conversation", windowDisplay: "primary" });
@@ -26,11 +34,6 @@ test("recent attachments show real thumbnails, open retained previews and handle
   const source = await image.getAttribute("src");
   expect(source).toMatch(/^inertia:\/\/bundle\/attachment-preview\/[0-9a-f-]{36}$/u);
   expect(source).not.toContain(app.testDirectory);
-  const capture = async (name: string): Promise<void> => {
-    await app.expectNoViewportOverflow(); const path = testInfo.outputPath(`${name}.png`);
-    await page.screenshot({ path, animations: "disabled" });
-    await testInfo.attach(name, { path, contentType: "image/png" });
-  };
   for (const theme of ["dark", "light"] as const) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true }).click();
@@ -44,13 +47,13 @@ test("recent attachments show real thumbnails, open retained previews and handle
       });
       expect(Math.round(layout.height * 100) / 100).toBeGreaterThanOrEqual(54); expect(layout.iconHeight).toBe(62); expect(layout.gap).toBe(5); expect(layout.overflow).toBe(false);
     }
-    await capture(`recent-attachments-${theme}`);
+    await capture(`recent-attachments-${theme}`, testInfo);
     await recent.getByRole("button", { name: /Preview attachment .*\.png$/u }).focus();
     await page.keyboard.press("Enter");
     const preview = page.getByRole("dialog").filter({ has: page.locator(".attachment-preview-stage") });
     await expect(preview).toBeVisible();
     await expect.poll(() => preview.locator(".attachment-preview-stage img").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(512);
-    await capture(`recent-image-preview-${theme}`);
+    await capture(`recent-image-preview-${theme}`, testInfo);
     const stage = preview.getByRole("group", { name: /^Zoomable preview of / });
     const level = stage.getByLabel("Zoom level");
     await expect(level).toHaveText("100%");
@@ -68,7 +71,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
     const clip = (await preview.locator(".attachment-preview-stage").boundingBox())!;
     expect(magnified.x).toBeLessThanOrEqual(clip.x + 1);
     expect(magnified.x + magnified.width).toBeGreaterThanOrEqual(clip.x + clip.width - 1);
-    await capture(`recent-image-zoom-${theme}`);
+    await capture(`recent-image-zoom-${theme}`, testInfo);
     await stage.getByRole("button", { name: "Reset zoom" }).click();
     await expect(level).toHaveText("100%");
     await expect(stage).toHaveAttribute("data-zoomed", "false");
@@ -79,7 +82,7 @@ test("recent attachments show real thumbnails, open retained previews and handle
   const document = page.locator(".attachment-preview-dialog");
   await expect(document).toBeVisible();
   await expect(document.getByRole("button", { name: "Open in PDF app" })).toBeVisible();
-  await capture("recent-document-preview-light");
+  await capture("recent-document-preview-light", testInfo);
   await page.keyboard.press("Escape");
   await page.reload(); await expect(recent).toBeVisible();
   await expect.poll(() => recent.locator("img").evaluate((node) => (node as HTMLImageElement).naturalWidth)).toBe(512);
@@ -91,12 +94,16 @@ test("recent attachments show real thumbnails, open retained previews and handle
   await page.reload(); await expect(recent.locator('[data-thumbnail-state="unavailable"]')).toBeVisible();
   await recent.getByRole("button", { name: /Preview attachment .*\.png$/u }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Preview unavailable" })).toBeVisible();
-  await capture("recent-missing-preview-light");
+  await capture("recent-missing-preview-light", testInfo);
   expect(app.rendererErrors.length).toBeGreaterThan(0);
   expect(app.rendererErrors.every((error) => error === "HTTP 404 GET image inertia://bundle/attachment-preview/redacted"
     || error === "Failed to load resource: the server responded with a status of 404 (Not Found) (inertia://bundle/attachment-preview/redacted:1:1)")).toBe(true);
   await page.keyboard.press("Escape");
+});
 
+test("new attachments update the same gallery after reload and a missing retained file", async ({ browserName: _browserName }, testInfo) => {
+  const page = app.page;
+  // Continue the same mounted gallery; do not reload or recreate the profile.
   // The dedicated surface immediately includes newly sent attachments.
   // Distinct icon sizes keep the imports distinct.
   const gallerySources = [
@@ -116,6 +123,11 @@ test("recent attachments show real thumbnails, open retained previews and handle
   await expect(page.locator(".composer-attachments img")).toHaveCount(gallerySources.length);
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("More media for the gallery.");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
+  // Clearing this unchanged draft confirms durable send acceptance. Native
+  // validation/retention precedes that acknowledgement; gallery projection is
+  // checked separately after it, within the same 45-second test budget.
+  await expect(page.getByRole("textbox", { name: "Message", exact: true }))
+    .toHaveValue("", { timeout: 30_000 });
   const gallery = page.getByRole("list", { name: "Chat attachments" });
   await expect(gallery.getByRole("listitem")).toHaveCount(10);
   await app.expectNoViewportOverflow();
@@ -141,6 +153,6 @@ test("recent attachments show real thumbnails, open retained previews and handle
   expect(scroller.availableHeight - scroller.clientHeight).toBeLessThanOrEqual(20);
   expect(scroller.scrollTop > 0)
     .toBe(scroller.scrollHeight > scroller.clientHeight);
-  await capture("recent-attachments-gallery-light");
+  await capture("recent-attachments-gallery-light", testInfo);
   await expect(page.getByRole("list", { name: "Chat attachments" })).toBeVisible();
 });

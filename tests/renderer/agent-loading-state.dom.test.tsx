@@ -3,11 +3,12 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { ActivityGroup } from "../../src/renderer/src/components/response-timeline/activity";
 import {
-  THINKING_LINE_FRAGMENT_INTERVAL_MS,
-  THINKING_LINE_INTERVAL_MS,
-  ActivityGroup,
-} from "../../src/renderer/src/components/response-timeline/activity";
+  THINKING_LINE_MAX_DWELL_MS,
+  THINKING_LINE_MIN_DWELL_MS,
+  thinkingLineDwellMs,
+} from "../../src/renderer/src/utils/reasoningSummary";
 import type {
   AgentActivity,
   AgentReasoning,
@@ -313,11 +314,12 @@ describe("agent loading and trace DOM", () => {
       .toHaveTextContent(/^Thinking·\s*\d+\.\ds\s*Live provider summary/u);
   });
 
-  it("streams the latest reasoning sentence in a throttled brain strip, then folds to its duration", () => {
+  it("streams the newest readable reasoning sentence in a paced brain strip, then folds to its duration", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
     try {
       const first = "**Tracing ownership**\nReading the pane reducer.";
+      const firstDwell = thinkingLineDwellMs("Reading the pane reducer.");
       const { container, onStop, rerender } = renderState({
         streamingReasoning: first,
         streamingChannel: "reasoning",
@@ -350,7 +352,7 @@ describe("agent loading and trace DOM", () => {
       }, onStop)} />);
       expect(entering()).toHaveTextContent("Reading the pane reducer.");
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS - 1);
+        vi.advanceTimersByTime(firstDwell - 1);
       });
       expect(entering()).toHaveTextContent("Reading the pane reducer.");
       act(() => {
@@ -361,7 +363,7 @@ describe("agent loading and trace DOM", () => {
         .toHaveTextContent("Reading the pane reducer.");
 
       act(() => {
-        vi.advanceTimersByTime(12_000 - THINKING_LINE_INTERVAL_MS);
+        vi.advanceTimersByTime(12_000 - firstDwell);
       });
       rerender(<ResponseTimeline {...stateProps({
         streamingReasoning: `${first} Checking the drop plans.`,
@@ -373,6 +375,7 @@ describe("agent loading and trace DOM", () => {
       expect(folded).toBe(summary);
       expect(folded).toHaveTextContent(/^Thought for 12s/u);
       expect(folded?.querySelector(".turn-thinking-elapsed")).toBeNull();
+      expect(folded?.querySelector(".turn-thinking-line")).toBeNull();
       const styles = readFileSync("src/renderer/src/styles.css", "utf8");
       expect(styles).toMatch(
         /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u,
@@ -383,6 +386,15 @@ describe("agent loading and trace DOM", () => {
       expect(styles).toMatch(
         /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,
       );
+      expect(styles).toMatch(
+        /\.turn-thinking-line \{[^}]*min-height: 3em;[^}]*align-items: center;/u,
+      );
+      expect(styles).toMatch(
+        /\.turn-thinking-line > span \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/u,
+      );
+      expect(styles).toMatch(
+        /\.turn-thinking\[data-thinking-state="live"\]\[data-thinking-hold\] \.turn-thinking-pulse \{\s*animation-play-state: paused;/u,
+      );
       expect(screen.queryByText("Tracing ownership")).not.toBeInTheDocument();
       fireEvent.click(summary);
       expect(screen.getByText("Tracing ownership")).toBeInTheDocument();
@@ -391,7 +403,7 @@ describe("agent loading and trace DOM", () => {
     }
   });
 
-  it("holds a mid-sentence fragment until it grows, and never longer than its own dwell", () => {
+  it("holds a mid-sentence fragment back until it finishes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
     try {
@@ -413,9 +425,10 @@ describe("agent loading and trace DOM", () => {
         streamingChannel: "reasoning",
       }, onStop)} />);
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS);
+        vi.advanceTimersByTime(THINKING_LINE_MAX_DWELL_MS * 4);
       });
       expect(entering()).toHaveTextContent("Reading the pane reducer.");
+      expect(summary.querySelector(".turn-thinking-line > .is-leaving")).toBeNull();
 
       rerender(<ResponseTimeline {...stateProps({
         streamingReasoning: `${first} Checking the drop plans.`,
@@ -430,11 +443,11 @@ describe("agent loading and trace DOM", () => {
     }
   });
 
-  it("shows a fragment that never grows once its own dwell elapses", () => {
+  it("gives a short finished sentence its minimum reading time", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
     try {
-      const first = "**Tracing ownership**\nReading the pane reducer.";
+      const first = "**Tracing ownership**\nRun tests.";
       const { container, onStop, rerender } = renderState({
         streamingReasoning: first,
         streamingChannel: "reasoning",
@@ -445,51 +458,251 @@ describe("agent loading and trace DOM", () => {
       if (!summary) throw new Error("Expected a live thinking strip.");
       const entering = (): Element | null =>
         summary.querySelector(".turn-thinking-line > .is-entering");
+      expect(entering()).toHaveTextContent("Run tests.");
 
       rerender(<ResponseTimeline {...stateProps({
-        streamingReasoning: `${first} Checking`,
+        streamingReasoning: `${first} Read the failures.`,
         streamingChannel: "reasoning",
       }, onStop)} />);
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_FRAGMENT_INTERVAL_MS - 1);
+        vi.advanceTimersByTime(THINKING_LINE_MIN_DWELL_MS - 1);
       });
-      expect(entering()).toHaveTextContent("Reading the pane reducer.");
+      expect(entering()).toHaveTextContent("Run tests.");
       act(() => {
         vi.advanceTimersByTime(1);
       });
-      expect(entering()).toHaveTextContent("Checking");
+      expect(entering()).toHaveTextContent("Read the failures.");
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("keeps a complete short sentence on the ordinary dwell", () => {
+  it("holds the last sentence through a pause, then folds once it has been readable", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
     try {
-      const first = "**Tracing ownership**\nReading the pane reducer.";
+      const first = "Reading the pane reducer.";
+      const second = `${first} Checking the drop plans.`;
       const { container, onStop, rerender } = renderState({
         streamingReasoning: first,
         streamingChannel: "reasoning",
       });
-      const summary = container.querySelector<HTMLElement>(
-        '[data-thinking-state="live"] > summary',
-      );
-      if (!summary) throw new Error("Expected a live thinking strip.");
+      const details = container.querySelector<HTMLElement>("details.turn-thinking");
+      if (!details) throw new Error("Expected a thinking disclosure.");
       const entering = (): Element | null =>
-        summary.querySelector(".turn-thinking-line > .is-entering");
+        details.querySelector(".turn-thinking-line > .is-entering");
+      const elapsed = (): string =>
+        details.querySelector(".turn-thinking-elapsed")?.textContent ?? "";
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: first,
+        streamingChannel: null,
+      }, onStop)} />);
+      expect(details).toHaveAttribute("data-thinking-state", "live");
+      expect(details).toHaveAttribute("data-thinking-hold", "");
+      expect(details).toHaveAttribute("data-agent-trace", "reasoning");
+      expect(details.querySelector(".turn-thinking-label")).toHaveTextContent("Thinking");
+      expect(entering()).toHaveTextContent(first);
+      const paused = elapsed();
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(elapsed()).toBe(paused);
 
       rerender(<ResponseTimeline {...stateProps({
-        streamingReasoning: `${first} Run tests.`,
+        streamingReasoning: second,
         streamingChannel: "reasoning",
       }, onStop)} />);
+      expect(details).not.toHaveAttribute("data-thinking-hold");
+      expect(details).toHaveAttribute("data-agent-trace", "thinking");
+      expect(entering()).toHaveTextContent(first);
       act(() => {
-        vi.advanceTimersByTime(THINKING_LINE_INTERVAL_MS);
+        vi.advanceTimersByTime(thinkingLineDwellMs(first) - 1_500);
       });
-      expect(entering()).toHaveTextContent("Run tests.");
+      expect(entering()).toHaveTextContent("Checking the drop plans.");
+
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: second,
+        streamingChannel: null,
+      }, onStop)} />);
+      expect(details).toHaveAttribute("data-thinking-hold", "");
+      act(() => {
+        vi.advanceTimersByTime(thinkingLineDwellMs("Checking the drop plans.") - 1);
+      });
+      expect(details).toHaveAttribute("data-thinking-state", "live");
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(details).toHaveAttribute("data-thinking-state", "folded");
+      expect(details).not.toHaveAttribute("data-thinking-hold");
+      expect(details.querySelector("summary")).toHaveTextContent(
+        /^Thought for \d+sreasoning summary/u,
+      );
+      expect(details.querySelector(".turn-thinking-line")).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(20_000);
+      });
+      rerender(<ResponseTimeline {...stateProps({
+        streamingReasoning: `${second}\n\nThe tests pass`,
+        streamingChannel: "reasoning",
+      }, onStop)} />);
+      expect(details).toHaveAttribute("data-thinking-state", "live");
+      expect(entering()).toHaveTextContent("The tests pass");
+      expect(details.querySelector(".turn-thinking-line > .is-leaving")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("marks automatic compaction where it happens with the thinking sweep, then settles it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-12T12:00:10.000Z"));
+    try {
+      const readFile = {
+        ...activity("Read file"),
+        id: "read-before-compaction",
+        status: "completed" as const,
+        createdAt: "2026-08-12T12:00:05.000Z",
+      };
+      const compacting = {
+        ...activity("Claude is compacting context", "status"),
+        id: "claude-compacting",
+        createdAt: "2026-08-12T12:00:06.000Z",
+      };
+      const tests = {
+        ...activity("npm test", "command"),
+        id: "command-after-compaction",
+        createdAt: "2026-08-12T12:00:09.000Z",
+      };
+      const { container, onStop, rerender } = renderState({
+        activities: [readFile, compacting, tests],
+      });
+      const stream = container.querySelector(".turn-execution-stream");
+      const live = screen.getByRole("separator", { name: "Compacting context" });
+      expect(stream).toContainElement(live);
+      expect(live).toHaveAttribute("data-compaction-state", "live");
+      expect(live.querySelector(".context-compaction-marker"))
+        .toHaveTextContent("Compacting context·4.0s");
+      expect(live.querySelector(".context-compaction-marker")).toHaveAttribute("aria-hidden", "true");
+      expect(live.closest("[role=status], [aria-live]")).toBeNull();
+      const rows = [...stream!.querySelectorAll('[role="listitem"]')];
+      expect(rows.map((row) => row.querySelector("[role=separator]") ? "compaction" : row.textContent))
+        .toEqual([expect.stringContaining("Read file"), "compaction", expect.stringContaining("npm test")]);
+
+      rerender(<ResponseTimeline {...stateProps({
+        activities: [
+          readFile,
+          { ...compacting, title: "Claude compacted context", status: "completed" },
+          {
+            ...compacting,
+            id: "claude-compact-boundary",
+            title: "Claude compacted context",
+            status: "completed",
+            detail: "Trigger: auto\nBefore: 173000 tokens\nAfter: 5690 tokens\nDuration: 1200 ms",
+            createdAt: "2026-08-12T12:00:07.000Z",
+          },
+          tests,
+        ],
+      }, onStop)} />);
+      const settled = screen.getByRole("separator", {
+        name: "Compacted context 173K → 5.69K tokens",
+      });
+      expect(settled).toHaveAttribute("data-compaction-state", "settled");
+      expect(settled.querySelector(".context-compaction-marker"))
+        .toHaveTextContent("Compacted context·173K → 5.69K tokens");
+      expect(screen.getAllByRole("separator")).toHaveLength(1);
+
+      const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+      const sweep = '.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,';
+      expect(styles).toMatch(/\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u);
+      expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+      expect(styles).toMatch(/@media \(forced-colors: active\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+      expect(styles.split(sweep)).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a settled turn's compaction visible outside its folded work", () => {
+    const compaction = {
+      ...activity("Context compaction", "status"),
+      id: "codex-compaction",
+      status: "completed" as const,
+      createdAt: "2026-08-12T12:00:06.000Z",
+    };
+    const { container } = renderState({
+      status: "failed",
+      activities: [
+        {
+          ...activity("Read file"),
+          id: "read-before-compaction",
+          status: "completed",
+          createdAt: "2026-08-12T12:00:05.000Z",
+        },
+        compaction,
+      ],
+    });
+    const marker = screen.getByRole("separator", { name: "Compacted context" });
+    expect(marker.parentElement).toHaveAttribute("data-turn-layer", "agent-execution");
+    expect(container.querySelector(".turn-work-log.is-settled details"))
+      .not.toHaveAttribute("open");
+
+    fireEvent.click(container.querySelector(".turn-work-log.is-settled details > summary")!);
+    expect(container.querySelector(".turn-work-log.is-settled details"))
+      .toHaveAttribute("open");
+    expect(screen.getAllByRole("separator", { name: "Compacted context" })).toHaveLength(1);
+  });
+
+  it("shows a manual compaction in the conversation until its receipt takes its place", () => {
+    const receipt = (id: string, createdAt: string): ChatMessage => ({
+      id,
+      conversationId,
+      turnId: null,
+      role: "system",
+      content: "/compact keep the API decisions",
+      attachments: [],
+      createdAt,
+      compaction: {
+        providerId: "claude",
+        beforeTokens: 173_000,
+        afterTokens: 5_690,
+        instructionForwarded: true,
+      },
+    });
+    const onStop = vi.fn<() => void>();
+    const settled = stateProps({ status: "completed" }, onStop);
+    const older = receipt("older-receipt", "2026-08-12T12:00:30.000Z");
+    const { container, rerender } = render(<ResponseTimeline
+      {...settled}
+      messages={[...settled.messages, older]}
+      compactingSince="2026-08-12T12:01:00.000Z"
+    />);
+    const pending = container.querySelector("[data-compaction-pending]");
+    expect(pending).not.toBeNull();
+    expect(pending?.querySelector("[role=separator]"))
+      .toHaveAttribute("data-compaction-state", "live");
+    expect(within(pending as HTMLElement).getByRole("separator", { name: "Compacting context" }))
+      .toBeInTheDocument();
+    expect(
+      container.querySelector('[data-turn-id="turn-agent-loading"]')!
+        .compareDocumentPosition(pending!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    rerender(<ResponseTimeline
+      {...settled}
+      messages={[...settled.messages, older, receipt("new-receipt", "2026-08-12T12:01:04.000Z")]}
+      compactingSince="2026-08-12T12:01:00.000Z"
+    />);
+    expect(container.querySelector("[data-compaction-pending]")).toBeNull();
+    expect(screen.queryByRole("separator", { name: "Compacting context" })).toBeNull();
+    expect(screen.getAllByRole("separator", {
+      name: "Compacted context 173K → 5.69K tokens",
+    })).toHaveLength(2);
+    expect(screen.getAllByText("/compact keep the API decisions")).toHaveLength(2);
   });
 
   it("presents retained reconnect text as historical until text owns the channel", () => {

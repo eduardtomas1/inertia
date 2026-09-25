@@ -70,6 +70,14 @@ export function isTranscriptActivity(activity: AgentActivity): boolean {
     || activityNeedsAttention(activity);
 }
 
+const COMPACTION_LIFECYCLE_TITLE = /^(?:.+ is compacting (?:session )?context|.+ compacted (?:the )?(?:session )?context|Context compacted|Context compaction)$/u;
+
+export function isCompactionActivity(activity: AgentActivity): boolean {
+  return activity.kind === "status"
+    && COMPACTION_LIFECYCLE_TITLE.test(activity.title)
+    && !activityNeedsAttention(activity);
+}
+
 export type TurnExecutionStreamEntry =
   | {
       kind: "commentary";
@@ -90,11 +98,18 @@ export type TurnExecutionStreamEntry =
       id: string;
       createdAt: string;
       activities: AgentActivity[];
+    }
+  | {
+      kind: "compaction";
+      id: string;
+      createdAt: string;
+      activities: AgentActivity[];
     };
 
 interface BuildTurnExecutionStreamOptions {
   liveContent?: string;
   includeImportantActivities?: boolean;
+  includeCompactions?: boolean;
 }
 
 /**
@@ -127,11 +142,12 @@ export function buildTurnExecutionStream(
         order: number;
       }
     | {
-        kind: "activity";
+        kind: "activity" | "compaction";
         id: string;
         createdAt: string;
         activity: AgentActivity;
         order: number;
+        episode: number;
       }
   > = [];
 
@@ -155,15 +171,24 @@ export function buildTurnExecutionStream(
       order: 1,
     });
   }
+  let episode = 0;
+  let previousCompaction: AgentActivity | null = null;
   for (const activity of turn.activities) {
-    if (!isTranscriptActivity(activity)) continue;
+    const compaction = isCompactionActivity(activity);
+    if (compaction && (
+      !previousCompaction
+      || (previousCompaction.status !== "running" && activity.status === "running")
+    )) episode += 1;
+    previousCompaction = compaction ? activity : null;
+    if (compaction ? !options.includeCompactions : !isTranscriptActivity(activity)) continue;
     if (!includeImportant && activityNeedsAttention(activity)) continue;
     items.push({
-      kind: "activity",
+      kind: compaction ? "compaction" : "activity",
       id: activity.id,
       createdAt: activity.createdAt,
       activity,
       order: 2,
+      episode: compaction ? episode : 0,
     });
   }
   if (options.liveContent) {
@@ -186,19 +211,22 @@ export function buildTurnExecutionStream(
     || left.id.localeCompare(right.id, "en"));
 
   const stream: TurnExecutionStreamEntry[] = [];
+  let streamEpisode = 0;
   for (const item of items) {
     if (item.kind === "commentary" || item.kind === "follow-up") {
       stream.push(item);
       continue;
     }
+    const kind = item.kind === "compaction" ? "compaction" : "activity-group";
     const previous = stream.at(-1);
-    if (previous?.kind === "activity-group") {
+    if (previous?.kind === kind && (kind !== "compaction" || item.episode === streamEpisode)) {
       previous.activities.push(item.activity);
       continue;
     }
+    streamEpisode = item.episode;
     stream.push({
-      kind: "activity-group",
-      id: `activity-group:${item.id}`,
+      kind,
+      id: `${kind}:${item.id}`,
       createdAt: item.createdAt,
       activities: [item.activity],
     });

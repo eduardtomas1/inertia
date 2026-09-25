@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
@@ -39,6 +39,7 @@ import {
   SettledWorkDetails,
   WorkLog,
 } from "./activity";
+import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import {
   ChangedFilesSummary,
   shouldShowChangedFilesSummary,
@@ -189,6 +190,13 @@ export function AgentExecutionLayer({
   const runState = agentRunStateForTurn(turn.agentTurn);
   const stopping = runState === "cancelling";
   const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const settledCompactions = useMemo(
+    () => turn.isActive
+      ? []
+      : buildTurnExecutionStream(turn, { includeCompactions: true })
+        .flatMap((entry) => entry.kind === "compaction" ? [entry] : []),
+    [turn],
+  );
   const activePresentation = activeAgentPresentation({
     turn,
     providerLabel,
@@ -284,6 +292,9 @@ export function AgentExecutionLayer({
           />
         </div>
       ) : null}
+      {settledCompactions.map((entry) => (
+        <ContextCompactionActivityMarker key={entry.id} activities={entry.activities} />
+      ))}
       <SubagentDisclosure
         key={`${props.conversationId}:${turn.id}`}
         conversationId={props.conversationId}

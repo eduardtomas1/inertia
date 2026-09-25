@@ -23,6 +23,12 @@ The useful changes in each Inertia release, in plain language.
   and end, and small references leave their unused room to larger ones.
 - Chat references shrink to fit beside large attachments instead of failing
   the send, and each sent message keeps an exact record of what was shared.
+- Keep the **Thinking** strip readable with Claude. It no longer flickers,
+  shows whole sentences long enough to read, and holds the current thought
+  through short tool calls. The full reasoning stays in its summary.
+- Mark **context compaction** in the conversation where it happens, for both
+  automatic compaction and `/compact`: it animates like Thinking while it
+  runs, then stays as a centered "Compacted context" divider.
 
 ## 0.0.62 — 2026-09-24
 

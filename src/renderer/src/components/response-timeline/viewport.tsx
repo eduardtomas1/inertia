@@ -38,7 +38,8 @@ import {
   type BuildResponseTimelineInput,
   type ResponseTimelineItem,
 } from "../../utils/responseTimeline";
-import { ContextCompactionRow } from "./ContextCompactionRow";
+import { LiveElapsed } from "./activity";
+import { ContextCompactionRow, PendingContextCompaction } from "./ContextCompactionRow";
 import { responseTimelineArticleLabel } from "./row-label";
 export { responseTimelineArticleLabel } from "./row-label";
 import { CompatibilityTimeline } from "./compatibility";
@@ -1225,6 +1226,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           </div>
         )
         : timeline.map((item) => <div className="response-static-item" key={item.id}>{renderItem(item)}</div>)}
+      {props.compactingSince && <PendingContextCompaction since={props.compactingSince} items={timeline} elapsed={<LiveElapsed startedAt={props.compactingSince} />} />}
     </>
   );
 }

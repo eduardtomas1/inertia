@@ -12292,17 +12292,21 @@ button.sent-attachment-open:focus-visible {
   display: grid;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 3em;
+  align-items: center;
   color: var(--text-soft);
   font-size: calc(var(--ui-font-secondary) + 0.5px);
   line-height: 1.5;
 }
 
 .turn-thinking-line > span {
+  display: -webkit-box;
   grid-area: 1 / 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .turn-thinking-line > .is-entering {
@@ -12321,6 +12325,8 @@ button.sent-attachment-open:focus-visible {
   color: var(--text-soft);
 }
 
+.composer-compact-notice.is-working,
+.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
 .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
   color: var(--text);
   -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);
@@ -12328,6 +12334,10 @@ button.sent-attachment-open:focus-visible {
   -webkit-mask-size: 300% 100%;
   mask-size: 300% 100%;
   animation: turn-thinking-sweep 3400ms var(--motion-ease-inout) infinite;
+}
+
+.turn-thinking[data-thinking-state="live"][data-thinking-hold] .turn-thinking-pulse {
+  animation-play-state: paused;
 }
 
 .turn-work-log > details.turn-thinking > summary small.turn-thinking-elapsed {
@@ -12388,6 +12398,8 @@ button.sent-attachment-open:focus-visible {
     visibility: hidden;
   }
 
+  .composer-compact-notice.is-working,
+  .context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
   .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
     -webkit-mask-image: none;
     mask-image: none;
@@ -12396,6 +12408,8 @@ button.sent-attachment-open:focus-visible {
 }
 
 @media (forced-colors: active) {
+  .composer-compact-notice.is-working,
+  .context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,
   .turn-thinking[data-thinking-state="live"] .turn-thinking-pulse {
     -webkit-mask-image: none;
     mask-image: none;
@@ -12403,6 +12417,8 @@ button.sent-attachment-open:focus-visible {
   }
 }
 
+.app-shell[data-document-visible="false"] .composer-compact-notice,
+.app-shell[data-document-visible="false"] .context-compaction-marker,
 .app-shell[data-document-visible="false"] .turn-thinking-pulse {
   animation-play-state: paused;
 }

@@ -952,6 +952,92 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
   });
 
+  it("keeps reasoning live across thinking-progress updates until thinking finishes", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId),
+              agentTurns: [],
+              turnGitArtifacts: [],
+              messages: [],
+              activities: [],
+              subagents: [],
+              reasonings: [],
+              usage: [],
+              plans: [],
+              goals: [],
+              checkpoints: [],
+              reviewSummaries: [],
+              reviewStates: [],
+              reviewNotes: [],
+            },
+          },
+        }
+      : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+    const owner = {
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+    };
+    const streaming = () => hook.result.current.streaming.getSnapshot();
+    const progress = (status: AgentActivity["status"]): void => source.emit({
+      type: "agent.activity",
+      activity: {
+        id: "thinking-progress",
+        ...owner,
+        kind: "reasoning",
+        title: status === "running" ? "Claude is thinking" : "Claude finished thinking",
+        detail: null,
+        status,
+        createdAt: "2026-08-12T12:00:01.000Z",
+      },
+    });
+
+    progress("running");
+    expect(streaming()[2]).toBeNull();
+    for (const text of ["Reading the pane ", "reducer. Checking ", "the drop plans."]) {
+      source.emit({ type: "agent.reasoning", ...owner, text });
+      progress("running");
+      expect(streaming()[2]).toBe("reasoning");
+    }
+    expect(streaming()[1]).toBe("Reading the pane reducer. Checking the drop plans.");
+    expect(hook.result.current.activities).toEqual([
+      expect.objectContaining({ id: "thinking-progress", status: "running" }),
+    ]);
+
+    progress("completed");
+    expect(streaming()[2]).toBeNull();
+
+    source.emit({ type: "agent.text", ...owner, text: "Visible commentary." });
+    expect(streaming()[2]).toBe("text");
+    progress("running");
+    expect(streaming()).toEqual([
+      "",
+      "Reading the pane reducer. Checking the drop plans.",
+      null,
+    ]);
+  });
+
   it("keeps streaming text when fresh hydration replays the current plan", async () => {
     const source = createEventSource();
     const baselinePlan: AgentPlan = {

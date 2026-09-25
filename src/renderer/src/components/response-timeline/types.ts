@@ -52,6 +52,7 @@ export interface ResponseTimelineProps {
   showChangedFileSummaries: boolean;
   autoScrollToFinalAnswer?: boolean;
   detailLoading?: boolean;
+  compactingSince?: string | null;
   checkpointRestoreDisabled: boolean;
   turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;

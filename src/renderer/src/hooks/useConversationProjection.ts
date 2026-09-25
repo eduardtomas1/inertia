@@ -197,13 +197,14 @@ export function useConversationProjection({
     setNativePlans({});
     setTerminalProjections({});
   }, [setStreaming]);
-  const closeTextStream = useCallback((): void => {
+  const closeTextStream = useCallback((kept: StreamingAgentChannel = null): void => {
     const hydration = freshHydrationRef.current;
     if (hydration) {
       hydration.text = "";
-      hydration.channel = null;
+      if (hydration.channel !== kept) hydration.channel = null;
     }
-    setStreaming(closeTextStreamState);
+    setStreaming(([, reasoning, channel]) =>
+      ["", reasoning, channel === kept ? kept : null]);
   }, [setStreaming]);
 
   const conversationId = enabled
@@ -737,7 +738,11 @@ export function useConversationProjection({
         runId: event.activity.runId,
         turnId: event.activity.turnId,
       });
-      closeTextStream();
+      if (event.activity.kind === "reasoning" && event.activity.status === "running") {
+        closeTextStream("reasoning");
+      } else {
+        closeTextStream();
+      }
       setLiveActivities((current) => {
         const existing = current[event.activity.conversationId] ?? [];
         return {

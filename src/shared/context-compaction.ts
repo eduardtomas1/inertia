@@ -20,7 +20,9 @@ export function isContextCompaction(value: unknown): value is ContextCompaction 
     && typeof row.instructionForwarded === "boolean";
 }
 
-export function contextCompactionLabel(value: ContextCompaction): string {
+export function contextCompactionLabel(
+  value: Pick<ContextCompaction, "beforeTokens" | "afterTokens">,
+): string {
   if (value.beforeTokens === null || value.afterTokens === null) return "Compacted context";
   const format = (count: number): string => new Intl.NumberFormat("en-US", {
     notation: "compact", maximumSignificantDigits: 3,

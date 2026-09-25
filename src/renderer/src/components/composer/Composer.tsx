@@ -90,7 +90,7 @@ export const Composer = memo(function Composer({
   skillsCapability,
   skillsLoading, skillsError,
   conversationContextHandoffEnabled = true, promptContext,
-  contextSources = [], contextPackets = [],
+  contextSources = [], contextPackets = [], hasVisibleHistory = false,
   agentContextRequest = null, onConversationContextCommand,
   previewContextUrl,
   providerIdentityLabels,
@@ -135,7 +135,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -1134,9 +1134,9 @@ export const Composer = memo(function Composer({
           onMentionQuery={onMentionQuery}
           conversationId={conversation.id}
           mentionResults={mentionResults}
-          chatSuggestions={conversationContext.canReferenceChat ? contextSources : []}
+          chatSuggestions={conversationContext.chatSuggestions} thisChatTitle={conversationContext.thisChatTitle}
           onAddFileReference={addFileReference}
-          onReferenceChat={conversationContext.referenceChat}
+          onReferenceChat={conversationContext.referenceChat} onReferenceThisChat={conversationContext.referenceThisChat}
           {...skillCompletion}
           acceptSkill={insertSkill}
           dismissSkills={() => dismissMenu("context-change")}

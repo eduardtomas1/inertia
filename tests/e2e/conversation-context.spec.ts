@@ -128,6 +128,60 @@ test.beforeAll(async () => {
       sourceWorkspace = otherProject.normalizedPath;
       const otherSource = store.createConversation(otherProject.id, "External research", { activate: false });
       store.createMessage(otherSource.id, "Share this note only after confirming the workspace boundary.", "assistant");
+      const rollout = store.createConversation(snapshot.activeProjectId, "Importer rollout", { activate: false });
+      const modules = ["accounts", "invoices", "payments", "ledgers", "customers", "orders"];
+      let clock = Date.UTC(2026, 8, 20, 9, 0, 0);
+      const at = (): string => new Date(clock += 45_000).toISOString();
+      store.createMessage(rollout.id, "Plan the importer rollout: every module resumes from its last committed cursor, batches stay under 500 rows, and the nightly export is never blocked.", "user", [], null, at());
+      for (let phase = 1; phase <= 36; phase += 1) {
+        const module = modules[phase % modules.length]!;
+        if (phase > 1) store.createMessage(rollout.id, `Continue with the ${module} importer, phase ${phase}.`, "user", [], null, at());
+        for (let step = 1; step <= 3; step += 1) {
+          store.createMessage(rollout.id, `Checking ${module} batch ${step}. ${"Reading the cursor table, validating row counts and comparing checksums against the export snapshot. ".repeat(24)}`, "assistant", [], null, at());
+        }
+        store.createMessage(rollout.id, `Phase ${phase} done: the ${module} importer resumes from its last committed cursor. ${"Verified resumable batches, idempotent writes and export compatibility. ".repeat(18)}`, "assistant", [], null, at());
+      }
+      const recoveryPackets = [targetConversationId, rollout.id].map((sourceConversationId) =>
+        store.contextPackets.create({ sourceConversationId, targetConversationId, acknowledgedWorkspaceDifference: false }).id);
+      const recoveredAt = "2026-08-19T10:15:00.000Z";
+      const recovery = store.beginAgentTurn({
+        id: randomUUID(),
+        conversationId: targetConversationId,
+        runId: randomUUID(),
+        content: "Pick up the importer plan where we left it.",
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfileId: "builtin:openai",
+        model: "gpt-test",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: 0,
+        association: "authoritative",
+        requestedAt: recoveredAt,
+        conversationContextPacketIds: recoveryPackets,
+        contextRequestId: randomUUID(),
+      });
+      store.updateAgentTurnLifecycle(recovery.turn.id, {
+        status: "running",
+        startedAt: recoveredAt,
+        updatedAt: recoveredAt,
+      });
+      const resumed = store.createMessage(
+        targetConversationId,
+        "Resuming phase 37 from the ledgers cursor; the provider boundary stays explicit.",
+        "assistant",
+        [],
+        recovery.turn.id,
+        "2026-08-19T10:15:04.000Z",
+      );
+      store.updateAgentTurnLifecycle(recovery.turn.id, {
+        status: "completed",
+        completedAt: resumed.createdAt,
+        terminalAssistantMessageId: resumed.id,
+        terminalReason: "provider-completed",
+        updatedAt: resumed.createdAt,
+      });
       store.selectConversation(targetConversationId);
       store.close();
     },
@@ -315,5 +369,70 @@ test("requires native confirmation before attaching a chat from another workspac
   await expect(page.getByRole("region", { name: "Shared chat context" })).toContainText(
     "Share this note only after confirming the workspace boundary.",
   );
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("references this chat beside two other chats and keeps what was sent", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const { page } = app;
+  const capture = async (name: string): Promise<void> => {
+    const path = testInfo.outputPath(`${name}.png`);
+    await page.screenshot({ animations: "disabled", path });
+    await testInfo.attach(name, { path, contentType: "image/png" });
+  };
+  await app.resizeWindow(1280, 820);
+  const preview = page.getByRole("region", { name: "Shared chat context" });
+  const closePreview = preview.getByRole("button", { name: "Close preview" });
+  if (await closePreview.isVisible()) await closePreview.click();
+  await page.getByRole("button", { name: "Remove context from External research" }).click();
+  await expect(page.getByRole("button", { name: /From External research/u })).toHaveCount(0);
+
+  const editor = page.getByLabel("Message", { exact: true });
+  await editor.fill("Pick up the importer plan @this");
+  const thisChat = page.getByRole("option", { name: /This chat/u });
+  await expect(thisChat).toBeVisible();
+  await expect(thisChat).toContainText("Earlier messages");
+  await capture("this-chat-mention");
+  await thisChat.click();
+  const ownChip = page.getByRole("button", { name: /^This chat/u });
+  await expect(ownChip).toBeVisible();
+  await expect(editor).toHaveValue("Pick up the importer plan ");
+
+  await editor.fill("Pick up the importer plan @Importer");
+  await page.getByRole("option", { name: /Importer rollout/u }).click();
+  const importerChip = page.getByRole("button", { name: /From Importer rollout/u });
+  await expect(importerChip).toBeVisible();
+  await expect(importerChip).toContainText("omitted");
+  await expect(editor).toHaveValue("Pick up the importer plan ");
+  await editor.fill("Pick up the importer plan @Arch");
+  await expect(page.getByRole("option", { name: /Architecture decisions/u })).toHaveCount(0);
+  await editor.fill("Pick up the importer plan");
+  await capture("three-references");
+
+  await importerChip.click();
+  await expect(preview.getByText(/earlier messages omitted/u)).toBeVisible();
+  await expect(preview.getByText(/intermediate agent updates left out so more turns fit/u)).toBeVisible();
+  await expect(preview.locator("li").first()).toContainText("Plan the importer rollout");
+  await capture("importer-preview");
+  await closePreview.click();
+  await ownChip.click();
+  await expect(preview).toContainText("The provider boundary remains explicit.");
+  await capture("this-chat-preview");
+  await closePreview.click();
+
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(ownChip).toHaveCount(0);
+  await expect(importerChip).toHaveCount(0);
+  await expect(page.getByText("Pick up the importer plan", { exact: true })).toBeVisible();
+
+  const receipts = page.getByRole("article", { name: "Your request" })
+    .filter({ hasText: "Pick up the importer plan where we left it." })
+    .getByLabel("Shared chat context");
+  await expect(receipts).toContainText("Earlier messages from this chat");
+  await expect(receipts).toContainText("Context from Importer rollout");
+  await expect(receipts).toContainText(/omitted/u);
+  await receipts.scrollIntoViewIfNeeded();
+  await capture("sent-receipts");
   expect(app.rendererErrors).toEqual([]);
 });

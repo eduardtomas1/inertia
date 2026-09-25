@@ -15,10 +15,16 @@ import {
 import type {
   ChatAttachment,
   InteractionMode,
+  MaterializedConversationContext,
   TurnRequestContext,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
-import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "../../../shared/conversation-context";
+import {
+  MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
+  MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+  MAX_CONVERSATION_CONTEXT_TURN_BYTES,
+} from "../../../shared/conversation-context";
+import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
@@ -39,6 +45,8 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
 const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
+const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
+const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
 
 export const BUILD_MODE_INSTRUCTION = [
   "In Build mode, inspect enough to act safely, then implement and validate promptly.",
@@ -104,6 +112,12 @@ export interface AssembledTurnRequest {
   executionPrompt: string;
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
+  conversationContextDeliveries: ConversationContextDelivery[];
+}
+
+export interface ConversationContextMaterialization {
+  blocks: readonly MaterializedConversationContext[];
+  deliveries: readonly ConversationContextDelivery[];
 }
 
 export interface AssembleTurnRequestInput {
@@ -119,6 +133,7 @@ export interface AssembleTurnRequestInput {
   /** Privileged, bounded document text derived from verified attachment bytes. */
   documentContexts?: readonly DocumentAttachmentContext[];
   context?: TurnRequestContext;
+  conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   internalInstructions?: readonly HiddenProviderInstruction[];
   /** Privileged same-chat recovery after a verified native provider update. */
   continuationHistory?: { content: string; truncated: boolean };
@@ -382,7 +397,7 @@ function materializeContext(
   cwd: string,
   context: TurnRequestContext = {},
   documents: readonly DocumentAttachmentContext[] = [],
-): MaterializedContext[] {
+): { contexts: MaterializedContext[]; conversationContextIndex: number } {
   if (documents.length > 8) {
     throw new Error("Execution context contains too many document attachments.");
   }
@@ -400,12 +415,6 @@ function materializeContext(
   }
   if ((context.reviewNotes?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many review notes.");
-  }
-  const conversationContextPacketIds = new Set(
-    (context.conversationContexts ?? []).map(({ packetId }) => packetId),
-  );
-  if (conversationContextPacketIds.size > MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
-    throw new Error("Execution context contains too many chat context packets.");
   }
   const documentContextBytes = documents.reduce(
     (total, document) =>
@@ -428,19 +437,7 @@ function materializeContext(
   materialized.push(
     ...materializeFileReferences(cwd, context.fileReferences ?? []),
   );
-
-  for (const packet of context.conversationContexts ?? []) {
-    materialized.push({
-      kind: "attachment",
-      label: boundedLabel(packet.label, "Chat context label"),
-      content: boundedText(
-        packet.content,
-        `Chat context ${packet.packetId}`,
-        MAX_EXECUTION_CONTEXT_BLOB_BYTES,
-      ),
-      truncated: false,
-    });
-  }
+  const conversationContextIndex = materialized.length;
 
   for (const selection of context.diffSelections ?? []) {
     const path = boundedLabel(selection.path, "Diff path");
@@ -575,7 +572,25 @@ function materializeContext(
       `Execution context exceeds the ${MAX_EXECUTION_CONTEXT_REFERENCES} reference limit.`,
     );
   }
-  return materialized;
+  return { contexts: materialized, conversationContextIndex };
+}
+
+function materializeConversationContexts(
+  blocks: readonly MaterializedConversationContext[],
+): MaterializedContext[] {
+  if (new Set(blocks.map(({ packetId }) => packetId)).size > MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
+    throw new Error("Execution context contains too many chat context packets.");
+  }
+  return blocks.map((packet) => ({
+    kind: "attachment",
+    label: boundedLabel(packet.label, "Chat context label"),
+    content: boundedText(
+      packet.content,
+      `Chat context ${packet.packetId}`,
+      MAX_EXECUTION_CONTEXT_BLOB_BYTES,
+    ),
+    truncated: false,
+  }));
 }
 
 function validateImages(
@@ -620,7 +635,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     "Visible user message",
     MAX_VISIBLE_MESSAGE_BYTES,
   );
-  const contexts = materializeContext(
+  const { contexts, conversationContextIndex } = materializeContext(
     input.cwd,
     input.context,
     [...(input.documentContexts ?? []), ...(input.attachments ?? []).filter((attachment) => attachment.snapshot).map((attachment) => ({
@@ -658,13 +673,14 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     throw new Error("Internal provider instructions exceed the turn limit.");
   }
 
-  const providerContexts = contexts.map((context) => ({
+  const providerContext = (context: MaterializedContext) => ({
     kind: context.kind,
     label: context.label,
     reference: referenceFor(context.content),
     truncated: context.truncated,
     content: context.content,
-  }));
+  });
+  const providerContexts = contexts.map(providerContext);
   const buildPrompt = (selectedContexts: typeof providerContexts): string => {
     const sections = [visibleContent];
     if (selectedContexts.length > 0) {
@@ -681,11 +697,42 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     }
     return sections.join("\n\n");
   };
-  let executionPrompt = buildPrompt(providerContexts);
   // CLI transports may serialize local image references into their prompt,
   // while richer transports send them as separate content blocks. Budget the
   // references either way so validation covers the complete provider input.
   const imageReferenceBytes = imagePaths.reduce((total, path) => total + byteLength(path) + 8, 0);
+  let conversationContextDeliveries: ConversationContextDelivery[] = [];
+  if (input.conversationContexts) {
+    const reservedBytes = byteLength(buildPrompt(providerContexts)) + imageReferenceBytes
+      + (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
+      + MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN
+        * MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET
+        * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES;
+    const capacity = Math.min(
+      MAX_CONVERSATION_CONTEXT_TURN_BYTES,
+      MAX_EXECUTION_PAYLOAD_BYTES - reservedBytes,
+    );
+    if (capacity <= 0) {
+      throw new Error(
+        "The referenced chats do not fit beside the rest of this message. Remove an attachment or a chat reference.",
+      );
+    }
+    const materialized = input.conversationContexts(capacity);
+    const conversationContexts = materializeConversationContexts(materialized.blocks);
+    contexts.splice(conversationContextIndex, 0, ...conversationContexts);
+    providerContexts.splice(
+      conversationContextIndex,
+      0,
+      ...conversationContexts.map(providerContext),
+    );
+    conversationContextDeliveries = [...materialized.deliveries];
+    if (contexts.length > MAX_EXECUTION_CONTEXT_REFERENCES) {
+      throw new Error(
+        `Execution context exceeds the ${MAX_EXECUTION_CONTEXT_REFERENCES} reference limit.`,
+      );
+    }
+  }
+  let executionPrompt = buildPrompt(providerContexts);
   let assembledPayloadBytes = byteLength(executionPrompt) + imageReferenceBytes;
   let executionSegmentCount = 1 + providerContexts.length + internalInstructions.length;
   if (executionSegmentCount > MAX_EXECUTION_MESSAGE_SEGMENTS) {
@@ -746,6 +793,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     visibleContent,
     executionPrompt,
     imagePaths,
+    conversationContextDeliveries,
     persistence: {
       manifest: {
         version: 1,

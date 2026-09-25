@@ -28,6 +28,9 @@ export function backgroundHistoryWriters(database: Database.Database) {
   const turns: TurnLedgerRepository = new TurnLedgerRepository({
     database, requireConversation, requireAgentTurn,
     createMessage: (...args) => transcript.createMessage(...args),
+    conversationContextDeliveries: () => {
+      throw new Error("History fixtures do not reference other chats.");
+    },
   });
   return { transcript, turns };
 }

@@ -3,7 +3,10 @@ import type {
   AgentConversationContextRequest,
   ConversationContextPacketSummary,
 } from "@shared/contracts";
-import { MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN } from "@shared/conversation-context";
+import {
+  MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+  isOwnConversationContext,
+} from "@shared/conversation-context";
 import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
@@ -24,11 +27,14 @@ export interface ComposerConversationContextController {
   draftContextPackets: ConversationContextPacketSummary[];
   enabled: boolean;
   canReferenceChat: boolean;
+  chatSuggestions: readonly ConversationContextSourceOption[];
+  thisChatTitle: string | null;
   referencing: boolean;
   isReferencing(): boolean;
   error: string | null;
   previewPacketId: string | null;
   referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
+  referenceThisChat(): Promise<boolean>;
   togglePreview(packetId: string): void;
   dismissError(): void;
   remove(packetId: string): Promise<void>;
@@ -36,11 +42,22 @@ export interface ComposerConversationContextController {
 
 export function useComposerConversationContext(input: {
   conversationId: string;
+  conversationTitle: string;
+  contextSources: readonly ConversationContextSourceOption[];
   contextPackets: readonly ConversationContextPacketSummary[];
+  hasVisibleHistory: boolean;
   enabled: boolean;
   onCommand?: ConversationContextCommandRunner;
 }): ComposerConversationContextController {
-  const { contextPackets, conversationId, enabled, onCommand } = input;
+  const {
+    contextPackets,
+    contextSources,
+    conversationId,
+    conversationTitle,
+    enabled,
+    hasVisibleHistory,
+    onCommand,
+  } = input;
   const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
   const pendingRequests = useRef(new Map<string, string | null>());
   const [, refresh] = useReducer((revision: number) => revision + 1, 0);
@@ -73,6 +90,15 @@ export function useComposerConversationContext(input: {
     () => draftContextPackets.map(({ id }) => id),
     [draftContextPackets],
   );
+  const canReferenceChat = enabled
+    && Boolean(onCommand)
+    && !referencing
+    && draftContextPackets.length < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN;
+  const chatSuggestions = useMemo(() => {
+    if (!canReferenceChat) return [];
+    const referenced = new Set(draftContextPackets.map(({ sourceConversationId }) => sourceConversationId));
+    return contextSources.filter(({ conversationId: source }) => !referenced.has(source));
+  }, [canReferenceChat, contextSources, draftContextPackets]);
 
   const remove = async (packetId: string): Promise<void> => {
     if (!enabled || !onCommand) return;
@@ -83,17 +109,21 @@ export function useComposerConversationContext(input: {
     });
   };
 
-  const referenceChat = async (
-    source: ConversationContextSourceOption,
-  ): Promise<boolean> => {
+  const canAddReference = (): boolean => {
     if (!enabled || !onCommand || isReferencing()) return false;
     if (draftContextPackets.length >= MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN) {
       setError({ conversationId, message: "Send or remove a referenced chat before adding another." });
       return false;
     }
-    const acknowledgedWorkspaceDifference = source.workspaceRelation === "different-workspace"
-      && window.confirm(`Share context from “${source.conversationTitle}” in ${source.projectName} (${source.workspaceLabel}) with this chat (${source.targetWorkspaceLabel})?\n\nThese are different workspaces. The agent will receive a size-limited copy of the source chat.`);
-    if (source.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) return false;
+    return true;
+  };
+
+  const createReference = async (
+    sourceConversationId: string,
+    acknowledgedWorkspaceDifference: boolean,
+    label: string,
+  ): Promise<boolean> => {
+    if (!onCommand) return false;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
@@ -101,7 +131,7 @@ export function useComposerConversationContext(input: {
       const event = await onCommand("conversation.context.create", {
         type: "conversation.context.create",
         payload: {
-          sourceConversationId: source.conversationId,
+          sourceConversationId,
           targetConversationId: conversationId,
           acknowledgedWorkspaceDifference,
         },
@@ -109,32 +139,50 @@ export function useComposerConversationContext(input: {
       if (event.type !== "request.result"
         || event.result.kind !== "conversation.context.packet"
         || event.result.packet.targetConversationId !== conversationId
-        || event.result.packet.sourceConversationId !== source.conversationId
+        || event.result.packet.sourceConversationId !== sourceConversationId
         || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
       pendingRequests.current.set(conversationId, event.result.packet.id);
       return true;
     } catch {
       pendingRequests.current.delete(conversationId);
-      setError({ conversationId, message: `${source.conversationTitle} could not be referenced.` });
+      setError({ conversationId, message: `${label} could not be referenced.` });
       return false;
     } finally {
       refresh();
     }
   };
 
+  const referenceChat = async (
+    source: ConversationContextSourceOption,
+  ): Promise<boolean> => {
+    if (!canAddReference()) return false;
+    const acknowledgedWorkspaceDifference = source.workspaceRelation === "different-workspace"
+      && window.confirm(`Share context from “${source.conversationTitle}” in ${source.projectName} (${source.workspaceLabel}) with this chat (${source.targetWorkspaceLabel})?\n\nThese are different workspaces. The agent will receive a size-limited copy of the source chat.`);
+    if (source.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) return false;
+    return createReference(source.conversationId, acknowledgedWorkspaceDifference, source.conversationTitle);
+  };
+
+  const referenceThisChat = async (): Promise<boolean> => {
+    if (!canAddReference()) return false;
+    return createReference(conversationId, false, "This chat");
+  };
+
   return {
     contextPacketIds,
     draftContextPackets,
     enabled,
-    canReferenceChat: enabled
-      && Boolean(onCommand)
-      && !referencing
-      && draftContextPackets.length < MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+    canReferenceChat,
+    chatSuggestions,
+    thisChatTitle: canReferenceChat && hasVisibleHistory
+      && !draftContextPackets.some(isOwnConversationContext)
+      ? conversationTitle
+      : null,
     referencing,
     isReferencing,
     error: error?.conversationId === conversationId ? error.message : null,
     previewPacketId,
     referenceChat,
+    referenceThisChat,
     togglePreview: (packetId) => {
       if (!enabled) return;
       setPreviewPacketId((current) => current === packetId ? null : packetId);

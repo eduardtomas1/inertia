@@ -18,10 +18,7 @@ import type {
   AgentTurnStatus,
 } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
-import type {
-  AgentConversationContextRequest,
-  MaterializedConversationContext,
-} from "../conversation-context";
+import type { AgentConversationContextRequest } from "../conversation-context";
 
 export {
   AGENT_TURN_STATUSES,
@@ -89,8 +86,6 @@ export interface TurnRequestContext {
   reviewNotes?: TurnReviewNoteContext[];
   /** Opaque immutable packets explicitly selected by the user for this turn. */
   conversationContextPacketIds?: string[];
-  /** Privileged runtime materialization. Renderer command schemas reject it. */
-  conversationContexts?: MaterializedConversationContext[];
 }
 
 export interface ChatAttachment {

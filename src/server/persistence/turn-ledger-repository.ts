@@ -54,11 +54,17 @@ import {
   compactReasoningContentForTurn,
 } from "./stream-text-storage";
 import { claimConversationContextPackets } from "./conversation-context-packet-repository";
+import type { ConversationContextDelivery } from "./conversation-context-transport";
 
 type TurnLedgerPersistenceContext = Pick<
   PersistenceContext,
   "createMessage" | "database" | "requireAgentTurn" | "requireConversation"
->;
+> & {
+  conversationContextDeliveries(
+    conversationId: string,
+    packetIds: readonly string[],
+  ): ConversationContextDelivery[];
+};
 
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
@@ -277,6 +283,11 @@ export class TurnLedgerRepository {
         }
         claimConversationContextPackets(this.context.database, {
           packetIds: input.conversationContextPacketIds,
+          deliveries: input.conversationContextDeliveries
+            ?? this.context.conversationContextDeliveries(
+              input.conversationId,
+              input.conversationContextPacketIds,
+            ),
           targetConversationId: input.conversationId,
           messageId: message.id,
           requestId: input.contextRequestId,

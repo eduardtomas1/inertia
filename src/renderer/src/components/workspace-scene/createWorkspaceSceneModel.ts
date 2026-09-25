@@ -23,7 +23,7 @@ import { providerTerminalResumeAvailability } from "@shared/provider-terminal-re
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
-import type { ConversationContextSourceOption } from "../conversation-context/types";
+import type { ConversationContextCommandRunner, ConversationContextSourceOption } from "../conversation-context/types";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 import type { useActivityActions } from "../../hooks/useActivityActions";
 import type { useAppUpdate } from "../../hooks/useAppUpdate";
@@ -232,6 +232,7 @@ export interface WorkspaceSceneActions {
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
+  runConversationContextCommand?: ConversationContextCommandRunner;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -363,14 +364,16 @@ export function createWorkspaceSceneModel({
       const sameWorkspace = workspaceDirectoryIdentity(
         candidate.worktreePath ?? candidateProject.normalizedPath,
       ) === activeDirectory;
-      if (persistedConversation && candidate.id !== persistedConversation.id) {
+      if (conversation && candidate.id !== conversation.id) {
         contextSources.push({
           conversationId: candidate.id,
           conversationTitle: candidate.title,
           projectName: candidateProject.name,
           workspaceLabel: candidate.worktreePath ?? candidateProject.normalizedPath,
-          targetWorkspaceLabel: conversation?.worktreePath ?? project?.normalizedPath ?? activeDirectory,
-          workspaceRelation: sameWorkspace
+          targetWorkspaceLabel: workspaceToolsUnavailable
+            ? `New isolated worktree for ${project?.name ?? "this project"}`
+            : conversation.worktreePath ?? project?.normalizedPath ?? activeDirectory,
+          workspaceRelation: sameWorkspace && !workspaceToolsUnavailable
             ? "same-workspace"
             : "different-workspace",
           archived: candidate.archivedAt !== null,
@@ -684,7 +687,7 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources,
       contextPackets: chatProjection.contextPackets,
-      onConversationContextCommand: actions.run,
+      onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")

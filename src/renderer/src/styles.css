@@ -8841,6 +8841,10 @@ button.header-breadcrumb-project:hover {
 .composer-context-request button, .composer-context-preview button { padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-strong); color: var(--text); font-size: 8.5px; }
 .composer-context-preview button { align-self: flex-end; }
 .composer-context-request button:first-child { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+.composer-context-confirmation footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.composer-context-confirmation button { margin: 0; }
+.composer-context-confirmation button:first-child { border-color: var(--border); background: var(--surface-strong); color: var(--text); }
+.composer-context-confirmation button:last-child { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
 
 .provider-auth-dialog {
   display: grid;

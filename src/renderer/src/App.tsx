@@ -859,6 +859,7 @@ export default function App(): React.JSX.Element {
         }
       },
       run,
+      runConversationContextCommand: draftConversation.runConversationContextCommand,
   });
   const workspaceScene = useMemo(() => createWorkspaceSceneModel({
     view: view === "settings" ? "settings" : "workspace",

@@ -222,7 +222,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        surfaceBackground: getComputedStyle(element, "::before").backgroundImage,
+        surfaceBackground: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element

@@ -281,11 +281,13 @@ test("references a whole chat from the composer and preserves its provenance", a
   expect(sourceConversationId).not.toBe("");
 });
 
-test("requires native confirmation before attaching a chat from another workspace", async () => {
+test("confirms cross-workspace sharing inline and restores keyboard input", async () => {
   const { page } = app;
   await app.resizeWindow(1280, 820);
   const closePreview = page.getByRole("button", { name: "Close preview" });
   if (await closePreview.isVisible()) await closePreview.click();
+  await page.getByRole("button", { name: "Start a new chat", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What should we build today?" })).toBeVisible();
   // Its role changes to combobox while the retained mention menu is open.
   const editor = page.getByLabel("Message", { exact: true });
   const reference = async (accept: boolean): Promise<void> => {
@@ -294,15 +296,23 @@ test("requires native confirmation before attaching a chat from another workspac
     await expect(option).toBeVisible();
     await expect(option).toContainText("Another workspace");
     await expect(option).toContainText("different workspace");
-    await Promise.all([
-      page.waitForEvent("dialog").then(async (dialog) => {
-        expect(dialog.type()).toBe("confirm");
-        expect(dialog.message()).toContain(sourceWorkspace);
-        expect(dialog.message()).toContain(targetWorkspace);
-        if (accept) await dialog.accept(); else await dialog.dismiss();
-      }),
-      option.click(),
-    ]);
+    await option.click();
+    const confirmation = page.getByRole("alertdialog", { name: "Share context from another workspace?" });
+    await expect(confirmation).toContainText(sourceWorkspace);
+    await expect(confirmation).toContainText(targetWorkspace);
+    await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+    const cancelBounds = (await confirmation.getByRole("button", { name: "Cancel", exact: true }).boundingBox())!;
+    const shareBounds = (await confirmation.getByRole("button", { name: "Share chat", exact: true }).boundingBox())!;
+    expect(cancelBounds.y).toBeCloseTo(shareBounds.y, 0);
+    expect(cancelBounds.height).toBeCloseTo(shareBounds.height, 0);
+    if (accept) {
+      const screenshot = await page.screenshot({ animations: "disabled",
+        path: test.info().outputPath("chat-reference-confirmation.png") });
+      await test.info().attach("Inline workspace confirmation", { body: screenshot, contentType: "image/png" });
+    }
+    await confirmation.getByRole("button", { name: accept ? "Share chat" : "Cancel", exact: true }).click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(editor).toBeFocused();
   };
   await reference(false);
   await expect(editor).toHaveValue("Explain @External");
@@ -311,6 +321,8 @@ test("requires native confirmation before attaching a chat from another workspac
   await reference(true);
   await expect(chip).toBeVisible();
   await expect(editor).toHaveValue("Explain ");
+  await page.keyboard.type("the decision");
+  await expect(editor).toHaveValue("Explain the decision");
   await chip.click();
   await expect(page.getByRole("region", { name: "Shared chat context" })).toContainText(
     "Share this note only after confirming the workspace boundary.",

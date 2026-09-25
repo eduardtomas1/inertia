@@ -22,12 +22,11 @@
 .composer-shell .composer:has(> .composer-toolbar > .composer-checkout-strip) {
   --composer-strip-offset: var(--composer-strip-height);
 }
-.composer-shell .composer::before {
+.composer-shell .composer > .composer-surface {
   position: absolute;
   z-index: -1;
   inset: 0 0 var(--composer-strip-offset) 0;
   pointer-events: none;
-  content: "";
   border: 1px solid var(--composer-border);
   border-radius: var(--radius-composer);
   background: var(--composer-surface-fill);
@@ -38,7 +37,7 @@
     border-color 180ms var(--motion-ease),
     box-shadow 180ms var(--motion-ease);
 }
-.composer-shell .composer:focus-within::before {
+.composer-shell .composer:focus-within > .composer-surface {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--composer-border));
   box-shadow:
     inset 0 1px var(--composer-surface-highlight),
@@ -239,7 +238,7 @@
   .composer-shell .composer-popover {
     animation: none;
   }
-  .composer-shell .composer::before {
+  .composer-shell .composer > .composer-surface {
     transition: none;
   }
 }

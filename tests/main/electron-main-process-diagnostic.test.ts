@@ -45,7 +45,7 @@ describe("bounded macOS Electron main-process evidence", () => {
   it("samples only its retained numeric PID with a private process group and minimal environment", () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.diagnostic.capture("rpc-timeout", Date.now() + 5_000);
+    f.diagnostic.capture("rpc-timeout", Date.now() + 10_000);
     expect(f.spawnSample).toHaveBeenCalledWith("/usr/bin/sample", [
       "123456", "1", "10", "-file", "/dev/stdout",
     ], {
@@ -62,8 +62,8 @@ describe("bounded macOS Electron main-process evidence", () => {
     const main = child(123456);
     const spawnSample = vi.fn();
     const diagnostic = createElectronMainProcessDiagnostic(main, { platform, spawn: spawnSample });
-    diagnostic.capture("rpc-timeout", Date.now() + 5_000);
-    diagnostic.watchQuit(Date.now() + 5_000);
+    diagnostic.capture("rpc-timeout", Date.now() + 10_000);
+    diagnostic.watchQuit(Date.now() + 10_000);
     expect(spawnSample).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     expect(main.listenerCount("exit")).toBe(0);
@@ -72,7 +72,7 @@ describe("bounded macOS Electron main-process evidence", () => {
   it("drains both streams continuously while retaining at most 128 KiB per sample", () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.diagnostic.capture("rpc-timeout", Date.now() + 5_000);
+    f.diagnostic.capture("rpc-timeout", Date.now() + 10_000);
     const sampler = f.samplers[0]!;
     sampler.stdout!.emit("data", Buffer.from("main-thread-stack\n"));
     sampler.stderr!.emit("data", Buffer.alloc(256 * 1024, "x"));
@@ -86,11 +86,11 @@ describe("bounded macOS Electron main-process evidence", () => {
     f.diagnostic.stop();
   });
 
-  it("kills the sampler group at 2 s even when neither it nor its pipes settle", async () => {
+  it("kills the sampler group at 6 s even when neither it nor its pipes settle", async () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.diagnostic.capture("rpc-timeout", Date.now() + 5_000);
-    await vi.advanceTimersByTimeAsync(1_999);
+    f.diagnostic.capture("rpc-timeout", Date.now() + 10_000);
+    await vi.advanceTimersByTimeAsync(5_999);
     expect(f.killGroup).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(f.killGroup).toHaveBeenCalledExactlyOnceWith(123457);
@@ -104,10 +104,10 @@ describe("bounded macOS Electron main-process evidence", () => {
   it("cancels on the retained child exit and never samples a reused PID", async () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.diagnostic.capture("rpc-timeout", Date.now() + 5_000);
+    f.diagnostic.capture("rpc-timeout", Date.now() + 10_000);
     f.main.emit("exit", 0, null);
-    f.diagnostic.capture("later-phase", Date.now() + 5_000);
-    f.diagnostic.watchQuit(Date.now() + 5_000);
+    f.diagnostic.capture("later-phase", Date.now() + 10_000);
+    f.diagnostic.watchQuit(Date.now() + 10_000);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(f.spawnSample).toHaveBeenCalledOnce();
     expect(f.killGroup).toHaveBeenCalledExactlyOnceWith(123457);
@@ -122,7 +122,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     f.diagnostic.capture("short-window", Date.now() + 2_000);
     expect(f.diagnostic.samples[0]!.status).toBe("skipped-insufficient-existing-budget");
     Object.assign(f.main, { pid: 987654 });
-    f.diagnostic.capture("different-pid", Date.now() + 5_000);
+    f.diagnostic.capture("different-pid", Date.now() + 10_000);
     expect(f.spawnSample).not.toHaveBeenCalled();
     f.diagnostic.stop();
   });
@@ -130,7 +130,7 @@ describe("bounded macOS Electron main-process evidence", () => {
   it("reports an unavailable sampler without throwing or leaving its deadline active", () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.diagnostic.capture("rpc-timeout", Date.now() + 5_000);
+    f.diagnostic.capture("rpc-timeout", Date.now() + 10_000);
     f.samplers[0]!.emit("error", new Error("spawn /usr/bin/sample ENOENT"));
     expect(f.diagnostic.samples[0]!.status).toContain("unavailable:");
     expect(vi.getTimerCount()).toBe(0);
@@ -140,19 +140,19 @@ describe("bounded macOS Electron main-process evidence", () => {
   it("stays quiet for a fast quit and samples a stalled quit only after 1 s", async () => {
     vi.useFakeTimers();
     const f = fixture();
-    const stopWatchdog = f.diagnostic.watchQuit(Date.now() + 5_000);
+    const stopWatchdog = f.diagnostic.watchQuit(Date.now() + 10_000);
     await vi.advanceTimersByTimeAsync(999);
     expect(f.spawnSample).not.toHaveBeenCalled();
     stopWatchdog();
     await vi.advanceTimersByTimeAsync(1);
     expect(f.spawnSample).not.toHaveBeenCalled();
-    f.diagnostic.watchQuit(Date.now() + 5_000);
+    f.diagnostic.watchQuit(Date.now() + 10_000);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(f.diagnostic.samples[0]!.reason).toBe("prepared-quit-still-pending");
     f.diagnostic.stop();
   });
 
-  it.each([false, true])("preserves the 5 s prepared-quit kill deadline with a stalled sampler (stop error: %s)", async (stopError) => {
+  it.each([false, true])("preserves the 12 s prepared-exit kill deadline with a stalled sampler (stop error: %s)", async (stopError) => {
     vi.useFakeTimers();
     const f = fixture();
     if (stopError) f.killGroup.mockImplementation(() => { throw new Error("sample kill failed"); });
@@ -167,9 +167,9 @@ describe("bounded macOS Electron main-process evidence", () => {
       waitForRuntimeExit: vi.fn(async () => undefined),
       closeServer: vi.fn(async () => undefined),
       removeDirectory: vi.fn(async () => undefined),
-      rpcTimeoutMs: 5_000, createMainProcessDiagnostic: () => f.diagnostic,
+      rpcTimeoutMs: 5_000, preparedExitTimeoutMs: 12_000, createMainProcessDiagnostic: () => f.diagnostic,
     }).catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(4_999);
+    await vi.advanceTimersByTimeAsync(11_999);
     expect(f.main.kill).not.toHaveBeenCalled();
     expect(f.spawnSample).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1);
@@ -178,6 +178,29 @@ describe("bounded macOS Electron main-process evidence", () => {
     expect(error).toBeInstanceOf(ElectronFixtureCloseError);
     expect((error as ElectronFixtureCloseError).mainProcessSamples[0]!.status)
       .toContain(stopError ? "sampler-stop-failed" : "timed-out");
+  });
+
+  it("accepts a slow exit after confirmed cleanup within the prepared-exit budget", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const closing = closeElectronFixtureBounded({
+      platform: "darwin",
+      current: { process: () => f.main, close: async () => undefined } as unknown as ElectronApplication,
+      prepareRuntimeQuit: async () => ({
+        phase: "privileged-cleanup-complete", runtimePid: null,
+        cleanupConfirmed: true, errorMessage: null,
+      }),
+      requestRuntimeQuit: async () => null,
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 5_000, preparedExitTimeoutMs: 12_000, createMainProcessDiagnostic: () => f.diagnostic,
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    Object.assign(f.main, { exitCode: 0 });
+    f.main.emit("exit", 0, null);
+    await expect(closing).resolves.toBeUndefined();
+    expect(f.main.kill).not.toHaveBeenCalled();
   });
 
   it("preserves snapshot, receipt and phase budgets and withholds exit without a receipt", async () => {
@@ -219,7 +242,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     const events: string[] = [];
     f.killGroup.mockImplementation(() => { events.push("sampler-stopped"); });
     f.main.once("exit", () => events.push("main-exited"));
-    f.diagnostic.capture("earlier-rpc-timeout", Date.now() + 5_000);
+    f.diagnostic.capture("earlier-rpc-timeout", Date.now() + 10_000);
     const closing = closeElectronFixtureBounded({
       platform: "darwin",
       current: { process: () => f.main, close: async () => undefined } as unknown as ElectronApplication,

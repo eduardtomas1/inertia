@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
-const SAMPLE_TIMEOUT_MS = 2_000;
+const SAMPLE_TIMEOUT_MS = 6_000;
 const SAMPLE_HEADROOM_MS = 250;
 const QUIT_WATCHDOG_MS = 1_000;
 const MAX_SAMPLE_BYTES = 128 * 1024;

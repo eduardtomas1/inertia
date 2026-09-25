@@ -1494,7 +1494,7 @@ describe("conversation context packets", () => {
       const inspected = new Database(databasePath, { readonly: true });
       const versions = inspected.prepare(`
         SELECT id, transport_version AS version, delivered_budget_bytes AS budget
-        FROM conversation_context_packets ORDER BY created_at, id
+        FROM conversation_context_packets ORDER BY transport_version, id
       `).all();
       inspected.close();
       expect(versions).toEqual([

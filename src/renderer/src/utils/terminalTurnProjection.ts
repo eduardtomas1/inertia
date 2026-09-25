@@ -204,12 +204,18 @@ export function withTerminalTurnProjection(
 export function reconcileTerminalTurnProjections(
   current: TerminalTurnProjections,
   turns: readonly AgentTurn[],
+  shellLatestTurn: ConversationLatestTurnSummary | null = null,
 ): TerminalTurnProjections {
   let next: TerminalTurnProjections | null = null;
   for (const turn of turns) {
     if (!isTerminalStatus(turn.status)) continue;
     const owner = turnOwner(turn);
     if (!current[owner]) continue;
+    if (
+      shellLatestTurn
+      && turnOwner(shellLatestTurn) === owner
+      && !isTerminalStatus(shellLatestTurn.status)
+    ) continue;
     next ??= { ...current };
     delete next[owner];
   }

@@ -600,4 +600,21 @@ describe("supervised runtime process environment", () => {
       NODE_ENV: "test",
     }, "linux")).toEqual({ NODE_ENV: "test" });
   });
+
+  it("forwards only a bounded test-mode initial backup delay", () => {
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS: "1000",
+      NODE_ENV: "test",
+    }, "linux")).toEqual({ NODE_ENV: "test", INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS: "1000" });
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS: "1000",
+      NODE_ENV: "production",
+    }, "linux")).toEqual({});
+    for (const value of ["0", "999", "100000", "1e3", " 1000"]) {
+      expect(runtimeProcessEnvironment({
+        INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS: value,
+        NODE_ENV: "test",
+      }, "linux")).toEqual({ NODE_ENV: "test" });
+    }
+  });
 });

@@ -52,6 +52,8 @@ export class PrivateConnectHost {
   private service: PrivateConnectService | null = null;
   private initialization: Promise<void> | null = null;
   private initializationError: string | null = DEFAULT_STATE.statusMessage;
+  private shutdownPhase: "not-started" | "awaiting-initialization" | "stopping-service" | "stopped" = "not-started";
+  private shuttingDownService: PrivateConnectService | null = null;
   private readonly privacyMonitor: PrivateConnectPrivacyMonitor;
   private stopped = false;
 
@@ -78,9 +80,18 @@ export class PrivateConnectHost {
   async shutdown(): Promise<void> {
     this.stopped = true;
     this.privacyMonitor.shutdown();
+    this.shutdownPhase = "awaiting-initialization";
     await this.initialization;
+    this.shutdownPhase = "stopping-service";
+    this.shuttingDownService = this.service ?? this.shuttingDownService;
     await this.service?.shutdown();
     this.service = null;
+    this.shutdownPhase = "stopped";
+  }
+
+  shutdownStep(): string {
+    if (this.shutdownPhase === "stopped") return "stopped";
+    return this.shuttingDownService?.shutdownStep() ?? this.shutdownPhase;
   }
 
   async prepareForUpdate(): Promise<boolean> {
@@ -110,6 +121,7 @@ export class PrivateConnectHost {
           onStateChange: (state) => this.emitState(state),
         });
         if (this.stopped) {
+          this.shuttingDownService = service;
           await service.shutdown();
           return;
         }

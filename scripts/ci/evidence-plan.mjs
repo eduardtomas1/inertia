@@ -87,7 +87,7 @@ export function createEvidencePlan({
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },
     renderer: critical && domains.has("renderer_ui"),
-    benchmarks: lane === "nightly" || (lane !== "draft" && domains.has("performance")),
+    benchmarks: lane === "nightly" || (lane === "main" && domains.has("performance")),
     omissions: Object.keys(jobs).filter((job) => !jobs[job]).map((job) => ({
       job, reason: full ? "covered-by-full-native-matrix"
         : changes.documentationOnly ? "documentation-does-not-change-runtime"

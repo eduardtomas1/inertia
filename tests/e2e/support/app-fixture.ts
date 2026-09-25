@@ -31,6 +31,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
+const FIXTURE_PREPARED_EXIT_TIMEOUT_MS = 12_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;
@@ -965,6 +966,7 @@ export async function createAppFixture(
         current: activeApp,
         readRuntimePid: async () => activeApp ? (await runtimeSnapshot(activeApp)).pid : null,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
+        preparedExitTimeoutMs: FIXTURE_PREPARED_EXIT_TIMEOUT_MS,
         prepareRuntimeQuit: async () => await prepareElectronPrivilegedCleanup(activeApp),
         readRuntimeQuitPhase: async () => await readElectronPrivilegedCleanupPhase(activeApp),
         requestRuntimeQuit: async () => await finishElectronPreparedQuit(activeApp),

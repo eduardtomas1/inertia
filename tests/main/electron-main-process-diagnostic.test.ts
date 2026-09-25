@@ -101,6 +101,19 @@ describe("bounded macOS Electron main-process evidence", () => {
     f.diagnostic.stop();
   });
 
+  it("samples within a five-second RPC deadline using the budget that remains", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.capture("runtime-snapshot-timed-out", Date.now() + 5_000);
+    expect(f.spawnSample).toHaveBeenCalledOnce();
+    expect(f.diagnostic.samples[0]!.status).toBe("sampling");
+    await vi.advanceTimersByTimeAsync(4_749);
+    expect(f.killGroup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.diagnostic.samples[0]!.status).toBe("timed-out");
+    f.diagnostic.stop();
+  });
+
   it("cancels on the retained child exit and never samples a reused PID", async () => {
     vi.useFakeTimers();
     const f = fixture();

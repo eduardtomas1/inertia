@@ -83,16 +83,15 @@ export class PrivateConnectHost {
     this.shutdownPhase = "awaiting-initialization";
     await this.initialization;
     this.shutdownPhase = "stopping-service";
-    this.shuttingDownService = this.service;
+    this.shuttingDownService = this.service ?? this.shuttingDownService;
     await this.service?.shutdown();
     this.service = null;
     this.shutdownPhase = "stopped";
   }
 
   shutdownStep(): string {
-    return this.shutdownPhase === "stopping-service"
-      ? this.shuttingDownService?.shutdownStep() ?? "stopped"
-      : this.shutdownPhase;
+    if (this.shutdownPhase === "stopped") return "stopped";
+    return this.shuttingDownService?.shutdownStep() ?? this.shutdownPhase;
   }
 
   async prepareForUpdate(): Promise<boolean> {
@@ -122,6 +121,7 @@ export class PrivateConnectHost {
           onStateChange: (state) => this.emitState(state),
         });
         if (this.stopped) {
+          this.shuttingDownService = service;
           await service.shutdown();
           return;
         }

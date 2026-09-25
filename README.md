@@ -30,7 +30,7 @@ Choose **All projects** to search by name or folder path, filter the sidebar, or
 
 ## One workspace for the coding loop
 
-- **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference another chat; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
+- **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference up to three chats, including this chat's own earlier messages with `@this-chat`; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
 - **Capture a window.** Enable [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in Settings → Snapshots to attach a foreground screenshot with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.

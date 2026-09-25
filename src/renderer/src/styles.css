@@ -8831,6 +8831,9 @@ button.header-breadcrumb-project:hover {
 .composer-context-preview li { display: flex; flex-direction: column; gap: 2px; }
 .composer-context-preview li > span { color: var(--text-muted); font-size: 7.5px; text-transform: uppercase; letter-spacing: 0.04em; }
 .composer-context-preview p { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 8.5px; line-height: 1.45; }
+.composer-context-preview li[data-role="gap"] { flex-direction: row; align-items: center; gap: 6px; }
+.composer-context-preview li[data-role="gap"]::before, .composer-context-preview li[data-role="gap"]::after { flex: 1 1 auto; height: 1px; background: var(--border); content: ""; }
+.composer-context-preview li[data-role="gap"] small { flex: 0 0 auto; }
 .composer-context-request label { display: flex; flex-direction: column; gap: 3px; }
 .composer-context-request label:has(input[type="checkbox"]) { flex-direction: row; align-items: flex-start; gap: 6px; color: var(--text); font-size: 8.5px; line-height: 1.45; }
 .composer-context-request input[type="checkbox"] { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--accent); }

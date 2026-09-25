@@ -1,12 +1,14 @@
-export const MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN = 2;
+export const MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN = 3;
 export const MAX_CONVERSATION_CONTEXT_MESSAGES = 2000;
 export const MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES = 8 * 1024;
-export const MAX_CONVERSATION_CONTEXT_TOTAL_BYTES = 176 * 1024;
-export const MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES = 256 * 1024;
+export const MAX_CONVERSATION_CONTEXT_TOTAL_BYTES = 256 * 1024;
+export const MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES = 640 * 1024;
 export const MAX_CONVERSATION_CONTEXT_NOTE_BYTES = 1024;
 export const MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES = 2000;
 export const MAX_CONVERSATION_CONTEXT_BLOCK_BYTES = 64 * 1024;
 export const MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET = 3;
+export const MAX_CONVERSATION_CONTEXT_TURN_BYTES =
+  MAX_CONVERSATION_CONTEXT_BLOCK_BYTES * MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET;
 export const MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE = 8;
 
 export type ConversationContextWorkspaceRelation =
@@ -52,9 +54,16 @@ export interface ConversationContextPacketSummary {
   sourceState: "available" | "deleted";
 }
 
+export interface ConversationContextOmissions {
+  earlierMessages: number;
+  intermediateAgentUpdates: number;
+  gapIndex: number;
+}
+
 export interface ConversationContextPacket
   extends ConversationContextPacketSummary {
   excerpts: ConversationContextExcerpt[];
+  omissions?: ConversationContextOmissions;
 }
 
 export interface ConversationContextSourceTranscript {
@@ -91,4 +100,10 @@ export interface MaterializedConversationContext {
   content: string;
   blockIndex: number;
   blockCount: number;
+}
+
+export function isOwnConversationContext(
+  packet: Pick<ConversationContextPacketSummary, "sourceConversationId" | "targetConversationId">,
+): boolean {
+  return packet.sourceConversationId === packet.targetConversationId;
 }

@@ -196,7 +196,14 @@ export function resolveTurnRequest(
   if (continuation.action === "new-conversation-required") {
     throw new Error(continuation.reason);
   }
+  const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const assembled = assembleTurnRequest({
+    ...(contextPacketIds.length > 0
+      ? {
+          conversationContexts: (capacityBytes: number) => dependencies.store.contextPackets
+            .materialize(conversation.id, contextPacketIds, capacityBytes),
+        }
+      : {}),
     continuationHistory: route.providerId === "claude"
       && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
       && continuation.action === "start-session"
@@ -297,10 +304,10 @@ export function resolveTurnRequest(
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
     executionContext: assembled.persistence,
-    ...(request.context?.conversationContextPacketIds?.length
+    ...(contextPacketIds.length > 0
       ? {
-          conversationContextPacketIds:
-            request.context.conversationContextPacketIds,
+          conversationContextPacketIds: contextPacketIds,
+          conversationContextDeliveries: assembled.conversationContextDeliveries,
           contextRequestId: request.contextRequestId,
         }
       : {}),

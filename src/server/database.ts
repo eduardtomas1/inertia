@@ -247,6 +247,8 @@ export class RuntimeStore {
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
+      conversationContextDeliveries: (conversationId, packetIds) =>
+        this.contextPackets.materialize(conversationId, packetIds).deliveries,
     });
     this.systemSuspends = new SystemSuspendRepository(this.database);
     this.transcriptRepository = new TranscriptRepository({

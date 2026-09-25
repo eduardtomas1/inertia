@@ -13,8 +13,12 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 function writeCodexLauncher(path: string): void {
   const staged = `${path}.next`;
-  if (process.platform === "win32") copyFileSync(process.execPath, staged);
-  else {
+  // Replace the provider launcher, not the Node executable used to run the
+  // fixture. A closed Windows child can still retain its executable image;
+  // installation fingerprinting must not depend on immediate PE replacement.
+  if (process.platform === "win32") {
+    writeFileSync(staged, `@echo off\r\n"${process.execPath}" %*\r\n`, "utf8");
+  } else {
     writeFileSync(staged, `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, "utf8");
     chmodSync(staged, 0o755);
   }
@@ -39,7 +43,7 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
     });
   `);
   writeNodeSubcommand(root, "login", 'process.stdout.write("Logged in using ChatGPT\\n");');
-  const executable = join(root, process.platform === "win32" ? "codex.exe" : "codex");
+  const executable = join(root, process.platform === "win32" ? "codex.cmd" : "codex");
   writeCodexLauncher(executable);
   const manager = ProviderManager.createProduction({
     commands: { codex: executable },
@@ -87,6 +91,51 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
   } finally {
     await manager.disposeAll();
     await removePortableFixture(root);
+  }
+});
+
+it("invalidates admission when a native executable is replaced at the same path", async () => {
+  const root = portableFixtureRoot("native installation fingerprint");
+  const executable = join(root, process.platform === "win32" ? "codex.exe" : "codex");
+  copyFileSync(process.execPath, executable);
+  // Keep native file replacement separate from process-image release. The
+  // launcher scenario above owns real discovery; neither native copy runs here.
+  const manager = ProviderManager.createProduction({
+    commands: { codex: executable },
+    installationLeases: new ProviderInstallationLeaseCoordinator(),
+    metadataCache: new ProviderMetadataCache(),
+    detectProvider: async () => ({
+      provider: PROVIDER_INFO.codex, available: true, executable,
+      version: "0.155.0", installState: "installed", authState: "authenticated",
+      canRun: true, protocolVerified: true, cleanupConfirmed: true,
+    }),
+  });
+  const input = nativeProviderRunInput({
+    providerId: "codex", conversationId: "native-replacement", cwd: root,
+    prompt: "Synthetic turn", interactionMode: "build", access: "supervised",
+  });
+  try {
+    await manager.detect("codex");
+    const before = manager.providerInstallationIdentityForMaintenance("codex", executable, "0.155.0");
+    expect(manager.providerInstallationState("codex")).toBe("current");
+    expect(manager.providerCapabilityAdmissible(input, "text-streaming")).toBe(true);
+
+    copyFileSync(process.execPath, `${executable}.next`);
+    renameSync(`${executable}.next`, executable);
+
+    const after = manager.providerInstallationIdentityForMaintenance("codex", executable, "0.155.0");
+    expect(after.scopeId).toBe(before.scopeId);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+    expect(manager.providerInstallationState("codex")).toBe("changed");
+    expect(manager.providerCapabilityAdmissible(input, "text-streaming")).toBe(false);
+    expect(() => manager.run(input)).toThrow("Codex changed since Inertia last checked it");
+
+    await manager.detect("codex");
+    expect(manager.providerInstallationState("codex")).toBe("current");
+    expect(manager.providerCapabilityAdmissible(input, "text-streaming")).toBe(true);
+  } finally {
+    try { await manager.disposeAll(); }
+    finally { await removePortableFixture(root); }
   }
 });
 

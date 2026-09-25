@@ -194,6 +194,15 @@ describe("Private Connect service lifecycle", () => {
     expect(JSON.stringify(response)).not.toContain("internal-sentinel");
   });
 
+  it("reports its shutdown step until the gateway has stopped", async () => {
+    const service = await createService();
+    expect(service.shutdownStep()).toBe("not-started");
+    const shutdown = service.shutdown();
+    expect(service.shutdownStep()).toBe("draining-mutations");
+    await shutdown;
+    expect(service.shutdownStep()).toBe("stopped");
+  });
+
   it("holds update admission atomically and rolls it back when pairing is active", async () => {
     const service = await createService();
     await service.setEnabled(true);

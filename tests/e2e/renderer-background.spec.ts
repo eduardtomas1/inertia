@@ -131,6 +131,7 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
   let seedDurationMs = 0;
   const fixture = await createAppFixture({
     name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
+    additionalEnvironment: { INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS: "1000" },
     beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
       const startedAt = performance.now();
       const metadataStore = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });

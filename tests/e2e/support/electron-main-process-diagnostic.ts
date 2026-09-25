@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
-const SAMPLE_TIMEOUT_MS = 2_000;
+const SAMPLE_TIMEOUT_MS = 6_000;
+const MIN_SAMPLE_TIMEOUT_MS = 2_000;
 const SAMPLE_HEADROOM_MS = 250;
 const QUIT_WATCHDOG_MS = 1_000;
 const MAX_SAMPLE_BYTES = 128 * 1024;
@@ -58,7 +59,11 @@ export function createElectronMainProcessDiagnostic(
       pid: pid!, reason, status: "starting", output: "", truncated: false,
     };
     samples.push(record);
-    if (deadlineAt - Date.now() < SAMPLE_TIMEOUT_MS + SAMPLE_HEADROOM_MS) {
+    const sampleTimeoutMs = Math.min(
+      SAMPLE_TIMEOUT_MS,
+      deadlineAt - Date.now() - SAMPLE_HEADROOM_MS,
+    );
+    if (sampleTimeoutMs < MIN_SAMPLE_TIMEOUT_MS) {
       record.status = "skipped-insufficient-existing-budget";
       return;
     }
@@ -107,7 +112,7 @@ export function createElectronMainProcessDiagnostic(
       sample.unref();
       cancelSample = null;
     };
-    const timer = setTimeout(() => finish("timed-out"), SAMPLE_TIMEOUT_MS);
+    const timer = setTimeout(() => finish("timed-out"), sampleTimeoutMs);
     timer.unref();
     cancelSample = () => finish("cancelled-at-fixture-exit-or-kill-deadline");
     sample.stdout?.on("data", drain);
@@ -129,7 +134,7 @@ export function createElectronMainProcessDiagnostic(
       clearWatchdog();
       if (platform === "darwin" && ownsLiveMain()
         && deadlineAt - Date.now()
-          >= QUIT_WATCHDOG_MS + SAMPLE_TIMEOUT_MS + SAMPLE_HEADROOM_MS) {
+          >= QUIT_WATCHDOG_MS + MIN_SAMPLE_TIMEOUT_MS + SAMPLE_HEADROOM_MS) {
         watchdog = setTimeout(() => {
           watchdog = null;
           capture("prepared-quit-still-pending", deadlineAt);

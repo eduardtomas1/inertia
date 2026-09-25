@@ -137,7 +137,7 @@ export class RuntimeStore {
     options: {
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
-      databaseBackupQuietGraceMs?: number;
+      databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
       recoverInterruptedRuns?: boolean;
       recoveryExportMaxBytes?: number;
     } = {},
@@ -155,7 +155,7 @@ export class RuntimeStore {
       databasePath,
       {
         canStartBackup: options.canStartDatabaseBackup,
-        quietGraceMs: options.databaseBackupQuietGraceMs,
+        quietGraceMs: options.databaseBackupQuietGraceMs, initialDelayMs: options.databaseBackupInitialDelayMs,
         onError: () => {
           console.error("The scheduled database backup failed.");
         },

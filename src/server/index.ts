@@ -200,6 +200,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null);
   const send = commandIncidents.sender(streamingTrace);
   let onDatabaseBackupCreated = (): void => undefined;
+  const testInitialBackupDelayMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS ?? 0) : 0;
   const store = new RuntimeStore(
     databasePath,
     options.defaultWorkspacePath,
@@ -211,6 +212,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         && activeRuntimeCommands === 0
         && (turns?.activeConversationIds().length ?? 0) === 0,
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
+      ...(testInitialBackupDelayMs > 0 ? { databaseBackupInitialDelayMs: testInitialBackupDelayMs } : {}),
     },
   );
   const {

@@ -426,6 +426,7 @@ export async function closeElectronFixtureBounded(options: {
   readonly onCleanupFailure?: (signal: AbortSignal) => Promise<void>;
   readonly removeDirectory: () => Promise<void>;
   readonly rpcTimeoutMs?: number;
+  readonly preparedExitTimeoutMs?: number;
   readonly cleanupReceiptTimeoutMs?: number;
   readonly serverTimeoutMs?: number;
   readonly removeTimeoutMs?: number;
@@ -544,7 +545,7 @@ export async function closeElectronFixtureBounded(options: {
               ...(options.prepareRuntimeQuit
                 ? {
                     gracefulTimeoutMs: cleanupPrepared
-                      ? options.rpcTimeoutMs ?? 1_000
+                      ? options.preparedExitTimeoutMs ?? options.rpcTimeoutMs ?? 1_000
                       : 0,
                   }
                 : {}),

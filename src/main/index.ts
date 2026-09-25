@@ -186,6 +186,7 @@ const mainWindowCreation = new MainWindowCreation();
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
+let privateConnectShutdownOwner: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
 let appUpdateInstallCoordinator: AppUpdateInstallCoordinator | null = null;
@@ -896,7 +897,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
   if (!privilegedCleanupOwners) {
     systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);
-    const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
+    const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectShutdownOwner = privateConnectHostToStop;
     const retainedAttachments = conversationAttachments; privilegedCleanupOwners = new RetryablePrivilegedCleanup({
       retryUnconfirmed: process.platform === "linux", runtime: supervisorToStop && { stop: () => testCleanupOwners.observe("runtime", () => supervisorToStop.stop()) },
       privateConnect: privateConnectHostToStop && { shutdown: () => testCleanupOwners.observe("privateConnect", () => privateConnectHostToStop.shutdown()) },
@@ -1205,7 +1206,7 @@ async function bootstrap(): Promise<void> {
           ?? Promise.reject(new Error("The test runtime is not running")),
         agentBrowser: (id: Parameters<PreviewBroker["perform"]>[0], command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
-          owners: testCleanupOwners.snapshot, cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
+          owners: testCleanupOwners.snapshot, privateConnectStep: () => (privateConnectShutdownOwner ?? privateConnectHost)?.shutdownStep(), cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);

@@ -99,6 +99,10 @@ class PrivateConnectRequestError extends Error {
   ) { super(message); }
 }
 
+export type PrivateConnectShutdownStep =
+  | "not-started" | "draining-mutations" | "awaiting-lifecycle"
+  | "disabling-serve" | "stopping-gateway" | "stopped";
+
 export class PrivateConnectService implements PrivateConnectGatewayHost {
   private data: PersistedPrivateConnect | null;
   private readonly now: () => Date;
@@ -139,6 +143,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
   private stopped = false;
   private updatePreparation = false;
   private shutdownOperation: Promise<void> | null = null;
+  private shutdownProgress: PrivateConnectShutdownStep = "not-started";
 
   private constructor(private readonly options: PrivateConnectServiceOptions, data: PersistedPrivateConnect | null) {
     this.data = data;
@@ -693,6 +698,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
     this.enableOperation += 1;
     const operation = (async () => {
       try {
+        this.shutdownProgress = "draining-mutations";
         await withDeadline(
           Promise.allSettled([
             ...this.activeLocalMutations,
@@ -701,6 +707,7 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
           AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS,
         );
       } finally {
+        this.shutdownProgress = "awaiting-lifecycle";
         await this.enqueueLifecycle(async () => {
           this.pending.clear();
           this.tickets.clear();
@@ -710,18 +717,25 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
             : null;
           try {
             if (port !== null || proof) {
+              this.shutdownProgress = "disabling-serve";
               await withDeadline(this.tailscale.disableOwnedServe(port, proof), AUTHORITY_REDUCTION_DRAIN_TIMEOUT_MS);
             }
           } finally {
             this.externalUrl = null;
             this.diagnostics = { ...this.diagnostics, gatewayPort: null, externalUrl: null };
+            this.shutdownProgress = "stopping-gateway";
             await this.gateway.stop();
+            this.shutdownProgress = "stopped";
           }
         });
       }
     })();
     this.shutdownOperation = operation;
     await operation;
+  }
+
+  shutdownStep(): PrivateConnectShutdownStep {
+    return this.shutdownProgress;
   }
 
   async prepareForUpdate(): Promise<boolean> {

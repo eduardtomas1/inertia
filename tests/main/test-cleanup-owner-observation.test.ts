@@ -135,4 +135,28 @@ describe("test-only cleanup owner observation", () => {
       get owners() { throw new Error("PRIVATE"); } })).toBe("privileged-cleanup;owners=unavailable");
     expect(receipt.phase).toBe("privileged-cleanup");
   });
+
+  it("reports only a fixed-shape Private Connect shutdown step beside the owners", async () => {
+    const observer = createTestCleanupOwnerObserver(true);
+    const stopped = deferred<void>();
+    const controller = createTestPrivilegedCleanupController({ runtimePid: () => 1,
+      cleanup: () => observer.observe("privateConnect", () => stopped.promise).then(() => true),
+      owners: observer.snapshot, privateConnectStep: () => "awaiting-initialization", exit: vi.fn() });
+    const preparation = controller.preparePrivilegedCleanup();
+    const pending = controller.privilegedCleanupSnapshot();
+    expect(pending).toMatchObject({ privateConnectStep: "awaiting-initialization", owners: { privateConnect: "pending" } });
+    expect(formatElectronPrivilegedCleanupPhase(pending)).toBe(
+      "privileged-cleanup;owners=runtime:not-started,privateConnect:pending,temporaryAttachments:not-started,durableAttachments:not-started;privateConnectStep=awaiting-initialization",
+    );
+    const owners = pending.owners!;
+    const receipt = { phase: "privileged-cleanup", runtimePid: 1, cleanupConfirmed: null, errorMessage: null, owners };
+    for (const privateConnectStep of ["PRIVATE", "stopping gateway", "a".repeat(41), 7]) {
+      expect(formatElectronPrivilegedCleanupPhase({ ...receipt, privateConnectStep }))
+        .toBe("privileged-cleanup;owners=runtime:not-started,privateConnect:pending,temporaryAttachments:not-started,durableAttachments:not-started");
+    }
+    stopped.resolve();
+    await expect(preparation).resolves.toMatchObject({ cleanupConfirmed: true });
+    expect(createTestPrivilegedCleanupController({ runtimePid: () => 1, cleanup: async () => true,
+      privateConnectStep: () => "stopped", exit: vi.fn() }).privilegedCleanupSnapshot()).not.toHaveProperty("privateConnectStep");
+  });
 });

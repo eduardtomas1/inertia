@@ -20,6 +20,18 @@ function evidence(selected = plan(["package-lock.json"])) {
 }
 
 describe("explainable CI plan", () => {
+  it("measures desktop performance on main and nightly, never as pull request gating", () => {
+    const performancePaths = ["benchmarks/renderer-primitives.test.ts"];
+    expect(plan(performancePaths, { event: "push" }).domains).toContain("performance");
+    expect(plan(performancePaths, { event: "push" }).benchmarks).toBe(true);
+    expect(plan(performancePaths, { event: "schedule" }).benchmarks).toBe(true);
+    expect(plan(["docs/CI_EVIDENCE.md"], { event: "schedule" }).benchmarks).toBe(true);
+    for (const options of [{ event: "pull_request" }, { event: "pull_request", draft: true }, { event: "merge_group" }]) {
+      expect(plan(performancePaths, options).benchmarks).toBe(false);
+    }
+    expect(plan(["docs/CI_EVIDENCE.md"], { event: "push" }).benchmarks).toBe(false);
+  });
+
   it("does not buy native installers for documentation or renderer contracts", () => {
     const docs = plan(["docs/CI_EVIDENCE.md"]);
     expect(docs.requiredJobs).toEqual(["gate", "lineage"]);

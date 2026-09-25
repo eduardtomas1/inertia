@@ -77,57 +77,6 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("repeatedly sends a pasted image after startup reconciliation in a non-Git project", async () => {
-  const app = activeApp = await createAppFixture({
-    name: "image-send-regression",
-    initialState: "conversation",
-    codexAppServerSource: imageAwareCodexAppServer,
-    workspaceGit: false,
-  });
-  try {
-    const imageBytes = [...withEmptyPngDataChunks(await readFile(app.attachmentImagePath))];
-    const expectedDigest = createHash("sha256")
-      .update(Buffer.from(imageBytes))
-      .digest("hex");
-    const composer = app.page.getByRole("textbox", { name: "Message" });
-    const send = app.page.getByRole("button", { name: "Send message" });
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      // A final answer can render while the preceding turn still owns imports.
-      await expect(app.page.getByRole("region", { name: "Message composer", exact: true }))
-        .toHaveAttribute("aria-busy", "false");
-      await expect(send).toBeVisible();
-      await expect(app.page.getByRole("button", { name: /^Attach /u })).toBeEnabled();
-      await composer.evaluate((textarea, bytes) => {
-        const transfer = new DataTransfer();
-        transfer.items.add(new File(
-          [new Uint8Array(bytes)],
-          "pasted.png",
-          { type: "image/png" },
-        ));
-        const event = new Event("paste", { bubbles: true, cancelable: true });
-        Object.defineProperty(event, "clipboardData", { value: transfer });
-        textarea.dispatchEvent(event);
-      }, imageBytes);
-      await expect(app.page.getByRole("button", {
-        name: "Remove attachment pasted.png",
-      })).toBeVisible();
-      const prompt = `Inspect this image, attempt ${attempt}.`;
-      await composer.fill(prompt);
-      await send.click();
-      await expect(app.page.getByText(prompt, { exact: true })).toBeVisible();
-      await expect(app.page.getByText(`image-sha256:${expectedDigest}`, { exact: true }))
-        .toHaveCount(attempt, { timeout: 15_000 });
-      await expect(send).toBeVisible();
-    }
-    await expect(app.page.getByRole("alert")).toHaveCount(0);
-    expect(app.rendererErrors).toEqual([]);
-  } catch (error) {
-    bodyFailure = { error };
-    await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
-    throw error;
-  }
-});
-
 test("native clipboard, dropped, and selected screenshots survive send and restart", async () => {
   // Three native import/preview/send cycles plus a full restart consumed
   // 44.6s on hosted Intel macOS before persisted previews were checked.

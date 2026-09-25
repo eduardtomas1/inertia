@@ -511,14 +511,18 @@ export function useConversationProjection({
         return next;
       });
     }
-    if (detailState?.state === "ready") {
-      setTerminalProjections((current) =>
-        reconcileTerminalTurnProjections(
-          current,
-          detailState.detail.agentTurns,
-        ));
-    }
   }, [conversation?.id, detail, detailState]);
+
+  const persistedLatestTurn = persistedConversation?.latestTurn ?? null;
+  useEffect(() => {
+    if (detailState?.state !== "ready") return;
+    if (detailState.conversationId !== persistedConversation?.id) return;
+    setTerminalProjections((current) => reconcileTerminalTurnProjections(
+      current,
+      detailState.detail.agentTurns,
+      persistedLatestTurn,
+    ));
+  }, [detailState, persistedConversation?.id, persistedLatestTurn]);
 
   useEffect(() => subscribe((event) => {
     const activeConversation = conversationRef.current;

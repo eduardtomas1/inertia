@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PROVIDER_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
@@ -11,7 +11,9 @@ import {
   loginShellEnvironment,
   providerChildEnvironment,
   providerEnvironment,
+  testProviderBinDirectory,
 } from "../../src/server/environment";
+import { detectProvider } from "../../src/server/provider/discovery";
 import { portableNodeExecutable } from "../helpers/portable-provider-fixture";
 
 const ENVIRONMENT_KEYS = [
@@ -29,9 +31,11 @@ const ENVIRONMENT_KEYS = [
   "HOME",
   "HTTPS_PROXY",
   "INERTIA_LOGIN_SHELL_MARKER",
+  "INERTIA_TEST_PROVIDER_BIN_DIR",
   "KIMI_API_KEY",
   "LOCALAPPDATA",
   "NVM_BIN",
+  "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
   "NO_PROXY",
   "OPENAI_API_KEY",
@@ -197,6 +201,120 @@ describe("provider environment discovery", { concurrent: false }, () => {
         environment,
         home,
       )).resolves.toEqual([realpathSync.native(newestCommand)]);
+    },
+  );
+
+  function hostLikeInstallations(name: string): {
+    home: string;
+    fixture: string;
+    inherited: string;
+    userBin: string;
+  } {
+    const home = temporaryRoot();
+    const fixture = temporaryRoot();
+    const inherited = temporaryRoot();
+    const userBin = process.platform === "win32" ? join(home, "npm") : join(home, ".local", "bin");
+    const windowsCodexBin = join(home, "Programs", "OpenAI", "Codex", "bin");
+    mkdirSync(userBin, { recursive: true });
+    mkdirSync(windowsCodexBin, { recursive: true });
+    for (const directory of [fixture, inherited, userBin, ...(name === "codex" ? [windowsCodexBin] : [])]) {
+      writeFileSync(join(directory, process.platform === "win32" ? `${name}.exe` : name), "#!/bin/sh\nexit 64\n", { mode: 0o755 });
+    }
+    return { home, fixture, inherited, userBin };
+  }
+
+  function installedPath(directory: string, name: string): string {
+    return realpathSync.native(join(directory, process.platform === "win32" ? `${name}.exe` : name));
+  }
+
+  function hostLikeEnvironment(
+    installations: ReturnType<typeof hostLikeInstallations>,
+    nodeEnvironment: string,
+  ): void {
+    const { home, fixture, inherited } = installations;
+    setEnvironment({
+      APPDATA: home, HOME: home, LOCALAPPDATA: home, USERPROFILE: home,
+      INERTIA_TEST_PROVIDER_BIN_DIR: fixture, NODE_ENV: nodeEnvironment,
+      PATH: [inherited, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].join(delimiter),
+      SHELL: process.env.SHELL,
+    });
+  }
+
+  it("accepts the fixture provider directory only as an absolute test-mode path", () => {
+    expect(testProviderBinDirectory({ NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/bin" }, "linux"))
+      .toBe("/fixture/bin");
+    expect(testProviderBinDirectory({ Node_Env: "test", Inertia_Test_Provider_Bin_Dir: "C:\\fixture\\bin" }, "win32"))
+      .toBe("C:\\fixture\\bin");
+    for (const environment of [
+      { NODE_ENV: "production", INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/bin" },
+      { INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/bin" },
+      { NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: "fixture/bin" },
+      { NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: "C:\\fixture\\bin" },
+      { NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/bin\n/opt/homebrew/bin" },
+      { NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: `/${"a".repeat(4_096)}` },
+      { NODE_ENV: "test", INERTIA_TEST_PROVIDER_BIN_DIR: "" },
+    ]) {
+      expect(testProviderBinDirectory(environment, "linux")).toBeNull();
+    }
+  });
+
+  it("searches only the fixture provider directory in test mode", async () => {
+    const installations = hostLikeInstallations("inertia-fixture-agent");
+    hostLikeEnvironment(installations, "test");
+
+    const environment = await providerEnvironment(true);
+
+    expect(environment.pathEntries).toEqual([installations.fixture]);
+    expect(environment.env.PATH?.split(delimiter)[0]).toBe(installations.fixture);
+    await expect(executableCandidates("inertia-fixture-agent", environment, installations.home))
+      .resolves.toEqual([installedPath(installations.fixture, "inertia-fixture-agent")]);
+  });
+
+  it("keeps production discovery roots when the fixture opt-in is outside test mode", async () => {
+    const installations = hostLikeInstallations("inertia-fixture-agent");
+    hostLikeEnvironment(installations, "production");
+
+    const environment = await providerEnvironment(true);
+
+    expect(environment.pathEntries).not.toContain(installations.fixture);
+    expect(environment.pathEntries).toEqual(expect.arrayContaining([
+      installations.inherited, installations.userBin, "/opt/homebrew/bin", "/usr/local/bin",
+    ]));
+    await expect(executableCandidates("inertia-fixture-agent", environment, installations.home))
+      .resolves.toEqual([
+        installedPath(installations.inherited, "inertia-fixture-agent"),
+        installedPath(installations.userBin, "inertia-fixture-agent"),
+      ]);
+  });
+
+  it.each(["claude", "codex"] as const)(
+    "probes only the fixture %s binary during test-mode detection",
+    async (providerId) => {
+      const installations = hostLikeInstallations(providerId);
+      hostLikeEnvironment(installations, "test");
+      const probed: string[] = [];
+
+      const detection = await detectProvider(providerId, {
+        cwd: installations.home,
+        probeAuthentication: false,
+        refreshEnvironment: true,
+      }, {
+        probeProcess: async (candidate, args) => {
+          probed.push(candidate);
+          return {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: args[0] === "--version" ? `${providerId} 9.9.9` : "codex app-server - Run the app server",
+            cleanupConfirmed: true,
+          };
+        },
+      });
+
+      const fake = installedPath(installations.fixture, providerId);
+      expect(detection.executable).toBe(fake);
+      expect(probed.length).toBeGreaterThan(0);
+      expect(new Set(probed)).toEqual(new Set([fake]));
     },
   );
 

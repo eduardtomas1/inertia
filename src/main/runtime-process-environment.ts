@@ -8,6 +8,10 @@ import {
   PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS,
   PROVIDER_ROUTING_ENVIRONMENT_KEYS,
 } from "../node/provider-routing-environment";
+import {
+  isTestProviderBinDirectory,
+  TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY,
+} from "../node/test-provider-bin-directory";
 
 const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "ALLUSERSPROFILE",
@@ -347,6 +351,10 @@ export function runtimeProcessEnvironment(
   const attachmentRecordLimit = environmentValue(environment, "INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS", platform);
   if (sanitized.NODE_ENV === "test" && attachmentRecordLimit && /^[1-9][0-9]{0,2}$/u.test(attachmentRecordLimit)) {
     sanitized.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS = attachmentRecordLimit;
+  }
+  const providerBinDirectory = environmentValue(environment, TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY, platform);
+  if (sanitized.NODE_ENV === "test" && isTestProviderBinDirectory(providerBinDirectory, platform)) {
+    sanitized[TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY] = providerBinDirectory;
   }
   return sanitized;
 }

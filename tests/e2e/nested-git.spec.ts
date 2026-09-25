@@ -91,6 +91,7 @@ test.beforeAll(async () => {
       NODE_ENV: "test",
       INERTIA_DATA_DIR: join(fixtureRoot, "data"),
       INERTIA_WORKSPACE_DIR: workspaceRoot,
+      INERTIA_TEST_PROVIDER_BIN_DIR: join(fixtureRoot, "provider-bin"),
     },
   });
   page = await application.firstWindow();

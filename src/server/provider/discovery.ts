@@ -12,6 +12,7 @@ import {
   executableCandidates,
   providerChildEnvironment,
   providerEnvironment,
+  testProviderBinDirectory,
   type ProviderEnvironment,
 } from "../environment";
 import {
@@ -475,6 +476,7 @@ export async function detectProvider(
     && process.platform === "win32"
     && command.toLocaleLowerCase("en-US") === PROVIDER_INFO.codex.command
     && dependencies.executableCandidates === undefined
+    && testProviderBinDirectory() === null
     ? await windowsCodexExecutableCandidates(candidateEnvironment, cwd)
     : [...new Set((await Promise.all(candidateCommands.map(
       async (candidate) => await resolveCandidates(

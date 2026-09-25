@@ -25,6 +25,7 @@ const companionWorkspaceDirectory = "/tmp/inertia-demo-companion";
 const dataDirectory = join(captureRoot, "data");
 const profileDirectory = join(captureRoot, "profile");
 const databasePath = join(dataDirectory, "inertia.sqlite");
+const providerBinDirectory = join(captureRoot, "provider-bin");
 let ownsWorkspace = false;
 let ownsCompanionWorkspace = false;
 let app;
@@ -37,6 +38,7 @@ async function launch() {
       NODE_ENV: "test",
       INERTIA_DATA_DIR: dataDirectory,
       INERTIA_WORKSPACE_DIR: workspaceDirectory,
+      INERTIA_TEST_PROVIDER_BIN_DIR: providerBinDirectory,
     },
   });
 }
@@ -593,6 +595,7 @@ try {
   await mkdir(companionWorkspaceDirectory);
   ownsCompanionWorkspace = true;
   await mkdir(screenshotDirectory, { recursive: true });
+  await mkdir(providerBinDirectory);
   await writeFile(join(workspaceDirectory, "welcome.ts"), "export const welcome = 'calm and focused';\n", "utf8");
   await writeFile(join(workspaceDirectory, "README.md"), "# Getting Started\n", "utf8");
   await writeFile(

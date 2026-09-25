@@ -123,6 +123,11 @@ test("new attachments update the same gallery after reload and a missing retaine
   await expect(page.locator(".composer-attachments img")).toHaveCount(gallerySources.length);
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("More media for the gallery.");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
+  // Clearing this unchanged draft confirms durable send acceptance. Native
+  // validation/retention precedes that acknowledgement; gallery projection is
+  // checked separately after it, within the same 45-second test budget.
+  await expect(page.getByRole("textbox", { name: "Message", exact: true }))
+    .toHaveValue("", { timeout: 30_000 });
   const gallery = page.getByRole("list", { name: "Chat attachments" });
   await expect(gallery.getByRole("listitem")).toHaveCount(10);
   await app.expectNoViewportOverflow();

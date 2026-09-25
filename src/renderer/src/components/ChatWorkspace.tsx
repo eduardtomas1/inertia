@@ -406,17 +406,19 @@ export function ChatWorkspace({
     setChatGoal,
   ]);
   const conversationId = conversation?.id ?? null;
-  const [compacting, setCompacting] = useState<{
-    conversationId: string | null;
-    since: string;
-  } | null>(null);
+  const [compacting, setCompacting] = useState<ReadonlyMap<string | null, string>>(() => new Map());
   const compactConversation = useCallback(async (instruction?: string) => {
-    const started = { conversationId, since: new Date().toISOString() };
-    setCompacting(started);
+    const since = new Date().toISOString();
+    setCompacting((current) => new Map(current).set(conversationId, since));
     try {
       return await onCompactConversation!(instruction);
     } finally {
-      setCompacting((current) => current === started ? null : current);
+      setCompacting((current) => {
+        if (current.get(conversationId) !== since) return current;
+        const next = new Map(current);
+        next.delete(conversationId);
+        return next;
+      });
     }
   }, [conversationId, onCompactConversation]);
   const [navigation, dispatchNavigation] = useReducer(
@@ -981,9 +983,7 @@ export function ChatWorkspace({
               autoScrollToFinalAnswer={autoScrollToFinalAnswer
                 && transcriptNavigationFollowsContent(activeNavigation)}
               detailLoading={detailLoading}
-              compactingSince={compacting?.conversationId === conversationId
-                ? compacting.since
-                : null}
+              compactingSince={compacting.get(conversationId) ?? null}
               turnAnchorId={turnAnchorId}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}

@@ -736,6 +736,41 @@ describe("draft turn anchoring", () => {
     expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
   });
 
+  it("keeps each conversation's in-flight compaction when another chat compacts meanwhile", async () => {
+    const pending: Array<(value: { message: string; instructionForwarded: boolean }) => void> = [];
+    const onCompactConversation = vi.fn(() => new Promise<{
+      message: string;
+      instructionForwarded: boolean;
+    }>((resolve) => pending.push(resolve)));
+    const first = conversation("conversation-compacting-a");
+    const second = conversation("conversation-compacting-b");
+    const view = render(
+      <ChatWorkspace {...workspaceProps(first, async () => null)} onCompactConversation={onCompactConversation} />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Compact from composer mock" }));
+    const firstSince = screen.getByTestId("timeline-compacting").textContent ?? "";
+    expect(Number.isFinite(Date.parse(firstSince))).toBe(true);
+
+    view.rerender(
+      <ChatWorkspace {...workspaceProps(second, async () => null)} onCompactConversation={onCompactConversation} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Compact from composer mock" }));
+    expect(screen.getByTestId("timeline-compacting")).not.toHaveTextContent("none");
+    await act(async () => {
+      pending[1]!({ message: "Compacted.", instructionForwarded: true });
+    });
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+
+    view.rerender(
+      <ChatWorkspace {...workspaceProps(first, async () => null)} onCompactConversation={onCompactConversation} />,
+    );
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent(firstSince);
+    await act(async () => {
+      pending[0]!({ message: "Compacted.", instructionForwarded: true });
+    });
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+  });
+
   it("removes the composer running state with a projected terminal shell", () => {
     const activeConversation = {
       ...conversation("conversation-terminal-projection"),

@@ -70,9 +70,11 @@ export function isTranscriptActivity(activity: AgentActivity): boolean {
     || activityNeedsAttention(activity);
 }
 
+const COMPACTION_LIFECYCLE_TITLE = /^(?:.+ is compacting (?:session )?context|.+ compacted (?:the )?(?:session )?context|Context compacted|Context compaction)$/u;
+
 export function isCompactionActivity(activity: AgentActivity): boolean {
   return activity.kind === "status"
-    && /\bcompact/iu.test(activity.title)
+    && COMPACTION_LIFECYCLE_TITLE.test(activity.title)
     && !activityNeedsAttention(activity);
 }
 
@@ -145,6 +147,7 @@ export function buildTurnExecutionStream(
         createdAt: string;
         activity: AgentActivity;
         order: number;
+        episode: number;
       }
   > = [];
 
@@ -168,8 +171,15 @@ export function buildTurnExecutionStream(
       order: 1,
     });
   }
+  let episode = 0;
+  let previousCompaction: AgentActivity | null = null;
   for (const activity of turn.activities) {
     const compaction = isCompactionActivity(activity);
+    if (compaction && (
+      !previousCompaction
+      || (previousCompaction.status !== "running" && activity.status === "running")
+    )) episode += 1;
+    previousCompaction = compaction ? activity : null;
     if (compaction ? !options.includeCompactions : !isTranscriptActivity(activity)) continue;
     if (!includeImportant && activityNeedsAttention(activity)) continue;
     items.push({
@@ -178,6 +188,7 @@ export function buildTurnExecutionStream(
       createdAt: activity.createdAt,
       activity,
       order: 2,
+      episode: compaction ? episode : 0,
     });
   }
   if (options.liveContent) {
@@ -200,6 +211,7 @@ export function buildTurnExecutionStream(
     || left.id.localeCompare(right.id, "en"));
 
   const stream: TurnExecutionStreamEntry[] = [];
+  let streamEpisode = 0;
   for (const item of items) {
     if (item.kind === "commentary" || item.kind === "follow-up") {
       stream.push(item);
@@ -207,10 +219,11 @@ export function buildTurnExecutionStream(
     }
     const kind = item.kind === "compaction" ? "compaction" : "activity-group";
     const previous = stream.at(-1);
-    if (previous?.kind === kind) {
+    if (previous?.kind === kind && (kind !== "compaction" || item.episode === streamEpisode)) {
       previous.activities.push(item.activity);
       continue;
     }
+    streamEpisode = item.episode;
     stream.push({
       kind,
       id: `${kind}:${item.id}`,

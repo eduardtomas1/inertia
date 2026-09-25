@@ -334,6 +334,55 @@ describe("authoritative response timeline", () => {
     ]);
   });
 
+  it("keeps separate compaction episodes apart and ignores open-ended compaction notices", () => {
+    const turn = agentTurn("turn-compaction-episodes", "user-compaction-episodes", {
+      status: "running",
+      completedAt: null,
+    });
+    const status = (id: string, title: string, update: Partial<AgentActivity> = {}) =>
+      activity(id, turn.id, { kind: "status", title, ...update });
+    const response = timelineTurn(buildResponseTimeline({
+      turns: [turn],
+      messages: [
+        message("user-compaction-episodes", turn.id, "user", "Keep going", "2026-07-23T10:00:00.000Z"),
+      ],
+      activities: [
+        status("first", "Claude compacted context", {
+          detail: "Before: 180000 tokens\nAfter: 40000 tokens",
+          createdAt: "2026-07-23T10:00:01.000Z",
+        }),
+        status("between", "Claude received a response", { createdAt: "2026-07-23T10:00:02.000Z" }),
+        status("second", "Claude compacted context", {
+          detail: "Before: 170000 tokens\nAfter: 38000 tokens",
+          createdAt: "2026-07-23T10:00:03.000Z",
+        }),
+        status("third", "Cursor is compacting session context", {
+          status: "running",
+          createdAt: "2026-07-23T10:00:04.000Z",
+        }),
+        status("unknown", "Cursor reported a context compaction update", {
+          detail: "Status: future_paused",
+          createdAt: "2026-07-23T10:00:05.000Z",
+        }),
+        status("cancelled", "Cursor cancelled session context compaction", {
+          createdAt: "2026-07-23T10:00:06.000Z",
+        }),
+      ],
+      reasonings: [],
+      checkpoints: [],
+    }), turn.id);
+
+    const stream = buildTurnExecutionStream(response, { includeCompactions: true });
+    expect(stream.map((entry) => entry.kind === "commentary" || entry.kind === "follow-up"
+      ? entry.kind
+      : `${entry.kind}:${entry.activities.map(({ id }) => id).join("+")}`)).toEqual([
+      "compaction:first",
+      "compaction:second",
+      "compaction:third",
+      "activity-group:cancelled",
+    ]);
+  });
+
   it("groups only adjacent calls and preserves commentary between work phases", () => {
     const turn = agentTurn("turn-interleaved", "user-interleaved", {
       status: "running",

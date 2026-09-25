@@ -289,14 +289,10 @@ function layoutPacket(
 }
 
 function chooseUnits(layout: PacketLayout, capacity: number): SelectionUnit[] {
-  const pinnedOpening = layout.opening && layout.opening.bytes <= capacity / 4
-    ? layout.opening
-    : null;
   const order = [
-    ...(pinnedOpening ? [pinnedOpening] : []),
+    ...(layout.opening ? [layout.opening] : []),
     ...layout.turns,
     ...layout.details,
-    ...(layout.opening && !pinnedOpening ? [layout.opening] : []),
   ];
   const chosen: SelectionUnit[] = [];
   const includedTurns = new Set<number>();

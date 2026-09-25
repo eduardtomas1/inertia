@@ -57,6 +57,18 @@ export function ConversationContextPreviewCard({
     return () => { active = false; };
   }, [packetId, targetConversationId, onCommand, attempt]);
 
+  const gapAt = (index: number): React.JSX.Element | null => (
+    packet && (packet.omissions?.earlierMessages ?? 0) > 0 && packet.omissions!.gapIndex === index
+      ? (
+        <li data-role="gap">
+          <small>
+            {packet.omissions!.earlierMessages} earlier{" "}
+            {packet.omissions!.earlierMessages === 1 ? "message" : "messages"} omitted
+          </small>
+        </li>
+      )
+      : null
+  );
   return (
     <section className="composer-context-preview" aria-label="Shared chat context">
       <button type="button" onClick={onDismiss}>Close preview</button>
@@ -86,15 +98,7 @@ export function ConversationContextPreviewCard({
             <ol>
               {packet.excerpts.map((excerpt, index) => (
                 <Fragment key={excerpt.sourceMessageId}>
-                  {(packet.omissions?.earlierMessages ?? 0) > 0
-                    && packet.omissions!.gapIndex === index && (
-                    <li data-role="gap">
-                      <small>
-                        {packet.omissions!.earlierMessages} earlier{" "}
-                        {packet.omissions!.earlierMessages === 1 ? "message" : "messages"} omitted
-                      </small>
-                    </li>
-                  )}
+                  {gapAt(index)}
                   <li data-role={excerpt.role}>
                     <span>{excerpt.role === "user" ? "You" : "Agent"}</span>
                     <p>{excerpt.content}</p>
@@ -107,6 +111,7 @@ export function ConversationContextPreviewCard({
                   </li>
                 </Fragment>
               ))}
+              {gapAt(packet.excerpts.length)}
             </ol>
           </>
         )

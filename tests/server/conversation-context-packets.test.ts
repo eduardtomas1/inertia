@@ -14,7 +14,10 @@ import {
 import { neutralizeUntrustedAgentText } from "../../src/server/runtime/untrusted-agent-text";
 import { conversationContextWholeChatMigration } from "../../src/server/persistence/migrations/conversation-context-whole-chat";
 import { assembleTurnRequest, MAX_EXECUTION_PAYLOAD_BYTES } from "../../src/server/runtime/turns/request-context";
-import type { ConversationContextDelivery } from "../../src/server/persistence/conversation-context-transport";
+import {
+  prepareConversationContextPacket,
+  type ConversationContextDelivery,
+} from "../../src/server/persistence/conversation-context-transport";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCK_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
@@ -1100,6 +1103,33 @@ describe("conversation context packets", () => {
       earlierMessages: packet.droppedMessageCount,
       intermediateAgentUpdates: 0,
     });
+    store.close();
+  });
+
+  it("pins an opening request that fits a tight allocation even when it exceeds a quarter of it", () => {
+    const { store, sourceId, targetId } = fixture();
+    store.createMessage(sourceId, `opening-${"o".repeat(6000)}`, "user", [], null, "2026-08-19T08:00:00.000Z");
+    for (let index = 1; index < 24; index += 1) {
+      store.createMessage(
+        sourceId,
+        `${index}-${"r".repeat(1800)}`,
+        index % 2 === 0 ? "user" : "assistant",
+        [],
+        null,
+        `2026-08-19T08:00:${String(index).padStart(2, "0")}.000Z`,
+      );
+    }
+    const packet = new ConversationContextService(store).createFromRenderer({
+      sourceConversationId: sourceId,
+      targetConversationId: targetId,
+      acknowledgedWorkspaceDifference: false,
+    });
+    const stored = store.contextPackets.get(packet.id, targetId);
+    const prepared = prepareConversationContextPacket(stored, 20 * 1024);
+    expect(prepared.complete).toBe(false);
+    expect(prepared.packet.excerpts[0]!.content.startsWith("opening-")).toBe(true);
+    expect(prepared.packet.excerpts.at(-1)!.content.startsWith("23-")).toBe(true);
+    expect(sentBlocks(prepared.blocks)[0]!.messages[1]![0]).toBe("gap");
     store.close();
   });
 

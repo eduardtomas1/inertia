@@ -532,4 +532,33 @@ describe("composer chat references", () => {
     ]);
     expect(screen.getByText("3 intermediate agent updates left out so more turns fit.")).toBeVisible();
   });
+
+  it("marks omitted later messages after the only retained opening request", async () => {
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: {
+        kind: "conversation.context.packet",
+        packet: {
+          ...packetSummary({ messageCount: 1, droppedMessageCount: 9 }),
+          excerpts: [
+            { sourceMessageId: "opening", role: "user", content: "Build the importer.", truncated: false },
+          ],
+          omissions: { earlierMessages: 9, intermediateAgentUpdates: 0, gapIndex: 1 },
+        },
+      },
+    } as unknown as ServerEvent));
+    render(<ConversationContextPreviewCard
+      packetId={packetSummary().id}
+      targetConversationId={packetSummary().targetConversationId}
+      onCommand={onCommand}
+      onDismiss={() => undefined}
+    />);
+
+    const items = await screen.findAllByRole("listitem");
+    expect(items.map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Build the importer."),
+      "9 earlier messages omitted",
+    ]);
+  });
 });

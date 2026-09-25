@@ -1475,6 +1475,84 @@ describe("useConversationProjection pending interactions", () => {
     });
   });
 
+  it("keeps a completed turn projected until the conversation shell settles", async () => {
+    const source = createEventSource();
+    let detailTurn = runningTurn();
+    let completedDetailsServed = 0;
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") {
+        return { type: "request.ok", requestId: crypto.randomUUID() };
+      }
+      if (detailTurn.status === "completed") completedDetailsServed += 1;
+      return {
+        type: "request.result",
+        requestId: crypto.randomUUID(),
+        result: {
+          kind: "conversation.detail",
+          conversationId: primaryId,
+          state: "ready",
+          detail: {
+            conversation: conversation(primaryId), agentTurns: [detailTurn], turnGitArtifacts: [],
+            messages: [], activities: [], subagents: [], reasonings: [], usage: [], plans: [],
+            goals: [], checkpoints: [], reviewSummaries: [], reviewStates: [], reviewNotes: [],
+          },
+        },
+      };
+    });
+    const summary = (turn: AgentTurn) => ({
+      id: turn.id, runId: turn.runId, status: turn.status, providerId: turn.providerId,
+      harnessId: turn.harnessId, backendProfileId: turn.backendProfileId,
+      modelSelection: turn.modelSelection, continuationIdentity: turn.continuationIdentity,
+      model: turn.model, reasoningEffort: turn.reasoningEffort, requestedAt: turn.requestedAt,
+      startedAt: turn.startedAt, completedAt: turn.completedAt,
+      terminalReason: turn.terminalReason, updatedAt: turn.updatedAt,
+    });
+    const shellSnapshot = (status: ConversationShell["status"], turn: AgentTurn): AppSnapshot => ({
+      ...snapshot,
+      conversations: [
+        { ...conversation(primaryId), status, attentionKind: null, pendingApproval: false,
+          pendingInput: false, latestTurn: summary(turn) },
+        conversation(secondaryId),
+      ],
+    });
+    const hook = renderHook(({ current }) => useConversationProjection({
+      snapshot: current,
+      status: "online",
+      request,
+      subscribe: source.subscribe,
+      enabled: true,
+      autoOpenPlan: false,
+      onOpenPlan: vi.fn(),
+      onTerminal: vi.fn(),
+    }), { initialProps: { current: shellSnapshot("running", runningTurn()) } });
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+
+    source.emit({
+      type: "agent.completed",
+      conversationId: primaryId,
+      runId: `${primaryId}-run`,
+      turnId: `${primaryId}-turn`,
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: null,
+    });
+    expect(hook.result.current.conversation?.status).toBe("completed");
+
+    const completedTurn: AgentTurn = {
+      ...runningTurn(), status: "completed", terminalReason: "provider-completed",
+      completedAt: "2026-07-28T12:02:00.000Z", updatedAt: "2026-07-28T12:02:00.000Z",
+    };
+    detailTurn = completedTurn;
+    source.emit({ type: "conversation.detail.invalidated", conversationId: primaryId });
+    await waitFor(() => expect(completedDetailsServed).toBeGreaterThan(0));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(hook.result.current.conversation?.status).toBe("completed");
+
+    hook.rerender({ current: shellSnapshot("completed", completedTurn) });
+    expect(hook.result.current.conversation?.status).toBe("completed");
+    expect(hook.result.current.conversation?.latestTurn?.status).toBe("completed");
+  });
+
   it("does not reload detail for bounded activity-shell refreshes", async () => {
     const source = createEventSource();
     const request = vi.fn(async (

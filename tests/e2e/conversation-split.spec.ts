@@ -1,5 +1,5 @@
 // @inertia-e2e-resource primary-display
-import { expect, test } from "@playwright/test";
+import { expect, test, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -10,6 +10,15 @@ import { expectPaneComposerClearOfTerminalHandle, openConversationPaneTool, open
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
+const primaryTitle = "conversation-split fixture";
+const secondaryTitle = "conversation-split companion";
+type ScopedPanes = Awaited<ReturnType<typeof verifyScopedTools>>;
+type ScopedBrowsers = Awaited<ReturnType<typeof verifyScopedBrowsers>>;
+// These checkpoints continue one native session, including both projects,
+// shells, drafts and browser ownership. A failure skips later checkpoints.
+test.describe.configure({ mode: "serial" });
+let scopedPanes: ScopedPanes;
+let scopedBrowsers: ScopedBrowsers;
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -60,18 +69,13 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test("keeps cross-project chats, tools, and terminals independently scoped", async (
-  { browserName: _browserName },
-  testInfo,
-) => {
+async function verifyScopedTools(testInfo: TestInfo) {
   await app.resizeWindow(1440, 920);
   await page.keyboard.press("Escape");
 
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  const primaryTitle = "conversation-split fixture";
-  const secondaryTitle = "conversation-split companion";
 
   await sidebar.locator(".activity-thread-select").filter({ hasText: secondaryTitle }).click({ button: "right" });
   await page.getByRole("menuitem", {
@@ -81,10 +85,10 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const split = page.getByRole("main", {
     name: "Split conversation workspace",
   });
-  let primary = page.getByRole("region", {
+  const primary = page.getByRole("region", {
     name: `Primary chat: Inertia · ${primaryTitle}`,
   });
-  let secondary = page.getByRole("region", {
+  const secondary = page.getByRole("region", {
     name: `Second chat: Companion · ${secondaryTitle}`,
   });
   await expect(split).toBeVisible();
@@ -357,6 +361,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     contentType: "image/png",
   });
 
+  return { sidebar, split, primary, secondary, primaryTerminalId, secondaryTerminalId };
+}
+
+async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
+  const { primary, secondary } = panes;
   const primaryPreview = await openConversationPaneTool(
     primary,
     primaryTitle,
@@ -679,6 +688,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await primaryPreview.locator('[data-workspace-tab="changes"]').click();
   await secondaryPreview.locator('[data-workspace-tab="changes"]').click();
 
+  return { ...panes, primaryPreviewUrl, secondaryPreviewUrl };
+}
+
+async function verifyPromotion(testInfo: TestInfo, browsers: ScopedBrowsers): Promise<void> {
+  const { sidebar, split, primaryTerminalId, secondaryTerminalId, primaryPreviewUrl, secondaryPreviewUrl } = browsers;
+  let { primary, secondary } = browsers;
   await sidebar.locator("button.activity-thread-select")
     .filter({ hasText: secondaryTitle })
     .click();
@@ -767,4 +782,16 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     level: 1,
   })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);
+}
+
+test("keeps cross-project drafts, tools and live terminals independently scoped", async ({ browserName: _browserName }, testInfo) => {
+  scopedPanes = await verifyScopedTools(testInfo);
+});
+
+test("keeps split browser actions, evidence and attachment previews scoped", async ({ browserName: _browserName }, testInfo) => {
+  scopedBrowsers = await verifyScopedBrowsers(testInfo, scopedPanes);
+});
+
+test("preserves the same drafts, shells and browsers after pane promotion and narrowing", async ({ browserName: _browserName }, testInfo) => {
+  await verifyPromotion(testInfo, scopedBrowsers);
 });

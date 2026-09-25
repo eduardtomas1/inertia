@@ -58,6 +58,7 @@ test.beforeAll(async () => {
         throw new Error("Context fixture requires an active target chat.");
       }
       const targetConversationId = snapshot.activeConversationId;
+      store.updateConversation(targetConversationId, { title: "Provider boundary review" });
       const source = store.createConversation(
         snapshot.activeProjectId,
         `Architecture decisions — ${"cross-platform release context ".repeat(6)}`,
@@ -397,7 +398,11 @@ test("references this chat beside two other chats and keeps what was sent", asyn
   const preview = page.getByRole("region", { name: "Shared chat context" });
   const closePreview = preview.getByRole("button", { name: "Close preview" });
   if (await closePreview.isVisible()) await closePreview.click();
-  await page.getByRole("button", { name: "Remove context from External research" }).click();
+  const target = page.getByRole("button", { name: /^Provider boundary review,/u });
+  const earlier = page.getByRole("button", { name: /^Earlier/u });
+  if (!(await target.isVisible()) && await earlier.isVisible()) await earlier.click();
+  await target.click();
+  await expect(page.getByRole("heading", { name: "Provider boundary review", level: 1 })).toBeVisible();
   await expect(page.getByRole("button", { name: /From External research/u })).toHaveCount(0);
 
   const editor = page.getByLabel("Message", { exact: true });

@@ -538,6 +538,56 @@ process.exit(child.status ?? 1);
   );
 
 
+  it("creates a durable draft reference target and rejects duplicate identities without overwriting", async () => {
+    const { data, workspace } = temporaryWorkspace();
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace);
+    const source = store.shellSnapshot().activeConversationId!;
+    store.createMessage(source, "Reviewed context from the source chat.", "assistant");
+    store.close();
+    const runtime = await startRuntime({ dataDirectory: data, defaultWorkspacePath: workspace,
+      enableProviders: false, ...runtimeIdentity });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
+    );
+    const target = randomUUID();
+    const createId = randomUUID();
+    const payload = { projectId: welcome.snapshot.activeProjectId!, title: "New chat",
+      draftConversationId: target, activate: false };
+    send(client.socket, { type: "conversation.create", requestId: createId, payload });
+    const created = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result" && event.requestId === createId,
+    );
+    expect(created.result).toMatchObject({ kind: "conversation.created", conversationId: target });
+    const contextId = randomUUID();
+    send(client.socket, { type: "conversation.context.create", requestId: contextId, payload: {
+      targetConversationId: target, sourceConversationId: source, acknowledgedWorkspaceDifference: false,
+    } });
+    const referenced = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.result" }> =>
+        event.type === "request.result" && event.requestId === contextId,
+    );
+    expect(referenced.result).toMatchObject({ kind: "conversation.context.packet", packet: {
+      targetConversationId: target, sourceConversationId: source, consumedMessageId: null,
+    } });
+    for (const draftConversationId of [target, "not-a-uuid"]) {
+      const requestId = randomUUID();
+      send(client.socket, { type: "conversation.create", requestId,
+        payload: { ...payload, draftConversationId, title: "Must not overwrite" } });
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+          event.type === "request.error" && event.requestId === requestId,
+      );
+    }
+    const detail = await loadConversationDetail(client.socket, client.events, target);
+    expect(detail.conversation.title).toBe("New chat");
+    expect(detail.conversation.status).toBe("idle");
+    expect(detail.messages).toEqual([]);
+    expect(detail.contextPackets).toHaveLength(1);
+  });
+
   it("loads settled chats directly and reports missing or deleted detail authoritatively", async () => {
     const { root, data, workspace } = temporaryWorkspace();
     const runtime = await startRuntime({

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacket,
@@ -9,6 +9,34 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
+
+export function ChatReferenceConfirmation({ source, onConfirm }: {
+  source: ConversationContextSourceOption;
+  onConfirm(accepted: boolean): void;
+}): React.JSX.Element {
+  const titleId = useId();
+  const cancel = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => { cancel.current?.focus(); }, []);
+  return (
+    <section className="composer-context-request composer-context-confirmation" role="alertdialog"
+      aria-labelledby={titleId} onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onConfirm(false);
+      }}>
+      <strong id={titleId}>Share context from another workspace?</strong>
+      <p>“{source.conversationTitle}” in {source.projectName}</p>
+      <p>From: {source.workspaceLabel}</p>
+      <p>To: {source.targetWorkspaceLabel}</p>
+      <p>Shares a size-limited copy with the agent. The original chat stays unchanged.</p>
+      <footer>
+        <button ref={cancel} type="button" className="secondary-button" onClick={() => onConfirm(false)}>Cancel</button>
+        <button type="button" className="primary-button" onClick={() => onConfirm(true)}>Share chat</button>
+      </footer>
+    </section>
+  );
+}
 
 function packetFromEvent(event: ServerEvent): ConversationContextPacket | null {
   if (event.type !== "request.result") return null;

@@ -11,6 +11,7 @@ import {
 export const conversationCreatePayloadSchema = z
   .object({
     projectId: z.string().uuid(),
+    draftConversationId: z.string().uuid().optional(),
     title: z.string().trim().min(1).max(120),
     providerId: providerIdSchema.optional(),
     modelSelection: modelSelectionSchema.optional(),

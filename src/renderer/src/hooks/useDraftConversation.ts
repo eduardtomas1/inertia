@@ -26,6 +26,7 @@ import {
 import { defaultConversationPayloadForProject } from "../utils/defaultConversationSelection";
 import { projectNameFromPath } from "../lib/format";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { ConversationContextCommandRunner } from "../components/conversation-context/types";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import {
   forgetPersistedDraftConversation,
@@ -54,6 +55,8 @@ type ConversationUpdate = Partial<Pick<
   | "interactionMode"
   | "accessMode"
 >>;
+
+const REFERENCE_DRAFT_CHANGED = "The new chat changed before its reference could be added.";
 
 interface DraftConversationState {
   conversation: Conversation;
@@ -115,6 +118,8 @@ export function useDraftConversation({
       : null;
   });
   const draftRef = useRef(draft);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const selectionWhenDraftOpenedRef = useRef(persistedConversationId);
   const independentDraftRef = useRef(false);
   const explicitModelRef = useRef(false);
@@ -341,8 +346,7 @@ export function useDraftConversation({
           persistedConversationId
           // Opening a global draft leaves the prior chat selected. Refreshing
           // that same selection is not navigation away from the new draft.
-          && (current.materialized !== null
-            || persistedConversationId !== selectionWhenDraftOpenedRef.current)
+          && persistedConversationId !== selectionWhenDraftOpenedRef.current
           && current.materialized?.conversationId !== persistedConversationId
         )
         || snapshot.activeProjectId !== current.conversation.projectId
@@ -443,13 +447,10 @@ export function useDraftConversation({
     replaceDraft(next);
   };
 
-  const materializeAndSend = async (
-    content: string,
-    attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-  ): Promise<TranscriptMessageSendAcceptance | null> => {
-    const sendingDraft = draftRef.current;
-    if (!sendingDraft) return null;
+  const createDraftConversation = async (
+    sendingDraft: DraftConversationState,
+    preserveDraftId: boolean,
+  ): Promise<string> => {
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
@@ -461,6 +462,7 @@ export function useDraftConversation({
         interactionMode: sendingDraft.conversation.interactionMode,
         accessMode: sendingDraft.conversation.accessMode,
         activate: false,
+        ...(preserveDraftId ? { draftConversationId: sendingDraft.conversation.id } : {}),
       },
     });
     if (
@@ -469,9 +471,23 @@ export function useDraftConversation({
     ) {
       throw new Error("The local service returned an unexpected chat response.");
     }
-    const conversationId = creation.result.conversationId;
+    return creation.result.conversationId;
+  };
+
+  const materializeDraft = async (
+    sendingDraft: DraftConversationState,
+    preserveDraftId = false,
+  ): Promise<DraftConversationState> => {
+    const conversationId = preserveDraftId && snapshotRef.current?.conversations.some(({ id, projectId }) => (
+      id === sendingDraft.conversation.id && projectId === sendingDraft.conversation.projectId
+    ))
+      ? sendingDraft.conversation.id
+      : await createDraftConversation(sendingDraft, preserveDraftId);
     const stillOwnsDraft =
       draftRef.current?.conversation.id === sendingDraft.conversation.id;
+    if (preserveDraftId && (conversationId !== sendingDraft.conversation.id || draftRef.current !== sendingDraft)) {
+      throw new Error(REFERENCE_DRAFT_CHANGED);
+    }
     const materializedState: DraftConversationState = {
       conversation: sendingDraft.conversation,
       payload: sendingDraft.payload,
@@ -494,9 +510,51 @@ export function useDraftConversation({
     });
     forgetPersistedDraftConversation(sendingDraft.conversation.id);
     if (stillOwnsDraft) {
-      onMaterialized?.(sendingDraft.conversation.projectId, sendingDraft.conversation.id, conversationId);
+      if (sendingDraft.conversation.id !== conversationId) {
+        onMaterialized?.(sendingDraft.conversation.projectId, sendingDraft.conversation.id, conversationId);
+      }
       replaceDraft(materializedState, false);
     }
+    return materializedState;
+  };
+
+  const runConversationContextCommand: ConversationContextCommandRunner = async (key, command) => {
+    const current = draftRef.current;
+    if (command.type === "conversation.context.create"
+      && current?.conversation.id === command.payload.targetConversationId) {
+      const saved = current.materialized ? current : await materializeDraft(current, true);
+      if (saved.materialized!.conversationId !== current.conversation.id) {
+        throw new Error("Reopen the saved chat before adding a reference.");
+      }
+      if (draftRef.current !== saved) {
+        throw new Error(REFERENCE_DRAFT_CHANGED);
+      }
+      // Reference packets require a durable target. Retain the composer's ID
+      // and draft text, then subscribe through ordinary conversation selection.
+      // No provider turn is started until the user sends their message.
+      await (runNavigationCommand ?? run)("conversation.select", {
+        type: "conversation.select",
+        payload: { conversationId: saved.materialized!.conversationId },
+      });
+      if (draftRef.current?.conversation.id !== current.conversation.id) {
+        throw new Error(REFERENCE_DRAFT_CHANGED);
+      }
+      forgetPersistedMaterializedDraftConversation(saved.materialized!.conversationId);
+      replaceDraft(null, false);
+    }
+    return run(key, command);
+  };
+
+  const materializeAndSend = async (
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ): Promise<TranscriptMessageSendAcceptance | null> => {
+    const sendingDraft = draftRef.current;
+    if (!sendingDraft) return null;
+    const materializedState = await materializeDraft(sendingDraft);
+    const conversationId = materializedState.materialized!.conversationId;
+    const stillOwnsDraft = draftRef.current?.conversation.id === sendingDraft.conversation.id;
 
     try {
       const acceptance = await sendMessage(
@@ -710,5 +768,6 @@ export function useDraftConversation({
     chooseModel,
     sendFromComposer,
     updateConversation,
+    runConversationContextCommand,
   };
 }

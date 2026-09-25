@@ -11,7 +11,9 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
-import { ConversationContextPacketStrip } from "../conversation-context/ConversationContextPacketStrip";
+const ConversationContextPacketStrip = lazy(async () => ({
+  default: (await import("../conversation-context/ConversationContextPacketStrip")).ConversationContextPacketStrip,
+}));
 
 const PreviewCard = lazy(async () => ({
   default: (await import("./ComposerConversationContextCards"))
@@ -20,6 +22,9 @@ const PreviewCard = lazy(async () => ({
 const RequestCard = lazy(async () => ({
   default: (await import("./ComposerConversationContextCards"))
     .ConversationContextRequestCard,
+}));
+const ChatReferenceConfirmation = lazy(async () => ({
+  default: (await import("./ComposerConversationContextCards")).ChatReferenceConfirmation,
 }));
 
 export interface ComposerConversationContextController {
@@ -33,6 +38,8 @@ export interface ComposerConversationContextController {
   isReferencing(): boolean;
   error: string | null;
   previewPacketId: string | null;
+  confirmation: ConversationContextSourceOption | null;
+  confirmReference(accepted: boolean): void;
   referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
   referenceThisChat(): Promise<boolean>;
   togglePreview(packetId: string): void;
@@ -42,6 +49,7 @@ export interface ComposerConversationContextController {
 
 export function useComposerConversationContext(input: {
   conversationId: string;
+  workspaceKey: string;
   conversationTitle: string;
   contextSources: readonly ConversationContextSourceOption[];
   contextPackets: readonly ConversationContextPacketSummary[];
@@ -54,6 +62,7 @@ export function useComposerConversationContext(input: {
     contextSources,
     conversationId,
     conversationTitle,
+    workspaceKey,
     enabled,
     hasVisibleHistory,
     onCommand,
@@ -62,6 +71,25 @@ export function useComposerConversationContext(input: {
   const pendingRequests = useRef(new Map<string, string | null>());
   const [, refresh] = useReducer((revision: number) => revision + 1, 0);
   const [error, setError] = useState<{ conversationId: string; message: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    conversationId: string;
+    workspaceKey: string;
+    source: ConversationContextSourceOption;
+  } | null>(null);
+  const confirmationReply = useRef<((accepted: boolean) => void) | null>(null);
+  const confirmReference = (accepted: boolean): void => {
+    const reply = confirmationReply.current;
+    confirmationReply.current = null;
+    setConfirmation(null);
+    reply?.(accepted);
+  };
+  useEffect(() => {
+    setConfirmation(null);
+    return () => {
+      confirmationReply.current?.(false);
+      confirmationReply.current = null;
+    };
+  }, [conversationId, workspaceKey, enabled]);
   const isReferencing = (): boolean => {
     return pendingRequests.current.has(conversationId)
       && !contextPackets.some(({ id }) => id === pendingRequests.current.get(conversationId));
@@ -120,14 +148,23 @@ export function useComposerConversationContext(input: {
 
   const createReference = async (
     sourceConversationId: string,
-    acknowledgedWorkspaceDifference: boolean,
     label: string,
+    source?: ConversationContextSourceOption,
   ): Promise<boolean> => {
     if (!onCommand) return false;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
     try {
+      const acknowledgedWorkspaceDifference = source?.workspaceRelation === "different-workspace"
+        && await new Promise<boolean>((resolve) => {
+          confirmationReply.current = resolve;
+          setConfirmation({ conversationId, workspaceKey, source });
+        });
+      if (source?.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) {
+        pendingRequests.current.delete(conversationId);
+        return false;
+      }
       const event = await onCommand("conversation.context.create", {
         type: "conversation.context.create",
         payload: {
@@ -156,15 +193,12 @@ export function useComposerConversationContext(input: {
     source: ConversationContextSourceOption,
   ): Promise<boolean> => {
     if (!canAddReference()) return false;
-    const acknowledgedWorkspaceDifference = source.workspaceRelation === "different-workspace"
-      && window.confirm(`Share context from “${source.conversationTitle}” in ${source.projectName} (${source.workspaceLabel}) with this chat (${source.targetWorkspaceLabel})?\n\nThese are different workspaces. The agent will receive a size-limited copy of the source chat.`);
-    if (source.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) return false;
-    return createReference(source.conversationId, acknowledgedWorkspaceDifference, source.conversationTitle);
+    return createReference(source.conversationId, source.conversationTitle, source);
   };
 
   const referenceThisChat = async (): Promise<boolean> => {
     if (!canAddReference()) return false;
-    return createReference(conversationId, false, "This chat");
+    return createReference(conversationId, "This chat");
   };
 
   return {
@@ -181,6 +215,10 @@ export function useComposerConversationContext(input: {
     isReferencing,
     error: error?.conversationId === conversationId ? error.message : null,
     previewPacketId,
+    confirmation: confirmation?.conversationId === conversationId
+      && confirmation.workspaceKey === workspaceKey && enabled
+      ? confirmation.source : null,
+    confirmReference,
     referenceChat,
     referenceThisChat,
     togglePreview: (packetId) => {
@@ -195,22 +233,35 @@ export function useComposerConversationContext(input: {
 export function ComposerConversationContextStrip({
   controller,
   disabled,
+  onConfirmationClosed,
 }: {
   controller: ComposerConversationContextController;
   disabled: boolean;
+  onConfirmationClosed?: () => void;
 }): React.JSX.Element | null {
   if (!controller.enabled) return null;
   return (
     <>
-      <ConversationContextPacketStrip
-        packets={controller.draftContextPackets}
-        disabled={disabled}
-        onPreview={controller.togglePreview}
-        onRemove={(packetId) => {
-          void controller.remove(packetId).catch(() => undefined);
-        }}
-      />
-      {controller.referencing && <p role="status">Adding chat reference…</p>}
+      {controller.draftContextPackets.length > 0 && (
+        <Suspense fallback={null}>
+          <ConversationContextPacketStrip
+            packets={controller.draftContextPackets}
+            disabled={disabled}
+            onPreview={controller.togglePreview}
+            onRemove={(packetId) => {
+              void controller.remove(packetId).catch(() => undefined);
+            }}
+          />
+        </Suspense>
+      )}
+      {controller.confirmation ? (
+        <Suspense fallback={null}>
+          <ChatReferenceConfirmation source={controller.confirmation} onConfirm={(accepted) => {
+            controller.confirmReference(accepted);
+            onConfirmationClosed?.();
+          }} />
+        </Suspense>
+      ) : controller.referencing ? <p role="status">Adding chat reference…</p> : null}
       {controller.error && (
         <p className="composer-limit-warning" role="alert">
           {controller.error}

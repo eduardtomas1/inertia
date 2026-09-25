@@ -119,6 +119,93 @@ describe("useDraftConversation", () => {
     });
   });
 
+  it("persists a reference target with its composer identity before selecting and sharing, without a turn", async () => {
+    const commands: CommandWithoutId[] = [];
+    const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> => {
+      commands.push(command);
+      return command.type === "conversation.create"
+        ? { type: "request.result", requestId: "create", result: {
+            kind: "conversation.created", conversationId: command.payload.draftConversationId!,
+          } }
+        : { type: "request.ok", requestId: "context" };
+    });
+    const sendMessage = vi.fn();
+    const hook = renderHook(() => useDraftConversation({
+      snapshot, settings: defaultSettings, run, sendMessage,
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation!.id;
+    const command = { type: "conversation.context.create", payload: {
+      sourceConversationId: conversationId, targetConversationId: draftId,
+      acknowledgedWorkspaceDifference: true,
+    } } as const;
+    await act(async () => { await hook.result.current.runConversationContextCommand("conversation.context.create", command); });
+    expect(commands.map(({ type }) => type)).toEqual([
+      "conversation.create", "conversation.select", "conversation.context.create",
+    ]);
+    expect(commands[0]).toMatchObject({ payload: { draftConversationId: draftId, activate: false } });
+    expect(commands[1]).toMatchObject({ payload: { conversationId: draftId } });
+    expect(commands[2]).toEqual(command);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(hook.result.current.conversation).toBeNull();
+  });
+
+  it("does not attach or select when the draft is replaced during target creation", async () => {
+    let finishCreation!: (event: ServerEvent) => void;
+    const run = vi.fn(() => new Promise<ServerEvent>((resolve) => { finishCreation = resolve; }));
+    const hook = renderHook(() => useDraftConversation({
+      snapshot, settings: defaultSettings, run, sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const firstId = hook.result.current.conversation!.id;
+    const request = hook.result.current.runConversationContextCommand("conversation.context.create", {
+      type: "conversation.context.create", payload: {
+        sourceConversationId: conversationId, targetConversationId: firstId,
+        acknowledgedWorkspaceDifference: false,
+      },
+    });
+    act(() => hook.result.current.start(projectId));
+    const secondId = hook.result.current.conversation!.id;
+    await act(async () => {
+      finishCreation({ type: "request.result", requestId: "create", result: {
+        kind: "conversation.created", conversationId: firstId,
+      } });
+      await expect(request).rejects.toThrow("new chat changed");
+    });
+    expect(run).toHaveBeenCalledOnce();
+    expect(hook.result.current.conversation?.id).toBe(secondId);
+  });
+
+  it("retains the draft after a selection failure and retries without creating another chat", async () => {
+    const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> =>
+      command.type === "conversation.create"
+        ? { type: "request.result", requestId: "create", result: {
+            kind: "conversation.created", conversationId: command.payload.draftConversationId!,
+          } }
+        : { type: "request.ok", requestId: "context" });
+    const navigate = vi.fn().mockRejectedValueOnce(new Error("Disconnected"))
+      .mockResolvedValue({ type: "request.ok", requestId: "select" });
+    const hook = renderHook(() => useDraftConversation({
+      snapshot, settings: defaultSettings, run, runNavigationCommand: navigate, sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation!.id;
+    const command = { type: "conversation.context.create", payload: {
+      sourceConversationId: conversationId, targetConversationId: draftId,
+      acknowledgedWorkspaceDifference: false,
+    } } as const;
+    await act(async () => {
+      await expect(hook.result.current.runConversationContextCommand("conversation.context.create", command)).rejects.toThrow("Disconnected");
+    });
+    expect(hook.result.current.conversation?.id).toBe(draftId);
+    await act(async () => { await hook.result.current.runConversationContextCommand("conversation.context.create", command); });
+    expect(run.mock.calls.map(([, value]) => value.type)).toEqual(["conversation.create", "conversation.context.create"]);
+    expect(navigate).toHaveBeenCalledTimes(2);
+  });
+
   it("restores a draft's identity and composer storage after a cross-project search", () => {
     const values = new Map<string, string>();
     vi.mocked(window.localStorage.getItem).mockImplementation((key) => values.get(key) ?? null);

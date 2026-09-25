@@ -135,7 +135,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -174,8 +174,7 @@ export const Composer = memo(function Composer({
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
   const { menu, dismissMenu } = menuController;
-  useNativePreviewSuspension(menu !== null);
-  useNativePreviewSuspension(conversationContext.previewPacketId !== null || agentContextRequest !== null);
+  useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const routeCancelRef = useRef<HTMLButtonElement>(null);
@@ -1027,6 +1026,7 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
+        <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
         {goal && (
           <Suspense fallback={null}>

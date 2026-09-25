@@ -62,7 +62,7 @@ describe("composer chat references", () => {
   it("keeps a cross-workspace mention until the user confirms the named source and destination", async () => {
     const user = userEvent.setup();
     const current = conversation("cross-workspace-reference");
-    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const confirm = vi.fn();
     vi.stubGlobal("confirm", confirm);
     const onCommand = vi.fn(async () => packetResult(current.id));
     render(<Composer {...composerProps(current, {
@@ -75,14 +75,49 @@ describe("composer chat references", () => {
     await user.click(option);
     expect(onCommand).not.toHaveBeenCalled();
     expect(editor).toHaveValue("Explain @Architect");
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("/workspace/other"));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("/workspace/inertia"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Share context from another workspace?" });
+    expect(dialog).toHaveTextContent("/workspace/other");
+    expect(dialog).toHaveTextContent("/workspace/inertia");
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(editor).toHaveFocus();
     // The mention remains available for another deliberate selection.
     fireEvent.change(editor, { target: { value: "Explain @Architec" } });
     await user.click(await screen.findByRole("option", { name: /Architecture decisions/u }));
+    await user.click(screen.getByRole("button", { name: "Share chat" }));
+    expect(confirm).not.toHaveBeenCalled();
+    expect(editor).toHaveFocus();
     expect(onCommand).toHaveBeenCalledWith("conversation.context.create", expect.objectContaining({
       payload: expect.objectContaining({ acknowledgedWorkspaceDifference: true }),
     }));
+  });
+
+  it.each(["conversation", "project"])("cancels unconfirmed sharing when the %s changes", async (change) => {
+    const user = userEvent.setup();
+    const current = conversation(`reference-owner-${change}`);
+    const onCommand = vi.fn();
+    const props = { contextSources: [{ ...sourceOption, workspaceRelation: "different-workspace" as const }],
+      onConversationContextCommand: onCommand };
+    const view = render(<Composer {...composerProps(current, props)} />);
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "Explain @Architect");
+    await user.click(await screen.findByRole("option", { name: /Architecture decisions/u }));
+    await screen.findByRole("alertdialog");
+    view.rerender(<Composer {...composerProps({ ...current,
+      ...(change === "conversation" ? { id: "next-chat" } : { projectId: "next-project" }),
+    }, props)} />);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await act(async () => {});
+    expect(onCommand).not.toHaveBeenCalled();
+    const editor = screen.getByLabelText("Message", { exact: true });
+    await user.clear(editor);
+    await user.type(editor, "Continue here");
+    expect(editor).toHaveValue("Continue here");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    view.rerender(<Composer {...composerProps(current, props)} />);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(onCommand).not.toHaveBeenCalled();
   });
 
   it.each(["rejected", "unavailable", "wrong-owner"])("ends a %s preview load and allows retry and dismissal", async (failure) => {

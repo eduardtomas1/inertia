@@ -132,6 +132,7 @@ export class ConversationCreationService {
         payload.title,
         {
           ...payload,
+          id: payload.draftConversationId,
           providerId,
           modelSelection: selection,
           branch: status.branch,
@@ -164,6 +165,7 @@ export class ConversationCreationService {
       payload.title,
       {
         ...payload,
+        id: payload.draftConversationId,
         providerId,
         modelSelection: selection,
         branch: projectStatus?.branch ?? null,

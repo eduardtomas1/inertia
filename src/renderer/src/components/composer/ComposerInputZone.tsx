@@ -274,6 +274,9 @@ export function ComposerInputZone({
           && currentDraft.current.message === message && textareaRef.current.value === message) {
           onMessageChange(message.replace(/@[^\s@]*$/u, ""));
         }
+        requestAnimationFrame(() => {
+          if (currentDraft.current.conversationId === conversationId) textareaRef.current?.focus();
+        });
       });
     } else {
       onMessageChange(message.replace(
@@ -281,8 +284,8 @@ export function ComposerInputZone({
         `@${option.entry.path}${option.entry.kind === "directory" ? "/" : " "}`,
       ));
       if (option.entry.kind === "file") onAddFileReference(option.entry.path);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
-    requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
   const moveSlashHighlight = (
@@ -312,7 +315,10 @@ export function ComposerInputZone({
 
   return (
     <>
-      <div className="composer-input-zone" data-composer-zone="input">
+      <div className="composer-input-zone" data-composer-zone="input"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) textareaRef.current?.focus();
+        }}>
         {contextCards}
         {!routeReadiness.ready && (
           <div

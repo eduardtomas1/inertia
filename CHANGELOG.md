@@ -16,6 +16,13 @@ The useful changes in each Inertia release, in plain language.
   state when returning to it.
 - Keep attached chat-context cards and previews inside the composer, including
   narrow layouts and enlarged text.
+- Type `@this-chat` to hand the agent this chat's own earlier messages when it
+  loses track. Reference up to three chats per message, each chat once.
+- Referenced chats carry more of the conversation: your opening request and
+  every turn's request and answer come first, long messages keep their start
+  and end, and small references leave their unused room to larger ones.
+- Chat references shrink to fit beside large attachments instead of failing
+  the send, and each sent message keeps an exact record of what was shared.
 - Keep the **Thinking** strip readable with Claude. It no longer flickers,
   shows whole sentences long enough to read, and holds the current thought
   through short tool calls. The full reasoning stays in its summary.

@@ -42,6 +42,7 @@ import type {
 } from "../../shared/backend-probe";
 import type { ContinuationReasonCode } from "../../shared/continuation-policy";
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
+import type { ConversationContextDelivery } from "./conversation-context-transport";
 import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 
 export interface NewConversationOptions {
@@ -149,6 +150,7 @@ export interface BeginAgentTurnInput
   executionContext?: PersistedTurnExecutionContext;
   /** Opaque user-authorized chat context claimed atomically with this message. */
   conversationContextPacketIds?: readonly string[];
+  conversationContextDeliveries?: readonly ConversationContextDelivery[];
   contextRequestId?: string;
   requestedAt?: string;
 }

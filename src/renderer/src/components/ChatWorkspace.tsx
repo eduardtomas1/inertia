@@ -447,6 +447,8 @@ export function ChatWorkspace({
       turnId: queueTurnOwner.id,
     })];
   const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const hasVisibleHistory = ownedMessages.some(({ role }) =>
+    role === "user" || role === "assistant");
   const stopTurn = latestTurnSummary
     ? ownedTurns.find(({ id }) => id === latestTurnSummary.id) ?? null
     : ownedTurns.at(-1) ?? null;
@@ -1068,6 +1070,7 @@ export function ChatWorkspace({
           promptContext={promptContext}
           contextSources={contextSources}
           contextPackets={contextPackets}
+          hasVisibleHistory={hasVisibleHistory}
           agentContextRequest={agentContextRequest}
           onConversationContextCommand={onConversationContextCommand}
           previewContextUrl={previewContextUrl}

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
+import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
@@ -136,19 +137,27 @@ export function UserRequestLayer({
       />
       {contextPackets.length > 0 && (
         <div className="sent-context" aria-label="Shared chat context">
-          {contextPackets.map((packet) => (
-            <span key={packet.id} data-source-state={packet.sourceState}>
-              <MessagesSquare size={13} aria-hidden="true" />
-              <span>
-                <strong>Context from {packet.sourceConversationTitle}</strong>
-                <small>
-                  {packet.sourceState === "deleted"
-                    ? "Source deleted · immutable sent excerpt"
-                    : `${packet.sourceProjectName} · ${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
-                </small>
+          {contextPackets.map((packet) => {
+            const own = isOwnConversationContext(packet);
+            const count = `${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`;
+            return (
+              <span key={packet.id} data-source-state={packet.sourceState}>
+                <MessagesSquare size={13} aria-hidden="true" />
+                <span>
+                  <strong>
+                    {own ? "Earlier messages from this chat" : `Context from ${packet.sourceConversationTitle}`}
+                  </strong>
+                  <small>
+                    {packet.sourceState === "deleted"
+                      ? "Source deleted · immutable sent excerpt"
+                      : own
+                        ? count
+                        : `${packet.sourceProjectName} · ${count}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
+                  </small>
+                </span>
               </span>
-            </span>
-          ))}
+            );
+          })}
         </div>
       )}
     </article>

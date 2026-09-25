@@ -1,9 +1,10 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacket,
   ServerEvent,
 } from "@shared/contracts";
+import { isOwnConversationContext } from "@shared/conversation-context";
 import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
@@ -84,6 +85,18 @@ export function ConversationContextPreviewCard({
     return () => { active = false; };
   }, [packetId, targetConversationId, onCommand, attempt]);
 
+  const gapAt = (index: number): React.JSX.Element | null => (
+    packet && (packet.omissions?.earlierMessages ?? 0) > 0 && packet.omissions!.gapIndex === index
+      ? (
+        <li data-role="gap">
+          <small>
+            {packet.omissions!.earlierMessages} earlier{" "}
+            {packet.omissions!.earlierMessages === 1 ? "message" : "messages"} omitted
+          </small>
+        </li>
+      )
+      : null
+  );
   return (
     <section className="composer-context-preview" aria-label="Shared chat context">
       <button type="button" onClick={onDismiss}>Close preview</button>
@@ -91,28 +104,42 @@ export function ConversationContextPreviewCard({
         ? (
           <>
             <header>
-              <strong>{packet.sourceConversationTitle}</strong>
+              <strong>
+                {isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle}
+              </strong>
               <small>
-                {packet.sourceProjectName} · {packet.messageCount}{" "}
+                {isOwnConversationContext(packet) ? "Earlier messages" : packet.sourceProjectName}
+                {" · "}{packet.messageCount}{" "}
                 {packet.messageCount === 1 ? "message" : "messages"}
                 {packet.droppedMessageCount > 0
-                  ? ` · ${packet.droppedMessageCount} oldest omitted`
+                  ? ` · ${packet.droppedMessageCount} omitted`
                   : ""}
               </small>
+              {(packet.omissions?.intermediateAgentUpdates ?? 0) > 0 && (
+                <small>
+                  {packet.omissions!.intermediateAgentUpdates} intermediate agent{" "}
+                  {packet.omissions!.intermediateAgentUpdates === 1 ? "update" : "updates"}
+                  {" "}left out so more turns fit.
+                </small>
+              )}
             </header>
             <ol>
-              {packet.excerpts.map((excerpt) => (
-                <li key={excerpt.sourceMessageId} data-role={excerpt.role}>
-                  <span>{excerpt.role === "user" ? "You" : "Agent"}</span>
-                  <p>{excerpt.content}</p>
-                  {excerpt.truncated && <small>Message shortened to fit the shared context.</small>}
-                  {excerpt.attachments && excerpt.attachments.length > 0 && (
-                    <small>
-                      {excerpt.attachments.map(({ name }) => name).join(", ")}
-                    </small>
-                  )}
-                </li>
+              {packet.excerpts.map((excerpt, index) => (
+                <Fragment key={excerpt.sourceMessageId}>
+                  {gapAt(index)}
+                  <li data-role={excerpt.role}>
+                    <span>{excerpt.role === "user" ? "You" : "Agent"}</span>
+                    <p>{excerpt.content}</p>
+                    {excerpt.truncated && <small>Message shortened to fit the shared context.</small>}
+                    {excerpt.attachments && excerpt.attachments.length > 0 && (
+                      <small>
+                        {excerpt.attachments.map(({ name }) => name).join(", ")}
+                      </small>
+                    )}
+                  </li>
+                </Fragment>
               ))}
+              {gapAt(packet.excerpts.length)}
             </ol>
           </>
         )

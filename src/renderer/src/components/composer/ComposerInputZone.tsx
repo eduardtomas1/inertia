@@ -95,8 +95,10 @@ export interface ComposerInputZoneProps {
   onMentionQuery: (query: string) => void;
   mentionResults: WorkspaceEntry[];
   chatSuggestions: readonly ConversationContextSourceOption[];
+  thisChatTitle: string | null;
   onAddFileReference: (path: string) => void;
   onReferenceChat: (source: ConversationContextSourceOption) => Promise<boolean>;
+  onReferenceThisChat: () => Promise<boolean>;
   onSkillSelectionChange?: (editor: HTMLTextAreaElement) => void;
   skillOpen: boolean;
   activeSkill: AgentSkillSummary | null;
@@ -160,8 +162,10 @@ export function ComposerInputZone({
   onMentionQuery,
   mentionResults,
   chatSuggestions,
+  thisChatTitle,
   onAddFileReference,
   onReferenceChat,
+  onReferenceThisChat,
   onSkillSelectionChange,
   skillOpen,
   activeSkill,
@@ -223,8 +227,15 @@ export function ComposerInputZone({
     .filter(({ conversationTitle, archived }) =>
       !archived && conversationTitle.toLowerCase().includes(mentionQuery))
     .slice(0, 4);
+  const thisChatMatches = thisChatTitle !== null && mentionQuery.length > 0 && (
+    "this-chat".startsWith(mentionQuery)
+    || "this chat".startsWith(mentionQuery)
+    || thisChatTitle.toLowerCase().includes(mentionQuery)
+  );
+  const chatOptionCount = chatMentionResults.length + (thisChatMatches ? 1 : 0);
   const visibleMentionResults = mentionResults.slice(0, 8);
   const mentionOptions = [
+    ...(thisChatMatches ? [{ id: "this-chat", kind: "this-chat" as const }] : []),
     ...chatMentionResults.map((source) => ({
       id: `chat:${source.conversationId}`,
       kind: "chat" as const,
@@ -265,8 +276,8 @@ export function ComposerInputZone({
     setHighlightedMentionId(mentionOptions[nextIndex]!.id);
   };
   const acceptMention = (option: (typeof mentionOptions)[number]): void => {
-    if (option.kind === "chat") {
-      void onReferenceChat(option.source).then((created) => {
+    if (option.kind === "chat" || option.kind === "this-chat") {
+      void (option.kind === "chat" ? onReferenceChat(option.source) : onReferenceThisChat()).then((created) => {
         // Completion belongs to the draft that requested this reference. Keep
         // the mention on failure, after navigation, or after further typing.
         if (created && textareaRef.current?.isConnected
@@ -576,16 +587,16 @@ export function ComposerInputZone({
           id={mentionListboxId}
           className="composer-suggestion-menu"
           role="listbox"
-          aria-label={chatMentionResults.length > 0
+          aria-label={chatOptionCount > 0
             ? "Chats and project files"
             : "Project files"}
         >
-          {chatMentionResults.length > 0 && (
+          {chatOptionCount > 0 && (
             <div className="popover-title">Reference a chat</div>
           )}
           {mentionOptions.map((option, index) => (
             <Fragment key={option.id}>
-              {option.kind === "file" && index === chatMentionResults.length && (
+              {option.kind === "file" && index === chatOptionCount && (
                 <div className="popover-title">Reference a file</div>
               )}
               <button
@@ -596,7 +607,17 @@ export function ComposerInputZone({
                 onMouseEnter={() => setHighlightedMentionId(option.id)}
                 onClick={() => acceptMention(option)}
               >
-                {option.kind === "chat"
+                {option.kind === "this-chat"
+                  ? (
+                    <>
+                      <span className="composer-suggestion-chat">
+                        <MessagesSquare size={11} aria-hidden="true" />
+                        This chat
+                      </span>
+                      <small>Earlier messages · {thisChatTitle}</small>
+                    </>
+                  )
+                  : option.kind === "chat"
                   ? (
                     <>
                       <span className="composer-suggestion-chat">

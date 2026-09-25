@@ -477,7 +477,8 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
 }
 function conversationContextPacket(value: unknown): boolean {
   if (!conversationContextPacketSummary(value) || !arrayOf(value.excerpts, conversationContextExcerpt)
-    || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")) return false;
+    || (value.excerpts as unknown[]).length !== value.messageCount || !uniqueRecordField(value.excerpts as unknown[], "sourceMessageId")
+    || (value.omissions !== undefined && !(record(value.omissions) && ["earlierMessages", "intermediateAgentUpdates", "gapIndex"].every((key) => integerFieldAtLeast(value.omissions as UnknownRecord, key)) && ((value.omissions as UnknownRecord).gapIndex as number) <= (value.messageCount as number)))) return false;
   const excerpts = value.excerpts as UnknownRecord[];
   let bytes = 0; let characters = 0;
   for (const excerpt of excerpts) { const content = excerpt.content as string; bytes += utf8Length(content); characters += content.length; }

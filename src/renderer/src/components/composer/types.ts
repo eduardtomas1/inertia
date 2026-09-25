@@ -59,6 +59,7 @@ export interface ComposerProps {
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
+  hasVisibleHistory?: boolean;
   agentContextRequest?: AgentConversationContextRequest | null;
   onConversationContextCommand?: ConversationContextCommandRunner;
   previewContextUrl?: string | null;

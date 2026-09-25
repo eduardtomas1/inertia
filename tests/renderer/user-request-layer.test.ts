@@ -268,6 +268,35 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("2 messages");
   });
 
+  it("marks a sent reference to this chat's earlier messages and what was omitted", () => {
+    const html = renderRequest("Pick up where we left off.", {
+      contextPackets: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        sourceConversationId: conversationId,
+        targetConversationId: conversationId,
+        sourceProjectId: "55555555-5555-4555-8555-555555555555",
+        targetProjectId: "55555555-5555-4555-8555-555555555555",
+        sourceConversationTitle: "Importer plan",
+        sourceProjectName: "Inertia",
+        sourceWorkspaceLabel: "Project checkout · main",
+        targetWorkspaceLabel: "Project checkout · main",
+        workspaceRelation: "same-workspace",
+        note: null,
+        messageCount: 40,
+        characterCount: 20_480,
+        droppedMessageCount: 12,
+        createdAt: requestedAt,
+        consumedMessageId: "user-1",
+        consumedAt: requestedAt,
+        sourceState: "available",
+      }],
+    });
+
+    expect(html).toContain("Earlier messages from this chat");
+    expect(html).toContain("40 messages · 12 omitted");
+    expect(html).not.toContain("Context from Importer plan");
+  });
+
   it("uses the shared width and radius tokens with intentional narrow behavior", () => {
     expect(css).toMatch(
       /\.response-turn\s*>\s*\.turn-user-request\s*\{[^}]*max-width:\s*var\(--user-request-max-width\);[^}]*border:\s*0;[^}]*border-radius:\s*var\(--radius-medium\);[^}]*background:\s*var\(--user-request-tint\);[^}]*box-shadow:\s*none;/su,

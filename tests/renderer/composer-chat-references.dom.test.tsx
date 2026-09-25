@@ -385,7 +385,7 @@ describe("composer chat references", () => {
       .toBeInTheDocument();
   });
 
-  it("states how many oldest messages the budget omitted", () => {
+  it("states how many messages the budget omitted", () => {
     const current = conversation("chat-reference-chip");
     render(<Composer {...composerProps(current, {
       contextPackets: [packetSummary({
@@ -395,7 +395,7 @@ describe("composer chat references", () => {
       onConversationContextCommand: vi.fn(async () => packetResult()),
     })} />);
 
-    expect(screen.getByText(/7 oldest omitted/u)).toBeInTheDocument();
+    expect(screen.getByText(/23 messages · 7 omitted/u)).toBeInTheDocument();
   });
 
   it("answers an agent context request without reopening a picker panel", async () => {
@@ -468,5 +468,152 @@ describe("composer chat references", () => {
         acknowledgedWorkspaceDifference: false,
       },
     });
+  });
+
+  it("references this chat from the mention menu once it has visible history", async () => {
+    const user = userEvent.setup();
+    const current = conversation("importer-plan");
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      result: {
+        kind: "conversation.context.packet",
+        packet: packetSummary({ sourceConversationId: current.id, targetConversationId: current.id }),
+      },
+    } as unknown as ServerEvent));
+    const props = composerProps(current, {
+      contextSources: [sourceOption],
+      onConversationContextCommand: onCommand,
+    });
+    const view = render(<Composer {...props} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "@this");
+    expect(screen.queryByRole("option", { name: /This chat/u })).not.toBeInTheDocument();
+
+    view.rerender(<Composer {...props} hasVisibleHistory />);
+    await user.clear(editor);
+    await user.type(editor, "Recover @this-chat");
+    const option = within(await screen.findByRole("listbox", { name: "Chats and project files" }))
+      .getByRole("option", { name: /This chat/u });
+    expect(option).toHaveTextContent("Earlier messages · importer-plan");
+    await user.click(option);
+
+    expect(editor).toHaveValue("Recover ");
+    expect(onCommand).toHaveBeenCalledWith("conversation.context.create", {
+      type: "conversation.context.create",
+      payload: {
+        sourceConversationId: current.id,
+        targetConversationId: current.id,
+        acknowledgedWorkspaceDifference: false,
+      },
+    });
+  });
+
+  it("labels this chat's reference and offers each chat once, up to three references", async () => {
+    const user = userEvent.setup();
+    const current = conversation("importer-plan");
+    const review = {
+      ...sourceOption,
+      conversationId: "99999999-9999-4999-8999-999999999999",
+      conversationTitle: "Architecture review",
+    };
+    const own = packetSummary({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      sourceConversationId: current.id,
+      targetConversationId: current.id,
+      droppedMessageCount: 4,
+    });
+    const fromSource = packetSummary({ targetConversationId: current.id });
+    const props = composerProps(current, {
+      contextSources: [sourceOption, review],
+      contextPackets: [own, fromSource],
+      hasVisibleHistory: true,
+      onConversationContextCommand: vi.fn(async () => packetResult()),
+    });
+    const view = render(<Composer {...props} />);
+
+    expect(screen.getByRole("button", { name: /^This chat/u })).toBeVisible();
+    expect(screen.getByText("Earlier messages · 23 messages · 4 omitted")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove this chat's earlier messages" })).toBeVisible();
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    await user.type(editor, "@Archi");
+    const options = within(await screen.findByRole("listbox", { name: "Chats and project files" }))
+      .getAllByRole("option");
+    expect(options.map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Architecture review"),
+    ]);
+    await user.clear(editor);
+    await user.type(editor, "@this");
+    expect(screen.queryByRole("option", { name: /This chat/u })).not.toBeInTheDocument();
+
+    view.rerender(<Composer {...props} contextPackets={[own, fromSource, packetSummary({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sourceConversationId: review.conversationId,
+      targetConversationId: current.id,
+    })]} />);
+    await user.clear(editor);
+    await user.type(editor, "@Archi");
+    expect(screen.queryByRole("listbox", { name: "Chats and project files" })).not.toBeInTheDocument();
+  });
+
+  it("shows where earlier messages and intermediate updates were left out", async () => {
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: {
+        kind: "conversation.context.packet",
+        packet: {
+          ...packetSummary({ messageCount: 2, droppedMessageCount: 15 }),
+          excerpts: [
+            { sourceMessageId: "opening", role: "user", content: "Build the importer.", truncated: false },
+            { sourceMessageId: "latest", role: "assistant", content: "Phase one shipped.", truncated: false },
+          ],
+          omissions: { earlierMessages: 12, intermediateAgentUpdates: 3, gapIndex: 1 },
+        },
+      },
+    } as unknown as ServerEvent));
+    render(<ConversationContextPreviewCard
+      packetId={packetSummary().id}
+      targetConversationId={packetSummary().targetConversationId}
+      onCommand={onCommand}
+      onDismiss={() => undefined}
+    />);
+
+    const items = await screen.findAllByRole("listitem");
+    expect(items.map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Build the importer."),
+      "12 earlier messages omitted",
+      expect.stringContaining("Phase one shipped."),
+    ]);
+    expect(screen.getByText("3 intermediate agent updates left out so more turns fit.")).toBeVisible();
+  });
+
+  it("marks omitted later messages after the only retained opening request", async () => {
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: {
+        kind: "conversation.context.packet",
+        packet: {
+          ...packetSummary({ messageCount: 1, droppedMessageCount: 9 }),
+          excerpts: [
+            { sourceMessageId: "opening", role: "user", content: "Build the importer.", truncated: false },
+          ],
+          omissions: { earlierMessages: 9, intermediateAgentUpdates: 0, gapIndex: 1 },
+        },
+      },
+    } as unknown as ServerEvent));
+    render(<ConversationContextPreviewCard
+      packetId={packetSummary().id}
+      targetConversationId={packetSummary().targetConversationId}
+      onCommand={onCommand}
+      onDismiss={() => undefined}
+    />);
+
+    const items = await screen.findAllByRole("listitem");
+    expect(items.map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Build the importer."),
+      "9 earlier messages omitted",
+    ]);
   });
 });

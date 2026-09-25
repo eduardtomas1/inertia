@@ -179,13 +179,7 @@ export function createTurnInteractionCommandHandler(
                 });
             return "handled";
           }
-          resolvedTurnContext = {
-            ...command.payload.context,
-            conversationContexts: contextService.materializeForTurn(
-              conversation.id,
-              contextPacketIds,
-            ),
-          };
+          contextService.assertSendable(conversation.id, contextPacketIds);
         }
         messageSendStage = "active-route";
         if (dependencies.providerTerminalResumes.isActive(conversation.id)) {

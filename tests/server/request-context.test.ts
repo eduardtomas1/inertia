@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 
+import { MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
 import {
   BUILD_MODE_INSTRUCTION,
   MAX_EXECUTION_PAYLOAD_BYTES,
@@ -210,6 +211,13 @@ describe("bounded structured turn request context", () => {
       source: { conversationTitle: "Architecture notes" },
       excerpts: [{ role: "user", content: "Keep the existing fallback." }],
     });
+    const delivery = {
+      packetId: "11111111-1111-4111-8111-111111111111",
+      budgetBytes: 4_096,
+      messageCount: 1,
+      characterCount: 27,
+      omittedMessageCount: 0,
+    };
     const result = assembleTurnRequest({
       cwd,
       visibleContent: "Implement the approved decision.",
@@ -217,17 +225,21 @@ describe("bounded structured turn request context", () => {
         conversationContextPacketIds: [
           "11111111-1111-4111-8111-111111111111",
         ],
-        conversationContexts: [{
+      },
+      conversationContexts: () => ({
+        blocks: [{
           packetId: "11111111-1111-4111-8111-111111111111",
           label: "Chat context · Architecture notes · 1 message",
           content: packetContent,
           blockIndex: 0,
           blockCount: 1,
         }],
-      },
+        deliveries: [delivery],
+      }),
     });
 
     expect(result.executionPrompt).toContain(JSON.stringify(packetContent));
+    expect(result.conversationContextDeliveries).toEqual([delivery]);
     expect(result.persistence.manifest.references).toEqual([
       expect.objectContaining({
         kind: "attachment",
@@ -383,6 +395,66 @@ describe("bounded structured turn request context", () => {
     expect(result.persistence.manifest.contextReferenceCount).toBe(4);
     expect(result.persistence.manifest.assembledPayloadBytes)
       .toBeLessThanOrEqual(MAX_EXECUTION_PAYLOAD_BYTES);
+  });
+
+  it("gives referenced chats only the capacity the rest of the request leaves", async () => {
+    const cwd = await workspace();
+    const capacities: number[] = [];
+    const packetId = "22222222-2222-4222-8222-222222222222";
+    const conversationContexts = (capacityBytes: number) => {
+      capacities.push(capacityBytes);
+      const blocks = [];
+      let remaining = capacityBytes;
+      while (blocks.length < 3 && remaining > 4_096) {
+        const size = Math.min(60 * 1024, remaining - 1_024);
+        blocks.push({
+          packetId,
+          label: `Chat context · Long history · part ${blocks.length + 1}`,
+          content: "c".repeat(size),
+          blockIndex: blocks.length,
+          blockCount: 3,
+        });
+        remaining -= size + 1_024;
+      }
+      return {
+        blocks,
+        deliveries: [{
+          packetId,
+          budgetBytes: capacityBytes,
+          messageCount: 1,
+          characterCount: 1,
+          omittedMessageCount: 0,
+        }],
+      };
+    };
+
+    assembleTurnRequest({ cwd, visibleContent: "Use the long history.", conversationContexts });
+    const crowded = assembleTurnRequest({
+      cwd,
+      visibleContent: "u".repeat(64 * 1024),
+      documentContexts: Array.from({ length: 4 }, (_, index) => ({
+        attachmentId: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+        label: `Document · brief-${index + 1}.txt`,
+        content: "a".repeat(24 * 1024),
+        truncated: true,
+      })),
+      internalInstructions: [
+        { label: "one", text: "i".repeat(16 * 1024) },
+        { label: "two", text: "j".repeat(16 * 1024) },
+      ],
+      conversationContexts,
+    });
+
+    expect(capacities[0]).toBe(MAX_CONVERSATION_CONTEXT_TURN_BYTES);
+    expect(capacities[1]).toBeGreaterThan(0);
+    expect(capacities[1]).toBeLessThan(capacities[0]! / 4);
+    expect(crowded.persistence.manifest.references.filter(({ label }) =>
+      label.startsWith("Chat context"))).not.toHaveLength(0);
+    expect(crowded.persistence.manifest.assembledPayloadBytes)
+      .toBeLessThanOrEqual(MAX_EXECUTION_PAYLOAD_BYTES);
+    expect(crowded.conversationContextDeliveries).toEqual([
+      expect.objectContaining({ packetId, budgetBytes: capacities[1] }),
+    ]);
   });
 
   it("rejects inconsistent manifest totals during privileged debug decoding", () => {

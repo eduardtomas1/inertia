@@ -647,6 +647,11 @@
       "version": 78,
       "name": "PersistWorkingIndicator",
       "digest": "24029a846c379da70172fc7697bbd7c08cb873e6572934c47d578f5517a01e61"
+    },
+    {
+      "version": 79,
+      "name": "ReferenceThisChatAndFreezeContextDeliveries",
+      "digest": "fccd0531b10107c3a8e0ac46478c359fa691bec0ebfb97ae7da05b476c8223d9"
     }
   ]
 }

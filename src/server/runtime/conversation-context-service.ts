@@ -5,6 +5,7 @@ import type {
 } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type { ConversationContextReplay } from "../persistence/conversation-context-packet-repository";
+import type { ConversationContextDelivery } from "../persistence/conversation-context-transport";
 import type {
   ConversationContextAuthorizationScope,
   ConversationContextSelection,
@@ -108,11 +109,17 @@ export class ConversationContextService {
   materializeForTurn(
     targetConversationId: string,
     packetIds: readonly string[],
-  ): MaterializedConversationContext[] {
+    totalBytes?: number,
+  ): { blocks: MaterializedConversationContext[]; deliveries: ConversationContextDelivery[] } {
     return this.store.contextPackets.materialize(
       targetConversationId,
       packetIds,
+      totalBytes,
     );
+  }
+
+  assertSendable(targetConversationId: string, packetIds: readonly string[]): void {
+    this.store.contextPackets.assertSendable(targetConversationId, packetIds);
   }
 
   replayAcceptance(

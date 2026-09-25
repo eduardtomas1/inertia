@@ -5,12 +5,12 @@
   "allocation": "Transfer 2,900 bytes from each overlapping initial/core ceiling into the two deferred Git closures (2,850 + 50). No combined allowance increase; all other ceilings stay unchanged.",
   "measurements": {
     "mainWorkbenchFirstLoadJavaScript": {
-      "emittedBytes": 828784,
+      "emittedBytes": 827981,
       "previousCeilingBytes": 834740.8,
       "newCeilingBytes": 831840.8
     },
     "coreJavaScript": {
-      "emittedBytes": 2155904,
+      "emittedBytes": 2154540,
       "previousCeilingBytes": 2160816.4,
       "newCeilingBytes": 2157916.4
     },

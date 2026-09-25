@@ -58,8 +58,6 @@ function setup() {
     },
     selectionCommandQueue,
     conversationSelectionGenerationRef: generation,
-    startupSurface: "summary",
-    showStartupSurface: vi.fn(),
     updateSplitConversationId: vi.fn(),
     setSidebarOpen,
     setView,

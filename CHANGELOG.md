@@ -12,6 +12,11 @@ The useful changes in each Inertia release, in plain language.
 - Keep fixed **Working indicator** styles on the Work tab and working cue.
   Only Automatic replaces tool, reasoning and subagent activity icons.
 
+- Start new chats with the side panel closed and restore each chat’s own panel
+  state when returning to it.
+- Keep attached chat-context cards and previews inside the composer, including
+  narrow layouts and enlarged text.
+
 ## 0.0.62 — 2026-09-24
 
 A clearer workspace, richer attachments, and more dependable agent conversations.

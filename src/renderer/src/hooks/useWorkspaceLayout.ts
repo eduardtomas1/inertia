@@ -11,11 +11,6 @@ import {
 import type { WorkspacePanelTab } from "../components/workspacePanelTypes";
 import { useTerminalDock, type TerminalDockActions } from "./useTerminalDock";
 import {
-  LAST_WORKSPACE_TOOL_KEY,
-  type WorkspaceStartupSurface,
-  workspacePanelTab,
-} from "../utils/workspaceStartup";
-import {
   activeRightPanelSurface,
   activateRightPanelSurface,
   applyRightPanelTool,
@@ -23,14 +18,12 @@ import {
   closeOtherRightPanelSurfaces,
   closeRightPanelSurface,
   EMPTY_RIGHT_PANEL_STATE,
-  hideRightPanel,
   legacyRightPanelState,
   openRightPanelSurface,
   parseRightPanelState,
   RIGHT_PANEL_SIBLING_MIN_WIDTH,
   rightPanelPresentation,
   serializeRightPanelState,
-  showRightPanel,
   toggleRightPanelSurface,
   toggleRightPanelVisibility,
   type RightPanelPresentation,
@@ -105,22 +98,8 @@ function workspacePanelStorageKeys(workspaceId: string | null): {
   };
 }
 
-function startupPanelState(
-  surface: WorkspaceStartupSurface,
-  preferred?: WorkspacePanelTab,
-): RightPanelState {
-  if (surface !== "tools") return EMPTY_RIGHT_PANEL_STATE;
-  const tool = preferred
-    ?? workspacePanelTab(window.localStorage.getItem(LAST_WORKSPACE_TOOL_KEY));
-  return tool
-    ? { isOpen: true, surfaces: [tool], activeSurfaceId: tool }
-    : { ...EMPTY_RIGHT_PANEL_STATE, isOpen: true };
-}
-
 function readWorkspacePanelState(
   workspaceId: string | null,
-  surface: WorkspaceStartupSurface,
-  preferred?: WorkspacePanelTab,
 ): PersistedWorkspacePanelState {
   const keys = workspacePanelStorageKeys(workspaceId);
   if (!keys.panel || !keys.legacyTool || !keys.legacyOpen) {
@@ -136,14 +115,33 @@ function readWorkspacePanelState(
       panel: legacyRightPanelState(legacyTool, legacyOpen === "true"),
     };
   }
-  return { key: workspaceId, panel: startupPanelState(surface, preferred) };
+  return { key: workspaceId, panel: EMPTY_RIGHT_PANEL_STATE };
+}
+
+/** Carry an explicit draft choice into its confirmed saved chat identity. */
+export function transferDraftWorkspacePanel(
+  projectId: string,
+  draftConversationId: string,
+  conversationId: string,
+): void {
+  const source = workspacePanelStorageKeys(`${projectId}:${draftConversationId}`).panel!;
+  const target = workspacePanelStorageKeys(`${projectId}:${conversationId}`).panel!;
+  if (source === target) return;
+  try {
+    const panel = parseRightPanelState(window.localStorage.getItem(source));
+    if (!panel) return;
+    if (window.localStorage.getItem(target) === null) {
+      window.localStorage.setItem(target, serializeRightPanelState(panel));
+    }
+    window.localStorage.removeItem(source);
+  } catch {
+    // Presentation persistence must never interrupt an acknowledged chat creation.
+  }
 }
 
 export interface WorkspaceLayoutOptions {
-  startupSurface?: WorkspaceStartupSurface;
   startupReady?: boolean;
   workspaceId?: string | null;
-  initialTool?: WorkspacePanelTab;
   /** Split-chat uses the existing bottom tool layout without persisting it. */
   forceStackedTools?: boolean;
 }
@@ -166,7 +164,6 @@ export interface WorkspaceLayout extends WorkspacePanelActions {
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
-  showStartupSurface: (surface: WorkspaceStartupSurface) => void;
   stackedTools: boolean;
   panelPresentation: RightPanelPresentation;
   mobileNavigation: boolean;
@@ -206,21 +203,12 @@ export function useWorkspaceLayout(
   const workspaceScope = options.startupReady && options.workspaceId
     ? options.workspaceId
     : null;
-  const startupSurface = options.startupSurface ?? "summary";
   const panelStorageKey = workspacePanelStorageKeys(workspaceScope).panel;
   const [persistedPanelState, setPersistedPanelState] = useState(() =>
-    readWorkspacePanelState(
-      workspaceScope,
-      startupSurface,
-      options.initialTool,
-    ));
+    readWorkspacePanelState(workspaceScope));
   const panelState = persistedPanelState.key === workspaceScope
     ? persistedPanelState.panel
-    : readWorkspacePanelState(
-      workspaceScope,
-      startupSurface,
-      options.initialTool,
-    ).panel;
+    : readWorkspacePanelState(workspaceScope).panel;
   const activeToolState = workspaceScope
     ? activeRightPanelSurface(panelState)
     : null;
@@ -270,16 +258,10 @@ export function useWorkspaceLayout(
   }, [sidebarCollapsed]);
   useEffect(() => {
     if (persistedPanelState.key !== workspaceScope) {
-      setPersistedPanelState(readWorkspacePanelState(
-        workspaceScope,
-        startupSurface,
-        options.initialTool,
-      ));
+      setPersistedPanelState(readWorkspacePanelState(workspaceScope));
     }
   }, [
-    options.initialTool,
     persistedPanelState.key,
-    startupSurface,
     workspaceScope,
   ]);
 
@@ -289,20 +271,14 @@ export function useWorkspaceLayout(
     setPersistedPanelState((current) => {
       const owned = current.key === workspaceScope
         ? current.panel
-        : readWorkspacePanelState(
-            workspaceScope,
-            startupSurface,
-            options.initialTool,
-          ).panel;
+        : readWorkspacePanelState(workspaceScope).panel;
       const next = update(owned);
       if (panelStorageKey) {
         window.localStorage.setItem(panelStorageKey, serializeRightPanelState(next));
       }
-      const active = activeRightPanelSurface(next);
-      if (active) window.localStorage.setItem(LAST_WORKSPACE_TOOL_KEY, active);
       return { key: workspaceScope, panel: next };
     });
-  }, [options.initialTool, panelStorageKey, startupSurface, workspaceScope]);
+  }, [panelStorageKey, workspaceScope]);
 
   const panelActions = useMemo(() => ({
     setActiveTool: ((update) => {
@@ -327,17 +303,6 @@ export function useWorkspaceLayout(
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);
   const terminalDock = useTerminalDock(workspaceScope, activeRightPanelSurface(panelState) === "terminal", panelActions.setActiveTool);
-
-  const showStartupSurface = useMemo(
-    () => (surface: WorkspaceStartupSurface) => {
-      updatePanel((current) => {
-        if (surface === "summary") return hideRightPanel(current);
-        if (current.surfaces.length > 0) return showRightPanel(current);
-        return startupPanelState("tools");
-      });
-    },
-    [updatePanel],
-  );
 
   useResizeObserverTarget(appShellRef, (entry) => {
     setShellWidth(entry.contentRect.width);
@@ -428,7 +393,6 @@ export function useWorkspaceLayout(
     activeTool: activeToolState,
     ...panelActions,
     ...terminalDock,
-    showStartupSurface,
     stackedTools,
     panelPresentation,
     mobileNavigation,
@@ -470,7 +434,6 @@ export function useWorkspaceLayout(
     setPersistedSidebarWidth,
     setPersistedToolsHeight,
     setPersistedToolsWidth,
-    showStartupSurface,
     sidebarCollapsed,
     sidebarDynamicMax,
     terminalDock,

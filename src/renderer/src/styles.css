@@ -3843,6 +3843,7 @@ button.header-breadcrumb-project:hover {
 
 .composer-input-zone {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: clamp(72px, 11cqh, 96px);
   align-content: start;
@@ -8814,8 +8815,9 @@ button.header-breadcrumb-project:hover {
 
 .composer-context-preview, .composer-context-request {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  margin: 0 0 6px;
+  margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 11px;

@@ -29,11 +29,12 @@ export async function closeWorkspaceTools(page: Page): Promise<void> {
 /** Opens the terminal docked under the primary chat. */
 export async function openTerminalDock(page: Page): Promise<Locator> {
   const dock = page.locator(".workspace-chat-column > .terminal-dock");
-  if (!await dock.isVisible().catch(() => false)) {
-    await page.locator("[data-panel-layout-controls]")
-      .getByRole("button", { name: /^Toggle terminal/u })
-      .click();
-  }
+  const toggle = page.locator("[data-panel-layout-controls]")
+    .getByRole("button", { name: /^Toggle terminal/u });
+  await expect(toggle).toBeEnabled();
+  // A retained open dock can still be loading its lazy renderer after reload.
+  // Its toolbar owns visibility; toggling an absent DOM node would close it.
+  if (await toggle.getAttribute("aria-pressed") === "false") await toggle.click();
   await expect(dock).toBeVisible();
   return dock;
 }

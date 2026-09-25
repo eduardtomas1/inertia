@@ -1050,15 +1050,15 @@ export const Composer = memo(function Composer({
             />
           </Suspense>
         )}
-        {conversationContextHandoffEnabled && (
-          <>
-            <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
-            <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
-            <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
-          </>
-        )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
+          contextCards={conversationContextHandoffEnabled && (
+            <>
+              <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
+              <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} />
+              <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
+            </>
+          )}
           routeReadiness={routeReadiness}
           routeRepairing={routeRepairing}
           disabled={disabled || conversationUpdatePending}

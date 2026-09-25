@@ -33,9 +33,10 @@ Choose **All projects** to search by name or folder path, filter the sidebar, or
 - **Chat with context.** Attach images, documents, spreadsheets, and plain-text source or configuration files; mention files or reference another chat; invoke skills with `$`; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
 - **Capture a window.** Enable [Snapshots](docs/SNAPSHOTS_AND_COMPACTION.md) in Settings → Snapshots to attach a foreground screenshot with inspectable accessibility context. Successful `/compact` operations retain a timeline receipt with provider-reported context counts.
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
+- **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
-- **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings, including thinking orbs or Automatic mode.
+- **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings for the Work tab and working cue; Automatic can also match individual tool and agent activity.
 - **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
@@ -48,7 +49,7 @@ Keep an objective in view alongside the latest conversation plan. Goals distingu
 
 ![A tracked objective and conversation plan in the Goal panel](docs/screenshots/inertia-goals.png)
 
-Open image attachments without leaving the chat, zoom into details, and pan across larger images. Sent attachments stay close in the conversation’s gallery.
+Open image attachments without leaving the chat, zoom into details, and pan across larger images. Browse sent files in **Open a surface → Attachments**, with previews and a scrollable gallery.
 
 ![Zooming into an attached interface screenshot](docs/screenshots/inertia-image-preview.png)
 

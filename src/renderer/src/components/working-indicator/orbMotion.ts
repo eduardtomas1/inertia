@@ -88,7 +88,7 @@ export function usesOrbs(settings: Pick<WorkingIndicatorSettings, "style">): boo
 export function usesActivityOrbs(
   settings: Pick<WorkingIndicatorSettings, "style" | "activity">,
 ): boolean {
-  return settings.style !== "classic" && settings.activity;
+  return settings.style === "automatic" && settings.activity;
 }
 
 export function resolveOrbMotion(

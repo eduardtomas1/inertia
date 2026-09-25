@@ -100,15 +100,15 @@ describe("right panel persistence", () => {
       isOpen: true,
       activeSurfaceId: "environment",
       surfaces: ["environment", "terminal", "files", "files", 3],
-    }))).toEqual(withSurfaces(["files"], "files"));
+    }))).toEqual(withSurfaces(["terminal", "files"], "terminal"));
     expect(parseRightPanelState("{broken")).toBeNull();
     expect(parseRightPanelState(null)).toBeNull();
   });
 
   it("migrates the single-tool layout, dropping Environment", () => {
     expect(legacyRightPanelState("files", true)).toEqual(withSurfaces(["files"], "files"));
-    // The terminal now docks under the chat, so an old terminal tab is dropped.
-    expect(legacyRightPanelState("terminal", true)).toEqual(withSurfaces([], null, true));
+    // Terminal is again a supported surface, including persisted legacy tabs.
+    expect(legacyRightPanelState("terminal", true)).toEqual(withSurfaces(["terminal"], "terminal"));
     expect(legacyRightPanelState("environment", true)).toEqual(withSurfaces([], null, true));
     expect(legacyRightPanelState("files", false)).toEqual(withSurfaces(["files"], "files", false));
   });

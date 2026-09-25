@@ -18,13 +18,18 @@ function storedOpen(scope: string | null): boolean {
 }
 
 /**
- * The terminal docks under the chat, independent of the right panel, so a
- * surface such as Changes can stay open beside it. Open state is kept per
- * workspace or split-pane scope, like the panel state.
+ * The bottom dock can stay open beside another surface. When Terminal is the
+ * active surface, the same toolbar controls operate on it instead of opening
+ * a second dock. Both locations retain workspace or split-pane ownership.
  */
-export function useTerminalDock(scope: string | null): TerminalDockActions {
+export function useTerminalDock(
+  scope: string | null,
+  surfaceOpen = false,
+  hideSurface?: (tool: null) => void,
+): TerminalDockActions {
   const [persisted, setPersisted] = useState(() => ({ scope, open: storedOpen(scope) }));
-  const terminalOpen = persisted.scope === scope ? persisted.open : storedOpen(scope);
+  const dockOpen = persisted.scope === scope ? persisted.open : storedOpen(scope);
+  const terminalOpen = surfaceOpen || dockOpen;
 
   const update = useCallback((next: (open: boolean) => boolean) => {
     setPersisted((current) => {
@@ -37,10 +42,19 @@ export function useTerminalDock(scope: string | null): TerminalDockActions {
     });
   }, [scope]);
 
-  return useMemo(() => ({
-    terminalOpen,
-    openTerminal: () => update(() => true),
-    closeTerminal: () => update(() => false),
-    toggleTerminal: () => update((open) => !open),
-  }), [terminalOpen, update]);
+  return useMemo(() => {
+    const closeTerminal = (): void => {
+      update(() => false);
+      if (surfaceOpen) hideSurface?.(null);
+    };
+    return {
+      terminalOpen,
+      openTerminal: () => { if (!surfaceOpen) update(() => true); },
+      closeTerminal,
+      toggleTerminal: () => {
+        if (terminalOpen) closeTerminal();
+        else update(() => true);
+      },
+    };
+  }, [hideSurface, surfaceOpen, terminalOpen, update]);
 }

@@ -173,23 +173,20 @@ describe("working indicator placements", () => {
     }
   });
 
-  it("uses a fixed style for reasoning steps and live subagents", () => {
-    const settings = { ...DEFAULT_WORKING_INDICATOR, style: "shaping" as const };
+  it("keeps fixed styles on the working cue without replacing agent output icons", () => {
+    const settings = { ...DEFAULT_WORKING_INDICATOR, style: "shaping" as const, activity: true };
     const view = render(
       <WorkingIndicatorProvider settings={settings}>
+        <AgentPixelLoader animated phase="working" conversationId="c1" />
+        <ActivityRow activity={runningActivity("command", "npm test")} />
         <ReasoningSummary content={"**Plan**\nFirst.\n\n**Check**\nSecond."} streaming />
         <SubagentStatusMark trace={{ status: "waiting", isLive: true } as SubagentTrace} />
-        <SubagentStatusMark trace={{ status: "completed", isLive: false } as SubagentTrace} />
       </WorkingIndicatorProvider>,
     );
-    const steps = [...view.container.querySelectorAll(".turn-reasoning-step")];
-    expect(steps.at(-1)).toHaveAttribute("data-step-indicator", "orb");
-    expect(steps.at(-1)!.querySelector(".working-orb")).toHaveAttribute("data-orb-design", "shaping");
-    expect(steps[0]!.querySelector(".working-orb")).toBeNull();
-    const marks = [...view.container.querySelectorAll(".subagent-status-mark")];
-    expect(marks[0]).toHaveAttribute("data-status-indicator", "orb");
-    expect(marks[0]!.querySelector(".working-orb")).toHaveAttribute("data-orb-pace", "0.5");
-    expect(marks[1]!.childElementCount).toBe(0);
+    expect(view.container.querySelectorAll(".working-orb")).toHaveLength(1);
+    expect(view.container.querySelector(".working-orb")).toHaveAttribute("data-orb-design", "shaping");
+    expect(view.container.querySelector("[data-activity-indicator],[data-step-indicator],[data-status-indicator]")).toBeNull();
+    expect(view.container.querySelector(".agent-activity-icon svg")).not.toBeNull();
   });
 });
 

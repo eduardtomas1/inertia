@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../../lib/locale";
-import { Fragment, lazy, Suspense, useEffect, useRef, useState, type RefObject } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   Box,
   Check,
@@ -53,6 +53,7 @@ interface ComposerSlashCommand extends ComposerCommandMenuItem {
 }
 
 export interface ComposerInputZoneProps {
+  contextCards?: ReactNode;
   routeReadiness: RouteReadiness;
   routeRepairing: boolean;
   disabled: boolean;
@@ -119,6 +120,7 @@ export interface ComposerInputZoneProps {
 }
 
 export function ComposerInputZone({
+  contextCards,
   routeReadiness,
   routeRepairing,
   disabled,
@@ -311,6 +313,7 @@ export function ComposerInputZone({
   return (
     <>
       <div className="composer-input-zone" data-composer-zone="input">
+        {contextCards}
         {!routeReadiness.ready && (
           <div
             className="provider-readiness"

@@ -118,4 +118,19 @@ describe("useConversationPaneLayout", () => {
     expect(hook.result.current.activeTool).toBe("files");
     expect(window.localStorage.getItem(toolKey("alpha"))).toBeNull();
   });
+  it("toggles the active Terminal surface from the toolbar without opening a second dock", () => {
+    const hook = renderHook(() => useConversationPaneLayout("alpha"));
+    act(() => hook.result.current.openSurface("terminal"));
+    expect(hook.result.current.terminalOpen).toBe(true);
+    act(() => hook.result.current.openTerminal());
+    expect(hook.result.current.activeTool).toBe("terminal");
+    expect(window.localStorage.getItem("inertia:layout:terminal-dock:split%3Aalpha:v1")).toBeNull();
+    act(() => hook.result.current.toggleTerminal());
+    expect(hook.result.current.terminalOpen).toBe(false);
+    expect(hook.result.current.toolsVisible).toBe(false);
+    act(() => hook.result.current.toggleTerminal());
+    expect(hook.result.current.terminalOpen).toBe(true);
+    expect(hook.result.current.toolsVisible).toBe(false);
+  });
+
 });

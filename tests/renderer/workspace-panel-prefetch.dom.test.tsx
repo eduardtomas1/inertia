@@ -165,10 +165,8 @@ describe("right panel surface host", () => {
 
     const launcher = await screen.findByRole("group", { name: "Open a surface" });
     await waitFor(() => expect(launcher).toHaveFocus());
-    expect(launcher).toHaveAttribute("aria-keyshortcuts", "D F B A U G P");
-    // The terminal docks under the chat; the right panel never offers it.
-    expect(within(launcher).queryByRole("button", { name: /^Terminal/u })).not.toBeInTheDocument();
-    for (const label of ["Changes", "Files", "Browser", "Agents", "Usage"]) {
+    expect(launcher).toHaveAttribute("aria-keyshortcuts", "D F B T H A U G P");
+    for (const label of ["Changes", "Files", "Browser", "Terminal", "Attachments", "Agents", "Usage"]) {
       expect(within(launcher).getByRole("button", { name: new RegExp(`^${label}`, "u") })).toBeVisible();
     }
     expect(within(launcher).getByRole("button", { name: /^Agents 2 running/u })).toBeVisible();

@@ -48,7 +48,7 @@ import { useMultiSpawn } from "./hooks/useMultiSpawn";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
-import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
+import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
@@ -63,11 +63,7 @@ import {
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
-import {
-  finishLegacyWorkspaceStartupMigration,
-  forgetWorkspaceBoundLastTool,
-  readLegacyWorkspaceStartup,
-} from "./utils/workspaceStartup";
+import { forgetWorkspaceBoundLastTool } from "./utils/workspaceStartup";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
@@ -152,9 +148,6 @@ export default function App(): React.JSX.Element {
   const splitActive = split.visibleOwners.length > 0;
   const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
-  const legacyWorkspaceStartupMigrationRef = useRef(false);
-  const [legacyWorkspaceStartup] = useState(() =>
-    readLegacyWorkspaceStartup(layoutStorage));
   const settings = useMemo(
     () => connection.snapshot?.settings ?? {
       ...defaultSettings,
@@ -219,31 +212,6 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.projects.find((item) => item.id === connection.snapshot?.activeProjectId) ?? null,
     [connection.snapshot],
   );
-  const effectiveWorkspaceStartupSurface = legacyWorkspaceStartup?.surface
-    ?? settings.workspaceStartupSurface;
-  const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
-    startupSurface: effectiveWorkspaceStartupSurface,
-    startupReady: Boolean(connection.snapshot),
-    workspaceId: project
-      ? `${project.id}:${connection.snapshot?.activeConversationId ?? "draft"}`
-      : null,
-    initialTool: legacyWorkspaceStartup?.tool ?? undefined,
-  });
-  const {
-    sidebarOpen,
-    setSidebarOpen,
-    setSidebarCollapsed,
-    showStartupSurface,
-    mobileNavigation,
-  } = workspaceLayout;
-  const primaryPaneLayout = useConversationPaneLayout(
-    connection.snapshot?.activeConversationId ?? null,
-  );
-  const primarySceneLayout = splitActive
-    ? primaryPaneLayout
-    : workspaceLayout;
-  const sceneActiveTool = primarySceneLayout.activeTool;
-  const sceneSetActiveTool = primarySceneLayout.setActiveTool;
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -341,7 +309,30 @@ export default function App(): React.JSX.Element {
     sendMessage: sendMessageWithWorkspaceAuthority,
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,
+    onMaterialized: transferDraftWorkspacePanel,
   });
+  const workspaceLayout = useWorkspaceLayout(view, Boolean(project), {
+    startupReady: Boolean(connection.snapshot),
+    workspaceId: project
+      ? `${project.id}:${view === "workspace" && draftConversation.conversation?.projectId === project.id
+        ? draftConversation.layoutConversationId
+        : connection.snapshot?.activeConversationId ?? "draft"}`
+      : null,
+  });
+  const {
+    sidebarOpen,
+    setSidebarOpen,
+    setSidebarCollapsed,
+    mobileNavigation,
+  } = workspaceLayout;
+  const primaryPaneLayout = useConversationPaneLayout(
+    connection.snapshot?.activeConversationId ?? null,
+  );
+  const primarySceneLayout = splitActive
+    ? primaryPaneLayout
+    : workspaceLayout;
+  const sceneActiveTool = primarySceneLayout.activeTool;
+  const sceneSetActiveTool = primarySceneLayout.setActiveTool;
   const {
     globalChatActive,
     deactivateGlobalChat,
@@ -359,8 +350,6 @@ export default function App(): React.JSX.Element {
     draftConversation,
     selectionCommandQueue,
     conversationSelectionGenerationRef,
-    startupSurface: effectiveWorkspaceStartupSurface,
-    showStartupSurface,
     updateSplitConversationId,
     setSidebarOpen,
     setView,
@@ -764,31 +753,8 @@ export default function App(): React.JSX.Element {
       type: "settings.update",
       payload: updates,
     });
-    if (updates.workspaceStartupSurface) {
-      showStartupSurface(updates.workspaceStartupSurface);
-    }
   };
-  useEffect(() => {
-    if (
-      !connection.snapshot
-      || !legacyWorkspaceStartup
-      || legacyWorkspaceStartupMigrationRef.current
-    ) return;
-    legacyWorkspaceStartupMigrationRef.current = true;
-    void request({
-      type: "settings.update",
-      payload: {
-        workspaceStartupSurface: legacyWorkspaceStartup.surface,
-      },
-    }).then(() => {
-      finishLegacyWorkspaceStartupMigration(
-        layoutStorage,
-        legacyWorkspaceStartup,
-      );
-    }).catch(() => {
-      legacyWorkspaceStartupMigrationRef.current = false;
-    });
-  }, [connection.snapshot, legacyWorkspaceStartup, request]);
+
   const chooseCodexBinary = async (): Promise<void> => {
     const path = await window.inertia.selectCodexExecutable();
     if (path) await updateSettings({ codexBinaryPath: path });

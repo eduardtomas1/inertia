@@ -7,6 +7,7 @@ import {
   type Project,
   type ServerEvent,
 } from "../../src/shared/contracts";
+import { transferDraftWorkspacePanel, useWorkspaceLayout } from "../../src/renderer/src/hooks/useWorkspaceLayout";
 import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConversation";
 import { useProjectChatNavigation } from "../../src/renderer/src/hooks/useProjectChatNavigation";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -162,7 +163,7 @@ describe("useDraftConversation", () => {
       const navigation = useProjectChatNavigation({
         project: current.projects.find(({ id }) => id === current.activeProjectId)!, projects: current.projects,
         busyAction: null, draftConversation: draft, conversationSelectionGenerationRef: { current: 0 },
-        selectionCommandQueue: vi.fn(), startupSurface: "summary", showStartupSurface: vi.fn(),
+        selectionCommandQueue: vi.fn(),
         updateSplitConversationId: vi.fn(), setSidebarOpen: vi.fn(), setView: vi.fn(),
       });
       return { draft, navigation };
@@ -433,6 +434,7 @@ describe("useDraftConversation", () => {
       userMessageId: "message-1",
       disposition: "new-turn" as const,
     }));
+    const onMaterialized = vi.fn();
     let currentSnapshot: AppSnapshot | null = null;
     let persistedId: string | null = null;
     const hook = renderHook(() => useDraftConversation({
@@ -442,6 +444,7 @@ describe("useDraftConversation", () => {
       sendMessage,
       persistedConversationId: persistedId,
       updatePersistedConversation: vi.fn(),
+      onMaterialized,
     }));
 
     act(() => hook.result.current.start(projectId));
@@ -484,6 +487,7 @@ describe("useDraftConversation", () => {
       turnId: "turn-1",
     });
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
     expect(readPersistedMaterializedDraftConversation()).toMatchObject({
       acceptedTurnId: "turn-1",
       acceptedUserMessageId: "message-1",
@@ -496,6 +500,10 @@ describe("useDraftConversation", () => {
       [],
     )).rejects.toThrow("was accepted");
     expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(onMaterialized.mock.calls).toEqual([
+      [projectId, draftId, conversationId],
+    ]);
+    expect(onMaterialized.mock.invocationCallOrder[0]).toBeLessThan(sendMessage.mock.invocationCallOrder[0]);
 
     currentSnapshot = materializedSnapshot(
       "running",
@@ -504,6 +512,7 @@ describe("useDraftConversation", () => {
     );
     hook.rerender();
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
     expect(readPersistedMaterializedDraftConversation()).not.toBeNull();
 
     persistedId = conversationId;
@@ -544,6 +553,7 @@ describe("useDraftConversation", () => {
     });
 
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
     await expect(hook.result.current.sendFromComposer(
       "Do not retry an uncertain acceptance.",
       [],
@@ -606,6 +616,7 @@ describe("useDraftConversation", () => {
     persistedId = conversationId;
     hook.rerender();
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
 
     let acceptance: TranscriptMessageSendAcceptance | null = null;
     await act(async () => {
@@ -674,6 +685,7 @@ describe("useDraftConversation", () => {
       await hook.result.current.sendFromComposer("Keep this in memory.", []);
     });
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
 
     currentSnapshot = materializedSnapshot(
       "running",
@@ -836,6 +848,7 @@ describe("useDraftConversation", () => {
     });
     expect(sendError).toMatchObject({ message: expect.stringContaining("disconnected") });
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
     expect(readPersistedMaterializedDraftConversation()).toMatchObject({
       acceptedTurnId: null,
       draftConversationId: draftId,
@@ -894,16 +907,27 @@ describe("useDraftConversation", () => {
         userMessageId: "message-retry",
         disposition: "new-turn" as const,
       });
-    const hook = renderHook(() => useDraftConversation({
-      snapshot: null,
+    const useDraftWithLayout = (currentSnapshot: AppSnapshot | null, selectedId: string | null) => {
+      const draft = useDraftConversation({
+      snapshot: currentSnapshot,
       settings: defaultSettings,
       run,
       sendMessage,
-      persistedConversationId: null,
+      persistedConversationId: selectedId,
       updatePersistedConversation: vi.fn(),
-    }));
+      onMaterialized: transferDraftWorkspacePanel,
+      });
+      const layout = useWorkspaceLayout("workspace", true, {
+        startupReady: true,
+        workspaceId: `${projectId}:${draft.layoutConversationId ?? selectedId ?? "draft"}`,
+      });
+      return { ...draft, layout };
+    };
+    const hook = renderHook(() => useDraftWithLayout(null, null));
     act(() => hook.result.current.start(projectId));
     const draftId = hook.result.current.conversation?.id;
+    expect(hook.result.current.layoutConversationId).toBe(draftId);
+    act(() => hook.result.current.layout.openSurface("usage"));
     const promptStorageKey = `inertia:draft:${draftId}`;
     const persistedPrompt = JSON.stringify({
       message: "Send once the socket returns.",
@@ -917,21 +941,22 @@ describe("useDraftConversation", () => {
       ).catch(() => undefined);
     });
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(hook.result.current.layoutConversationId).toBe(conversationId);
     expect(values.get(promptStorageKey)).toBe(persistedPrompt);
+    expect(hook.result.current.layout.activeTool).toBe("usage");
+    act(() => {
+      hook.result.current.layout.openSurface("agents");
+      hook.result.current.layout.toggleWorkspaceTools();
+    });
+    expect(hook.result.current.layout.panel.isOpen).toBe(false);
     hook.unmount();
 
     let reconciledSnapshot = materializedSnapshot();
     let reconciledId: string | null = conversationId;
-    const restored = renderHook(() => useDraftConversation({
-      snapshot: reconciledSnapshot,
-      settings: defaultSettings,
-      run,
-      sendMessage,
-      // The empty server-owned shell is now active, but that alone does not
-      // prove the first message arrived.
-      persistedConversationId: reconciledId,
-      updatePersistedConversation: vi.fn(),
-    }));
+    const restored = renderHook(() => useDraftWithLayout(reconciledSnapshot, reconciledId));
+    expect(restored.result.current.layoutConversationId).toBe(conversationId);
+    expect(restored.result.current.layout.panel.isOpen).toBe(false);
+    expect(restored.result.current.layout.panel.activeSurfaceId).toBe("agents");
     expect(restored.result.current.conversation?.id).toBe(draftId);
     expect(values.get(promptStorageKey)).toBe(persistedPrompt);
     await act(async () => {
@@ -962,6 +987,9 @@ describe("useDraftConversation", () => {
     expect(restored.result.current.conversation).toBeNull();
     expect(readPersistedMaterializedDraftConversation()).toBeNull();
     expect(values.has(promptStorageKey)).toBe(false);
+    expect(restored.result.current.layout.panel.isOpen).toBe(false);
+    act(() => restored.result.current.layout.toggleWorkspaceTools());
+    expect(restored.result.current.layout.activeTool).toBe("agents");
   });
 
   it("restores a new-project draft identity after the renderer remounts", () => {
@@ -1007,6 +1035,7 @@ describe("useDraftConversation", () => {
       settleCreation = resolve;
     }));
     const sendMessage = vi.fn(async () => null);
+    const onMaterialized = vi.fn();
     const hook = renderHook(() => useDraftConversation({
       snapshot,
       settings: defaultSettings,
@@ -1014,6 +1043,7 @@ describe("useDraftConversation", () => {
       sendMessage,
       persistedConversationId: null,
       updatePersistedConversation: vi.fn(),
+      onMaterialized,
     }));
     act(() => hook.result.current.start(projectId));
 
@@ -1042,5 +1072,6 @@ describe("useDraftConversation", () => {
       false,
     );
     expect(hook.result.current.conversation).toBeNull();
+    expect(onMaterialized).not.toHaveBeenCalled();
   });
 });

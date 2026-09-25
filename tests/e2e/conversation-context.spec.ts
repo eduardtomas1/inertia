@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
+import { ensureWorkspaceTools, closeWorkspaceTools } from "./support/workspace-tools";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 import {
   createAppFixture,
@@ -59,7 +60,7 @@ test.beforeAll(async () => {
       const targetConversationId = snapshot.activeConversationId;
       const source = store.createConversation(
         snapshot.activeProjectId,
-        "Architecture decisions",
+        `Architecture decisions — ${"cross-platform release context ".repeat(6)}`,
         { activate: false },
       );
       sourceConversationId = source.id;
@@ -169,6 +170,27 @@ test("references a whole chat from the composer and preserves its provenance", a
   });
   await expect(chip).toBeVisible();
   await expect(editor).toHaveValue("");
+  const expectContextInsideComposer = async (): Promise<void> => {
+    const geometry = await chip.evaluate((element) => {
+      const card = element.closest("article")!.getBoundingClientRect();
+      const input = element.closest(".composer")!.querySelector(".composer-input-zone")!;
+      const rect = input.getBoundingClientRect();
+      const style = getComputedStyle(input);
+      return {
+        card: { left: card.left, right: card.right, top: card.top, bottom: card.bottom },
+        input: {
+          left: rect.left + parseFloat(style.paddingLeft),
+          right: rect.right - parseFloat(style.paddingRight),
+          top: rect.top + parseFloat(style.paddingTop), bottom: rect.bottom,
+        },
+      };
+    });
+    expect(geometry.card.left).toBeGreaterThanOrEqual(geometry.input.left - 1);
+    expect(geometry.card.right).toBeLessThanOrEqual(geometry.input.right + 1);
+    expect(geometry.card.top).toBeGreaterThanOrEqual(geometry.input.top - 1);
+    expect(geometry.card.bottom).toBeLessThanOrEqual(geometry.input.bottom + 1);
+  };
+  await expectContextInsideComposer();
 
   await chip.click();
   const preview = page.getByRole("region", { name: "Shared chat context" });
@@ -228,6 +250,7 @@ test("references a whole chat from the composer and preserves its provenance", a
   expect(boundsAt125!.x + boundsAt125!.width).toBeLessThanOrEqual(
     viewportAt125.width,
   );
+  await expectContextInsideComposer();
   await capture("conversation-context-scale-125");
 
   await electronApp.evaluate(({ BrowserWindow }) => {
@@ -235,7 +258,19 @@ test("references a whole chat from the composer and preserves its provenance", a
   });
   await resizeWindow(600, 760);
   await expect(chip).toBeVisible();
+  await expectContextInsideComposer();
   await capture("conversation-context-narrow-600x760");
+  await resizeWindow(1200, 820);
+  await ensureWorkspaceTools(page);
+  await expectContextInsideComposer();
+  const previewBounds = await preview.boundingBox();
+  const inputBounds = await page.locator(".composer-input-zone").boundingBox();
+  const titleBounds = await preview.locator("header strong").boundingBox();
+  expect(previewBounds!.x).toBeGreaterThanOrEqual(inputBounds!.x);
+  expect(previewBounds!.x + previewBounds!.width).toBeLessThanOrEqual(inputBounds!.x + inputBounds!.width);
+  expect(titleBounds!.x + titleBounds!.width).toBeLessThanOrEqual(previewBounds!.x + previewBounds!.width);
+  await capture("conversation-context-with-panel");
+  await closeWorkspaceTools(page);
 
   await page.emulateMedia({ forcedColors: "active" });
   await expect(chip).toBeVisible();

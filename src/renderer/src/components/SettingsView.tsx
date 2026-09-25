@@ -610,11 +610,7 @@ export function SettingsView({
               <div className="settings-card-heading"><div><PanelLeft size={18} /></div><span><h3 id="workspace-heading">Workspace</h3><p>Choose which quiet details help you stay oriented.</p></span></div>
 
               <div className="response-density-setting">
-                <span><strong>Workspace startup</strong><small>Begin with the chat and its header summary, or restore the last right panel you used.</small></span>
-                <div role="radiogroup" aria-label="Workspace startup surface">
-                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "summary"} className={clsx(settings.workspaceStartupSurface === "summary" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "summary" })}>Chat only</button>
-                  <button type="button" role="radio" aria-checked={settings.workspaceStartupSurface === "tools"} className={clsx(settings.workspaceStartupSurface === "tools" && "is-active")} disabled={disabled} onClick={() => onUpdate({ workspaceStartupSurface: "tools" })}>Last panel</button>
-                </div>
+                <span><strong>Chat panels</strong><small>New chats start with the panel closed. Each chat remembers the surfaces and panel visibility you leave it with.</small></span>
               </div>
               <div className="response-density-setting project-grouping-setting">
                 <span><strong>Logical project grouping</strong><small>Use canonical Git identity and normalized paths, never display names.</small></span>

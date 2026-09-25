@@ -121,11 +121,32 @@ describe("runtime shutdown authority", () => {
     runtimes.push(runtime);
     await vi.waitFor(() => expect(beforeRefresh).toHaveBeenCalledOnce());
 
-    await expect(runtime.prepareForUpdate(randomUUID())).resolves.toEqual({
-      ready: false,
-      blocker: "provider-refresh",
-    });
-    refreshGate.resolve();
+    try {
+      await expect(runtime.prepareForUpdate(randomUUID())).resolves.toEqual({
+        ready: false,
+        blocker: "provider-refresh",
+      });
+      const client = await connectRuntime(runtime.websocketUrl);
+      await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
+          event.type === "server.welcome",
+      );
+      const requestId = randomUUID();
+      client.socket.send(JSON.stringify({
+        type: "settings.update", requestId, payload: { theme: "dark" },
+      }));
+      await expect(client.events.next(
+        (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+          event.type === "request.ok" && event.requestId === requestId,
+      )).resolves.toMatchObject({ requestId });
+    } finally {
+      // Close admission before releasing the synthetic refresh. Otherwise this
+      // authority-only fixture starts real host provider discovery in teardown.
+      const closing = runtime.close();
+      refreshGate.resolve();
+      await closing;
+      runtimes.splice(runtimes.indexOf(runtime), 1);
+    }
   });
 
   it("does not close while an admitted command is still inside its owned barrier", async () => {

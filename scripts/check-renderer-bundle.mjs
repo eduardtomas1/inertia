@@ -59,7 +59,11 @@ const budgets = {
   // The plain-text attachment extension and declared-type tables in the shared
   // attachments module add 535 bytes to each first-load route (834,497 /
   // 640,108 measured on Linux x64); the import validator itself stays in main.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535,
+  // Removing unused Environment projections moves Git action helpers to their
+  // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
+  // and core to those deferred closures; the combined ceiling does not grow.
+  // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -121,8 +125,8 @@ const budgets = {
   // Hide: 494 bytes (26,456 measured).
   deferredTerminalJavaScript: 25.5 * kibibyte + 494,
   // Branch search/tracking and the Git overview load only when opened.
-  deferredGitMenusJavaScript: 8.875 * kibibyte + 245,
-  deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte,
+  deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
+  deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -156,7 +160,7 @@ const budgets = {
   // The same release-audit additions add 2,065 core bytes (2,160,000
   // measured on Linux x64); allow 2,310 and keep ~0.25 KiB of headroom.
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

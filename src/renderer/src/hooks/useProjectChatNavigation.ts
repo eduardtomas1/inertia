@@ -17,7 +17,6 @@ import type { ProjectImportInput } from "../../../shared/project-import";
 import type { AppView } from "../appView";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigation";
-import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
 import { readPersistedDraftConversation, writePersistedDraftConversation } from "../utils/draftConversationPersistence";
 
 type DraftConversationNavigation = {
@@ -45,8 +44,6 @@ export function useProjectChatNavigation({
   draftConversation,
   selectionCommandQueue,
   conversationSelectionGenerationRef,
-  startupSurface,
-  showStartupSurface,
   updateSplitConversationId,
   setSidebarOpen,
   setView,
@@ -57,8 +54,6 @@ export function useProjectChatNavigation({
   draftConversation: DraftConversationNavigation;
   selectionCommandQueue: SelectionCommandQueue;
   conversationSelectionGenerationRef: MutableRefObject<number>;
-  startupSurface: WorkspaceStartupSurface;
-  showStartupSurface: (surface: WorkspaceStartupSurface) => void;
   updateSplitConversationId: (conversationId: string | null) => void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setView: Dispatch<SetStateAction<AppView>>;
@@ -154,7 +149,6 @@ export function useProjectChatNavigation({
       if (!await draftConversation.importProject(input)) return;
       setView("workspace");
       setSidebarOpen(false);
-      showStartupSurface(startupSurface);
     } catch (error) { if (input) throw error; /* Native callers receive the existing error toast. */ }
   }, [
     busyAction,
@@ -162,8 +156,6 @@ export function useProjectChatNavigation({
     draftConversation,
     setSidebarOpen,
     setView,
-    showStartupSurface,
-    startupSurface,
   ]);
 
   const selectProject = useCallback((nextProject: Project) => {

@@ -88,7 +88,9 @@ describe("Automatic phase mapping", () => {
     expect(usesOrbs({ style: "automatic" })).toBe(true);
     expect(usesActivityOrbs({ style: "classic", activity: true })).toBe(false);
     expect(usesActivityOrbs({ style: "weaving", activity: false })).toBe(false);
-    expect(usesActivityOrbs({ style: "weaving", activity: true })).toBe(true);
+    for (const style of ORB_DESIGNS) expect(usesActivityOrbs({ style, activity: true })).toBe(false);
+    expect(usesActivityOrbs({ style: "automatic", activity: true })).toBe(true);
+    expect(usesActivityOrbs({ style: "automatic", activity: false })).toBe(false);
     expect(workingOrbSyncKey("abc")).toBe("conversation:abc");
   });
 });

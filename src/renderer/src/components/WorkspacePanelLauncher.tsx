@@ -5,15 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import {
-  Bot,
-  Files,
-  Flag,
-  Gauge,
-  GitCompareArrows,
-  Globe2,
-  ListChecks,
-} from "lucide-react";
+import { surfaceIcons } from "./workspacePanelIcons";
 
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
@@ -30,16 +22,6 @@ export interface SurfaceAction {
   reason?: string;
   badge: number;
 }
-
-const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
-  changes: <GitCompareArrows size={14} aria-hidden="true" />,
-  files: <Files size={14} aria-hidden="true" />,
-  preview: <Globe2 size={14} aria-hidden="true" />,
-  agents: <Bot size={14} aria-hidden="true" />,
-  usage: <Gauge size={14} aria-hidden="true" />,
-  goal: <Flag size={14} aria-hidden="true" />,
-  plan: <ListChecks size={14} aria-hidden="true" />,
-};
 
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
   '[role="dialog"][aria-modal="true"]',

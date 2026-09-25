@@ -209,7 +209,12 @@ test("collapses and restores both workspace sides without losing layout", async 
     lastTool: window.localStorage.getItem(
       "inertia:layout:last-workspace-tool:v2",
     ),
-  }))).toEqual({ legacy: null, lastTool: "files" });
+  }))).toEqual({ legacy: null, lastTool: null });
+  await expect.poll(() => page.evaluate(() => Object.entries(window.localStorage)
+    .filter(([key]) => key.startsWith("inertia:layout:workspace-panel:"))
+    .map(([, value]) => JSON.parse(value)))).toEqual([
+      expect.objectContaining({ isOpen: false, activeSurfaceId: "files", surfaces: expect.arrayContaining(["files"]) }),
+    ]);
   const readingCanvas = await page.evaluate(() => {
     const workspaceBody = document.querySelector<HTMLElement>(".workspace-body");
     const chat = document.querySelector<HTMLElement>(".chat-workspace");
@@ -233,8 +238,13 @@ test("collapses and restores both workspace sides without losing layout", async 
   expect(readingCanvas?.hasTools).toBe(false);
   expect(readingCanvas?.chatBackground).toBe(readingCanvas?.canvasBackground);
   expect(Math.abs((readingCanvas?.chatCenter ?? 0) - (readingCanvas?.turnCenter ?? 0))).toBeLessThanOrEqual(1);
+  await page.reload();
+  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
+  await expect(toolsToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".workspace-panel")).toBeHidden();
   await toolsToggle.click();
   await expect(page.locator(".workspace-panel")).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^Files/u })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".workspace-body")).toHaveClass(/has-tools/u);
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);

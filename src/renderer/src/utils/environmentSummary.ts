@@ -322,9 +322,7 @@ function repositorySummaries(
   }];
 }
 
-/** Rows the collapsed environment panel shows before it is expanded. */
-export const ENVIRONMENT_ATTACHMENT_PREVIEW_COUNT = 3;
-/** Upper bound on the expanded gallery, newest first. */
+/** Upper bound on the attachment surface gallery, newest first. */
 export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = 60;
 
 // Collecting the whole gallery costs a scan of the transcript, and the scene
@@ -429,30 +427,18 @@ function usageSummary(
   };
 }
 
-export function buildEnvironmentSummary({
-  projectId,
-  projectName,
-  conversationId,
-  connectionStatus,
-  gitStatus,
-  workspaceGitStatus,
-  runs,
-  subagents,
-  messages,
-  projectPath = null,
-  worktreePath = null,
-  gitLoading = false,
-  gitError = null,
-  gitBusy = false,
-  projects = [],
-  conversations = [],
-  visibleProjectIds: additionalVisibleProjectIds = [],
-  usage = null,
-  latestTurnId = null,
-  usageProvider = null,
-  usageIdentity = null,
+export type WorkspaceSurfaceSummary = Pick<EnvironmentSummarySnapshot,
+  "runtime" | "gitNotice" | "checks" | "localServers" | "usage" | "attachments"
+>;
+
+/** Only the projections used by current surfaces; legacy Environment rows stay off the chat route. */
+export function buildWorkspaceSurfaceSummary({
+  projectId, conversationId, connectionStatus, workspaceGitStatus, runs, messages,
+  gitError = null, projects = [], conversations = [],
+  visibleProjectIds: additionalVisibleProjectIds = [], usage = null,
+  latestTurnId = null, usageProvider = null, usageIdentity = null,
   usageQuotaSource = "isolated",
-}: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
+}: EnvironmentSummaryInput): WorkspaceSurfaceSummary {
   const visibleProjectIds = new Set(additionalVisibleProjectIds);
   if (projectId) visibleProjectIds.add(projectId);
   const knownProjects = new Map(projects.map((project) => [project.id, project]));
@@ -537,6 +523,32 @@ export function buildEnvironmentSummary({
   const checks = runItems
     .filter(({ previewUrl }) => previewUrl === null)
     .map(({ item }) => item);
+  const workspaceScanIncomplete = Boolean(
+    workspaceGitStatus?.partial || workspaceGitStatus?.truncated,
+  );
+  const gitNotice = gitError
+    ?? workspaceGitStatus?.issues[0]?.message
+    ?? workspaceGitStatus?.repositories.find(({ state }) =>
+      state === "error")?.error
+    ?? (workspaceScanIncomplete
+      ? "The repository scan did not inspect every directory."
+      : null);
+  return {
+    runtime: { status: connectionStatus },
+    gitNotice,
+    checks,
+    localServers,
+    usage: usageSummary(usage, latestTurnId, usageProvider, usageIdentity, usageQuotaSource),
+    attachments: recentAttachments(messages),
+  };
+}
+
+export function buildEnvironmentSummary(input: EnvironmentSummaryInput): EnvironmentSummarySnapshot {
+  const {
+    projectName, conversationId, gitStatus, workspaceGitStatus, subagents,
+    projectPath = null, worktreePath = null, gitLoading = false, gitError = null, gitBusy = false,
+  } = input;
+  const surfaces = buildWorkspaceSurfaceSummary(input);
   const activeSubagents = conversationId
     ? subagents
       .filter((trace) =>
@@ -555,13 +567,6 @@ export function buildEnvironmentSummary({
   const workspaceScanIncomplete = Boolean(
     workspaceGitStatus?.partial || workspaceGitStatus?.truncated,
   );
-  const gitNotice = gitError
-    ?? workspaceGitStatus?.issues[0]?.message
-    ?? workspaceGitStatus?.repositories.find(({ state }) =>
-      state === "error")?.error
-    ?? (workspaceScanIncomplete
-      ? "The repository scan did not inspect every directory."
-      : null);
   const gitFailed = Boolean(
     workspaceScanIncomplete
     || workspaceGitStatus?.issues.length
@@ -598,22 +603,11 @@ export function buildEnvironmentSummary({
       name: projectName ?? pathName(workspacePath),
       path: workspacePath,
     } : null,
-    runtime: { status: connectionStatus },
+    ...surfaces,
     changes,
     gitState,
-    gitNotice,
     branch: branchSummary(gitStatus, workspaceGitStatus),
     repositories,
-    checks,
-    localServers,
-    usage: usageSummary(
-      usage,
-      latestTurnId,
-      usageProvider,
-      usageIdentity,
-      usageQuotaSource,
-    ),
     subagents: activeSubagents,
-    attachments: recentAttachments(messages),
   };
 }

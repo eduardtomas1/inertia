@@ -162,7 +162,11 @@ export function useConversationPaneLayout(
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);
-  const terminalDock = useTerminalDock(conversationId === null ? null : `split:${conversationId}`);
+  const terminalDock = useTerminalDock(
+    conversationId === null ? null : `split:${conversationId}`,
+    activeTool === "terminal",
+    panelActions.setActiveTool,
+  );
 
   return useMemo(() => ({
     panel: panelState,

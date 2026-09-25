@@ -309,12 +309,12 @@ export function WorkingIndicatorSettings({
           <div className="setting-row">
             <span className="setting-copy">
               <strong>Use for tool and step activity</strong>
-              <small>Replace the spinning rings on running tools, subagents and reasoning steps. Classic keeps the rings.</small>
+              <small>Automatic can match running tools, subagents and reasoning steps. Fixed styles only change the Work tab and working indicator.</small>
             </span>
             <Switch
               label="Use for tool and step activity"
-              checked={value.activity}
-              disabled={disabled}
+              checked={value.style === "automatic" && value.activity}
+              disabled={disabled || value.style !== "automatic"}
               onChange={(activity) => commit({ activity })}
             />
           </div>

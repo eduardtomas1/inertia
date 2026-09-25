@@ -1,14 +1,15 @@
 .p-s {
   display: flex;
-  padding: 0 12px 8px;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .p-c {
   display: grid;
-  min-width: min(310px, 100%);
-  max-width: 420px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 420px;
   min-height: 42px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;

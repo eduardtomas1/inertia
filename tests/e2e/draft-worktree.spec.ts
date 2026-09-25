@@ -59,8 +59,11 @@ test("keeps the right panel available while an isolated draft worktree materiali
     });
     const unavailableReason =
       "Available after the first message creates this isolated worktree.";
-    await expect(workspaceTools).toBeVisible();
     await expect(rightPanelToggle(app.page)).toBeEnabled();
+    await expect(rightPanelToggle(app.page)).toHaveAttribute("aria-pressed", "false");
+    await expect(workspaceTools).toHaveCount(0);
+    await rightPanelToggle(app.page).click();
+    await expect(workspaceTools).toBeVisible();
     await expect(workspaceTools.getByRole("tab")).toHaveCount(0);
     const launcher = workspaceTools.getByRole("group", {
       name: "Open a surface",
@@ -95,6 +98,9 @@ test("keeps the right panel available while an isolated draft worktree materiali
       .get() as { count: number };
     database.close();
     expect(row.count).toBe(0);
+    await selectWorkspaceTool(workspaceTools, "Usage");
+    await expect(workspaceTools.getByRole("tab", { name: "Usage" }))
+      .toHaveAttribute("aria-selected", "true");
 
     await app.page.getByRole("textbox", { name: "Message" })
       .fill("Inspect this isolated worktree.");
@@ -146,10 +152,13 @@ test("keeps the right panel available while an isolated draft worktree materiali
     ).resolves.toBe(true);
 
     await expect(app.page.getByLabel("Terminal panel")).toHaveCount(0);
-    await expect(launcher.getByRole("button", { name: /^Files/u }))
-      .toBeEnabled();
-    await expect(launcher.locator('[aria-disabled="true"]')).toHaveCount(0);
-    await selectWorkspaceTool(workspaceTools, "Files");
+    await expect(workspaceTools.getByRole("tab", { name: "Usage" }))
+      .toHaveAttribute("aria-selected", "true");
+    await workspaceTools.getByRole("button", { name: "Add panel surface" }).click();
+    const availableSurfaces = app.page.getByRole("menu", { name: "Add panel surface" });
+    await expect(availableSurfaces.getByRole("menuitem", { name: /^Files/u })).toBeEnabled();
+    await expect(availableSurfaces.locator('[aria-disabled="true"]')).toHaveCount(0);
+    await availableSurfaces.getByRole("menuitem", { name: /^Files/u }).click();
     await expect(
       workspaceTools.getByRole("tree", { name: "Files" }),
     ).toBeVisible();

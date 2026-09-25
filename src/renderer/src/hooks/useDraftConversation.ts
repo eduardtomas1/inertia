@@ -76,6 +76,7 @@ export function useDraftConversation({
   sendMessage,
   persistedConversationId,
   updatePersistedConversation,
+  onMaterialized,
 }: {
   snapshot: AppSnapshot | null;
   settings: AppSettings;
@@ -99,6 +100,7 @@ export function useDraftConversation({
     conversationId: string,
     change: ConversationUpdate,
   ) => Promise<void>;
+  onMaterialized?: (projectId: string, draftConversationId: string, conversationId: string) => void;
   }) {
   const [draft, setDraft] = useState<DraftConversationState | null>(() => {
     const stored = readPersistedDraftConversation();
@@ -491,7 +493,10 @@ export function useDraftConversation({
       payload: materializedState.payload,
     });
     forgetPersistedDraftConversation(sendingDraft.conversation.id);
-    if (stillOwnsDraft) replaceDraft(materializedState, false);
+    if (stillOwnsDraft) {
+      onMaterialized?.(sendingDraft.conversation.projectId, sendingDraft.conversation.id, conversationId);
+      replaceDraft(materializedState, false);
+    }
 
     try {
       const acceptance = await sendMessage(
@@ -693,6 +698,7 @@ export function useDraftConversation({
 
   return {
     conversation: draft?.conversation ?? null,
+    layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(
       draft?.payload.useWorktree && !draft.payload.worktreePath,
     ),

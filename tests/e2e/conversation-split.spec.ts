@@ -6,7 +6,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
-import { expectPaneComposerClearOfTerminalHandle, openConversationPaneTool, openPaneTerminal } from "./support/workspace-tools";
+import { expectPaneComposerClearOfTerminalHandle, openConversationPaneTool, openPaneTerminal, selectWorkspaceTool } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
 let primaryConversationId = "";
@@ -318,6 +318,15 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .toHaveAttribute("title", "Terminal 1 · Inertia");
   await expect(secondaryTerminal.getByRole("tab", { name: "Terminal 1" }))
     .toHaveAttribute("title", "Terminal 1 · Companion");
+  const secondaryTerminalSurface = await openConversationPaneTool(secondary, secondaryTitle, "Terminal");
+  await expect(secondaryTerminalSurface.locator(".terminal-panel[data-terminal-id]"))
+    .toHaveAttribute("data-terminal-id", secondaryTerminalId!);
+  await expect(secondaryTerminal).toBeHidden();
+  await expect(primaryTerminal).toBeVisible();
+  await expect(primarySession).toHaveAttribute("data-terminal-id", primaryTerminalId!);
+  await selectWorkspaceTool(secondaryTerminalSurface, "Changes");
+  await openPaneTerminal(secondary, secondaryTitle);
+  await expect(secondarySession).toHaveAttribute("data-terminal-id", secondaryTerminalId!);
   const setUiScale = async (height: number, zoom: number, scale: string) => {
     await app.resizeWindow(1440, height);
     await page.evaluate((value) => { document.documentElement.dataset.interfaceScale = value; }, scale);

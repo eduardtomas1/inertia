@@ -48,7 +48,7 @@ import {
   canStopSubagentTrace,
   isLiveSubagentTrace,
 } from "../../utils/subagentDisclosure";
-import { buildEnvironmentSummary } from "../../utils/environmentSummary";
+import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
@@ -405,6 +405,10 @@ export function createWorkspaceSceneModel({
     panel: panelState,
     panelPresentation,
   } = layout;
+  const openPanelSurface = (surface: WorkspacePanelTab): void => {
+    if (surface === "terminal") closeTerminal();
+    layout.openSurface(surface);
+  };
   const unavailableSurfaces: Partial<Record<WorkspacePanelTab, string>> = {};
   if (workspaceToolsUnavailable) {
     for (const surface of WORKSPACE_BOUND_SURFACES) {
@@ -450,7 +454,7 @@ export function createWorkspaceSceneModel({
             ?? conversation.modelSelection.backendProfileDisplayName,
         }
     : null;
-  const environmentSummary = buildEnvironmentSummary({
+  const environmentSummary = buildWorkspaceSurfaceSummary({
     projectId: project?.id ?? null,
     projectName: project?.name ?? null,
     conversationId: conversation?.id ?? null,
@@ -805,9 +809,10 @@ export function createWorkspaceSceneModel({
           goal: currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0,
           plan: planSteps.length,
+          attachments: environmentSummary.attachments.length,
         },
-        onActivateSurface: layout.activateSurface,
-        onOpenSurface: layout.openSurface,
+        onActivateSurface: openPanelSurface,
+        onOpenSurface: openPanelSurface,
         onCloseSurface: layout.closeSurface,
         onClosePanel: layout.toggleWorkspaceTools,
       },
@@ -818,9 +823,9 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
+      attachments: { attachments: environmentSummary.attachments },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
-        attachments: environmentSummary.attachments,
         subagents: projection.subagents,
         turns: projection.turns,
         canFollowUpSubagent: canGuideParent,

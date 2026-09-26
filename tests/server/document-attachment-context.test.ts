@@ -333,6 +333,22 @@ describe("document attachment execution context", () => {
     expect(rejectionCount).toBe(2);
   });
 
+  it.each([
+    ["notes.txt", Buffer.from("\ufeffRésumé 東京", "utf16le"), "Résumé 東京"],
+    ["app.log", Buffer.from("\ufeffINFO ready", "utf16le").swap16(), "INFO ready"],
+    ["app.log", Buffer.from("\x1b[31mERROR\x1b[0m: disk full"), "ERROR: disk full"],
+    ["Dockerfile", Buffer.from("FROM scratch"), "FROM scratch"],
+  ])("delivers decoded %s in the shared provider prompt", async (name, bytes, content) => {
+    const document = attachment({ name, mimeType: "text/plain", size: bytes.length });
+    const contexts = await documentAttachmentContexts([{ attachment: document, bytes }]);
+    expect(contexts[0]).toMatchObject({ content, truncated: false });
+    const assembled = assembleTurnRequest({
+      cwd: process.cwd(), visibleContent: "Inspect.", attachments: [document], documentContexts: contexts,
+    });
+    expect(assembled.executionPrompt).toContain(JSON.stringify(content));
+    expect(assembled.persistence.manifest).toMatchObject({ contextReferenceCount: 1, imageCount: 0 });
+  });
+
   it("adds verified UTF-8 documents and ignores images", async () => {
     const text = attachment({
       name: "brief.md",

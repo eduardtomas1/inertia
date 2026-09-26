@@ -157,6 +157,21 @@ describe("workspace startup surface", () => {
       .toBe(JSON.stringify({ isOpen: true, activeSurfaceId: "changes", surfaces: ["changes"] }));
   });
 
+  it.each(["getItem", "setItem"] as const)("keeps workspace controls usable when layout storage fails (%s)", (method) => {
+    vi.spyOn(window.localStorage, method).mockImplementation(() => {
+      throw new DOMException("Storage unavailable", method === "getItem" ? "SecurityError" : "QuotaExceededError");
+    });
+    const view = render(<LayoutHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle tools" }));
+    expect(screen.getByLabelText("Panel open")).toHaveTextContent("false");
+    view.rerender(<LayoutHarness workspaceId="another-chat" />);
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("none");
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(screen.getByLabelText("Active tool")).toHaveTextContent("changes");
+  });
+
   it("starts observing layout targets that mount after the hook's initial effect", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

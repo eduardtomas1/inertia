@@ -110,6 +110,22 @@ describe("supervised attachment import utility", () => {
     await expect(running.stopped).resolves.toBeUndefined();
   });
 
+  it.each(["text-content", "text-size"])("surfaces a privacy-safe %s failure through the worker", async (code) => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({ spawn: () => utility(child) });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "attachment-import.result",
+      operationId: operationId(child),
+      ok: false,
+      code,
+    });
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toMatchObject({ code });
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
   it("surfaces an image-too-large rejection with its exact message", async () => {
     const child = new FakeUtilityProcess();
     const runner = createAttachmentImportUtilityRunner({

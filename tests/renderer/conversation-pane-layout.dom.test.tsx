@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useConversationPaneLayout } from "../../src/renderer/src/hooks/useConversationPaneLayout";
 
@@ -62,6 +62,21 @@ describe("useConversationPaneLayout", () => {
       toolsVisible: true,
     });
     expect(hook.result.current.activeTool).toBe("preview");
+  });
+
+  it.each(["getItem", "setItem"] as const)("keeps split-pane controls usable when layout storage fails (%s)", (method) => {
+    vi.spyOn(window.localStorage, method).mockImplementation(() => {
+      throw new DOMException("Storage unavailable", method === "getItem" ? "SecurityError" : "QuotaExceededError");
+    });
+    const hook = renderHook(({ id }) => useConversationPaneLayout(id), { initialProps: { id: "alpha" } });
+    act(() => hook.result.current.openSurface("files"));
+    expect(hook.result.current.activeTool).toBe("files");
+    act(() => hook.result.current.closeAllSurfaces());
+    expect(hook.result.current.toolsVisible).toBe(false);
+    hook.rerender({ id: "beta" });
+    expect(hook.result.current.activeTool).toBeNull();
+    act(() => hook.result.current.openSurface("terminal"));
+    expect(hook.result.current.terminalOpen).toBe(true);
   });
 
   it("does not briefly reopen tools for a conversation persisted as closed", () => {

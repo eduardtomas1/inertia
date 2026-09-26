@@ -241,7 +241,7 @@ describe("document extraction scheduling", () => {
         attachment: attachment(2, "second.txt"),
         bytes: new Uint8Array(),
       },
-    ])).rejects.toThrow("first.txt is not valid UTF-8 text.");
+    ])).rejects.toThrow(/^first\.txt: .*Convert the file to UTF-8/u);
 
     const tooMany = Array.from({ length: 9 }, (_, index) => ({
       attachment: attachment(index + 1, `${index + 1}.txt`),

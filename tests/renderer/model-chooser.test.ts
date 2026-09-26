@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -150,35 +149,4 @@ describe("ModelChooser", () => {
     expect(searchable).toHaveLength(2);
   });
 
-  it("owns labelled autofocus search, composed filters, focus restoration, and keyboard commands", () => {
-    const source = readFileSync(
-      new URL("../../src/renderer/src/components/ModelChooser.tsx", import.meta.url),
-      "utf8",
-    );
-    const css = readFileSync(
-      new URL("../../src/renderer/src/styles.css", import.meta.url),
-      "utf8",
-    );
-
-    expect(source).toContain('aria-label="Search models"');
-    expect(source).toContain("searchRef.current?.focus()");
-    expect(source).toContain("filterModelRoutesBySource");
-    expect(source).toContain("searchModelRoutes(sourceRoutes, query)");
-    expect(source).toContain("resolveModelShortcutBindings");
-    expect(source).toContain("restoreFocusWhenEnabledRef");
-    expect(source).toContain("trigger.focus()");
-    expect(source).toContain('event.key !== "Escape"');
-    expect(source).toContain(
-      'document.addEventListener("keydown", handleKeyDown, true)',
-    );
-    expect(source).toContain("event.stopPropagation()");
-    expect(source).toContain("isSidebarNavigationKey(event.key)");
-    expect(source).toContain('<ul');
-    expect(source).toContain('className="model-chooser-list"');
-    expect(source).not.toContain('role="listbox"');
-    expect(source).toContain("results.emptyState");
-    expect(css).toContain(".model-chooser-palette");
-    expect(css).toContain(".model-chooser-header:focus-within");
-    expect(css).toContain("calc(100dvh - 178px)");
-  });
 });

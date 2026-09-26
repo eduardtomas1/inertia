@@ -26,6 +26,7 @@ import {
 import type { WorkspacePanelActions } from "./useWorkspaceLayout";
 import { usePersistedSize } from "./usePersistedSize";
 import { useTerminalDock } from "./useTerminalDock";
+import { layoutStorage } from "../utils/layoutStorage";
 
 const PANE_TOOL_MIN_HEIGHT = 150;
 const PANE_TOOL_MAX_HEIGHT = 520;
@@ -58,13 +59,13 @@ function storedPanePanelState(
   legacyToolStorageKey: string,
   legacyOpenStorageKey: string,
 ): PersistedPanePanelState {
-  const stored = parseRightPanelState(window.localStorage.getItem(panelStorageKey));
+  const stored = parseRightPanelState(layoutStorage.getItem(panelStorageKey));
   if (stored) return { key, panel: stored };
   return {
     key,
     panel: legacyRightPanelState(
-      window.localStorage.getItem(legacyToolStorageKey),
-      window.localStorage.getItem(legacyOpenStorageKey) === "true",
+      layoutStorage.getItem(legacyToolStorageKey),
+      layoutStorage.getItem(legacyOpenStorageKey) === "true",
     ),
   };
 }
@@ -135,7 +136,7 @@ export function useConversationPaneLayout(
           legacyOpenStorageKey,
         ).panel;
       const next = update(owned);
-      window.localStorage.setItem(panelStorageKey, serializeRightPanelState(next));
+      layoutStorage.setItem(panelStorageKey, serializeRightPanelState(next));
       return { key: ownerKey, panel: next };
     });
   }, [legacyOpenStorageKey, legacyToolStorageKey, ownerKey, panelStorageKey]);

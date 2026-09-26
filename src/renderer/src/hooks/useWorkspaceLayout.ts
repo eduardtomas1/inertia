@@ -32,6 +32,7 @@ import {
 import { useMediaQuery } from "./useMediaQuery";
 import { usePersistedSize } from "./usePersistedSize";
 import type { AppView } from "../appView";
+import { layoutStorage } from "../utils/layoutStorage";
 
 const RESIZE_HANDLE_SIZE = 7;
 export const SIDEBAR_MIN_WIDTH = 220;
@@ -105,10 +106,10 @@ function readWorkspacePanelState(
   if (!keys.panel || !keys.legacyTool || !keys.legacyOpen) {
     return { key: workspaceId, panel: EMPTY_RIGHT_PANEL_STATE };
   }
-  const stored = parseRightPanelState(window.localStorage.getItem(keys.panel));
+  const stored = parseRightPanelState(layoutStorage.getItem(keys.panel));
   if (stored) return { key: workspaceId, panel: stored };
-  const legacyOpen = window.localStorage.getItem(keys.legacyOpen);
-  const legacyTool = window.localStorage.getItem(keys.legacyTool);
+  const legacyOpen = layoutStorage.getItem(keys.legacyOpen);
+  const legacyTool = layoutStorage.getItem(keys.legacyTool);
   if (legacyOpen !== null || legacyTool !== null) {
     return {
       key: workspaceId,
@@ -197,7 +198,7 @@ export function useWorkspaceLayout(
 ): WorkspaceLayout {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
-    window.localStorage.getItem(
+    layoutStorage.getItem(
       "inertia:layout:sidebar-collapsed:v1",
     ) === "true");
   const workspaceScope = options.startupReady && options.workspaceId
@@ -251,7 +252,7 @@ export function useWorkspaceLayout(
     [persistedToolsHeight],
   );
   useEffect(() => {
-    window.localStorage.setItem(
+    layoutStorage.setItem(
       "inertia:layout:sidebar-collapsed:v1",
       String(sidebarCollapsed),
     );
@@ -274,7 +275,7 @@ export function useWorkspaceLayout(
         : readWorkspacePanelState(workspaceScope).panel;
       const next = update(owned);
       if (panelStorageKey) {
-        window.localStorage.setItem(panelStorageKey, serializeRightPanelState(next));
+        layoutStorage.setItem(panelStorageKey, serializeRightPanelState(next));
       }
       return { key: workspaceScope, panel: next };
     });

@@ -67,7 +67,7 @@ const attachmentDeclaredMimeAliases: Readonly<
     "text/pdf",
     "text/x-pdf",
   ],
-  "text/plain": ["text/x-log"],
+  "text/plain": ["text/x-log", "application/x-log", "application/x-text", "text/x-text"],
   "text/markdown": [
     "application/markdown",
     "application/x-markdown",
@@ -155,16 +155,21 @@ export function chatAttachmentMimeTypeForName(
  * stored-attachment codec, and the frozen migration parser stays unchanged.
  * Deliberately absent: SVG (an image format that can carry script), .env and
  * key or certificate files (credentials), and every binary container. The
- * import still proves the bytes are control-free UTF-8 before accepting them.
+ * import still validates bounded Unicode text before accepting them.
  */
-const PLAIN_TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
-  "log", "text", "rst", "tex", "tsv", "jsonl", "ndjson",
-  "yaml", "yml", "toml", "ini", "cfg", "conf", "properties", "xml", "html", "htm",
-  "css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "tsx", "vue", "svelte",
-  "py", "rb", "go", "rs", "java", "kt", "kts", "scala", "c", "h", "cc", "cpp", "hpp",
-  "cs", "swift", "php", "lua", "dart", "r", "pl", "ex", "exs", "erl", "hs", "clj",
-  "sh", "bash", "zsh", "ps1", "bat", "cmd", "sql", "graphql", "proto", "diff", "patch",
-]);
+const PLAIN_TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set((
+  "log text rst tex tsv jsonl ndjson jsonc json5 ipynb mdx "
+  + "yaml yml toml ini cfg conf properties xml html htm "
+  + "css scss less js mjs cjs jsx ts tsx vue svelte "
+  + "py rb go rs java kt kts scala c h cc cpp hpp "
+  + "cs swift php lua dart r pl ex exs erl hs clj "
+  + "sh bash zsh ps1 bat cmd sql graphql proto diff patch"
+).split(" "));
+
+const PLAIN_TEXT_ATTACHMENT_NAMES: ReadonlySet<string> = new Set((
+  "dockerfile containerfile makefile gnumakefile justfile "
+  + "readme license .gitignore .gitattributes .dockerignore .editorconfig"
+).split(" "));
 
 // Declared types platforms report for the plain-text set beyond text/*.
 const PLAIN_TEXT_DECLARED_MIME_TYPES: ReadonlySet<string> = new Set([
@@ -176,9 +181,11 @@ const PLAIN_TEXT_DECLARED_MIME_TYPES: ReadonlySet<string> = new Set([
   "application/sql", "application/x-sql", "application/x-httpd-php", "application/x-php",
   "application/x-python", "application/x-python-code", "application/x-ruby",
   "application/x-perl", "application/x-tex", "application/x-latex",
-  "application/x-ndjson", "application/jsonl", "application/graphql", "application/x-protobuf",
+  "application/x-ndjson", "application/jsonl", "application/json", "application/json5",
+  "application/graphql", "application/x-protobuf", "application/x-ipynb+json",
+  "application/vnd.dart", "application/x-tiled-tsx", "application/x-genesis-32x-rom",
   // Chromium classifies a .ts file by extension as an MPEG transport stream.
-  "video/mp2t",
+  "video/mp2t", "video/vnd.dlna.mpeg-tts",
 ]);
 
 function attachmentNameExtension(name: string): string | null {
@@ -199,6 +206,7 @@ export function chatAttachmentPickerExtensions(mode: "images" | "all"): string[]
 }
 
 function isPlainTextAttachmentName(name: string): boolean {
+  if (PLAIN_TEXT_ATTACHMENT_NAMES.has(name.trim().toLowerCase())) return true;
   const extension = attachmentNameExtension(name);
   return extension !== null
     && !Object.hasOwn(attachmentMimeByExtension, extension)
@@ -212,12 +220,13 @@ function isPlainTextAttachmentName(name: string): boolean {
 export function safeChatAttachmentMimeTypeForName(
   name: string,
 ): ChatAttachmentMimeType | null {
-  const extension = attachmentNameExtension(name);
-  if (extension === null) return null;
+  const leaf = name.trim().toLowerCase();
+  const extension = /\.([^.]+)$/u.exec(leaf)?.[1] ?? "";
   if (Object.hasOwn(attachmentMimeByExtension, extension)) {
     return attachmentMimeByExtension[extension]!;
   }
-  return PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension) ? "text/plain" : null;
+  return PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension)
+    || PLAIN_TEXT_ATTACHMENT_NAMES.has(leaf) ? "text/plain" : null;
 }
 
 export function isPotentialChatAttachment(
@@ -233,6 +242,8 @@ export function isPotentialChatAttachment(
     !declared
     || declared === inferred
     || declared === "application/octet-stream"
+    || declared === "binary/octet-stream"
+    || declared === "application/unknown"
   ) return true;
   if (attachmentDeclaredMimeAliases[inferred]?.includes(declared)) return true;
   return isPlainTextAttachmentName(name)

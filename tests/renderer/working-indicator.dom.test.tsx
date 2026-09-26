@@ -239,6 +239,18 @@ describe("working indicator settings", () => {
     });
   });
 
+  it("enables activity indicators only for Automatic and preserves the saved switch", () => {
+    renderSettings({ ...automatic, activity: true });
+    const activity = screen.getByRole("switch", { name: "Use for tool and step activity" });
+    expect(activity).toBeEnabled();
+    expect(activity).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Shaping" }));
+    expect(activity).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: "Automatic" }));
+    expect(activity).toBeEnabled();
+    expect(activity).toHaveAttribute("aria-checked", "true");
+  });
+
   it("has exactly one control per dimension with unique accessible names", () => {
     const { view } = renderSettings();
     const section = view.container.querySelector(".working-indicator-settings")!;

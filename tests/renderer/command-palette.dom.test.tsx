@@ -146,7 +146,7 @@ describe("CommandPalette behavior", () => {
     })).toHaveFocus();
   });
 
-  it("resets keyboard selection when filtering after pointer selection", async () => {
+  it("resets selection when filtering and ignores mouse entry until the pointer moves", async () => {
     const user = userEvent.setup();
     render(palette(true));
     const search = screen.getByRole("combobox", {
@@ -157,11 +157,17 @@ describe("CommandPalette behavior", () => {
     fireEvent.pointerMove(settings);
     expect(settings).toHaveAttribute("aria-selected", "true");
 
-    await user.type(search, "settings");
+    await user.type(search, "e");
 
-    expect(screen.getByRole("option", { name: /Open settings/u }))
-      .toHaveAttribute("aria-selected", "true");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    const firstResult = screen.getAllByRole("option")[0]!;
+    expect(firstResult).not.toBe(settings);
+    expect(firstResult).toHaveAttribute("aria-selected", "true");
+    expect(settings).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.mouseEnter(settings);
+    expect(settings).toHaveAttribute("aria-selected", "false");
+    fireEvent.pointerMove(settings);
+    expect(settings).toHaveAttribute("aria-selected", "true");
   });
 
   it("clears query and selection after Escape and after running an action", async () => {

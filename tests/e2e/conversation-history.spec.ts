@@ -35,7 +35,7 @@ test("loads older pages without moving the reading position or losing the oldest
   const transcript = page.getByLabel("Thread transcript", { exact: true });
   // Begin after the initial latest-answer navigation has mounted its target.
   await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
-  await transcript.press(process.platform === "darwin" ? "Meta+Home" : "Control+Home");
+  await transcript.press("Home");
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
   await earlier.scrollIntoViewIfNeeded();
   const anchor = page.locator(`[data-turn-id="${turns[45]}"]`).first();
@@ -75,11 +75,10 @@ test("loads older pages without moving the reading position or losing the oldest
   }
   await earlier.scrollIntoViewIfNeeded();
   await earlier.click();
-  await expect(earlier).toHaveCount(0);
-  await transcript.press(process.platform === "darwin" ? "Meta+Home" : "Control+Home");
-  const oldest = page.locator(`[data-turn-id="${turns[0]}"]`).first();
-  await oldest.scrollIntoViewIfNeeded();
-  await expect(oldest).toBeInViewport();
+  await expect(page.getByRole("feed", { name: `${turns.length} conversation turns`, exact: true })).toBeAttached();
+  await expect(page.getByRole("button", { name: /earlier messages/u })).toHaveCount(0);
+  await transcript.press("Home");
+  await expect(page.locator(`[data-turn-id="${turns[0]}"]`).first()).toBeInViewport();
   await app.expectNoViewportOverflow();
   expect(app.rendererErrors).toEqual([]);
 });

@@ -12,6 +12,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
+import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -41,6 +42,7 @@ import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
+import { CLAUDE_MESSAGE_DRAIN_TIMEOUT, nextClaudeMessage, claudeFastModeFailure } from "./claude-sdk-lifecycle-support";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
 import { claudeQuestions } from "./claude-questions";
@@ -80,7 +82,6 @@ const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
 const CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS = 6_000;
-const CLAUDE_MESSAGE_DRAIN_TIMEOUT = Symbol("claude-message-drain-timeout");
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -153,42 +154,6 @@ function claudeTerminalSubagentDrainTimeout(
     MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS,
     Math.min(value, CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS),
   );
-}
-
-async function nextClaudeMessage(
-  iterator: AsyncIterator<SDKMessage>,
-  timeoutMs: number | null,
-): Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT> {
-  if (timeoutMs === null) return await iterator.next();
-  if (timeoutMs <= 0) return CLAUDE_MESSAGE_DRAIN_TIMEOUT;
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>((resolve) => {
-    timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);
-    timer.unref();
-  });
-  try {
-    return await Promise.race([iterator.next(), timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function claudeFastModeFailure(record: Record<string, unknown>): string {
-  const reason = stringValue(record.fast_mode_disabled_reason);
-  const detail = reason === "model_not_allowed"
-    ? "The selected Claude model does not allow Fast mode."
-    : reason === "sdk_opt_in_required"
-      ? "This Claude Agent SDK version did not accept the Fast mode opt-in."
-      : reason === "extra_usage_disabled"
-        ? "Fast mode requires extra usage to be enabled for this Claude account."
-        : reason === "not_first_party"
-          ? "Fast mode is unavailable through this Claude backend."
-          : reason === "disabled_by_env"
-            ? "Fast mode is disabled by the Claude environment."
-            : reason === "free"
-              ? "Fast mode is unavailable on this Claude account tier."
-              : "Claude did not activate Fast mode for this session.";
-  return `${detail} Choose Standard, refresh models, or update Claude Code.`;
 }
 
 interface PendingApproval {
@@ -265,6 +230,8 @@ function startClaudeRun(
   const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
   let authoritativeSessionId = options.input.sessionId;
+  let pendingSessionReset: { outgoingId: string; candidateId?: string } | undefined;
+  let contextUsageGeneration = 0;
   let latestContextUsage: unknown;
   let contextUsageRequest: Promise<void> | null = null;
   let stagedSkillPlugin: Awaited<ReturnType<
@@ -303,9 +270,10 @@ function startClaudeRun(
 
   const refreshContextUsage = (): void => {
     if (!query || contextUsageRequest) return;
+    const generation = contextUsageGeneration;
     contextUsageRequest = readClaudeContextUsage(query)
       .then((usage) => {
-        if (usage) latestContextUsage = usage;
+        if (usage && generation === contextUsageGeneration) latestContextUsage = usage;
       })
       .finally(() => {
         contextUsageRequest = null;
@@ -616,6 +584,16 @@ function startClaudeRun(
         const childOwned = record.parent_tool_use_id !== null
           && record.parent_tool_use_id !== undefined;
         const messageSessionId = stringValue(record.session_id);
+        if (message.type === "conversation_reset") {
+          const replacement = message.new_conversation_id;
+          if (childOwned || pendingSessionReset || !authoritativeSessionId
+            || messageSessionId !== authoritativeSessionId
+            || typeof replacement !== "string"
+            || !isProviderTerminalSessionId(replacement)
+            || options.input.operation) {
+            throw new Error("Claude returned an invalid provider session reset.");
+          }
+        }
         const requiresSessionAttestation = !childOwned && (
           (message.type === "system" && message.subtype === "init")
           || message.type === "result"
@@ -624,7 +602,13 @@ function startClaudeRun(
           throw new Error("Claude did not attest the requested provider session.");
         }
         if (!childOwned && messageSessionId) {
-          if (authoritativeSessionId && messageSessionId !== authoritativeSessionId) {
+          const expectedSessionId = pendingSessionReset?.candidateId ?? authoritativeSessionId;
+          const authorizedReset = pendingSessionReset !== undefined
+            && isProviderTerminalSessionId(messageSessionId)
+            && messageSessionId !== pendingSessionReset.outgoingId
+            && (!pendingSessionReset.candidateId || messageSessionId === pendingSessionReset.candidateId);
+          if (!authorizedReset && (pendingSessionReset
+            || (expectedSessionId && messageSessionId !== expectedSessionId))) {
             const attestationFailure = requestedFastModeState === "on"
               ? "Claude did not confirm Fast mode because it did not attest the requested provider session."
               : requestedFastModeState === "off"
@@ -634,11 +618,15 @@ function startClaudeRun(
                   : "Claude did not attest the requested provider session.";
             throw new Error(attestationFailure);
           }
-          authoritativeSessionId = messageSessionId;
+          if (pendingSessionReset && !requiresSessionAttestation) {
+            pendingSessionReset.candidateId = messageSessionId;
+          } else {
+            authoritativeSessionId = messageSessionId;
+            pendingSessionReset = undefined;
+          }
         }
-        const initAttestsRequestedSession = messageSessionId !== undefined
-          && (options.input.sessionId === undefined
-            || messageSessionId === options.input.sessionId);
+        const initAttestsRequestedSession = !childOwned && messageSessionId !== undefined
+          && messageSessionId === authoritativeSessionId;
         if (message.type === "system" && message.subtype === "init"
           && initAttestsRequestedSession) {
           if (requestedFastModeState === "on"
@@ -670,6 +658,7 @@ function startClaudeRun(
           && messageSessionId === options.input.sessionId;
         if (
           !childOwned
+          && !pendingSessionReset
           && typeof record.session_id === "string"
           && record.session_id !== sessionId
         ) {
@@ -682,6 +671,12 @@ function startClaudeRun(
         subagentTracker.observe(message);
         const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
         messageProjector.observe(message, provesRequestedCompaction);
+        if (message.type === "conversation_reset") {
+          pendingSessionReset = { outgoingId: authoritativeSessionId! };
+          latestContextUsage = undefined;
+          contextUsageGeneration += 1;
+          fastModeVerified = requestedFastModeState === null;
+        }
         const commandLifecycle = !childOwned ? claudeCommandLifecycleMessage(message) : null;
         if (commandLifecycle && (commandLifecycle.state === "refused"
           || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
@@ -750,6 +745,9 @@ function startClaudeRun(
         }
       }
       if (ownedProcess.transportError()) throw ownedProcess.transportError();
+      if (pendingSessionReset) {
+        throw new Error("Claude did not confirm the replacement provider session.");
+      }
       if (!selectedSkillsVerified) {
         throw new Error("Claude did not confirm the selected isolated skills.");
       }

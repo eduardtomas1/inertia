@@ -1,7 +1,7 @@
 import type { Query, SDKControlGetContextUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 
 import type { ProviderRateLimit, ThreadUsageSnapshot } from "../../shared/contracts";
-import { clampProviderPercent, providerTimestamp } from "./usage-values";
+import { providerTimestamp } from "./usage-values";
 
 export type ClaudeUsageSnapshot = Omit<
   ThreadUsageSnapshot,
@@ -260,7 +260,11 @@ export function parseClaudeRateLimitEvent(value: unknown): ProviderRateLimit | n
   const type = typeof info?.rateLimitType === "string"
     ? info.rateLimitType
     : null;
-  const utilization = clampProviderPercent(info?.utilization);
+  const fraction = info?.utilization;
+  const utilization = typeof fraction === "number"
+    && Number.isFinite(fraction) && fraction >= 0
+    ? Math.min(fraction, 1) * 100
+    : null;
   if (!type || utilization === null) return null;
   const presentation = rateLimitLabels[type] ?? {
     label: `Claude · ${type.replaceAll("_", " ")}`,

@@ -56,11 +56,12 @@ function assistantMessage(input: {
   supersedes?: string[];
   aborted?: true;
   parentToolUseId?: string | null;
+  sessionId?: string;
 }): SDKMessage {
   return sdkMessage({
     type: "assistant",
     uuid: input.uuid,
-    session_id: CLAUDE_PROTOCOL_SESSION_ID,
+    session_id: input.sessionId ?? CLAUDE_PROTOCOL_SESSION_ID,
     parent_tool_use_id: input.parentToolUseId ?? null,
     message: {
       id: input.apiMessageId,
@@ -941,14 +942,16 @@ describe("Claude Agent SDK message projection", () => {
       assistantMessage({
         uuid: "after-reset",
         apiMessageId: "api-after-reset",
+        sessionId: "new-conversation",
         content: [{ type: "text", text: "New conversation" }],
       }),
-      claudeSuccessResult("New conversation", "completed"),
+      { ...claudeSuccessResult("New conversation", "completed"), session_id: "new-conversation" },
     ]);
 
     expect(result).toMatchObject({
       status: "completed",
       text: "New conversation",
+      sessionId: "new-conversation",
     });
     expect(events).toContainEqual(expect.objectContaining({
       type: "text-snapshot",

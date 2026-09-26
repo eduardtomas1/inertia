@@ -182,9 +182,10 @@ const PLAIN_TEXT_DECLARED_MIME_TYPES: ReadonlySet<string> = new Set([
   "application/x-python", "application/x-python-code", "application/x-ruby",
   "application/x-perl", "application/x-tex", "application/x-latex",
   "application/x-ndjson", "application/jsonl", "application/json", "application/json5",
-  "application/graphql", "application/x-protobuf",
+  "application/graphql", "application/x-protobuf", "application/x-ipynb+json",
+  "application/vnd.dart", "application/x-tiled-tsx", "application/x-genesis-32x-rom",
   // Chromium classifies a .ts file by extension as an MPEG transport stream.
-  "video/mp2t",
+  "video/mp2t", "video/vnd.dlna.mpeg-tts",
 ]);
 
 function attachmentNameExtension(name: string): string | null {

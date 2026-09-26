@@ -55,6 +55,12 @@ describe("chat attachment contract", () => {
     expect(isPotentialChatAttachment("app.log", "application/unknown")).toBe(true);
     expect(isPotentialChatAttachment("settings.jsonc", "application/json")).toBe(true);
     expect(isPotentialChatAttachment("Dockerfile", "")).toBe(true);
+    expect(isPotentialChatAttachment("notebook.ipynb", "application/x-ipynb+json")).toBe(true);
+    expect(isPotentialChatAttachment("main.dart", "application/vnd.dart")).toBe(true);
+    expect(isPotentialChatAttachment("view.tsx", "application/x-tiled-tsx")).toBe(true);
+    expect(isPotentialChatAttachment("page.mdx", "application/x-genesis-32x-rom")).toBe(true);
+    expect(isPotentialChatAttachment("main.ts", "video/vnd.dlna.mpeg-tts")).toBe(true);
+    expect(isPotentialChatAttachment("notes.txt", "application/x-ipynb+json")).toBe(false);
     expect(isPotentialChatAttachment("index.html", "image/png")).toBe(false);
     expect(isPotentialChatAttachment("index.html", "application/pdf")).toBe(false);
     expect(isPotentialChatAttachment("index.html", "application/zip")).toBe(false);

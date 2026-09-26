@@ -15,6 +15,7 @@ describe("text attachment formats", () => {
     ["settings.jsonc", "application/json", Buffer.from('{ // editor settings\n "enabled": true\n}')],
     ["Dockerfile", "", Buffer.from("FROM scratch\n")],
     [".gitignore", "text/plain", Buffer.from("node_modules/\n")],
+    ["analysis.ipynb", "application/x-ipynb+json", Buffer.from('{"cells": [], "nbformat": 4}\n')],
   ])("imports %s with %s and preserves its bytes", (name, mimeType, data) => {
     const result = validateAttachmentImport({ name, mimeType, data });
     expect(result.mimeType).toBe("text/plain");

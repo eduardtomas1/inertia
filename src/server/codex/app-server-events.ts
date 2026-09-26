@@ -27,6 +27,7 @@ import {
   parseCodexGoalUpdatedNotification,
 } from "./goals";
 import { parseCodexPlan } from "./plans";
+import { validCodexGatewayOAuthNotification } from "./gateway-oauth-notification";
 import {
   boundedText,
   CappedTextBuffer,
@@ -568,6 +569,14 @@ export class CodexAppServerEvents {
   handleNotification(method: string, params: JsonObject): void {
     if (this.host.isSettled()) return;
     this.host.setLastProtocolMethod(method);
+    if (method === "account/gatewayOAuth/changed") {
+      if (!validCodexGatewayOAuthNotification(params)) this.failMalformedProtocol(
+        "Codex sent malformed gateway authentication status.",
+        "The gateway authentication notification did not match the reviewed schema.",
+      );
+      // Never initiate login or forward authorization URLs/provider error data.
+      return;
+    }
     if (method === "account/rateLimits/updated") {
       const limits = parseCodexRateLimits({
         rateLimits: params.rateLimits,

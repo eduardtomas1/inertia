@@ -30,26 +30,49 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await app?.close(); });
 
-test("loads older pages without moving the reading position or losing the oldest turn", async () => {
+test("loads older pages without moving the reading position or losing the oldest turn", async ({ browserName: _browserName }, info) => {
   const { page } = app;
   const transcript = page.getByLabel("Thread transcript", { exact: true });
+  // Begin after the initial latest-answer navigation has mounted its target.
+  await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
   await transcript.press(process.platform === "darwin" ? "Meta+Home" : "Control+Home");
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
   await earlier.scrollIntoViewIfNeeded();
   const anchor = page.locator(`[data-turn-id="${turns[45]}"]`).first();
   await expect(anchor).toBeInViewport();
   let before = 0;
+  const positions: unknown[] = [];
+  const observe = async () => {
+    const position = await transcript.evaluate((scroll) => {
+      const bounds = scroll.getBoundingClientRect();
+      return { at: performance.now(), scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight,
+        viewport: { top: bounds.top, height: bounds.height },
+        rows: [...scroll.querySelectorAll<HTMLElement>("[data-response-row-id]")].map((row) => ({
+          id: row.dataset.responseRowId, top: row.getBoundingClientRect().top,
+          height: row.getBoundingClientRect().height,
+        })) };
+    });
+    positions.push(position);
+    return position;
+  };
   await expect.poll(async () => {
     const bounds = await anchor.boundingBox();
     if (bounds) before = bounds.y;
     return Boolean(bounds);
   }).toBe(true);
+  await observe();
   await earlier.click();
   await expect(page.getByRole("button", { name: "Loading earlier messages…" })).toHaveCount(0);
-  await expect.poll(async () => {
-    const bounds = await anchor.boundingBox();
-    return bounds ? Math.abs(bounds.y - before) : Number.POSITIVE_INFINITY;
-  }).toBeLessThan(4);
+  try {
+    await expect.poll(async () => {
+      const position = await observe();
+      const row = position.rows.find(({ id }) => id === turns[45]);
+      return row ? Math.abs(row.top - before) : Number.POSITIVE_INFINITY;
+    }).toBeLessThan(4);
+  } finally {
+    await info.attach("prepend-positions", { body: JSON.stringify({ anchor: turns[45], before, positions }, null, 2), contentType: "application/json" });
+    await info.attach("prepend-viewport", { body: await page.screenshot(), contentType: "image/png" });
+  }
   await earlier.scrollIntoViewIfNeeded();
   await earlier.click();
   await expect(earlier).toHaveCount(0);

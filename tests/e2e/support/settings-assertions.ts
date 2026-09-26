@@ -12,7 +12,8 @@ export async function expectFlatSettingsSections(settings: Locator): Promise<voi
   await expect(toolbar).toBeVisible();
   await expect(toolbar).toHaveCSS("justify-content", "flex-end");
   await expect(toolbar).toHaveCSS("margin-bottom", "16px");
-  const rows = settings.locator(".settings-rows");
+  // The working indicator intentionally outlines its specialized switch group.
+  const rows = settings.locator(".settings-rows:not(.working-indicator-switches)");
   expect(await rows.count()).toBeGreaterThan(0);
   for (const row of await rows.all()) await expect(row).toHaveCSS("border-top-width", "0px");
   const cards = settings.locator(".settings-card");

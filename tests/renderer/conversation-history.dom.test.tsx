@@ -6,6 +6,7 @@ import { useConversationHistory } from "../../src/renderer/src/hooks/useConversa
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "../../src/renderer/src/utils/messageSearchFocus";
 import { clearTimelineFocus, requestTimelineFocus } from "../../src/renderer/src/utils/timelineFocus";
 import { useMessageSearchFocus } from "../../src/renderer/src/components/response-timeline/useMessageSearchFocus";
+import { prepareConversationHistoryPrepend } from "../../src/renderer/src/utils/conversationHistoryNavigation";
 import type { ResponseTimelineItem } from "../../src/renderer/src/utils/responseTimeline";
 
 const cursor = { at: "2030-01-01T00:00:00.000Z", id: "older", kind: "turn" as const };
@@ -26,6 +27,28 @@ function deferred() {
 afterEach(() => { clearMessageSearchFocus(); clearTimelineFocus(); });
 
 describe("history navigation lifecycle", () => {
+  it("captures a prepend before update and restores only after the new timeline commits", () => {
+    const initial: ResponseTimelineItem[] = [];
+    const next = [{}] as ResponseTimelineItem[];
+    const capture = vi.fn();
+    const restore = vi.fn();
+    const reading = vi.fn();
+    const hook = renderHook(({ timeline }) => useMessageSearchFocus(
+      { conversationId: "chat", projectId: "project", messages: [] },
+      timeline, reading, vi.fn(), capture, restore,
+    ), { initialProps: { timeline: initial } });
+    act(() => prepareConversationHistoryPrepend("another-chat"));
+    expect(capture).not.toHaveBeenCalled();
+    act(() => prepareConversationHistoryPrepend("chat"));
+    expect(capture).toHaveBeenCalledOnce();
+    expect(reading).toHaveBeenCalledOnce();
+    hook.rerender({ timeline: initial });
+    expect(restore).not.toHaveBeenCalled();
+    hook.rerender({ timeline: next });
+    expect(restore).toHaveBeenCalledOnce();
+    hook.rerender({ timeline: next });
+    expect(restore).toHaveBeenCalledOnce();
+  });
   it("ignores an old page after switching chats and maintains stable control identity", async () => {
     const response = deferred();
     const request = vi.fn(() => response.promise);

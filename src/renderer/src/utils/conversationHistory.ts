@@ -28,9 +28,9 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
     ...(mode === "refresh" ? incoming : current),
     history: mode === "older" ? incoming.history : current.history ?? incoming.history,
     agentTurns: merge(current.agentTurns, incoming.agentTurns)
-      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.id.localeCompare(b.id)),
+      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt, "en") || a.id.localeCompare(b.id, "en")),
     messages: merge(current.messages, incoming.messages)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt, "en") || a.id.localeCompare(b.id, "en")),
     activities: merge(current.activities, incoming.activities),
     subagents: merge(current.subagents, incoming.subagents),
     reasonings: merge(current.reasonings, incoming.reasonings),

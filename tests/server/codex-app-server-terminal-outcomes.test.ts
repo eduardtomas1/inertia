@@ -23,12 +23,15 @@ import { createCodexAppServerHarness } from "../../src/server/provider/codex-app
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 function fixture(throughHarness = false) {
+  const observed = { onActivity: vi.fn(), onText: vi.fn(), onStatus: vi.fn(), onRateLimits: vi.fn() };
+  const writes: unknown[] = [];
   const child = new EventEmitter() as ChildProcessWithoutNullStreams;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const stdin = new Writable({
     write(chunk, _encoding, callback) {
       const message = JSON.parse(String(chunk)) as { id?: number; method?: string };
+      writes.push(message);
       if (message.id !== undefined && message.method) {
         const result = message.method === "thread/start"
           ? { thread: { id: "thread-test" } }
@@ -59,10 +62,14 @@ function fixture(throughHarness = false) {
     executable: "/synthetic/codex", cwd: "/synthetic", environment: {},
     prompt: "Exercise terminal outcomes", access: "full", planMode: false,
     rpcTimeoutMs: 50, terminateProcessTree,
+    ...observed,
   });
   child.emit("spawn");
   return {
-    run, terminateProcessTree, finishCleanup,
+    run, terminateProcessTree, finishCleanup, observed, writes,
+    notification(method: string, params: Record<string, unknown>) {
+      stdout.write(`${JSON.stringify({ method, params })}\n`);
+    },
     serverRequest(method: string, params: Record<string, unknown>) {
       stdout.write(`${JSON.stringify({ id: "review-request", method, params })}\n`);
     },
@@ -130,6 +137,39 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("Codex App Server terminal outcomes", () => {
+  it.each(["notReady", "started", "succeeded", "failed"])("ignores gateway OAuth %s without projecting auth handoffs or changing the active turn", async (status) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    const before = JSON.stringify({ writes: app.writes, calls: Object.values(app.observed).map((spy) => spy.mock.calls) });
+    app.notification("account/gatewayOAuth/changed", {
+      providerId: "fixture-gateway", status,
+      authUrl: "https://gateway.example.test/authorize?code=PRIVATE_GATEWAY_CODE",
+      error: "PRIVATE_GATEWAY_DIAGNOSTIC", threadId: "thread-test", turnId: "turn-test",
+    });
+    expect(JSON.stringify({ writes: app.writes, calls: Object.values(app.observed).map((spy) => spy.mock.calls) })).toBe(before);
+    expect(app.terminateProcessTree).not.toHaveBeenCalled();
+    app.terminal("completed"); app.finishCleanup(true);
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true });
+    expect(JSON.stringify({ result, calls: Object.values(app.observed).map((spy) => spy.mock.calls) })).not.toContain("PRIVATE_GATEWAY");
+  });
+
+  it.each([
+    { status: "future-secret-status" }, { status: null }, { authUrl: { code: "PRIVATE_GATEWAY_CODE" } },
+    { error: ["PRIVATE_GATEWAY_DIAGNOSTIC"] }, { providerId: "" }, { authUrl: undefined },
+  ])("fails malformed gateway OAuth status closed without retaining sensitive fields: %j", async (override) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.notification("account/gatewayOAuth/changed", {
+      providerId: "fixture-gateway", status: "started", authUrl: null, error: "PRIVATE_GATEWAY_DIAGNOSTIC", ...override,
+    });
+    app.terminal("completed"); app.finishCleanup(true);
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, failure: { reason: "malformed-protocol" } });
+    expect(JSON.stringify({ result, calls: Object.values(app.observed).map((spy) => spy.mock.calls) })).not.toMatch(/PRIVATE_GATEWAY|future-secret-status/u);
+    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["foreign approval", "item/commandExecution/requestApproval", { threadId: "foreign-thread", command: "npm test" }],
     ["malformed approval", "item/commandExecution/requestApproval", { threadId: "thread-test", command: { invalid: true } }],

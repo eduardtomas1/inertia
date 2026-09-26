@@ -280,6 +280,18 @@ afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
 });
 
+async function renderReadyTranscript(ui: React.ReactNode) {
+  const view = render(ui);
+  // React.lazy starts its promise on first render even when the module was
+  // imported above. Settle nested imports and their React commits before the
+  // measurement baseline; cold hosted transforms are not streaming work.
+  await act(async () => { await vi.dynamicImportSettled(); });
+  await waitFor(() => expect(
+    view.container.querySelector(`[data-turn-id="${turn.id}"]`),
+  ).not.toBeNull(), { timeout: 5_000 });
+  return view;
+}
+
 describe("streamed agent text", () => {
   it("re-renders only the transcript for each token", async () => {
     // LiveElapsed ticks independently of token delivery. Keep its clock fixed
@@ -299,14 +311,11 @@ describe("streamed agent text", () => {
       counting.renders.App = (counting.renders.App ?? 0) + 1;
       return App();
     }
-    const view = render(
+    const view = await renderReadyTranscript(
       <Profiler id="app" onRender={() => { commits += 1; }}>
         <RootFlusher><CountedApp /></RootFlusher>
       </Profiler>,
     );
-    await waitFor(() => expect(
-      view.container.querySelector(`[data-turn-id="${turn.id}"]`),
-    ).not.toBeNull());
     let quietCycles = 0;
     for (let cycle = 0; cycle < 200 && quietCycles < 3; cycle += 1) {
       const commitsBefore = commits;
@@ -354,10 +363,7 @@ describe("streamed agent text", () => {
     const { default: App } = await import("../../src/renderer/src/App");
     const { loadCommandPalette } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
     await loadCommandPalette();
-    const view = render(<App />);
-    await waitFor(() => expect(
-      view.container.querySelector(`[data-turn-id="${turn.id}"]`),
-    ).not.toBeNull());
+    await renderReadyTranscript(<App />);
     const background = ["WorkspaceScene", "ChatWorkspace", "Composer", "ResponseTimeline", "TurnTimeline"];
     for (const name of background) counting.renders[name] = 0;
 
@@ -375,10 +381,7 @@ describe("streamed agent text", () => {
 
   it("reveals each streamed word in its own commit behind the caret", async () => {
     const { default: App } = await import("../../src/renderer/src/App");
-    const view = render(<App />);
-    await waitFor(() => expect(
-      view.container.querySelector(`[data-turn-id="${turn.id}"]`),
-    ).not.toBeNull());
+    const view = await renderReadyTranscript(<App />);
     const words = Array.from({ length: 12 }, (_, index) => `word${index}`);
     const revealed: Element[] = [];
     for (const [index, word] of words.entries()) {

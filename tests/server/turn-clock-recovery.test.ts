@@ -4,6 +4,7 @@ import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
   flushTurnControllerTestPromises, turnControllerTestIdentity,
 } from "../support/turn-controller-runtime";
+import { monotonicTurnClock } from "../../src/server/runtime/turns/turn-clock";
 
 afterEach(cleanupTurnControllerTestDirectories);
 
@@ -29,6 +30,32 @@ describe("turn clock correction and durable settlement repair", () => {
       expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
       expect(runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." }).turn.status).toBe("queued");
     } finally { runtime.store.close(); }
+  });
+
+  it("keeps later transcript messages strictly after earlier ones while wall time catches up", async () => {
+    let wallTime = Date.parse("2030-01-01T00:00:00.000Z");
+    const runtime = await createTurnControllerTestRuntime({}, { clock: () => new Date(wallTime) });
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First." });
+      runtime.controller.start(first.turn.id);
+      wallTime += 1000;
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      wallTime -= 60_000;
+      runtime.provider.resolve({ status: "completed", text: "Answer." });
+      await flushTurnControllerTestPromises();
+      await flushTurnControllerTestPromises();
+      const second = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Second." });
+      const assistant = runtime.store.conversationDetail(runtime.conversationId)!.messages
+        .find((message) => message.role === "assistant")!;
+      expect(Date.parse(second.message.createdAt)).toBeGreaterThan(Date.parse(assistant.createdAt));
+    } finally { runtime.store.close(); }
+  });
+
+  it("advances every clamped reading and follows wall time once it passes the maximum", () => {
+    const readings = [1_000, 1_000, 400, 400, 1_002, 1_003, 1_010];
+    const clock = monotonicTurnClock(() => new Date(readings.shift()!));
+    expect(Array.from({ length: 7 }, () => clock().getTime()))
+      .toEqual([1_000, 1_000, 1_001, 1_002, 1_003, 1_004, 1_010]);
   });
 
   it("lets Stop repair a failed terminal commit only after exact provider cleanup", async () => {

@@ -1,0 +1,45 @@
+{
+  "baselineCommit": "69b82e738569dfe6861f97a134d7eb8af81ec318",
+  "productionSourceCommit": "d6193194",
+  "node": "v22.23.1",
+  "platform": "win32",
+  "architecture": "x64",
+  "method": "Production electron-vite builds on identical installed dependencies; uncompressed emitted bytes using scripts/check-renderer-bundle.mjs. Additional allowance preserves existing headroom and rounds added feature bytes up to 64 bytes.",
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "baseline": 831810,
+      "candidate": 837868,
+      "delta": 6058,
+      "previousBudget": 831840.8,
+      "addedAllowance": 6080
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "baseline": 642631,
+      "candidate": 648505,
+      "delta": 5874,
+      "previousBudget": 642729.2,
+      "addedAllowance": 5888
+    },
+    "deferredComposerQueueJavaScript": {
+      "baseline": 7755,
+      "candidate": 12512,
+      "delta": 4757,
+      "previousBudget": 8192,
+      "addedAllowance": 4800
+    },
+    "deferredLifecycleIntegritySettingsJavaScript": {
+      "baseline": 4183,
+      "candidate": 5285,
+      "delta": 1102,
+      "previousBudget": 5120,
+      "addedAllowance": 1152
+    },
+    "coreJavaScript": {
+      "baseline": 2165882,
+      "candidate": 2175359,
+      "delta": 9477,
+      "previousBudget": 2165985.4,
+      "addedAllowance": 9536
+    }
+  }
+}

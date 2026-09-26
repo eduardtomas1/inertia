@@ -1,3 +1,4 @@
+import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
@@ -396,6 +397,8 @@ function keybindingsFromJson(value: string): AppSettings["keybindings"] {
 
 export function settingsFromState(state: StateRow): AppSettings {
   return {
+    attachmentStorageGiB: parseAttachmentStorageGiB(state.attachment_storage_gib),
+    autoRemoveOldAttachments: state.auto_remove_old_attachments === 1,
     theme: state.theme,
     colorTheme: state.color_theme,
     lightColorTheme: state.light_color_theme ?? state.color_theme,

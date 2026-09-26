@@ -59,6 +59,7 @@ import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import {
+  loadAttachmentStorageSettings,
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
@@ -261,6 +262,7 @@ export function SettingsView({
   const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, section === "diagnostics");
   const ProjectSettings = useLoadedSurface(loadProjectSettings, section === "projects");
   const SnapshotSettings = useLoadedSurface(loadSnapshotSettings, section === "snapshots");
+  const AttachmentStorageSettings = useLoadedSurface(loadAttachmentStorageSettings, section === "archive");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -1127,6 +1129,7 @@ export function SettingsView({
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
               <StorageStatusSettings health={appHealth} healthStatus={healthStatus} clearingCache={clearingCache}
                 backup={databaseBackup} onClearCache={clearAppCache} />
+              {onReportCommand && (AttachmentStorageSettings ? <AttachmentStorageSettings settings={settings} disabled={disabled} request={onReportCommand} onUpdate={updateSettingsRequest} /> : <SettingsSectionFallback />)}
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Portable conversation recovery export</strong>

@@ -897,9 +897,7 @@ export class RuntimeStore {
     );
   }
 
-  updateMessageContent(messageId: string, content: string): void {
-    this.transcriptRepository.updateMessageContent(messageId, content);
-  }
+  updateMessageContent(messageId: string, content: string): void { this.transcriptRepository.updateMessageContent(messageId, content); }
 
   appendMessageContent(messageId: string, delta: string): void {
     this.transcriptRepository.appendMessageContent(messageId, delta);
@@ -907,7 +905,8 @@ export class RuntimeStore {
 
   attachments(conversationId?: string): ChatAttachment[] { return [...this.transcriptRepository.attachments(conversationId), ...this.queuedMessages.attachments(conversationId)]; }
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.queuedMessages.referencedAttachmentIds(candidateIds, this.transcriptRepository.referencedAttachmentIds(candidateIds)); }
-  evictableAttachmentIds(): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds()); }
+  evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds(conversationIds)); }
+  attachmentConversationIds(attachmentIds: readonly string[]): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }

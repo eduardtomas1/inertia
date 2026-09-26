@@ -1,4 +1,5 @@
 import { serverEventBoundary } from "./server-event-boundary";
+import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { usageResultValidators } from "./usage-results-schema";
@@ -310,7 +311,6 @@ function providerInfo(value: unknown): boolean {
         && record(value.maintenance)
         && value.maintenance.providerId === value.id));
 }
-
 function appSettings(value: unknown): boolean {
   if (!record(value)) return false;
   const strings = ["defaultModel", "defaultReasoningEffort", "codexBinaryPath", "discordReleaseRepositoryUrl"];
@@ -352,9 +352,9 @@ function appSettings(value: unknown): boolean {
       && !/[\0\r\n]/u.test(label)
     ))
     && appKeybindings(value.keybindings)
+    && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator));
 }
-
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
     && arrayOf(value.projects, project)
@@ -1103,6 +1103,7 @@ type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
+  "attachment.storage": isAttachmentStorageResult,
   "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
@@ -1161,7 +1162,6 @@ const REQUEST_RESULT_VALIDATORS = {
   "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
   "review.summary": (value) => reviewSummary(value.summary),
 } satisfies Record<RequestResultKind, (value: UnknownRecord) => boolean>;
-
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;
   const validator = REQUEST_RESULT_VALIDATORS[value.kind as RequestResultKind];

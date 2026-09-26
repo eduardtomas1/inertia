@@ -314,8 +314,8 @@ describe("durable conversation attachment storage", () => {
     finishCleanupStop();
     await expect(reconciling).resolves.toBeUndefined();
     await expect(usage).resolves.toEqual({
-      bytes: 2 * 1024 * 1024 * 1024,
-      records: 4_096,
+      bytes: 16 * 1024 * 1024 * 1024,
+      records: 65_536,
     });
     await vi.waitFor(async () => {
       await expect(readdir(store.directory)).resolves.toEqual([]);

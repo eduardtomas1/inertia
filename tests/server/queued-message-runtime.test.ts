@@ -46,7 +46,7 @@ async function fixture() {
   } });
   const drain = async () => {
     await flushTurnControllerTestPromises();
-    while (tasks.size) await Promise.allSettled([...tasks]);
+    while (tasks.size) await Promise.allSettled(tasks);
     await flushTurnControllerTestPromises();
   };
   const command = async (type: "message.queue.enqueue" | "message.queue.send" | "message.queue.remove", id: string, media: ChatAttachment[] = []) => {

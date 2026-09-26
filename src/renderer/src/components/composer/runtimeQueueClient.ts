@@ -1,6 +1,7 @@
 import type { ChatAttachment } from "@shared/contracts";
 import type { MessageQueueResult } from "@shared/queued-messages";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 
 export type QueueCommand = Extract<CommandWithoutId, { type: `message.queue.${string}` }>;
 export type QueueCommandRunner = (command: QueueCommand) => Promise<MessageQueueResult>;
@@ -41,10 +42,24 @@ export function finishQueueIntent(conversationId: string, expectedId: string): v
 
 export async function enqueueRuntimePrompt(run: QueueCommandRunner, conversationId: string, content: string, attachments: readonly ChatAttachment[]): Promise<void> {
   const id = queueIntent(conversationId, content, attachments);
-  const result = await run({ type: "message.queue.enqueue", payload: {
-    conversationId, id, content,
-    attachments: attachments.map(({ id: attachmentId, name, path, mimeType, size }) => ({ id: attachmentId, name, path, mimeType, size })),
-  } });
-  if (!result.receipt || result.receipt.state === "cancelled") throw new Error("That queued message was removed. Edit the draft before queueing it again.");
+  let result: MessageQueueResult;
+  try {
+    result = await run({ type: "message.queue.enqueue", payload: {
+      conversationId, id, content,
+      attachments: attachments.map(({ id: attachmentId, name, path, mimeType, size }) => ({ id: attachmentId, name, path, mimeType, size })),
+    } });
+  } catch (error) {
+    // An error can follow durable admission. Read the receipt before changing
+    // identity; a missing receipt alone cannot settle unknown delivery.
+    try { result = await run({ type: "message.queue.get", payload: { conversationId, id } }); }
+    catch { throw error; }
+    if (!result.receipt) {
+      const delivery = runtimeCommandDelivery(error);
+      if (delivery === "rejected" || delivery === "not-sent") finishQueueIntent(conversationId, id);
+      throw error;
+    }
+  }
+  if (!result.receipt || result.receipt.id !== id || result.receipt.conversationId !== conversationId) throw new Error("The queue did not confirm this draft. Try again to check its receipt.");
   finishQueueIntent(conversationId, id);
+  if (result.receipt.state === "cancelled") throw new Error("That queued message was removed. Queue the draft again to send it.");
 }

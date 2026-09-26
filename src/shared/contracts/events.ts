@@ -178,6 +178,7 @@ export type ServerEvent =
       type: "request.result";
       requestId: string;
       result:
+        | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
         | { kind: "support.report"; report: import("../issue-report").IssueReport | null }
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }

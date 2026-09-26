@@ -91,11 +91,22 @@ export class QueuedMessageRepository {
   }
   referencedAttachmentIds(candidateIds: readonly string[], transcriptIds: Set<string>): Set<string> {
     const candidates = new Set(candidateIds);
-    for (const attachment of this.attachments()) if (candidates.has(attachment.id)) transcriptIds.add(attachment.id);
+    if (candidates.size === 0) return transcriptIds;
+    const rows = this.database.prepare(`
+      SELECT attachments_json FROM queued_messages
+      WHERE state IN ('waiting','dispatching','blocked') AND attachments_json <> '[]'
+        AND (json_valid(attachments_json) = 0 OR EXISTS (
+          SELECT 1 FROM json_tree(CASE WHEN json_valid(attachments_json) THEN attachments_json ELSE '[]' END) AS node
+          WHERE node.atom IN (SELECT value FROM json_each(?))
+        ))
+    `).all(JSON.stringify([...candidates])) as { attachments_json: string }[];
+    for (const row of rows) for (const attachment of parseStoredAttachments(row.attachments_json)) {
+      if (candidates.has(attachment.id)) transcriptIds.add(attachment.id);
+    }
     return transcriptIds;
   }
   excludeQueuedAttachments(candidateIds: readonly string[]): string[] {
-    const queued = new Set(this.attachments().map(({ id }) => id));
+    const queued = this.referencedAttachmentIds(candidateIds, new Set());
     return candidateIds.filter((id) => !queued.has(id));
   }
 }

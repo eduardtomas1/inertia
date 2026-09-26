@@ -164,7 +164,7 @@ describe("targeted attachment reference lookup", () => {
     }
   });
 
-  it("orders evictable attachments oldest first and protects every non-terminal turn", () => {
+  it("orders finished-chat files oldest first and protects all files in chats with non-terminal turns", () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-attachment-evictions-"));
     directories.push(directory);
     const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory, {
@@ -175,12 +175,17 @@ describe("targeted attachment reference lookup", () => {
         store.createProject("Evictions", directory).id,
         "Evictions",
       );
-      const [oldest, reused, untracked, followUp, queued] = Array.from(
-        { length: 5 },
+      const [other, oldest, reused, untracked, followUp, queued] = Array.from(
+        { length: 6 },
         () => randomUUID(),
       );
       const at = (second: number): string =>
         new Date(Date.UTC(2026, 8, 22, 8, 0, second)).toISOString();
+      const archived = store.createConversation(conversation.projectId, "Finished archived chat");
+      store.createMessage(archived.id, "Archived", "user", [
+        attachment(other!), attachment(reused!),
+      ] as never, null, at(0));
+      store.archiveConversation(archived.id, true);
       const turn = (userMessageId: string, requestedAt: string) => store.createAgentTurn({
         conversationId: conversation.id,
         requestedAt,
@@ -213,12 +218,14 @@ describe("targeted attachment reference lookup", () => {
       const queuedMessage = store.createMessage(conversation.id, "Queued", "user", [
         attachment(queued!),
       ] as never, null, at(7));
-      turn(queuedMessage.id, at(7));
+      const queuedTurn = turn(queuedMessage.id, at(7));
 
-      expect(store.evictableAttachmentIds()).toEqual([oldest, untracked]);
+      expect(store.evictableAttachmentIds()).toEqual([other]);
 
       store.updateAgentTurnLifecycle(running.id, { status: "interrupted", updatedAt: at(8) });
-      expect(store.evictableAttachmentIds()).toEqual([oldest, reused, untracked, followUp]);
+      expect(store.evictableAttachmentIds()).toEqual([other]);
+      store.updateAgentTurnLifecycle(queuedTurn.id, { status: "interrupted", updatedAt: at(9) });
+      expect(store.evictableAttachmentIds()).toEqual([other, reused, oldest, untracked, followUp, queued]);
     } finally {
       store.close();
     }

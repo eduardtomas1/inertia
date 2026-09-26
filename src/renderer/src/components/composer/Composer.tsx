@@ -724,7 +724,7 @@ export const Composer = memo(function Composer({
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
     const isCurrent = () => conversationIdRef.current === queuedConversationId && draftValueRef.current === queuedMessage && attachmentsRef.current === queuedAttachments;
-    const { queueComposerDraft } = await import("./queueComposerDraft");
+    const { queueComposerDraft } = await import("./ComposerQueuedActions");
     if (!await queueComposerDraft(onQueueCommand, queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments, isCurrent,
       (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }) || !isCurrent()) return;
     attachmentsRef.current = []; setAttachments([]);

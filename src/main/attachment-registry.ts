@@ -49,8 +49,8 @@ import {
 } from "./attachment-import-file.js";
 import { RendererAttachmentImportHolds } from "./attachment-import-holds.js";
 
-const MAX_SESSION_ATTACHMENT_RECORDS = 256;
-const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
+const MAX_SESSION_ATTACHMENT_RECORDS = 1_024;
+const MAX_SESSION_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
 const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;

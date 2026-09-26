@@ -11,7 +11,7 @@ function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<Mes
   const prior = loads.get(conversationId);
   if (prior) return prior;
   const operation = run({ type: "message.queue.get", payload: { conversationId } })
-    .finally(() => loads.delete(conversationId));
+    .finally(() => { if (loads.get(conversationId) === operation) loads.delete(conversationId); });
   loads.set(conversationId, operation);
   return operation;
 }
@@ -24,19 +24,25 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const owner = useRef(conversationId);
+  const revision = useRef(0);
   owner.current = conversationId;
   useEffect(() => {
     let current = true;
     const refresh = (): void => {
       if (document.visibilityState === "hidden") return;
+      const requestedRevision = revision.current;
       void loadQueue(onCommand, conversationId).then((result) => {
-        if (current) { setQueue(result.entries); setError(null); }
+        if (current && revision.current === requestedRevision) { setQueue(result.entries); setError(null); }
       }, () => { /* A disconnected runtime keeps the last known queue visible. */ });
     };
     setQueue([]); setError(null); setBusy(false);
     refresh();
     const changed = (event: Event): void => {
-      if ((event as CustomEvent<unknown>).detail === conversationId) refresh();
+      if ((event as CustomEvent<unknown>).detail === conversationId) {
+        revision.current += 1;
+        pendingLoads.get(onCommand)?.delete(conversationId);
+        refresh();
+      }
     };
     window.addEventListener(RUNTIME_QUEUE_CHANGED, changed);
     document.addEventListener("visibilitychange", refresh);
@@ -53,7 +59,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     setBusy(true); setError(null);
     try {
       const result = await onCommand({ type, payload: { conversationId, id: first.id } });
-      if (owner.current === conversationId) setQueue(result.entries);
+      if (owner.current === conversationId) { revision.current += 1; setQueue(result.entries); }
       window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
     } catch (failure) {
       if (owner.current === conversationId) setError(failure instanceof Error ? failure.message : "The queue could not be updated.");

@@ -293,20 +293,43 @@ export class TranscriptRepository {
     return projectAttachments(rows);
   }
 
-  evictableAttachmentIds(): string[] {
+  evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] {
     const rows = this.context.database.prepare(`
-      SELECT messages.attachments_json, EXISTS (
+      SELECT messages.conversation_id, messages.attachments_json, EXISTS (
         SELECT 1 FROM agent_turns
-        WHERE (agent_turns.id = messages.turn_id OR agent_turns.user_message_id = messages.id)
+        WHERE agent_turns.conversation_id = messages.conversation_id
           AND agent_turns.status IN (SELECT value FROM json_each(?))
       ) AS active
       FROM messages
       WHERE messages.attachments_json <> '[]'
       ORDER BY messages.created_at ASC, messages.id ASC
     `).all(JSON.stringify(AGENT_TURN_STATUSES.filter((status) => !isAgentTurnTerminalStatus(status)))) as Array<
-      Pick<MessageRow, "attachments_json"> & { active: number }>;
-    const active = new Set(projectAttachments(rows.filter((row) => row.active === 1)).map(({ id }) => id));
+      Pick<MessageRow, "conversation_id" | "attachments_json"> & { active: number }>;
+    const active = new Set(projectAttachments(rows.filter((row) => row.active === 1
+      || (conversationIds !== undefined && !conversationIds.has(row.conversation_id)))).map(({ id }) => id));
     return [...new Set(projectAttachments(rows).map(({ id }) => id))].filter((id) => !active.has(id));
+  }
+
+  attachmentConversationIds(attachmentIds: readonly string[]): string[] {
+    if (attachmentIds.length === 0) return [];
+    const rows = this.context.database.prepare(`
+      SELECT DISTINCT messages.conversation_id
+      FROM messages
+      WHERE messages.attachments_json <> '[]'
+        AND (
+          json_valid(messages.attachments_json) = 0
+          OR EXISTS (
+            SELECT 1
+            FROM json_tree(CASE
+              WHEN json_valid(messages.attachments_json)
+                THEN messages.attachments_json
+              ELSE '[]'
+            END) AS node
+            WHERE node.atom IN (SELECT value FROM json_each(?))
+          )
+        )
+    `).all(JSON.stringify([...new Set(attachmentIds)])) as Array<Pick<MessageRow, "conversation_id">>;
+    return rows.map(({ conversation_id }) => conversation_id);
   }
 
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> {

@@ -21,6 +21,7 @@ import {
 } from "./composerQueuedPrompts";
 
 export { enqueueComposerPrompt };
+export { queueComposerDraft } from "./queueComposerDraft";
 
 export async function releaseDeletedComposerQueue(
   conversationId: string,

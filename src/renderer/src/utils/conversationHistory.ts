@@ -20,15 +20,27 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
     }
     return [...values.values()];
   };
+  const agentTurns = merge(current.agentTurns, incoming.agentTurns)
+    .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt, "en") || a.id.localeCompare(b.id, "en"));
+  const incomingPlanRuns = new Set(incoming.plans.map(({ runId }) => runId));
   const retainedPlans = mode === "refresh"
-    ? current.plans.filter((plan) => !plan.turnId || !replacedTurns.has(plan.turnId)) : current.plans;
-  const planByRun = new Map([...incoming.plans, ...retainedPlans].map((plan) => [plan.runId, plan]));
-  if (mode === "refresh") for (const plan of incoming.plans) planByRun.set(plan.runId, plan);
+    ? current.plans.filter((plan) => !incomingPlanRuns.has(plan.runId)
+      && (!plan.turnId || !replacedTurns.has(plan.turnId))) : current.plans;
+  const planSources = mode === "refresh"
+    ? [...retainedPlans, ...incoming.plans] : [...incoming.plans, ...retainedPlans];
+  // A run is unique within this conversation. Older responses cannot overwrite
+  // current values; refreshed turns replace their complete saved plan state.
+  const planByRun = new Map(planSources.map((plan) => [plan.runId, plan]));
+  const turnOrder = new Map(agentTurns.map(({ id }, index) => [id, index]));
+  const planOrder = (turnId: string | null) => turnId === null ? -1 : turnOrder.get(turnId) ?? -1;
+  // Search jumps can load middle pages after distant ones. Order owned plans by
+  // their turns so consumers selecting the last plan still select the latest.
+  // Legacy plans have no timestamp; preserve their relative source order.
+  const plans = [...planByRun.values()].sort((a, b) => planOrder(a.turnId) - planOrder(b.turnId));
   return {
     ...(mode === "refresh" ? incoming : current),
     history: mode === "older" ? incoming.history : current.history ?? incoming.history,
-    agentTurns: merge(current.agentTurns, incoming.agentTurns)
-      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt, "en") || a.id.localeCompare(b.id, "en")),
+    agentTurns,
     messages: merge(current.messages, incoming.messages)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt, "en") || a.id.localeCompare(b.id, "en")),
     activities: merge(current.activities, incoming.activities),
@@ -38,6 +50,6 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
     turnGitArtifacts: merge(current.turnGitArtifacts, incoming.turnGitArtifacts),
     contextPackets: merge((current.contextPackets ?? []).filter((packet) =>
       mode !== "refresh" || packet.consumedMessageId !== null), incoming.contextPackets ?? []),
-    plans: [...planByRun.values()],
+    plans,
   };
 }

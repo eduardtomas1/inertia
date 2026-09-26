@@ -16,11 +16,15 @@ async function run(): Promise<void> {
   await window.loadURL(`data:text/html,${encodeURIComponent(html)}`);
   window.show(); window.focus(); window.webContents.focus();
   let finish!: () => void, fail!: (error: unknown) => void;
+  let clientSize: { width: number; height: number } | undefined;
   const captured = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
   const service = new SnapshotService(async () => {
     try {
       const result = await service.capture();
       assert(!negative, "Missing accessibility must never return pixels");
+      assert(clientSize);
+      assert.equal(result.source.width, clientSize.width, "Capture stays within the native X11 client width");
+      assert.equal(result.source.height, clientSize.height, "Capture stays within the native X11 client height");
       assert(!JSON.stringify(result.source).includes("snapshot-private-sentinel"));
       assert(JSON.stringify(result.source).includes("Public snapshot evidence"));
       const masks = result.source.accessibility.nodes.filter((node) => node.redacted);
@@ -45,6 +49,9 @@ async function run(): Promise<void> {
     await runFile("xdotool", ["windowactivate", "--sync", windowId], { timeout: 3000, maxBuffer: 1024 });
     const { stdout } = await runFile("xdotool", ["getactivewindow"], { timeout: 1000, maxBuffer: 1024 });
     assert.equal(stdout.trim(), windowId, "The synthetic capture window must own the foreground");
+    const { stdout: geometry } = await runFile("xdotool", ["getwindowgeometry", "--shell", windowId], { timeout: 1000, maxBuffer: 1024 });
+    clientSize = { width: Number(/^WIDTH=(\d+)$/mu.exec(geometry)?.[1]), height: Number(/^HEIGHT=(\d+)$/mu.exec(geometry)?.[1]) };
+    assert(clientSize.width > 0 && clientSize.height > 0);
     // Use an OS key event, not a test-only call to the shortcut callback.
     await Promise.all([captured, runFile("xdotool", ["key", "--clearmodifiers", "ctrl+alt+s"], { timeout: 3000, maxBuffer: 1024 })]);
   } finally { await service.dispose(); window.destroy(); }

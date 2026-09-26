@@ -5,7 +5,7 @@ import {
   SNAPSHOT_MAX_IMAGE_BYTES, SNAPSHOT_MAX_SOURCE_BYTES, snapshotSourceSchema,
   type SnapshotCapturePhase, type SnapshotFailureCategory, type SnapshotRect, type SnapshotSource,
 } from "../shared/snapshots.js";
-import { readX11Foreground, matchesX11Bounds, SnapshotX11ForegroundError } from "./snapshot-x11-foreground.js";
+import { readX11Foreground, x11CaptureBounds, SnapshotX11ForegroundError } from "./snapshot-x11-foreground.js";
 const { App, screenshot, AccessibilityNotEnabledError, PermissionDeniedError, SelectorNotMatchedError } = xa11y;
 
 export class SnapshotCaptureFailure extends Error {
@@ -32,11 +32,12 @@ async function foreground(phase: SnapshotCapturePhase) {
     throw error;
   }) : await App.foreground({ timeout: 0 });
   const candidates = process.platform === "win32" ? [app.asElement()] : await app.children();
-  const active = candidates.filter((element) => native ? element.name === native.name && matchesX11Bounds(element.bounds, native.bounds) : element.active);
+  const active = candidates.filter((element) => native ? element.name === native.name && x11CaptureBounds(element.bounds, native) : element.active);
   if (active.length !== 1 || !app.pid) throw new SnapshotCaptureFailure("no-active-window");
   const window = active[0]!;
   if (!window.bounds) throw new SnapshotCaptureFailure("invalid-geometry");
-  return { app, window, identity: JSON.stringify([native, app.pid, window.stableId, window.name, window.bounds]) };
+  const region = native ? x11CaptureBounds(window.bounds, native)! : null;
+  return { app, window, region, identity: JSON.stringify([native, app.pid, window.stableId, window.name, window.bounds]) };
 }
 
 function protectedGeometry(rectangles: readonly SnapshotRect[]): string {
@@ -59,8 +60,8 @@ export async function captureForegroundSnapshot() {
 }
 
 async function captureOnce(progress: { phase: SnapshotCapturePhase }) {
-  const { app, window, identity } = await foreground(progress.phase);
-  const bounds = window.bounds!;
+  const { app, window, region, identity } = await foreground(progress.phase);
+  const bounds = region ?? window.bounds!;
   if (!Object.values(bounds).every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0 || bounds.width * bounds.height > 16_000_000) throw new SnapshotCaptureFailure("invalid-geometry");
   progress.phase = "accessibility";
   const deadline = Date.now() + 3000;
@@ -69,7 +70,7 @@ async function captureOnce(progress: { phase: SnapshotCapturePhase }) {
   if (!context.complete) throw new SnapshotCaptureFailure("incomplete");
   if ((await foreground(progress.phase)).identity !== identity) throw new SnapshotCaptureFailure("changed");
   progress.phase = "screenshot";
-  const shot = await screenshot({ element: window });
+  const shot = await screenshot(region ? { region } : { element: window });
   if (shot.width * shot.height > 32_000_000 || shot.width <= 0 || shot.height <= 0) throw new SnapshotCaptureFailure("native-failure");
   progress.phase = "verification";
   const after = await foreground(progress.phase);

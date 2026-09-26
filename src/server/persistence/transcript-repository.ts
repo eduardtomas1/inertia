@@ -297,7 +297,7 @@ export class TranscriptRepository {
     const rows = this.context.database.prepare(`
       SELECT messages.attachments_json, EXISTS (
         SELECT 1 FROM agent_turns
-        WHERE (agent_turns.id = messages.turn_id OR agent_turns.user_message_id = messages.id)
+        WHERE agent_turns.conversation_id = messages.conversation_id
           AND agent_turns.status IN (SELECT value FROM json_each(?))
       ) AS active
       FROM messages

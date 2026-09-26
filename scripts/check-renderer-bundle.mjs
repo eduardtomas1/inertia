@@ -67,7 +67,9 @@ const budgets = {
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129,
+  // Global storage settings add shared command/result guards; measured 642,614 bytes.
+  // The 5 KiB management UI is separately deferred and capped below.
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -85,6 +87,8 @@ const budgets = {
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
+  // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
+  deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,
@@ -160,7 +164,9 @@ const budgets = {
   // The same release-audit additions add 2,065 core bytes (2,160,000
   // measured on Linux x64); allow 2,310 and keep ~0.25 KiB of headroom.
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129,
+  // Storage contracts and its deferred loader bring core to 2,165,776 bytes.
+  // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -645,6 +651,12 @@ if (entryJavaScriptClosure.has(snapshotSettingsEntry) || mainWorkbenchJavaScript
 }
 // Charge only this feature's new module separately. Shared helpers stay in core.
 const deferredSnapshotSettingsJavaScriptBytes = await assetBytes(`assets/${snapshotSettingsEntry}`);
+const attachmentStorageSettingsEntry = assetNames.find((name) => /^AttachmentStorageSettings-.*\.js$/u.test(name));
+if (!attachmentStorageSettingsEntry) throw new Error("Missing deferred attachment storage settings");
+if (entryJavaScriptClosure.has(attachmentStorageSettingsEntry) || mainWorkbenchJavaScriptClosure.has(attachmentStorageSettingsEntry) || detachedChatJavaScriptClosure.has(attachmentStorageSettingsEntry)) {
+  throw new Error("Attachment storage settings must remain deferred from the initial chat routes");
+}
+const deferredAttachmentStorageSettingsJavaScriptBytes = await assetBytes(`assets/${attachmentStorageSettingsEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
@@ -652,6 +664,7 @@ const coreJavaScriptBytes =
   - deferredWelcomeGuideJavaScriptBytes
   - deferredWorkingOrbJavaScriptBytes
   - deferredSnapshotSettingsJavaScriptBytes
+  - deferredAttachmentStorageSettingsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -690,6 +703,7 @@ const measurements = {
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
+  deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,
   deferredThreadActionsJavaScript: deferredThreadActionsJavaScriptBytes,

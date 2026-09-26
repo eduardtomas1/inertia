@@ -33,7 +33,8 @@ failed writes use the existing rollback and restart reconciliation paths.
 **Remove oldest files** previews the count and bytes of the next batch (up to
 64 files). Confirmation explains that originals in finished chats, including
 archived chats, will be deleted while their messages remain. Cleanup protects
-running chats and in-flight retentions, rechecks eligibility during deletion,
+all attachments in chats with active or queued turns and in-flight retentions,
+rechecks eligibility during deletion,
 and shares the import mutation queue. If cleanup fails, refresh usage before
 retrying: already removed files are accounted for, and unconfirmed cleanup
 stays charged until safely reconciled.

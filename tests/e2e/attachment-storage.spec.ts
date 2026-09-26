@@ -48,7 +48,8 @@ test("manages retained files across chats, persists disk settings and confirms c
     await expect(page.getByRole("group", { name: "Confirm attachment deletion" })).toBeFocused();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await readdir(join(app.testDirectory, "data", "conversation-attachments"))).toHaveLength(2);
-    await testInfo.attach("global-storage-settings", { body: await page.screenshot(), contentType: "image/png" });
+    await app.expectNoViewportOverflow();
+    await testInfo.attach("global-storage-settings", { body: await page.locator(".attachment-storage-setting").screenshot(), contentType: "image/png" });
     const metrics = await app.electronApp.evaluate(({ app }) => app.getAppMetrics().map(({ type, memory }) => ({ type, workingSetKiB: memory.workingSetSize })));
     await testInfo.attach("storage-memory-sample", { body: JSON.stringify(metrics, null, 2), contentType: "application/json" });
     page = (await app.restart()).page;

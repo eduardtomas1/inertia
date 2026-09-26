@@ -1,4 +1,7 @@
 import { createSurfaceLoader } from "../utils/surfaceLoader";
+export const loadAttachmentStorageSettings = createSurfaceLoader(async () => ({
+  default: (await import("./AttachmentStorageSettings")).AttachmentStorageSettings,
+}));
 export const loadProjectSettings = createSurfaceLoader(async () => ({
   default: (await import("./ProjectSettings")).ProjectSettings,
 }));
@@ -36,6 +39,7 @@ export const loadSnapshotSettings = createSurfaceLoader(async () => ({
 }));
 
 export function prefetchSettingsSection(section: string): void {
+  if (section === "archive") void loadAttachmentStorageSettings();
   if (section === "snapshots") void loadSnapshotSettings();
   if (section === "projects") void loadProjectSettings();
   if (section === "diagnostics") void loadDiagnosticsSettings();

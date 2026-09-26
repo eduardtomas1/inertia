@@ -157,8 +157,6 @@ describe("CommandPalette behavior", () => {
     fireEvent.pointerMove(settings);
     expect(settings).toHaveAttribute("aria-selected", "true");
 
-    // Keep the pointed option in the results so a stale selection cannot pass
-    // merely because filtering removed it.
     await user.type(search, "e");
 
     const firstResult = screen.getAllByRole("option")[0]!;

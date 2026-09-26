@@ -85,6 +85,7 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
     await expect(preview).toBeVisible();
     const stage = preview.getByRole("group", { name: /^Zoomable preview of / });
     await expect.poll(() => stage.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(8_000);
+    await stage.locator("img").evaluate((image) => (image as HTMLImageElement).decode());
     await sampleMemory("40 MP original visible in gallery and preview");
     await stage.focus();
     await page.keyboard.press("+");

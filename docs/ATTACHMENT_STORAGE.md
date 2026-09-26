@@ -85,3 +85,35 @@ settings persistence, explicit cleanup and unchanged renderer error state. The
 40-megapixel gallery scenario records OS working-set samples while the original
 is offscreen, open, then closed. These samples describe one local run, not a
 cross-platform memory ceiling or a guarantee about Chromium's release timing.
+
+### Measured local run (2026-09-26)
+
+macOS arm64, Node 22.23.2 and Electron 44.4.3 passed `npm run check`
+(938 files / 10,072 tests passed; 16 files / 146 tests skipped). Both native
+scenarios passed, including restart, cleanup cancellation, archived-chat files,
+keyboard preview, zoom and viewport bounds. The storage panel was visually
+inspected. [Raw measurements](pr-evidence/attachment-storage/measurements.json)
+record the tested production commit, per-process samples and bundle sizes.
+
+| Gallery stage | Summed process working sets |
+| --- | ---: |
+| 60 originals retained; 40 MP image offscreen | 780.8 MiB |
+| 40 MP image decoded and open in gallery and preview | 1,564.9 MiB |
+| Preview closed; large gallery image unmounted | 1,566.8 MiB |
+
+These are point samples from Electron's process metrics, which can count shared
+pages in multiple processes. The large PNG is a compressible solid-color test
+image. Closing the preview did **not** immediately reduce the sampled working
+sets. This change increases managed disk capacity and preserves the existing
+decode limits; it does not establish lower preview RAM use or immediate cache
+release. The settings panel itself loads as a separate, budgeted 5 KiB module.
+
+One earlier full run timed out in the unrelated Git branch-listing fixture's
+10-second `git update-ref` setup, before the branch-listing operation ran. Its
+focused control passed in 854 ms and both subsequent full gates passed. The
+timeout's cause remains unexplained; no deadlines, workers, assertions or Git
+production code were changed.
+
+Native Linux/Windows, real provider accounts, a 64 GiB disk fill and a 65,536-file
+soak were not exercised. Larger quotas are covered by bounded accounting tests,
+including history above the old 4,096-record limit.

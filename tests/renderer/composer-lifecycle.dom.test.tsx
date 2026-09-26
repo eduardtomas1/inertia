@@ -1254,6 +1254,35 @@ describe("composer asynchronous ownership", () => {
       .not.toBeInTheDocument();
   });
 
+  it("shows truthful provider chat-tool support in the control rail", () => {
+    const current = conversation("composer-chat-tools");
+    const { rerender } = render(<Composer {...composerProps(current, {
+      providers: [{
+        ...provider,
+        agentThreadManagement: { state: "supported", detail: "Host chat tools are ready." },
+      }],
+    })} />);
+
+    const supported = screen.getByLabelText("Agent chat tools: supported");
+    expect(supported).toHaveClass("is-active");
+    expect(supported).toHaveAttribute("title", "Host chat tools are ready.");
+
+    rerender(<Composer {...composerProps(current, {
+      providers: [{
+        ...provider,
+        agentThreadManagement: { state: "unavailable", detail: "Update the CLI to manage chats." },
+      }],
+    })} />);
+
+    const unavailable = screen.getByLabelText("Agent chat tools: unavailable");
+    expect(unavailable).not.toHaveClass("is-active");
+    expect(unavailable).toHaveAttribute("title", "Update the CLI to manage chats.");
+
+    rerender(<Composer {...composerProps(current)} />);
+
+    expect(screen.queryByLabelText(/Agent chat tools/u)).not.toBeInTheDocument();
+  });
+
   it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
     const current = conversation("composer-fast-metadata-unavailable");
     current.modelSelection = providerNativeModelSelection({

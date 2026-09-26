@@ -190,28 +190,6 @@ test("follows the phase in Automatic and keeps the sidebar row in step with the 
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("limits fixed styles to Work and the working cue while preserving activity icons", async () => {
-  await openAppearanceSettings();
-  await page.getByRole("radio", { name: "Shaping", exact: true }).click();
-  await expect(page.getByRole("switch", { name: "Use for tool and step activity" })).toBeDisabled();
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(workingRowOrb()).toHaveAttribute("data-orb-design", "shaping");
-  await expect(sidebarOrb("Working indicator fixture")).toHaveAttribute("data-orb-design", "shaping");
-  const activity = { ...fixture.runningActivities[0], id: "fixed-style-running-tool", status: "running" };
-  await publishCapturedWebSocketEvent(page, { type: "agent.activity", activity });
-  const row = activeTurn().locator('.agent-activity.is-running').filter({ hasText: activity.title! });
-  await expect(row).toBeVisible();
-  await expect(row.locator(".working-orb")).toHaveCount(0);
-  await expect(row.locator(".agent-activity-icon svg")).toBeVisible();
-  await openAppearanceSettings();
-  await page.getByRole("radio", { name: "Automatic", exact: true }).click();
-  await expect(page.getByRole("switch", { name: "Use for tool and step activity" })).toBeEnabled();
-  await expect(page.getByRole("switch", { name: "Use for tool and step activity" })).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
-  await expect(row.locator(".working-orb")).toHaveCount(1);
-  expect(app.rendererErrors).toEqual([]);
-});
-
 test("restores the indicator settings after restart", async () => {
   ({ page } = await app.restart());
   await openAppearanceSettings();

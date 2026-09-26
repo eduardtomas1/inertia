@@ -234,7 +234,7 @@ export class ConversationHistoryRepository {
       // Traces are turn dependencies: newer tool activity must not hide live
       // controls or sever nested-agent ancestry. forTurns preflights their size.
       subagents: forTurns<SubagentTraceRow>("subagent_traces")
-        .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id))
+        .sort((left, right) => left.created_at.localeCompare(right.created_at, "en") || left.id.localeCompare(right.id, "en"))
         .map(subagentTraceFromRow),
       checkpoints: byIds<CheckpointRow>("checkpoints", checkpointIds).map(checkpointFromRow),
       usage: (this.database.prepare("SELECT * FROM thread_usage WHERE conversation_id = ?").all(conversationId) as ThreadUsageRow[]).map(usageFromRow),

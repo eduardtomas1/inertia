@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -291,7 +292,6 @@ export function useDraftConversation({
         current?.materialized
         && current.materialized.conversationId
           === materialized.materializedConversationId
-        && current.materialized.awaitingReconciliation
       ) {
         replaceDraft({
           ...current,
@@ -569,9 +569,9 @@ export function useDraftConversation({
           draftRef.current?.materialized?.conversationId === conversationId
         ) {
           replaceDraft({
-            ...materializedState,
+            ...draftRef.current,
             materialized: {
-              ...materializedState.materialized!,
+              ...draftRef.current.materialized,
               awaitingReconciliation: true,
               recoveryMode: true,
             },
@@ -593,9 +593,9 @@ export function useDraftConversation({
         draftRef.current?.materialized?.conversationId === conversationId
       ) {
         replaceDraft({
-          ...materializedState,
+          ...draftRef.current,
           materialized: {
-            ...materializedState.materialized!,
+            ...draftRef.current.materialized,
             acceptedTurnId: acceptance.turnId,
             acceptedUserMessageId: acceptance.userMessageId,
           },
@@ -612,9 +612,9 @@ export function useDraftConversation({
         draftRef.current?.materialized?.conversationId === conversationId
       ) {
         replaceDraft({
-          ...materializedState,
+          ...draftRef.current,
           materialized: {
-            ...materializedState.materialized!,
+            ...draftRef.current.materialized,
             awaitingReconciliation:
               runtimeCommandDelivery(error) === "ambiguous"
               || runtimeCommandDelivery(error) === null,
@@ -663,9 +663,9 @@ export function useDraftConversation({
               === current.materialized.conversationId
           ) {
             replaceDraft({
-              ...current,
+              ...draftRef.current,
               materialized: {
-                ...current.materialized,
+                ...draftRef.current.materialized,
                 awaitingReconciliation: true,
                 recoveryMode: true,
               },
@@ -688,9 +688,9 @@ export function useDraftConversation({
             === current.materialized.conversationId
         ) {
           replaceDraft({
-            ...current,
+            ...draftRef.current,
             materialized: {
-              ...current.materialized,
+              ...draftRef.current.materialized,
               acceptedTurnId: acceptance.turnId,
               acceptedUserMessageId: acceptance.userMessageId,
               recoveryMode: false,
@@ -710,9 +710,9 @@ export function useDraftConversation({
             === current.materialized.conversationId
         ) {
           replaceDraft({
-            ...current,
+            ...draftRef.current,
             materialized: {
-              ...current.materialized,
+              ...draftRef.current.materialized,
               awaitingReconciliation:
                 runtimeCommandDelivery(error) === "ambiguous"
                 || runtimeCommandDelivery(error) === null,
@@ -754,11 +754,21 @@ export function useDraftConversation({
     }
   };
 
+  const draftConversation = draft?.conversation;
+  const materializedConversationId = draft?.materialized?.conversationId;
+  const workspaceConversation = useMemo(
+    () => draftConversation && materializedConversationId
+      ? { ...draftConversation, id: materializedConversationId }
+      : null,
+    [draftConversation, materializedConversationId],
+  );
+
   return {
     conversation: draft?.conversation ?? null,
+    workspaceConversation,
     layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(
-      draft?.payload.useWorktree && !draft.payload.worktreePath,
+      draft?.payload.useWorktree && !draft.conversation.worktreePath,
     ),
     start,
     changeProject,

@@ -8,7 +8,6 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
-  MAX_TEXT_ATTACHMENT_BYTES,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentKind,
   chatAttachmentPickerExtensions,
@@ -19,6 +18,11 @@ import {
   type DocumentAttachmentMimeType,
   type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
+import {
+  ATTACHMENT_MIME_MISMATCH_ERROR,
+  UNSUPPORTED_ATTACHMENT_TYPE_ERROR,
+  decodeTextAttachment,
+} from "../shared/text-attachment.js";
 import type { AttachmentPickerMode } from "../shared/desktop.js";
 import {
   ImageAttachmentTooLargeError,
@@ -204,16 +208,6 @@ function safeDisplayName(value: unknown, mimeType: ChatAttachmentMimeType): stri
     || /[\0-\x1f\x7f]/u.test(leaf)
   ) return fallbackName(mimeType);
   return leaf;
-}
-
-function decodedSafeText(bytes: Buffer): string | null {
-  if (bytes.length > MAX_TEXT_ATTACHMENT_BYTES) return null;
-  try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(text) ? null : text;
-  } catch {
-    return null;
-  }
 }
 
 function zipEndOfCentralDirectory(bytes: Buffer): number {
@@ -598,8 +592,7 @@ function hasExpectedDocumentSignature(
       ? hasExpectedXlsxContainer(bytes)
       : hasExpectedXlsContainer(bytes);
   }
-  const text = decodedSafeText(bytes);
-  if (text === null) return false;
+  const text = decodeTextAttachment(bytes);
   if (mimeType !== "application/json") return text.trim().length > 0;
   try {
     JSON.parse(text.replace(/^\uFEFF/u, ""));
@@ -683,10 +676,12 @@ export function prepareAttachmentImportMetadata(
   const declaredMimeType = typeof item.mimeType === "string" ? item.mimeType : "";
   const suppliedName = typeof item.name === "string" ? item.name : "";
   const mimeType = chatAttachmentMimeTypeForName(suppliedName);
+  if (!mimeType) throw new Error(UNSUPPORTED_ATTACHMENT_TYPE_ERROR);
+  if (!isPotentialChatAttachment(suppliedName, declaredMimeType)) {
+    throw new Error(ATTACHMENT_MIME_MISMATCH_ERROR);
+  }
   if (
-    !mimeType
-    || !isPotentialChatAttachment(suppliedName, declaredMimeType)
-    || typeof item.size !== "number"
+    typeof item.size !== "number"
     || !Number.isSafeInteger(item.size)
     || item.size < 1
     || item.size > MAX_CHAT_ATTACHMENT_BYTES

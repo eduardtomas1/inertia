@@ -34,6 +34,7 @@ import {
   type SpreadsheetPreviewWorkbook,
 } from "@shared/spreadsheet-workbook";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { decodeTextAttachment } from "@shared/text-attachment";
 import { useDocumentVisibility } from "../hooks/useDocumentPresence";
 import {
   attachmentPreviewKind,
@@ -278,13 +279,15 @@ export function DocumentAttachmentPreview({
         ? {
             kind: "spreadsheet",
             workbook: await readSpreadsheetWorkbook(
-              bytes,
+              mimeType === "text/csv"
+                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(bytes)}`)
+                : bytes,
               SPREADSHEET_PREVIEW_LIMITS,
             ),
           }
         : {
             kind: "text",
-            text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+            text: decodeTextAttachment(bytes),
           };
       if (controller.signal.aborted) return;
       startTransition(() => setContent(next.kind === "text" && mimeType === "application/json"

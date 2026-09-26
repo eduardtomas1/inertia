@@ -24,7 +24,10 @@ export function registerAttachmentSelectionIpc(options: {
         filters: [{
           name: picker.filterName,
           extensions: picker.extensions,
-        }],
+        }, ...(mode === "all" ? [{
+          name: "All files (supported text names such as Dockerfile)",
+          extensions: ["*"],
+        }] : [])],
         properties: ["openFile", "multiSelections"],
       });
       if (result.canceled) {

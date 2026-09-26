@@ -4,7 +4,7 @@ import type { ChildProcess, spawn } from "node:child_process";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createElectronMainProcessDiagnostic } from
+import { createElectronMainProcessDiagnostic, electronHelperProcesses } from
   "../e2e/support/electron-main-process-diagnostic";
 import { closeElectronFixtureBounded, ElectronFixtureCloseError } from
   "../e2e/support/electron-app-lifecycle";
@@ -165,6 +165,132 @@ describe("bounded macOS Electron main-process evidence", () => {
     f.diagnostic.stop();
   });
 
+  it("reduces the process table to the retained main process's helper roles", () => {
+    const table = [
+      "  1     0 Ss   /sbin/launchd",
+      "123456 900 S    /tmp/Electron.app/Contents/MacOS/Electron . --user-data-dir=/tmp/private-profile",
+      "200 123456 S  /tmp/Electron Helper (GPU) --type=gpu-process --user-data-dir=/tmp/private-profile --token=secret",
+      "201 123456 T  /tmp/Electron Helper --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en",
+      "202 123456 R  /tmp/Electron Helper (Renderer) --type=renderer --enable-features=X",
+      "300 202 S    /bin/sh -c secret-command",
+      "400 1 S /tmp/Electron Helper (GPU) --type=gpu-process",
+      "not a process row",
+    ].join("\n");
+    expect(electronHelperProcesses(123456, table)).toEqual([
+      { pid: 200, ppid: 123456, stat: "S", role: "gpu-process" },
+      { pid: 201, ppid: 123456, stat: "T", role: "utility/network.mojom.NetworkService" },
+      { pid: 202, ppid: 123456, stat: "R", role: "renderer" },
+      { pid: 300, ppid: 202, stat: "S", role: "other" },
+    ]);
+  });
+
+  it("records helper states and samples the GPU helper when a prepared quit stalls", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(f.spawnSample.mock.calls.map((call) => (call as unknown[]).slice(0, 2))).toEqual([
+      ["/usr/bin/sample", ["123456", "1", "10", "-file", "/dev/stdout"]],
+      ["/bin/ps", ["-axww", "-o", "pid=,ppid=,stat=,command="]],
+    ]);
+    const table = f.samplers[1]!;
+    table.stdout!.emit("data", Buffer.from([
+      "123456 900 S /tmp/Electron .",
+      "777 123456 U /tmp/Electron Helper (GPU) --type=gpu-process --token=secret",
+      "778 123456 S /tmp/Electron Helper (Renderer) --type=renderer",
+    ].join("\n")));
+    table.emit("close", 0, null);
+    expect(f.diagnostic.samples[1]).toMatchObject({
+      pid: 123456, reason: "electron-helper-processes", status: "completed",
+      output: "777 123456 U gpu-process\n778 123456 S renderer",
+    });
+    expect(f.diagnostic.samples[1]!.output).not.toContain("secret");
+    expect(f.spawnSample.mock.calls[2]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-o", "ppid=,lstart=", "-p", "777"],
+    ]);
+    const identity = "123456 Sat Sep 26 20:00:00 2026";
+    f.samplers[2]!.stdout!.emit("data", Buffer.from(`  ${identity}\n`));
+    f.samplers[2]!.emit("close", 0, null);
+    expect(f.spawnSample.mock.calls[3]!.slice(0, 2)).toEqual([
+      "/usr/bin/sample", ["777", "1", "10", "-file", "/dev/stdout"],
+    ]);
+    expect(f.diagnostic.samples[2]).toMatchObject({
+      pid: 777, reason: "gpu-helper-still-pending", status: "sampling",
+    });
+    f.samplers[3]!.stdout!.emit("data", Buffer.from("gpu stack"));
+    f.samplers[3]!.emit("close", 0, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({ status: "validating-helper-identity", output: "" });
+    expect(f.spawnSample.mock.calls[4]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-o", "ppid=,lstart=", "-p", "777"],
+    ]);
+    f.samplers[4]!.stdout!.emit("data", Buffer.from(`${identity}\n`));
+    f.samplers[4]!.emit("close", 0, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({ status: "completed", output: "gpu stack" });
+    expect(f.diagnostic.samples).toHaveLength(3);
+    f.diagnostic.stop();
+    expect(f.diagnostic.samples[0]!.status).toBe("cancelled-at-fixture-exit-or-kill-deadline");
+    expect(f.main.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ["a reused PID", "123456 Sat Sep 26 20:00:05 2026"],
+    ["an exited helper", ""],
+  ])("discards a GPU helper sample when the helper identity changes to %s", async (_label, afterIdentity) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from("777 123456 U /tmp/Electron Helper (GPU) --type=gpu-process"));
+    f.samplers[1]!.emit("close", 0, null);
+    f.samplers[2]!.stdout!.emit("data", Buffer.from("123456 Sat Sep 26 20:00:00 2026"));
+    f.samplers[2]!.emit("close", 0, null);
+    f.samplers[3]!.stdout!.emit("data", Buffer.from("unrelated process stack"));
+    f.samplers[3]!.emit("close", 0, null);
+    f.samplers[4]!.stdout!.emit("data", Buffer.from(afterIdentity));
+    f.samplers[4]!.emit("close", afterIdentity ? 0 : 1, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({
+      pid: 777, status: "discarded-helper-identity-changed", output: "",
+    });
+    f.diagnostic.stop();
+  });
+
+  it("never samples a GPU helper whose parent is no longer the retained main process", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from("777 123456 U /tmp/Electron Helper (GPU) --type=gpu-process"));
+    f.samplers[1]!.emit("close", 0, null);
+    f.samplers[2]!.stdout!.emit("data", Buffer.from("1 Sat Sep 26 20:00:00 2026"));
+    f.samplers[2]!.emit("close", 0, null);
+    expect(f.spawnSample).toHaveBeenCalledTimes(3);
+    expect(f.diagnostic.samples).toHaveLength(2);
+    f.diagnostic.stop();
+  });
+
+  it("bounds the helper table and skips the GPU sample once the main process exits", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.diagnostic.samples[1]!.status).toBe("sampling");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.diagnostic.samples[1]!.status).toBe("timed-out");
+    expect(f.killGroup).toHaveBeenCalledExactlyOnceWith(123458);
+    const late = fixture();
+    late.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    late.samplers[1]!.stdout!.emit("data", Buffer.from("777 123456 S x --type=gpu-process"));
+    Object.assign(late.main, { exitCode: 0 });
+    late.main.emit("exit", 0, null);
+    late.samplers[1]!.emit("close", 0, null);
+    expect(late.spawnSample).toHaveBeenCalledTimes(2);
+    expect(late.diagnostic.samples[1]!.status).toBe("cancelled-at-fixture-exit-or-kill-deadline");
+    f.diagnostic.stop();
+  });
+
   it.each([false, true])("preserves the 12 s prepared-exit kill deadline with a stalled sampler (stop error: %s)", async (stopError) => {
     vi.useFakeTimers();
     const f = fixture();
@@ -184,13 +310,16 @@ describe("bounded macOS Electron main-process evidence", () => {
     }).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(11_999);
     expect(f.main.kill).not.toHaveBeenCalled();
-    expect(f.spawnSample).toHaveBeenCalledOnce();
+    expect(f.spawnSample.mock.calls.map((call) => (call as unknown[])[0]))
+      .toEqual(["/usr/bin/sample", "/bin/ps"]);
     await vi.advanceTimersByTimeAsync(1);
     const error = await closing;
     expect(f.main.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
     expect(error).toBeInstanceOf(ElectronFixtureCloseError);
-    expect((error as ElectronFixtureCloseError).mainProcessSamples[0]!.status)
-      .toContain(stopError ? "sampler-stop-failed" : "timed-out");
+    const evidence = (error as ElectronFixtureCloseError).mainProcessSamples;
+    expect(evidence[0]!.status).toContain(stopError ? "sampler-stop-failed" : "timed-out");
+    expect(evidence[1]).toMatchObject({ reason: "electron-helper-processes", output: "" });
+    expect(evidence[1]!.status).toContain("timed-out");
   });
 
   it("accepts a slow exit after confirmed cleanup within the prepared-exit budget", async () => {

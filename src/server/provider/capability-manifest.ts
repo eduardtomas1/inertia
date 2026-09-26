@@ -285,7 +285,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.276",
+    bundledSdkVersion: "0.3.283",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,

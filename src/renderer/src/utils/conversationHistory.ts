@@ -1,12 +1,9 @@
 import type { ConversationDetail } from "@shared/contracts";
 
-/** Keep loaded older pages while replacing the authoritative refreshed turns. */
 export function mergeConversationHistory(current: ConversationDetail, incoming: ConversationDetail,
   mode: "refresh" | "older" | "target"): ConversationDetail {
   if (current.conversation.id !== incoming.conversation.id) return incoming;
   const replacedTurns = new Set(incoming.agentTurns.map(({ id }) => id));
-  // A long offline gap can put an entire page between the loaded and latest
-  // windows. Restart at the new page so its cursor cannot silently skip that gap.
   if (mode === "refresh" && !current.agentTurns.some(({ id }) => replacedTurns.has(id))
     && !current.messages.some(({ id }) => incoming.messages.some((message) => message.id === id))) return incoming;
   const merge = <T extends { id: string; turnId?: string | null }>(left: T[], right: T[]): T[] => {
@@ -28,14 +25,9 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
       && (!plan.turnId || !replacedTurns.has(plan.turnId))) : current.plans;
   const planSources = mode === "refresh"
     ? [...retainedPlans, ...incoming.plans] : [...incoming.plans, ...retainedPlans];
-  // A run is unique within this conversation. Older responses cannot overwrite
-  // current values; refreshed turns replace their complete saved plan state.
   const planByRun = new Map(planSources.map((plan) => [plan.runId, plan]));
   const turnOrder = new Map(agentTurns.map(({ id }, index) => [id, index]));
   const planOrder = (turnId: string | null) => turnId === null ? -1 : turnOrder.get(turnId) ?? -1;
-  // Search jumps can load middle pages after distant ones. Order owned plans by
-  // their turns so consumers selecting the last plan still select the latest.
-  // Legacy plans have no timestamp; preserve their relative source order.
   const plans = [...planByRun.values()].sort((a, b) => planOrder(a.turnId) - planOrder(b.turnId));
   const currentOmitted = current.history?.omittedTurnIds ?? [];
   const omittedTurnIds = [

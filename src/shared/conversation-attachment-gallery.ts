@@ -1,6 +1,5 @@
 export const CONVERSATION_ATTACHMENT_GALLERY_LIMIT = 60;
 
-/** Preview identities only; paths, image bytes and snapshot context stay private. */
 export interface ConversationAttachmentGalleryItem {
   id: string;
   name: string;

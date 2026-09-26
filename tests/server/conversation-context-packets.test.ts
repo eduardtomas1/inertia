@@ -1485,7 +1485,6 @@ describe("conversation context packets", () => {
 
     const database = new Database(databasePath);
     database.pragma("foreign_keys = OFF");
-    // Restore the pre-delivery schema, including objects added by later releases.
     database.exec("DROP TABLE queued_messages;");
     database.exec("ALTER TABLE agent_thread_operations DROP COLUMN target_turn_id; ALTER TABLE agent_thread_operations DROP COLUMN target_run_id;");
     database.exec(conversationContextWholeChatMigration.up as string);

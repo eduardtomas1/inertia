@@ -19,7 +19,6 @@ function pendingIntents(conversationId: string): { id: string; identity: string 
   } catch { return []; }
 }
 
-/** The stable intent survives a lost acknowledgement or renderer restart. */
 export function queueIntent(conversationId: string, content: string, attachments: readonly ChatAttachment[]): string {
   const key = `inertia:queue-intent:${conversationId}`;
   const identity = JSON.stringify([content, attachments.map(({ id }) => id)]);
@@ -31,12 +30,18 @@ export function queueIntent(conversationId: string, content: string, attachments
   try { window.localStorage.setItem(key, JSON.stringify([...pending, { id, identity }])); } catch { return id; }
   return id;
 }
-export function finishQueueIntent(conversationId: string, expectedId: string): void {
+function forgetQueueIntent(conversationId: string, expectedId: string): void {
   try {
     const remaining = pendingIntents(conversationId).filter(({ id }) => id !== expectedId);
     if (remaining.length) window.localStorage.setItem(`inertia:queue-intent:${conversationId}`, JSON.stringify(remaining));
     else window.localStorage.removeItem(`inertia:queue-intent:${conversationId}`);
-  } catch { /* The durable receipt remains safe to replay. */ }
+  } catch {
+    return;
+  }
+}
+
+export function finishQueueIntent(conversationId: string, expectedId: string): void {
+  forgetQueueIntent(conversationId, expectedId);
   window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
 }
 
@@ -49,8 +54,6 @@ export async function enqueueRuntimePrompt(run: QueueCommandRunner, conversation
       attachments: attachments.map(({ id: attachmentId, name, path, mimeType, size }) => ({ id: attachmentId, name, path, mimeType, size })),
     } });
   } catch (error) {
-    // An error can follow durable admission. Read the receipt before changing
-    // identity; a missing receipt alone cannot settle unknown delivery.
     try { result = await run({ type: "message.queue.get", payload: { conversationId, id } }); }
     catch { throw error; }
     if (!result.receipt) {

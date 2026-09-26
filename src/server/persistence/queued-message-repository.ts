@@ -92,8 +92,6 @@ export class QueuedMessageRepository {
     })();
   }
   reconcile(): void {
-    // Provider start is downstream of the transaction that changes this row
-    // to accepted. A dispatching row therefore never started a provider turn.
     this.database.prepare("UPDATE queued_messages SET state = 'waiting', error = NULL WHERE state = 'dispatching' AND turn_id IS NULL").run();
   }
   attachments(conversationId?: string): ChatAttachment[] {

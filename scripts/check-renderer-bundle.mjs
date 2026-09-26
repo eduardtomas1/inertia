@@ -8,9 +8,6 @@ const kibibyte = 1024;
 // Route closures include their statically imported dependencies. Keeping the
 // bootstrap and both window surfaces separate makes a detached chat regression
 // visible even when Rollup moves shared modules between chunks.
-// Stateful history navigation, durable queue receipts, and capability details add
-// measured feature bytes on the same dependency graph. Preserve existing headroom;
-// see docs/pr-evidence/audit-reliability/renderer-bundle.json. Queue UI stays deferred.
 const budgets = {
   // React 19.3 adds 29,322 emitted bytes on identical application source.
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.

@@ -42,11 +42,10 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
       const requestedRevision = revision.current;
       void loadQueue(onCommand, conversationId).then((result) => {
         if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
-          // The bounded queue poll must not commit an unchanged idle transcript.
           updateQueue(result.entries);
           if (latestError.current !== null) setError(null);
         }
-      }, () => { /* A disconnected runtime keeps the last known queue visible. */ });
+      }, () => undefined);
     };
     updateQueue([]); setError(null); setBusy(false);
     refresh();
@@ -59,8 +58,6 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     };
     window.addEventListener(RUNTIME_QUEUE_CHANGED, changed);
     document.addEventListener("visibilitychange", refresh);
-    // Small bounded reads reconcile edits from another window. Dispatch itself
-    // is exclusively runtime-owned and continues while this component is gone.
     const timer = window.setInterval(refresh, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);

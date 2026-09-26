@@ -377,8 +377,6 @@ function galleryWithLiveAttachments(gallery: EnvironmentSummarySnapshot["attachm
   if (previous) return previous;
   const live = recentAttachments(liveMessages);
   if (!live.length) return gallery;
-  // Only live persisted events can precede the authoritative gallery. Historical
-  // pages loaded by search must not displace the newest retained attachments.
   const seen = new Set<string>();
   const merged = [...live, ...gallery].filter(({ id }) => {
     if (seen.has(id)) return false;

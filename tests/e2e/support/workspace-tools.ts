@@ -60,8 +60,6 @@ export async function selectWorkspaceTool(
   const tab = panel.locator(`[data-workspace-tab="${tabId}"]`);
   const launcher = panel.getByRole("group", { name: "Open a surface" });
   const add = panel.getByRole("button", { name: "Add panel surface" });
-  // The panel becomes visible before its lazy empty-state launcher loads.
-  // Choose a route only after one of its real controls is present.
   await expect.poll(async () =>
     await tab.isVisible() || await launcher.isVisible() || await add.isVisible(),
   ).toBe(true);

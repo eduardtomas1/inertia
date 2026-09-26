@@ -20,6 +20,5 @@ export interface ConversationHistoryPage {
   omittedTurnIds?: string[];
 }
 
-// Leave ample room for other frames already queued on the shared connection.
 export const MAX_CONVERSATION_HISTORY_BYTES = 32 * 1024 * 1024;
 export const CONVERSATION_HISTORY_PAGE_SIZE = 40;

@@ -286,9 +286,6 @@ function startOpenCodeRun(
     if (cancelRequested || terminalError) return;
     if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
     eventInactivityTimer = setTimeout(() => {
-      // Waiting for the user is not evidence of a stalled provider. Only
-      // admitted, unanswered interactions suspend inactivity; response RPCs,
-      // unrelated sessions, cancellation and the absolute run limit do not.
       if (pendingHostApprovals.size > 0
         || [...approvals.values()].some((pending) => !pending.settled)
         || [...inputs.values()].some((pending) => !pending.settled)) {

@@ -29,8 +29,6 @@ export function emitCursorMetadata(
     description: bounded(model.description || "Cursor session model"),
     isDefault: modelOption.currentValue === model.value,
     inputModalities: supportsImages ? ["text", "image"] : ["text"],
-    // ACP options describe the current session configuration. A model change
-    // may replace thought_level entirely; other models have not attested it.
     reasoningOptions: modelOption.currentValue === model.value ? efforts.map((effort) => ({
       value: bounded(effort.value),
       label: bounded(effort.name || effort.value),

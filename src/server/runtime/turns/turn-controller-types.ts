@@ -187,7 +187,6 @@ export interface TurnControllerHooks {
 }
 
 export interface QueueTurnRequest {
-  /** Internal durable queue owner; never accepted from a renderer send payload. */
   queuedMessageId?: string;
   conversationId: string;
   /** Authenticated Private Connect origin, supplied only by the privileged gateway. */

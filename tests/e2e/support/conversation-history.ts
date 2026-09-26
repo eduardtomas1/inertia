@@ -1,6 +1,5 @@
 import { expect, type Page } from "@playwright/test";
 
-/** Load the seeded long-history fixture through its actual paging controls. */
 export async function loadSeededConversationTurns(page: Page, expectedCount: number): Promise<void> {
   const transcript = page.getByLabel("Thread transcript", { exact: true });
   const loadedCount = () => transcript.evaluate((element) => {
@@ -21,8 +20,6 @@ export async function loadSeededConversationTurns(page: Page, expectedCount: num
   await expect.poll(loadedCount).toBe(expectedCount);
   await expect(earlier).toHaveCount(0);
   if (loadedPages > 0) {
-    // Page prepends intentionally enter reader mode. Restore the fixtures'
-    // original follow-latest baseline before measuring geometry or idle work.
     const latest = page.getByRole("button", { name: "Jump to latest", exact: true });
     await expect(latest).toBeVisible();
     await latest.click();

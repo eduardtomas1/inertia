@@ -1,8 +1,6 @@
 import { expect, type Locator } from "@playwright/test";
 
 export async function expectFlatSettingsSections(settings: Locator): Promise<void> {
-  // Observe the actual cascade. The former source-text negatives passed even
-  // after the settings rules were deleted; positive spacing prevents that.
   await expect(settings.getByText("Make it yours", { exact: true })).toHaveCount(0);
   await expect(settings.getByText("Keep the workspace calm, capable, and predictable.", { exact: true }))
     .toHaveCount(0);
@@ -12,7 +10,6 @@ export async function expectFlatSettingsSections(settings: Locator): Promise<voi
   await expect(toolbar).toBeVisible();
   await expect(toolbar).toHaveCSS("justify-content", "flex-end");
   await expect(toolbar).toHaveCSS("margin-bottom", "16px");
-  // The working indicator intentionally outlines its specialized switch group.
   const rows = settings.locator(".settings-rows:not(.working-indicator-switches)");
   expect(await rows.count()).toBeGreaterThan(0);
   for (const row of await rows.all()) await expect(row).toHaveCSS("border-top-width", "0px");

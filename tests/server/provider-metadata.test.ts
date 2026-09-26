@@ -71,7 +71,6 @@ describe("provider metadata cache", () => {
       { id: "model-a", ...reasoning },
       { id: "model-b", reasoningOptions: [], defaultReasoningEffort: "" },
     ]);
-    // Simulate a catalog written by the previous version of Inertia.
     Object.assign(persisted!.models[1]!, reasoning);
     const restarted = new ProviderMetadataCache({ persistence });
     expect(restarted.current("cursor").models).toMatchObject([

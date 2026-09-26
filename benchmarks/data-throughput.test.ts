@@ -43,8 +43,6 @@ function measure<T>(operation: () => T): {
     result,
     wallMs,
     cpuMs: (cpu.user + cpu.system) / 1_000,
-    // Synchronous native work cannot yield to a JavaScript sampling timer.
-    // Report the signed before/after change, never an unobserved peak.
     rssDeltaMiB: (process.memoryUsage().rss - rssBefore) / 1024 / 1024,
   };
 }

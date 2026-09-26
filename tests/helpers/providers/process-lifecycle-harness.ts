@@ -121,16 +121,11 @@ const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity">, 
 
 export interface ProcessLifecycleHarnessForTestsOptions {
   supports?: (input: AgentHarnessStartOptions["input"]) => boolean;
-  /** Arguments passed to the fixture executable, such as the Node script path. */
   prefixArgs?: readonly string[];
-  /** Test seam for the owned child-process lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
 /**
- * Neutral child-process fixture for lifecycle tests and benchmarks. The retired
- * harness IDs are reserved test identities; no provider CLI format is emulated.
- * Production routes use the native registry and must never register this fixture.
  */
 export function createProcessLifecycleHarnessForTests(
   providerId: ProviderId,

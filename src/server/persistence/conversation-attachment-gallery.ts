@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import { CONVERSATION_ATTACHMENT_GALLERY_LIMIT, isConversationAttachmentGallery,
   type ConversationAttachmentGalleryItem } from "../../shared/conversation-attachment-gallery";
 
-/** Query bounded metadata across history without materializing message bodies. */
 export function conversationAttachmentGallery(database: Database.Database, conversationId: string): ConversationAttachmentGalleryItem[] {
   const rows = database.prepare(`
       SELECT json_extract(item.value, '$.id') AS id,
@@ -19,8 +18,6 @@ export function conversationAttachmentGallery(database: Database.Database, conve
   `).iterate(conversationId);
   const entries: ConversationAttachmentGalleryItem[] = [];
   const ids = new Set<string>();
-  // The conversation/time index yields newest messages first. Stop as soon as
-  // the gallery is full instead of sorting every historical attachment.
   for (const row of rows) {
     if (!isConversationAttachmentGallery([row])) continue;
     const entry = row as ConversationAttachmentGalleryItem;

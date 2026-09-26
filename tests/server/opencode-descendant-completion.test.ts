@@ -136,7 +136,6 @@ const server = http.createServer((req, res) => {
         setTimeout(() => sendEvent(childIdle), 90);
         setTimeout(() => sendEvent(rootIdle), 110);
         setTimeout(() => sendEvent({ ...childIdle, id: "second-child-idle" }), 130);
-        // An exact old busy replay must not resurrect the completed child.
         setTimeout(() => sendEvent(busy), 150);
         setTimeout(finalRootActivity, 170);
         setTimeout(() => sendEvent({ ...rootIdle, id: "fresh-root-idle" }), 190);

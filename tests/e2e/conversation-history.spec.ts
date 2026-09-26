@@ -33,7 +33,6 @@ test.afterAll(async () => { await app?.close(); });
 test("loads older pages without moving the reading position or losing the oldest turn", async ({ browserName: _browserName }, info) => {
   const { page } = app;
   const transcript = page.getByLabel("Thread transcript", { exact: true });
-  // Begin after the initial latest-answer navigation has mounted its target.
   await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
   await transcript.press("Home");
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });

@@ -112,7 +112,6 @@ function classifiedMessageSendError(
 }
 
 export interface TurnInteractionCommandDependencies {
-  /** Runtime coordinator only. Public message.send never supplies this owner. */
   queuedMessage?: QueuedMessage;
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;

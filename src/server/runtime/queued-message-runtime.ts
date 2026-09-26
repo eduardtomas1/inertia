@@ -14,7 +14,6 @@ import {
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
-/** Durable queue dispatch never depends on a renderer remaining mounted. */
 export function createQueuedMessageRuntime(
   dependencies: TurnInteractionCommandDependencies,
   options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> },
@@ -59,8 +58,6 @@ export function createQueuedMessageRuntime(
     }
     if (!store.queuedMessages.claim(conversationId, first.id)) return;
     changed(conversationId);
-    // The private handler option is the only route to durable attachment
-    // previews and the atomic receipt. Renderer payloads cannot select it.
     const handler = createTurnInteractionCommandHandler({
       ...dependencies, queuedMessage: first,
       send: (_socket, _event) => undefined,
@@ -71,8 +68,6 @@ export function createQueuedMessageRuntime(
         payload: { conversationId, content: first.content, attachments: [], activate: false },
       });
     } catch (error) {
-      // An accepted row is authoritative even when publication subsequently
-      // failed. Never turn an uncertain acknowledgement into a second turn.
       if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId);
       else store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
     } finally {
@@ -87,7 +82,7 @@ export function createQueuedMessageRuntime(
     if (previous) return previous;
     const task = options.track(async () => {
       while (again.delete(conversationId) && !options.signal.aborted) {
-        try { await dispatch(conversationId); } catch { /* Deleted chats have no queue to dispatch. */ }
+        await dispatch(conversationId).catch(() => undefined);
       }
     }).finally(() => {
       running.delete(conversationId);

@@ -64,7 +64,6 @@ type HistoryTable = typeof HISTORY_TABLES[number];
 const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
   "diff_review_states", "diff_review_notes"] as const;
 
-/** Fixed table names only; identities always travel as bound SQL parameters. */
 export function historyPredicate(
   table: HistoryTable,
   scope: ConversationHistoryScope,
@@ -114,7 +113,6 @@ function storedBytes(database: Database.Database, table: string, conversationId:
     .get(conversationId, ...where.parameters) as { bytes: number }).bytes;
 }
 
-/** Measure in SQLite before materializing large text or thousands of records. */
 export function historyStoredBytes(database: Database.Database, conversationId: string,
   scope: ConversationHistoryScope): number {
   let bytes = 0;

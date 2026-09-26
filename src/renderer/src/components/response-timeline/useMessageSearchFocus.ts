@@ -55,8 +55,6 @@ export function useMessageSearchFocus(
   useLayoutEffect(() => {
     const pending = pendingPrepend.current;
     if (!pending || pending.timeline === timeline) return;
-    // A frame scheduled before React commits the page can restore the old
-    // layout and finish before the prepend. Restore against committed rows.
     pendingPrepend.current = null;
     if (pending.conversationId === props.conversationId) restoreLayoutAnchorAfterChange?.();
   }, [props.conversationId, timeline, restoreLayoutAnchorAfterChange]);

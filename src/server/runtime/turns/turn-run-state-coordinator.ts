@@ -138,8 +138,6 @@ export class TurnRunStateCoordinator {
   }
 
   retryTerminalPersistence(active: ActiveTurn): boolean {
-    // A terminal reducer alone is not cleanup proof. Only the exact stopOwned
-    // receipt can clear providerRunStarted and make this repair safe.
     if (!active.runState.isTerminal() || active.providerRunStarted) return false;
     return this.options.settlement.retryTerminalPersistence(active);
   }

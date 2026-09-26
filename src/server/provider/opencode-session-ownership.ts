@@ -326,7 +326,6 @@ export class OpenCodeSessionOwnership {
 
   private recordEventIdentity(event: Event): OpenCodeDescendantEvidence | undefined {
     const rawId = (event as Event & { id?: unknown }).id;
-    // Older servers omit envelope IDs. Keep their conservative payload proof.
     if (rawId === undefined) return undefined;
     const id = safeSessionId(rawId);
     const payload = openCodeEventEvidenceKey(event);
@@ -405,8 +404,6 @@ export class OpenCodeSessionOwnership {
       )
     ) {
       const evidence = this.recordEventEvidence(event);
-      // A fresh envelope can end a new busy/idle cycle with the same payload.
-      // Payload novelty still controls deadline credit, not current liveness.
       if (evidence !== "accepted" && identity !== "accepted") {
         return { scope, active: false };
       }
@@ -427,8 +424,6 @@ export class OpenCodeSessionOwnership {
     const active = added || activeDescendantEvent(event, eventSessionId!);
     if (!active) return { scope, active: false };
     const evidence = this.recordEventEvidence(event);
-    // A new envelope may reassert busy state. Replayed IDs never resurrect a
-    // settled child, and repeated payloads never extend the inactivity timer.
     this.liveDescendants.add(eventSessionId!);
     return { scope, active: evidence === "accepted" };
   }

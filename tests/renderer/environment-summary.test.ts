@@ -254,7 +254,6 @@ describe("environment summary projection", () => {
       id: "attachment-follow-up", name: "new.png", mimeType: "image/png", size: 128,
     }]);
     expect(JSON.stringify(summary.attachments)).not.toContain("/private/");
-    // A detail refresh can include the follow-up before the live projection is cleared.
     const refreshed = [summary.attachments[0]!, ...current.slice(0, 59)];
     expect(attachmentGallerySummary(live, refreshed, live).attachments).toEqual(refreshed);
   });

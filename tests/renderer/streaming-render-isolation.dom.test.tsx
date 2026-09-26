@@ -282,9 +282,6 @@ afterEach(() => {
 
 async function renderReadyTranscript(ui: React.ReactNode) {
   const view = render(ui);
-  // React.lazy starts its promise on first render even when the module was
-  // imported above. Settle nested imports and their React commits before the
-  // measurement baseline; cold hosted transforms are not streaming work.
   await act(async () => { await vi.dynamicImportSettled(); });
   await waitFor(() => expect(
     view.container.querySelector(`[data-turn-id="${turn.id}"]`),

@@ -1,6 +1,5 @@
 import type Database from "better-sqlite3";
 
-/** Remove later schema additions when reconstructing a pre-72 database. */
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
   database.exec(`
     DROP TABLE IF EXISTS queued_messages;

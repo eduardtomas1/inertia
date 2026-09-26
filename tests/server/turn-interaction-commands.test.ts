@@ -1921,7 +1921,7 @@ describe("image messages against a full durable attachment store", () => {
     history: string[] | ((ids: string[]) => string[]) = (ids) => ids,
   ) {
     const directory = await mkdtemp(join(tmpdir(), "inertia-full-attachment-store-"));
-    const store = await ConversationAttachmentStore.open(directory, { maxRecords: 3 });
+    const store = await ConversationAttachmentStore.open(directory, { maxRecords: 3, autoRemoveOldAttachments: true });
     const retentionId = randomUUID();
     const settled = (await store.retain([payload(), payload(), payload()], undefined, retentionId))
       .map(({ id }) => id);

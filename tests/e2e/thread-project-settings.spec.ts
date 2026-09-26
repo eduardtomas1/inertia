@@ -26,7 +26,7 @@ async function createThreadFixture(withSavedAction = false): Promise<AppFixture>
         otherThreadId = state.conversations.find((chat) => chat.projectId !== project.id)!.id;
         store.updateProject(project.id, { name: "Workspace studio", preferences: {
           ...defaultProjectPreferences(), icon: { kind: "symbol", name: "code" },
-          actions: withSavedAction ? [{ id: randomUUID(), name: "Check workspace", executable: "node", args: ["--version"] }] : [],
+          actions: withSavedAction ? [{ id: randomUUID(), name: "Check workspace", executable: process.execPath, args: ["--version"] }] : [],
         } });
         store.updateConversation(thread.id, { title: "Review authentication flow" });
         store.updateSettings({ theme: withSavedAction ? "dark" : "light", newThreadMode: "local" });

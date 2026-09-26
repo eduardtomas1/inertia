@@ -3,7 +3,7 @@ import { _electron as electron, test, type ElectronApplication,
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { positionWorkbenchOnPrimary, waitForWorkbenchPage } from "./electron-workbench-page";
@@ -679,7 +679,8 @@ export async function createAppFixture(
     testDirectory,
     options.workspaceGit !== false,
   );
-  let providerBinDirectory: string | null = null;
+  const providerBinDirectory = join(testDirectory, "provider-bin");
+  await mkdir(providerBinDirectory, { recursive: true });
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
     : null;
@@ -722,12 +723,7 @@ export async function createAppFixture(
         ]),
     );
   }
-  if (options.claudeAuthSource || options.githubCliSources) {
-    providerBinDirectory = join(testDirectory, "provider-bin");
-    await mkdir(providerBinDirectory, { recursive: true });
-  }
   if (options.claudeAuthSource) {
-    if (!providerBinDirectory) throw new Error("Provider fixture bin was not created.");
     portableNodeExecutable(providerBinDirectory, "claude");
     await Promise.all([
       writeFile(
@@ -743,7 +739,6 @@ export async function createAppFixture(
     ]);
   }
   if (options.githubCliSources) {
-    if (!providerBinDirectory) throw new Error("GitHub fixture bin was not created.");
     portableNodeExecutable(providerBinDirectory, "gh");
     await Promise.all([
       writeFile(
@@ -804,13 +799,7 @@ export async function createAppFixture(
       INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
       ...(options.attachmentImportDelayMs ? { INERTIA_TEST_ATTACHMENT_IMPORT_DELAY_MS: String(options.attachmentImportDelayMs) } : {}),
       ...(options.attachmentCommitDelayMs ? { INERTIA_TEST_ATTACHMENT_COMMIT_DELAY_MS: String(options.attachmentCommitDelayMs) } : {}),
-      ...(providerBinDirectory
-        ? {
-            PATH: [providerBinDirectory, process.env.PATH ?? ""]
-              .filter(Boolean)
-              .join(delimiter),
-          }
-        : {}),
+      INERTIA_TEST_PROVIDER_BIN_DIR: providerBinDirectory,
       ...(options.codexAppServerSource
         ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
         : {}),

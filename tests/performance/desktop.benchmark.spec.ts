@@ -1882,12 +1882,17 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
   const dataDirectory = join(fixtureRoot, "data");
   const workspace = join(fixtureRoot, "workspace");
   const profile = join(fixtureRoot, "profile");
+  const fixtureEnvironment = {
+    ...process.env,
+    INERTIA_TEST_PROVIDER_BIN_DIR: join(fixtureRoot, "provider-bin"),
+  };
   const launchedApps: ElectronApplication[] = [];
   try {
     await Promise.all([
       mkdir(dataDirectory, { recursive: true }),
       mkdir(workspace, { recursive: true }),
       mkdir(profile, { recursive: true }),
+      mkdir(fixtureEnvironment.INERTIA_TEST_PROVIDER_BIN_DIR, { recursive: true }),
     ]);
     await initializeWorkspace(workspace);
     const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
@@ -1897,6 +1902,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       dataDirectory,
       workspace,
       profile,
+      fixtureEnvironment,
     );
     launchedApps.push(cold.electronApp);
     const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
@@ -2057,6 +2063,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       dataDirectory,
       workspace,
       profile,
+      fixtureEnvironment,
     );
     launchedApps.push(warm.electronApp);
     const warmSample = await processSample(warm.electronApp);

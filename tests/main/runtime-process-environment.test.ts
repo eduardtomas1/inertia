@@ -557,6 +557,39 @@ describe("supervised runtime process environment", () => {
     },
   );
 
+  it("passes only an absolute test-mode provider fixture directory", () => {
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/provider-bin",
+      NODE_ENV: "test",
+    }, "linux")).toEqual({
+      INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/provider-bin",
+      NODE_ENV: "test",
+    });
+    expect(runtimeProcessEnvironment({
+      Inertia_Test_Provider_Bin_Dir: "C:\\fixture\\provider-bin",
+      Node_Env: "test",
+    }, "win32")).toEqual({
+      INERTIA_TEST_PROVIDER_BIN_DIR: "C:\\fixture\\provider-bin",
+      NODE_ENV: "test",
+    });
+    expect(runtimeProcessEnvironment({
+      INERTIA_TEST_PROVIDER_BIN_DIR: "/fixture/provider-bin",
+      NODE_ENV: "production",
+    }, "linux")).toEqual({});
+    for (const rejected of [
+      "provider-bin",
+      "C:\\fixture\\provider-bin",
+      "/fixture/provider-bin\n/opt/homebrew/bin",
+      `/${"a".repeat(4_096)}`,
+      multiMegabyteValue,
+    ]) {
+      expect(runtimeProcessEnvironment({
+        INERTIA_TEST_PROVIDER_BIN_DIR: rejected,
+        NODE_ENV: "test",
+      }, "linux")).toEqual({ NODE_ENV: "test" });
+    }
+  });
+
   it("requires the exact test-only streaming trace opt-in", () => {
     expect(runtimeProcessEnvironment({
       INERTIA_STREAMING_TRACE: "1",

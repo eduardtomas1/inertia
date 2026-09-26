@@ -9,6 +9,10 @@ import {
   isClaudeCloudRoutingEnvironmentKey,
   isValidClaudeCloudRoutingEnvironmentValue,
 } from "../node/provider-routing-environment";
+import {
+  isTestProviderBinDirectory,
+  TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY,
+} from "../node/test-provider-bin-directory";
 import type { ProviderId } from "./provider/contracts";
 
 export interface ProviderEnvironment {
@@ -384,24 +388,42 @@ async function commonExecutableDirectories(
   ]);
 }
 
+export function testProviderBinDirectory(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const directory = environmentValue(
+    environment,
+    TEST_PROVIDER_BIN_DIRECTORY_ENVIRONMENT_KEY,
+    platform,
+  );
+  return environmentValue(environment, "NODE_ENV", platform) === "test"
+    && isTestProviderBinDirectory(directory, platform)
+    ? directory
+    : null;
+}
+
 async function loadProviderEnvironment(): Promise<ProviderEnvironment> {
-  const shellEnvironment = await loginShellEnvironment();
   const env = normalizeCodexHomeEnvironment({
     ...process.env,
   });
-  const inheritedPath = environmentValue(process.env, "PATH") ?? "";
-  const effectivePath = environmentValue(shellEnvironment, "PATH") ?? "";
-  const pathEntries = unique([
-    ...(effectivePath.split(delimiter)),
-    ...(inheritedPath.split(delimiter)),
-    ...await commonExecutableDirectories(env),
-  ]);
+  const inheritedPath = (environmentValue(process.env, "PATH") ?? "").split(delimiter);
+  const fixtureDirectory = testProviderBinDirectory();
+  const pathEntries = fixtureDirectory
+    ? [fixtureDirectory]
+    : unique([
+        ...(environmentValue(await loginShellEnvironment(), "PATH") ?? "").split(delimiter),
+        ...inheritedPath,
+        ...await commonExecutableDirectories(env),
+      ]);
   if (process.platform === "win32") {
     for (const key of Object.keys(env)) {
       if (key !== "PATH" && key.toUpperCase() === "PATH") delete env[key];
     }
   }
-  env.PATH = pathEntries.join(delimiter);
+  env.PATH = (fixtureDirectory
+    ? unique([fixtureDirectory, ...inheritedPath])
+    : pathEntries).join(delimiter);
   return { env, pathEntries };
 }
 

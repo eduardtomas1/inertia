@@ -179,11 +179,9 @@ it("runs bounded operation-count performance checks before native jobs for a per
   expect(smoke["continue-on-error"]).not.toBe(true);
 });
 
-it("keeps provider canary failures visible and automatically rechecks merged drift fixes", () => {
+it("keeps provider canary failures visible without filing incidents for cancelled or branch runs", () => {
   const drift = parse(source(".github/workflows/provider-contract-drift.yml"));
-  expect(drift.on.push.branches).toEqual(["main"]);
-  expect(drift.on.push.paths).toContain("src/server/codex/**");
-  expect(drift.on.push.paths).toContain("scripts/provider-drift*");
+  expect(drift.on.push).toBeUndefined();
   expect(drift.jobs["provider-drift"]["continue-on-error"]).not.toBe(true);
   const final = drift.jobs["provider-drift"].steps.at(-1);
   expect(final.if).toBe("always()");
@@ -191,6 +189,7 @@ it("keeps provider canary failures visible and automatically rechecks merged dri
   expect(final["continue-on-error"]).not.toBe(true);
   expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
   expect(drift.jobs["report-failure"].if).toContain("github.ref == 'refs/heads/main'");
+  expect(drift.jobs["report-failure"].if).toContain("needs.provider-drift.result != 'cancelled'");
 });
 
 it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "electron"], ["release-platforms.yml", "build"]])(

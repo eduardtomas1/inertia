@@ -186,12 +186,9 @@ Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,
 never under PR/merge-group source. Missing secret is explicitly not exercised.
 The separate latest-provider drift workflow remains secret-free and outside
 the required merge checks. It now fails its final check when any acquisition,
-install or probe fails, after collecting issue-report evidence. Changes to
-provider adapters, Codex/Claude protocol handling, the probe or dependency
-graph on main rerun it, so a merged drift fix does not wait for the weekly
-schedule. The Linux x64 probe verifies Antigravity's official native archive
-checksum and its version/help headless flags inside the same isolated home;
-it does not authenticate or claim a successful model turn.
+install or probe fails, after collecting issue-report evidence. It runs on its
+weekly schedule or by manual dispatch, and a cancelled run never files an
+incident.
 
 ## Verification retirement map
 

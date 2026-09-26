@@ -5,6 +5,12 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import { basename } from "node:path";
+import {
+  ATTACHMENT_MIME_MISMATCH_ERROR,
+  TEXT_ATTACHMENT_CONTENT_ERROR,
+  TEXT_ATTACHMENT_SIZE_ERROR,
+  UNSUPPORTED_ATTACHMENT_TYPE_ERROR,
+} from "../shared/text-attachment.js";
 
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
@@ -32,6 +38,10 @@ interface SelectedAttachment {
 }
 
 const SAFE_ATTACHMENT_ERRORS = new Set([
+  ATTACHMENT_MIME_MISMATCH_ERROR,
+  TEXT_ATTACHMENT_CONTENT_ERROR,
+  TEXT_ATTACHMENT_SIZE_ERROR,
+  UNSUPPORTED_ATTACHMENT_TYPE_ERROR,
   "A selected attachment changed while it was being opened.",
   "A selected attachment changed while it was being read.",
   "A selected attachment is empty or exceeds the 10 MB file limit.",

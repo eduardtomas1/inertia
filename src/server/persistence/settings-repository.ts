@@ -47,6 +47,7 @@ export class SettingsRepository {
         default_interaction_mode = ?,
         codex_binary_path = ?,
         discord_release_repository_url = ?,
+        attachment_storage_gib = ?, auto_remove_old_attachments = ?,
         working_indicator_json = ?
       WHERE id = 1
     `).run(
@@ -84,6 +85,7 @@ export class SettingsRepository {
       next.defaultInteractionMode,
       next.codexBinaryPath,
       next.discordReleaseRepositoryUrl,
+      next.attachmentStorageGiB, Number(next.autoRemoveOldAttachments),
       JSON.stringify(next.workingIndicator),
     );
   }

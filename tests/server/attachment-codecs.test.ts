@@ -18,6 +18,13 @@ describe("stored attachment codec", () => {
     size: 12,
   };
 
+  it.each(["notes.txt", "app.log", "Dockerfile", ".gitignore", "settings.jsonc"])(
+    "reopens %s metadata with its original identity and canonical storage path", (name) => {
+      const stored = { ...yaml, name, path: "/private/22222222-2222-4222-8222-222222222222.txt" };
+      expect(parseStoredAttachments(JSON.stringify([stored]))).toEqual([stored]);
+    },
+  );
+
   it("reads plain-text attachment names through the live codec while the frozen parser stays unchanged", () => {
     const stored = JSON.stringify([
       image,

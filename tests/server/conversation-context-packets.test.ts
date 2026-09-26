@@ -1486,7 +1486,8 @@ describe("conversation context packets", () => {
     const database = new Database(databasePath);
     database.pragma("foreign_keys = OFF");
     database.exec(conversationContextWholeChatMigration.up as string);
-    database.prepare("DELETE FROM schema_migrations WHERE version = 79").run();
+    database.exec("ALTER TABLE app_state DROP COLUMN attachment_storage_gib; ALTER TABLE app_state DROP COLUMN auto_remove_old_attachments;");
+    database.prepare("DELETE FROM schema_migrations WHERE version >= 79").run();
     database.close();
 
     const upgraded = new RuntimeStore(databasePath, tmpdir(), { recoverInterruptedRuns: false });

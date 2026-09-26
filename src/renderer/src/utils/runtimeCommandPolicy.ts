@@ -219,6 +219,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "support.report.retire": shortMutation,
   "review.summary.cancel": shortMutation,
   "review.summary.generate": reviewOperation,
+  "attachment.storage.get": shortMutation,
+  "attachment.storage.cleanup": { timeoutMs: 60_000, timeoutDelivery: "ambiguous" },
   "settings.update": {
     timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",

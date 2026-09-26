@@ -1,5 +1,6 @@
 import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
+import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
 import {
@@ -343,12 +344,16 @@ export const appCommandSchemas = [
 ] as const;
 
 export const configurationCommandSchemas = [
+  z.object({ ...requestBase, type: z.literal("attachment.storage.get") }).strict(),
+  z.object({ ...requestBase, type: z.literal("attachment.storage.cleanup") }).strict(),
   z
     .object({
       ...requestBase,
       type: z.literal("settings.update"),
       payload: z
         .object({
+          attachmentStorageGiB: z.union(ATTACHMENT_STORAGE_GIB_OPTIONS.map((value) => z.literal(value))).optional(),
+          autoRemoveOldAttachments: z.boolean().optional(),
           theme: z.enum(["system", "light", "dark"]).optional(),
           colorTheme: z.enum(COLOR_THEME_IDS).optional(),
           lightColorTheme: z.enum(COLOR_THEME_IDS).optional(),

@@ -164,6 +164,8 @@ export interface ProviderInfo {
 }
 
 export interface AppSettings {
+  attachmentStorageGiB: import("../attachment-storage").AttachmentStorageGiB;
+  autoRemoveOldAttachments: boolean;
   theme: ThemePreference;
   colorTheme: ColorThemeId;
   /** Legacy snapshots fall back to colorTheme for both appearances. */
@@ -327,6 +329,8 @@ export interface DatabaseBackupStatus {
 }
 
 export const defaultSettings: AppSettings = {
+  attachmentStorageGiB: 16,
+  autoRemoveOldAttachments: false,
   theme: "system",
   colorTheme: "inertia",
   compactSidebar: false,

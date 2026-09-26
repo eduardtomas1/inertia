@@ -60,6 +60,7 @@ import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import {
+  loadAttachmentStorageSettings,
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
@@ -276,6 +277,7 @@ export function SettingsView({
   const DiagnosticsSettings = useLoadedSurface(loadDiagnosticsSettings, section === "diagnostics");
   const ProjectSettings = useLoadedSurface(loadProjectSettings, section === "projects");
   const SnapshotSettings = useLoadedSurface(loadSnapshotSettings, section === "snapshots");
+  const AttachmentStorageSettings = useLoadedSurface(loadAttachmentStorageSettings, section === "archive");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -1158,6 +1160,7 @@ export function SettingsView({
                   <button type="button" className="secondary-button" disabled={clearingCache || !appHealth} onClick={() => { void clearAppCache(); }}><Trash2 size={14} />{clearingCache ? "Clearing…" : "Clear browser cache"}</button>
                 </div>
               </div>
+              {onReportCommand && (AttachmentStorageSettings ? <AttachmentStorageSettings settings={settings} disabled={disabled} request={onReportCommand} onUpdate={updateSettingsRequest} /> : <SettingsSectionFallback />)}
               {healthStatus && <p className="settings-card-note" role="status">{healthStatus}</p>}
               <div className="codex-binary-path runtime-log-setting">
                 <span>

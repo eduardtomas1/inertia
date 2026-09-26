@@ -1,4 +1,5 @@
 import { DocumentAttachmentError } from "./attachment-errors";
+import { decodeTextAttachment, TextAttachmentError } from "../../../shared/text-attachment";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -583,9 +584,11 @@ function extractTextDocument(
 ): { content: string; truncated: boolean } {
   let content: string;
   try {
-    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new DocumentAttachmentError(`${attachment.name} is not valid UTF-8 text.`);
+    content = decodeTextAttachment(bytes);
+  } catch (error) {
+    throw new DocumentAttachmentError(error instanceof TextAttachmentError
+      ? `${attachment.name}: ${error.message}`
+      : `${attachment.name}: The text attachment could not be decoded.`);
   }
   const bounded = boundedUtf8(content.trim(), maximumJsonBytes);
   if (!bounded.value) throw new DocumentAttachmentError(`${attachment.name} is empty.`);

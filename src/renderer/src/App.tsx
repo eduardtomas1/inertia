@@ -406,7 +406,7 @@ export default function App(): React.JSX.Element {
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
       project: composerProject,
-      conversation: draftConversation.conversation ? null : conversation,
+      conversation: draftConversation.conversation ? draftConversation.workspaceConversation : conversation,
       detail: draftConversation.conversation ? null : conversationDetail,
       online: connection.status === "online",
       ignoreWhitespace: settings.ignoreWhitespace,

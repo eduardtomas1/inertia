@@ -63,6 +63,11 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     const tile = page.locator('.composer-attachment[data-snapshot="true"]');
     await expect(tile).toBeVisible(); await expect(tile.getByText("Notes", { exact: true })).toBeVisible();
     await expect(tile.getByText("Release checklist", { exact: true })).toBeVisible();
+    await page.getByRole("list", { name: "Attachments", exact: true }).evaluate((list) => Promise.all(
+      list.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished),
+    ));
     const titleBounds = await tile.getByText("Release checklist", { exact: true }).boundingBox();
     const listBounds = await page.getByRole("list", { name: "Attachments", exact: true }).boundingBox();
     expect(titleBounds!.y + titleBounds!.height).toBeLessThanOrEqual(listBounds!.y + listBounds!.height);

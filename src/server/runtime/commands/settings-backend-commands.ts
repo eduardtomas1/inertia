@@ -11,14 +11,18 @@ import { providerIdForHarness } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { attachmentCleanupAuthority } from "../attachments/attachment-cleanup-authority";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
+import type { TurnController } from "../turns/turn-controller";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
 
 export interface SettingsBackendCommandDependencies {
+  conversationAttachments: import("../../../node/conversation-attachment-store").ConversationAttachmentStore;
   store: RuntimeStore;
+  turns: Pick<TurnController, "acquireTurnAdmission">;
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   defaultWorkspacePath: string;
@@ -47,6 +51,8 @@ export function createSettingsBackendCommandHandler(
   };
   return defineRuntimeCommandHandler([
     "settings.update",
+    "attachment.storage.get",
+    "attachment.storage.cleanup",
     "prompt-preset.create",
     "prompt-preset.update",
     "prompt-preset.duplicate",
@@ -62,6 +68,17 @@ export function createSettingsBackendCommandHandler(
     "backend.default.clear",
   ], async (socket, command) => {
     switch (command.type) {
+      case "attachment.storage.get":
+      case "attachment.storage.cleanup": {
+        const order = () => dependencies.store.evictableAttachmentIds();
+        const removed = command.type === "attachment.storage.cleanup"
+          ? await dependencies.conversationAttachments.cleanupOldest(order, attachmentCleanupAuthority(dependencies.store, dependencies.turns))
+          : undefined;
+        const storage = await dependencies.conversationAttachments.storageStatus(order);
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "attachment.storage", storage, ...(removed ? { removed } : {}) } });
+        return "handled";
+      }
       case "settings.update": {
         if (command.payload.codexBinaryPath !== undefined) {
           assertMaintenanceIdle("codex");
@@ -97,6 +114,12 @@ export function createSettingsBackendCommandHandler(
           );
         }
         dependencies.store.updateSettings(command.payload);
+        if (command.payload.attachmentStorageGiB !== undefined || command.payload.autoRemoveOldAttachments !== undefined) {
+          const settings = dependencies.store.shellSnapshot().settings;
+          dependencies.conversationAttachments.setStoragePolicy(
+            settings.attachmentStorageGiB * 1024 ** 3, settings.autoRemoveOldAttachments,
+          );
+        }
         if (command.payload.codexBinaryPath !== undefined) {
           await dependencies.refreshProviderInfo("codex", true, true);
         }

@@ -9,7 +9,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
-test("keeps offscreen gallery originals unloaded and opens a retained 40-megapixel image by keyboard", async () => {
+test("keeps offscreen gallery originals unloaded and opens a retained 40-megapixel image by keyboard", async ({ browserName: _browserName }, testInfo) => {
   const largeId = randomUUID();
   const app = await createAppFixture({
     name: "gallery-visibility", initialState: "conversation", windowDisplay: "primary",
@@ -45,6 +45,12 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
   });
   try {
     const { page } = app;
+    const memorySamples: Array<{ stage: string; workingSetKiB: number }> = [];
+    const sampleMemory = async (stage: string): Promise<void> => {
+      const workingSetKiB = await app.electronApp.evaluate(({ app }) => app.getAppMetrics()
+        .reduce((total, metric) => total + metric.memory.workingSetSize, 0));
+      memorySamples.push({ stage, workingSetKiB });
+    };
     await app.resizeWindow(1440, 920);
     // Recent attachments live in the right panel's Attachments surface.
     await selectWorkspaceTool(await ensureWorkspaceTools(page), "Attachments");
@@ -54,6 +60,7 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
     const last = gallery.getByRole("button", { name: "Preview attachment gallery-0.png" });
     await expect.poll(() => first.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     await expect(last.locator("img")).toHaveCount(0);
+    await sampleMemory("retained gallery; 40 MP original offscreen");
 
     const mountedImagesAreVisible = () => gallery.evaluate((list) => {
       const clip = list.parentElement!.getBoundingClientRect();
@@ -78,6 +85,8 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
     await expect(preview).toBeVisible();
     const stage = preview.getByRole("group", { name: /^Zoomable preview of / });
     await expect.poll(() => stage.locator("img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(8_000);
+    await stage.locator("img").evaluate((image) => (image as HTMLImageElement).decode());
+    await sampleMemory("40 MP original visible in gallery and preview");
     await stage.focus();
     await page.keyboard.press("+");
     await expect(stage.getByLabel("Zoom level")).toHaveText("150%");
@@ -87,6 +96,8 @@ test("keeps offscreen gallery originals unloaded and opens a retained 40-megapix
     await first.focus();
     await expect(last.locator("img")).toHaveCount(0);
     await expect.poll(mountedImagesAreVisible).toBe(true);
+    await sampleMemory("40 MP preview closed and gallery image offscreen");
+    await testInfo.attach("image-memory-samples", { body: JSON.stringify(memorySamples, null, 2), contentType: "application/json" });
     await app.expectNoViewportOverflow();
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }

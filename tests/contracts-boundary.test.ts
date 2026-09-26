@@ -124,6 +124,8 @@ describe("shared contracts boundary", () => {
       "activity.acknowledge",
       "agent.approval.respond",
       "agent.input.respond",
+      "attachment.storage.get",
+      "attachment.storage.cleanup",
       "settings.update",
       "backend.profile.get",
       "backend.profile.create",

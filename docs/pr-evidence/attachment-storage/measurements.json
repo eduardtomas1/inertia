@@ -1,0 +1,86 @@
+{
+  "date": "2026-09-26",
+  "productionSourceCommit": "09a02c48ed3899011bc8c9694c1fbe60cbe8be42",
+  "platform": {
+    "os": "macOS",
+    "arch": "arm64",
+    "node": "22.23.2",
+    "electron": "44.4.3"
+  },
+  "memoryMetric": "Sum of Electron app.getAppMetrics() workingSetSize in KiB; shared pages can appear in multiple process working sets. These are point samples, not peak or physical-memory guarantees.",
+  "gallerySetup": "60 retained PNG originals, including one 8000 x 5000 (40 MP) solid-color PNG. The open sample waits for HTMLImageElement.decode().",
+  "gallerySamples": [
+    {
+      "stage": "retained gallery; 40 MP original offscreen",
+      "workingSetKiB": 799552
+    },
+    {
+      "stage": "40 MP original visible in gallery and preview",
+      "workingSetKiB": 1602448
+    },
+    {
+      "stage": "40 MP preview closed and gallery image offscreen",
+      "workingSetKiB": 1604432
+    }
+  ],
+  "settingsProcessSamples": [
+    {
+      "type": "Browser",
+      "workingSetKiB": 249632
+    },
+    {
+      "type": "GPU",
+      "workingSetKiB": 123520
+    },
+    {
+      "type": "Utility",
+      "workingSetKiB": 50992
+    },
+    {
+      "type": "Tab",
+      "workingSetKiB": 243024
+    },
+    {
+      "type": "Utility",
+      "workingSetKiB": 155056
+    }
+  ],
+  "rendererBundleBytes": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "measured": 831762,
+      "budget": 831840.8
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "measured": 642614,
+      "budget": 642729.2
+    },
+    "settingsJavaScript": {
+      "measured": 55810,
+      "budget": 58139
+    },
+    "coreJavaScript": {
+      "measured": 2165834,
+      "budget": 2165985.4
+    },
+    "deferredAttachmentStorageSettingsJavaScript": {
+      "measured": 5069,
+      "budget": 5120
+    }
+  },
+  "verification": {
+    "fullGate": "npm run check: passed, 938 files / 10072 tests; 16 files / 146 tests skipped",
+    "nativeStorage": "passed",
+    "nativeGallery": "passed",
+    "finalEvidenceQuality": "passed"
+  },
+  "historicalTimeout": {
+    "source": "tests/server/git-workflows.test.ts:449",
+    "command": "npm run check",
+    "exit": 1,
+    "error": "spawnSync git ETIMEDOUT during the 10-second update-ref fixture setup for 1000 branches, before listBranches runs",
+    "control": "npx vitest run tests/server/git-workflows.test.ts -t \"bounds a large branch listing\": passed, 854 ms total",
+    "subsequentFullGates": "passed twice",
+    "cause": "unexplained; no timeout, worker, assertion or Git production changes"
+  },
+  "limits": "No native Linux/Windows run, real provider accounts, 64 GiB disk fill or 65536-real-file soak. Closing the preview did not immediately lower the sampled process working sets."
+}

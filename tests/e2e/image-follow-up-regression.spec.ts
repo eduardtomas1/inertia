@@ -156,13 +156,13 @@ test("queued, steered, and later image follow-ups keep working once durable atta
     initialState: "conversation",
     codexAppServerSource: followUpCodexAppServer,
     workspaceGit: false,
-    additionalEnvironment: { INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS: "2" },
+    additionalEnvironment: { INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS: "3" },
   });
   try {
     const page = app.page;
     const composer = page.getByRole("textbox", { name: "Message" });
     const send = page.getByRole("button", { name: "Send message" });
-    const history = [colouredPng(200, 40, 40), colouredPng(40, 200, 40)];
+    const history = [colouredPng(200, 40, 40), colouredPng(40, 200, 40), colouredPng(200, 200, 40)];
     for (const [index, image] of history.entries()) {
       await pasteImages(page, [image]);
       await composer.fill(`Fill attachment storage ${index + 1}.`);
@@ -171,6 +171,8 @@ test("queued, steered, and later image follow-ups keep working once durable atta
       await expect(send).toBeVisible();
     }
 
+    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "What should we build in Inertia?" })).toBeVisible();
     await startHeldTurn(page, "Keep working until I steer you.");
     const steered = colouredPng(40, 40, 200);
     await pasteImages(page, [steered]);

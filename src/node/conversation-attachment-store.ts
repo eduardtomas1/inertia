@@ -1,3 +1,10 @@
+import { metadataFor, metadataFromUnknown, type PersistedAttachmentMetadata } from "./conversation-attachment-store-metadata.js";
+import { availableAttachmentDiskBytes, describeAttachmentStorage, cleanupOldestAttachments, type AttachmentStorageManagement, type AuthorizeAttachmentCleanup } from "./conversation-attachment-storage-management.js";
+import {
+  ATTACHMENT_DISK_RESERVE_BYTES,
+  ATTACHMENT_STORAGE_GIB_BYTES, DEFAULT_ATTACHMENT_STORAGE_GIB, MAX_RETAINED_ATTACHMENTS,
+  type AttachmentStorageStatus,
+} from "../shared/attachment-storage.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type Dir } from "node:fs";
 import {
@@ -23,11 +30,8 @@ import {
   FILE_OPEN_NO_FOLLOW,
 } from "./platform-file-open-flags.js";
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENTS,
-  MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
-  safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
   chatAttachmentStorageExtension,
   type ChatAttachmentMimeType,
 } from "../shared/attachments.js";
@@ -39,7 +43,7 @@ import {
 } from "./conversation-attachment-store-child.js";
 import { ConversationAttachmentStoreTerminationTracker } from
   "./conversation-attachment-store-termination.js";
-import { attachmentUsage, ConversationAttachmentStorageFullError, conversationAttachmentEvictions,
+import { attachmentUsage, ConversationAttachmentStorageFullError, ConversationAttachmentDiskFullError, conversationAttachmentEvictions,
   type ConversationAttachmentEvictionOrder, type ConversationAttachmentUsage } from "./conversation-attachment-store-capacity.js";
 
 export type {
@@ -48,8 +52,8 @@ export type {
 } from "./conversation-attachment-store-child.js";
 
 const STORE_DIRECTORY = "conversation-attachments";
-const MAX_PERSISTED_RECORDS = 4_096;
-const MAX_PERSISTED_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_PERSISTED_RECORDS = MAX_RETAINED_ATTACHMENTS;
+const MAX_PERSISTED_BYTES = 64 * ATTACHMENT_STORAGE_GIB_BYTES;
 const RECONCILIATION_BATCH_ENTRIES = 32;
 const RECONCILIATION_BATCH_TIMEOUT_MS = 250;
 const MAX_PARALLEL_CLEANUPS = 8;
@@ -57,21 +61,10 @@ const CLEANUP_BATCH_TIMEOUT_MS = 30_000;
 const CHILD_STOP_CONFIRMATION_TIMEOUT_MS = 250;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 
 /** Transient admission failure: no retention bytes have been published. */
 export class ConversationAttachmentStoreReconcilingError extends Error {
   constructor() { super("Conversation attachment storage is still reconciling."); }
-}
-
-interface PersistedAttachmentMetadata {
-  readonly version: 1;
-  readonly id: string;
-  readonly name: string;
-  readonly mimeType: ChatAttachmentMimeType;
-  readonly size: number;
-  readonly digest: string;
-  readonly extension: string;
 }
 
 export interface ConversationAttachmentPayload {
@@ -100,6 +93,7 @@ export type ConversationAttachmentValidator = (value: {
 export interface ConversationAttachmentStoreOptions {
   readonly platform?: NodeJS.Platform;
   readonly maxBytes?: number;
+  readonly autoRemoveOldAttachments?: boolean;
   readonly maxRecords?: number;
   readonly validate?: ConversationAttachmentValidator;
   readonly persistenceFault?: {
@@ -170,50 +164,6 @@ function boundedLimit(
     : maximum;
 }
 
-function metadataFromUnknown(value: unknown): PersistedAttachmentMetadata | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  const candidate = value as Partial<PersistedAttachmentMetadata>;
-  const keys = Object.keys(value);
-  if (
-    keys.length !== 7
-    || !keys.every((key) => [
-      "version",
-      "id",
-      "name",
-      "mimeType",
-      "size",
-      "digest",
-      "extension",
-    ].includes(key))
-    || candidate.version !== 1
-    || typeof candidate.id !== "string"
-    || !UUID_PATTERN.test(candidate.id)
-    || typeof candidate.name !== "string"
-    || candidate.name.length < 1
-    || candidate.name.length > 255
-    || /[\0-\x1f\x7f]/u.test(candidate.name)
-    || /[\\/]/u.test(candidate.name)
-    || basename(candidate.name) !== candidate.name
-    || typeof candidate.mimeType !== "string"
-    || !(CHAT_ATTACHMENT_MIME_TYPES as readonly string[])
-      .includes(candidate.mimeType)
-    || chatAttachmentMimeTypeForName(candidate.name) !== candidate.mimeType
-    || !Number.isSafeInteger(candidate.size)
-    || (candidate.size ?? 0) < 1
-    || (candidate.size ?? 0) > MAX_CHAT_ATTACHMENT_BYTES
-    || typeof candidate.digest !== "string"
-    || !DIGEST_PATTERN.test(candidate.digest)
-    || typeof candidate.extension !== "string"
-    || chatAttachmentStorageExtension(
-      candidate.mimeType as ChatAttachmentMimeType,
-    )
-      !== candidate.extension
-  ) return null;
-  return candidate as PersistedAttachmentMetadata;
-}
-
 async function secureStoreDirectory(
   dataDirectory: string,
 ): Promise<StoreDirectoryAuthority> {
@@ -272,37 +222,11 @@ async function secureStoreDirectory(
   };
 }
 
-function metadataFor(payload: ConversationAttachmentPayload): PersistedAttachmentMetadata {
-  const { attachment, bytes } = payload;
-  if (
-    !UUID_PATTERN.test(attachment.id)
-    || attachment.name.length < 1
-    || attachment.name.length > 255
-    || /[\0-\x1f\x7f]/u.test(attachment.name)
-    || /[\\/]/u.test(attachment.name)
-    || basename(attachment.name) !== attachment.name
-    || bytes.byteLength !== attachment.size
-    || attachment.size < 1
-    || attachment.size > MAX_CHAT_ATTACHMENT_BYTES
-    || chatAttachmentMimeTypeForName(attachment.name) !== attachment.mimeType
-  ) {
-    throw new Error("The retained conversation attachment is invalid.");
-  }
-  return {
-    version: 1,
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
-    digest: createHash("sha256").update(bytes).digest("hex"),
-    extension: chatAttachmentStorageExtension(attachment.mimeType),
-  };
-}
-
 export class ConversationAttachmentStore {
   readonly directory: string;
   private readonly directoryAuthority: StoreDirectoryAuthority;
-  private readonly maxBytes: number;
+  private maxBytes: number;
+  private autoRemoveOldAttachments: boolean;
   private readonly maxRecords: number;
   private readonly validate?: ConversationAttachmentValidator;
   private readonly persistenceFault?: ConversationAttachmentStoreOptions["persistenceFault"];
@@ -336,7 +260,8 @@ export class ConversationAttachmentStore {
   ) {
     this.directoryAuthority = directoryAuthority;
     this.directory = directoryAuthority.path;
-    this.maxBytes = boundedLimit(options.maxBytes, MAX_PERSISTED_BYTES);
+    this.maxBytes = boundedLimit(options.maxBytes ?? DEFAULT_ATTACHMENT_STORAGE_GIB * ATTACHMENT_STORAGE_GIB_BYTES, MAX_PERSISTED_BYTES);
+    this.autoRemoveOldAttachments = options.autoRemoveOldAttachments ?? false;
     this.maxRecords = boundedLimit(options.maxRecords, MAX_PERSISTED_RECORDS);
     this.validate = options.validate;
     this.persistenceFault = options.persistenceFault;
@@ -453,7 +378,18 @@ export class ConversationAttachmentStore {
         (total, { bytes }) => total + bytes.byteLength,
         0,
       );
-      await this.admitCapacity(attachmentUsage(this.records), newPayloads.length, newBytes, unique, evictionOrder);
+      if (newBytes > 0) {
+        const available = await this.availableDiskBytes();
+        const reserved = attachmentUsage(this.pendingRecordBytes);
+        // Allow for per-file metadata, directories and filesystem allocation.
+        const overhead = (newPayloads.length + reserved.records) * 64 * 1024;
+        if (available < newBytes + reserved.bytes + overhead + ATTACHMENT_DISK_RESERVE_BYTES) {
+          throw new ConversationAttachmentDiskFullError();
+        }
+      }
+      // Budget changes never delete existing files. Eviction is an explicit policy.
+      await this.admitCapacity(attachmentUsage(this.records), newPayloads.length, newBytes, unique,
+        this.autoRemoveOldAttachments ? evictionOrder : undefined);
       signal?.throwIfAborted();
       if (newPayloads.length > 0) {
         const pendingIds = new Set<string>();
@@ -668,6 +604,39 @@ export class ConversationAttachmentStore {
           records: this.maxRecords,
         })
       : this.loadUsage());
+  }
+
+  setStoragePolicy(maxBytes: number, autoRemoveOldAttachments: boolean): void {
+    this.assertOpen();
+    this.maxBytes = boundedLimit(maxBytes, MAX_PERSISTED_BYTES);
+    this.autoRemoveOldAttachments = autoRemoveOldAttachments;
+  }
+
+  private async availableDiskBytes(): Promise<number> {
+    await this.assertStoreRootAuthority();
+    return await availableAttachmentDiskBytes(this.directory);
+  }
+  private management(): AttachmentStorageManagement {
+    return { state: this.reconciliation ? "reconciling" : this.reconciliationFailure ? "unavailable" : "ready",
+      maxBytes: this.maxBytes, maxRecords: this.maxRecords, records: this.records ?? new Map(),
+      authoritative: this.authoritativeRecords, retained: this.recordRetentions, pending: this.pendingRecordBytes,
+      availableDiskBytes: () => this.availableDiskBytes(), removeRecord: (id, signal) => this.removeRecord(id, signal) };
+  }
+  async storageStatus(order: ConversationAttachmentEvictionOrder): Promise<AttachmentStorageStatus> {
+    this.assertOpen();
+    return await this.serialize(async () => {
+      if (!this.reconciliation && !this.reconciliationFailure) await this.loadUsage();
+      return await describeAttachmentStorage(this.management(), order);
+    });
+  }
+  async cleanupOldest(order: ConversationAttachmentEvictionOrder, authorize: AuthorizeAttachmentCleanup): Promise<ConversationAttachmentUsage> {
+    this.assertOpen();
+    return await this.serialize(async () => {
+      this.assertOpen();
+      if (this.reconciliation || this.reconciliationFailure) throw new ConversationAttachmentStoreReconcilingError();
+      await this.loadUsage();
+      return await cleanupOldestAttachments(this.management(), order, authorize);
+    });
   }
 
   /** Cancels new work and proves every spawned store child has stopped. */
@@ -1127,6 +1096,7 @@ export class ConversationAttachmentStore {
 
   private async admitCapacity(usage: ConversationAttachmentUsage, newRecords: number, newBytes: number,
     batch: ReadonlyMap<string, unknown>, evictionOrder?: ConversationAttachmentEvictionOrder): Promise<void> {
+    if (newRecords === 0 && newBytes === 0) return;
     const { records: reservedRecords, bytes: reservedBytes } = attachmentUsage(this.pendingRecordBytes);
     const excessRecords = usage.records + reservedRecords + newRecords - this.maxRecords;
     const excessBytes = usage.bytes + reservedBytes + newBytes - this.maxBytes;

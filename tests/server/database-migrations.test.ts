@@ -2137,6 +2137,7 @@ describe("runtime migration catalog", () => {
       { version: 77 },
       { version: 78 },
       { version: 79 },
+      { version: 80 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2267,4 +2268,19 @@ describe("legacy inferred turn backfill", () => {
     secondDatabase.close();
     expect(secondTurnIds).toEqual(turns.map(({ id }) => id));
   }, 30_000);
+});
+
+it("upgrades schema 79 with preserving global attachment settings and persists a changed budget", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "inertia.sqlite");
+  const database = new Database(path);
+  migrateRuntimeDatabase(database, 79);
+  database.close();
+  const store = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
+  expect(store.shellSnapshot().settings).toMatchObject({ attachmentStorageGiB: 16, autoRemoveOldAttachments: false });
+  store.updateSettings({ attachmentStorageGiB: 64, autoRemoveOldAttachments: true });
+  store.close();
+  const restarted = new RuntimeStore(path, directory, { recoverInterruptedRuns: false });
+  expect(restarted.shellSnapshot().settings).toMatchObject({ attachmentStorageGiB: 64, autoRemoveOldAttachments: true });
+  restarted.close();
 });

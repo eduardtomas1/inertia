@@ -1,6 +1,6 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SnapshotElement } from "../../src/main/snapshot-accessibility";
 const native = vi.hoisted(() => {
   class XA11yError extends Error {}
@@ -234,6 +234,41 @@ describe.runIf(process.platform === "linux")("X11 foreground identity", () => {
   it("reports missing AT-SPI access when X11 proves a foreground process exists", async () => {
     native.foreground.mockRejectedValue(new SelectorNotMatchedError("unregistered app"));
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "accessibility-unavailable" });
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Windows application roots", () => {
+  let platform: PropertyDescriptor;
+  beforeEach(() => {
+    platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  });
+  afterEach(() => { Object.defineProperty(process, "platform", platform); });
+
+  it("captures the unique active modal below the synthetic application root", async () => {
+    const app = foreground();
+    const main = { ...app.asElement(), active: false };
+    const modal = { ...app.asElement(), name: "Active modal", stableId: "modal-window", role: "dialog" };
+    native.foreground.mockResolvedValue({ ...app,
+      asElement: () => ({ ...main, role: "application", bounds: null }),
+      children: async () => [main, modal],
+    });
+    const result = await captureForegroundSnapshot();
+    expect(result.source.windowTitle).toBe("Active modal");
+    expect(native.screenshot).toHaveBeenCalledExactlyOnceWith({ element: modal });
+    expect(native.x11).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 2])("refuses a process with %i active windows", async (count) => {
+    const app = foreground();
+    native.foreground.mockResolvedValue({ ...app,
+      asElement: () => ({ ...app.asElement(), role: "application", active: false, bounds: null }),
+      children: async () => Array.from({ length: count }, (_, index) => ({ ...app.asElement(), stableId: `window-${index}` })),
+    });
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground" });
+    expect(native.foreground).toHaveBeenCalledTimes(3);
     expect(native.screenshot).not.toHaveBeenCalled();
   });
 });

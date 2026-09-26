@@ -31,7 +31,8 @@ async function foreground(phase: SnapshotCapturePhase) {
     if (phase === "foreground" && error instanceof SelectorNotMatchedError) throw new SnapshotCaptureFailure("accessibility-unavailable");
     throw error;
   }) : await App.foreground({ timeout: 0 });
-  const candidates = process.platform === "win32" ? [app.asElement()] : await app.children();
+  // xa11y 0.15 returns an application root on every platform, including Windows.
+  const candidates = await app.children();
   const active = candidates.filter((element) => native ? element.name === native.name && x11CaptureBounds(element.bounds, native) : element.active);
   if (active.length !== 1 || !app.pid) throw new SnapshotCaptureFailure("no-active-window");
   const window = active[0]!;

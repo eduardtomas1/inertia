@@ -1,6 +1,6 @@
 {
   "baselineCommit": "3f98ab74b78d60fcc2d40dcaf12f29880dd036a3",
-  "productionSourceCommit": "af255f56f05898e6ac47b02c1d22fe5c9eefccfb",
+  "productionSourceCommit": "4b59d05020ad37817747ec1d7ba261b9122ff1f2",
   "node": "v22.23.1",
   "platform": "win32",
   "architecture": "x64",
@@ -8,24 +8,24 @@
   "measurements": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baseline": 831810,
-      "candidate": 838034,
-      "delta": 6224,
+      "candidate": 839161,
+      "delta": 7351,
       "previousBudget": 831840.8,
-      "addedAllowance": 6272
+      "addedAllowance": 7360
     },
     "detachedChatFirstLoadJavaScript": {
       "baseline": 642631,
-      "candidate": 648671,
-      "delta": 6040,
+      "candidate": 648744,
+      "delta": 6113,
       "previousBudget": 642729.2,
-      "addedAllowance": 6080
+      "addedAllowance": 6144
     },
     "deferredComposerQueueJavaScript": {
       "baseline": 7755,
-      "candidate": 12512,
-      "delta": 4757,
+      "candidate": 12703,
+      "delta": 4948,
       "previousBudget": 8192,
-      "addedAllowance": 4800
+      "addedAllowance": 4992
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "baseline": 4183,
@@ -36,10 +36,10 @@
     },
     "coreJavaScript": {
       "baseline": 2165882,
-      "candidate": 2175790,
-      "delta": 9908,
+      "candidate": 2177341,
+      "delta": 11459,
       "previousBudget": 2165985.4,
-      "addedAllowance": 9920
+      "addedAllowance": 11520
     }
   }
 }

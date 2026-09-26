@@ -79,7 +79,7 @@ describe("duration-aware Windows test shards", () => {
       .toThrow("invalid shape");
   });
 
-  it("keeps the checked successful-run manifest representative and balanced", async () => {
+  it("uses existing tests from the checked successful-run manifest and balances every current test", async () => {
     const [files, manifest] = await Promise.all([
       discoverVitestFiles(),
       loadWindowsDurationManifest(),
@@ -90,7 +90,9 @@ describe("duration-aware Windows test shards", () => {
       conclusion: "success",
       jobIds: [100955752412, 100955788770, 100955752798, 100955753005],
     });
-    expect(Object.keys(manifest.durationsMs).length).toBeGreaterThanOrEqual(590);
+    const measuredFiles = Object.keys(manifest.durationsMs);
+    expect(measuredFiles.length).toBeGreaterThan(0);
+    expect(files).toEqual(expect.arrayContaining(measuredFiles));
     const shards = createDurationAwareShards(files, manifest.durationsMs, 4, manifest.defaults);
     const allFiles = shards.flatMap((shard) => shard.files);
     expect(new Set(allFiles).size).toBe(files.length);

@@ -337,8 +337,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "opencode",
     harnessId: "opencode-sdk",
     implementationRevision: 1,
-    protocolRevision: "opencode-owned-server/sdk-1.18.31",
-    bundledSdkVersion: "1.18.31",
+    protocolRevision: "opencode-owned-server/sdk-1.18.32",
+    bundledSdkVersion: "1.18.32",
     support: {
       ...CORE_NATIVE,
       "follow-up-steer": "native",

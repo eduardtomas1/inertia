@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AppSettings, ServerEvent } from "@shared/contracts";
 import { ATTACHMENT_CLEANUP_BATCH_RECORDS, ATTACHMENT_STORAGE_GIB_OPTIONS, type AttachmentStorageGiB, type AttachmentStorageStatus } from "@shared/attachment-storage";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import { INTERFACE_LOCALE } from "../lib/locale";
 
 function size(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -60,7 +61,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       <strong>Attachment storage · all chats</strong>
       <small>Original images and documents kept on this device. This disk budget does not reserve RAM.</small>
       <small role="status">{storage?.state === "ready"
-        ? `${size(storage.bytes!)} used · ${storage.records!.toLocaleString()} of ${storage.maxRecords.toLocaleString()} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${size(storage.availableDiskBytes)} free on disk`}`
+        ? `${size(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${size(storage.availableDiskBytes)} free on disk`}`
         : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : "Attachment usage unavailable. Refresh to check again."}</small>
       <label>Global attachment disk budget <select aria-label="Global attachment disk budget" value={settings.attachmentStorageGiB} disabled={blocked} onChange={(event) => {
         const attachmentStorageGiB = Number(event.target.value) as AttachmentStorageGiB;

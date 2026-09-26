@@ -164,7 +164,7 @@ const budgets = {
   // The same release-audit additions add 2,065 core bytes (2,160,000
   // measured on Linux x64); allow 2,310 and keep ~0.25 KiB of headroom.
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
-  // Storage contracts and its deferred loader bring core to 2,165,776 bytes.
+  // Storage contracts and its deferred loader bring core to 2,165,828 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792,
   deferredPdfJavaScript: 500 * kibibyte,

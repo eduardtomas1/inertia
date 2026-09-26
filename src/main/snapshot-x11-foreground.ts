@@ -61,8 +61,6 @@ export function readX11Foreground(): X11Foreground {
       paramsType: [D.External, D.U64, D.U64, D.I32, D.I32, D.U8Array, D.U8Array, D.U8Array], paramsValue: [display, id, root, 0, 0, ...positioned] });
     const bounds = { x: positioned[0]!.readInt32LE(), y: positioned[1]!.readInt32LE(), width: geometry[3]!.readUInt32LE(), height: geometry[4]!.readUInt32LE() };
     if (!found || !translated || bounds.width <= 0 || bounds.height <= 0 || bounds.width * bounds.height > 32_000_000) throw new SnapshotX11ForegroundError();
-    // xa11y 0.15 reports the decorated X11 frame. Match that exact frame,
-    // but retain the client rectangle as the only pixels we may capture.
     const extents = property(id, "_NET_FRAME_EXTENTS", "CARDINAL", 32, 4, true);
     if (extents.length !== 0 && extents.length !== 32) throw new SnapshotX11ForegroundError();
     const extent = (offset: number): number => extents.length === 0 ? 0 : Number(extents.readBigUInt64LE(offset));
@@ -76,7 +74,6 @@ export function readX11Foreground(): X11Foreground {
   }
 }
 
-/** Accept only exact client/frame geometry; keep screenshots inside the client. */
 export function x11CaptureBounds(logical: SnapshotRect | null, native: Pick<X11Foreground, "bounds" | "frameBounds">): SnapshotRect | null {
   const matched = [native.bounds, native.frameBounds].find((pixels) => matchesX11Bounds(logical, pixels));
   if (!matched || !logical) return null;

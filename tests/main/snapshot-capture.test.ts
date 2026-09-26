@@ -187,8 +187,6 @@ describe("foreground snapshot failure categories", () => {
   it("refuses invalid foreground geometry before taking pixels", async () => {
     const flat = { ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } };
     native.foreground.mockResolvedValue({ ...foreground(), asElement: () => flat, children: async () => [flat] });
-    // X11 rejects the candidate during exact geometry matching; other platforms
-    // can identify the active window before rejecting its unusable rectangle.
     const category = process.platform === "linux" ? "no-active-window" : "invalid-geometry";
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category, phase: "foreground" });
     expect(native.foreground).toHaveBeenCalledTimes(process.platform === "linux" ? 3 : 1);

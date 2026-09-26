@@ -196,7 +196,8 @@ jobs:
   report-failure:
     name: Report provider compatibility failure
     needs: provider-drift
-    if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
+    # Branch dispatches verify a proposed fix without filing a product incident.
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true

@@ -190,6 +190,7 @@ it("keeps provider canary failures visible and automatically rechecks merged dri
   expect(final.run).toBe('test "$CANARY_FAILED" = false');
   expect(final["continue-on-error"]).not.toBe(true);
   expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
+  expect(drift.jobs["report-failure"].if).toContain("github.ref == 'refs/heads/main'");
 });
 
 it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "electron"], ["release-platforms.yml", "build"]])(

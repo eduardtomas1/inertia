@@ -1,6 +1,7 @@
 import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
 
-export async function releaseTurnAttachments(active: ActiveTurn, hooks: TurnControllerHooks): Promise<void> {
+export async function releaseTurnAttachments(active: ActiveTurn, hooks: TurnControllerHooks, drainFollowUps: () => Promise<void>): Promise<void> {
+  await drainFollowUps();
   if (active.attachmentsReleased || (active.attachmentIds.length === 0 && active.generatedAttachmentPaths.length === 0)) return;
   if (active.attachmentRelease) return await active.attachmentRelease;
   const release = Promise.all([

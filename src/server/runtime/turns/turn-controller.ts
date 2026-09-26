@@ -1175,9 +1175,8 @@ export class TurnController {
     return this.runStates.settle(active, status, cause, message, failure);
   }
 
-  private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
-    await this.followUps.drain(active);
-    await releaseTurnAttachments(active, this.hooks);
+  private releaseTurnAttachments(active: ActiveTurn): Promise<void> {
+    return releaseTurnAttachments(active, this.hooks, () => this.followUps.drain(active));
   }
 
   private async releaseTurnAttachmentsWithRetry(active: ActiveTurn): Promise<void> {

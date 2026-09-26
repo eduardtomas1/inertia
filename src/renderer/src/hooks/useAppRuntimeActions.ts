@@ -18,7 +18,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { runtimeCommandDelivery } from "../utils/connectionMessages";
+import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connectionMessages";
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 
 export interface AppRuntimeActions {
@@ -172,11 +172,7 @@ export function useAppRuntimeActions(options: {
       throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
       preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "The message could not be sent.",
-      );
+      setActionError(messageSendFailureText(error));
       throw error;
     } finally {
       if (handoffPrepared && !preserveAmbiguousHandoff) {

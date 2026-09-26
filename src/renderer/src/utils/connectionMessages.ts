@@ -40,6 +40,13 @@ export function runtimeCommandDelivery(
   return error instanceof RuntimeCommandError ? error.delivery : null;
 }
 
+export function messageSendFailureText(error: unknown): string {
+  const detail = error instanceof Error ? error.message : "The message could not be sent.";
+  return runtimeCommandDelivery(error) === "ambiguous"
+    ? `Delivery could not be confirmed. Check this chat before sending again; the message may already have arrived. ${detail}`
+    : detail;
+}
+
 export interface PendingConnectionRequest {
   resolve: (event: ServerEvent) => void;
   reject: (error: Error) => void;
@@ -119,7 +126,7 @@ export function settlePendingConnectionRequest(
     return "late";
   }
   if (event.type === "request.error") {
-    pending.reject(new RuntimeCommandError(event.message, "rejected", event.diagnosticId));
+    pending.reject(new RuntimeCommandError(event.message, event.delivery ?? "rejected", event.diagnosticId));
   } else {
     pending.resolve(event);
   }

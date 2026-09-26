@@ -228,6 +228,7 @@ function dependencies(options: {
         release: vi.fn(),
       })),
       steer: vi.fn(async () => null),
+      deferFollowUpAttachmentCleanup: vi.fn(),
       queue: options.queue,
       start: vi.fn(() => true),
       failBeforeStart: vi.fn(() => true),
@@ -1608,7 +1609,7 @@ describe("message attachment ownership transfer", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("rolls back accepted durable images when follow-up persistence fails", async () => {
+  it("reports accepted delivery when follow-up persistence fails", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const handlerDependencies = dependencies({ queue: vi.fn(), relinquishAll });
     vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
@@ -1619,16 +1620,22 @@ describe("message attachment ownership transfer", () => {
       acknowledge,
     ) => {
       acknowledge?.();
-      return null;
+      throw new Error("simulated SQLITE_FULL");
     });
 
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
       {} as never,
       messageCommand(),
-    )).rejects.toThrow("cannot accept a follow-up");
+    )).rejects.toMatchObject({
+      delivery: "ambiguous",
+      message: expect.stringContaining("The follow-up was accepted"),
+    });
 
-    expect(handlerDependencies.conversationAttachments.release)
-      .toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.release).not.toHaveBeenCalled();
+    const deferred = vi.mocked(handlerDependencies.turns.deferFollowUpAttachmentCleanup).mock.calls[0]?.[1];
+    expect(deferred).toBeTypeOf("function");
+    await deferred!();
+    expect(handlerDependencies.conversationAttachments.release).toHaveBeenCalledWith([trustedAttachment.id]);
     expect(handlerDependencies.conversationAttachments.releaseRetention)
       .not.toHaveBeenCalled();
     expect(handlerDependencies.attachmentResolver!.releaseAll)

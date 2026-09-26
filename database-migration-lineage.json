@@ -662,6 +662,11 @@
       "version": 81,
       "name": "PersistRuntimeQueuedMessages",
       "digest": "dc92625d4fe5c06fa6c405b75b6219bf2e8a9e273188f76d5ae15829a41414c9"
+    },
+    {
+      "version": 82,
+      "name": "PersistAgentThreadTargetOwnership",
+      "digest": "78fbf2f67e23be99135308fcf86113b0e0e244b384003b95a3e14f03af467849"
     }
   ]
 }

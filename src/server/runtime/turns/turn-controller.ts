@@ -82,6 +82,7 @@ import {
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
+import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 
 export type {
   QueuedTurn,
@@ -900,6 +901,14 @@ export class TurnController {
     return this.settle(active, "cancelled", cause, "Stopped");
   }
 
+  activeIdentity(conversationId: string): TurnOwnerIdentity | null {
+    return activeTurnIdentity(this.activeByConversation.get(conversationId));
+  }
+
+  cancelOwned(conversationId: string, owner: TurnOwnerIdentity): boolean {
+    return sameTurnOwner(this.activeIdentity(conversationId), owner) && this.cancel(conversationId);
+  }
+
   failBeforeStart(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
@@ -910,6 +919,11 @@ export class TurnController {
   acquireFollowUpAdmission(conversationId: string): FollowUpAdmissionLease | null {
     return this.followUps.acquire(this.activeByConversation.get(conversationId));
   }
+
+  deferFollowUpAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {
+    this.followUps.deferAttachmentCleanup(lease, cleanup);
+  }
+
   async steer(
     lease: FollowUpAdmissionLease,
     input: ProviderSteerInput,

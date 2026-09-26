@@ -1487,6 +1487,7 @@ describe("conversation context packets", () => {
     database.pragma("foreign_keys = OFF");
     // Restore the pre-delivery schema, including objects added by later releases.
     database.exec("DROP TABLE queued_messages;");
+    database.exec("ALTER TABLE agent_thread_operations DROP COLUMN target_turn_id; ALTER TABLE agent_thread_operations DROP COLUMN target_run_id;");
     database.exec(conversationContextWholeChatMigration.up as string);
     database.exec("ALTER TABLE app_state DROP COLUMN attachment_storage_gib; ALTER TABLE app_state DROP COLUMN auto_remove_old_attachments;");
     database.prepare("DELETE FROM schema_migrations WHERE version >= 79").run();

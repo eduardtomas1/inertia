@@ -173,7 +173,7 @@ export type ServerEvent =
   | RuntimeSequencedFrame
   | { type: "runtime.sync.completed"; sync: RuntimeSyncCursor }
   | { type: "request.ok"; requestId: string }
-  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string }
+  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string; delivery?: "ambiguous" }
   | {
       type: "request.result";
       requestId: string;

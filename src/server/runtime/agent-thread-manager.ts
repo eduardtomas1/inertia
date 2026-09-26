@@ -50,6 +50,8 @@ import {
   type HarnessCapabilityRegistry,
 } from "./harness-capabilities";
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
+import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
+import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";
 import {
   boundedUntrustedAgentText,
@@ -64,6 +66,7 @@ const TERMINAL_TURN_STATUSES = new Set([
   "completed",
   "failed",
   "cancelled",
+  "interrupted",
 ]);
 
 const idSchema = z.string().uuid();
@@ -353,7 +356,7 @@ function safeConversation(conversation: Conversation, managed: boolean): unknown
 
 export class AgentThreadManager {
   private readonly now: () => string;
-  private readonly mutationTails = new Map<string, Promise<void>>();
+  private readonly mutations = new ManagedMutationQueue();
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
 
@@ -384,12 +387,10 @@ export class AgentThreadManager {
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {
     this.dependencies.contextRequests.cancelForTurn(turn.conversationId, turn.id);
     if (turn.status === "completed") return;
-    const active = new Set(this.dependencies.turns.activeConversationIds());
     const targets = this.dependencies.store.agentThreadManagement
-      .targetsActedOnByTurn(turn.conversationId, turn.id);
-    for (const conversationId of targets) {
-      if (!active.has(conversationId)) continue;
-      this.dependencies.turns.cancel(conversationId);
+      .runsDispatchedByTurn(turn.conversationId, turn.id);
+    for (const target of targets) {
+      this.dependencies.turns.cancelOwned(target.conversationId, target);
     }
   }
 
@@ -445,9 +446,18 @@ export class AgentThreadManager {
         case "inertia_send_message":
           return await this.mutate(source, call, call.tool, (operationId, signal) =>
             this.send(source, call.arguments, operationId, signal));
-        case "inertia_stop_conversation":
+        case "inertia_stop_conversation": {
+          const input = inspectSchema.parse(call.arguments);
+          const target = this.managedTarget(current, input.conversationId);
+          const identity = this.dependencies.turns.activeIdentity(target.id);
+          if (!identity) throw new Error("The managed chat does not have an exact active turn to stop.");
           return await this.mutate(source, call, call.tool, (_operationId, signal) =>
-            this.stop(source, call.arguments, signal));
+            this.stop(source, call.arguments, signal, identity), {
+              childConversationId: target.id,
+              targetTurnId: identity.turnId,
+              targetRunId: identity.runId,
+            });
+        }
         case "inertia_archive_conversation":
           return await this.mutate(source, call, call.tool, (_operationId, signal) =>
             this.archive(source, call.arguments, signal));
@@ -708,6 +718,7 @@ export class AgentThreadManager {
       operationId: string,
       signal: AbortSignal,
     ) => Promise<ProviderHostToolResult>,
+    target?: { childConversationId: string; targetTurnId: string; targetRunId: string },
   ): Promise<ProviderHostToolResult> {
     await this.preflightMutation(source, toolName, call.arguments);
     if (call.signal.aborted) {
@@ -742,6 +753,9 @@ export class AgentThreadManager {
         `The original operation is ${reserved.operation.status}; Inertia will not repeat it.`,
       );
     }
+    if (target) this.dependencies.store.agentThreadManagement.transition(
+      reserved.operation.id, ["approval-pending"], "approval-pending", target, this.now(),
+    );
     const detail = this.approvalDetail(source, toolName, call.arguments);
     const decision = await call.requestApproval({
       title: detail.title,
@@ -777,7 +791,7 @@ export class AgentThreadManager {
       return failure("call_cancelled", "The parent turn ended after approval.");
     }
     try {
-      const result = await this.serializeMutation(
+      const result = await this.mutations.run(
         source.conversation.id,
         async () => {
           if (call.signal.aborted) {
@@ -1055,6 +1069,7 @@ export class AgentThreadManager {
       content: input.prompt,
       activateConversation: false,
     });
+    recordQueuedManagedTurn(this.dependencies.store, this.dependencies.turns, operationId, queued.turn, this.now());
     if (!this.dependencies.turns.start(queued.turn.id)) {
       this.dependencies.turns.failBeforeStart(
         child.id,
@@ -1114,7 +1129,9 @@ export class AgentThreadManager {
         const message = await this.dependencies.turns.steer(lease, {
           content: input.content,
           imagePaths: [],
-        }, [], undefined, signal);
+        }, [], () => recordManagedTurn(this.dependencies.store, operationId, {
+          id: lease.turnId, runId: lease.runId,
+        }, this.now()), signal);
         if (!message?.turnId) throw new Error("The target provider did not accept the follow-up.");
         this.dependencies.broadcastSnapshot();
         return json({
@@ -1146,6 +1163,7 @@ export class AgentThreadManager {
         content: input.content,
         activateConversation: false,
       });
+      recordQueuedManagedTurn(this.dependencies.store, this.dependencies.turns, operationId, queued.turn, this.now());
       if (!this.dependencies.turns.start(queued.turn.id)) {
         this.dependencies.turns.failBeforeStart(target.id, "The managed follow-up could not start.");
         throw new Error("The target chat could not start the new turn.");
@@ -1166,18 +1184,13 @@ export class AgentThreadManager {
     source: AgentThreadSource,
     args: unknown,
     signal: AbortSignal,
+    identity: { turnId: string; runId: string },
   ): Promise<ProviderHostToolResult> {
     const input = inspectSchema.parse(args);
     const current = this.assertSource(source);
     const target = this.managedTarget(current, input.conversationId);
     if (signal.aborted) throw new Error("The parent turn ended before stop.");
-    if (!this.dependencies.turns.cancel(target.id)) {
-      throw new Error("The managed chat does not have an exact active turn to stop.");
-    }
-    await this.dependencies.turns.waitForProviderCleanup([target.id]);
-    if (this.dependencies.turns.isActive(target.id)) {
-      throw new Error("Stop was requested, but exact provider cleanup was not confirmed.");
-    }
+    await stopOwnedManagedTurn(this.dependencies.store, this.dependencies.turns, target.id, identity);
     this.dependencies.broadcastSnapshot();
     return json({ conversationId: target.id, stopped: true });
   }
@@ -1215,26 +1228,4 @@ export class AgentThreadManager {
         .managedBy(sourceConversationId, conversationId) !== null).length;
   }
 
-  private async serializeMutation<T>(
-    sourceConversationId: string,
-    action: () => Promise<T>,
-  ): Promise<T> {
-    const predecessor = this.mutationTails.get(sourceConversationId)
-      ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = predecessor.catch(() => undefined).then(() => gate);
-    this.mutationTails.set(sourceConversationId, tail);
-    await predecessor.catch(() => undefined);
-    try {
-      return await action();
-    } finally {
-      release();
-      if (this.mutationTails.get(sourceConversationId) === tail) {
-        this.mutationTails.delete(sourceConversationId);
-      }
-    }
-  }
 }

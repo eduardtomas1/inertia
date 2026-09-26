@@ -1193,6 +1193,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return stringField(value, "requestId");
     case "request.error":
       return stringField(value, "requestId") && stringField(value, "message")
+        && (value.delivery === undefined || value.delivery === "ambiguous")
         && (value.diagnosticId === undefined || (typeof value.diagnosticId === "string"
           && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value.diagnosticId)));
     case "request.result":

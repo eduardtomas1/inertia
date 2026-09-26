@@ -15,11 +15,6 @@ export class TextAttachmentError extends Error {
   }
 }
 
-/**
- * Decode only unambiguous Unicode encodings. Never guess a legacy code page
- * from arbitrary binary bytes. Keep stored bytes untouched; every consumer
- * uses this projection so a preview and the provider see the same content.
- */
 export function decodeTextAttachment(bytes: Uint8Array): string {
   if (bytes.byteLength > MAX_TEXT_ATTACHMENT_BYTES) {
     throw new TextAttachmentError("text-size");
@@ -35,8 +30,6 @@ export function decodeTextAttachment(bytes: Uint8Array): string {
   } catch {
     throw new TextAttachmentError("text-content");
   }
-  // Logs commonly contain ANSI color/style sequences. Remove only SGR;
-  // cursor movement, OSC links/clipboard commands and other controls fail.
   text = text.replace(/\x1b\[[0-9;:]*m/gu, "");
   if (/[\0-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/u.test(text) || !text.trim()) {
     throw new TextAttachmentError("text-content");

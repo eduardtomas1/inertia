@@ -22,12 +22,14 @@ import type {
   TurnGitArtifact,
 } from "./git";
 import type { ConversationContextPacketSummary } from "../conversation-context";
+import type { ConversationHistoryPage } from "../conversation-history";
 
 /**
  * Heavy state for one conversation. This is loaded independently from the
  * app shell so transcript growth does not inflate navigation snapshots.
  */
 export interface ConversationDetail {
+  history?: ConversationHistoryPage;
   conversation: Conversation;
   agentTurns: AgentTurn[];
   turnGitArtifacts: TurnGitArtifact[];

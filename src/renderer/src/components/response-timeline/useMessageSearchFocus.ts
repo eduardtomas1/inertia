@@ -1,8 +1,9 @@
-import { isTimelineFocusDetail, TIMELINE_FOCUS_EVENT } from "../../utils/timelineFocus";
-import { useEffect, useLayoutEffect } from "react";
+import { clearTimelineFocus, isTimelineFocusDetail, pendingTimelineFocus, TIMELINE_FOCUS_EVENT } from "../../utils/timelineFocus";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ResponseTimelineProps } from "./types";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { MESSAGE_SEARCH_FOCUS_EVENT, clearMessageSearchFocus, pendingMessageSearchFocus } from "../../utils/messageSearchFocus";
+import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../utils/conversationHistoryNavigation";
 
 export function resolveMessageSearchDestination(row: HTMLElement, messageId: string, turnId?: string): HTMLElement | null {
   if (turnId && row.dataset.turnId !== turnId) {
@@ -36,7 +37,29 @@ export function useMessageSearchFocus(
   timeline: ResponseTimelineItem[],
   beginReaderTimelineNavigation: () => void,
   focusTimelineItem: (index: number, target: "turn" | { messageId: string; turnId?: string }) => void,
+  captureLayoutAnchorBeforeChange?: () => void,
+  restoreLayoutAnchorAfterChange?: () => void,
 ): void {
+  const pendingPrepend = useRef<{ conversationId: string; timeline: ResponseTimelineItem[] } | null>(null);
+  useLayoutEffect(() => {
+    const prepend = (event: Event) => {
+      if ((event as CustomEvent<{ conversationId: string }>).detail?.conversationId === props.conversationId) {
+        pendingPrepend.current = { conversationId: props.conversationId, timeline };
+        beginReaderTimelineNavigation();
+        captureLayoutAnchorBeforeChange?.();
+      }
+    };
+    window.addEventListener(CONVERSATION_HISTORY_PREPEND_EVENT, prepend);
+    return () => window.removeEventListener(CONVERSATION_HISTORY_PREPEND_EVENT, prepend);
+  }, [props.conversationId, timeline, beginReaderTimelineNavigation, captureLayoutAnchorBeforeChange]);
+  useLayoutEffect(() => {
+    const pending = pendingPrepend.current;
+    if (!pending || pending.timeline === timeline) return;
+    // A frame scheduled before React commits the page can restore the old
+    // layout and finish before the prepend. Restore against committed rows.
+    pendingPrepend.current = null;
+    if (pending.conversationId === props.conversationId) restoreLayoutAnchorAfterChange?.();
+  }, [props.conversationId, timeline, restoreLayoutAnchorAfterChange]);
   useEffect(() => {
     const focusSearchResult = (): void => {
       const target = pendingMessageSearchFocus(props.conversationId);
@@ -66,8 +89,8 @@ export function useMessageSearchFocus(
   }, [beginReaderTimelineNavigation, focusTimelineItem, props.conversationId, props.projectId, props.messages, timeline]);
 
   useLayoutEffect(() => {
-    const focusRequestedTurn = (event: Event): void => {
-      const detail = (event as CustomEvent<unknown>).detail;
+    const focusRequestedTurn = (event?: Event): void => {
+      const detail = event ? (event as CustomEvent<unknown>).detail : pendingTimelineFocus(props.conversationId);
       if (
         !isTimelineFocusDetail(detail)
         || detail.conversationId !== props.conversationId
@@ -75,11 +98,13 @@ export function useMessageSearchFocus(
       const index = timeline.findIndex((item) =>
         item.kind === "turn" && item.turn.id === detail.turnId);
       if (index >= 0) {
+        clearTimelineFocus();
         beginReaderTimelineNavigation();
         focusTimelineItem(index, "turn");
       }
     };
     window.addEventListener(TIMELINE_FOCUS_EVENT, focusRequestedTurn);
+    focusRequestedTurn();
     return () => window.removeEventListener(
       TIMELINE_FOCUS_EVENT,
       focusRequestedTurn,

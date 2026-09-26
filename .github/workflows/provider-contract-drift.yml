@@ -1,6 +1,16 @@
 name: Provider contract drift
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "src/server/provider/**"
+      - "src/server/codex/**"
+      - "src/server/claude/**"
+      - "scripts/provider-drift*"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/provider-contract-drift.yml"
   schedule:
     - cron: "17 5 * * 1"
   workflow_dispatch:
@@ -17,7 +27,6 @@ jobs:
     name: Latest provider compatibility canary
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    continue-on-error: true
     permissions:
       contents: read
     outputs:
@@ -141,7 +150,7 @@ jobs:
             "$CURSOR_INSTALL_OUTCOME" \
             "$LATEST_PROBE_OUTCOME"
           do
-            if [[ "$outcome" == "failure" ]]; then
+            if [[ "$outcome" != "success" ]]; then
               failed=true
             fi
           done
@@ -159,6 +168,7 @@ jobs:
                 "@anthropic-ai/claude-code",
                 "@moonshot-ai/kimi-code",
                 "opencode-ai",
+                "antigravity-cli",
               ]);
               let report = {};
               try { report = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
@@ -175,10 +185,19 @@ jobs:
           printf 'failed=%s\n' "$failed" >> "$GITHUB_OUTPUT"
           printf 'latest_versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
 
+      # This workflow is deliberately outside merge-ready. Compatibility
+      # failures must nevertheless be red instead of looking certified.
+      - name: Require successful provider compatibility evidence
+        if: always()
+        env:
+          CANARY_FAILED: ${{ steps.collect.outputs.failed }}
+        run: test "$CANARY_FAILED" = false
+
   report-failure:
     name: Report provider compatibility failure
     needs: provider-drift
-    if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
+    # Branch dispatches verify a proposed fix without filing a product incident.
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     continue-on-error: true

@@ -292,6 +292,7 @@ export class OpenCodeSessionOwnership {
   private readonly liveDescendants = new Set<string>();
   private readonly deletedDescendants = new Set<string>();
   private readonly eventEvidenceKeys = new Set<string>();
+  private readonly eventIdentities = new Map<string, string>();
 
   constructor(
     private readonly rootSessionId: string,
@@ -320,6 +321,23 @@ export class OpenCodeSessionOwnership {
       return "unretained";
     }
     this.eventEvidenceKeys.add(eventKey);
+    return "accepted";
+  }
+
+  private recordEventIdentity(event: Event): OpenCodeDescendantEvidence | undefined {
+    const rawId = (event as Event & { id?: unknown }).id;
+    // Older servers omit envelope IDs. Keep their conservative payload proof.
+    if (rawId === undefined) return undefined;
+    const id = safeSessionId(rawId);
+    const payload = openCodeEventEvidenceKey(event);
+    if (!id || !payload) return "unretained";
+    const previous = this.eventIdentities.get(id);
+    if (previous !== undefined) {
+      if (previous !== payload) throw new Error("OpenCode changed a retained event identity.");
+      return "duplicate";
+    }
+    if (this.eventIdentities.size >= this.maxActivityEventKeys) return "unretained";
+    this.eventIdentities.set(id, payload);
     return "accepted";
   }
 
@@ -371,6 +389,10 @@ export class OpenCodeSessionOwnership {
     if (this.deletedDescendants.has(eventSessionId!)) {
       return { scope, active: false };
     }
+    const identity = this.recordEventIdentity(event);
+    if (identity === "duplicate" || identity === "unretained") {
+      return { scope, active: false };
+    }
     if (
       event.type === "session.idle"
       || event.type === "session.error"
@@ -383,7 +405,9 @@ export class OpenCodeSessionOwnership {
       )
     ) {
       const evidence = this.recordEventEvidence(event);
-      if (evidence !== "accepted") {
+      // A fresh envelope can end a new busy/idle cycle with the same payload.
+      // Payload novelty still controls deadline credit, not current liveness.
+      if (evidence !== "accepted" && identity !== "accepted") {
         return { scope, active: false };
       }
       const wasLive = this.liveDescendants.delete(eventSessionId!);
@@ -396,15 +420,15 @@ export class OpenCodeSessionOwnership {
       return {
         scope,
         active: false,
-        ...(wasLive || becameTerminal ? { lifecycleProgress: true } : {}),
+        ...(evidence === "accepted" && (wasLive || becameTerminal)
+          ? { lifecycleProgress: true } : {}),
       };
     }
     const active = added || activeDescendantEvent(event, eventSessionId!);
     if (!active) return { scope, active: false };
     const evidence = this.recordEventEvidence(event);
-    // Every structurally valid activity observation reasserts liveness. Only
-    // novel retained evidence receives progress credit, so replay cannot keep
-    // extending the inactivity deadline.
+    // A new envelope may reassert busy state. Replayed IDs never resurrect a
+    // settled child, and repeated payloads never extend the inactivity timer.
     this.liveDescendants.add(eventSessionId!);
     return { scope, active: evidence === "accepted" };
   }

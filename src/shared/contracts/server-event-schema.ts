@@ -1,5 +1,7 @@
+import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
+import { conversationHistoryCursorSchema } from "../conversation-history";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -997,6 +999,8 @@ function conversationDetail(
   const conversationId = value.conversation.id as string;
   return (expectedConversationId === undefined
       || conversationId === expectedConversationId)
+    && (value.history === undefined || (record(value.history)
+      && (value.history.older === null || conversationHistoryCursorSchema.safeParse(value.history.older).success)))
     && arrayOf(value.agentTurns, agentTurn)
     && arrayOf(value.turnGitArtifacts, turnGitArtifact)
     && arrayOf(value.messages, chatMessage)
@@ -1092,10 +1096,12 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   }
 }
 import { issueReportSchema } from "../issue-report";
+import { messageQueueResultSchema } from "../queued-messages";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,
   "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
@@ -1228,22 +1234,5 @@ function isServerEvent(value: unknown): value is ServerEvent {
  * identities, and renderer-consumed nested state checked below to have their
  * declared runtime shapes.
  */
-export function parseServerEvent(value: unknown): ServerEvent {
-  if (!isServerEvent(value)) throw new Error("Malformed server event");
-  return value;
-}
-
-export const serverEventSchema = Object.freeze({
-  parse: parseServerEvent,
-  safeParse(value: unknown): { success: true; data: ServerEvent }
-    | { success: false; error: Error } {
-    try {
-      return { success: true, data: parseServerEvent(value) };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error : new Error("Malformed server event"),
-      };
-    }
-  },
-});
+export const serverEventSchema = serverEventBoundary(isServerEvent);
+export const parseServerEvent = serverEventSchema.parse;

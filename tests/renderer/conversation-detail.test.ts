@@ -16,6 +16,8 @@ import {
   mergeConversationShell,
   resolveConversationDetail,
 } from "../../src/renderer/src/utils/conversationDetail";
+import { mergeConversationHistory } from "../../src/renderer/src/utils/conversationHistory";
+import { mergeProjectionPlans } from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const conversation: Conversation = {
   id: "conversation-1",
@@ -114,6 +116,103 @@ const agentTurn: AgentTurn = {
   createdAt: conversation.createdAt,
   updatedAt: conversation.createdAt,
 };
+
+describe("paged history reconciliation", () => {
+  const older = { at: conversation.createdAt, id: "old-turn", kind: "turn" as const };
+  const page = (id: string, content: string): ConversationDetail => ({
+    ...detail, history: { older }, agentTurns: [{ ...agentTurn, id }],
+    messages: [{ ...detail.messages[0]!, id: `message-${id}`, turnId: id, content }],
+  });
+  const plannedPage = (index: number, step = `Plan ${index}`): ConversationDetail => {
+    const id = `turn-${index}`;
+    const at = `2026-07-25T10:0${index}:00.000Z`;
+    return { ...page(id, `Message ${index}`),
+      agentTurns: [{ ...agentTurn, id, runId: `run-${index}`, requestedAt: at }],
+      plans: [{ conversationId: conversation.id, turnId: id, runId: `run-${index}`,
+        explanation: null, steps: [{ step, status: "completed" }] }] };
+  };
+
+  it.each(["older", "target"] as const)("keeps the latest plan selected after loading %s history and refreshing", (mode) => {
+    const recent = plannedPage(3);
+    const old = plannedPage(1);
+    const loaded = mergeConversationHistory(recent, old, mode);
+    const refreshed = mergeConversationHistory(loaded, plannedPage(3, "Updated latest plan"), "refresh");
+    expect(refreshed.plans.map(({ runId }) => runId)).toEqual(["run-1", "run-3"]);
+    expect(mergeProjectionPlans(refreshed.plans, undefined).at(-1)?.steps[0]?.step)
+      .toBe("Updated latest plan");
+    expect(recent.plans[0]?.steps[0]?.step).toBe("Plan 3");
+    expect(old.plans[0]?.steps[0]?.step).toBe("Plan 1");
+  });
+
+  it("orders successive search targets between already loaded distant and latest plans", () => {
+    const distant = mergeConversationHistory(plannedPage(4), plannedPage(1), "target");
+    const middle = mergeConversationHistory(distant, plannedPage(3), "target");
+    const complete = mergeConversationHistory(middle, plannedPage(2), "target");
+    expect(complete.plans.map(({ runId }) => runId)).toEqual(["run-1", "run-2", "run-3", "run-4"]);
+    expect(mergeProjectionPlans(complete.plans, undefined).at(-1)?.steps[0]?.step).toBe("Plan 4");
+  });
+
+  it.each(["older", "target"] as const)("deduplicates overlapping %s plans without replacing current values", (mode) => {
+    const current = plannedPage(2, "Current plan");
+    const stale = plannedPage(2, "Stale plan");
+    const merged = mergeConversationHistory(current, stale, mode);
+    expect(merged.plans).toEqual(current.plans);
+    const withOlder = mergeConversationHistory(merged, plannedPage(1), "older");
+    const cleared = mergeConversationHistory(withOlder, { ...current, plans: [] }, "refresh");
+    expect(cleared.plans.map(({ runId }) => runId)).toEqual(["run-1"]);
+  });
+
+  it("retains legacy plan order while refreshing their values and owned plans", () => {
+    const legacy = { ...plannedPage(1).plans[0]!, turnId: null, runId: "legacy" };
+    const current = { ...plannedPage(2), plans: [legacy, ...plannedPage(2).plans] };
+    const loaded = mergeConversationHistory(current, plannedPage(1), "older");
+    const updatedLegacy = { ...legacy, explanation: "Updated legacy plan" };
+    const refreshed = mergeConversationHistory(loaded,
+      { ...plannedPage(2), plans: [updatedLegacy, ...plannedPage(2).plans] }, "refresh");
+    expect(refreshed.plans.map(({ runId }) => runId)).toEqual(["legacy", "run-1", "run-2"]);
+    expect(refreshed.plans[0]).toBe(updatedLegacy);
+  });
+
+  it("replaces another conversation's history even when its run identities match", () => {
+    const current = plannedPage(1, "Current chat");
+    const other = plannedPage(1, "Other chat");
+    other.conversation = { ...conversation, id: "other-conversation" };
+    other.plans = other.plans.map((plan) => ({ ...plan, conversationId: other.conversation.id }));
+    expect(mergeConversationHistory(current, other, "target")).toBe(other);
+    expect(other.plans).toHaveLength(1);
+    expect(other.plans[0]?.steps[0]?.step).toBe("Other chat");
+  });
+
+  it("retains older pages while refreshing the active turn authoritatively", () => {
+    const current = mergeConversationHistory(page("live", "streaming"), page("old", "saved"), "older");
+    const next = page("live", "complete");
+    const updated = mergeConversationHistory(current, next, "refresh");
+    expect(updated.messages.map(({ content }) => content).sort()).toEqual(["complete", "saved"]);
+    expect(updated.agentTurns).toHaveLength(2);
+    expect(updated.history).toEqual(current.history);
+  });
+
+  it("does not overwrite newer live data when a delayed older page overlaps it", () => {
+    const current = page("live", "complete");
+    const old = { ...page("live", "stale"), history: { older: null } };
+    expect(mergeConversationHistory(current, old, "older").messages[0]?.content).toBe("complete");
+    expect(mergeConversationHistory(current, old, "older").history?.older).toBeNull();
+  });
+
+  it("keeps the contiguous cursor when loading a distant search result", () => {
+    const current = page("recent", "recent");
+    const distant = { ...page("distant", "hit"), history: { older: null } };
+    const merged = mergeConversationHistory(current, distant, "target");
+    expect(merged.messages).toHaveLength(2);
+    expect(merged.history?.older).toEqual(older);
+  });
+
+  it("resets a disconnected latest window to avoid silently skipping offline turns", () => {
+    const current = { ...page("old", "old"), history: { older: null } };
+    const latest = page("new", "new");
+    expect(mergeConversationHistory(current, latest, "refresh")).toBe(latest);
+  });
+});
 
 function result(
   state: ConversationDetailResult["state"],

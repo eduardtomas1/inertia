@@ -51,6 +51,7 @@ import {
   messageSendPreparationExpired,
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
+import type { QueuedMessage } from "../../../shared/queued-messages";
 
 type MessageSendStage =
   | "conversation-state"
@@ -108,6 +109,8 @@ function classifiedMessageSendError(
 }
 
 export interface TurnInteractionCommandDependencies {
+  /** Runtime coordinator only. Public message.send never supplies this owner. */
+  queuedMessage?: QueuedMessage;
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -154,6 +157,12 @@ export function createTurnInteractionCommandHandler(
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
+          if (dependencies.queuedMessage && (
+            dependencies.queuedMessage.conversationId !== conversation.id
+            || conversation.archivedAt !== null
+            || dependencies.turns.isActive(conversation.id)
+            || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, conversation)
+          )) throw new RuntimeRequestError("The chat changed before its queued message could start.");
           contextPacketIds =
             command.payload.context?.conversationContextPacketIds ?? [];
           resolvedTurnContext = command.payload.context;
@@ -394,7 +403,15 @@ export function createTurnInteractionCommandHandler(
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
         > = [];
-        if (command.payload.attachments.length > 0) {
+        if (dependencies.queuedMessage) {
+          for (const attachment of dependencies.queuedMessage.attachments) {
+            const preview = await awaitMessageSendPreparation(
+              dependencies.conversationAttachments.preview(attachment.id), preparationDeadlineAt,
+            );
+            if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
+            resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
+          }
+        } else if (command.payload.attachments.length > 0) {
           const resolver = dependencies.attachmentResolver;
           if (!resolver) {
             throw new RuntimeRequestError(
@@ -738,6 +755,14 @@ export function createTurnInteractionCommandHandler(
         let durableTurnPersisted = false;
         let deriveInitialTitle = false;
         try {
+          if (dependencies.queuedMessage) {
+            const current = dependencies.store.conversation(conversation.id);
+            const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
+            if (current.archivedAt !== null || item?.state !== "dispatching"
+              || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, current)) {
+              throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
+            }
+          }
           // A real first-message title can itself equal an untitled placeholder.
           // Capture history before queue/createMessage persists this message.
           deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")
@@ -755,6 +780,7 @@ export function createTurnInteractionCommandHandler(
           }
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
+                queuedMessageId: dependencies.queuedMessage?.id,
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,

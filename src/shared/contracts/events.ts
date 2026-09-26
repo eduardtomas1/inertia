@@ -1,4 +1,5 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
+import type { MessageQueueResult } from "../queued-messages";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -202,6 +203,7 @@ export type ServerEvent =
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
+        | MessageQueueResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult

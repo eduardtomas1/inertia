@@ -20,6 +20,7 @@ import type {
   UsageDisplayMode,
   WorkspaceEntry,
 } from "@shared/contracts";
+import type { QueueCommandRunner } from "./runtimeQueueClient";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
@@ -62,6 +63,7 @@ export interface ComposerProps {
   hasVisibleHistory?: boolean;
   agentContextRequest?: AgentConversationContextRequest | null;
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onQueueCommand?: QueueCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   goal?: ChatGoalControlProps | null;

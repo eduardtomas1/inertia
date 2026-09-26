@@ -43,6 +43,16 @@ export interface TurnSettlementCoordinatorOptions {
 export class TurnSettlementCoordinator {
   constructor(private readonly options: TurnSettlementCoordinatorOptions) {}
 
+  retryTerminalPersistence(active: ActiveTurn): boolean {
+    const status = active.runState.snapshot().state;
+    if ((status !== "completed" && status !== "failed" && status !== "cancelled" && status !== "interrupted")
+      || active.providerRunStarted) return false;
+    return this.finalizeGuarded(
+      active, status, "stream-persistence-failed",
+      "The turn could not be finalized cleanly.",
+    );
+  }
+
   settle(
     active: ActiveTurn,
     status: AgentTurnTerminalStatus,

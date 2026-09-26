@@ -159,6 +159,9 @@ export function runtimeProviderCapabilityContract(
       currentlyAvailableCount: 0,
       declaredCapabilityCount: manifest?.capabilities.length ?? 0,
       hostToolBridgeAvailable: false,
+      capabilities: (manifest?.capabilities ?? []).map(({ id, support }) => ({
+        id, state: support === "unavailable" ? "unsupported" : "installation-unverified",
+      })),
     };
   }
   return {
@@ -175,6 +178,14 @@ export function runtimeProviderCapabilityContract(
       attestation,
       "host-tool-bridge",
     ).currentlyAvailable,
+    capabilities: attestation.capabilities.map((capability) => ({
+      id: capability.id,
+      state: capability.currentlyAvailable ? "available"
+        : capability.support === "unavailable" ? "unsupported"
+        : !capability.installedVersionCompatible ? "installation-unverified"
+        : !capability.configurationAvailable ? "configuration-required"
+        : "negotiation-required",
+    })),
   };
 }
 

@@ -4,12 +4,6 @@ import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../../../src/server/process-lifecycle";
-import {
-  buildProviderInvocation,
-  normalizeProviderLine,
-  type ProviderInvocation,
-  type ProviderParserState,
-} from "./legacy-cli-adapters";
 import { providerFailureMessage } from "../../../src/server/provider/adapters";
 import {
   createAgentHarnessEmitter,
@@ -51,7 +45,7 @@ const CORE_CAPABILITIES = {
   },
 } as const;
 
-export const LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS = {
+export const PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS = {
   codex: {
     ...CORE_CAPABILITIES,
     session: { resume: "native", identity: "thread" },
@@ -125,21 +119,22 @@ const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity">, 
   opencode: "opencode-cli",
 };
 
-export interface LegacyCliAgentHarnessForTestsOptions {
+export interface ProcessLifecycleHarnessForTestsOptions {
   supports?: (input: AgentHarnessStartOptions["input"]) => boolean;
-  /** Arguments inserted before the provider CLI arguments (for native test launchers). */
+  /** Arguments passed to the fixture executable, such as the Node script path. */
   prefixArgs?: readonly string[];
-  /** Test seam for the owned CLI process-tree lifecycle. */
+  /** Test seam for the owned child-process lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
 /**
- * Sunset compatibility fixture for lifecycle tests and benchmarks. Production
- * routes use the native harness registry and must never register this adapter.
+ * Neutral child-process fixture for lifecycle tests and benchmarks. The retired
+ * harness IDs are reserved test identities; no provider CLI format is emulated.
+ * Production routes use the native registry and must never register this fixture.
  */
-export function createLegacyCliAgentHarnessForTests(
+export function createProcessLifecycleHarnessForTests(
   providerId: ProviderId,
-  options: LegacyCliAgentHarnessForTestsOptions = {},
+  options: ProcessLifecycleHarnessForTestsOptions = {},
 ): AgentHarness {
   if (providerId === "antigravity") {
     throw new Error("Antigravity is available only through its native headless harness.");
@@ -151,7 +146,7 @@ export function createLegacyCliAgentHarnessForTests(
   return {
     id: harnessId,
     providerId,
-    capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
+    capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS[providerId],
     supports: options.supports ?? ((input) => input.providerId === providerId),
     start: (startOptions) => startCliRun(
       harnessId,
@@ -179,12 +174,11 @@ function startCliRun(
     options.input.turnId,
     options.input.cwd,
   );
-  const parserState: ProviderParserState = {
+  const parserState = {
     sessionId: options.input.sessionId,
-    sawText: false,
-    sawStreamingDelta: false,
+    sawTerminalEvent: false,
     hadErrorEvent: false,
-    failureText: undefined,
+    failureText: undefined as string | undefined,
   };
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -200,14 +194,22 @@ function startCliRun(
   const decoder = new ProviderNdjsonDecoder(
     MAX_NDJSON_LINE_BYTES,
     (line) => {
-      normalizeProviderLine(
-        providerId,
-        line,
-        parserState,
-        emitText,
-        emitter.activity,
-        emitter.session,
-      );
+      const event: unknown = JSON.parse(line);
+      if (!event || typeof event !== "object") throw new Error("Invalid lifecycle fixture event.");
+      if ("session" in event && typeof event.session === "string") {
+        parserState.sessionId = event.session;
+        emitter.session(event.session);
+      } else if ("text" in event && typeof event.text === "string") {
+        emitText(event.text);
+      } else if ("complete" in event && event.complete === true) {
+        parserState.sawTerminalEvent = true;
+      } else if ("error" in event && typeof event.error === "string") {
+        parserState.sawTerminalEvent = true;
+        parserState.hadErrorEvent = true;
+        parserState.failureText = event.error;
+      } else {
+        throw new Error("Unknown lifecycle fixture event.");
+      }
       if (parserState.sawTerminalEvent && !terminationRequested) {
         requestProcessTermination(true);
       }
@@ -219,16 +221,11 @@ function startCliRun(
     },
   );
 
-  let invocation: ProviderInvocation;
-  try {
-    invocation = buildProviderInvocation(options.input, options.executable);
-    invocation.args.unshift(...prefixArgs);
-  } catch {
-    const message = "The provider could not be started.";
-    emitter.status("starting");
-    emitter.status("failed", message);
-    return settledCliRun(harnessId, providerId, options.input, message);
-  }
+  const invocation = {
+    command: options.executable,
+    args: [...prefixArgs],
+    stdin: options.input.prompt,
+  };
 
   emitter.status("starting");
   let child: ChildProcessWithoutNullStreams;

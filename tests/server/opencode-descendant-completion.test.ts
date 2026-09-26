@@ -16,7 +16,8 @@ type CompletionScenario =
   | "replay-status-idle"
   | "replayed-root-does-not-refresh"
   | "settled-before-first-idle"
-  | "terminal-progress";
+  | "terminal-progress"
+  | "reused-child";
 
 function descendantCompletionServer(
   root: string,
@@ -127,6 +128,21 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      if (scenario === "reused-child") {
+        const busy = { id: "first-busy", type: "session.status", properties: { sessionID: childID, status: { type: "busy" } } };
+        setTimeout(() => sendEvent(busy), 30);
+        setTimeout(() => sendEvent(childIdle), 50);
+        setTimeout(() => sendEvent({ ...busy, id: "second-busy" }), 70);
+        setTimeout(() => sendEvent(childIdle), 90);
+        setTimeout(() => sendEvent(rootIdle), 110);
+        setTimeout(() => sendEvent({ ...childIdle, id: "second-child-idle" }), 130);
+        // An exact old busy replay must not resurrect the completed child.
+        setTimeout(() => sendEvent(busy), 150);
+        setTimeout(finalRootActivity, 170);
+        setTimeout(() => sendEvent({ ...rootIdle, id: "fresh-root-idle" }), 190);
+        return;
+      }
+
       if (scenario === "replayed-root-does-not-refresh") {
         setTimeout(() => sendEvent(childIdle), 50);
         for (const delay of [100, 200, 300, 400, 500, 600, 700, 800, 900, 1_000]) {
@@ -153,7 +169,7 @@ const server = http.createServer((req, res) => {
           },
         },
       }), 70);
-      setTimeout(() => sendEvent({ ...childIdle, id: "replayed-child-idle" }), 90);
+      setTimeout(() => sendEvent(childIdle), 90);
       setTimeout(() => sendEvent({ ...rootIdle, id: "root-idle-while-child-live" }), 110);
       setTimeout(() => sendEvent({ type: "session.status", properties: { sessionID: childID, status: { type: "idle" } } }), 130);
       setTimeout(() => sendEvent({ ...rootIdle, id: "root-idle-after-child" }), 150);
@@ -235,6 +251,14 @@ describe("OpenCode descendant completion", () => {
     )).resolves.toMatchObject({
       status: "completed",
       text: "Parent resumed after the child settled",
+    });
+  });
+
+  it("finishes after a reused child completes a second cycle despite old event replays", async () => {
+    const root = portableFixtureRoot("OpenCode reused child completion");
+    roots.push(root);
+    await expect(runCompletionScenario(root, "reused-child")).resolves.toMatchObject({
+      status: "completed", text: "Parent resumed after the child settled", cleanupConfirmed: true,
     });
   });
 

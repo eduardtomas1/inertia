@@ -5,6 +5,15 @@ export interface TimelineFocusDetail {
   turnId: string;
 }
 
+let pending: { detail: TimelineFocusDetail; expires: number } | null = null;
+
+export function pendingTimelineFocus(conversationId: string): TimelineFocusDetail | null {
+  if (pending && pending.expires < Date.now()) pending = null;
+  return pending?.detail.conversationId === conversationId ? pending.detail : null;
+}
+
+export function clearTimelineFocus(): void { pending = null; }
+
 export function isTimelineFocusDetail(
   value: unknown,
 ): value is TimelineFocusDetail {
@@ -19,6 +28,7 @@ export function isTimelineFocusDetail(
 }
 
 export function requestTimelineFocus(detail: TimelineFocusDetail): void {
+  pending = { detail, expires: Date.now() + 10_000 };
   window.dispatchEvent(new CustomEvent<TimelineFocusDetail>(
     TIMELINE_FOCUS_EVENT,
     { detail },

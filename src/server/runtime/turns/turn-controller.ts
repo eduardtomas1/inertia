@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { monotonicTurnClock } from "./turn-clock";
+import { releaseTurnAttachments } from "./turn-attachment-release";
 
 import {
   type AgentApprovalDecision,
@@ -143,7 +145,7 @@ export class TurnController {
     } = {},
   ) {
     this.scheduler = options.scheduler ?? defaultTurnScheduler();
-    this.clock = options.clock ?? (() => new Date());
+    this.clock = monotonicTurnClock(options.clock);
     this.id = options.id ?? randomUUID;
     const turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
     const turnMaxLifetimeMs = Math.max(
@@ -892,7 +894,8 @@ export class TurnController {
 
   cancel(conversationId: string, cause: TurnTerminalCause = "user-cancelled"): boolean {
     const active = this.activeByConversation.get(conversationId);
-    if (!active || active.runState.isTerminal()) return false;
+    if (!active) return false;
+    if (active.runState.isTerminal()) return this.runStates.retryTerminalPersistence(active);
     requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
   }
@@ -1172,43 +1175,8 @@ export class TurnController {
     return this.runStates.settle(active, status, cause, message, failure);
   }
 
-  private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
-    await this.followUps.drain(active);
-    if (
-      active.attachmentsReleased
-      || (
-        active.attachmentIds.length === 0
-        && active.generatedAttachmentPaths.length === 0
-      )
-    ) return;
-    if (active.attachmentRelease) return await active.attachmentRelease;
-    const release = Promise.all([
-      active.attachmentIds.length > 0
-        ? Promise.resolve(this.hooks.releaseTurnAttachments?.({
-            turn: active.turn,
-            attachmentIds: active.attachmentIds,
-          }))
-        : Promise.resolve(),
-      active.generatedAttachmentPaths.length > 0
-        ? Promise.resolve(
-            this.hooks.releaseGeneratedAttachments?.(
-              active.generatedAttachmentPaths,
-            ) ?? Promise.reject(
-              new Error("Generated attachment cleanup is unavailable."),
-            ),
-          )
-        : Promise.resolve(),
-    ]).then(() => {
-      active.attachmentsReleased = true;
-    });
-    active.attachmentRelease = release;
-    try {
-      await release;
-    } finally {
-      if (active.attachmentRelease === release) {
-        active.attachmentRelease = null;
-      }
-    }
+  private releaseTurnAttachments(active: ActiveTurn): Promise<void> {
+    return releaseTurnAttachments(active, this.hooks, () => this.followUps.drain(active));
   }
 
   private async releaseTurnAttachmentsWithRetry(active: ActiveTurn): Promise<void> {

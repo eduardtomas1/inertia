@@ -28,3 +28,15 @@
 .composer-project-picker-trigger:hover { background: var(--surface-hover); }
 .composer-project-picker-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .composer-project-picker-trigger:disabled { opacity: var(--disabled-opacity); }
+.conversation-history-controls {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+
+.conversation-history-controls p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}

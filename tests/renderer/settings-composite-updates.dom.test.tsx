@@ -537,6 +537,44 @@ describe("Settings composite updates", () => {
     expect(contract).not.toHaveTextContent(manifestDigest);
   });
 
+  it("expands model-aware capability reasons without exposing private configuration", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true, value: { getPlatform: () => "linux" },
+    });
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[{
+        ...codexWithModels(),
+        capabilityContract: {
+          schemaVersion: 1, harnessId: "codex-app-server", manifestDigest: "a".repeat(64),
+          installationVerified: true, installedVersion: "1.0.0",
+          currentlyAvailableCount: 1, declaredCapabilityCount: 5, hostToolBridgeAvailable: false,
+          capabilities: [
+            { id: "images", state: "available" },
+            { id: "performance-modes", state: "negotiation-required" },
+            { id: "subagent-stop", state: "unsupported" },
+            { id: "host-tool-bridge", state: "configuration-required" },
+            { id: "rate-limits", state: "installation-unverified" },
+          ],
+        },
+      }]}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const summary = await screen.findByText("Feature availability");
+    const details = summary.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute("open");
+    expect(screen.getByText("Images").closest("li")).toHaveTextContent("Ready");
+    expect(screen.getByText("Response speed").closest("li"))
+      .toHaveTextContent("Checked when a chat starts");
+    expect(screen.getByText("Stop a subagent").closest("li"))
+      .toHaveTextContent("Not supported by this connection");
+    expect(screen.getByText("Manage Inertia chats").closest("li")).toHaveTextContent("Needs setup");
+    expect(screen.getByText("Account limits").closest("li")).toHaveTextContent("Verify installation");
+    expect(details).toHaveTextContent("Availability can also depend on the model");
+  });
+
   it("moves provider detail tabs with the composite keyboard pattern", () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

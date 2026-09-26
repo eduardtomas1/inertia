@@ -25,8 +25,8 @@ import {
   AgentHarnessRegistry,
   ProviderManager,
 } from "../../src/server/providers";
-import { createLegacyCliAgentHarnessForTests } from
-  "../helpers/providers/legacy-cli-harness";
+import { createProcessLifecycleHarnessForTests } from
+  "../helpers/providers/process-lifecycle-harness";
 import {
   providerRunTerminal,
   type ProviderDetection,
@@ -743,7 +743,7 @@ describe("provider manager installation ownership", () => {
       access: "supervised",
     });
     const terminal = deferred<ProviderRunResult>();
-    const baseHarness = createLegacyCliAgentHarnessForTests("codex");
+    const baseHarness = createProcessLifecycleHarnessForTests("codex");
     const manager = ProviderManager.createForTests(
       {
         commands: { codex: "/tools/codex" },
@@ -815,7 +815,7 @@ describe("provider manager installation ownership", () => {
       interactionMode: "build",
       access: "supervised",
     });
-    const baseHarness = createLegacyCliAgentHarnessForTests("codex");
+    const baseHarness = createProcessLifecycleHarnessForTests("codex");
     const manager = ProviderManager.createForTests(
       {
         commands: { codex: "/tools/codex" },

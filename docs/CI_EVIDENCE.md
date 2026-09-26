@@ -50,11 +50,16 @@ ARM64 runs the same complete unit suite without duplicate instrumentation;
 macOS keeps the two-worker bound; four Windows x64 duration-balanced shards
 remain single-worker; Windows ARM64 retains its portable/native obligations.
 Windows Electron remains one worker, other isolated desktop projects two. The
-desktop Electron projects run in a separate `<label> Electron` job per selected
-target (see package evidence below); the package job itself has no Playwright
+desktop Electron projects run in separate jobs per selected target; macOS x64
+has independent display-sensitive, isolated and runtime-recovery jobs (see
+package evidence below). The package job itself has no Playwright
 step.
 The isolated browser-evidence CPU budget remains in CI quality and on each
 release target, separate from instrumented coverage.
+Ready PRs touching rendering, turns, runtime, storage or performance also run
+bounded serialization, stream-coalescing, render-isolation and virtualization
+checks in the quality gate. These use operation counts and fake clocks; full
+platform/desktop timing benchmarks retain their main/nightly policy.
 
 The stable `merge-ready` job uses `always()` and explicitly requires classifier,
 quality, migration lineage and every planned result. It validates the canonical
@@ -113,7 +118,7 @@ and [job evidence API](https://docs.github.com/en/rest/actions/workflow-jobs).
 
 ## Package evidence and preserved trust
 
-Each selected native target runs two jobs from the same source checkout, each
+Each selected native target runs package and Electron jobs from the same source checkout, each
 with its own `npm run build:packaged` for its exact source/target/configuration:
 
 - `<label>` (the `test` matrix): units or portable contracts, the platform
@@ -123,9 +128,14 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
 - `<label> Electron` (the `electron` matrix): the display-sensitive, isolated
   and runtime-recovery Playwright projects, the provider-settings screenshots
   on Linux x64, the desktop benchmark and the compact timing report.
+  macOS x64 expands this into three required checks named
+  `macOS x64 Electron (display-sensitive)`, `macOS x64 Electron (isolated)` and
+  `macOS x64 Electron (runtime-recovery)`. Each builds the exact candidate on a
+  separate runner; only the recovery job runs its desktop benchmark. Display
+  and recovery retain their serial project settings internally.
 
-Both are required checks in the plan (`requiredChecks` lists the Electron
-label per selected platform) and both are enumerated by `merge-ready` from the
+All are required checks in the plan (`requiredChecks` lists every Electron
+phase for macOS x64) and all are enumerated by `merge-ready` from the
 REST job records. Neither transfers an artifact to the other: the Electron job
 runs against its own built bundle and the downloaded Electron binary, exactly
 as the Linux interaction sentinel already did, so no cross-job artifact
@@ -163,12 +173,25 @@ nine minutes depending on the runner), for example roughly 42 minutes instead
 of 70 on macOS x64. This is a projection from those step timings, not a hosted
 measurement; the first full runs on this workflow supply the before/after
 comparison, and the runner budget rises by one install and build per target.
-Peak concurrency for a full run is four macOS jobs, within the five-slot
-hosted limit noted in the speed study.
+The later macOS x64 phase split responds to main run
+[36244548680](https://github.com/eduardtomas1/inertia/actions/runs/36244548680):
+its Electron job took 48m04s, including display 26m04s, isolated 13m59s and
+recovery 2m03s. Splitting those phases permits independent execution at the
+cost of two additional installs/builds. The matrices may now request six macOS
+runners across both architectures; hosted concurrency limits can queue jobs.
+The gain must be measured from completed hosted runs, not inferred from the
+sum of phase times.
 
 Opt-in authenticated Kimi smoke runs only on trusted scheduled Linux x64,
 never under PR/merge-group source. Missing secret is explicitly not exercised.
-The separate latest-provider drift workflow remains secret-free and unchanged.
+The separate latest-provider drift workflow remains secret-free and outside
+the required merge checks. It now fails its final check when any acquisition,
+install or probe fails, after collecting issue-report evidence. Changes to
+provider adapters, Codex/Claude protocol handling, the probe or dependency
+graph on main rerun it, so a merged drift fix does not wait for the weekly
+schedule. The Linux x64 probe verifies Antigravity's official native archive
+checksum and its version/help headless flags inside the same isolated home;
+it does not authenticate or claim a successful model turn.
 
 ## Verification retirement map
 

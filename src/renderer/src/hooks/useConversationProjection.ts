@@ -49,6 +49,7 @@ import {
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
 import { createStreamingAgentStore } from "./useStreamingAgentState";
+import { useConversationHistory } from "./useConversationHistory";
 import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
 // A chat that is listed but unreadable is retried at these intervals before
@@ -217,6 +218,7 @@ export function useConversationProjection({
       id === conversationId) ?? null,
     [conversationId, snapshot],
   );
+  const history = useConversationHistory({ conversationId, online: status === "online", detailState, setDetailState, request });
   const conversation = useMemo(() => projectConversationTerminal(
     persistedConversation,
     terminalProjections,
@@ -990,6 +992,7 @@ export function useConversationProjection({
 
   return {
     conversation,
+    history,
     latestTurnSummary: conversation?.latestTurn ?? null,
     detail,
     detailState,

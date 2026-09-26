@@ -201,6 +201,7 @@ function startOpenCodeRun(
   const serverOutput = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
   const approvals = new Map<string, OpenCodePendingApproval>();
   const inputs = new Map<string, OpenCodePendingInput>();
+  const pendingHostApprovals = new Set<string>();
   const interactionState = createOpenCodeInteractionState();
   const eventAbort = new AbortController();
   const emittedParts = new Map<string, string>();
@@ -226,8 +227,13 @@ function startOpenCodeRun(
     conversationId,
     turnId: options.input.turnId,
     cwd: options.input.cwd,
-    onApproval: (request) => emitter.rich({ type: "approval", request }),
+    onApproval: (request) => {
+      pendingHostApprovals.add(request.requestId);
+      emitter.rich({ type: "approval", request });
+    },
     onApprovalResolved: (requestId, decision) => {
+      pendingHostApprovals.delete(requestId);
+      armEventInactivityDeadline();
       emitter.rich({ type: "approval-resolved", requestId, decision });
     },
   });
@@ -280,6 +286,15 @@ function startOpenCodeRun(
     if (cancelRequested || terminalError) return;
     if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
     eventInactivityTimer = setTimeout(() => {
+      // Waiting for the user is not evidence of a stalled provider. Only
+      // admitted, unanswered interactions suspend inactivity; response RPCs,
+      // unrelated sessions, cancellation and the absolute run limit do not.
+      if (pendingHostApprovals.size > 0
+        || [...approvals.values()].some((pending) => !pending.settled)
+        || [...inputs.values()].some((pending) => !pending.settled)) {
+        armEventInactivityDeadline();
+        return;
+      }
       failDeadline(
         "OpenCode's event stream became inactive before the session completed.",
         "event/inactivity-deadline",
@@ -305,6 +320,7 @@ function startOpenCodeRun(
     const pending = approvals.get(requestId);
     if (!pending || pending.settled || !client) return false;
     pending.settled = true;
+    armEventInactivityDeadline();
     if (decision === "cancel") {
       approvals.delete(requestId);
       emitter.rich({ type: "approval-resolved", requestId, decision });
@@ -333,6 +349,7 @@ function startOpenCodeRun(
     const pending = inputs.get(requestId);
     if (!pending || pending.settled || !client) return false;
     pending.settled = true;
+    armEventInactivityDeadline();
     const ordered = pending.questions.map((question, index) => {
       const labelsById = new Map(question.options.map((option, optionIndex) => [
         openCodeOptionId(optionIndex),

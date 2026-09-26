@@ -135,6 +135,12 @@ export interface ProviderCapabilityContractView {
   currentlyAvailableCount: number;
   declaredCapabilityCount: number;
   hostToolBridgeAvailable: boolean;
+  /** Safe native-route availability; session-negotiated features are checked per turn. */
+  capabilities?: Array<{
+    id: string;
+    state: "available" | "installation-unverified" | "configuration-required"
+      | "negotiation-required" | "unsupported";
+  }>;
 }
 
 export interface ProviderInfo {

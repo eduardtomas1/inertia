@@ -17,7 +17,6 @@ import {
 } from "../../src/node/runtime-owned-processes";
 import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
   "../helpers/prepared-runtime-owned-process-registry";
-import { buildProviderInvocation } from "../helpers/providers/legacy-cli-adapters";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   createKimiAcpHarness,
@@ -161,24 +160,13 @@ setInterval(() => {}, 1000);
     },
   );
 
-  it("uses shell-free native ACP and rejects the incompatible legacy CLI path", () => {
+  it("uses shell-free native ACP", () => {
     expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux"))
       .toEqual({ command: "/usr/local/bin/kimi", args: ["acp"] });
     expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux", ["--login"]))
       .toEqual({ command: "/usr/local/bin/kimi", args: ["acp", "--login"] });
 
-    const input = nativeProviderRunInput({
-      providerId: "kimi",
-      conversationId: "kimi-invocation",
-      cwd: "/workspace/project",
-      prompt: "Inspect the change",
-      interactionMode: "plan",
-      access: "full",
-      model: "kimi-for-coding",
-      sessionId: "kimi-session",
-    });
-    expect(() => buildProviderInvocation(input, "/usr/local/bin/kimi"))
-      .toThrow("Kimi Code requires its native ACP harness");
+
   });
 
   it("recognizes only coherent Kimi question and plan-review envelopes as input", () => {

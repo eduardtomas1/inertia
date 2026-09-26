@@ -48,6 +48,8 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
+import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from "../../shared/conversation-history";
+import { historyPredicate, historyStoredBytes, selectConversationHistory, HISTORY_TOO_LARGE_MESSAGE, type ConversationHistoryScope } from "./conversation-history";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import {
   MESSAGE_PROJECTION_COLUMNS,
@@ -55,7 +57,7 @@ import {
 } from "./stream-text-storage";
 
 type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
-  contextPackets(conversationId: string): ConversationContextPacketSummary[];
+  contextPackets(conversationId: string, messageIds?: string[]): ConversationContextPacketSummary[];
 };
 
 export class SnapshotRepository {
@@ -170,67 +172,61 @@ export class SnapshotRepository {
     );
   }
 
-  conversationDetail(conversationId: string): ConversationDetail | null {
+  conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {
+    if (!this.context.database.prepare("SELECT 1 FROM conversations WHERE id = ?").get(conversationId)) return null;
+    const scope = selectConversationHistory(this.context.database, conversationId, request);
+    while (true) {
+      const bytes = historyStoredBytes(this.context.database, conversationId, scope);
+      if (bytes > MAX_CONVERSATION_HISTORY_BYTES / 4 && scope.units.length > 1) {
+        scope.units = scope.units.slice(0, Math.max(1, Math.floor(scope.units.length / 2)));
+        scope.older = scope.units.at(-1)!;
+        continue;
+      }
+      if (bytes > MAX_CONVERSATION_HISTORY_BYTES) throw new Error(HISTORY_TOO_LARGE_MESSAGE);
+      const detail = this.conversationDetail(conversationId, scope);
+      if (!detail) return null;
+      detail.history = { older: scope.older };
+      if (Buffer.byteLength(JSON.stringify(detail), "utf8") <= MAX_CONVERSATION_HISTORY_BYTES) return detail;
+      if (scope.units.length <= 1) throw new Error(HISTORY_TOO_LARGE_MESSAGE);
+      scope.units = scope.units.slice(0, Math.max(1, Math.floor(scope.units.length / 2)));
+      scope.older = scope.units.at(-1)!;
+    }
+  }
+
+  conversationDetail(conversationId: string, scope?: ConversationHistoryScope): ConversationDetail | null {
     const conversationRow = this.context.database.prepare(
       "SELECT * FROM conversations WHERE id = ?",
     ).get(conversationId) as ConversationRow | undefined;
     if (!conversationRow) return null;
 
+    const query = <T>(table: string, columns: string, order: string): T[] => {
+      const where = scope ? historyPredicate(table, scope) : { sql: "1", parameters: [] };
+      return this.context.database.prepare(`SELECT ${columns} FROM ${table}
+        WHERE ${table}.conversation_id = ? AND (${where.sql}) ORDER BY ${order}`)
+        .all(conversationId, ...where.parameters) as T[];
+    };
+    const messages = query<MessageRow>("messages", MESSAGE_PROJECTION_COLUMNS, "messages.created_at ASC, messages.id ASC").map(messageFromRow);
+
     return {
       conversation: conversationFromRow(conversationRow),
-      agentTurns: (this.context.database.prepare(`
-        SELECT * FROM agent_turns
-        WHERE conversation_id = ?
-        ORDER BY requested_at ASC, id ASC
-      `).all(conversationId) as AgentTurnRow[]).map(agentTurnFromRow),
-      turnGitArtifacts: (this.context.database.prepare(`
-        SELECT * FROM turn_git_artifacts
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as TurnGitArtifactRow[]).map(turnGitArtifactFromRow),
-      messages: (this.context.database.prepare(`
-        SELECT ${MESSAGE_PROJECTION_COLUMNS}
-        FROM messages
-        WHERE messages.conversation_id = ?
-        ORDER BY messages.created_at ASC, messages.id ASC
-      `).all(conversationId) as MessageRow[]).map(messageFromRow),
-      activities: (this.context.database.prepare(`
-        SELECT * FROM activities
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as ActivityRow[]).map(activityFromRow),
-      subagents: (this.context.database.prepare(`
-        SELECT * FROM subagent_traces
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, sequence ASC, id ASC
-      `).all(conversationId) as SubagentTraceRow[]).map(subagentTraceFromRow),
-      reasonings: (this.context.database.prepare(`
-        SELECT ${REASONING_PROJECTION_COLUMNS}
-        FROM agent_reasonings
-        WHERE agent_reasonings.conversation_id = ?
-        ORDER BY agent_reasonings.created_at ASC, agent_reasonings.id ASC
-      `).all(conversationId) as AgentReasoningRow[]).map(reasoningFromRow),
+      agentTurns: query<AgentTurnRow>("agent_turns", "*", "requested_at ASC, id ASC").map(agentTurnFromRow),
+      turnGitArtifacts: query<TurnGitArtifactRow>("turn_git_artifacts", "*", "created_at ASC, id ASC").map(turnGitArtifactFromRow),
+      messages,
+      activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map(activityFromRow),
+      subagents: query<SubagentTraceRow>("subagent_traces", "*", "created_at ASC, sequence ASC, id ASC").map(subagentTraceFromRow),
+      reasonings: query<AgentReasoningRow>("agent_reasonings", REASONING_PROJECTION_COLUMNS, "agent_reasonings.created_at ASC, agent_reasonings.id ASC").map(reasoningFromRow),
       usage: (this.context.database.prepare(`
         SELECT * FROM thread_usage
         WHERE conversation_id = ?
         ORDER BY updated_at ASC
       `).all(conversationId) as ThreadUsageRow[]).map(usageFromRow),
-      plans: (this.context.database.prepare(`
-        SELECT conversation_id, run_id, turn_id, explanation, steps_json
-        FROM agent_plans
-        WHERE conversation_id = ?
-        ORDER BY updated_at ASC, conversation_id ASC, run_id ASC
-      `).all(conversationId) as AgentPlanRow[]).map(planFromRow),
+      plans: query<AgentPlanRow>("agent_plans", "conversation_id, run_id, turn_id, explanation, steps_json", "updated_at ASC, conversation_id ASC, run_id ASC").map(planFromRow),
       goals: (this.context.database.prepare(`
         SELECT * FROM agent_goals
         WHERE conversation_id = ?
         ORDER BY updated_at ASC, source ASC
       `).all(conversationId) as AgentGoalRow[]).map(agentGoalFromRow),
-      checkpoints: (this.context.database.prepare(`
-        SELECT * FROM checkpoints
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC, id ASC
-      `).all(conversationId) as CheckpointRow[]).map(checkpointFromRow),
+      checkpoints: query<CheckpointRow>("checkpoints", "*", "created_at ASC, id ASC").map(checkpointFromRow),
       reviewSummaries: (this.context.database.prepare(`
         SELECT * FROM diff_review_summaries
         WHERE conversation_id = ?
@@ -249,7 +245,7 @@ export class SnapshotRepository {
         WHERE conversation_id = ?
         ORDER BY created_at ASC
       `).all(conversationId) as DiffReviewNoteRow[]).map(reviewNoteFromRow),
-      contextPackets: this.context.contextPackets(conversationId),
+      contextPackets: this.context.contextPackets(conversationId, scope ? messages.map(({ id }) => id) : undefined),
     };
   }
 

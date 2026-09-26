@@ -13,6 +13,7 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import type { ProviderRunCallbacks } from "../../src/server/provider/contracts";
 
 function descendantInteractionServer(
   root: string,
@@ -94,6 +95,47 @@ describe("OpenCode descendant interactions", () => {
   afterEach(async () => await Promise.all(
     roots.splice(0).map(removePortableFixture),
   ));
+
+  it("keeps admitted human interactions open beyond the provider inactivity window", async () => {
+    const root = portableFixtureRoot("OpenCode human wait");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", descendantInteractionServer(root, join(root, "capture.json")));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000, eventInactivityDeadlineMs: 300,
+      })]),
+    );
+    let onApproval!: NonNullable<ProviderRunCallbacks["onApproval"]>;
+    let onInput!: NonNullable<ProviderRunCallbacks["onInput"]>;
+    const approval = new Promise<Parameters<typeof onApproval>[0]>((resolve) => { onApproval = resolve; });
+    const input = new Promise<Parameters<typeof onInput>[0]>((resolve) => { onInput = resolve; });
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode", conversationId: "human-wait", cwd: root,
+      prompt: "Delegate with supervised interactions", access: "supervised", interactionMode: "build",
+    }), { onApproval, onInput });
+    try {
+      const pendingApproval = await approval;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(manager.activeConversationIds()).toContain("human-wait");
+      expect(manager.respondToApproval("human-wait", pendingApproval.request.requestId, "approve", {
+        runId: pendingApproval.runId, turnId: pendingApproval.turnId,
+      })).toBe(true);
+      const pendingInput = await input;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      expect(manager.activeConversationIds()).toContain("human-wait");
+      expect(manager.respondToInput("human-wait", pendingInput.request.requestId, {
+        [pendingInput.request.questions[0]!.id]: ["Yes"],
+      }, { runId: pendingInput.runId, turnId: pendingInput.turnId })).toBe(true);
+      await expect(result).resolves.toMatchObject({
+        status: "completed", text: "Parent resumed after child interaction", cleanupConfirmed: true,
+      });
+    } finally {
+      manager.cancel("human-wait");
+      await result;
+    }
+  });
 
   it("routes verified child interactions without projecting private output", async () => {
     const root = portableFixtureRoot("OpenCode descendant interaction");

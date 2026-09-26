@@ -657,6 +657,11 @@
       "version": 80,
       "name": "PersistAttachmentStorageSettings",
       "digest": "109a0fc7385486124005e843a3ee9075a8a2bf7f6e1e8cd494dbe19680318a9f"
+    },
+    {
+      "version": 81,
+      "name": "PersistRuntimeQueuedMessages",
+      "digest": "dc92625d4fe5c06fa6c405b75b6219bf2e8a9e273188f76d5ae15829a41414c9"
     }
   ]
 }

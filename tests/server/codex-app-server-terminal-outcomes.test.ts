@@ -157,17 +157,21 @@ describe("Codex App Server terminal outcomes", () => {
   it.each([
     { status: "future-secret-status" }, { status: null }, { authUrl: { code: "PRIVATE_GATEWAY_CODE" } },
     { error: ["PRIVATE_GATEWAY_DIAGNOSTIC"] }, { providerId: "" }, { authUrl: undefined },
-  ])("fails malformed gateway OAuth status closed without retaining sensitive fields: %j", async (override) => {
+    { authUrl: "https://gateway.example.test/authorize?code=PRIVATE_GATEWAY_CODE", error: undefined },
+  ])("drops an unknown or malformed gateway OAuth status without failing the turn or retaining it: %j", async (override) => {
     const app = fixture();
     await vi.advanceTimersByTimeAsync(0);
+    const before = JSON.stringify({ writes: app.writes, calls: Object.values(app.observed).map((spy) => spy.mock.calls) });
     app.notification("account/gatewayOAuth/changed", {
       providerId: "fixture-gateway", status: "started", authUrl: null, error: "PRIVATE_GATEWAY_DIAGNOSTIC", ...override,
     });
+    expect(JSON.stringify({ writes: app.writes, calls: Object.values(app.observed).map((spy) => spy.mock.calls) })).toBe(before);
+    expect(app.terminateProcessTree).not.toHaveBeenCalled();
     app.terminal("completed"); app.finishCleanup(true);
     const result = await app.run.result;
-    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, failure: { reason: "malformed-protocol" } });
+    expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true });
+    expect(result.failure).toBeUndefined();
     expect(JSON.stringify({ result, calls: Object.values(app.observed).map((spy) => spy.mock.calls) })).not.toMatch(/PRIVATE_GATEWAY|future-secret-status/u);
-    expect(app.terminateProcessTree).toHaveBeenCalledOnce();
   });
 
   it.each([

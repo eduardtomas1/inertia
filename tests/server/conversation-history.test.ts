@@ -39,6 +39,27 @@ function result(detail: ConversationDetail): ServerEvent {
 }
 
 describe("bounded conversation history", () => {
+  it("keeps the newest 60 unique gallery attachments across unloaded pages without exposing bodies or paths", () => {
+    const { store, conversation } = fixture();
+    const attachment = (index: number) => ({ id: `image-${index}`, name: `image-${index}.png`,
+      path: `PRIVATE_PATH_${index}`, mimeType: "image/png" as const, size: 42 });
+    for (let index = 0; index < 65; index++) store.createMessage(conversation.id, `PRIVATE_BODY_${index}`,
+      "user", [attachment(index)], null, new Date(Date.UTC(2030, 0, 1, 0, index)).toISOString());
+    store.createMessage(conversation.id, "Repeated image", "user", [attachment(64)], null, "2030-01-02T00:00:00.000Z");
+    const other = store.createConversation(conversation.projectId, "Other gallery");
+    store.createMessage(other.id, "Foreign attachment", "user", [attachment(99)]);
+    const page = store.conversationHistory(conversation.id)!;
+    expect(page.messages).toHaveLength(40);
+    expect(page.attachmentGallery?.map(({ id }) => id)).toEqual(Array.from({ length: 60 }, (_, index) => `image-${64 - index}`));
+    expect(JSON.stringify(page.attachmentGallery)).not.toMatch(/PRIVATE_|path|image-99/u);
+    expect(parseServerEvent(result(page))).toEqual(result(page));
+    const entry = page.attachmentGallery![0]!;
+    for (const invalid of [[{ ...entry, path: "PRIVATE_PATH" }], [entry, entry],
+      [{ ...entry, size: -1 }], Array.from({ length: 61 }, (_, index) => ({ ...entry, id: `extra-${index}` }))]) {
+      expect(() => parseServerEvent(result({ ...page, attachmentGallery: invalid }))).toThrow("Malformed server event");
+    }
+  });
+
   it("pages normal turn-linked history beyond the transport ceiling without losing identities or closing the socket", () => {
     const { store, conversation } = fixture();
     const text = "x".repeat(450_000);

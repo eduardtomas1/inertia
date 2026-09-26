@@ -2,6 +2,7 @@ import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
+import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -1001,6 +1002,7 @@ function conversationDetail(
       || conversationId === expectedConversationId)
     && (value.history === undefined || (record(value.history)
       && (value.history.older === null || conversationHistoryCursorSchema.safeParse(value.history.older).success)))
+    && (value.attachmentGallery === undefined || isConversationAttachmentGallery(value.attachmentGallery))
     && arrayOf(value.agentTurns, agentTurn)
     && arrayOf(value.turnGitArtifacts, turnGitArtifact)
     && arrayOf(value.messages, chatMessage)

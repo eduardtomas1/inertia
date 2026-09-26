@@ -59,6 +59,7 @@ const MISSING_DETAIL_MESSAGE =
   "This chat could not be loaded. It may have been deleted; refresh to try again.";
 
 const EMPTY_REASONINGS: AgentReasoning[] = [];
+const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_TURNS: AgentTurn[] = [];
 const EMPTY_CHECKPOINTS: CheckpointSummary[] = [];
 const EMPTY_GIT_ARTIFACTS: TurnGitArtifact[] = [];
@@ -999,6 +1000,7 @@ export function useConversationProjection({
     refreshDetail,
     turns,
     messages,
+    liveMessages: activeConversationId ? liveMessages[activeConversationId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES,
     activities,
     subagents,
     reasonings: detail?.reasonings ?? EMPTY_REASONINGS,

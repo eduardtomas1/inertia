@@ -51,6 +51,7 @@ import type { RuntimeStoreSnapshot } from "./types";
 import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from "../../shared/conversation-history";
 import { historyPredicate, historyStoredBytes, selectConversationHistory, HISTORY_TOO_LARGE_MESSAGE, type ConversationHistoryScope } from "./conversation-history";
 import { PromptPresetRepository } from "./prompt-preset-repository";
+import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
 import {
   MESSAGE_PROJECTION_COLUMNS,
   REASONING_PROJECTION_COLUMNS,
@@ -175,6 +176,7 @@ export class SnapshotRepository {
   conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {
     if (!this.context.database.prepare("SELECT 1 FROM conversations WHERE id = ?").get(conversationId)) return null;
     const scope = selectConversationHistory(this.context.database, conversationId, request);
+    const attachmentGallery = conversationAttachmentGallery(this.context.database, conversationId);
     while (true) {
       const bytes = historyStoredBytes(this.context.database, conversationId, scope);
       if (bytes > MAX_CONVERSATION_HISTORY_BYTES / 4 && scope.units.length > 1) {
@@ -186,6 +188,7 @@ export class SnapshotRepository {
       const detail = this.conversationDetail(conversationId, scope);
       if (!detail) return null;
       detail.history = { older: scope.older };
+      detail.attachmentGallery = attachmentGallery;
       if (Buffer.byteLength(JSON.stringify(detail), "utf8") <= MAX_CONVERSATION_HISTORY_BYTES) return detail;
       if (scope.units.length <= 1) throw new Error(HISTORY_TOO_LARGE_MESSAGE);
       scope.units = scope.units.slice(0, Math.max(1, Math.floor(scope.units.length / 2)));

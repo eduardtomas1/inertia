@@ -405,7 +405,7 @@ describe("useConversationProjection pending interactions", () => {
       turnId: `${primaryId}-turn`,
       role: "user",
       content: "Check the Windows edge too.",
-      attachments: [],
+      attachments: [{ id: "follow-up-image", name: "windows.png", path: "/private/windows.png", mimeType: "image/png", size: 128 }],
       createdAt: "2026-07-28T12:01:00.000Z",
     };
     source.emit({
@@ -415,6 +415,7 @@ describe("useConversationProjection pending interactions", () => {
 
     await waitFor(() => {
       expect(hook.result.current.messages).toEqual([followUp]);
+      expect(hook.result.current.liveMessages).toEqual([followUp]);
       expect(hook.result.current.streaming.getSnapshot()[0])
         .toBe("I am checking the current implementation.");
     });

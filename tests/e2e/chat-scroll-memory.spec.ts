@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { loadSeededConversationTurns } from "./support/conversation-history";
 
 for (const turnCount of [4, 80]) {
 test(`returns to the same historical row after navigating through an empty chat (${turnCount} turns)`, async () => {
@@ -37,6 +38,7 @@ test(`returns to the same historical row after navigating through an empty chat 
     await app.resizeWindow(1440, 920);
     const transcript = page.getByLabel("Thread transcript");
     await expect(page.getByRole("heading", { name: "Scroll history A", level: 1 })).toBeVisible();
+    if (turnCount > 4) await loadSeededConversationTurns(page, turnCount);
     await expect.poll(() => transcript.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(120);
     if (turnCount > 4) {
       await expect(transcript.getByRole("feed", { name: `${turnCount} conversation turns` })).toBeVisible();

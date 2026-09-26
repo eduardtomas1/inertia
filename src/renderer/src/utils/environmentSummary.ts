@@ -12,6 +12,7 @@ import type {
   WorkspaceRun,
 } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
+import { CONVERSATION_ATTACHMENT_GALLERY_LIMIT } from "@shared/conversation-attachment-gallery";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import {
   headerGitActions,
@@ -141,6 +142,8 @@ interface EnvironmentSummaryInput {
   runs: readonly WorkspaceRun[];
   subagents: readonly SubagentTrace[];
   messages: readonly ChatMessage[];
+  liveMessages?: readonly ChatMessage[];
+  attachmentGallery?: EnvironmentSummarySnapshot["attachments"];
   projectPath?: string | null;
   worktreePath?: string | null;
   gitLoading?: boolean;
@@ -323,7 +326,7 @@ function repositorySummaries(
 }
 
 /** Upper bound on the attachment surface gallery, newest first. */
-export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = 60;
+export const ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT = CONVERSATION_ATTACHMENT_GALLERY_LIMIT;
 
 // Collecting the whole gallery costs a scan of the transcript, and the scene
 // model rebuilds for reasons unrelated to messages. The result is memoized per
@@ -361,6 +364,30 @@ function recentAttachments(
   }
   attachmentGalleries.set(messages, attachments);
   return attachments;
+}
+
+const liveAttachmentGalleries = new WeakMap<EnvironmentSummarySnapshot["attachments"],
+  WeakMap<readonly ChatMessage[], EnvironmentSummarySnapshot["attachments"]>>();
+
+function galleryWithLiveAttachments(gallery: EnvironmentSummarySnapshot["attachments"],
+  liveMessages?: readonly ChatMessage[]): EnvironmentSummarySnapshot["attachments"] {
+  if (!liveMessages?.length) return gallery;
+  let cached = liveAttachmentGalleries.get(gallery);
+  const previous = cached?.get(liveMessages);
+  if (previous) return previous;
+  const live = recentAttachments(liveMessages);
+  if (!live.length) return gallery;
+  // Only live persisted events can precede the authoritative gallery. Historical
+  // pages loaded by search must not displace the newest retained attachments.
+  const seen = new Set<string>();
+  const merged = [...live, ...gallery].filter(({ id }) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  }).slice(0, CONVERSATION_ATTACHMENT_GALLERY_LIMIT);
+  if (!cached) { cached = new WeakMap(); liveAttachmentGalleries.set(gallery, cached); }
+  cached.set(liveMessages, merged);
+  return merged;
 }
 
 export function workspaceRunPreviewUrl(
@@ -433,7 +460,7 @@ export type WorkspaceSurfaceSummary = Pick<EnvironmentSummarySnapshot,
 
 /** Only the projections used by current surfaces; legacy Environment rows stay off the chat route. */
 export function buildWorkspaceSurfaceSummary({
-  projectId, conversationId, connectionStatus, workspaceGitStatus, runs, messages,
+  projectId, conversationId, connectionStatus, workspaceGitStatus, runs, messages, liveMessages, attachmentGallery,
   gitError = null, projects = [], conversations = [],
   visibleProjectIds: additionalVisibleProjectIds = [], usage = null,
   latestTurnId = null, usageProvider = null, usageIdentity = null,
@@ -539,7 +566,7 @@ export function buildWorkspaceSurfaceSummary({
     checks,
     localServers,
     usage: usageSummary(usage, latestTurnId, usageProvider, usageIdentity, usageQuotaSource),
-    attachments: recentAttachments(messages),
+    attachments: attachmentGallery ? galleryWithLiveAttachments(attachmentGallery, liveMessages) : recentAttachments(messages),
   };
 }
 

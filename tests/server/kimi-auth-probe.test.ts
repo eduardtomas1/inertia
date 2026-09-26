@@ -34,7 +34,9 @@ function fixture(mode = "terminal", withDescendant = false, initializationDelayM
 const fs = require("node:fs");
 const state = { pid: process.pid, cwd: process.cwd(), args: process.argv.slice(2), marker: process.env.PROBE_MARKER, messages: [] };
 const capturePath = ${JSON.stringify(capturePath)};
-const save = () => { fs.writeFileSync(capturePath + ".next", JSON.stringify(state)); fs.renameSync(capturePath + ".next", capturePath); };
+// The parent retries incomplete JSON while polling. Publishing directly avoids
+// a Windows rename racing the parent's open handle to the staging file.
+const save = () => fs.writeFileSync(capturePath, JSON.stringify(state));
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 const mode = ${JSON.stringify(mode)};
 if (${withDescendant}) state.descendantPid = require("node:child_process").spawn(process.execPath,

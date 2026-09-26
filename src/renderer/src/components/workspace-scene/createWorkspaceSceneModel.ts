@@ -469,6 +469,9 @@ export function createWorkspaceSceneModel({
     runs: connection.snapshot?.runs ?? [],
     subagents: projection.subagents,
     messages: projection.messages,
+    liveMessages: projection.liveMessages,
+    attachmentGallery: detailState?.state === "ready" && detailState.conversationId === conversation?.id
+      ? detailState.detail.attachmentGallery : undefined,
     projectPath: project?.normalizedPath ?? null,
     worktreePath: conversation?.worktreePath ?? null,
     gitLoading: workspaceTools.gitLoading,

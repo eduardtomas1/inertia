@@ -10,6 +10,7 @@ import {
   type AppFixture,
 } from "./support/app-fixture";
 import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
+import { loadSeededConversationTurns } from "./support/conversation-history";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -248,6 +249,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect(workspacePanel).toBeHidden();
 
     const transcript = page.getByLabel("Thread transcript");
+    await loadSeededConversationTurns(page, 120);
     const scrollToMiddle = async (): Promise<void> => {
       await transcript.hover();
       const delta = await transcript.evaluate((element) =>

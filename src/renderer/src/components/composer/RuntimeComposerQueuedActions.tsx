@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
@@ -21,8 +21,17 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
   latestTurnId: string | null; latestTurnStatus: string | null; queueHost: HTMLElement | null;
 }): React.JSX.Element | null {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const queueSignature = useRef("[]");
+  const updateQueue = useCallback((entries: QueuedMessage[]): void => {
+    const signature = JSON.stringify(entries);
+    if (queueSignature.current === signature) return;
+    queueSignature.current = signature;
+    setQueue(entries);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const latestError = useRef(error);
+  latestError.current = error;
   const owner = useRef(conversationId);
   const revision = useRef(0);
   owner.current = conversationId;
@@ -32,10 +41,14 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
       if (document.visibilityState === "hidden") return;
       const requestedRevision = revision.current;
       void loadQueue(onCommand, conversationId).then((result) => {
-        if (current && revision.current === requestedRevision) { setQueue(result.entries); setError(null); }
+        if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
+          // The bounded queue poll must not commit an unchanged idle transcript.
+          updateQueue(result.entries);
+          if (latestError.current !== null) setError(null);
+        }
       }, () => { /* A disconnected runtime keeps the last known queue visible. */ });
     };
-    setQueue([]); setError(null); setBusy(false);
+    updateQueue([]); setError(null); setBusy(false);
     refresh();
     const changed = (event: Event): void => {
       if ((event as CustomEvent<unknown>).detail === conversationId) {
@@ -50,7 +63,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     // is exclusively runtime-owned and continues while this component is gone.
     const timer = window.setInterval(refresh, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
-  }, [conversationId, onCommand, latestTurnId, latestTurnStatus]);
+  }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
   const first = queue[0];
   if (!first) return null;
   const dispatching = first.state === "dispatching";
@@ -59,7 +72,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     setBusy(true); setError(null);
     try {
       const result = await onCommand({ type, payload: { conversationId, id: first.id } });
-      if (owner.current === conversationId) { revision.current += 1; setQueue(result.entries); }
+      if (owner.current === conversationId) { revision.current += 1; updateQueue(result.entries); }
       window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
     } catch (failure) {
       if (owner.current === conversationId) setError(failure instanceof Error ? failure.message : "The queue could not be updated.");

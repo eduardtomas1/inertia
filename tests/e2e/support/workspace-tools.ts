@@ -58,16 +58,22 @@ export async function selectWorkspaceTool(
 ): Promise<void> {
   const tabId = name === "Browser" ? "preview" : name.toLowerCase();
   const tab = panel.locator(`[data-workspace-tab="${tabId}"]`);
+  const launcher = panel.getByRole("group", { name: "Open a surface" });
+  const add = panel.getByRole("button", { name: "Add panel surface" });
+  // The panel becomes visible before its lazy empty-state launcher loads.
+  // Choose a route only after one of its real controls is present.
+  await expect.poll(async () =>
+    await tab.isVisible() || await launcher.isVisible() || await add.isVisible(),
+  ).toBe(true);
   if (await tab.isVisible().catch(() => false)) {
     await tab.click();
     return;
   }
 
-  const launcher = panel.getByRole("group", { name: "Open a surface" });
   if (await launcher.isVisible().catch(() => false)) {
     await launcher.getByRole("button", { name: new RegExp(`^${name}`, "u") }).click();
   } else {
-    await panel.getByRole("button", { name: "Add panel surface" }).click();
+    await add.click();
     await panel.page().getByRole("menu", { name: "Add panel surface" })
       .getByRole("menuitem", { name: new RegExp(`^${name}`, "u") })
       .click();

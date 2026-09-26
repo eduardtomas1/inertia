@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeComposerQueuedActions } from "../../src/renderer/src/components/composer/RuntimeComposerQueuedActions";
 import { enqueueRuntimePrompt, finishQueueIntent, queueIntent, RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
@@ -11,6 +12,46 @@ const response = (entries = [queued], receipt: QueuedMessage | null = null): Mes
 beforeEach(() => window.localStorage.clear());
 
 describe("runtime queue presentation and durable draft identity", () => {
+  it("defers a pending queue result until the window becomes visible again", async () => {
+    let resolveRead!: (value: MessageQueueResult) => void;
+    const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });
+    const run = vi.fn<QueueCommandRunner>().mockReturnValueOnce(pending).mockResolvedValue(response());
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend
+      latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    try {
+      visibility.mockReturnValue("hidden");
+      await act(async () => { resolveRead(response()); await pending; });
+      expect(screen.queryByText("Next task")).toBeNull();
+      visibility.mockReturnValue("visible");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(screen.getByText("Next task")).toBeTruthy();
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally { view.unmount(); visibility.mockRestore(); }
+  });
+
+  it.each([false, true])("does not commit identical polling results with queued entries=%s", async (hasEntry) => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => structuredClone(response(hasEntry ? [queued] : [])));
+      let commits = 0;
+      const view = render(<Profiler id="queue" onRender={() => { commits += 1; }}>
+        <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend
+          latestTurnId="first" latestTurnStatus="completed" queueHost={null} />
+      </Profiler>);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const initialCommits = commits;
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      expect(run).toHaveBeenCalledTimes(3);
+      expect(commits).toBe(initialCommits);
+      run.mockResolvedValue(response([{ ...queued, content: "Updated queue" }]));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(screen.getByText("Updated queue")).toBeTruthy();
+      expect(commits).toBe(initialCommits + 1);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps a second pending draft's identity when the first acknowledgement arrives", () => {
     const first = queueIntent(conversationId, "First", []);
     const second = queueIntent(conversationId, "Second", []);

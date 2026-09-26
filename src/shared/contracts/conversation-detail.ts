@@ -23,6 +23,7 @@ import type {
 } from "./git";
 import type { ConversationContextPacketSummary } from "../conversation-context";
 import type { ConversationHistoryPage } from "../conversation-history";
+import type { ConversationAttachmentGalleryItem } from "../conversation-attachment-gallery";
 
 /**
  * Heavy state for one conversation. This is loaded independently from the
@@ -30,6 +31,7 @@ import type { ConversationHistoryPage } from "../conversation-history";
  */
 export interface ConversationDetail {
   history?: ConversationHistoryPage;
+  attachmentGallery?: ConversationAttachmentGalleryItem[];
   conversation: Conversation;
   agentTurns: AgentTurn[];
   turnGitArtifacts: TurnGitArtifact[];

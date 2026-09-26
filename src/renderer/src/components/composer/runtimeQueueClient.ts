@@ -8,9 +8,9 @@ export type QueueCommandRunner = (command: QueueCommand) => Promise<MessageQueue
 export const RUNTIME_QUEUE_CHANGED = "inertia:runtime-queue-changed";
 
 function pendingIntents(conversationId: string): { id: string; identity: string }[] {
-  const raw = window.localStorage.getItem(`inertia:queue-intent:${conversationId}`);
-  if (!raw) return [];
   try {
+    const raw = window.localStorage.getItem(`inertia:queue-intent:${conversationId}`);
+    if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     const items = Array.isArray(parsed) ? parsed : [parsed];
     return items.filter((item): item is { id: string; identity: string } => item && typeof item === "object"
@@ -28,7 +28,7 @@ export function queueIntent(conversationId: string, content: string, attachments
   if (saved) return saved.id;
   if (pending.length >= 3) throw new Error("Confirm the earlier queued drafts before queueing another message.");
   const id = window.crypto.randomUUID();
-  window.localStorage.setItem(key, JSON.stringify([...pending, { id, identity }]));
+  try { window.localStorage.setItem(key, JSON.stringify([...pending, { id, identity }])); } catch { return id; }
   return id;
 }
 export function finishQueueIntent(conversationId: string, expectedId: string): void {

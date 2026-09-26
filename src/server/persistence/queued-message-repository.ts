@@ -23,6 +23,12 @@ export function queuedRouteIdentity(conversation: Conversation): string {
 export function queuedIntentDigest(content: string, attachments: readonly ChatAttachment[]): string {
   return createHash("sha256").update(JSON.stringify([content.trim(), attachments.map(({ id }) => id)])).digest("hex");
 }
+export const RETAINED_TERMINAL_QUEUED_MESSAGES = 50;
+export function pruneTerminalQueuedMessages(database: Database.Database, conversationId: string): void {
+  database.prepare(`DELETE FROM queued_messages WHERE conversation_id = ? AND state IN ('accepted','cancelled') AND sequence NOT IN (
+    SELECT sequence FROM queued_messages WHERE conversation_id = ? AND state IN ('accepted','cancelled') ORDER BY sequence DESC LIMIT ?
+  )`).run(conversationId, conversationId, RETAINED_TERMINAL_QUEUED_MESSAGES);
+}
 export class QueuedMessageRepository {
   constructor(private readonly database: Database.Database) {}
 
@@ -67,16 +73,23 @@ export class QueuedMessageRepository {
     return this.database.prepare("UPDATE queued_messages SET state = 'dispatching', error = NULL WHERE id = ? AND conversation_id = ? AND state IN ('waiting','blocked')")
       .run(id, conversationId).changes === 1;
   }
+  release(conversationId: string, id: string): boolean {
+    return this.database.prepare("UPDATE queued_messages SET state = 'waiting', error = NULL WHERE id = ? AND conversation_id = ? AND state = 'dispatching' AND turn_id IS NULL")
+      .run(id, conversationId).changes === 1;
+  }
   block(conversationId: string, id: string, error: string): void {
     this.database.prepare("UPDATE queued_messages SET state = 'blocked', error = ? WHERE id = ? AND conversation_id = ? AND state IN ('waiting','dispatching','blocked')")
       .run(error.slice(0, 1000), id, conversationId);
   }
   cancel(conversationId: string, id: string): QueuedMessage | null {
-    const item = this.get(conversationId, id);
-    if (!item || !["waiting", "blocked"].includes(item.state)) return null;
-    this.database.prepare("UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL WHERE id = ? AND conversation_id = ?")
-      .run(id, conversationId);
-    return item;
+    return this.database.transaction(() => {
+      const item = this.get(conversationId, id);
+      if (!item || !["waiting", "blocked"].includes(item.state)) return null;
+      this.database.prepare("UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL WHERE id = ? AND conversation_id = ?")
+        .run(id, conversationId);
+      pruneTerminalQueuedMessages(this.database, conversationId);
+      return item;
+    })();
   }
   reconcile(): void {
     // Provider start is downstream of the transaction that changes this row

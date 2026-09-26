@@ -69,6 +69,17 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(run.mock.calls[2]![0].payload.id).toBe(run.mock.calls[0]![0].payload.id);
   });
 
+  it.each(["getItem", "setItem"] as const)("queues a draft when intent storage is unavailable (%s)", async (method) => {
+    const storage = vi.spyOn(window.localStorage, method).mockImplementation(() => {
+      throw new DOMException("Storage unavailable", method === "getItem" ? "SecurityError" : "QuotaExceededError");
+    });
+    try {
+      const run = vi.fn<QueueCommandRunner>().mockImplementation(async (command) => response([], { ...queued, id: command.payload.id! }));
+      await expect(enqueueRuntimePrompt(run, conversationId, "Next task", [])).resolves.toBeUndefined();
+      expect(run.mock.calls.map(([command]) => command.type)).toEqual(["message.queue.enqueue"]);
+    } finally { storage.mockRestore(); }
+  });
+
   it("frees a definitively rejected intent only after confirming there is no receipt", async () => {
     const rejectedId = queueIntent(conversationId, "Next task", []);
     const run = vi.fn<QueueCommandRunner>().mockRejectedValueOnce(new RuntimeCommandError("Full queue", "rejected"))

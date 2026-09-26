@@ -7,7 +7,12 @@ import { queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-m
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
-import { awaitMessageSendPreparation, messageSendPreparationDeadline } from "./commands/message-send-preparation";
+import {
+  awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
+} from "./commands/message-send-preparation";
+
+const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
+  || (error instanceof RuntimeRequestError && error.message.startsWith("Message admission"));
 
 /** Durable queue dispatch never depends on a renderer remaining mounted. */
 export function createQueuedMessageRuntime(
@@ -30,13 +35,19 @@ export function createQueuedMessageRuntime(
     if (conversation.archivedAt !== null) throw new RuntimeRequestError("Unarchive this chat before changing its queue.");
     return conversation;
   };
+  const retryAfterCleanup = (conversationId: string): void => {
+    void turns.waitForProviderCleanup([conversationId]).then(() => schedule(conversationId)).catch(() => undefined);
+  };
 
   async function dispatch(conversationId: string, manualId?: string): Promise<void> {
     if (options.signal.aborted || !dependencies.enableProviders || turns.isClosing()) return;
     const first = store.queuedMessages.list(conversationId)[0];
     if (!first || (manualId && first.id !== manualId)) return;
     if (!manualId && first.state !== "waiting") return;
-    await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000);
+    if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
+      retryAfterCleanup(conversationId);
+      return;
+    }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt !== null) return;
@@ -62,7 +73,8 @@ export function createQueuedMessageRuntime(
     } catch (error) {
       // An accepted row is authoritative even when publication subsequently
       // failed. Never turn an uncertain acknowledgement into a second turn.
-      store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
+      if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId);
+      else store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
     } finally {
       changed(conversationId);
     }
@@ -77,7 +89,10 @@ export function createQueuedMessageRuntime(
       while (again.delete(conversationId) && !options.signal.aborted) {
         try { await dispatch(conversationId); } catch { /* Deleted chats have no queue to dispatch. */ }
       }
-    }).finally(() => { running.delete(conversationId); });
+    }).finally(() => {
+      running.delete(conversationId);
+      if (again.has(conversationId)) void schedule(conversationId).catch(() => undefined);
+    });
     running.set(conversationId, task);
     return task;
   }

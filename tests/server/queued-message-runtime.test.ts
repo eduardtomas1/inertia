@@ -7,21 +7,24 @@ import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/share
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
-import { queuedIntentDigest } from "../../src/server/persistence/queued-message-repository";
+import { queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
+import { MessageSendPreparationTimeoutError } from "../../src/server/runtime/commands/message-send-preparation";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
-  flushTurnControllerTestPromises, turnControllerTestProviderInfo,
+  flushTurnControllerTestPromises, turnControllerTestAttachment, turnControllerTestProviderInfo,
 } from "../support/turn-controller-runtime";
+import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
 
 afterEach(cleanupTurnControllerTestDirectories);
-async function fixture() {
+async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
   let queue: ReturnType<typeof createQueuedMessageRuntime> | undefined;
-  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn) });
+  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn), ...hookOverrides });
   const attachments = await ConversationAttachmentStore.open(runtime.directory);
   const abort = new AbortController();
   const tasks = new Set<Promise<unknown>>();
   const events: ServerEvent[] = [];
+  const hooks: { operationSettled?: () => void } = {};
   const dependencies: TurnInteractionCommandDependencies = {
     store: runtime.store, turns: runtime.controller, conversationAttachments: attachments,
     backendProfileController: {
@@ -42,7 +45,7 @@ async function fixture() {
     broadcastSnapshot: () => undefined, send: (_socket, event) => { events.push(event); },
   };
   queue = createQueuedMessageRuntime(dependencies, { signal: abort.signal, track: (operation) => {
-    const task = operation(); tasks.add(task); void task.finally(() => tasks.delete(task)); return task;
+    const task = operation().then((value) => { hooks.operationSettled?.(); return value; }); tasks.add(task); void task.finally(() => tasks.delete(task)); return task;
   } });
   const drain = async () => {
     await flushTurnControllerTestPromises();
@@ -56,7 +59,7 @@ async function fixture() {
       },
     } as ClientCommand);
   };
-  return { ...runtime, dependencies, queue, attachments, events, drain, command, abort,
+  return { ...runtime, dependencies, queue, attachments, events, hooks, drain, command, abort,
     close: async () => { abort.abort(); await drain(); await runtime.controller.dispose(); await attachments.close(); runtime.store.close(); },
   };
 }
@@ -192,6 +195,95 @@ describe("durable runtime message queue", () => {
       await f.command("message.queue.remove", first); await f.drain();
       expect(f.store.queuedMessages.get(f.conversationId, second)?.state).toBe("accepted");
       expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("waits for provider cleanup that outlasts the dispatch and admission waits instead of stalling the queue", async () => {
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const f = await fixture({ releaseTurnAttachments: () => cleanup });
+    try {
+      const image = await turnControllerTestAttachment(f, randomUUID());
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First", attachments: [image] });
+      f.controller.start(initial.turn.id);
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      f.provider.resolve({ status: "completed" });
+      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(121_000);
+      vi.useRealTimers();
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+      expect(admission).not.toHaveBeenCalled();
+      expect(f.provider.runCount).toBe(1);
+      finishCleanup();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { vi.useRealTimers(); finishCleanup(); await f.close(); }
+  });
+
+  it.each([
+    ["an unavailable admission", () => Promise.resolve(null)],
+    ["an admission timeout", () => Promise.reject(new MessageSendPreparationTimeoutError("Preparing this message took too long. No turn was started."))],
+  ] as const)("returns the head to waiting and dispatches it again after %s", async (_name, failure) => {
+    const f = await fixture();
+    try {
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockImplementationOnce(failure);
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id);
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(admission).toHaveBeenCalledTimes(2);
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("consumes a wake-up that arrives after the dispatch loop finishes but before it is released", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id); f.provider.resolve({ status: "completed" }); await f.drain();
+      const active = vi.spyOn(f.controller, "isActive").mockReturnValue(true);
+      f.hooks.operationSettled = () => {
+        f.hooks.operationSettled = undefined;
+        active.mockRestore();
+        f.queue.onTurnSettled(f.store.latestAgentTurnForConversation(f.conversationId)!);
+      };
+      const id = randomUUID(); await f.command("message.queue.enqueue", id);
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("keeps only the most recent terminal receipts when messages are cancelled or accepted", async () => {
+    const f = await fixture();
+    try {
+      const conversation = f.store.conversation(f.conversationId);
+      const add = (content: string) => {
+        const id = randomUUID();
+        f.store.queuedMessages.add({ id, conversation, content, attachments: [], digest: queuedIntentDigest(content, []) });
+        return { id, digest: queuedIntentDigest(content, []) };
+      };
+      const replayable = ({ id, digest }: { id: string; digest: string }) => f.store.queuedMessages.replay(f.conversationId, id, digest) !== null;
+      const waiting = add("Still waiting");
+      const cancelled = Array.from({ length: RETAINED_TERMINAL_QUEUED_MESSAGES + 2 }, (_, index) => {
+        const entry = add(`Cancelled ${index}`);
+        f.store.queuedMessages.cancel(f.conversationId, entry.id);
+        return entry;
+      });
+      expect(cancelled.map(replayable)).toEqual(cancelled.map((_, index) => index >= 2));
+      const accepted = add("Accepted");
+      f.store.queuedMessages.claim(f.conversationId, accepted.id);
+      f.controller.queue({ conversationId: f.conversationId, content: "Accepted", queuedMessageId: accepted.id });
+      expect(cancelled.map(replayable)).toEqual(cancelled.map((_, index) => index >= 3));
+      expect(f.store.queuedMessages.get(f.conversationId, accepted.id)?.state).toBe("accepted");
+      expect(f.store.queuedMessages.get(f.conversationId, waiting.id)?.state).toBe("waiting");
     } finally { await f.close(); }
   });
 });

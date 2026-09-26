@@ -23,6 +23,7 @@ import {
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "../runtime/turns/request-context";
+import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import {
   agentTurnFromRow,
   normalizeAgentTurnUsage,
@@ -281,6 +282,7 @@ export class TurnLedgerRepository {
           WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
         `).run(turn.id, message.id, input.queuedMessageId, input.conversationId);
         if (accepted.changes !== 1) throw new Error("The queued message no longer owns this dispatch.");
+        pruneTerminalQueuedMessages(this.context.database, input.conversationId);
       }
       if (input.executionContext) {
         this.persistExecutionContext(turn.id, input.executionContext, message.createdAt);

@@ -5,6 +5,7 @@ import {
   type ConversationHistoryCursor,
   type ConversationHistoryRequest,
 } from "../../shared/conversation-history";
+import { RecordNotFoundError } from "./errors";
 
 export interface ConversationHistoryScope {
   units: ConversationHistoryCursor[];
@@ -30,7 +31,7 @@ export function selectConversationHistory(
     const message = database.prepare(`SELECT id, turn_id, created_at FROM messages
       WHERE conversation_id = ? AND id = ?`).get(conversationId, request.messageId) as
       { id: string; turn_id: string | null; created_at: string } | undefined;
-    if (!message) throw new Error("This message is no longer available.");
+    if (!message) throw new RecordNotFoundError("This message is no longer available.");
     if (message.turn_id) {
       target = database.prepare(`SELECT id, requested_at AS at, 'turn' AS kind
         FROM agent_turns WHERE conversation_id = ? AND id = ?`)
@@ -42,7 +43,7 @@ export function selectConversationHistory(
       .get(conversationId, request.turnId) as ConversationHistoryCursor | undefined;
   }
   if ((request.turnId || request.messageId) && !target) {
-    throw new Error("This turn is no longer available.");
+    throw new RecordNotFoundError("This turn is no longer available.");
   }
   const cursor = request.before ?? target;
   const boundary = cursor ? `WHERE (at, id, kind) ${target ? "<=" : "<"} (?, ?, ?)` : "";
@@ -57,9 +58,15 @@ export function selectConversationHistory(
   return { units, older: hasMore ? units.at(-1)! : null, upper: request.before?.at ?? next?.at ?? null };
 }
 
+const HISTORY_TABLES = ["agent_turns", "turn_git_artifacts", "messages", "activities",
+  "subagent_traces", "agent_reasonings", "agent_plans", "checkpoints", "conversation_context_packets"] as const;
+type HistoryTable = typeof HISTORY_TABLES[number];
+const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
+  "diff_review_states", "diff_review_notes"] as const;
+
 /** Fixed table names only; identities always travel as bound SQL parameters. */
 export function historyPredicate(
-  table: string,
+  table: HistoryTable,
   scope: ConversationHistoryScope,
 ): { sql: string; parameters: string[] } {
   const turns = scope.units.filter(({ kind }) => kind === "turn").map(({ id }) => id);
@@ -76,46 +83,44 @@ export function historyPredicate(
       WHERE ${inValues("turn_id", turns).replaceAll(`${table}.`, "messages.")} OR ${inValues("id", messages).replaceAll(`${table}.`, "messages.")}))`,
     parameters: [...turns, ...messages],
   };
-  if (["turn_git_artifacts", "subagent_traces"].includes(table)) {
+  if (table === "turn_git_artifacts" || table === "subagent_traces") {
     return { sql: inValues("turn_id", turns), parameters: turns };
   }
-  if (["activities", "agent_reasonings", "agent_plans", "checkpoints"].includes(table)) {
-    const timestamp = table === "agent_plans" ? "updated_at" : "created_at";
-    const lower = scope.older ? scope.units.at(-1)?.at : undefined;
-    const legacy = [`${table}.turn_id IS NULL`,
-      ...(lower ? [`${table}.${timestamp} >= ?`] : []),
-      ...(scope.upper ? [`${table}.${timestamp} <= ?`] : [])];
-    return { sql: `(${inValues("turn_id", turns)} OR (${legacy.join(" AND ")}))`,
-      parameters: [...turns, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])] };
-  }
-  return { sql: "1", parameters: [] };
+  const timestamp = table === "agent_plans" ? "updated_at" : "created_at";
+  const lower = scope.older ? scope.units.at(-1)?.at : undefined;
+  const legacy = [`${table}.turn_id IS NULL`,
+    ...(lower ? [`${table}.${timestamp} >= ?`] : []),
+    ...(scope.upper ? [`${table}.${timestamp} <= ?`] : [])];
+  return { sql: `(${inValues("turn_id", turns)} OR (${legacy.join(" AND ")}))`,
+    parameters: [...turns, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])] };
 }
 
-const HISTORY_TABLES = ["agent_turns", "turn_git_artifacts", "messages", "activities",
-  "subagent_traces", "agent_reasonings", "agent_plans", "checkpoints",
-  "thread_usage", "agent_goals", "diff_review_summaries", "diff_review_states", "diff_review_notes", "conversation_context_packets"];
 const columns = new WeakMap<Database.Database, Map<string, string[]>>();
+
+function storedBytes(database: Database.Database, table: string, conversationId: string,
+  where: { sql: string; parameters: string[] }): number {
+  let cache = columns.get(database);
+  if (!cache) { cache = new Map(); columns.set(database, cache); }
+  let names = cache.get(table);
+  if (!names) {
+    names = (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
+      .map(({ name }) => name);
+    cache.set(table, names);
+  }
+  const lengths = names.map((name) => `COALESCE(length(CAST("${name}" AS BLOB)), 0)`).join(" + ");
+  const conversationColumn = table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
+  return (database.prepare(`SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
+    FROM ${table} WHERE ${conversationColumn} = ? AND (${where.sql})`)
+    .get(conversationId, ...where.parameters) as { bytes: number }).bytes;
+}
 
 /** Measure in SQLite before materializing large text or thousands of records. */
 export function historyStoredBytes(database: Database.Database, conversationId: string,
   scope: ConversationHistoryScope): number {
-  let cache = columns.get(database);
-  if (!cache) { cache = new Map(); columns.set(database, cache); }
   let bytes = 0;
   for (const table of HISTORY_TABLES) {
-    let names = cache.get(table);
-    if (!names) {
-      names = (database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
-        .map(({ name }) => name);
-      cache.set(table, names);
-    }
     const where = historyPredicate(table, scope);
-    const lengths = names.map((name) => `COALESCE(length(CAST("${name}" AS BLOB)), 0)`).join(" + ");
-    const conversationColumn = table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
-    const row = database.prepare(`SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
-      FROM ${table} WHERE ${conversationColumn} = ? AND (${where.sql})`)
-      .get(conversationId, ...where.parameters) as { bytes: number };
-    bytes += row.bytes;
+    bytes += storedBytes(database, table, conversationId, where);
     if (table === "messages" || table === "agent_reasonings") {
       const chunkTable = table === "messages" ? "message_content_chunks" : "reasoning_content_chunks";
       const key = table === "messages" ? "message_id" : "reasoning_id";
@@ -129,5 +134,13 @@ export function historyStoredBytes(database: Database.Database, conversationId: 
   return bytes;
 }
 
+export function conversationStoredBytes(database: Database.Database, conversationId: string): number {
+  return CONVERSATION_TABLES.reduce((bytes, table) =>
+    bytes + storedBytes(database, table, conversationId, { sql: "1", parameters: [] }), 0);
+}
+
 export const HISTORY_TOO_LARGE_MESSAGE =
   "This turn is too large to display. Your history is saved. Open another chat or export your data from Settings.";
+
+export const CONVERSATION_RECORDS_TOO_LARGE_MESSAGE =
+  "This chat's review and usage records are too large to display. Your history is saved. Open another chat or export your data from Settings.";

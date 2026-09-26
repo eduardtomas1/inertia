@@ -207,6 +207,28 @@ describe("paged history reconciliation", () => {
     expect(merged.history?.older).toEqual(older);
   });
 
+  it.each(["older", "target"] as const)("keeps conversation-scoped records from the latest page after %s pages", (mode) => {
+    const note = { id: "note" } as ConversationDetail["reviewNotes"][number];
+    const goal = { source: "codex" } as unknown as ConversationDetail["goals"][number];
+    const current = { ...page("recent", "recent"), reviewNotes: [note], goals: [goal] };
+    const merged = mergeConversationHistory(current, page("old", "old"), mode);
+    expect(merged.reviewNotes).toBe(current.reviewNotes);
+    expect(merged.goals).toBe(current.goals);
+    expect(merged.usage).toBe(current.usage);
+  });
+
+  it("accumulates omitted turns across pages and clears them when a refresh replaces the turn", () => {
+    const current = { ...page("live", "live"), history: { older, omittedTurnIds: ["live"] } };
+    const loaded = mergeConversationHistory(current, { ...page("old", ""), history: { older: null, omittedTurnIds: ["old"] } }, "older");
+    expect(loaded.history).toEqual({ older: null, omittedTurnIds: ["live", "old"] });
+    const unchanged = mergeConversationHistory(loaded, { ...page("live", "live"), history: { older, omittedTurnIds: ["live"] } }, "refresh");
+    expect(unchanged.history).toBe(loaded.history);
+    const replaced = mergeConversationHistory(loaded, page("live", "fits now"), "refresh");
+    expect(replaced.history).toEqual({ older: null, omittedTurnIds: ["old"] });
+    expect(mergeConversationHistory(page("old", "full"), { ...page("old", ""), history: { older: null, omittedTurnIds: ["old"] } }, "target")
+      .history).toEqual({ older });
+  });
+
   it("resets a disconnected latest window to avoid silently skipping offline turns", () => {
     const current = { ...page("old", "old"), history: { older: null } };
     const latest = page("new", "new");

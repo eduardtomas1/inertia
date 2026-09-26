@@ -37,9 +37,19 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
   // their turns so consumers selecting the last plan still select the latest.
   // Legacy plans have no timestamp; preserve their relative source order.
   const plans = [...planByRun.values()].sort((a, b) => planOrder(a.turnId) - planOrder(b.turnId));
+  const currentOmitted = current.history?.omittedTurnIds ?? [];
+  const omittedTurnIds = [
+    ...currentOmitted.filter((id) => mode !== "refresh" || !replacedTurns.has(id)),
+    ...(incoming.history?.omittedTurnIds ?? []).filter((id) => mode === "refresh" || !current.agentTurns.some((turn) => turn.id === id)),
+  ];
+  const unchanged = omittedTurnIds.length === currentOmitted.length
+    && omittedTurnIds.every((id) => currentOmitted.includes(id));
+  const page = mode === "older" ? incoming.history : current.history ?? incoming.history;
+  const history = !page || (unchanged && page === current.history) ? page
+    : { older: page.older, ...(omittedTurnIds.length ? { omittedTurnIds: unchanged ? currentOmitted : omittedTurnIds } : {}) };
   return {
     ...(mode === "refresh" ? incoming : current),
-    history: mode === "older" ? incoming.history : current.history ?? incoming.history,
+    history,
     agentTurns,
     messages: merge(current.messages, incoming.messages)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt, "en") || a.id.localeCompare(b.id, "en")),

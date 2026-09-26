@@ -32,6 +32,7 @@ function fixture() {
   });
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
+    conversation: (conversationId) => store.conversationShell(conversationId),
     detail: (conversationId) => store.conversationDetail(conversationId),
     isConversationActive: () => false,
     preparePrompt: async () => undefined,

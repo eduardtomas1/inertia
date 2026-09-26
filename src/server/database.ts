@@ -75,7 +75,7 @@ import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
 import { UsageLimitsRepository } from "./persistence/usage-limits-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
-import { SnapshotRepository } from "./persistence/snapshot-repository";
+import { SnapshotRepository, type RecentConversationLimits } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
@@ -394,6 +394,8 @@ export class RuntimeStore {
   conversationHistory(conversationId: string, request?: ConversationHistoryRequest): ConversationDetail | null {
     return this.snapshotRepository.conversationHistory(conversationId, request);
   }
+
+  recentConversationDetail(conversationId: string, limits: RecentConversationLimits) { return this.snapshotRepository.recentConversationDetail(conversationId, limits); }
 
   loadProviderMetadata = (): PersistedProviderMetadata[] => this.providerMetadataRepository.load();
   saveProviderMetadata = (metadata: PersistedProviderMetadata): void => this.providerMetadataRepository.save(metadata);

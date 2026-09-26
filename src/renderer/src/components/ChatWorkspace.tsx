@@ -203,7 +203,8 @@ type ChatWorkspaceProps = {
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
   detailLoading?: boolean;
-  history?: { hasOlder: boolean; loading: boolean; error: string | null; loadOlder: () => void };
+  history?: { hasOlder: boolean; loading: boolean; error: string | null; loadOlder: () => void;
+    omittedTurnIds?: readonly string[] };
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
@@ -366,6 +367,11 @@ export function ChatWorkspace({
   const stopRestoreSequenceRef = useRef(0);
   const stopsInFlightRef = useRef(new Map<string, Promise<void>>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const keepHistoryFocus = useCallback((button: HTMLButtonElement | null) => () => {
+    if (button && document.activeElement === button) queueMicrotask(() => {
+      if (!button.isConnected && document.activeElement === document.body) scrollRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
@@ -943,8 +949,13 @@ export function ChatWorkspace({
         <div ref={timelineRef} className="response-timeline">
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
-              {history.hasOlder && <button type="button" className="subtle-button" disabled={history.loading}
-                onClick={() => { noteResponseTimelineNavigationIntent(); history.loadOlder(); }}>
+              {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"
+                aria-disabled={history.loading || undefined}
+                onClick={() => {
+                  if (history.loading) return;
+                  noteResponseTimelineNavigationIntent();
+                  history.loadOlder();
+                }}>
                 {history.loading ? "Loading earlier messages…" : "Load earlier messages"}
               </button>}
               {history.error && <p role="alert">{history.error}</p>}
@@ -973,6 +984,7 @@ export function ChatWorkspace({
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
+              omittedTurnIds={history?.omittedTurnIds}
               gitArtifacts={ownedTurnGitArtifacts}
               projectRoot={projectRoot}
               projectId={project.id}

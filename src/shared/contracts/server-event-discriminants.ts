@@ -160,6 +160,8 @@ export function conversationDetailCollectionsCoherent(
   const checkpointsById = new Map((value.checkpoints as IdentityRecord[])
     .map((checkpoint) => [checkpoint.id, checkpoint]));
   const turnsById = new Map(turns.map((turn) => [turn.id, turn]));
+  const omittedTurnIds = (value.history as { omittedTurnIds?: unknown } | undefined)?.omittedTurnIds ?? [];
+  const omitted = new Set(Array.isArray(omittedTurnIds) ? omittedTurnIds : [null]);
   const providerIdentityUnique = (key: "providerTaskId" | "providerAgentId") => {
     const identified = subagents.filter((trace) => trace[key] !== null);
     return new Set(identified.map((trace) => JSON.stringify([
@@ -169,7 +171,8 @@ export function conversationDetailCollectionsCoherent(
   const reviewStateKeys = reviewStates.map((state) => JSON.stringify([
     state.repositoryPath ?? ".", state.scope, state.path, state.hunkId ?? "",
   ]));
-  return CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
+  return [...omitted].every((id) => turnsById.has(id as string))
+    && CONVERSATION_DETAIL_SCOPED_COLLECTIONS.every((key) =>
     (value[key] as IdentityRecord[]).every((entry) =>
       entry.conversationId === conversationId))
     && CONVERSATION_DETAIL_ID_COLLECTIONS.every((key) =>
@@ -192,9 +195,9 @@ export function conversationDetailCollectionsCoherent(
       const checkpoint = turn.checkpointId === null
         ? null : checkpointsById.get(turn.checkpointId);
       return userMessage?.role === "user" && userMessage.turnId === turn.id
-        && (terminalMessage === null
+        && (omitted.has(turn.id) || ((terminalMessage === null
           || (terminalMessage?.role === "assistant" && terminalMessage.turnId === turn.id))
-        && (checkpoint === null || checkpoint?.turnId === turn.id);
+        && (checkpoint === null || checkpoint?.turnId === turn.id)));
     })
     && uniqueIdentity(artifacts, "turnId")
     && artifacts.every((artifact) =>

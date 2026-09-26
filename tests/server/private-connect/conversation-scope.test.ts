@@ -38,9 +38,11 @@ function fixture() {
   const granted = store.createConversation(project.id, "Granted conversation");
   const sibling = store.createConversation(project.id, "Sibling conversation");
   const queuePrompt = vi.fn(() => ({ turnId: "private-connect-turn" }));
+  const detail = vi.fn((conversationId: string) => store.conversationDetail(conversationId));
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    conversation: (conversationId) => store.conversationShell(conversationId),
+    detail,
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt,
@@ -68,7 +70,7 @@ function fixture() {
     includeFutureConversations: false,
     legacyProjectWide: false,
   });
-  return { store, gateway, project, other, granted, sibling, subject, explicit, queuePrompt };
+  return { store, gateway, project, other, granted, sibling, subject, explicit, queuePrompt, detail };
 }
 
 async function visibleConversations(
@@ -129,6 +131,7 @@ describe("Private Connect conversation-scoped authority", () => {
     const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);
     expect((await sendPrompt(f.gateway, subject, f.granted.id)).ok).toBe(true);
     expect(f.queuePrompt).toHaveBeenCalledExactlyOnceWith(f.granted.id, "hello", subject.deviceId);
+    expect(f.detail).not.toHaveBeenCalled();
   });
   it("exposes only the granted conversation from its project", async () => {
     const f = fixture();

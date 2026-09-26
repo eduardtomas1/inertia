@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConversationDetail, ConversationDetailViewState, ServerEvent } from "../../src/shared/contracts";
+import type { AgentTurn, ChatMessage, ConversationDetail, ConversationDetailViewState, ServerEvent } from "../../src/shared/contracts";
+import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { useConversationHistory } from "../../src/renderer/src/hooks/useConversationHistory";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "../../src/renderer/src/utils/messageSearchFocus";
 import { clearTimelineFocus, requestTimelineFocus } from "../../src/renderer/src/utils/timelineFocus";
@@ -24,7 +26,7 @@ function deferred() {
   const promise = new Promise<ServerEvent>((done) => { resolve = done; });
   return { resolve, promise };
 }
-afterEach(() => { clearMessageSearchFocus(); clearTimelineFocus(); });
+afterEach(() => { cleanup(); clearMessageSearchFocus(); clearTimelineFocus(); });
 
 describe("history navigation lifecycle", () => {
   it("captures a prepend before update and restores only after the new timeline commits", () => {
@@ -110,5 +112,49 @@ describe("history navigation lifecycle", () => {
     expect(request).toHaveBeenCalledOnce();
     act(() => requestMessageSearchFocus({ conversationId: "chat", projectId: "project", turnId: null, messageId: "missing" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  });
+
+  it("exposes omitted turns and does not reload a target that stays omitted", async () => {
+    const omittedPage = { ...detail("target"), messages: [], history: { older: cursor, omittedTurnIds: ["target"] } };
+    const request = vi.fn().mockResolvedValue({ type: "request.result", requestId: "history",
+      result: { kind: "conversation.detail", conversationId: "chat", state: "ready", detail: omittedPage } });
+    const hook = renderHook(() => {
+      const [state, setState] = useState<ConversationDetailViewState | null>({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") });
+      return useConversationHistory({ conversationId: "chat", online: true, detailState: state, setDetailState: setState, request });
+    });
+    act(() => requestMessageSearchFocus({ conversationId: "chat", projectId: "project", turnId: "target", messageId: "answer-in-target" }));
+    await waitFor(() => expect(hook.result.current.omittedTurnIds).toEqual(["target"]));
+    hook.rerender();
+    await act(async () => undefined);
+    expect(request).toHaveBeenCalledOnce();
+  });
+});
+
+describe("omitted history turns", () => {
+  it("keeps the request readable and explains why the turn body is not shown", () => {
+    const at = "2030-01-01T00:00:00.000Z";
+    const turn = { id: "large-turn", conversationId: "chat", runId: "large-run", userMessageId: "large-request",
+      terminalAssistantMessageId: "large-answer", providerId: "codex",
+      modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" }),
+      continuationIdentity: { harnessId: "codex-app-server", backendProfileId: "native:codex:app-server",
+        backendConfigurationRevision: 1, modelIdentity: "gpt-test", endpointIdentity: null },
+      harnessId: "codex-app-server", backendProfileId: "native:codex:app-server", model: "gpt-test", modelAlias: null,
+      reasoningEffort: "high", interactionMode: "build", accessMode: "supervised", providerSessionBefore: null,
+      providerSessionAfter: null, requestedAt: at, startedAt: at, completedAt: at, status: "completed",
+      terminalReason: "provider-completed", checkpointId: null, usageAtStart: null, usageAtCompletion: null,
+      configurationRevision: 1, association: "authoritative", createdAt: at, updatedAt: at } as AgentTurn;
+    const request: ChatMessage = { id: "large-request", conversationId: "chat", turnId: "large-turn", role: "user",
+      content: "Summarize the huge log", attachments: [], createdAt: at };
+    render(<ResponseTimeline turns={[turn]} messages={[request]} activities={[]} reasonings={[]} plans={[]}
+      checkpoints={[]} projectRoot="/workspace" projectId="project" conversationId="chat" streamingText=""
+      streamingReasoning="" approvals={[]} inputRequests={[]} showTimestamps={false} showThinking={false}
+      defaultCodeWrap={false} autoCollapseWorkLog showChangedFileSummaries={false} checkpointRestoreDisabled
+      omittedTurnIds={["large-turn"]} onRespondToApproval={async () => undefined}
+      onRespondToInput={async () => undefined} onRevertCheckpoint={() => undefined} onOpenTurnDiff={() => undefined}
+      onCompareTurnArtifacts={() => undefined} onOpenTurnFile={() => undefined} onStop={() => undefined} />);
+    const section = screen.getByRole("region", { name: "Turn 1" });
+    expect(section).toHaveTextContent("Summarize the huge log");
+    expect(screen.getByRole("note")).toHaveTextContent("This turn is too large to display. Your history is saved.");
+    expect(screen.queryByRole("article", { name: "Final assistant answer" })).toBeNull();
   });
 });

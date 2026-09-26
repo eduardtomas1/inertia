@@ -17,6 +17,7 @@ export type ConversationHistoryRequest = z.infer<typeof conversationHistoryReque
 
 export interface ConversationHistoryPage {
   older: ConversationHistoryCursor | null;
+  omittedTurnIds?: string[];
 }
 
 // Leave ample room for other frames already queued on the shared connection.

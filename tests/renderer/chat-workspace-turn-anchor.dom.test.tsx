@@ -551,6 +551,32 @@ describe("draft turn anchoring", () => {
     })).toBeVisible();
   });
 
+  it("keeps keyboard focus through loading earlier messages and after the last page", async () => {
+    const loadOlder = vi.fn();
+    const props = workspaceProps(conversation("conversation-history-focus"), async () => null);
+    const history = { hasOlder: true, loading: false, error: null, loadOlder };
+    const view = render(<ChatWorkspace {...props} history={history} />);
+    const earlier = screen.getByRole("button", { name: "Load earlier messages" });
+    earlier.focus();
+    fireEvent.click(earlier);
+    expect(loadOlder).toHaveBeenCalledOnce();
+
+    view.rerender(<ChatWorkspace {...props} history={{ ...history, loading: true }} />);
+    const loading = screen.getByRole("button", { name: "Loading earlier messages…" });
+    expect(loading).toBe(earlier);
+    expect(loading).toHaveAttribute("aria-disabled", "true");
+    expect(loading).not.toBeDisabled();
+    expect(loading).toHaveFocus();
+    fireEvent.click(loading);
+    expect(loadOlder).toHaveBeenCalledOnce();
+
+    view.rerender(<ChatWorkspace {...props} history={history} />);
+    expect(earlier).toHaveFocus();
+    view.rerender(<ChatWorkspace {...props} history={{ ...history, hasOlder: false }} />);
+    expect(screen.queryByRole("button", { name: /earlier messages/u })).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText("Thread transcript")).toHaveFocus());
+  });
+
   it("passes project choice into the empty-chat composer", () => {
     const studioProject: Project = {
       ...project,

@@ -47,6 +47,7 @@ function TurnTimelineComponent({
     props.providerIdentityLabels,
   );
   const timerStart = turn.startedAt ?? turn.requestedAt;
+  const omitted = props.omittedTurnIds?.includes(turn.id) ?? false;
   const wasActive = useRef(turn.isActive);
   const [completionAnnouncement, setCompletionAnnouncement] = useState("");
   const [settlingTransition, setSettlingTransition] = useState<{
@@ -122,32 +123,40 @@ function TurnTimelineComponent({
         onAfterToggle={handleAfterToggle}
       />
 
-      <AgentExecutionLayer
-        turn={turn}
-        props={props}
-        subagents={subagents ?? []}
-        providerLabel={providerLabel}
-        reasoningContent={reasoningContent}
-        liveContent={liveContent}
-        timerStart={timerStart}
-        completionAnnouncement={completionAnnouncement}
-        onBeforeToggle={handleBeforeToggle}
-        onAfterToggle={handleAfterToggle}
-      />
+      {omitted ? (
+        <p className="response-turn-omitted" role="note">
+          This turn is too large to display. Your history is saved.
+        </p>
+      ) : (
+        <>
+          <AgentExecutionLayer
+            turn={turn}
+            props={props}
+            subagents={subagents ?? []}
+            providerLabel={providerLabel}
+            reasoningContent={reasoningContent}
+            liveContent={liveContent}
+            timerStart={timerStart}
+            completionAnnouncement={completionAnnouncement}
+            onBeforeToggle={handleBeforeToggle}
+            onAfterToggle={handleAfterToggle}
+          />
 
-      <FinalAnswerDocument
-        turn={turn}
-        props={props}
-        liveContent={liveContent}
-      />
+          <FinalAnswerDocument
+            turn={turn}
+            props={props}
+            liveContent={liveContent}
+          />
 
-      <SupportingLedgerLayer
-        turn={turn}
-        props={props}
-        previousArtifactTurnId={previousArtifactTurnId}
-        onBeforeToggle={handleBeforeToggle}
-        onAfterToggle={handleAfterToggle}
-      />
+          <SupportingLedgerLayer
+            turn={turn}
+            props={props}
+            previousArtifactTurnId={previousArtifactTurnId}
+            onBeforeToggle={handleBeforeToggle}
+            onAfterToggle={handleAfterToggle}
+          />
+        </>
+      )}
     </section>
   );
 }
@@ -198,6 +207,7 @@ export function sameTurnTimelineProps(
     && left.onStopSubagent === right.onStopSubagent
     && left.turns === right.turns
     && left.contextPackets === right.contextPackets
+    && left.omittedTurnIds === right.omittedTurnIds
     && (!next.turn.isActive || (
       left.streamingText === right.streamingText
       && left.streamingReasoning === right.streamingReasoning

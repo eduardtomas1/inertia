@@ -40,3 +40,14 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+
+.conversation-history-controls button[aria-disabled="true"] {
+  opacity: var(--disabled-opacity);
+  cursor: progress;
+}
+
+.response-turn-omitted {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}

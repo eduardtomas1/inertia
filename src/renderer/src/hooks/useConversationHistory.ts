@@ -44,6 +44,8 @@ export function useConversationHistory({ conversationId, online, detailState, se
       const result = event.result;
       if (result.state !== "ready") throw new Error(result.state === "failed" ? result.message : "This chat history is no longer available.");
       if (mode === "older") prepareConversationHistoryPrepend(conversationId);
+      if (targetKey && !result.detail.messages.some(({ id }) => id === targetKey)
+        && !result.detail.agentTurns.some(({ id }) => id === targetKey)) failedTarget.current = targetKey;
       setDetailState((previous) => previous?.state === "ready" && previous.conversationId === conversationId
         ? { ...previous, detail: mergeConversationHistory(previous.detail, result.detail, mode) }
         : previous);
@@ -92,5 +94,7 @@ export function useConversationHistory({ conversationId, online, detailState, se
     };
   }, [conversationId, detailState?.state, load, loading]);
   const hasOlder = detailState?.state === "ready" && Boolean(detailState.detail.history?.older);
-  return useMemo(() => ({ hasOlder, loading, error, loadOlder }), [hasOlder, loading, error, loadOlder]);
+  const omittedTurnIds = detailState?.state === "ready" ? detailState.detail.history?.omittedTurnIds : undefined;
+  return useMemo(() => ({ hasOlder, loading, error, loadOlder, omittedTurnIds }),
+    [hasOlder, loading, error, loadOlder, omittedTurnIds]);
 }

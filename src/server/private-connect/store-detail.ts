@@ -1,23 +1,19 @@
-import type { ConversationDetail } from "../../shared/contracts";
+import type { Conversation, ConversationDetail } from "../../shared/contracts";
+import { PRIVATE_CONNECT_RUNTIME_LIMITS } from "../../shared/private-connect/runtime-contract";
+import { PRIVATE_CONNECT_INSPECTION_CHARACTERS } from "../../shared/private-connect/sanitizer";
 import type { RuntimeStore } from "../database";
-import { HISTORY_TOO_LARGE_MESSAGE } from "../persistence/conversation-history";
 
-/** Mobile projects a recent window; it never needs the full saved transcript. */
-export function privateConnectStoreDetail(
-  store: Pick<RuntimeStore, "conversationHistory" | "conversation">,
-  conversationId: string,
-): ConversationDetail | null {
-  try {
-    return store.conversationHistory(conversationId);
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== HISTORY_TOO_LARGE_MESSAGE) throw error;
-    // One oversized turn must not prevent authenticated stop/input actions.
-    // The gateway still checks project, conversation grants and current shell.
-    return {
-      conversation: store.conversation(conversationId), agentTurns: [], turnGitArtifacts: [],
-      messages: [], activities: [], subagents: [], reasonings: [], usage: [], plans: [],
-      goals: [], checkpoints: [], reviewSummaries: [], reviewStates: [], reviewNotes: [],
-      contextPackets: [],
-    };
-  }
+export function privateConnectStoreReads(store: Pick<RuntimeStore, "conversationShell" | "recentConversationDetail">): {
+  conversation(conversationId: string): Conversation | null;
+  detail(conversationId: string): ConversationDetail | null;
+} {
+  return {
+    conversation: (conversationId) => store.conversationShell(conversationId),
+    detail: (conversationId) => store.recentConversationDetail(conversationId, {
+      messages: PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages,
+      activities: PRIVATE_CONNECT_RUNTIME_LIMITS.activities,
+      subagents: PRIVATE_CONNECT_RUNTIME_LIMITS.subagents,
+      contentCharacters: PRIVATE_CONNECT_INSPECTION_CHARACTERS,
+    }),
+  };
 }

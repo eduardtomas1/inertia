@@ -54,6 +54,7 @@ export interface ResponseTimelineProps {
   detailLoading?: boolean;
   compactingSince?: string | null;
   checkpointRestoreDisabled: boolean;
+  omittedTurnIds?: readonly string[];
   turnAnchorId?: string | null;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   timelineElementRef?: RefObject<HTMLDivElement | null>;

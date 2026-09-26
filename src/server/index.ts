@@ -109,7 +109,7 @@ import {
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
-import { privateConnectStoreDetail } from "./private-connect/store-detail";
+import { privateConnectStoreReads } from "./private-connect/store-detail";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
@@ -958,7 +958,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
-    detail: (conversationId) => privateConnectStoreDetail(store, conversationId),
+    ...privateConnectStoreReads(store),
     isConversationActive: (conversationId) =>
       turns.isActive(conversationId) || isolatedRuns.has(conversationId),
     preparePrompt: async (conversation) => {

@@ -16,6 +16,8 @@ import {
   AttachmentResolutionError,
 } from "./runtime/attachments/attachment-errors";
 
+export const MESSAGE_ADMISSION_UNAVAILABLE = "message-admission-unavailable";
+
 export class RuntimeRequestError extends Error {
   constructor(
     message: string,

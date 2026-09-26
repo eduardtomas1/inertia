@@ -1,4 +1,4 @@
-import { RuntimeRequestError } from "../../runtime-errors";
+import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
 import type { TurnAdmissionLease } from "./turn-controller-types";
 
 interface TurnAdmissionCoordinatorOptions {
@@ -51,6 +51,7 @@ export class TurnAdmissionCoordinator {
     if (admission && !reserved) {
       throw new RuntimeRequestError(
         "Message admission expired before the turn could be queued.",
+        MESSAGE_ADMISSION_UNAVAILABLE,
       );
     }
   }

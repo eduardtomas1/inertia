@@ -4,7 +4,7 @@ import type { AgentTurn, ChatAttachment, ServerEvent } from "../../shared/contra
 import { chatAttachmentKind } from "../../shared/attachments";
 import type { MessageQueueResult } from "../../shared/queued-messages";
 import { queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
-import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
+import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
 import {
@@ -12,7 +12,7 @@ import {
 } from "./commands/message-send-preparation";
 
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
-  || (error instanceof RuntimeRequestError && error.message.startsWith("Message admission"));
+  || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
 /** Durable queue dispatch never depends on a renderer remaining mounted. */
 export function createQueuedMessageRuntime(

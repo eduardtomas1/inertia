@@ -23,6 +23,7 @@ import {
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import {
+  MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
   RuntimeRequestError,
 } from "../../runtime-errors";
@@ -406,6 +407,7 @@ export function createTurnInteractionCommandHandler(
           throw classifiedMessageSendError(
             new RuntimeRequestError(
               "Message admission did not become available. Try again in a moment.",
+              MESSAGE_ADMISSION_UNAVAILABLE,
             ),
             messageSendStage,
           );

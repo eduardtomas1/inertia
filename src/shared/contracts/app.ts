@@ -94,6 +94,7 @@ export interface ProviderModel {
   defaultReasoningEffort: string;
   /** Missing is accepted only for metadata cached before Fast mode shipped. */
   fastMode?: ProviderFastMode | null;
+  reasoningObserved?: boolean;
 }
 
 export interface ProviderRateLimit {

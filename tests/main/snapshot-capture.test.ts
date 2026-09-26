@@ -1,6 +1,6 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { EventEmitter } from "node:events";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SnapshotElement } from "../../src/main/snapshot-accessibility";
 const native = vi.hoisted(() => {
   class XA11yError extends Error {}
@@ -10,7 +10,9 @@ const native = vi.hoisted(() => {
   } };
 });
 vi.mock("@crowecawcaw/xa11y", () => ({ default: { App: { foreground: native.foreground, byPid: native.foreground }, screenshot: native.screenshot, ...native.errors } }));
-vi.mock("../../src/main/snapshot-x11-foreground", () => ({ readX11Foreground: native.x11, matchesX11Bounds: (bounds: unknown) => Boolean(bounds), SnapshotX11ForegroundError: class extends Error {} }));
+vi.mock("../../src/main/snapshot-x11-foreground", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/main/snapshot-x11-foreground")>(), readX11Foreground: native.x11,
+}));
 import { captureForegroundSnapshot, SnapshotCaptureFailure, snapshotFailureCategory } from "../../src/main/snapshot-capture-worker";
 import { SnapshotGeometryError } from "../../src/main/snapshot-accessibility";
 import type { SnapshotCapturePhase, SnapshotFailureCategory } from "../../src/shared/snapshots";
@@ -27,9 +29,10 @@ function foreground(name = "Review window", fields: SnapshotElement[] = [field()
   };
   return { pid: 123, name: "Fixture", asElement: () => window, children: async () => [window] };
 }
+const nativeBounds = { x: 50, y: 50, width: 100, height: 100 };
 beforeEach(() => {
   vi.resetAllMocks();
-  native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window" });
+  native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window", bounds: nativeBounds, frameBounds: nativeBounds });
   native.foreground.mockResolvedValue(foreground());
   native.screenshot.mockResolvedValue({ width: 100, height: 100, pixels: Buffer.alloc(100 * 100 * 4, 255) });
 });
@@ -173,7 +176,6 @@ describe("foreground snapshot failure categories", () => {
 
   it.each([
     ["permission-denied", "foreground", () => { native.foreground.mockRejectedValue(new PermissionDeniedError("denied")); }],
-    ["invalid-geometry", "foreground", () => { const flat = { ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } }; native.foreground.mockResolvedValue({ ...foreground(), asElement: () => flat, children: async () => [flat] }); }],
     ["invalid-geometry", "accessibility", () => { native.foreground.mockResolvedValue(foreground("Review window", [{ ...field(), bounds: null }])); }],
     ["native-failure", "screenshot", () => { native.screenshot.mockRejectedValue(new PlatformError("capture failed")); }],
     ["native-failure", "screenshot", () => { native.screenshot.mockResolvedValue({ width: 0, height: 0, pixels: Buffer.alloc(0) }); }],
@@ -181,6 +183,14 @@ describe("foreground snapshot failure categories", () => {
     arrange();
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category, phase });
     expect(native.foreground.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+  it("refuses invalid foreground geometry before taking pixels", async () => {
+    const flat = { ...foreground().asElement(), bounds: { x: 0, y: 0, width: 0, height: 10 } };
+    native.foreground.mockResolvedValue({ ...foreground(), asElement: () => flat, children: async () => [flat] });
+    const category = process.platform === "linux" ? "no-active-window" : "invalid-geometry";
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category, phase: "foreground" });
+    expect(native.foreground).toHaveBeenCalledTimes(process.platform === "linux" ? 3 : 1);
+    expect(native.screenshot).not.toHaveBeenCalled();
   });
 });
 
@@ -199,15 +209,64 @@ describe.runIf(process.platform === "linux")("X11 foreground identity", () => {
     expect(native.screenshot).not.toHaveBeenCalled();
   });
   it("discards pixels on a same-title same-process native window switch", async () => {
-    native.x11.mockReturnValueOnce({ id: 100, pid: 123, name: "Review window" })
-      .mockReturnValueOnce({ id: 100, pid: 123, name: "Review window" })
-      .mockReturnValue({ id: 101, pid: 123, name: "Review window" });
+    const window = { pid: 123, name: "Review window", bounds: nativeBounds, frameBounds: nativeBounds };
+    native.x11.mockReturnValueOnce({ ...window, id: 100 })
+      .mockReturnValueOnce({ ...window, id: 100 })
+      .mockReturnValue({ ...window, id: 101 });
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "changed", phase: "verification" });
     expect(native.screenshot).toHaveBeenCalledOnce();
+  });
+  it("masks the client region when xa11y returns decorated frame bounds", async () => {
+    const frameBounds = { x: 49, y: 30, width: 102, height: 125 };
+    const app = foreground();
+    native.x11.mockReturnValue({ id: 100, pid: 123, name: "Review window", bounds: nativeBounds, frameBounds });
+    native.foreground.mockResolvedValue({ ...app, children: async () => [{ ...app.asElement(), bounds: frameBounds }] });
+    const result = await captureForegroundSnapshot();
+    expect(native.screenshot).toHaveBeenCalledExactlyOnceWith({ region: nativeBounds });
+    expect(result.source).toMatchObject({ width: 100, height: 100 });
+    expect(result.source.accessibility.nodes[1]).toMatchObject({ redacted: true, bounds: { x: 10, y: 10, width: 20, height: 20 } });
+    const canvas = createCanvas(100, 100), ctx = canvas.getContext("2d");
+    ctx.drawImage(await loadImage(result.png), 0, 0);
+    expect([...ctx.getImageData(15, 15, 1, 1).data]).toEqual([36, 36, 36, 255]);
   });
   it("reports missing AT-SPI access when X11 proves a foreground process exists", async () => {
     native.foreground.mockRejectedValue(new SelectorNotMatchedError("unregistered app"));
     await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "accessibility-unavailable" });
+    expect(native.screenshot).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Windows application roots", () => {
+  let platform: PropertyDescriptor;
+  beforeEach(() => {
+    platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+  });
+  afterEach(() => { Object.defineProperty(process, "platform", platform); });
+
+  it("captures the unique active modal below the synthetic application root", async () => {
+    const app = foreground();
+    const main = { ...app.asElement(), active: false };
+    const modal = { ...app.asElement(), name: "Active modal", stableId: "modal-window", role: "dialog" };
+    native.foreground.mockResolvedValue({ ...app,
+      asElement: () => ({ ...main, role: "application", bounds: null }),
+      children: async () => [main, modal],
+    });
+    const result = await captureForegroundSnapshot();
+    expect(result.source.windowTitle).toBe("Active modal");
+    expect(native.screenshot).toHaveBeenCalledExactlyOnceWith({ element: modal });
+    expect(native.x11).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 2])("refuses a process with %i active windows", async (count) => {
+    const app = foreground();
+    native.foreground.mockResolvedValue({ ...app,
+      asElement: () => ({ ...app.asElement(), role: "application", active: false, bounds: null }),
+      children: async () => Array.from({ length: count }, (_, index) => ({ ...app.asElement(), stableId: `window-${index}` })),
+    });
+    await expect(captureForegroundSnapshot()).rejects.toMatchObject({ category: "no-active-window", phase: "foreground" });
+    expect(native.foreground).toHaveBeenCalledTimes(3);
     expect(native.screenshot).not.toHaveBeenCalled();
   });
 });

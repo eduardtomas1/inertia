@@ -22,7 +22,7 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const sessionId = "drift-session";
 require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
-  fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify(message.method) + "\\n");
+  fs.appendFileSync(${JSON.stringify(marker)}, JSON.stringify(message) + "\\n");
   if (message.method === ${JSON.stringify(stalledMethod ?? "never")}) return;
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
     protocolVersion: 1, agentCapabilities: { loadSession: true },
@@ -75,6 +75,21 @@ describe.each(["cursor", "kimi"] as const)("%s ACP drift regressions", (provider
     const result = await start().result;
     expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true });
     expect(JSON.stringify(result.failure)).toMatch(/malformed usage update/iu);
+  });
+
+  it("rejects an unnegotiated ACP 1.5 notice and confirms cleanup", async () => {
+    const { start, marker } = fixture(providerId, undefined, {
+      sessionUpdate: "notice", severity: "warning", title: "Fixture advisory",
+    });
+    const result = await start().result;
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true });
+    expect(result.failure?.reason).toBe("malformed-protocol");
+    expect(JSON.stringify(result.failure)).toMatch(/malformed session update envelope/iu);
+    const requests = readFileSync(marker, "utf8").trim().split("\n").map((line) => (
+      JSON.parse(line) as { method: string; params?: { clientCapabilities?: object } }
+    ));
+    expect(requests.find((request) => request.method === "initialize")?.params?.clientCapabilities)
+      .not.toHaveProperty("session.notices");
   });
 
   it("rejects a tool identity containing NUL", async () => {

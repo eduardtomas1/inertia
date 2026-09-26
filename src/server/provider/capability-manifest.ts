@@ -285,7 +285,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.276",
+    bundledSdkVersion: "0.3.283",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,
@@ -304,8 +304,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "cursor",
     harnessId: "cursor-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-1.4.0/cursor",
-    bundledSdkVersion: "1.4.0",
+    protocolRevision: "acp-v1/sdk-1.5.0/cursor",
+    bundledSdkVersion: "1.5.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -321,8 +321,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-1.4.0/kimi",
-    bundledSdkVersion: "1.4.0",
+    protocolRevision: "acp-v1/sdk-1.5.0/kimi",
+    bundledSdkVersion: "1.5.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -337,8 +337,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "opencode",
     harnessId: "opencode-sdk",
     implementationRevision: 1,
-    protocolRevision: "opencode-owned-server/sdk-1.18.31",
-    bundledSdkVersion: "1.18.31",
+    protocolRevision: "opencode-owned-server/sdk-1.18.32",
+    bundledSdkVersion: "1.18.32",
     support: {
       ...CORE_NATIVE,
       "follow-up-steer": "native",

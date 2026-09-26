@@ -18,7 +18,7 @@ vi.mock("@crowecawcaw/xa11y", () => ({ default: {
 } }));
 vi.mock("../../src/main/snapshot-x11-foreground", () => ({
   readX11Foreground: () => ({ id: 100, pid: 123, name: "Private roadmap" }),
-  matchesX11Bounds: () => true,
+  x11CaptureBounds: (bounds: unknown) => bounds,
   SnapshotX11ForegroundError: class extends Error {},
 }));
 vi.mock("electron", () => ({

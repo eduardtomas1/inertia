@@ -81,6 +81,9 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       title: `Checked fixture ${index}`,
       detail: "A measured work-log row for scroll-anchor validation.",
       status: "completed",
+      // Recent activity across distinct older turns keeps this bounded runtime
+      // window virtualized without asking the server for unbounded history.
+      createdAt: new Date(baseTime + 240_000 + index * 1_000).toISOString(),
     });
     const answer = store.createMessage(
       conversation.id,
@@ -190,6 +193,18 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       terminalReason: "provider-completed",
     });
   }
+  // Ten expensive turns trigger weighted virtualization below the fourteen-row
+  // threshold. The remaining source history stays in SQLite and is pageable.
+  for (let index = 26; index < 36; index += 1) {
+    store.addActivity({
+      conversationId: weightedConversation.id,
+      runId: `${fixturePrefix}-weighted-run-${index}`,
+      turnId: `${fixturePrefix}-weighted-${String(index).padStart(2, "0")}`,
+      kind: "command", title: `Recent weighted detail ${index}`,
+      detail: `${index === 26 ? "CLOSED_WEIGHTED_SENTINEL\n" : ""}${weightedDetail.repeat(4)}`,
+      status: "completed", createdAt: new Date(baseTime + 240_000 + index * 1_000).toISOString(),
+    });
+  }
   store.selectConversation(weightedConversation.id);
   store.close();
 
@@ -201,7 +216,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     })).toBeVisible();
     const weightedTranscript = page.getByLabel("Thread transcript");
     const weightedVirtualWindow = weightedTranscript.getByRole("feed", {
-      name: "36 conversation turns",
+      name: "10 conversation turns",
     });
     await expect(weightedVirtualWindow).toBeVisible();
     await expect.poll(
@@ -220,9 +235,9 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       tagName === "ARTICLE"
       && /^Turn \d+: Weighted request \d+$/u.test(label ?? "")
       && Number(position) > 0
-      && size === "36")).toBe(true);
+      && size === "10")).toBe(true);
     const weightedFeedAx = await weightedVirtualWindow.ariaSnapshot();
-    expect(weightedFeedAx).toContain('- feed "36 conversation turns"');
+    expect(weightedFeedAx).toContain('- feed "10 conversation turns"');
     expect(weightedFeedAx).toMatch(
       /article "Turn \d+: Weighted request \d+"/u,
     );
@@ -254,16 +269,17 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
         Math.floor((element.scrollHeight - element.clientHeight) / 2) - element.scrollTop);
       await page.mouse.wheel(0, delta);
     };
-    const virtualWindow = transcript.getByRole("feed", { name: "120 conversation turns" });
+    const virtualWindow = transcript.getByRole("feed", { name: "24 conversation turns" });
     await expect(virtualWindow).toBeVisible();
+    await expect(page.getByRole("button", { name: "Older history", exact: true })).toBeVisible();
     await expect.poll(() => virtualWindow.locator(".response-virtual-item").count()).toBeLessThan(24);
     const minimap = transcript.getByRole("navigation", { name: "Conversation minimap" });
     await expect(minimap).toBeVisible();
-    await expect(minimap.getByRole("button")).toHaveCount(40);
+    await expect(minimap.getByRole("button")).toHaveCount(24);
     const firstMinimapMarker = minimap.getByRole("button").first();
     await expect(firstMinimapMarker).toHaveAttribute(
       "aria-label",
-      "Go to turn 1: Virtualized request 0",
+      "Go to turn 1: Virtualized request 96",
     );
     await expect(firstMinimapMarker).not.toHaveAttribute("title");
     // Settle the native target, then restore its idle state before measuring.
@@ -281,7 +297,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     const minimapPreview = minimap.locator(".timeline-minimap-preview");
     await expect(minimapPreview).toHaveCount(1);
     await expect(minimapPreview).toHaveAttribute("data-turn", "1");
-    await expect(minimapPreview).toContainText("Virtualized request 0");
+    await expect(minimapPreview).toContainText("Virtualized request 96");
     await expect(minimapPreview).toHaveAttribute("aria-hidden", "true");
     await expect(firstMinimapMarker).not.toHaveAttribute("aria-describedby");
     // Hover has to enlarge the marker itself without shifting the 36px pointer

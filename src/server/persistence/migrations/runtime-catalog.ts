@@ -32,6 +32,10 @@ import { appearanceThemePairMigration } from "./appearance-theme-pair";
 import { providerUsageLimitsMigration } from "./provider-usage-limits";
 import { messageChronologyMigration, privateConnectMessageOriginMigration } from "./message-metadata";
 import { nativeAntigravityProviderMigration } from "./native-antigravity-provider"; import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat"; import { workingIndicatorMigration } from "./working-indicator"; import { conversationContextDeliveriesMigration } from "./conversation-context-deliveries"; import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
+import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership"; import { recoveredFinalAnswersMigration } from "./recovered-final-answers";
+import { durableMessageQueueMigration } from "./durable-message-queue";
+import { addConversationContentRevisions } from "./conversation-content-revisions";
+import { messageSendReceiptsMigration } from "./message-send-receipts";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -1223,22 +1227,18 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
           WHERE usage_start_json IS NOT NULL;
         `,
       },
-      persistColorTheme,
-      persistAgentThreadManagement,
-      conversationContextPacketsMigration,
-      nativeKimiProviderMigration,
-      persistDiscordReleaseRepositoryUrl,
-      authoritativeRunStateMigration,
+      persistColorTheme, persistAgentThreadManagement,
+      conversationContextPacketsMigration, nativeKimiProviderMigration,
+      persistDiscordReleaseRepositoryUrl, authoritativeRunStateMigration,
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, nativeGeminiProviderMigration,
       persistTurnContinuationEvidence, issueReportsMigration,
-      messageChronologyMigration,
-      contextCompactionMigration,
-      projectPreferencesMigration,
-      appearanceThemePairMigration,
-      providerUsageLimitsMigration,
-      privateConnectMessageOriginMigration,
+      messageChronologyMigration, contextCompactionMigration,
+      projectPreferencesMigration, appearanceThemePairMigration,
+      providerUsageLimitsMigration, privateConnectMessageOriginMigration,
       nativeAntigravityProviderMigration, conversationContextWholeChatMigration, workingIndicatorMigration, conversationContextDeliveriesMigration, attachmentStorageSettingsMigration,
+      agentThreadTargetOwnershipMigration, recoveredFinalAnswersMigration, durableMessageQueueMigration,
+      { name: "TrackConversationContentRevisions", up: addConversationContentRevisions }, messageSendReceiptsMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

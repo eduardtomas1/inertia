@@ -1,6 +1,6 @@
 import type WebSocket from "ws";
 import type { ServerEvent } from "../../../shared/contracts";
-import type { MessageSearchResult, MessageSearchTarget } from "../../../shared/message-search";
+import type { MessageSearchCursor, MessageSearchResult, MessageSearchTarget } from "../../../shared/message-search";
 import type { RuntimeStore } from "../../database";
 import { runMessageSearchWorker } from "../../persistence/message-search-worker-client";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -23,7 +23,7 @@ export class MessageSearchController {
     private readonly worker = runMessageSearchWorker,
   ) {}
 
-  search(socket: WebSocket, requestId: string, query: string): Promise<MessageSearchResult> {
+  search(socket: WebSocket, requestId: string, query: string, cursor?: MessageSearchCursor): Promise<MessageSearchResult> {
     const previous = this.jobs.get(socket);
     previous?.controller.abort();
     const controller = new AbortController();
@@ -35,7 +35,7 @@ export class MessageSearchController {
       if (this.running >= 2) throw new RuntimeRequestError("Message search is busy. Try again shortly.");
       this.running += 1;
       try {
-        return await this.worker(this.databasePath, query, controller.signal);
+        return await this.worker(this.databasePath, query, controller.signal, cursor);
       } catch {
         throw new RuntimeRequestError(controller.signal.aborted
           ? "Search cancelled."
@@ -74,7 +74,7 @@ export function createMessageSearchCommandHandler(input: {
   ], async (socket, command) => {
     switch (command.type) {
       case "conversation.messages.search": {
-        const result = await input.searches.search(socket, command.requestId, command.payload.query);
+        const result = await input.searches.search(socket, command.requestId, command.payload.query, command.payload.cursor);
         input.send(socket, { type: "request.result", requestId: command.requestId, result });
         return "handled";
       }

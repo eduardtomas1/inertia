@@ -6,10 +6,12 @@ import {
   turnRequestContextSchema,
 } from "./common";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
+import { messageQueuePayloadSchema } from "../../message-queue";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
 export const agentCommandSchemas = [
+  z.strictObject({ ...requestBase, type: z.literal("message.queue"), payload: messageQueuePayloadSchema }),
   z
     .object({
       ...requestBase,

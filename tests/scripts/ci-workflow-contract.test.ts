@@ -6,6 +6,67 @@ import { createEvidencePlan, EVIDENCE_JOBS, outputsForEvidencePlan, PLATFORMS } 
 const source = (file: string) => readFileSync(file, "utf8");
 const workflow = parse(source(".github/workflows/ci.yml"));
 
+it("runs the native Windows ARM64 regressions outside the portable subset", () => {
+  const step = workflow.jobs.test.steps.find((entry: { name: string }) =>
+    entry.name === "Verify Windows ARM64 native terminal and Job Object regressions");
+  expect(step.if).toBe("runner.os == 'Windows' && matrix.arch == 'arm64'");
+  expect(step["continue-on-error"]).not.toBe(true);
+  expect(step["timeout-minutes"]).toBe(8);
+  expect(step.run).toContain("vitest run --maxWorkers=1");
+  for (const file of ["tests/server/windows-managed-terminal-native.test.ts", "tests/main/windows-runtime-job.test.ts"]) {
+    expect(step.run).toContain(file);
+    expect(source(file)).toContain("win32");
+  }
+});
+
+it("runs and retains targeted budgets on exactly the selected Linux jobs", () => {
+  expect(workflow.jobs.classify.outputs.hot_path_benchmarks)
+    .toBe("${{ steps.changes.outputs.hot_path_benchmarks }}");
+  for (const [id, command] of [
+    ["pr-linux-core", "npm run benchmark:platform:smoke"],
+    ["pr-linux-lifecycle", "xvfb-run --auto-servernum npm run benchmark:desktop:built"],
+  ]) {
+    const job = workflow.jobs[id!];
+    const step = job.steps.find((entry: { run?: string }) => entry.run === command);
+    expect(step.if).toBe("needs.classify.outputs.hot_path_benchmarks == 'true'");
+    expect(step["timeout-minutes"]).toBe(8);
+    expect(step["continue-on-error"]).not.toBe(true);
+    const retained = job.steps.find((entry: { with?: { path?: string } }) => entry.with?.path === "performance-results");
+    expect(retained.if).toContain("always()");
+    expect(retained.with["if-no-files-found"]).toBe("error");
+    expect(workflow.jobs["merge-ready"].needs).toContain(id);
+  }
+  for (const [id, name] of [
+    ["test", "Run cross-platform performance smoke"],
+    ["electron", "Measure desktop workloads under Xvfb"],
+  ]) {
+    const step = workflow.jobs[id!].steps.find((entry: { name: string }) => entry.name === name);
+    expect(step.if).toContain("needs.classify.outputs.benchmarks == 'true'");
+    expect(step.if).toContain("needs.classify.outputs.hot_path_benchmarks == 'true' && matrix.artifact == 'linux-x64'");
+    expect(step["continue-on-error"]).not.toBe(true);
+  }
+});
+
+it("reports provider drift as a failed standalone canary without adding a PR obligation", () => {
+  const canary = parse(source(".github/workflows/provider-contract-drift.yml"));
+  expect(Object.keys(canary.on).sort()).toEqual(["schedule", "workflow_dispatch"]);
+  const probe = canary.jobs["provider-drift"];
+  expect(probe["continue-on-error"]).not.toBe(true);
+  expect(canary.jobs["report-failure"]["continue-on-error"]).not.toBe(true);
+  expect(canary.jobs["report-failure"].if).toContain("always()");
+  const collection = probe.steps.find((entry: { id?: string }) => entry.id === "collect");
+  expect(collection.if).toBe("always()");
+  expect(collection.run).toContain('if [[ "$outcome" != "success" ]]');
+  const settlement = probe.steps.at(-1);
+  expect(settlement.name).toBe("Require a complete successful provider probe");
+  expect(settlement.if).toBe("always()");
+  expect(settlement["continue-on-error"]).not.toBe(true);
+  expect(settlement.env.CANARY_FAILED).toBe("${{ steps.collect.outputs.failed }}");
+  expect(settlement.run).toContain('if [[ "$CANARY_FAILED" != "false" ]]');
+  expect(settlement.run).toContain("exit 1");
+  expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
+});
+
 it.each(PLATFORMS.filter(({ artifact }) => artifact.startsWith("linux-")))(
   "certifies the release configuration and updater metadata for $artifact",
   (platform) => {

@@ -1,4 +1,5 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
+import type { MessageQueueResult } from "../message-queue";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -30,7 +31,7 @@ import type {
   RuntimeSyncCursor,
   WorkspaceRun,
 } from "./app";
-import type { ConversationDetailResult } from "./conversation-detail";
+import type { ConversationContentResult, ConversationDetailResult } from "./conversation-detail";
 import type { MessageSearchResult, MessageSearchTarget } from "../message-search";
 import type {
   DuoPendingResult,
@@ -172,7 +173,7 @@ export type ServerEvent =
   | RuntimeSequencedFrame
   | { type: "runtime.sync.completed"; sync: RuntimeSyncCursor }
   | { type: "request.ok"; requestId: string }
-  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string }
+  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string; delivery?: "ambiguous" }
   | {
       type: "request.result";
       requestId: string;
@@ -202,6 +203,7 @@ export type ServerEvent =
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
+        | MessageQueueResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult
@@ -226,6 +228,7 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
+        | ConversationContentResult
         | MessageSearchResult;
     }
   | RuntimeMutationEvent

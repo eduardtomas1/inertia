@@ -144,9 +144,8 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
       level: 1,
     })).toBeVisible();
     const transcript = page.getByLabel("Thread transcript");
-    await expect(transcript.getByRole("feed", {
-      name: "18 conversation turns",
-    })).toBeVisible();
+    await expect(transcript.locator(".response-static-item")).toHaveCount(8);
+    await expect(page.getByRole("button", { name: "Older history", exact: true })).toBeVisible();
     await page.waitForTimeout(250);
     await transcript.hover({ position: { x: 300, y: 240 } });
     await page.mouse.wheel(0, -4_000);

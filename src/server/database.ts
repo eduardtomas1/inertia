@@ -13,6 +13,7 @@ import {
   type CheckpointSummary,
   type Conversation,
   type ConversationDetail,
+  type ConversationHistoryRequest,
   type ConversationShell,
   type DiffReviewNote,
   type DiffReviewState,
@@ -32,6 +33,10 @@ import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { MessageQueueRepository } from "./persistence/message-queue-repository";
+import { MessageSendReceiptRepository } from "./persistence/message-send-receipt-repository";
+import { ConversationHistoryRepository, HISTORY_MAX_BYTES } from "./persistence/conversation-history-repository";
+import { PrivateConnectTranscriptRepository } from "./persistence/private-connect-transcript-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
@@ -59,7 +64,7 @@ import {
 import { RecordNotFoundError } from "./persistence/errors";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
-import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { initializeRuntimeDatabase } from "./persistence/runtime-database-startup";
 import { cachedStatement } from "./persistence/statement-cache";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
@@ -112,6 +117,8 @@ export class RuntimeStore {
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
+  readonly messageQueue: MessageQueueRepository;
+  readonly messageSendReceipts: MessageSendReceiptRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
@@ -125,6 +132,8 @@ export class RuntimeStore {
   readonly usageLimits: UsageLimitsRepository;
   private readonly settingsRepository: SettingsRepository;
   private readonly snapshotRepository: SnapshotRepository;
+  private readonly historyRepository: ConversationHistoryRepository;
+  private readonly privateConnectTranscripts: PrivateConnectTranscriptRepository;
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
@@ -172,6 +181,8 @@ export class RuntimeStore {
         this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
+    this.messageQueue = new MessageQueueRepository(this.database);
+    this.messageSendReceipts = new MessageSendReceiptRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
@@ -212,6 +223,8 @@ export class RuntimeStore {
       database: this.database,
       contextPackets: (conversationId) => this.contextPackets.list(conversationId),
     });
+    this.historyRepository = new ConversationHistoryRepository(this.database);
+    this.privateConnectTranscripts = new PrivateConnectTranscriptRepository(this.database);
     this.executionLedgerRepository = new ExecutionLedgerRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
@@ -227,23 +240,7 @@ export class RuntimeStore {
       database: this.database,
     });
     this.turnLedgerRepository = new TurnLedgerRepository({
-      createMessage: (
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ) => this.createMessage(
-        conversationId,
-        content,
-        role,
-        attachments,
-        turnId,
-        createdAt,
-        options,
-      ),
+      createMessage: (...args) => this.createMessage(...args),
       database: this.database,
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -264,28 +261,16 @@ export class RuntimeStore {
       requireConversation: (conversationId) => this.requireConversation(conversationId),
       requireProject: (projectId) => this.requireProject(projectId),
     });
-    try {
-      this.database.pragma("foreign_keys = ON");
-      this.database.pragma("busy_timeout = 5000");
-      this.database.pragma("journal_mode = WAL");
-      // NORMAL keeps committed transactions crash-consistent in WAL mode
-      // without forcing every streamed update through a full filesystem sync.
-      // A sudden host power loss may still lose the newest OS-buffered commits.
-      this.database.pragma("synchronous = NORMAL");
-      this.database.pragma("cache_size = -16000");
-      this.database.pragma("mmap_size = 268435456");
-      this.database.pragma("temp_store = MEMORY");
-      migrateRuntimeDatabase(this.database);
+    initializeRuntimeDatabase(this.database, () => {
       this.agentThreadManagement.recoverInterrupted();
+      this.messageQueue.recoverInterrupted();
+      this.messageSendReceipts.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
       reconcileRecoveryImportJournal(this.database);
       this.settingsRepository.initialize();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
-    } catch (error) {
-      if (this.database.open) this.database.close();
-      throw error;
-    }
+    });
   }
 
   close(): void {
@@ -350,6 +335,7 @@ export class RuntimeStore {
             message.content,
             message.role,
             message.createdAt,
+            message.finalAnswer,
           );
         },
       },
@@ -394,8 +380,23 @@ export class RuntimeStore {
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    return this.snapshotRepository.conversationDetail(conversationId);
+    const detail = this.snapshotRepository.conversationDetail(conversationId);
+    return detail ? { ...detail, queuedMessages: this.messageQueue.list(conversationId) } : null;
   }
+
+  conversationHistory(conversationId: string, options: ConversationHistoryRequest = {}): ConversationDetail | null {
+    const detail = this.historyRepository.load(conversationId, options);
+    if (!detail) return null;
+    const result = { ...detail, queuedMessages: this.messageQueue.list(conversationId), contextPackets: this.contextPackets.list(conversationId, detail.messages.map(({ id }) => id)) };
+    if (Buffer.byteLength(JSON.stringify(result)) > HISTORY_MAX_BYTES) throw new Error("This history page contains oversized metadata. Its stored content is preserved.");
+    return result;
+  }
+
+  conversationContent(conversationId: string, cursor: string) {
+    return this.historyRepository.readContent(conversationId, cursor);
+  }
+
+  privateConnectTranscript(conversationId: string) { return this.privateConnectTranscripts.load(conversationId); }
 
   loadProviderMetadata = (): PersistedProviderMetadata[] => this.providerMetadataRepository.load();
   saveProviderMetadata = (metadata: PersistedProviderMetadata): void => this.providerMetadataRepository.save(metadata);

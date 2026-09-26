@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
-export const DATABASE_RECOVERY_EXPORT_VERSION = 2;
+export const DATABASE_RECOVERY_EXPORT_VERSION = 3;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
 export const DATABASE_RECOVERY_EXPORT_MAX_PROJECTS = 10_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS = 100_000;
@@ -15,10 +15,17 @@ const legacyRecoveryMessageSchema = z.object({
   createdAt: timestampSchema,
 }).strict();
 
-const recoveryMessageSchema = legacyRecoveryMessageSchema.extend({
+const versionTwoMessageSchema = legacyRecoveryMessageSchema.extend({
   ordinal: z.number().int().min(0)
     .max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES - 1),
 }).strict();
+
+const recoveryMessageSchema = versionTwoMessageSchema.extend({
+  /** Older exports have no evidence that distinguishes answers from commentary. */
+  finalAnswer: z.boolean().optional(),
+}).strict().refine((value) => !value.finalAnswer || value.role === "assistant", {
+  message: "Only assistant messages can be final answers.",
+});
 
 const recoveryConversationFields = {
   title: z.string().max(4_000),
@@ -45,6 +52,10 @@ const legacyRecoveryConversationSchema = z.object({
 const recoveryConversationSchema = z.object({
   ...recoveryConversationFields,
   messages: z.array(recoveryMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
+  queuedMessages: z.array(z.strictObject({
+    content: z.string().min(1).max(20_000), createdAt: timestampSchema,
+    status: z.enum(["queued", "paused", "dispatching", "uncertain", "rejected"]),
+  })).max(3).optional(),
 }).strict().superRefine((value, context) => {
   for (const [index, message] of value.messages.entries()) {
     if (message.ordinal !== index) {
@@ -77,9 +88,15 @@ const recoveryProjectSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
 }).strict();
 
+const versionTwoProjectSchema = legacyRecoveryProjectSchema.extend({
+  conversations: z.array(legacyRecoveryConversationSchema.extend({
+    messages: z.array(versionTwoMessageSchema).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
+  }).strict()).max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
+}).strict();
+
 interface RecoveryExportCounts {
   projects: Array<{
-    conversations: Array<{ messages: unknown[] }>;
+    conversations: Array<{ messages: unknown[]; queuedMessages?: unknown[] }>;
   }>;
 }
 
@@ -89,10 +106,12 @@ function validateRecoveryExportCounts(
 ): void {
   let conversations = 0;
   let messages = 0;
+  let queuedMessages = 0;
   for (const project of value.projects) {
     conversations += project.conversations.length;
     for (const conversation of project.conversations) {
       messages += conversation.messages.length;
+      queuedMessages += conversation.queuedMessages?.length ?? 0;
     }
   }
   if (conversations > DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS) {
@@ -107,6 +126,7 @@ function validateRecoveryExportCounts(
       message: "The recovery export contains too many messages.",
     });
   }
+  if (queuedMessages > 1000) context.addIssue({ code: "custom", message: "The recovery export contains too many queued messages." });
 }
 
 const legacyDatabaseRecoveryExportSchema = z.object({
@@ -127,6 +147,12 @@ export const databaseRecoveryExportSchema = z.object({
 
 const supportedDatabaseRecoveryExportSchema = z.union([
   databaseRecoveryExportSchema,
+  z.strictObject({
+    format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
+    version: z.literal(2),
+    exportedAt: timestampSchema,
+    projects: z.array(versionTwoProjectSchema).max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
+  }).superRefine(validateRecoveryExportCounts),
   legacyDatabaseRecoveryExportSchema,
 ]);
 
@@ -171,6 +197,10 @@ export function parseDatabaseRecoveryExport(
   if (result.data.version === DATABASE_RECOVERY_EXPORT_VERSION) {
     return result.data;
   }
+  if (result.data.version === 2 && result.data.projects.some((project) =>
+    project.conversations.some((conversation) => conversation.messages.some(
+      (message, index) => message.ordinal !== index,
+    )))) throw new Error("The recovery export does not match the supported format.");
   return {
     ...result.data,
     version: DATABASE_RECOVERY_EXPORT_VERSION,

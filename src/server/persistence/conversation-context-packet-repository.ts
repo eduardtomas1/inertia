@@ -984,11 +984,12 @@ export class ConversationContextPacketRepository {
     return rows.map(({ target_conversation_id }) => target_conversation_id);
   }
 
-  list(targetConversationId: string): ConversationContextPacketSummary[] {
+  list(targetConversationId: string, messageIds?: readonly string[]): ConversationContextPacketSummary[] {
     this.context.requireConversation(targetConversationId);
+    const scope = messageIds ? `AND (packet.consumed_message_id IS NULL OR packet.consumed_message_id IN (${messageIds.map(() => "?").join(",") || "NULL"}))` : "";
     const rows = this.context.database.prepare(`
       SELECT ${PACKET_SUMMARY_COLUMNS},
-        CASE WHEN packet.transport_version = 1 OR packet.consumed_message_id IS NULL
+        CASE WHEN packet.consumed_message_id IS NULL
           THEN packet.excerpts_json END AS excerpts_json,
         EXISTS(
           SELECT 1 FROM conversations source
@@ -996,8 +997,9 @@ export class ConversationContextPacketRepository {
         ) AS source_available
       FROM conversation_context_packets packet
       WHERE packet.target_conversation_id = ?
+        ${scope}
       ORDER BY packet.created_at ASC, packet.id ASC
-    `).all(targetConversationId) as ConversationContextPacketListRow[];
+    `).all(targetConversationId, ...(messageIds ?? [])) as ConversationContextPacketListRow[];
     const legacyCohorts = new Map<string | null, number>();
     for (const row of rows) {
       if (row.transport_version !== 1) continue;
@@ -1007,7 +1009,8 @@ export class ConversationContextPacketRepository {
     const agentPackets = new Set((this.context.database.prepare(`
       SELECT packet_id FROM agent_context_requests
       WHERE target_conversation_id = ? AND status = 'completed'
-    `).all(targetConversationId) as Array<{ packet_id: string }>).map((row) => row.packet_id));
+        ${messageIds ? `AND target_user_message_id IN (${messageIds.map(() => "?").join(",") || "NULL"})` : ""}
+    `).all(targetConversationId, ...(messageIds ?? [])) as Array<{ packet_id: string }>).map((row) => row.packet_id));
     const drafts = new Map(this.previewDrafts(rows
       .filter((row) => row.consumed_message_id === null)
       .map((row) => packetFromRow(row as ConversationContextPacketRow, row.source_available === 1)))
@@ -1017,7 +1020,7 @@ export class ConversationContextPacketRepository {
       if (draft) return summaryFromPacket(draft);
       if (row.transport_version !== 1) return deliveredSummary(row, row.source_available === 1);
       return summaryFromPacket(prepareLegacyConversationContextPacket(
-        packetFromRow(row as ConversationContextPacketRow, row.source_available === 1),
+        this.get(row.id, targetConversationId),
         agentPackets.has(row.id) ? AGENT_CONTEXT_RESULT_BUDGET_BYTES
           : conversationContextTransportBudget(legacyCohorts.get(row.consumed_request_id)!),
         agentPackets.has(row.id) ? "tool-result" : "prompt",

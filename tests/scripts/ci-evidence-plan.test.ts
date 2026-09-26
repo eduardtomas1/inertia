@@ -20,7 +20,7 @@ function evidence(selected = plan(["package-lock.json"])) {
 }
 
 describe("explainable CI plan", () => {
-  it("measures desktop performance on main and nightly, never as pull request gating", () => {
+  it("keeps the complete performance matrix on main and nightly", () => {
     const performancePaths = ["benchmarks/renderer-primitives.test.ts"];
     expect(plan(performancePaths, { event: "push" }).domains).toContain("performance");
     expect(plan(performancePaths, { event: "push" }).benchmarks).toBe(true);
@@ -30,6 +30,41 @@ describe("explainable CI plan", () => {
       expect(plan(performancePaths, options).benchmarks).toBe(false);
     }
     expect(plan(["docs/CI_EVIDENCE.md"], { event: "push" }).benchmarks).toBe(false);
+  });
+
+  it.each([
+    "src/renderer/src/components/ResponseTimeline.tsx",
+    "src/renderer/src/components/response-timeline/viewport.tsx",
+    "src/renderer/src/hooks/useConversationDetail.ts",
+    "src/server/persistence/snapshot-repository.ts",
+    "src/server/runtime/turns/turn-stream-coalescer.ts",
+    "src/server/runtime/turns/turn-controller.ts",
+    "src/server/runtime/runtime-sync-hub.ts",
+    "src/server/runtime-protocol.ts",
+    "src/renderer/src/hooks/useInertiaConnection.ts",
+    "benchmarks/renderer-primitives.test.ts",
+    "package-lock.json",
+  ])("requires Linux performance budgets before merging a hot-path change: %s", (path) => {
+    for (const event of ["pull_request", "merge_group", "push"]) {
+      const selected = plan([path], { event });
+      expect(selected.benchmarks || selected.hotPathBenchmarks).toBe(true);
+      if (selected.hotPathBenchmarks) {
+        expect(selected.suites).toContain("linux-hot-path-benchmarks");
+        expect(selected.platforms.includes("linux-x64")
+          || (selected.requiredJobs.includes("pr-linux-core")
+            && selected.requiredJobs.includes("pr-linux-lifecycle"))).toBe(true);
+      }
+      expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
+    }
+    expect(plan([path], { draft: true }).hotPathBenchmarks).toBe(false);
+  });
+
+  it("omits targeted benchmarks for unrelated UI and avoids duplicate nightly obligations", () => {
+    expect(plan(["src/renderer/src/components/UsageLimitsPanel.tsx"]).hotPathBenchmarks).toBe(false);
+    expect(plan(["README.md"]).hotPathBenchmarks).toBe(false);
+    expect(plan(["src/server/persistence/snapshot-repository.ts"], { event: "schedule" }))
+      .toMatchObject({ benchmarks: true, hotPathBenchmarks: false });
+    expect(plan(["package-lock.json"]).suites).toContain("windows-arm64:native-process-regressions");
   });
 
   it("does not buy native installers for documentation or renderer contracts", () => {
@@ -211,7 +246,7 @@ it("enumerates every shadow omission without changing canonical current-candidat
   ]);
   expect(comparison.newlyRequiredChecks).toEqual(["Linux core and portable conformance", "Linux interaction and lifecycle"]);
   expect(comparison).toMatchObject({ currentBenchmarks: true, proposedBenchmarks: false });
-  expect(comparison.newlyOmittedSuites).toHaveLength(14);
+  expect(comparison.newlyOmittedSuites).toHaveLength(15);
   expect(JSON.stringify(current)).toBe(before);
   // Shadow evidence cannot satisfy the strict plan, nor can a different source
   // or merge SHA be compared as if it were the candidate.

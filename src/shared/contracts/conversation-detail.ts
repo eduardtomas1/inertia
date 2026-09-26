@@ -23,11 +23,38 @@ import type {
 } from "./git";
 import type { ConversationContextPacketSummary } from "../conversation-context";
 
+export interface ConversationHistoryRequest {
+  cursor?: string;
+  anchorMessageId?: string;
+}
+
+export interface ConversationDeferredContent {
+  kind: "message" | "reasoning" | "activity";
+  id: string;
+  label: string;
+  cursor: string;
+  totalBytes: number;
+}
+
+export interface ConversationContentResult {
+  kind: "conversation.content";
+  conversationId: string;
+  text: string;
+  offsetBytes: number;
+  totalBytes: number;
+  nextCursor: string | null;
+}
+import type { QueuedMessage } from "../message-queue";
+
 /**
  * Heavy state for one conversation. This is loaded independently from the
  * app shell so transcript growth does not inflate navigation snapshots.
  */
 export interface ConversationDetail {
+  /** A bounded transcript window; navigation replaces, rather than accumulates, it. */
+  history?: { olderCursor: string | null; newerCursor: string | null; recordCount: number };
+  /** Explicit previews whose complete stored text remains available in bounded segments. */
+  deferredContent?: ConversationDeferredContent[];
   conversation: Conversation;
   agentTurns: AgentTurn[];
   turnGitArtifacts: TurnGitArtifact[];
@@ -44,6 +71,7 @@ export interface ConversationDetail {
   reviewNotes: DiffReviewNote[];
   /** Present on current local-runtime details; absent from legacy projections. */
   contextPackets?: ConversationContextPacketSummary[];
+  queuedMessages?: QueuedMessage[];
 }
 
 export type ConversationDetailResult =

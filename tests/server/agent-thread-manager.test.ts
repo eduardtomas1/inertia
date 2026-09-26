@@ -45,7 +45,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }) {
     configurationRevision: source.modelSelection.backendConfigurationRevision,
     association: "authoritative",
   }).turn;
-  const active = new Set<string>();
+  const active = new Map<string, { turnId: string; runId: string }>();
   const terminalResumes = new Set<string>();
   let reservationHeldDuringStart = false;
   const providerTerminalResumes = {
@@ -69,7 +69,8 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }) {
   let followUpAdmission = true;
   const turns = {
     isActive: (conversationId: string) => active.has(conversationId),
-    activeConversationIds: () => [...active],
+    activeConversationIds: () => [...active.keys()],
+    activeIdentity: (conversationId: string) => active.get(conversationId) ?? null,
     queue: (request: {
       conversationId: string;
       content: string;
@@ -101,21 +102,30 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }) {
       const turn = store.agentTurn(turnId);
       reservationHeldDuringStart ||= terminalResumes.has(turn.conversationId);
       starts.push(turnId);
-      active.add(turn.conversationId);
+      active.set(turn.conversationId, { turnId: turn.id, runId: turn.runId });
       return true;
     },
     failBeforeStart: vi.fn(),
     cancel: (conversationId: string) => active.delete(conversationId),
+    cancelOwned: (conversationId: string, identity: { turnId: string; runId: string }) => {
+      const current = active.get(conversationId);
+      return current?.turnId === identity.turnId && current.runId === identity.runId
+        ? active.delete(conversationId) : false;
+    },
     waitForProviderCleanup: async () => undefined,
     acquireFollowUpAdmission: (conversationId: string) => (
       active.has(conversationId) && followUpAdmission
-        ? { conversationId, release: vi.fn() }
+        ? { conversationId, ...active.get(conversationId)!, release: vi.fn() }
         : null
     ),
     setFollowUpAdmission: (accepted: boolean) => {
       followUpAdmission = accepted;
     },
-    steer: async () => ({ turnId: `follow-up-${++followUps}` }),
+    steer: async (lease: { turnId: string }, _input: unknown, _attachments: unknown, acknowledged?: () => void) => {
+      followUps += 1;
+      acknowledged?.();
+      return { id: `follow-up-${followUps}`, turnId: lease.turnId };
+    },
   };
   const creation = {
     create: async (payload: Parameters<RuntimeStore["createConversation"]>[2] & {
@@ -214,6 +224,55 @@ afterEach(async () => {
 });
 
 describe("AgentThreadManager", () => {
+  it("does not stop a replacement turn after a delayed stop approval", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const created = await bridge.invoke(call("inertia_create_conversation", {
+        title: "Child", prompt: "Original work",
+      }));
+      expect(created.success).toBe(true);
+      const { conversationId } = JSON.parse(created.text) as { conversationId: string };
+      let approve!: (decision: AgentApprovalDecision) => void;
+      let requested!: () => void;
+      const approvalRequested = new Promise<void>((resolve) => { requested = resolve; });
+      const stopCall = call("inertia_stop_conversation", { conversationId });
+      stopCall.requestApproval = async () => {
+        requested();
+        return await new Promise<AgentApprovalDecision>((resolve) => { approve = resolve; });
+      };
+      const stopped = bridge.invoke(stopCall);
+      await approvalRequested;
+      turns.cancel(conversationId);
+      const replacement = turns.queue({ conversationId, content: "New user work", activateConversation: false });
+      turns.start(replacement.turn.id);
+      approve("approve");
+
+      expect(await stopped).toMatchObject({ success: false, text: expect.stringContaining("approved turn is no longer active") });
+      expect(turns.activeIdentity(conversationId)).toEqual({ turnId: replacement.turn.id, runId: replacement.turn.runId });
+    } finally { store.close(); }
+  });
+
+  it("does not cancel a replacement child turn when its earlier parent fails", async () => {
+    const { manager, source, sourceTurn, store, turns } = await runtime();
+    try {
+      const created = await manager.bridgeFor({ conversation: source, turn: sourceTurn }).invoke(call(
+        "inertia_create_conversation", { title: "Child", prompt: "Original work" },
+      ));
+      expect(created.success).toBe(true);
+      const { conversationId, turnId } = JSON.parse(created.text) as { conversationId: string; turnId: string };
+      expect(store.agentThreadManagement.runsDispatchedByTurn(source.id, sourceTurn.id))
+        .toEqual([{ conversationId, turnId, runId: store.agentTurn(turnId).runId }]);
+      turns.cancel(conversationId);
+      const replacement = turns.queue({ conversationId, content: "New user work", activateConversation: false });
+      turns.start(replacement.turn.id);
+
+      await manager.onSourceTurnSettled({ ...sourceTurn, status: "failed" });
+
+      expect(turns.activeIdentity(conversationId)).toEqual({ turnId: replacement.turn.id, runId: replacement.turn.runId });
+    } finally { store.close(); }
+  });
+
   it("blocks browser calls by original project policy for every provider without invoking the browser", async () => {
     const browser = { perform: vi.fn() };
     const { manager, project, source, sourceTurn, store } = await runtime(browser);

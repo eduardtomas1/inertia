@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { removePost79SchemaFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,6 +146,22 @@ afterEach(() => {
 });
 
 describe("conversation context packets", () => {
+  it("hydrates only context receipts for the displayed messages while retaining current drafts", () => {
+    const { store, sourceId, targetId, siblingId } = fixture();
+    try {
+      store.createMessage(sourceId, "Sent decision");
+      store.createMessage(siblingId, "Next decision");
+      const sent = store.contextPackets.create({ sourceConversationId: sourceId, targetConversationId: targetId, acknowledgedWorkspaceDifference: false });
+      const { turn } = beginWithPacket(store, targetId, [sent.id]);
+      store.updateAgentTurnLifecycle(turn.id, { status: "completed", terminalReason: "provider-completed" });
+      const draft = store.contextPackets.create({ sourceConversationId: siblingId, targetConversationId: targetId, acknowledgedWorkspaceDifference: false });
+      const complete = store.contextPackets.list(targetId);
+      expect(store.contextPackets.list(targetId, [turn.userMessageId])).toEqual(complete);
+      expect(store.contextPackets.list(targetId, [])).toEqual(complete.filter(({ id }) => id === draft.id));
+      expect(store.contextPackets.list(targetId, [randomUUID()])).toEqual(complete.filter(({ id }) => id === draft.id));
+    } finally { store.close(); }
+  });
+
   it.each([1, 2, 3])("sends %s large JSON chat references with the same excerpts as their previews and receipts", (packetCount) => {
     const { store, sourceId, targetId, otherId, siblingId } = fixture();
     const service = new ConversationContextService(store);
@@ -1486,8 +1503,8 @@ describe("conversation context packets", () => {
     const database = new Database(databasePath);
     database.pragma("foreign_keys = OFF");
     database.exec(conversationContextWholeChatMigration.up as string);
-    database.exec("ALTER TABLE app_state DROP COLUMN attachment_storage_gib; ALTER TABLE app_state DROP COLUMN auto_remove_old_attachments;");
-    database.prepare("DELETE FROM schema_migrations WHERE version >= 79").run();
+    removePost79SchemaFromLegacyFixture(database);
+    database.prepare("DELETE FROM schema_migrations WHERE version = 79").run();
     database.close();
 
     const upgraded = new RuntimeStore(databasePath, tmpdir(), { recoverInterruptedRuns: false });

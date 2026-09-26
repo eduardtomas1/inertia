@@ -14,6 +14,19 @@ export type TimelineItemFocusTarget = {
   destination: HTMLElement;
 };
 
+function revealDestination(destination: HTMLElement, scroll: HTMLElement | null, align: "center" | "start"): void {
+  if (!scroll) {
+    destination.scrollIntoView({ block: align, inline: "nearest" });
+    return;
+  }
+  // scrollIntoView also scrolls overflow:hidden ancestors. A long disclosure
+  // can then move the entire workspace above the window while retaining focus.
+  const destinationBounds = destination.getBoundingClientRect();
+  const viewport = scroll.getBoundingClientRect();
+  const centerOffset = align === "center" ? (viewport.height - destinationBounds.height) / 2 : 0;
+  scroll.scrollTo({ top: scroll.scrollTop + destinationBounds.top - viewport.top - centerOffset, behavior: "auto" });
+}
+
 function intersectsScrollViewport(
   row: HTMLElement,
   scrollElement: HTMLElement,
@@ -110,7 +123,7 @@ export function startTimelineItemFocus(input: {
         return;
       }
       if (!virtualized) {
-        destination.scrollIntoView({ block: align, inline: "nearest" });
+        revealDestination(destination, scrollElement, align);
       } else if (
         scrollElement
         && !intersectsScrollViewport(target.row, scrollElement)
@@ -124,7 +137,7 @@ export function startTimelineItemFocus(input: {
         return;
       }
       if (scrollElement && !intersectsScrollViewport(destination, scrollElement)) {
-        destination.scrollIntoView({ block: align, inline: "nearest" });
+        revealDestination(destination, scrollElement, align);
         consecutiveStableSamples = 0;
         lastDestination = null;
         schedule();

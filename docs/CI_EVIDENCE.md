@@ -44,6 +44,20 @@ renderer matching and does not infer native coverage from a test's UI-facing
 name. Mixed changes take the union; a full native target replaces
 the equivalent same-platform sentinel.
 
+Streaming, transcript/virtualization, transport and persistence changes also
+require the enforced platform and desktop performance workloads on Linux x64
+before merge. Shared or uncertain changes retain that obligation. These run
+inside the selected Linux core/Electron jobs, so `merge-ready` cannot pass if
+a budget fails; unrelated renderer changes do not pay for them. Draft feedback
+omits the additional budgets. The complete six-platform benchmark matrix stays
+on its main/nightly policy. Windows ARM64 additionally runs the native terminal
+and Job Object regression suites, including cases absent from portable discovery.
+
+The separately scheduled provider compatibility canary collects all outcomes,
+exposes a truthful failed job status, and reports its issue. It is not
+part of the PR merge requirements; a green canary means every probe completed
+successfully, including the latest-provider checks.
+
 No assertions are removed from full certification. The complete Linux x64
 suite enforces unchanged all-source/per-area coverage thresholds once. Linux
 ARM64 runs the same complete unit suite without duplicate instrumentation;

@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
-import { MESSAGE_SEARCH_LIMIT, messageSearchExcerpt, messageSearchPattern, type MessageSearchHit, type MessageSearchResult } from "../../shared/message-search";
-import { messageSearchQuerySchema } from "../../shared/message-search-schema";
+import { MESSAGE_SEARCH_LIMIT, messageSearchExcerpt, messageSearchPattern, type MessageSearchCursor, type MessageSearchHit, type MessageSearchResult } from "../../shared/message-search";
+import { messageSearchCursorSchema, messageSearchQuerySchema } from "../../shared/message-search-schema";
 
 const MAX_MESSAGE_BYTES = 16 * 1_048_576;
 const MAX_SCAN_BYTES = 256 * 1_048_576;
@@ -10,9 +10,12 @@ const MAX_SCAN_MS = 2_000;
 export function searchMessages(
   database: Database.Database,
   queryInput: string,
-  options: { now?: () => number; maxScanMs?: number; maxScanBytes?: number } = {},
+  options: { now?: () => number; maxScanMs?: number; maxScanBytes?: number; cursor?: MessageSearchCursor } = {},
 ): MessageSearchResult {
   const query = messageSearchQuerySchema.parse(queryInput);
+  const cursor = options.cursor && messageSearchCursorSchema.parse(options.cursor);
+  if (cursor && cursor.query !== query) throw new Error("Search cursor belongs to a different query.");
+  let before = cursor?.before ?? null;
   const pattern = messageSearchPattern(query);
   const now = options.now ?? performance.now.bind(performance);
   const deadline = now() + (options.maxScanMs ?? MAX_SCAN_MS);
@@ -24,7 +27,8 @@ export function searchMessages(
   // cannot hide unbounded work inside SQLite before the next deadline check.
   // The covering index supplies chronology without sorting the full table.
   const candidates = database.prepare(`
-    SELECT id AS messageId FROM messages INDEXED BY messages_created_id_idx
+    SELECT id AS messageId, created_at AS createdAt FROM messages INDEXED BY messages_created_id_idx
+    ${before ? "WHERE (created_at, id) < (?, ?)" : ""}
     ORDER BY created_at DESC, id DESC
   `);
   const eligible = database.prepare(`
@@ -35,7 +39,11 @@ export function searchMessages(
     JOIN projects p ON p.id = c.project_id
     LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
     WHERE m.id = ? AND c.archived_at IS NULL AND (
-      m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+      m.role = 'user' OR (m.role = 'assistant' AND (
+        t.terminal_assistant_message_id = m.id OR EXISTS (
+          SELECT 1 FROM recovered_final_answers r WHERE r.message_id = m.id
+        )
+      ))
     )
   `);
   // Bound each native read: never aggregate an entire chunk history inside
@@ -87,24 +95,27 @@ export function searchMessages(
     } finally { iterator.return?.(); }
   };
   database.transaction(() => {
-    for (const { messageId } of candidates.iterate() as Iterable<{ messageId: string }>) {
+    const parameters = before ? [before.createdAt, before.messageId] : [];
+    for (const identity of candidates.iterate(...parameters) as Iterable<{ messageId: string; createdAt: string }>) {
       if (now() >= deadline || scannedBytes >= maximumBytes) {
         result.incomplete = true;
+        result.nextCursor = { query, before };
         break;
       }
-      const candidate = eligible.get(messageId) as Omit<MessageSearchHit, "snippet" | "matchStart" | "matchEnd"> | undefined;
-      if (!candidate) continue;
+      const candidate = eligible.get(identity.messageId) as Omit<MessageSearchHit, "snippet" | "matchStart" | "matchEnd"> | undefined;
+      if (!candidate) { before = identity; continue; }
       const content = readContent(candidate.messageId);
-      if (exhausted) break;
-      if (content === null) continue;
-      if (expired()) break;
+      if (exhausted || expired()) { result.nextCursor = { query, before }; break; }
+      if (content === null) { before = identity; continue; }
       const excerpt = messageSearchExcerpt(content, pattern);
-      if (!excerpt) continue;
+      if (!excerpt) { before = identity; continue; }
       if (result.hits.length === MESSAGE_SEARCH_LIMIT) {
         result.hasMore = true;
+        result.nextCursor = { query, before };
         break;
       }
       result.hits.push({ ...candidate, ...excerpt });
+      before = identity;
     }
   })();
   return result;

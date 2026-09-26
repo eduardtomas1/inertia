@@ -44,6 +44,8 @@ export interface AgentThreadOperation {
   requestFingerprint: string;
   status: AgentThreadOperationStatus;
   childConversationId: string | null;
+  targetTurnId: string | null;
+  targetRunId: string | null;
   inputChars: number;
   resultJson: string | null;
   failureMessage: string | null;
@@ -61,6 +63,8 @@ interface AgentThreadOperationRow {
   request_fingerprint: string;
   status: AgentThreadOperationStatus;
   child_conversation_id: string | null;
+  target_turn_id: string | null;
+  target_run_id: string | null;
   input_chars: number;
   result_json: string | null;
   failure_message: string | null;
@@ -94,6 +98,8 @@ function operationFromRow(row: AgentThreadOperationRow): AgentThreadOperation {
     requestFingerprint: row.request_fingerprint,
     status: row.status,
     childConversationId: row.child_conversation_id,
+    targetTurnId: row.target_turn_id,
+    targetRunId: row.target_run_id,
     inputChars: row.input_chars,
     resultJson: row.result_json,
     failureMessage: row.failure_message,
@@ -169,6 +175,25 @@ export class AgentThreadManagementRepository {
       AGENT_THREAD_MAX_MUTATIONS_PER_TURN,
     ) as Array<{ child_conversation_id: string }>).map(
       ({ child_conversation_id: conversationId }) => conversationId,
+    );
+  }
+
+  runsDispatchedByTurn(
+    sourceConversationId: string,
+    sourceTurnId: string,
+  ): Array<{ conversationId: string; turnId: string; runId: string }> {
+    return (this.database.prepare(`
+      SELECT DISTINCT child_conversation_id, target_turn_id, target_run_id
+      FROM agent_thread_operations
+      WHERE source_conversation_id = ? AND source_turn_id = ?
+        AND tool_name IN ('inertia_create_conversation', 'inertia_send_message')
+        AND child_conversation_id IS NOT NULL
+        AND target_turn_id IS NOT NULL AND target_run_id IS NOT NULL
+      LIMIT ?
+    `).all(sourceConversationId, sourceTurnId, AGENT_THREAD_MAX_MUTATIONS_PER_TURN) as
+      Array<{ child_conversation_id: string; target_turn_id: string; target_run_id: string }>).map(
+      (row) => ({ conversationId: row.child_conversation_id,
+        turnId: row.target_turn_id, runId: row.target_run_id }),
     );
   }
 
@@ -262,6 +287,8 @@ export class AgentThreadManagementRepository {
     status: AgentThreadOperationStatus,
     update: {
       childConversationId?: string | null;
+      targetTurnId?: string;
+      targetRunId?: string;
       resultJson?: string | null;
       failureMessage?: string | null;
     },
@@ -273,11 +300,15 @@ export class AgentThreadManagementRepository {
       UPDATE agent_thread_operations
       SET status = ?,
           child_conversation_id = COALESCE(?, child_conversation_id),
+          target_turn_id = COALESCE(?, target_turn_id),
+          target_run_id = COALESCE(?, target_run_id),
           result_json = ?, failure_message = ?, updated_at = ?
       WHERE id = ? AND status IN (${placeholders})
     `).run(
       status,
       update.childConversationId ?? null,
+      update.targetTurnId ?? null,
+      update.targetRunId ?? null,
       update.resultJson ?? null,
       update.failureMessage ?? null,
       now,

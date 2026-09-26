@@ -111,6 +111,7 @@ export function createConversationCommandHandler(
     "conversation.create",
     "conversation.select",
     "conversation.detail.load",
+    "conversation.content.read",
     "conversation.detail.subscription",
     "conversation.context.source.load",
     "conversation.context.agent.source.load",
@@ -180,9 +181,7 @@ export function createConversationCommandHandler(
           return "handled";
         }
         try {
-          const detail = dependencies.store.conversationDetail(
-            conversationId,
-          );
+          const detail = dependencies.store.conversationHistory(conversationId, command.payload);
           dependencies.send(socket, {
             type: "request.result",
             requestId: command.requestId,
@@ -216,6 +215,12 @@ export function createConversationCommandHandler(
         }
         return "handled";
       }
+      case "conversation.content.read":
+        dependencies.send(socket, {
+          type: "request.result", requestId: command.requestId,
+          result: dependencies.store.conversationContent(command.payload.conversationId, command.payload.cursor),
+        });
+        return "handled";
       case "conversation.detail.subscription":
         dependencies.runtimeSync.setConversationSubscription(
           socket,

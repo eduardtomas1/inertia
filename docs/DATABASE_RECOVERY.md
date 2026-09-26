@@ -87,6 +87,17 @@ deliberately excludes:
 - attachment metadata and bytes;
 - execution manifests, source context, Git patches, and diagnostics.
 
+Version 3 also records which assistant messages were final answers, preserving
+their search and reveal eligibility after import, restart, and re-export. Versions
+1 and 2 remain importable; they contain no final-answer provenance, so their
+assistant commentary is not automatically classified as a final answer. Message
+array order remains authoritative when timestamps are equal.
+
+Version 3 includes pending text-only queued messages. Imports give them fresh
+identities and pause them for review; interrupted or unconfirmed deliveries
+remain uncertain. Import never automatically replays queued work. Completed
+delivery receipts and provider continuation identities are not exported.
+
 Import validates the complete document before a transaction begins and asks the
 user to authorize a destination folder separately from the recovery file.
 Exported absolute paths and access grants are never trusted: projects are

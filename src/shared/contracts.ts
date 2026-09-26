@@ -11,6 +11,7 @@ export * from "./provider-terminal-resume";
 export * from "./run-state";
 export * from "./lifecycle-diagnostics";
 export * from "./conversation-context";
+export type { QueuedMessage, MessageQueueResult } from "./message-queue";
 export type {
   PromptPreset,
   PromptPresetDraft,

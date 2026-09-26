@@ -1,7 +1,7 @@
 import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
-import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
+import { messageSearchCursorSchema, messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
 import {
   WORKING_INDICATOR_COLORS,
@@ -81,7 +81,7 @@ export const appCommandSchemas = [
   z.strictObject({ ...requestBase, type: z.literal("usage.source.remove"), payload: z.strictObject({ id: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.reset.prepare"), payload: z.strictObject({ accountId: z.string().min(1).max(256) }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.reset.confirm"), payload: z.strictObject({ confirmationId: z.string().uuid(), confirmed: z.literal(true) }) }),
-  z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema, cursor: messageSearchCursorSchema.optional() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search.cancel"), payload: z.strictObject({ searchRequestId: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.message.reveal"), payload: messageSearchTargetSchema.extend({ focusDetached: z.boolean().optional() }) }),
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
@@ -242,9 +242,18 @@ export const appCommandSchemas = [
     .object({
       ...requestBase,
       type: z.literal("conversation.detail.load"),
-      payload: z.object({ conversationId: z.string().uuid() }).strict(),
+      payload: z.object({
+        conversationId: z.string().uuid(),
+        cursor: z.string().min(1).max(2048).optional(),
+        anchorMessageId: messageSearchTargetSchema.shape.messageId.optional(),
+      }).strict().refine((value) => !(value.cursor && value.anchorMessageId)),
     })
     .strict(),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.content.read"),
+    payload: z.strictObject({ conversationId: z.string().uuid(), cursor: z.string().min(1).max(2048) }),
+  }),
   z
     .object({
       ...requestBase,

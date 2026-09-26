@@ -89,6 +89,19 @@ function classifiedMessageSendError(
   error: unknown,
   stage: MessageSendStage,
 ): RuntimeRequestError {
+  if (stage === "follow-up-publication") {
+    return new RuntimeRequestError(
+      "The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [message-send/follow-up-publication/unexpected]",
+      "message-send/follow-up-publication/unexpected",
+      "ambiguous",
+    );
+  }
+  if (stage === "turn-publication") {
+    return new RuntimeRequestError(
+      "The turn was admitted but could not start cleanly. Refresh this chat before retrying. [message-send/turn-publication/unexpected]",
+      "message-send/turn-publication/unexpected", "ambiguous",
+    );
+  }
   if (error instanceof RuntimeRequestError) return error;
   const publicMessage = publicRuntimeError(error);
   if (publicMessage !== "The request could not be completed.") {
@@ -96,11 +109,7 @@ function classifiedMessageSendError(
   }
   const code = `message-send/${stage}/unexpected`;
   return new RuntimeRequestError(
-    stage === "turn-publication"
-      ? `The turn was admitted but could not start cleanly. Refresh this chat before retrying. [${code}]`
-      : stage === "follow-up-publication"
-        ? `The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [${code}]`
-        : stage === "follow-up-preparation"
+    stage === "follow-up-preparation"
           ? `The follow-up could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No follow-up was submitted; try again. [${code}]`
       : `The message could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No turn was started; try again. [${code}]`,
     code,
@@ -217,6 +226,7 @@ export function createTurnInteractionCommandHandler(
           let retention: Promise<ChatAttachment[]> | null = null;
           let attachments: ChatAttachment[] = [];
           let followUpPersisted = false;
+          let providerAcknowledged = false;
           let sourceClaimSettled = false;
           try {
             let resolvedAttachments: Awaited<
@@ -279,6 +289,8 @@ export function createTurnInteractionCommandHandler(
               },
               attachments,
               () => {
+                providerAcknowledged = true;
+                messageSendStage = "follow-up-publication";
                 if (!retentionId) return;
                 dependencies.conversationAttachments.acceptRetention(retentionId);
                 retentionAccepted = true;
@@ -313,7 +325,15 @@ export function createTurnInteractionCommandHandler(
             dependencies.broadcastSnapshot();
             return "handled";
           } catch (error) {
-            if (retentionId && !retentionAccepted) {
+            const deferRetentionCleanup = providerAcknowledged && !followUpPersisted && retentionId !== null;
+            if (deferRetentionCleanup) {
+              const exactRetentionId = retentionId!;
+              dependencies.turns.deferFollowUpAttachmentCleanup(admission, async () => {
+                if (retentionAccepted) await dependencies.conversationAttachments.release(attachments.map(({ id }) => id));
+                else await dependencies.conversationAttachments.releaseRetention(exactRetentionId);
+              });
+            }
+            if (retentionId && !retentionAccepted && !deferRetentionCleanup) {
               const exactRetentionId = retentionId;
               if (retention && !retentionCompleted) {
                 void retention.then(
@@ -329,7 +349,7 @@ export function createTurnInteractionCommandHandler(
             }
             if (retentionAccepted) {
               await Promise.all([
-                followUpPersisted
+                followUpPersisted || deferRetentionCleanup
                   ? undefined
                   : dependencies.conversationAttachments.release(
                       attachments.map(({ id }) => id),
@@ -341,9 +361,8 @@ export function createTurnInteractionCommandHandler(
                     ),
               ]);
             } else if (!sourceClaimSettled) {
-              await dependencies.attachmentResolver?.relinquishAll(
-                sourceAttachmentIds,
-              );
+              if (providerAcknowledged) await dependencies.attachmentResolver?.releaseAll(sourceAttachmentIds);
+              else await dependencies.attachmentResolver?.relinquishAll(sourceAttachmentIds);
             }
             throw error;
           } finally {
@@ -738,6 +757,11 @@ export function createTurnInteractionCommandHandler(
         let durableTurnPersisted = false;
         let deriveInitialTitle = false;
         try {
+          // Preparation may yield while another client archives this chat.
+          // Read again immediately before any durable message/turn is admitted.
+          if (dependencies.store.conversation(conversation.id).archivedAt) {
+            throw new RuntimeRequestError("Restore this archived chat before sending work.");
+          }
           // A real first-message title can itself equal an untitled placeholder.
           // Capture history before queue/createMessage persists this message.
           deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")

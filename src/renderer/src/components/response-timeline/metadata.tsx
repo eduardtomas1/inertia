@@ -115,7 +115,8 @@ export function turnMetadataPresentation(
   const details: TurnRunDetail[] = [
     { label: "Harness ID", value: selection.harnessId, technical: true },
     { label: "Backend profile ID", value: selection.backendProfileId, technical: true },
-    { label: "Exact model ID", value: selection.modelId, technical: true },
+    { label: "Selected model ID", value: selection.modelId, technical: true },
+    { label: "Provider-resolved model ID", value: "Not recorded", technical: false },
     {
       label: "Requested alias",
       value: selection.alias ?? "Not requested",

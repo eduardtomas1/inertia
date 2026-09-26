@@ -119,7 +119,7 @@ export function settlePendingConnectionRequest(
     return "late";
   }
   if (event.type === "request.error") {
-    pending.reject(new RuntimeCommandError(event.message, "rejected", event.diagnosticId));
+    pending.reject(new RuntimeCommandError(event.message, event.delivery ?? "rejected", event.diagnosticId));
   } else {
     pending.resolve(event);
   }

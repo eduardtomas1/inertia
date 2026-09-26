@@ -10,6 +10,10 @@ export type MessageSearchHit = MessageSearchTarget & {
 };
 export type MessageSearchResult = {
   kind: "conversation.messages.search"; query: string; hits: MessageSearchHit[]; hasMore: boolean; incomplete: boolean;
+  nextCursor?: MessageSearchCursor;
+};
+export type MessageSearchCursor = {
+  query: string; before: { createdAt: string; messageId: string } | null;
 };
 
 /** Literal Unicode-aware matching; punctuation never becomes query syntax. */

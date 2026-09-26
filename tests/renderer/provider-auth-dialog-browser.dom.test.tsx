@@ -12,6 +12,8 @@ const AUTH_URL = "https://claude.com/cai/oauth/authorize?client_id=fixture&respo
 const TERMINAL_ID = "11111111-1111-4111-8111-111111111111";
 const terminalConstructorOptions = vi.hoisted(() =>
   [] as Array<Record<string, unknown>>);
+const terminalInstances = vi.hoisted(() =>
+  [] as Array<import("@xterm/xterm").Terminal>);
 const terminalParsing = vi.hoisted(() => ({
   holdCallbacks: false, callbacks: [] as Array<() => void>,
 }));
@@ -29,6 +31,7 @@ vi.mock("@xterm/xterm", async () => {
       constructor(options: ConstructorParameters<typeof actual.Terminal>[0]) {
         super({ ...options, cols: 90, rows: 24 });
         terminalConstructorOptions.push({ ...options });
+        terminalInstances.push(this);
       }
       override loadAddon(): void {}
       override open(): void {}
@@ -151,6 +154,7 @@ function renderDialog(options: {
 describe("ProviderAuthDialog browser handoff", () => {
   beforeEach(() => {
     terminalConstructorOptions.length = 0;
+    terminalInstances.length = 0;
     terminalParsing.holdCallbacks = false;
     terminalParsing.callbacks.length = 0;
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
@@ -168,6 +172,32 @@ describe("ProviderAuthDialog browser handoff", () => {
 
   afterEach(() => {
     Reflect.deleteProperty(window, "inertia");
+  });
+
+  it("uses current typography on mount and updates the existing terminal after a preference change", async () => {
+    const sendCommand = vi.fn(async (sent: ClientCommand) => created(sent));
+    const subscribe = () => () => undefined;
+    const onClose = vi.fn();
+    const dialog = (selected: ProviderInfo | null, fontSize: number) => (
+      <ProviderAuthDialog provider={selected} status="online" theme="dark"
+        fontSize={fontSize} sendCommand={sendCommand} subscribe={subscribe} onClose={onClose} />
+    );
+    const view = render(dialog(null, 13));
+    view.rerender(dialog(null, 17));
+    expect(terminalInstances).toHaveLength(0);
+    view.rerender(dialog(provider, 17));
+    await waitFor(() => expect(terminalInstances).toHaveLength(1));
+    const terminal = terminalInstances[0]!;
+    expect(terminal.options.fontSize).toBe(17);
+
+    view.rerender(dialog(provider, 21));
+    await waitFor(() => expect(terminal.options.fontSize).toBe(21));
+    expect(terminalInstances).toHaveLength(1);
+
+    view.rerender(dialog(null, 19));
+    view.rerender(dialog(kimiProvider, 19));
+    await waitFor(() => expect(terminalInstances).toHaveLength(2));
+    expect(terminalInstances[1]!.options.fontSize).toBe(19);
   });
 
   it("opens a chunked Claude OAuth URL once through the desktop host", async () => {

@@ -1,0 +1,9 @@
+.conversation-history-controls { display: grid; gap: 8px; margin: 12px 0; font-size: 12px; }
+.conversation-history-controls nav, .conversation-content-reader > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.conversation-history-controls button { min-height: 32px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: inherit; cursor: pointer; }
+.conversation-history-controls button:disabled { opacity: .5; cursor: default; }
+.conversation-history-controls summary { cursor: pointer; padding: 8px 0; }
+.conversation-history-controls ul { list-style: none; display: grid; gap: 6px; padding: 0; }
+.conversation-content-reader { border: 1px solid var(--border); padding: 12px; border-radius: 8px; }
+.conversation-content-reader > div { justify-content: space-between; }
+.conversation-content-reader pre { max-height: 50vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }

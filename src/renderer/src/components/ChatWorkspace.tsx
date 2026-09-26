@@ -45,6 +45,7 @@ import type {
   ProviderId,
   ProviderInfo,
   PromptPreset,
+  QueuedMessage,
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
   ResponseDensity,
@@ -56,6 +57,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
+import type { ConversationHistoryControlsProps } from "./ConversationHistoryControls";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
@@ -86,6 +88,7 @@ import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type {
   NewChatProjectPicker,
   PromptPresetCommandRunner,
+  MessageQueueCommandRunner,
 } from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import type {
@@ -133,6 +136,9 @@ function StreamingResponseTimeline({
 }
 const ProviderMaintenanceNotice = lazy(async () => ({
   default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
+}));
+const ConversationHistoryControls = lazy(async () => ({
+  default: (await import("./ConversationHistoryControls")).ConversationHistoryControls,
 }));
 const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
@@ -201,6 +207,7 @@ type ChatWorkspaceProps = {
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
   detailLoading?: boolean;
+  historyControls?: ConversationHistoryControlsProps;
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
@@ -215,6 +222,8 @@ type ChatWorkspaceProps = {
   }>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   onPromptPresetCommand?: PromptPresetCommandRunner;
+  queuedMessages?: readonly QueuedMessage[];
+  onMessageQueueCommand?: MessageQueueCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
   onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
@@ -312,6 +321,7 @@ export function ChatWorkspace({
   providerIdentityLabels,
   loading,
   detailLoading = false,
+  historyControls,
   sending,
   onAddProject,
   onCreateConversation,
@@ -319,6 +329,8 @@ export function ChatWorkspace({
   onCompactConversation,
   onListSkills,
   onPromptPresetCommand,
+  queuedMessages,
+  onMessageQueueCommand,
   onRespondToApproval,
   onRespondToInput,
   onUpdateConversation,
@@ -950,6 +962,10 @@ export function ChatWorkspace({
             </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
+            {historyControls && <ConversationHistoryControls
+              key={`${conversation.id}:${historyControls.history?.olderCursor ?? ""}:${historyControls.history?.newerCursor ?? ""}`}
+              {...historyControls} loading={detailLoading || historyControls.loading}
+            />}
             <StreamingResponseTimeline
               turns={ownedTurns}
               messages={ownedMessages}
@@ -1090,6 +1106,8 @@ export function ChatWorkspace({
           promptPresetsEnabled={promptPresetsEnabled}
           promptStashEnabled={promptStashEnabled}
           onPromptPresetCommand={onPromptPresetCommand}
+          queuedMessages={queuedMessages}
+          onMessageQueueCommand={onMessageQueueCommand}
           onUpdateConversation={onUpdateConversation}
           onCreateConversationForSelection={onCreateConversationForSelection}
           onChooseAttachments={onChooseAttachments}

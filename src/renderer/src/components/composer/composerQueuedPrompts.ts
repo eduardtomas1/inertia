@@ -118,11 +118,18 @@ function queuedPrompt(
     && (typeof candidate.dispatchedAt !== "string"
       || !Number.isFinite(Date.parse(candidate.dispatchedAt)))
   ) return null;
+  const runtimeQueue = record(candidate.runtimeQueue);
+  if (candidate.runtimeQueue !== undefined && (!runtimeQueue || attachments.length > 0
+    || (runtimeQueue.afterTurnId !== null && (typeof runtimeQueue.afterTurnId !== "string"
+      || !runtimeQueue.afterTurnId || runtimeQueue.afterTurnId.length > 256)))) return null;
   return {
     id: candidate.id,
     content: candidate.content,
     createdAt: candidate.createdAt,
     attachments,
+    ...(runtimeQueue
+      ? { runtimeQueue: { afterTurnId: runtimeQueue.afterTurnId as string | null } }
+      : {}),
     ...(typeof candidate.dispatchedAt === "string" ? { dispatchedAt: candidate.dispatchedAt } : {}),
   };
 }
@@ -243,6 +250,7 @@ export function enqueueComposerPrompt(
   conversationId: string,
   content: string,
   attachments: readonly ChatAttachment[] = [],
+  runtimeQueue?: ComposerQueuedPrompt["runtimeQueue"],
 ): boolean {
   try {
     const current = readComposerQueue(conversationId);
@@ -256,6 +264,7 @@ export function enqueueComposerPrompt(
       content,
       createdAt: new Date(createdAtMs).toISOString(),
       attachments,
+      ...(runtimeQueue ? { runtimeQueue } : {}),
     }, attachments.length > 0 ? "media" : "text");
     if (!candidate) return false;
     const attachmentIds = new Set(
@@ -266,6 +275,25 @@ export function enqueueComposerPrompt(
     }
     storeQueue(conversationId, [...current, candidate], true);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+export function markComposerQueuedPromptRuntimeOwned(
+  conversationId: string,
+  promptId: string,
+  afterTurnId: string | null,
+): boolean {
+  try {
+    const current = readComposerQueue(conversationId);
+    const candidate = current.find(({ id }) => id === promptId);
+    if (!candidate || candidate.attachments.length || candidate.dispatchedAt) return false;
+    if (candidate.runtimeQueue) return true;
+    storeQueue(conversationId, current.map((prompt) => prompt.id === promptId
+      ? { ...prompt, runtimeQueue: { afterTurnId } }
+      : prompt), true);
+    return Boolean(readComposerQueue(conversationId).find(({ id }) => id === promptId)?.runtimeQueue);
   } catch {
     return false;
   }

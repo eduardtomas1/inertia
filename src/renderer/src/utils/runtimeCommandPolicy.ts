@@ -73,6 +73,7 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "message.queue": shortMutation,
   "activity.acknowledge": shortMutation,
   "activity.dismiss": shortMutation,
   "activity.mark-seen": shortMutation,
@@ -122,6 +123,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutMs: CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "rejected",
   },
+  "conversation.content.read": { timeoutMs: 15_000, timeoutDelivery: "rejected" },
   "conversation.detail.subscription": shortRetrySafe,
   "conversation.messages.search": shortRetrySafe,
   "conversation.messages.search.cancel": shortRetrySafe,

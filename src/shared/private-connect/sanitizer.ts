@@ -16,6 +16,8 @@ const CONTENT_CONTROL_CHARACTERS =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/gu;
 const SECRET_SCAN_MARGIN_CHARACTERS = 4 * 1024;
 const MAX_PRIVATE_CONNECT_CONTENT_CHARACTERS = 64 * 1024;
+/** Three UTF-8 bytes per UTF-16 unit bounds the exact sanitizer inspection prefix. */
+export const PRIVATE_CONNECT_INSPECTION_BYTES = 3 * (MAX_PRIVATE_CONNECT_CONTENT_CHARACTERS + SECRET_SCAN_MARGIN_CHARACTERS);
 const CODE_OMISSION = "[Code omitted on Private Connect]";
 const HTML_OMISSION = "[HTML omitted on Private Connect]";
 const PRIVATE_CONNECT_HTML_TAGS = new Set([

@@ -213,8 +213,11 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
           {openError && <div className="palette-search-status" role="alert">Could not open this message. Try again.</div>}
           {search.loading && <div className="palette-search-status" role="status">Searching messages…</div>}
           {search.error && <div className="palette-search-status" role="status">{search.error} <button type="button" onClick={() => { search.retry(); searchRef.current?.focus(); }}>Retry</button></div>}
-          {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
-          {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
+          {search.result?.incomplete && <div className="palette-search-status" role="status">This search covered part of the history. Results may be incomplete.</div>}
+          {(search.hasPrevious || search.result?.nextCursor) && <div className="palette-search-status" aria-label="Message search pages">
+            {search.hasPrevious && <button type="button" onClick={() => { search.previousPage(); setActiveId(null); searchRef.current?.focus(); }}>Previous results</button>}
+            {search.result?.nextCursor && <button type="button" onClick={() => { search.nextPage(); setActiveId(null); searchRef.current?.focus(); }}>Search older messages</button>}
+          </div>}
           {items.length === 0 && !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={18} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>}
         </div>
         <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>

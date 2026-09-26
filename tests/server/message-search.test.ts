@@ -163,6 +163,33 @@ describe("persisted message search", () => {
     } finally { reopened.close(); }
   });
 
+  it("continues across pages without duplicates, even with equal timestamps and new messages", async () => {
+    const { store, database, conversation } = await fixture();
+    for (let index = 0; index < 45; index += 1) store.createMessage(conversation.id, `needle ${index}`, "user", [], null, "2026-09-01T00:00:00.000Z");
+    const first = searchMessages(database, "needle");
+    expect(first.nextCursor).toBeDefined();
+    store.createMessage(conversation.id, "newer needle", "user", [], null, "2026-09-02T00:00:00.000Z");
+    const second = searchMessages(database, "needle", { cursor: first.nextCursor });
+    const third = searchMessages(database, "needle", { cursor: second.nextCursor });
+    const ids = [...first.hits, ...second.hits, ...third.hits].map(({ messageId }) => messageId);
+    expect(ids).toHaveLength(45);
+    expect(new Set(ids).size).toBe(45);
+    expect(third.nextCursor).toBeUndefined();
+    expect(() => searchMessages(database, "different", { cursor: first.nextCursor })).toThrow("different query");
+  });
+
+  it("resumes an interrupted scan without losing the partially read candidate", async () => {
+    const { store, database, conversation } = await fixture();
+    const oldest = store.createMessage(conversation.id, "old needle", "user", [], null, "2026-09-01T00:00:00.000Z");
+    const middle = store.createMessage(conversation.id, "needle middle content", "user", [], null, "2026-09-02T00:00:00.000Z");
+    const newest = store.createMessage(conversation.id, "needle", "user", [], null, "2026-09-03T00:00:00.000Z");
+    const first = searchMessages(database, "needle", { maxScanBytes: 12 });
+    expect(first.hits.map(({ messageId }) => messageId)).toEqual([newest.id]);
+    expect(first.incomplete).toBe(true);
+    const rest = searchMessages(database, "needle", { cursor: first.nextCursor });
+    expect(rest.hits.map(({ messageId }) => messageId)).toEqual([middle.id, oldest.id]);
+  });
+
   it("scans past an eligible empty message instead of failing the search", async () => {
     const { store, database, databasePath, conversation } = await fixture();
     const older = store.createMessage(conversation.id, "old needle", "user", [], null, "2026-01-01T00:00:00.000Z");

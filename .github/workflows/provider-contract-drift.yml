@@ -17,7 +17,6 @@ jobs:
     name: Latest provider compatibility canary
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    continue-on-error: true
     permissions:
       contents: read
     outputs:
@@ -141,7 +140,7 @@ jobs:
             "$CURSOR_INSTALL_OUTCOME" \
             "$LATEST_PROBE_OUTCOME"
           do
-            if [[ "$outcome" == "failure" ]]; then
+            if [[ "$outcome" != "success" ]]; then
               failed=true
             fi
           done
@@ -175,13 +174,25 @@ jobs:
           printf 'failed=%s\n' "$failed" >> "$GITHUB_OUTPUT"
           printf 'latest_versions=%s\n' "$versions" >> "$GITHUB_OUTPUT"
 
+      - name: Require a complete successful provider probe
+        if: always()
+        shell: bash
+        env:
+          CANARY_FAILED: ${{ steps.collect.outputs.failed }}
+        run: |
+          set -euo pipefail
+          if [[ "$CANARY_FAILED" != "false" ]]; then
+            echo "Provider compatibility failed or did not complete; inspect the probe and reporting jobs." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Locked contracts and every latest-provider probe passed." >> "$GITHUB_STEP_SUMMARY"
+
   report-failure:
     name: Report provider compatibility failure
     needs: provider-drift
     if: ${{ always() && (needs.provider-drift.result != 'success' || needs.provider-drift.outputs.failed != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    continue-on-error: true
     permissions:
       contents: read
       issues: write

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ClientCommand, ServerEvent } from "@shared/contracts";
-import { MESSAGE_SEARCH_QUERY_MAX, type MessageSearchResult } from "@shared/message-search";
+import { MESSAGE_SEARCH_QUERY_MAX, type MessageSearchCursor, type MessageSearchResult } from "@shared/message-search";
 
 export type MessageSearchCommand = (command: ClientCommand) => Promise<ServerEvent>;
 
@@ -8,8 +8,11 @@ export function useMessageSearch(open: boolean, query: string, sendCommand?: Mes
   const normalized = query.trim();
   const eligible = open && Boolean(sendCommand) && normalized.length >= 2 && normalized.length <= MESSAGE_SEARCH_QUERY_MAX && !normalized.includes("\0");
   const [attempt, setAttempt] = useState(0);
+  const [pages, setPages] = useState<{ query: string; cursors: Array<MessageSearchCursor | undefined> }>({ query: "", cursors: [undefined] });
+  const cursors = pages.query === normalized ? pages.cursors : [undefined];
+  const cursor = cursors.at(-1);
   const [state, setState] = useState<{
-    query: string; result: MessageSearchResult | null; error: string | null;
+    query: string; cursor?: MessageSearchCursor; result: MessageSearchResult | null; error: string | null;
   } | null>(null);
   useEffect(() => {
     setState(null);
@@ -20,16 +23,16 @@ export function useMessageSearch(open: boolean, query: string, sendCommand?: Mes
     const requestId = crypto.randomUUID();
     const timer = window.setTimeout(() => {
       started = true;
-      void sendCommand({ type: "conversation.messages.search", requestId, payload: { query: normalized } }).then((event) => {
+      void sendCommand({ type: "conversation.messages.search", requestId, payload: { query: normalized, ...(cursor ? { cursor } : {}) } }).then((event) => {
         settled = true;
         if (disposed) return;
         if (event.type !== "request.result" || event.result.kind !== "conversation.messages.search" || event.result.query !== normalized) {
           throw new Error("The local service returned an unexpected search response.");
         }
-        setState({ query: normalized, result: event.result, error: null });
+        setState({ query: normalized, cursor, result: event.result, error: null });
       }).catch(() => {
         settled = true;
-        if (!disposed) setState({ query: normalized, result: null, error: "Message search is unavailable. Try again." });
+        if (!disposed) setState({ query: normalized, cursor, result: null, error: "Message search is unavailable. Try again." });
       });
     }, 200);
     return () => {
@@ -39,7 +42,16 @@ export function useMessageSearch(open: boolean, query: string, sendCommand?: Mes
         void sendCommand({ type: "conversation.messages.search.cancel", requestId: crypto.randomUUID(), payload: { searchRequestId: requestId } }).catch(() => undefined);
       }
     };
-  }, [eligible, normalized, sendCommand, attempt]);
-  const current = eligible && state?.query === normalized ? state : null;
-  return { retry: () => { setState(null); setAttempt((value) => value + 1); }, result: current?.result ?? null, error: current?.error ?? null, loading: eligible && current === null };
+  }, [eligible, normalized, sendCommand, attempt, cursor]);
+  const current = eligible && state?.query === normalized && state.cursor === cursor ? state : null;
+  return {
+    retry: () => { setState(null); setAttempt((value) => value + 1); },
+    nextPage: () => {
+      const next = current?.result?.nextCursor;
+      if (next) setPages({ query: normalized, cursors: [...cursors, next] });
+    },
+    previousPage: () => { if (cursors.length > 1) setPages({ query: normalized, cursors: cursors.slice(0, -1) }); },
+    hasPrevious: eligible && cursors.length > 1,
+    result: current?.result ?? null, error: current?.error ?? null, loading: eligible && current === null,
+  };
 }

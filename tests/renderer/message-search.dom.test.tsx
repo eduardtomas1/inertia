@@ -159,9 +159,9 @@ describe("message search in the palette", () => {
   it("shows escaped snippets, supports keyboard selection and discloses bounded results", async () => {
     vi.useFakeTimers();
     const onSelectMessage = vi.fn(async () => true);
-    const send = vi.fn(async (): Promise<ServerEvent> => response("needle", { hasMore: true, incomplete: true }));
+    const send = vi.fn(async (): Promise<ServerEvent> => response("needle", { hasMore: true, incomplete: true, nextCursor: { query: "needle", before: { createdAt: hit.createdAt, messageId: hit.messageId } } }));
     const noOp = (): void => undefined;
-    const view = render(<CommandPalette
+    render(<CommandPalette
       open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
       newThreadShortcut="Ctrl+N" sendCommand={send} onSelectMessage={onSelectMessage}
       onClose={noOp} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onAddProject={noOp} onOpenSettings={noOp}
@@ -175,10 +175,35 @@ describe("message search in the palette", () => {
     expect(option).toHaveTextContent(hit.snippet);
     expect(option.querySelector("mark")).toHaveTextContent("needle");
     expect(option.querySelector("img")).toBeNull();
-    expect(view.container.querySelectorAll("[role=status]")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Results may be incomplete");
+    expect(screen.getByRole("button", { name: "Search older messages" })).toBeEnabled();
     expect(input).toHaveAttribute("aria-activedescendant", option.id);
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
     expect(onSelectMessage).toHaveBeenCalledWith(hit, expect.any(AbortSignal));
+  });
+
+  it("continues older searches, returns to previous results and resets cursors for a new query", async () => {
+    vi.useFakeTimers();
+    const cursor = { query: "needle", before: { createdAt: hit.createdAt, messageId: hit.messageId } };
+    const send = vi.fn<(_: ClientCommand) => Promise<ServerEvent>>(async (command) => {
+      if (command.type !== "conversation.messages.search") return { type: "request.ok", requestId: command.requestId };
+      return response(command.payload.query, command.payload.cursor ? { hits: [], incomplete: false } : { nextCursor: cursor });
+    });
+    const hook = renderHook(({ query }) => useMessageSearch(true, query, send), { initialProps: { query: "needle" } });
+    await debounce();
+    act(() => hook.result.current.nextPage());
+    await debounce();
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { query: "needle", cursor } });
+    expect(hook.result.current.result?.hits).toEqual([]);
+    expect(hook.result.current.hasPrevious).toBe(true);
+    act(() => hook.result.current.previousPage());
+    await debounce();
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { query: "needle" } });
+    expect(hook.result.current.result?.hits).toEqual([hit]);
+    hook.rerender({ query: "different" });
+    await debounce();
+    expect(send.mock.calls.at(-1)?.[0]).toMatchObject({ payload: { query: "different" } });
+    expect(hook.result.current.hasPrevious).toBe(false);
   });
 
   it("retries a failed search from the palette and returns focus to the input", async () => {

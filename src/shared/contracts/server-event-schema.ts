@@ -1,5 +1,7 @@
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
 import { authoritativeRunState } from "./run-state-schema";
+import { conversationContentResult, conversationDetailExtensions, messageQueueResult } from "./conversation-history-schema";
+import { optionalTerminalResumeEvent } from "./terminal-resume-event-schema";
 import { usageResultValidators } from "./usage-results-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -27,9 +29,6 @@ function record(value: unknown): value is UnknownRecord {
 }
 function stringField(value: UnknownRecord, key: string): boolean {
   return typeof value[key] === "string";
-}
-function nonemptyStringField(value: UnknownRecord, key: string): boolean {
-  return stringField(value, key) && (value[key] as string).length > 0;
 }
 function nullableStringField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || stringField(value, key);
@@ -997,6 +996,7 @@ function conversationDetail(
   const conversationId = value.conversation.id as string;
   return (expectedConversationId === undefined
       || conversationId === expectedConversationId)
+    && conversationDetailExtensions(value, conversationId)
     && arrayOf(value.agentTurns, agentTurn)
     && arrayOf(value.turnGitArtifacts, turnGitArtifact)
     && arrayOf(value.messages, chatMessage)
@@ -1096,6 +1096,7 @@ import { issueReportSchema } from "../issue-report";
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "message.queue": messageQueueResult,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,
   "support.report": (value) => value.report === null || issueReportSchema.safeParse(value.report).success,
@@ -1139,6 +1140,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && (value.state !== "ready"
       || conversationDetail(value.detail, value.conversationId as string))
     && (value.state !== "failed" || stringField(value, "message")),
+  "conversation.content": conversationContentResult,
   "duo.pending": (value) =>
     arrayOf(value.launchIds, (entry) => typeof entry === "string")
     && new Set(value.launchIds as unknown[]).size === (value.launchIds as unknown[]).length
@@ -1185,6 +1187,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
       return stringField(value, "requestId");
     case "request.error":
       return stringField(value, "requestId") && stringField(value, "message")
+        && (value.delivery === undefined || value.delivery === "ambiguous")
         && (value.diagnosticId === undefined || (typeof value.diagnosticId === "string"
           && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value.diagnosticId)));
     case "request.result":
@@ -1192,27 +1195,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case "terminal.created":
       return stringField(value, "requestId")
         && stringField(value, "terminalId")
-        && (
-          value.providerResume === undefined
-            ? value.providerResumeConversationId === undefined
-            : recordWithStrings(
-                value.providerResume,
-                "providerId",
-                "providerLabel",
-                "sessionId",
-              )
-              && oneOf(value.providerResume, "providerId", [
-                "codex", "claude", "cursor", "kimi", "opencode", "antigravity",
-              ])
-              && nonemptyStringField(value.providerResume, "providerLabel")
-              && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(
-                value.providerResume.sessionId as string,
-              )
-              && nonemptyStringField(value, "providerResumeConversationId")
-              && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-                value.providerResumeConversationId as string,
-              )
-        );
+        && optionalTerminalResumeEvent(value);
     case "terminal.output":
       return stringField(value, "terminalId") && stringField(value, "data");
     case "terminal.exit":

@@ -18,7 +18,7 @@
 }
 
 .composer:has(.composer-queue) {
-  margin-top: 49px;
+  margin-top: calc(var(--composer-queue-height, 44px) + 5px);
 }
 
 .composer-queue {
@@ -28,6 +28,9 @@
   bottom: calc(100% + 5px);
   left: -1px;
   min-width: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .composer-queue-item {
@@ -47,6 +50,35 @@
 
 .composer-queue-item.has-media {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+}
+
+.composer-queue-durable {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  border-radius: 10px;
+}
+
+.composer-queue-controls {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 2px;
+  grid-column: 2 / -1;
+}
+
+.composer-queue-status {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.composer-queue-error,
+.composer-queue-item-error {
+  margin: 0;
+  padding: 5px 9px;
+  grid-column: 2 / -1;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  background: var(--composer-surface);
+  font-size: var(--ui-font-micro);
 }
 
 .composer-queue-item > svg {
@@ -123,6 +155,14 @@
 
   .composer-queue-item.has-media {
     grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  }
+
+  .composer-queue-durable {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .composer-queue-status {
+    grid-column: 2;
   }
 
   .composer-queue-count {

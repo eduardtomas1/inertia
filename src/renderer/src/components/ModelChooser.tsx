@@ -55,6 +55,7 @@ import {
 } from "../utils/sidebarModel";
 
 const ModelSourceRail = lazy(() => import("./ModelSourceRail"));
+const ModelRouteDetails = lazy(async () => ({ default: (await import("./ModelRouteDetails")).ModelRouteDetails }));
 
 export type ModelChooserNavigationKey =
   | "ArrowDown"
@@ -514,6 +515,7 @@ export function ModelChooser({
       target.closest(".model-source-rail")
       || target.closest(".model-chooser-row-option")
       || target.closest(".model-chooser-row-favorite")
+      || target.closest(".model-route-details")
     ) {
       return;
     }
@@ -692,6 +694,9 @@ export function ModelChooser({
               </div>
             </div>
           </div>
+          <Suspense fallback={null}>
+            <ModelRouteDetails route={activeRoute ?? routes.find((route) => activeKeyForRoute(route) === selectedKey) ?? null} selection={selectedRoute} />
+          </Suspense>
         </div>
       )}
     </div>

@@ -40,6 +40,7 @@ jobs:
       windows_unit: ${{ steps.changes.outputs.windows_unit }}
       renderer: ${{ steps.changes.outputs.renderer }}
       benchmarks: ${{ steps.changes.outputs.benchmarks }}
+      hot_path_benchmarks: ${{ steps.changes.outputs.hot_path_benchmarks }}
       full_certification: ${{ steps.changes.outputs.full_certification }}
 
     steps:
@@ -173,6 +174,20 @@ jobs:
       - name: Run core suite with all-source coverage baselines
         run: npm run test:coverage
 
+      - name: Enforce Linux hot-path platform budgets
+        if: needs.classify.outputs.hot_path_benchmarks == 'true'
+        timeout-minutes: 8
+        run: npm run benchmark:platform:smoke
+
+      - name: Keep Linux hot-path platform evidence
+        if: always() && needs.classify.outputs.hot_path_benchmarks == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-pr-linux-core
+          path: performance-results
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
@@ -196,7 +211,7 @@ jobs:
     if: needs.classify.outputs.pr_linux_lifecycle == 'true'
     runs-on: ubuntu-24.04
     needs: [classify, gate]
-    timeout-minutes: 25
+    timeout-minutes: ${{ needs.classify.outputs.hot_path_benchmarks == 'true' && 35 || 25 }}
     env:
       CI: "true"
       INERTIA_CI_TIMINGS: "true"
@@ -252,6 +267,20 @@ jobs:
 
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Enforce Linux hot-path desktop budgets
+        if: needs.classify.outputs.hot_path_benchmarks == 'true'
+        timeout-minutes: 8
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+
+      - name: Keep Linux hot-path desktop evidence
+        if: always() && needs.classify.outputs.hot_path_benchmarks == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-pr-linux-lifecycle
+          path: performance-results
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Keep Linux sentinel failure diagnostics
         if: failure()
@@ -489,7 +518,7 @@ jobs:
         run: npm run test:native-architecture
 
       - name: Run cross-platform performance smoke
-        if: needs.classify.outputs.benchmarks == 'true'
+        if: needs.classify.outputs.benchmarks == 'true' || (needs.classify.outputs.hot_path_benchmarks == 'true' && matrix.artifact == 'linux-x64')
         run: npm run benchmark:platform:smoke
 
       # Migrations, architecture, lint, and types are already proven by the
@@ -516,6 +545,14 @@ jobs:
       - name: Run Windows ARM64 portable runtime and provider protocol suite
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:portable
+
+      - name: Verify Windows ARM64 native terminal and Job Object regressions
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+        timeout-minutes: 8
+        run: >-
+          npm exec -- vitest run --maxWorkers=1
+          tests/server/windows-managed-terminal-native.test.ts
+          tests/main/windows-runtime-job.test.ts
 
       # Every attempt is retained and any failed attempt fails the job at the
       # end. A pass after a failure is classified as a flake, never as success.
@@ -742,7 +779,7 @@ jobs:
           retention-days: 7
 
       - name: Keep cross-platform performance evidence
-        if: always() && (needs.classify.outputs.benchmarks == 'true')
+        if: always() && (needs.classify.outputs.benchmarks == 'true' || (needs.classify.outputs.hot_path_benchmarks == 'true' && matrix.artifact == 'linux-x64'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-${{ matrix.artifact }}
@@ -879,7 +916,7 @@ jobs:
         run: npm run benchmark:desktop:built
 
       - name: Measure desktop workloads under Xvfb
-        if: (needs.classify.outputs.benchmarks == 'true') && runner.os == 'Linux'
+        if: (needs.classify.outputs.benchmarks == 'true' || (needs.classify.outputs.hot_path_benchmarks == 'true' && matrix.artifact == 'linux-x64')) && runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Keep failure diagnostics
@@ -892,7 +929,7 @@ jobs:
           retention-days: 7
 
       - name: Keep desktop performance evidence
-        if: always() && (needs.classify.outputs.benchmarks == 'true')
+        if: always() && (needs.classify.outputs.benchmarks == 'true' || (needs.classify.outputs.hot_path_benchmarks == 'true' && matrix.artifact == 'linux-x64'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-electron-${{ matrix.artifact }}

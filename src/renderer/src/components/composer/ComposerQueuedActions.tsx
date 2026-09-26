@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CornerDownRight, Paperclip, Pause, Play, Trash2 } from "lucide-react";
 
-import type { ChatAttachment } from "@shared/contracts";
+import type { ChatAttachment, QueuedMessage } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { resultEvent } from "../../lib/runtimeCommands";
+import type { MessageQueueCommand, MessageQueueCommandRunner } from "./types";
+import { transferRuntimeComposerPrompt } from "./runtimeComposerQueue";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
   clearComposerQueuedPromptDispatched,
@@ -19,6 +22,8 @@ import {
 } from "./composerQueuedPrompts";
 
 export { enqueueComposerPrompt };
+
+const EMPTY_QUEUE: readonly QueuedMessage[] = [];
 
 export async function releaseDeletedComposerQueue(
   conversationId: string,
@@ -43,6 +48,8 @@ export function ComposerQueuedActions({
   latestTurnId,
   latestTurnStatus,
   latestTurnAuthoritative,
+  queuedMessages = EMPTY_QUEUE,
+  onMessageQueueCommand,
   queueHost,
   onSendQueued,
   onReleaseAttachment,
@@ -53,6 +60,8 @@ export function ComposerQueuedActions({
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
   latestTurnAuthoritative: boolean;
+  queuedMessages?: readonly QueuedMessage[];
+  onMessageQueueCommand?: MessageQueueCommandRunner;
   queueHost: HTMLElement | null;
   onSendQueued: (
     content: string,
@@ -63,6 +72,14 @@ export function ComposerQueuedActions({
   const [queuedPrompts, setQueuedPrompts] = useState(() =>
     readComposerQueue(conversationId));
   const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [queueResult, setQueueResult] = useState<{
+    source: readonly QueuedMessage[]; conversationId: string; items: QueuedMessage[];
+  } | null>(null);
+  const migrationAttempts = useRef(new Set<string>());
+  const queueElementRef = useRef<HTMLDivElement>(null);
+  const durableMessages = (queueResult?.source === queuedMessages && queueResult.conversationId === conversationId
+    ? queueResult.items : queuedMessages).filter((item) => item.conversationId === conversationId);
   const queueSendingRef = useRef<string | null>(null);
   const conversationIdRef = useRef(conversationId);
   const autoQueuedTurnRef = useRef<string | null>(null);
@@ -75,6 +92,8 @@ export function ComposerQueuedActions({
     queueSendingRef.current = null;
     autoQueuedTurnRef.current = null;
     setQueueSendingId(null);
+    setQueueError(null);
+    migrationAttempts.current = new Set();
     syncQueue();
     const onStorage = (event: StorageEvent): void => {
       if (event.key === composerQueueKey(conversationId)) syncQueue();
@@ -86,6 +105,55 @@ export function ComposerQueuedActions({
       window.removeEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
     };
   }, [conversationId, syncQueue]);
+
+  const transferQueued = useCallback(async (promptId: string): Promise<void> => {
+    if (!onMessageQueueCommand) return;
+    const prompt = readComposerQueue(conversationId).find(({ id }) => id === promptId);
+    if (!prompt) return;
+    try {
+      await transferRuntimeComposerPrompt(conversationId, prompt, latestTurnId, onMessageQueueCommand);
+      if (conversationIdRef.current === conversationId) {
+        setQueueError(null);
+      }
+    } catch (error) {
+      if (conversationIdRef.current === conversationId
+        && readComposerQueue(conversationId).some(({ id }) => id === prompt.id)) {
+        setQueueError(error instanceof Error ? error.message : "The queue could not be saved. Try again.");
+      }
+    }
+  }, [conversationId, latestTurnId, onMessageQueueCommand]);
+
+  useEffect(() => {
+    if (!onMessageQueueCommand) return;
+    for (const prompt of queuedPrompts) {
+      if (prompt.attachments.length || prompt.dispatchedAt
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(prompt.id)
+        || migrationAttempts.current.has(prompt.id)) continue;
+      migrationAttempts.current.add(prompt.id);
+      void transferQueued(prompt.id);
+    }
+  }, [onMessageQueueCommand, queuedPrompts, transferQueued]);
+
+  const changeQueue = async (payload: MessageQueueCommand["payload"]): Promise<void> => {
+    if (!onMessageQueueCommand || queueSendingRef.current) return;
+    const id = "id" in payload ? payload.id : conversationId;
+    queueSendingRef.current = id;
+    setQueueSendingId(id);
+    setQueueError(null);
+    try {
+      const result = resultEvent(await onMessageQueueCommand("message.queue", { type: "message.queue", payload })).result;
+      if (result.kind !== "message.queue" || result.conversationId !== conversationId) throw new Error("The local service did not confirm this queue.");
+      if (payload.action === "remove") removeComposerQueuedPrompt(conversationId, payload.id);
+      if (conversationIdRef.current === conversationId) setQueueResult({ source: queuedMessages, conversationId, items: result.items });
+    } catch (error) {
+      if (conversationIdRef.current === conversationId) setQueueError(error instanceof Error ? error.message : "The queue could not be updated.");
+    } finally {
+      if (conversationIdRef.current === conversationId && queueSendingRef.current === id) {
+        queueSendingRef.current = null;
+        setQueueSendingId(null);
+      }
+    }
+  };
 
   useEffect(() => {
     const releaseQueuedMedia = (): void => {
@@ -115,11 +183,16 @@ export function ComposerQueuedActions({
     origin: "automatic" | "manual",
   ): Promise<void> => {
     const dispatch = async (): Promise<void> => {
-      if (queueSendingRef.current || !canSendQueuedNow) return;
+      if (queueSendingRef.current) return;
       const queued = readComposerQueue(conversationId).find(
         ({ id }) => id === promptId,
       );
       if (!queued) return;
+      if (queued.runtimeQueue || (onMessageQueueCommand && !queued.attachments.length && !queued.dispatchedAt)) {
+        await transferQueued(promptId);
+        return;
+      }
+      if (!canSendQueuedNow) return;
       // Re-read under the lock: an earlier attempt in this or another window
       // may have dispatched the prompt since the effect looked at it.
       if (origin === "automatic" && queued.dispatchedAt) return;
@@ -161,7 +234,7 @@ export function ComposerQueuedActions({
         if (lock) await dispatch();
       },
     );
-  }, [canSendQueuedNow, conversationId, onSendQueued, removeQueued]);
+  }, [canSendQueuedNow, conversationId, onMessageQueueCommand, onSendQueued, removeQueued, transferQueued]);
 
   useEffect(() => {
     const queued = queuedPrompts[0];
@@ -174,6 +247,9 @@ export function ComposerQueuedActions({
       || latestTurnStatus !== "completed"
       || !latestTurnAuthoritative
       || queued.dispatchedAt
+      || queued.runtimeQueue
+      || (onMessageQueueCommand && !queued.attachments.length)
+      || durableMessages.length > 0
     ) return;
     const terminalKey = `${conversationId}:${latestTurnId}`;
     if (autoQueuedTurnRef.current === terminalKey) return;
@@ -188,14 +264,51 @@ export function ComposerQueuedActions({
     queuedPrompts,
     running,
     sendQueued,
+    onMessageQueueCommand,
+    durableMessages.length,
   ]);
 
-  const queued = queuedPrompts[0] ?? null;
-  if (!queued) return null;
-  const sending = queueSendingId === queued.id;
-  const unconfirmed = Boolean(queued.dispatchedAt) && !sending;
+  const queued = queuedPrompts.find((prompt) => !durableMessages.some(({ id }) => id === prompt.id)) ?? null;
+  const hasQueue = Boolean(queued || durableMessages.length || queueError);
+  useLayoutEffect(() => {
+    const element = queueElementRef.current;
+    if (!element || !queueHost) return;
+    const measure = (): void => queueHost.style.setProperty("--composer-queue-height", `${element.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => { observer.disconnect(); queueHost.style.removeProperty("--composer-queue-height"); };
+  }, [queueHost, hasQueue]);
+  if (!hasQueue) return null;
+  const sending = queueSendingId === queued?.id;
+  const unconfirmed = Boolean(queued?.dispatchedAt) && !sending;
   const queueElement = (
-    <div className="composer-queue" role="list" aria-label="Queued messages">
+    <div className="composer-queue" ref={queueElementRef}>
+      {queueError && <p className="composer-queue-error" role="alert">{queueError}</p>}
+      {durableMessages.length > 0 && <div role="list" aria-label="Saved queued messages">
+        {durableMessages.map((item, index) => {
+          const uncertain = item.status === "uncertain";
+          const dispatching = item.status === "dispatching";
+          const mutable = !uncertain && !dispatching;
+          const status = uncertain ? "Send unconfirmed — check transcript"
+            : dispatching ? "Sending…" : item.status === "paused" ? "Paused"
+              : item.status === "rejected" ? "Send failed" : "Queued";
+          return <div className="composer-queue-item composer-queue-durable" role="listitem" key={item.id}>
+            <CornerDownRight size={15} aria-hidden="true" />
+            <span className="composer-queue-copy" title={item.content}>{item.content}</span>
+            <small className="composer-queue-status" title={item.lastError ?? undefined}>{status}</small>
+            <div className="composer-queue-controls" role="group" aria-label={`Queued message ${index + 1}`}>
+              <button type="button" className="composer-queue-remove" aria-label="Move queued message up" disabled={!mutable || index === 0 || queueSendingId !== null} onClick={() => void changeQueue({ action: "move", conversationId, id: item.id, direction: "up" })}><ArrowUp size={14} aria-hidden="true" /></button>
+              <button type="button" className="composer-queue-remove" aria-label="Move queued message down" disabled={!mutable || index === durableMessages.length - 1 || queueSendingId !== null} onClick={() => void changeQueue({ action: "move", conversationId, id: item.id, direction: "down" })}><ArrowDown size={14} aria-hidden="true" /></button>
+              <button type="button" className="composer-queue-remove" aria-label={item.status === "paused" ? "Resume queued message" : "Pause queued message"} disabled={!mutable || queueSendingId !== null} onClick={() => void changeQueue({ action: "pause", conversationId, id: item.id, paused: item.status !== "paused" })}>{item.status === "paused" ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}</button>
+              <button type="button" className="composer-queue-send" disabled={!canSendQueuedNow || running || !mutable || queueSendingId !== null} onClick={() => void changeQueue({ action: "send", conversationId, id: item.id })}>Send now</button>
+              <button type="button" className="composer-queue-remove" aria-label="Remove queued message" disabled={dispatching || queueSendingId !== null} onClick={() => void changeQueue({ action: "remove", conversationId, id: item.id })}><Trash2 size={14} aria-hidden="true" /></button>
+            </div>
+            {item.lastError && <span className="composer-queue-item-error">{item.lastError}</span>}
+          </div>;
+        })}
+      </div>}
+      {queued && <div role="list" aria-label="Queued messages">
       <div
         className={`composer-queue-item${
           queued.attachments.length > 0 ? " has-media" : ""
@@ -225,27 +338,31 @@ export function ComposerQueuedActions({
         >
           {unconfirmed
             ? "Send unconfirmed"
-            : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+            : queued.runtimeQueue ? "Waiting to save" : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
         </small>
         <button
           type="button"
           className="composer-queue-send"
-          aria-label="Send queued message now"
-          disabled={!canSendQueuedNow || queueSendingId !== null}
+          aria-label={queued.runtimeQueue ? "Retry saving queued message" : "Send queued message now"}
+          disabled={(!queued.runtimeQueue && !canSendQueuedNow) || queueSendingId !== null}
           onClick={() => void sendQueued(queued.id, "manual")}
         >
-          {sending ? "Sending…" : "Send now"}
+          {sending ? "Sending…" : queued.runtimeQueue ? "Retry save" : "Send now"}
         </button>
         <button
           type="button"
           className="composer-queue-remove"
           aria-label="Remove queued message"
           disabled={queueSendingId === queued.id}
-          onClick={() => removeQueued(queued.id)}
+          onClick={() => {
+            if (queued.runtimeQueue && onMessageQueueCommand) void changeQueue({ action: "remove", conversationId, id: queued.id });
+            else removeQueued(queued.id);
+          }}
         >
           <Trash2 size={14} aria-hidden="true" />
         </button>
       </div>
+      </div>}
     </div>
   );
   return queueHost ? createPortal(queueElement, queueHost) : queueElement;

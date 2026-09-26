@@ -39,6 +39,8 @@ export interface ComposerModelRoute extends ModelSearchRoute {
   reasoningEffort: string | null;
   reasoningOptions: readonly string[];
   supportsNativeFastModeControl?: boolean;
+  /** Current provider discovery for this native route; absent means unreported. */
+  inputModalities?: readonly string[];
 }
 
 const harnessLabels: Readonly<Record<ProviderId, string>> = {
@@ -410,11 +412,20 @@ export function buildComposerModelRoutes(
   currentSelection: ModelSelection,
   providerIdentityLabels: ProviderIdentityLabels = {},
 ): ComposerModelRoute[] {
-  const applyIdentityLabels = (routes: ComposerModelRoute[]) => routes.map(
-    (route) => route.providerId && providerIdentityLabels[route.providerId]
-      ? { ...route, providerLabel: providerIdentityLabels[route.providerId]! }
-      : route,
-  );
+  const applyIdentityLabels = (routes: ComposerModelRoute[]) => routes.map((route) => {
+    const provider = providers.find(({ id }) => id === route.providerId);
+    const model = route.modelId === "provider-default"
+      ? provider?.models.find(({ isDefault }) => isDefault) ?? provider?.models[0]
+      : provider?.models.find(({ id }) => id === route.modelId);
+    const native = provider && route.backendProfileId === providerNativeBackendProfile(provider.id).id;
+    return {
+      ...route,
+      ...(native && model && provider.metadataState.models.freshness !== "unavailable"
+        ? { inputModalities: [...model.inputModalities] } : {}),
+      ...(route.providerId && providerIdentityLabels[route.providerId]
+        ? { providerLabel: providerIdentityLabels[route.providerId]! } : {}),
+    };
+  });
   if (backendProfiles.length === 0) {
     return applyIdentityLabels(
       fallbackNativeRoutes(providers, currentSelection),

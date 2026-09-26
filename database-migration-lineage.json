@@ -657,6 +657,31 @@
       "version": 80,
       "name": "PersistAttachmentStorageSettings",
       "digest": "109a0fc7385486124005e843a3ee9075a8a2bf7f6e1e8cd494dbe19680318a9f"
+    },
+    {
+      "version": 81,
+      "name": "PersistAgentThreadTargetOwnership",
+      "digest": "9cfee8bc4de2c6fcba984a0b2021ba164adc77a5305de7c71520a8df315eabce"
+    },
+    {
+      "version": 82,
+      "name": "PreserveRecoveredFinalAnswerProvenance",
+      "digest": "400c6c86ace0677aec09bea6648260d146499d992446fe6ffeb8947a001b8ad7"
+    },
+    {
+      "version": 83,
+      "name": "PersistMessageQueueAndDispatchReceipts",
+      "digest": "5bce6275f5f0bbf6cd4812994bec92b640e2eeb1d06ffa291939276377b6ed06"
+    },
+    {
+      "version": 84,
+      "name": "TrackConversationContentRevisions",
+      "digest": "33d36f7c666a54d2e8ea2e878af2beea71a6b70555f5efd020d17014056a8372"
+    },
+    {
+      "version": 85,
+      "name": "PersistTextMessageDeliveryReceipts",
+      "digest": "fc5b5aac7757e800ebf25840aa7885de44300a9984e0686801d0c7f0684be547"
     }
   ]
 }

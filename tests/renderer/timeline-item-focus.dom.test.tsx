@@ -84,7 +84,7 @@ afterEach(() => {
 });
 
 describe("timeline item focus settlement", () => {
-  it("waits for a nested message and reveals it when its long turn already intersects the viewport", () => {
+  it.each([true, false])("reveals a nested message only within its transcript (virtualized: %s)", (virtualized) => {
     vi.useFakeTimers();
     const frames = frameHarness();
     const { root, row, scrollElement } = fixture();
@@ -93,9 +93,10 @@ describe("timeline item focus settlement", () => {
     destination.tabIndex = -1;
     let top = 1_200;
     destination.getBoundingClientRect = () => rectangle({ left: 20, top, width: 700, height: 100 });
-    const scroll = vi.spyOn(destination, "scrollIntoView").mockImplementation(() => { top = 100; });
+    const unscopedScroll = vi.spyOn(destination, "scrollIntoView");
+    const scroll = vi.spyOn(scrollElement, "scrollTo").mockImplementation(() => { top = 100; });
     const onSettled = vi.fn();
-    startTimelineItemFocus({ root, scrollElement, index: 9, align: "start", virtualized: true,
+    startTimelineItemFocus({ root, scrollElement, index: 9, align: "start", virtualized,
       resolveTarget: () => destination.isConnected ? { row, destination } : null,
       scrollToIndex: vi.fn(), onSettled });
     frames.runNext();
@@ -103,9 +104,10 @@ describe("timeline item focus settlement", () => {
     expect(onSettled).not.toHaveBeenCalled();
     row.append(destination);
     frames.runNext();
-    expect(scroll).toHaveBeenCalledWith({ block: "start", inline: "nearest" });
+    expect(scroll).toHaveBeenCalledWith({ top: 1_200, behavior: "auto" });
+    expect(unscopedScroll).not.toHaveBeenCalled();
     expect(onSettled).not.toHaveBeenCalled();
-    for (let attempt = 0; attempt < 8; attempt += 1) frames.runNext();
+    for (let attempt = 0; attempt < 8 && frames.pending() > 0; attempt += 1) frames.runNext();
     expect(destination).toHaveFocus();
     expect(onSettled).toHaveBeenCalledWith(true);
     expect(frames.pending()).toBe(0);
@@ -162,7 +164,7 @@ describe("timeline item focus settlement", () => {
     const destination = document.createElement("article");
     destination.tabIndex = -1;
     destination.getBoundingClientRect = () => rectangle({ left: 20, top: 1_200, width: 700, height: 100 });
-    const scroll = vi.spyOn(destination, "scrollIntoView");
+    const scroll = vi.spyOn(scrollElement, "scrollTo");
     const onSettled = vi.fn();
     startTimelineItemFocus({ root, scrollElement, index: 9, align: "start", virtualized: true,
       resolveTarget: () => destination.isConnected ? { row, destination } : null,

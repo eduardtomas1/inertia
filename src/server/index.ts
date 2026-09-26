@@ -30,8 +30,7 @@ import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilit
 import {
   ProviderInstallationLeaseCoordinator,
 } from "./provider/installation-lease";
-import { ProviderMaintenanceJournal } from
-  "./provider/maintenance-journal";
+import { ProviderMaintenanceJournal } from "./provider/maintenance-journal";
 import { recoverProviderMaintenanceJournal } from
   "./provider/maintenance-recovery";
 import { createProviderInfoRefresh, providerInstallationVerifier } from "./provider/provider-info-refresh";
@@ -87,7 +86,8 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
-import { createTurnInteractionCommandHandler } from "./runtime/commands/turn-interaction-commands";
+import { createMessageQueueRuntime } from "./runtime/message-queue-runtime";
+import type { MessageQueueController } from "./runtime/message-queue-controller";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import {
@@ -169,6 +169,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
+  let messageQueue: MessageQueueController | undefined;
   let closed = false;
   let closing: Promise<void> | null = null;
   const runtimeLifetimeAbort = new AbortController();
@@ -649,6 +650,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
+        (settled) => messageQueue?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
@@ -675,6 +677,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     { workspaceRuns, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
+  const queuedMessageRuntime = createMessageQueueRuntime({
+    store, conversationAttachments: initializedConversationAttachments,
+    backendProfileController, turns, isolatedRuns, workspaceRuns,
+    pendingApprovals, pendingInputs, dataDirectory, enableProviders,
+    attachmentResolver, generatedAttachments,
+    prepareDocumentAttachments: options.prepareDocumentAttachments,
+    workflows: agentWorkflows, providerTerminalResumes,
+    providerInfo: () => providerInfo,
+    verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
+    broadcast, broadcastSnapshot, send,
+  }, {
+    canDispatch: () => !closed && !runtimeSafetyLock && !databaseRecoveryImportActive && !updatePreparation.isAdmissionClosed(),
+    track: trackRuntimeOperation,
+  });
+  messageQueue = queuedMessageRuntime.queue;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
@@ -719,27 +736,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
       }),
-      createTurnInteractionCommandHandler({
-        store, conversationAttachments: initializedConversationAttachments,
-        backendProfileController,
-        turns,
-        isolatedRuns,
-        workspaceRuns,
-        pendingApprovals,
-        pendingInputs,
-        dataDirectory,
-        enableProviders,
-        attachmentResolver,
-        generatedAttachments,
-        prepareDocumentAttachments: options.prepareDocumentAttachments,
-        workflows: agentWorkflows,
-        providerTerminalResumes,
-        providerInfo: () => providerInfo,
-        verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
-        broadcast,
-        broadcastSnapshot,
-        send,
-      }),
+      queuedMessageRuntime.turnCommands,
+      queuedMessageRuntime.queueCommands,
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
         store,
@@ -937,6 +935,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
     if (enableProviders) {
       void refreshProviderInfo(undefined, true).then(async () => {
+        if (!closed) messageQueue?.start();
         // Remote version advisories are best-effort UI data and own no
         // shutdown resources.
         if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
@@ -958,7 +957,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    conversation: (conversationId) => store.conversationShell(conversationId),
+    transcript: (conversationId) => store.privateConnectTranscript(conversationId),
     isConversationActive: (conversationId) =>
       turns.isActive(conversationId) || isolatedRuns.has(conversationId),
     preparePrompt: async (conversation) => {

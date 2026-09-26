@@ -1,6 +1,8 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +10,8 @@ import { RuntimeStore } from "../../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../../src/server/private-connect/runtime-gateway";
 import { PrivateConnectTranscriptCache } from "../../../src/server/private-connect/transcript-cache";
 import type { PrivateConnectRuntimeAuthorization } from "../../../src/shared/private-connect/runtime-contract";
+import { PRIVATE_CONNECT_RUNTIME_LIMITS } from "../../../src/shared/private-connect/runtime-contract";
+import { PRIVATE_CONNECT_INSPECTION_BYTES, sanitizePrivateConnectContent } from "../../../src/shared/private-connect/sanitizer";
 import {
   privateConnectRuntimeGrantsFromProjectIds,
 } from "../../../src/shared/private-connect/runtime-grants";
@@ -32,7 +36,8 @@ function fixture() {
   });
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    conversation: (id) => store.conversationShell(id),
+    transcript: (id) => store.privateConnectTranscript(id),
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: "turn" }),
@@ -49,7 +54,7 @@ function fixture() {
     grantVersion: 1,
     expiresAt: "2030-02-01T00:00:00.000Z",
   };
-  return { store, gateway, transcriptCache, subject, project, conversation };
+  return { store, gateway, transcriptCache, subject, project, conversation, databasePath: join(directory, "inertia.sqlite") };
 }
 
 async function transcript(
@@ -94,8 +99,8 @@ describe("Private Connect runtime transcript memory", () => {
     // 29 MB of fixture prose through separate transactions tests storage
     // throughput, not the cache's retained-byte budget. The other cases keep
     // real store reads to cover the integration with persisted transcripts.
-    const detail = store.conversationDetail(conversation.id)!;
-    vi.spyOn(store, "conversationDetail").mockReturnValue({
+    const detail = store.privateConnectTranscript(conversation.id);
+    vi.spyOn(store, "privateConnectTranscript").mockReturnValue({
       ...detail,
       messages: detail.messages.map((message) => ({
         ...message,
@@ -163,5 +168,42 @@ describe("Private Connect runtime transcript memory", () => {
     expect(messages[0]?.content).toBe("[Code omitted on Private Connect]");
     expect(transcriptCache.size()).toBe(1);
     expect(transcriptCache.retainedBytes()).toBeLessThan(2_000);
+  });
+
+  it("reads the latest 200 messages after a 75 MiB older transcript without loading full details", async () => {
+    const { store, gateway, subject, conversation, databasePath } = fixture();
+    const database = new Database(databasePath);
+    const expected: string[] = [];
+    try {
+      const insert = database.prepare("INSERT INTO messages (id, conversation_id, role, content, attachments_json, created_at) VALUES (?, ?, 'assistant', ?, '[]', ?)");
+      database.transaction(() => {
+        for (let index = 0; index < 75 + PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages; index++) {
+          const id = randomUUID();
+          const content = index < 75 ? "x".repeat(1024 * 1024) : `Recent ${index}`;
+          if (index >= 75) expected.push(id);
+          insert.run(id, conversation.id, content, new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString());
+        }
+      })();
+    } finally { database.close(); }
+    vi.spyOn(store, "conversationDetail").mockImplementation(() => { throw new Error("Unbounded detail must not be read"); });
+    const projected = store.privateConnectTranscript(conversation.id);
+    expect(projected.messages.map(({ id }) => id)).toEqual(expected);
+    expect(projected.messages.every(({ content }) => Buffer.byteLength(content) <= PRIVATE_CONNECT_INSPECTION_BYTES)).toBe(true);
+    expect((await transcript(gateway, subject, conversation.id)).map(({ id }) => id)).toEqual(expected);
+  });
+
+  it.each([
+    "雪".repeat(65_525) + " token_abcdefghijklmnop and more " + "🧭".repeat(20_000),
+    "\ufeffBefore\0```\n" + "secret source\n".repeat(100_000) + "```",
+    "a".repeat(65_520) + " https://user:password@example.com/path " + "z".repeat(100_000),
+  ])("preserves sanitizer and cache inspection semantics for a bounded UTF-8 prefix", async (content) => {
+    const { store, gateway, subject, conversation } = fixture();
+    const message = store.createMessage(conversation.id, content.slice(0, 100), "assistant");
+    store.appendMessageContent(message.id, content.slice(100));
+    const projected = store.privateConnectTranscript(conversation.id);
+    expect(Buffer.byteLength(projected.messages[0]!.content)).toBeLessThanOrEqual(PRIVATE_CONNECT_INSPECTION_BYTES);
+    expect(sanitizePrivateConnectContent(projected.messages[0]!.content)).toBe(sanitizePrivateConnectContent(content));
+    const first = await transcript(gateway, subject, conversation.id);
+    expect(await transcript(gateway, subject, conversation.id)).toEqual(first);
   });
 });

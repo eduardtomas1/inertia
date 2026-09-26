@@ -15,6 +15,8 @@ import type {
   ProviderId,
   ProviderInfo,
   PromptPreset,
+  QueuedMessage,
+  ServerEvent,
   ThreadUsageSnapshot,
   TurnRequestContext,
   UsageDisplayMode,
@@ -46,6 +48,8 @@ export interface ComposerProps {
   promptHistory?: readonly ComposerPromptHistoryEntry[];
   latestTurnSummary?: ConversationLatestTurnSummary | null;
   queuedTurnAuthoritative?: boolean;
+  queuedMessages?: readonly QueuedMessage[];
+  onMessageQueueCommand?: MessageQueueCommandRunner;
   mentionResults: WorkspaceEntry[];
   usage: ThreadUsageSnapshot | null;
   usageDisplayMode: UsageDisplayMode;
@@ -131,6 +135,8 @@ export interface ComposerQueuedPrompt {
   content: string;
   createdAt: string;
   attachments: ChatAttachment[];
+  /** Local outbox ownership; these entries may only enter the runtime queue. */
+  runtimeQueue?: { afterTurnId: string | null };
   /**
    * Set when a send was dispatched but its outcome never arrived (the socket
    * dropped or the window reloaded mid-request). The runtime may already hold
@@ -147,6 +153,12 @@ export type PromptPresetCommandRunner = (
   key: PromptPresetCommand["type"],
   command: PromptPresetCommand,
 ) => Promise<unknown>;
+
+export type MessageQueueCommand = Extract<CommandWithoutId, { type: "message.queue" }>;
+export type MessageQueueCommandRunner = (
+  key: "message.queue",
+  command: MessageQueueCommand,
+) => Promise<ServerEvent>;
 
 export type ComposerMenu =
   | "reasoning"

@@ -10,7 +10,7 @@ const rateLimitEvent = {
   rate_limit_info: {
     status: "allowed",
     rateLimitType: "five_hour",
-    utilization: 30,
+    utilization: 0.3,
     resetsAt: 1_893_456_000,
   },
 } as unknown as SDKMessage;

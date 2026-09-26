@@ -228,6 +228,7 @@ function dependencies(options: {
         release: vi.fn(),
       })),
       steer: vi.fn(async () => null),
+      deferFollowUpAttachmentCleanup: vi.fn(),
       queue: options.queue,
       start: vi.fn(() => true),
       failBeforeStart: vi.fn(() => true),
@@ -1608,7 +1609,27 @@ describe("message attachment ownership transfer", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("rolls back accepted durable images when follow-up persistence fails", async () => {
+  it("rejects a chat archived while skill preparation was awaiting", async () => {
+    let release!: () => void;
+    let prepared!: () => void;
+    const started = new Promise<void>((resolve) => { prepared = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queue = vi.fn(() => queuedTurn());
+    const handlerDependencies = dependencies({ queue, relinquishAll: vi.fn(async () => undefined),
+      resolveSkills: vi.fn(async () => { prepared(); await gate; return []; }),
+    });
+    const command = messageCommand(); command.payload.attachments = [];
+    const sending = createTurnInteractionCommandHandler(handlerDependencies)({} as never, command);
+    await started;
+    const archived = { ...handlerDependencies.store.conversation(conversationId), archivedAt: new Date().toISOString() };
+    vi.mocked(handlerDependencies.store.conversation).mockReturnValue(archived);
+    release();
+    await expect(sending).rejects.toThrow("Restore this archived chat");
+    expect(queue).not.toHaveBeenCalled();
+    expect(handlerDependencies.turns.start).not.toHaveBeenCalled();
+  });
+
+  it("reports accepted delivery when follow-up persistence fails", async () => {
     const relinquishAll = vi.fn(async () => undefined);
     const handlerDependencies = dependencies({ queue: vi.fn(), relinquishAll });
     vi.mocked(handlerDependencies.turns.isActive).mockReturnValue(true);
@@ -1619,16 +1640,22 @@ describe("message attachment ownership transfer", () => {
       acknowledge,
     ) => {
       acknowledge?.();
-      return null;
+      throw new Error("simulated SQLITE_FULL");
     });
 
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
       {} as never,
       messageCommand(),
-    )).rejects.toThrow("cannot accept a follow-up");
+    )).rejects.toMatchObject({
+      delivery: "ambiguous",
+      message: expect.stringContaining("The follow-up was accepted"),
+    });
 
-    expect(handlerDependencies.conversationAttachments.release)
-      .toHaveBeenCalledWith([trustedAttachment.id]);
+    expect(handlerDependencies.conversationAttachments.release).not.toHaveBeenCalled();
+    const deferred = vi.mocked(handlerDependencies.turns.deferFollowUpAttachmentCleanup).mock.calls[0]?.[1];
+    expect(deferred).toBeTypeOf("function");
+    await deferred!();
+    expect(handlerDependencies.conversationAttachments.release).toHaveBeenCalledWith([trustedAttachment.id]);
     expect(handlerDependencies.conversationAttachments.releaseRetention)
       .not.toHaveBeenCalled();
     expect(handlerDependencies.attachmentResolver!.releaseAll)

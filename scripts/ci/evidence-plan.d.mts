@@ -41,6 +41,7 @@ export interface EvidencePlan {
   matrix: { include: NativePlatform[] };
   renderer: boolean;
   benchmarks: boolean;
+  hotPathBenchmarks: boolean;
   omissions: Array<{ job: string; reason: string }>;
 }
 export interface JobEvidence {

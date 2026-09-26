@@ -2106,39 +2106,7 @@ describe("runtime migration catalog", () => {
     const migrated = new Database(databasePath, { readonly: true });
     expect(migrated.prepare(
       "SELECT version FROM schema_migrations WHERE version >= 50 ORDER BY version",
-    ).all()).toEqual([
-      { version: 50 },
-      { version: 51 },
-      { version: 52 },
-      { version: 53 },
-      { version: 54 },
-      { version: 55 },
-      { version: 56 },
-      { version: 57 },
-      { version: 58 },
-      { version: 59 },
-      { version: 60 },
-      { version: 61 },
-      { version: 62 },
-      { version: 63 },
-      { version: 64 },
-      { version: 65 },
-      { version: 66 },
-      { version: 67 },
-      { version: 68 },
-      { version: 69 },
-      { version: 70 },
-      { version: 71 },
-      { version: 72 },
-      { version: 73 },
-      { version: 74 },
-      { version: 75 },
-      { version: 76 },
-      { version: 77 },
-      { version: 78 },
-      { version: 79 },
-      { version: 80 },
-    ]);
+    ).all()).toEqual(Array.from({ length: CURRENT_DATABASE_SCHEMA_VERSION - 49 }, (_, index) => ({ version: index + 50 })));
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
     ).get() as { enabled: number }).enabled).toBe(1);

@@ -23,6 +23,11 @@ import {
 import { commandRefreshesConversationDetail } from "../../src/renderer/src/lib/runtimeCommands";
 
 describe("runtime command delivery policy", () => {
+  it("refreshes queue mutations but not queue reads and preserves ambiguous delivery", () => {
+    expect(commandRefreshesConversationDetail({ type: "message.queue", payload: { action: "list", conversationId: "chat" } })).toBe(false);
+    expect(commandRefreshesConversationDetail({ type: "message.queue", payload: { action: "remove", conversationId: "chat", id: "entry" } })).toBe(true);
+    expect(runtimeCommandPolicy("message.queue").timeoutDelivery).toBe("ambiguous");
+  });
   it("classifies representative reads and idempotent refreshes as retry-safe", () => {
     expect(runtimeCommandPolicy("app.refresh")).toEqual({
       timeoutMs: 15_000,

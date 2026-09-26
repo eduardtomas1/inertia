@@ -258,6 +258,7 @@ test("reveals the exact follow-up inside a collapsed long historical turn", asyn
   const followUp = page.locator(`[data-follow-up-message-id="${followUpMessageId}"]`);
   await expect(followUp).toBeFocused();
   await expect(followUp).toBeInViewport();
+  await expect(page.locator(".workspace-body")).toHaveJSProperty("scrollTop", 0);
   await expect(followUp).toHaveText(/maximum recovery delay/u);
   await expect(page.locator(`[data-turn-id="${targetTurnId}"] .turn-run-details-toggle`)).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(`[data-turn-id="${targetTurnId}"] [data-turn-jump-target="request"]`)).not.toBeInViewport();

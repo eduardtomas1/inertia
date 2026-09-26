@@ -289,7 +289,8 @@ describe("final-answer turn metadata", () => {
     expect(primary).not.toContain("acme/code-pro");
     expect(detailValue(projected, "Harness ID")).toBe("custom-harness");
     expect(detailValue(projected, "Backend profile ID")).toBe("custom:acme");
-    expect(detailValue(projected, "Exact model ID")).toBe("acme/code-pro");
+    expect(detailValue(projected, "Selected model ID")).toBe("acme/code-pro");
+    expect(detailValue(projected, "Provider-resolved model ID")).toBe("Not recorded");
     expect(detailValue(projected, "Requested alias")).toBe("Not requested");
     expect(detailValue(projected, "Reasoning level")).toBe("Default");
     expect(detailValue(projected, "Interaction mode")).toBe("plan");

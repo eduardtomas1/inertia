@@ -509,7 +509,7 @@ describe("safe database recovery exports", () => {
         }>;
       }>;
     };
-    expect(exported.version).toBe(2);
+    expect(exported.version).toBe(3);
     expect(exported.projects[0]?.conversations[0]?.messages.map(
       ({ role, content }) => ({ role, content }),
     )).toEqual(expected);

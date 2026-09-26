@@ -26,6 +26,8 @@ import {
 } from "./database-recovery-import";
 import type { ConversationRow, MessageRow, ProjectRow } from "./rows";
 import { MESSAGE_PROJECTION_COLUMNS } from "./stream-text-storage";
+import { MessageQueueRepository } from "./message-queue-repository";
+import type { QueuedMessage } from "../../shared/message-queue";
 
 type RecoveryProject = DatabaseRecoveryExport["projects"][number];
 type RecoveryConversation = RecoveryProject["conversations"][number];
@@ -139,6 +141,9 @@ export function exportDatabaseRecoveryData(
       UNION ALL
       SELECT length(CAST(content AS BLOB)) AS bytes
       FROM message_content_chunks
+      UNION ALL
+      SELECT length(CAST(content AS BLOB)) + 128 AS bytes
+      FROM queued_messages WHERE status NOT IN ('accepted', 'removed')
     )
   `).get() as { bytes: unknown };
   if (
@@ -163,14 +168,24 @@ export function exportDatabaseRecoveryData(
       "SELECT * FROM conversations ORDER BY updated_at DESC, id ASC",
     ).all() as ConversationRow[],
     messages: database.prepare(`
-      SELECT ${MESSAGE_PROJECTION_COLUMNS}
+      SELECT ${MESSAGE_PROJECTION_COLUMNS},
+        EXISTS (SELECT 1 FROM agent_turns t
+          WHERE t.id = messages.turn_id AND t.conversation_id = messages.conversation_id
+            AND t.terminal_assistant_message_id = messages.id)
+        OR EXISTS (SELECT 1 FROM recovered_final_answers r
+          WHERE r.message_id = messages.id) AS final_answer
       FROM messages
       ORDER BY messages.created_at ASC, messages.id ASC
-    `).all() as MessageRow[],
+    `).all() as Array<MessageRow & { final_answer: number }>,
+    queuedMessages: database.prepare("SELECT conversation_id, content, created_at, status FROM queued_messages WHERE status NOT IN ('accepted', 'removed') ORDER BY position, id LIMIT 1001")
+      .all() as Array<{ conversation_id: string; content: string; created_at: string; status: QueuedMessage["status"] }>,
   }))();
+  if (rows.queuedMessages.length > 1000) throw new Error("The recovery export contains too many queued messages.");
   const projects = rows.projects.map(projectFromRow);
   const conversations = rows.conversations.map(conversationFromRow);
-  const messages = rows.messages.map(messageFromRow);
+  const messages = rows.messages.map((row) => ({
+    ...messageFromRow(row), finalAnswer: row.role === "assistant" && row.final_answer === 1,
+  }));
   const conversationsByProject = new Map<string, typeof conversations>();
   for (const conversation of conversations) {
     const grouped = conversationsByProject.get(conversation.projectId);
@@ -178,6 +193,12 @@ export function exportDatabaseRecoveryData(
     else conversationsByProject.set(conversation.projectId, [conversation]);
   }
   const messagesByConversation = new Map<string, typeof messages>();
+  const queuesByConversation = new Map<string, NonNullable<RecoveryConversation["queuedMessages"]>>();
+  for (const row of rows.queuedMessages) {
+    const queued = { content: row.content, createdAt: row.created_at, status: row.status };
+    const group = queuesByConversation.get(row.conversation_id);
+    if (group) group.push(queued); else queuesByConversation.set(row.conversation_id, [queued]);
+  }
   for (const message of messages) {
     const grouped = messagesByConversation.get(message.conversationId);
     if (grouped) grouped.push(message);
@@ -216,6 +237,8 @@ export function exportDatabaseRecoveryData(
         path: project.path,
         conversations: (conversationsByProject.get(project.id) ?? [])
           .map((conversation) => {
+            const queuedMessages = queuesByConversation.get(conversation.id);
+            if (queuedMessages) account(queuedMessages);
             account({
               title: conversation.title,
               providerId: conversation.providerId,
@@ -231,6 +254,7 @@ export function exportDatabaseRecoveryData(
               reasoningEffort: conversation.reasoningEffort,
               interactionMode: conversation.interactionMode,
               accessMode: conversation.accessMode,
+              ...(queuedMessages ? { queuedMessages } : {}),
               messages: (messagesByConversation.get(conversation.id) ?? [])
                 .map((message, ordinal) => {
                   const exportedMessage = {
@@ -238,6 +262,7 @@ export function exportDatabaseRecoveryData(
                     content: message.content,
                     createdAt: message.createdAt,
                     ordinal,
+                    finalAnswer: message.finalAnswer,
                   };
                   account(exportedMessage);
                   return exportedMessage;
@@ -336,6 +361,9 @@ export async function importDatabaseRecoveryData(
             );
             messageCount += 1;
             options.operations?.afterMessageCreate?.();
+          }
+          for (const queuedMessage of importedConversation.queuedMessages ?? []) {
+            new MessageQueueRepository(database).restore(conversationId, queuedMessage);
           }
         }
       }

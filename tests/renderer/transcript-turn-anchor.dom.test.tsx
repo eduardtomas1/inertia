@@ -1401,6 +1401,14 @@ describe("timeline keyboard navigation", () => {
     view.rerender(scene(3));
     expect(keydownCalls("addEventListener")).toBe(1);
     expect(keydownCalls("removeEventListener")).toBe(0);
+    scrollElement.getBoundingClientRect = () => rect(0, 600);
+    const rows = timelineElementRef.current!.querySelectorAll<HTMLElement>("[data-response-row-id]");
+    rows.forEach((row, index) => { row.getBoundingClientRect = () => rect(index === 2 ? 100 : -200, 100); });
+    const request = timelineElementRef.current!.querySelector<HTMLElement>('[data-turn-request-context="turn-3"]')!;
+    request.getBoundingClientRect = () => rect(150 - scrollElement.scrollTop, 100);
+    vi.spyOn(scrollElement, "scrollTo").mockImplementation((options?: ScrollToOptions | number, top?: number) => {
+      scrollElement.scrollTop = typeof options === "object" ? options.top ?? scrollElement.scrollTop : top ?? scrollElement.scrollTop;
+    });
 
     expect(fireEvent.keyDown(scrollElement, { altKey: true, key: "Home" }))
       .toBe(false);
@@ -1408,8 +1416,9 @@ describe("timeline keyboard navigation", () => {
       frames.shift()?.(performance.now());
     });
 
-    expect(scrollIntoView.mock.contexts[0])
-      .toHaveAttribute("data-turn-request-context", "turn-3");
+    expect(request).toHaveFocus();
+    expect(request.getBoundingClientRect().top).toBe(0);
+    expect(scrollIntoView).not.toHaveBeenCalled();
     view.unmount();
     expect(keydownCalls("removeEventListener")).toBe(1);
   });

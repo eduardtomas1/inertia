@@ -44,13 +44,32 @@ export function createEvidencePlan({
   const code = !changes.documentationOnly || full;
   const provider = domains.has("provider_common");
   const critical = !full && code;
+  const benchmarks = lane === "nightly" || (lane === "main" && domains.has("performance"));
+  // A single Linux host proves the shipped streaming, SQLite and renderer
+  // budgets before merge; comparative six-platform evidence remains separate.
+  const hotPathBenchmarks = lane !== "draft" && !benchmarks && code && (
+    changes.allEvidence || domains.has("performance") || paths.some((input) => {
+      const path = input.replaceAll("\\", "/");
+      return path.startsWith("src/server/persistence/")
+        || path === "src/server/database.ts"
+        || path === "src/server/runtime-protocol.ts"
+        || path === "src/server/serialized-runtime-event.ts"
+        || path.startsWith("src/server/runtime/turns/")
+        || path === "src/server/runtime/runtime-sync-hub.ts"
+        || path === "src/server/runtime/snapshot-broadcast-coalescer.ts"
+        || path === "src/renderer/src/hooks/useInertiaConnection.ts"
+        || path === "src/renderer/src/utils/runtimeSnapshotProjection.ts"
+        || (path.startsWith("src/renderer/")
+          && /(?:response|transcript|stream|virtual|conversation.?detail)/iu.test(path));
+    })
+  );
   const jobs = {
     gate: true,
     lineage: true,
     "node-22-minimum": full || domains.has("ci_test_infrastructure"),
     "pr-linux-core": code && !platforms.includes("linux-x64"),
     "pr-linux-lifecycle": critical && !platforms.includes("linux-x64")
-      && (provider || domains.has("renderer_ui") || lane === "draft"),
+      && (provider || domains.has("renderer_ui") || hotPathBenchmarks || lane === "draft"),
     "pr-windows-lifecycle": critical && provider && !platforms.includes("windows-x64"),
     "pr-macos-lifecycle": critical && provider && !platforms.includes("macos-arm64"),
     test: platforms.length > 0,
@@ -81,13 +100,15 @@ export function createEvidencePlan({
       ...(jobs["pr-linux-lifecycle"] ? [domains.has("renderer_ui") ? "linux-full-electron" : "linux-core-bridge", "linux-recovery"] : []),
       ...(jobs["pr-windows-lifecycle"] ? ["windows-portable-and-lifecycle", "windows-codex-discovery"] : []),
       ...(jobs["pr-macos-lifecycle"] ? ["macos-portable-and-lifecycle"] : []),
+      ...(hotPathBenchmarks ? ["linux-hot-path-benchmarks"] : []),
+      ...(platforms.includes("windows-arm64") ? ["windows-arm64:native-process-regressions"] : []),
       ...platforms.map((platform) => `${platform}:native-units-package-smoke`),
       ...platforms.map((platform) => `${platform}:electron-display-isolated-recovery`),
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },
     renderer: critical && domains.has("renderer_ui"),
-    benchmarks: lane === "nightly" || (lane === "main" && domains.has("performance")),
+    benchmarks, hotPathBenchmarks,
     omissions: Object.keys(jobs).filter((job) => !jobs[job]).map((job) => ({
       job, reason: full ? "covered-by-full-native-matrix"
         : changes.documentationOnly ? "documentation-does-not-change-runtime"
@@ -105,6 +126,7 @@ export function outputsForEvidencePlan(plan) {
     full_certification: plan.fullCertification,
     renderer: plan.renderer,
     benchmarks: plan.benchmarks,
+    hot_path_benchmarks: plan.hotPathBenchmarks,
   };
   for (const job of Object.keys(EVIDENCE_JOBS)) {
     outputs[job.replaceAll("-", "_")] = plan.requiredJobs.includes(job);

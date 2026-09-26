@@ -40,7 +40,8 @@ function fixture() {
   const queuePrompt = vi.fn(() => ({ turnId: "private-connect-turn" }));
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    conversation: (id) => store.conversationShell(id),
+    transcript: (id) => store.privateConnectTranscript(id),
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt,

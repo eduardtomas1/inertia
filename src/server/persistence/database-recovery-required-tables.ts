@@ -36,4 +36,8 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [61, ["conversation_context_packets", "agent_context_requests"]],
   [66, ["system_suspend_intervals"]],
   [74, ["usage_limit_sources", "usage_reset_attempts"]],
+  [82, ["recovered_final_answers"]],
+  [83, ["queued_messages"]],
+  [84, ["conversation_content_revisions"]],
+  [85, ["message_send_receipts"]],
 ];

@@ -693,6 +693,13 @@ export function createWorkspaceSceneModel({
       loading: (!connection.snapshot && connection.status !== "offline")
         || chatProjection.detailLoading,
       detailLoading: chatProjection.detailLoading,
+      historyControls: detail?.conversation.id === conversation?.id ? {
+        history: detail?.history, deferredContent: detail?.deferredContent,
+        loading: projection.historyLoading, historyError: projection.historyError,
+        viewingHistory: projection.viewingHistory,
+        onOlder: projection.loadOlderHistory, onNewer: projection.loadNewerHistory,
+        onLatest: projection.loadLatestHistory, readContent: projection.readDeferredContent,
+      } : undefined,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),
@@ -700,6 +707,8 @@ export function createWorkspaceSceneModel({
       onCompactConversation: actions.compactConversation,
       onListSkills: actions.listSkills,
       onPromptPresetCommand: actions.run,
+      queuedMessages: detail?.queuedMessages,
+      onMessageQueueCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
       onUpdateConversation: actions.updateConversation,

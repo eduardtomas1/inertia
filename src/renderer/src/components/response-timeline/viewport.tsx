@@ -53,21 +53,13 @@ import {
   type TimelineMarker,
 } from "./minimap";
 import { startTimelineItemFocus } from "./timeline-item-focus";
+import { currentPlainTimelineIndex, findTurnElement } from "./timeline-dom-navigation";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
 export { TimelineMinimap, type TimelineMarker } from "./minimap";
 
 type TimelineJumpTarget = "turn" | "request" | "final" | "artifact" | { messageId: string; turnId?: string };
-
-function findTurnElement(
-  root: HTMLElement | null | undefined,
-  turnId: string,
-): HTMLElement | null {
-  if (!root) return null;
-  return [...root.querySelectorAll<HTMLElement>("[data-turn-id]")]
-    .find((element) => element.dataset.turnId === turnId) ?? null;
-}
 
 function latestTurnCompletion(
   timeline: ResponseTimelineItem[],
@@ -93,21 +85,6 @@ function latestTurnCompletion(
     }
   }
   return null;
-}
-
-function currentPlainTimelineIndex(
-  root: HTMLElement | null | undefined,
-  scrollElement: HTMLElement | null | undefined,
-  timeline: ResponseTimelineItem[],
-): number {
-  if (!root || !scrollElement || timeline.length === 0) return 0;
-  const scrollTop = scrollElement.getBoundingClientRect().top;
-  const visible = [...root.querySelectorAll<HTMLElement>("[data-response-row-id]")]
-    .find((element) => element.getBoundingClientRect().bottom > scrollTop + 8);
-  const index = visible
-    ? timeline.findIndex(({ id }) => id === visible.dataset.responseRowId)
-    : -1;
-  return index >= 0 ? index : Math.max(0, timeline.length - 1);
 }
 
 function currentInterfaceScale(): InterfaceScale {
@@ -543,6 +520,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const manuallyAdjustedRows = useRef(new Set<string>());
   const layoutAnchorActive = useRef(false);
   const turnAnchorActive = useRef(false);
+  const timelineItemFocusActive = useRef(false);
   const finalAnswerAnchorOwner = useRef<string | null>(null);
   const finalAnswerAnchorSignalOwner = useRef<string | null>(null);
   const cancelFinalAnswerAnchorRef = useRef<(() => void) | null>(null);
@@ -567,6 +545,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       scrollDirection: instance.scrollDirection,
       manuallyAnchored: layoutAnchorActive.current
         || turnAnchorActive.current
+        || timelineItemFocusActive.current
         || finalAnswerAnchorOwner.current !== null
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
@@ -808,6 +787,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     virtualizer,
   ]);
   captureLayoutAnchorRef.current = () => {
+    if (timelineItemFocusActive.current) return;
     if (pendingLayoutAnchor.current) {
       if (!cancelLayoutAnchorRestoration.current) return;
       cancelLayoutAnchorRestoration.current();
@@ -950,6 +930,9 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
   const captureExpansionAnchor = useCallback((sourceTurnId: string): void => {
+    // Search opens disclosures to reveal a nested destination. Preserving the
+    // old disclosure position would fight that exact navigation's scroll.
+    if (timelineItemFocusActive.current) return;
     // Disclosures are deliberate history navigation. Claim it before their
     // resize can let the parent follow-latest observer reclaim the viewport.
     beginReaderTimelineNavigation();
@@ -1098,12 +1081,19 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (!item) return;
     const align = target === "turn" ? "center" : "start";
     cancelTimelineItemFocus.current?.();
+    cancelLayoutAnchorRestoration.current?.();
+    pendingLayoutAnchor.current = null;
+    pendingAnchors.current.clear();
+    activeAnchorRestorations.current.clear();
+    manuallyAdjustedRows.current.clear();
+    timelineItemFocusActive.current = true;
     cancelTimelineItemFocus.current = startTimelineItemFocus({
       root: props.timelineElementRef?.current ?? null,
       scrollElement: props.scrollElementRef?.current ?? null,
       index: boundedIndex,
       align,
       virtualized,
+      onSettled: () => { timelineItemFocusActive.current = false; },
       resolveTarget: (root) => {
         const row = item.kind === "turn"
           ? findTurnElement(root, item.turn.id)

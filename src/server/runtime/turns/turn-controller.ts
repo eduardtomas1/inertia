@@ -80,6 +80,7 @@ import {
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
+import { releaseTurnAttachments } from "./turn-attachment-cleanup";
 
 export type {
   QueuedTurn,
@@ -897,6 +898,23 @@ export class TurnController {
     return this.settle(active, "cancelled", cause, "Stopped");
   }
 
+  activeIdentity(conversationId: string): { runId: string; turnId: string } | null {
+    const active = this.activeByConversation.get(conversationId);
+    return active && !active.runState.isTerminal()
+      ? { runId: active.turn.runId, turnId: active.turn.id }
+      : null;
+  }
+
+  cancelOwned(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    const active = this.activeIdentity(conversationId);
+    return active?.runId === identity.runId && active.turnId === identity.turnId
+      ? this.cancel(conversationId)
+      : false;
+  }
+
   failBeforeStart(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
@@ -906,6 +924,9 @@ export class TurnController {
 
   acquireFollowUpAdmission(conversationId: string): FollowUpAdmissionLease | null {
     return this.followUps.acquire(this.activeByConversation.get(conversationId));
+  }
+  deferFollowUpAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {
+    this.followUps.deferAttachmentCleanup(lease, cleanup);
   }
   async steer(
     lease: FollowUpAdmissionLease,
@@ -1172,53 +1193,14 @@ export class TurnController {
     return this.runStates.settle(active, status, cause, message, failure);
   }
 
-  private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {
-    await this.followUps.drain(active);
-    if (
-      active.attachmentsReleased
-      || (
-        active.attachmentIds.length === 0
-        && active.generatedAttachmentPaths.length === 0
-      )
-    ) return;
-    if (active.attachmentRelease) return await active.attachmentRelease;
-    const release = Promise.all([
-      active.attachmentIds.length > 0
-        ? Promise.resolve(this.hooks.releaseTurnAttachments?.({
-            turn: active.turn,
-            attachmentIds: active.attachmentIds,
-          }))
-        : Promise.resolve(),
-      active.generatedAttachmentPaths.length > 0
-        ? Promise.resolve(
-            this.hooks.releaseGeneratedAttachments?.(
-              active.generatedAttachmentPaths,
-            ) ?? Promise.reject(
-              new Error("Generated attachment cleanup is unavailable."),
-            ),
-          )
-        : Promise.resolve(),
-    ]).then(() => {
-      active.attachmentsReleased = true;
-    });
-    active.attachmentRelease = release;
-    try {
-      await release;
-    } finally {
-      if (active.attachmentRelease === release) {
-        active.attachmentRelease = null;
-      }
-    }
-  }
-
   private async releaseTurnAttachmentsWithRetry(active: ActiveTurn): Promise<void> {
     try {
-      await this.releaseTurnAttachments(active);
+      await releaseTurnAttachments(active, this.hooks, () => this.followUps.drain(active));
     } catch {
       // Release hooks are required to be idempotent. One whole-set retry
       // closes partial multi-path failures without releasing before provider
       // detachment or silently dropping the failed lease.
-      await this.releaseTurnAttachments(active);
+      await releaseTurnAttachments(active, this.hooks, () => this.followUps.drain(active));
     }
   }
 

@@ -19,6 +19,7 @@ import type {
   ProjectAction,
   ProviderInfo,
   PromptPreset,
+  QueuedMessage,
   ThreadUsageSnapshot,
   UsageDisplayMode,
 } from "@shared/contracts";
@@ -49,7 +50,7 @@ import {
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import { ProjectPicker } from "./ProjectPicker";
 import type { ComposerMenuController } from "./useComposerMenus";
-import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
+import type { MessageQueueCommandRunner, NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
@@ -151,6 +152,8 @@ export interface ComposerToolbarProps {
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
   queuedTurnAuthoritative: boolean;
+  queuedMessages?: readonly QueuedMessage[];
+  onMessageQueueCommand?: MessageQueueCommandRunner;
   onSendQueued: (
     content: string,
     attachments: ChatAttachment[],
@@ -222,6 +225,8 @@ export function ComposerToolbar({
   queuedTurnId,
   queuedTurnStatus,
   queuedTurnAuthoritative,
+  queuedMessages,
+  onMessageQueueCommand,
   onSendQueued,
   onReleaseAttachment,
   onSubmit,
@@ -514,7 +519,9 @@ export function ComposerToolbar({
             running={running}
             latestTurnId={queuedTurnId}
             latestTurnStatus={queuedTurnStatus}
-            latestTurnAuthoritative={queuedTurnAuthoritative}
+          latestTurnAuthoritative={queuedTurnAuthoritative}
+          queuedMessages={queuedMessages}
+          onMessageQueueCommand={onMessageQueueCommand}
             onSendQueued={onSendQueued}
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}

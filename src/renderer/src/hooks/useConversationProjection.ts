@@ -49,6 +49,7 @@ import {
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
 import { createStreamingAgentStore } from "./useStreamingAgentState";
+import { useConversationHistoryNavigation } from "./useConversationHistoryNavigation";
 import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
 // A chat that is listed but unreadable is retried at these intervals before
@@ -243,6 +244,11 @@ export function useConversationProjection({
       ? mergeConversationShell(detailState.detail, conversation)
       : detailState.detail;
   }, [conversation, detailState]);
+  const historyNavigation = useConversationHistoryNavigation(conversationId, detail, request);
+  const { historyRequest, historyRevision, setHistoryLoading, setHistoryError, loadLatestHistory, resetHistoryNavigation } = historyNavigation;
+  const viewingHistory = Boolean(historyRequest.cursor || historyRequest.anchorMessageId);
+  const viewingHistoryRef = useRef(viewingHistory);
+  viewingHistoryRef.current = viewingHistory;
 
   useEffect(() => {
     if (!conversationId) return;
@@ -288,10 +294,12 @@ export function useConversationProjection({
 
     const generation = requestGenerationRef.current + 1;
     requestGenerationRef.current = generation;
+    setHistoryLoading(true);
+    setHistoryError(null);
     let retryTimer: number | null = null;
     void request({
       type: "conversation.detail.load",
-      payload: { conversationId },
+      payload: { conversationId, ...historyRequest },
     }).then((event) => {
       if (generation !== requestGenerationRef.current) return;
       if (
@@ -303,6 +311,12 @@ export function useConversationProjection({
         );
       }
       const result = event.result;
+      setHistoryLoading(false);
+      if (result.state === "failed" && (historyRequest.cursor || historyRequest.anchorMessageId)) {
+        setHistoryError(result.message);
+        setDetailState((current) => current?.conversationId === conversationId && current.state === "ready" ? current : result);
+        return;
+      }
       const shell = snapshotRef.current?.conversations.find(
         ({ id }) => id === conversationId,
       ) ?? null;
@@ -399,6 +413,8 @@ export function useConversationProjection({
       }
     }).catch((error) => {
       if (generation !== requestGenerationRef.current) return;
+      setHistoryLoading(false);
+      setHistoryError(error instanceof Error ? error.message : "This chat could not be loaded.");
       setDetailState((current) => (
         current?.conversationId === conversationId
         && current.state === "ready"
@@ -422,6 +438,10 @@ export function useConversationProjection({
     request,
     setStreaming,
     status,
+    historyRequest,
+    historyRevision,
+    setHistoryLoading,
+    setHistoryError,
   ]);
 
   useEffect(() => {
@@ -528,6 +548,7 @@ export function useConversationProjection({
     const activeConversation = conversationRef.current;
     const projectionEnabled = enabledRef.current;
     if (event.type === "server.welcome") {
+      resetHistoryNavigation();
       requestGenerationRef.current += 1;
       terminalRefreshPendingRef.current = false;
       liveTurnOwnerRef.current = null;
@@ -669,6 +690,7 @@ export function useConversationProjection({
       return;
     }
     if (!projectionEnabled) return;
+    if (viewingHistoryRef.current) return;
     if (event.type === "conversation.message.persisted") {
       if (event.message.conversationId !== activeConversation?.id) return;
       setLiveMessages((current) => {
@@ -934,36 +956,37 @@ export function useConversationProjection({
     setStreaming,
     subscribe,
     subscriptionOwner,
+    resetHistoryNavigation,
   ]);
 
   useEffect(() => {
     resetLiveProjection();
-  }, [conversation?.id, resetLiveProjection]);
+  }, [conversation?.id, resetLiveProjection, viewingHistory]);
 
   const activeConversationId = conversation?.id ?? null;
-  const turns = useMemo(() => applyTerminalTurnProjections(
+  const turns = useMemo(() => viewingHistory ? detail?.agentTurns ?? EMPTY_TURNS : applyTerminalTurnProjections(
     detail?.agentTurns ?? EMPTY_TURNS,
     terminalProjections,
     conversation?.latestTurn ?? null,
-  ), [conversation?.latestTurn, detail?.agentTurns, terminalProjections]);
+  ), [conversation?.latestTurn, detail?.agentTurns, terminalProjections, viewingHistory]);
   const messages = useMemo(
     () => mergeProjectionRecords(
       detail?.messages ?? [],
-      activeConversationId ? liveMessages[activeConversationId] ?? [] : [],
+      activeConversationId && !viewingHistory ? liveMessages[activeConversationId] ?? [] : [],
       compareCreatedRecords,
     ),
-    [activeConversationId, detail?.messages, liveMessages],
+    [activeConversationId, detail?.messages, liveMessages, viewingHistory],
   );
   const activities = useMemo(() => mergeProjectionRecords(
     detail?.activities ?? [],
-    activeConversationId ? liveActivities[activeConversationId] ?? [] : [],
+    activeConversationId && !viewingHistory ? liveActivities[activeConversationId] ?? [] : [],
     compareCreatedRecords,
-  ), [activeConversationId, detail?.activities, liveActivities]);
+  ), [activeConversationId, detail?.activities, liveActivities, viewingHistory]);
   const subagents = useMemo(() => mergeProjectionRecords(
     detail?.subagents ?? [],
-    activeConversationId ? liveSubagents[activeConversationId] ?? [] : [],
+    activeConversationId && !viewingHistory ? liveSubagents[activeConversationId] ?? [] : [],
     compareSubagentTraces,
-  ), [activeConversationId, detail?.subagents, liveSubagents]);
+  ), [activeConversationId, detail?.subagents, liveSubagents, viewingHistory]);
   const usage = useMemo(() => projectionUsage(
     activeConversationId,
     liveUsage,
@@ -972,9 +995,9 @@ export function useConversationProjection({
   const plans = useMemo(() => activeConversationId
     ? mergeProjectionPlans(
         detail?.plans ?? [],
-        nativePlans[activeConversationId],
+        viewingHistory ? undefined : nativePlans[activeConversationId],
       )
-    : [], [activeConversationId, detail?.plans, nativePlans]);
+    : [], [activeConversationId, detail?.plans, nativePlans, viewingHistory]);
   const approvals = useMemo(
     () => recordsForConversation(pendingApprovals, conversation?.id),
     [conversation?.id, pendingApprovals],
@@ -990,10 +1013,17 @@ export function useConversationProjection({
 
   return {
     conversation,
-    latestTurnSummary: conversation?.latestTurn ?? null,
+    latestTurnSummary: viewingHistory ? null : conversation?.latestTurn ?? null,
     detail,
     detailState,
     refreshDetail,
+    loadOlderHistory: historyNavigation.loadOlderHistory,
+    loadNewerHistory: historyNavigation.loadNewerHistory,
+    loadLatestHistory,
+    readDeferredContent: historyNavigation.readDeferredContent,
+    historyLoading: historyNavigation.historyLoading,
+    historyError: historyNavigation.historyError,
+    viewingHistory,
     turns,
     messages,
     activities,

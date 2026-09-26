@@ -3,6 +3,7 @@ import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attach
 import type { ChatAttachment, ChatMessage } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import type { ProviderSteerInput } from "../../provider/contracts";
+import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
@@ -20,6 +21,7 @@ interface TurnFollowUpCoordinatorOptions {
 export class TurnFollowUpCoordinator {
   private readonly owners = new WeakMap<FollowUpAdmissionLease, ActiveTurn>();
   private readonly lastSubmittedAtMs = new WeakMap<ActiveTurn, number>();
+  private readonly attachmentCleanups = new WeakMap<ActiveTurn, Set<() => Promise<void>>>();
 
   constructor(private readonly options: TurnFollowUpCoordinatorOptions) {}
 
@@ -98,17 +100,18 @@ export class TurnFollowUpCoordinator {
       { content: [followUp, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
       { runId: active.turn.runId, turnId: active.turn.id },
     );
+    if (!accepted) return null;
+    // Acceptance remains true even if the turn settles while awaiting it.
+    onProviderAcknowledged?.();
     const ownerAfterSteer = this.options.activeForConversation(
       lease.conversationId,
     );
     if (
-      !accepted
-      || ownerAfterSteer !== active
+      ownerAfterSteer !== active
       || !active.runState.acceptsProviderEvents()
       || active.turn.runId !== lease.runId
       || active.turn.id !== lease.turnId
-    ) return null;
-    onProviderAcknowledged?.();
+    ) throw new RuntimeRequestError("The follow-up was accepted as its turn ended. Check this chat before retrying.", undefined, "ambiguous");
     return this.options.store.createAcknowledgedFollowUpMessage(
       lease.conversationId,
       active.turn.id,
@@ -119,9 +122,22 @@ export class TurnFollowUpCoordinator {
     );
   }
 
+  deferAttachmentCleanup(lease: FollowUpAdmissionLease, cleanup: () => Promise<void>): void {
+    const active = this.owners.get(lease);
+    if (!active) throw new Error("The follow-up attachment lease is no longer owned.");
+    const cleanups = this.attachmentCleanups.get(active) ?? new Set<() => Promise<void>>();
+    cleanups.add(cleanup);
+    this.attachmentCleanups.set(active, cleanups);
+  }
+
   async drain(active: ActiveTurn): Promise<void> {
     while (active.followUpAdmissions.size > 0) {
       await Promise.allSettled(active.followUpAdmissions);
+    }
+    const cleanups = this.attachmentCleanups.get(active);
+    for (const cleanup of cleanups ?? []) {
+      await cleanup();
+      cleanups!.delete(cleanup);
     }
   }
 }

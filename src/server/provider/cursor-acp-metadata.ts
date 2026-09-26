@@ -29,14 +29,16 @@ export function emitCursorMetadata(
     description: bounded(model.description || "Cursor session model"),
     isDefault: modelOption.currentValue === model.value,
     inputModalities: supportsImages ? ["text", "image"] : ["text"],
-    reasoningOptions: efforts.map((effort) => ({
+    // ACP reasoning choices describe the selected model. Changing models can
+    // replace this selector, so unobserved models must use provider defaults.
+    reasoningOptions: modelOption.currentValue === model.value ? efforts.map((effort) => ({
       value: bounded(effort.value),
       label: bounded(effort.name || effort.value),
       description: bounded(
         effort.description || `${effort.name || effort.value} reasoning`,
       ),
-    })),
-    defaultReasoningEffort: defaultEffort,
+    })) : [],
+    defaultReasoningEffort: modelOption.currentValue === model.value ? defaultEffort : "",
   }));
   emitter.capability("model-discovery", true);
   emitter.rich({

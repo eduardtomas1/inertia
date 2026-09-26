@@ -214,10 +214,14 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });
     await expect(page.getByRole("heading", { name: "Background history fixture", level: 1 })).toBeVisible();
     if (turns === 128) {
-      await expect(page.getByRole("feed", { name: `${turns} conversation turns` })).toBeVisible();
-      await expect.poll(() => page.locator(".response-virtual-item").count()).toBeLessThan(24);
+      await expect(page.getByRole("button", { name: "Older history", exact: true })).toBeVisible();
+      const mounted = page.locator(".response-virtual-item, .response-static-item");
+      await expect.poll(() => mounted.count()).toBeGreaterThan(0);
+      await expect.poll(() => mounted.count()).toBeLessThanOrEqual(24);
     } else {
-      await expect(page.locator(".response-static-item")).toHaveCount(turns);
+      // Each turn has 74 activities; the latest 24-record page contains one turn.
+      await expect(page.locator(".response-static-item")).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "Older history", exact: true })).toBeVisible();
     }
     // The scheduled initial backup publishes a real snapshot after its quiet
     // grace. Measure idle motion after that one-time startup work completes.

@@ -83,6 +83,8 @@ export const Composer = memo(function Composer({
   promptHistory = [],
   latestTurnSummary = null,
   queuedTurnAuthoritative = true,
+  queuedMessages,
+  onMessageQueueCommand,
   mentionResults,
   usage,
   usageDisplayMode,
@@ -139,6 +141,8 @@ export const Composer = memo(function Composer({
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [queueSaving, setQueueSaving] = useState(false);
+  const queueSavingRef = useRef<symbol | null>(null);
   const submittingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const { stopping, stopClaimRef, stop } = useComposerStopAction({
@@ -167,6 +171,7 @@ export const Composer = memo(function Composer({
   const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
   const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
   const [routeRepairing, setRouteRepairing] = useState(false);
+  const routeRepairRef = useRef<symbol | null>(null);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -324,6 +329,8 @@ export const Composer = memo(function Composer({
     }
     submittingRef.current = false;
     setSubmitting(false);
+    queueSavingRef.current = null;
+    setQueueSaving(false);
     const nextDraft = window.localStorage.getItem(
       `inertia:draft:${conversation.id}`,
     ) ?? "";
@@ -340,6 +347,7 @@ export const Composer = memo(function Composer({
     setPendingRoute(null);
     setCreatingRouteConversation(false);
     setRouteRepairing(false);
+    routeRepairRef.current = null;
     conversationUpdateSequenceRef.current += 1;
     setConversationUpdatePending(false);
     setConversationUpdateError(null);
@@ -717,55 +725,44 @@ export const Composer = memo(function Composer({
     sending,
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
-    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const queueCurrentMessage = async (): Promise<void> => {
-    if (!canQueue || conversationContext.isReferencing()) return;
+    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending && !queueSaving;
+  const queueCurrentMessage = (): Promise<void> => {
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
-    const { enqueueComposerPrompt } = await import("./ComposerQueuedActions");
-    if (conversationIdRef.current !== queuedConversationId || draftValueRef.current !== queuedMessage
-      || attachmentsRef.current !== queuedAttachments || !enqueueComposerPrompt(
-        queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
-      )) return;
-    attachmentsRef.current = []; setAttachments([]);
-    setAttachmentError(null);
-    pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
-    flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
-    markEditorChanged(); promptHistoryController.reset(""); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return import("./composerQueueAction").then(({ queueComposerMessage }) => queueComposerMessage({
+      canQueue: canQueue && !conversationContext.isReferencing(), pending: queueSavingRef,
+      conversationId: queuedConversationId, content: queuedMessage.trim() || attachmentFallback,
+      attachments: queuedAttachments, afterTurnId: (latestTurnSummary ?? latestTurn)?.id ?? null,
+      run: onMessageQueueCommand,
+      isCurrent: () => mountedRef.current && conversationIdRef.current === queuedConversationId
+        && draftValueRef.current === queuedMessage && attachmentsRef.current === queuedAttachments,
+      setSaving: (value) => { if (mountedRef.current) setQueueSaving(value); },
+      onError: setAttachmentError,
+      onSaved: () => {
+        attachmentsRef.current = []; setAttachments([]); setAttachmentError(null);
+        pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
+        flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
+        markEditorChanged(); promptHistoryController.reset(""); draftValueRef.current = ""; setMessage("");
+        window.requestAnimationFrame(() => textareaRef.current?.focus());
+      },
+    })).catch((error: unknown) => {
+      if (mountedRef.current && conversationIdRef.current === queuedConversationId) setAttachmentError(error instanceof Error ? error.message : "The message could not be queued.");
+    });
   };
   const runRouteRepair = async (): Promise<void> => {
-    if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
-    const action = routeReadiness.action;
-    if (action === "install") {
-      onOpenProviderSetup(conversation.providerId);
-      return;
-    }
-    if (action === "connect") {
-      onConnectProvider(conversation.providerId);
-      return;
-    }
-    if (action === "add-key") {
-      if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
-      return;
-    }
-    if (action === "configure") {
-      if (selectedBackendProfile) onOpenBackendSetup(selectedBackendProfile.id);
-      return;
-    }
-    setRouteRepairing(true);
-    try {
-      if (action === "probe" && selectedBackendProfile) {
-        await onProbeBackendProfile(
-          selectedBackendProfile.id,
-          conversation.modelSelection.modelId,
-        );
-      } else {
-        onRefreshProvider(conversation.providerId);
-      }
-    } finally {
-      if (mountedRef.current) setRouteRepairing(false);
-    }
+    if (routeRepairRef.current || routeReadiness.ready || !routeReadiness.action) return;
+    const token = Symbol(); routeRepairRef.current = token; setRouteRepairing(true);
+    try { const { repairComposerRoute } = await import("./composerRouteRepair");
+      if (!mountedRef.current || routeRepairRef.current !== token) return;
+      await repairComposerRoute({
+        readiness: routeReadiness, profileId: selectedBackendProfile?.id, pending: false,
+        conversation, onOpenProviderSetup, onConnectProvider, onOpenBackendSetup,
+        onProbeBackendProfile, onRefreshProvider,
+        setPending: () => undefined,
+      });
+    } catch (error) { if (mountedRef.current && routeRepairRef.current === token) setAttachmentError(error instanceof Error ? error.message : "The provider could not be refreshed.");
+    } finally { if (mountedRef.current && routeRepairRef.current === token) { routeRepairRef.current = null; setRouteRepairing(false); } }
   };
   const submissionPending = primaryAction === "submitting";
   const followUpPending = followUpState === "pending";
@@ -1238,6 +1235,8 @@ export const Composer = memo(function Composer({
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
+          queuedMessages={queuedMessages}
+          onMessageQueueCommand={onMessageQueueCommand}
           onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}

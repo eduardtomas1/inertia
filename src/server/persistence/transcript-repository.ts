@@ -78,17 +78,25 @@ export class TranscriptRepository {
     content: string,
     role: ChatMessage["role"],
     createdAt: string,
+    finalAnswer = false,
   ): ChatMessage {
-    return this.createMessageWithId(
-      id,
-      conversationId,
-      content,
-      role,
-      [],
-      null,
-      createdAt,
-      { activateConversation: false },
-    );
+    if (finalAnswer && role !== "assistant") throw new Error("Only assistant messages can be final answers.");
+    return this.context.database.transaction(() => {
+      const message = this.createMessageWithId(
+        id,
+        conversationId,
+        content,
+        role,
+        [],
+        null,
+        createdAt,
+        { activateConversation: false },
+      );
+      if (finalAnswer) this.context.database.prepare(
+        "INSERT INTO recovered_final_answers (message_id) VALUES (?)",
+      ).run(message.id);
+      return message;
+    })();
   }
 
   private createMessageWithId(
@@ -366,7 +374,11 @@ export class TranscriptRepository {
       FROM messages m JOIN conversations c ON c.id = m.conversation_id
       LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
       WHERE m.id = ? AND c.archived_at IS NULL AND (
-        m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+        m.role = 'user' OR (m.role = 'assistant' AND (
+          t.terminal_assistant_message_id = m.id OR EXISTS (
+            SELECT 1 FROM recovered_final_answers r WHERE r.message_id = m.id
+          )
+        ))
       )
     `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }

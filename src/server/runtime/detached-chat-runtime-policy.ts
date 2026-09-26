@@ -59,6 +59,7 @@ export function detachedChatCommandRejection(
         ? null
         : REJECTION;
     case "conversation.detail.load":
+    case "conversation.content.read":
       return owns(command.payload.conversationId) ? null : REJECTION;
     case "agent.workflow.load":
     case "agent.workflow.saved.load":
@@ -66,6 +67,7 @@ export function detachedChatCommandRejection(
     case "agent.goal.set":
     case "agent.goal.clear":
     case "agent.stop":
+    case "message.queue":
     case "conversation.compact":
       return ownsExistingConversation(command.payload.conversationId)
         ? null

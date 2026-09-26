@@ -20,6 +20,7 @@ export class RuntimeRequestError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly delivery?: "ambiguous",
   ) {
     super(message);
   }

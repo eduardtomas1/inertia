@@ -23,6 +23,7 @@ export function commandRefreshesConversationDetail(
   command: CommandWithoutId,
   event?: ServerEvent,
 ): boolean {
+  if (command.type === "message.queue") return command.payload.action !== "list";
   if (command.type === "git.workspace.diff") {
     return event?.type === "request.result"
       && event.result.kind === "git.workspace.diff"

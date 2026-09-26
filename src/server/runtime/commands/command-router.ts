@@ -1,4 +1,5 @@
 import type WebSocket from "ws";
+import { RuntimeRequestError } from "../../runtime-errors";
 
 import {
   clientCommandSchema,
@@ -116,6 +117,8 @@ export function createRuntimeCommandExecutor(
         type: "request.error",
         requestId: command.requestId,
         message: options.publicError(error),
+        ...(error instanceof RuntimeRequestError && error.delivery
+          ? { delivery: error.delivery } : {}),
       });
     }
   };

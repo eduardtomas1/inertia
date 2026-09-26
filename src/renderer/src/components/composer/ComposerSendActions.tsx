@@ -5,7 +5,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ChatAttachment } from "@shared/contracts";
+import type { ChatAttachment, QueuedMessage } from "@shared/contracts";
+import type { MessageQueueCommandRunner } from "./types";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   loaderCircleMorphIcon,
@@ -65,6 +66,8 @@ export function ComposerSendActions({
   latestTurnId,
   latestTurnStatus,
   latestTurnAuthoritative = true,
+  queuedMessages,
+  onMessageQueueCommand,
   onSendQueued,
   onReleaseAttachment,
   onSubmit,
@@ -77,6 +80,8 @@ export function ComposerSendActions({
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
   latestTurnAuthoritative?: boolean;
+  queuedMessages?: readonly QueuedMessage[];
+  onMessageQueueCommand?: MessageQueueCommandRunner;
   onSendQueued: (
     content: string,
     attachments: ChatAttachment[],
@@ -112,6 +117,8 @@ export function ComposerSendActions({
           latestTurnId={latestTurnId}
           latestTurnStatus={latestTurnStatus}
           latestTurnAuthoritative={latestTurnAuthoritative}
+          queuedMessages={queuedMessages}
+          onMessageQueueCommand={onMessageQueueCommand}
           queueHost={queueHost}
           onSendQueued={onSendQueued}
           onReleaseAttachment={onReleaseAttachment}

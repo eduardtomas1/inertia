@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -18,7 +19,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { runtimeCommandDelivery } from "../utils/connectionMessages";
+import { RuntimeCommandError, runtimeCommandDelivery } from "../utils/connectionMessages";
 
 export interface AppRuntimeActions {
   sendingConversationIds: ReadonlySet<string>;
@@ -68,6 +69,7 @@ export function useAppRuntimeActions(options: {
   const [sendingConversationIds, setSendingConversationIds] = useState(
     () => new Set<string>(),
   );
+  const pendingTextSends = useRef(new Set<string>());
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
@@ -127,7 +129,27 @@ export function useAppRuntimeActions(options: {
     });
     let handoffPrepared = false;
     let preserveAmbiguousHandoff = false;
+    let ownsTextSend = false;
+    let textIdentity: typeof import("../lib/messageSendIdentity") | null = null;
+    const clearTextIdentity = (): void => {
+      if (attachments.length !== 0) return;
+      // Keeping a confirmed UUID after storage failure is safe: it can only replay.
+      try { textIdentity?.clearTextSendIdentity(sessionStorage, targetConversationId, command.requestId); } catch { /* best effort */ }
+    };
     try {
+      if (attachments.length === 0 && command.type === "message.send") {
+        try {
+          textIdentity = await import("../lib/messageSendIdentity");
+          command.requestId = await textIdentity.prepareTextSendIdentity(sessionStorage, command.payload, command.requestId);
+        } catch {
+          throw new RuntimeCommandError("Message delivery identity could not be saved. Free local storage before retrying.", "not-sent");
+        }
+        if (pendingTextSends.current.has(command.requestId)) {
+          throw new RuntimeCommandError("This message is already being sent. Wait for its acknowledgement.", "ambiguous");
+        }
+        pendingTextSends.current.add(command.requestId);
+        ownsTextSend = true;
+      }
       if (attachments.length > 0) {
         await window.inertia.prepareAttachmentHandoff({
           requestId: command.requestId,
@@ -139,11 +161,12 @@ export function useAppRuntimeActions(options: {
       if (
         event.type === "request.result"
         && event.result.kind === "message.accepted"
-      ) return event.result;
-      if (event.type === "request.ok") return null;
+      ) { clearTextIdentity(); return event.result; }
+      if (event.type === "request.ok") { clearTextIdentity(); return null; }
       throw new Error("The local service returned an unexpected message response.");
     } catch (error) {
       preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";
+      if (ownsTextSend && ["not-sent", "rejected"].includes(runtimeCommandDelivery(error) ?? "")) clearTextIdentity();
       setActionError(
         error instanceof Error
           ? error.message
@@ -151,6 +174,7 @@ export function useAppRuntimeActions(options: {
       );
       throw error;
     } finally {
+      if (ownsTextSend) pendingTextSends.current.delete(command.requestId);
       if (handoffPrepared && !preserveAmbiguousHandoff) {
         await window.inertia.finishAttachmentHandoff(command.requestId)
           .catch(() => undefined);

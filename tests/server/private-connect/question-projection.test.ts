@@ -75,7 +75,8 @@ function fixture(
   };
   const gateway = new PrivateConnectRuntimeGateway({
     shell: () => store.shellSnapshot(),
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    conversation: (id) => store.conversationShell(id),
+    transcript: (id) => store.privateConnectTranscript(id),
     isConversationActive: () => false,
     preparePrompt: async () => undefined,
     queuePrompt: () => ({ turnId: "turn-1" }),

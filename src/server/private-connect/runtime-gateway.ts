@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type {
   AppSnapshot,
   Conversation,
-  ConversationDetail,
+  AgentPlan,
+  AgentActivity,
 } from "../../shared/contracts";
 import type { AgentInputRequest } from "../../shared/contracts";
 import type { RuntimePrivateConnectPromptPreparation } from "../../node/runtime-process-protocol";
@@ -31,10 +32,12 @@ import {
 } from "../../shared/private-connect/sanitizer";
 import { PROVIDER_INFO } from "../provider/catalog";
 import { PrivateConnectTranscriptCache } from "./transcript-cache";
+import type { PrivateConnectTranscript } from "../persistence/private-connect-transcript-repository";
 
 interface PrivateConnectGatewayDependencies {
   shell(): AppSnapshot;
-  detail(conversationId: string): ConversationDetail | null;
+  conversation(conversationId: string): Conversation | null;
+  transcript(conversationId: string): PrivateConnectTranscript;
   isConversationActive(conversationId: string): boolean;
   preparePrompt(conversation: Conversation): Promise<void>;
   queuePrompt(conversationId: string, content: string, deviceId: string): {
@@ -161,8 +164,8 @@ export class PrivateConnectRuntimeGateway {
     subject: PrivateConnectRuntimeAuthorization,
     request: Extract<PrivateConnectRuntimeRequest, { type: "input.respond" }>,
   ): PrivateConnectRuntimeResponse {
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !authorizedConversation(subject, detail)) return unavailableConversationResponse(request.requestId);
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation || !authorizedConversation(subject, conversation)) return unavailableConversationResponse(request.requestId);
     const pending = this.dependencies.respondToInput;
     if (!pending) return failedResponse(request.requestId, "unavailable", "Questions are not available while the local runtime is restarting.");
     if (!this.dependencies.shell().conversations.find(({ id }) => id === request.conversationId)?.pendingInput) {
@@ -187,8 +190,8 @@ export class PrivateConnectRuntimeGateway {
     subject: PrivateConnectRuntimeAuthorization,
     request: Extract<PrivateConnectRuntimeRequest, { type: "run.stop" }>,
   ): PrivateConnectRuntimeResponse {
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !authorizedConversation(subject, detail)) return unavailableConversationResponse(request.requestId);
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation || !authorizedConversation(subject, conversation)) return unavailableConversationResponse(request.requestId);
     const stop = this.dependencies.stopRun;
     if (!stop) return failedResponse(request.requestId, "unavailable", "Stopping is not available while the local runtime is restarting.");
     const result = stop(request.conversationId, request.runId);
@@ -210,19 +213,22 @@ export class PrivateConnectRuntimeGateway {
     subject: PrivateConnectRuntimeAuthorization,
     request: Extract<PrivateConnectRuntimeRequest, { type: "conversation.get" }>,
   ): PrivateConnectRuntimeResponse {
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !authorizedConversation(subject, detail)) {
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation || !authorizedConversation(subject, conversation)) {
       return failedResponse(
         request.requestId,
         "not-found",
         "That conversation is unavailable to this device.",
       );
     }
+    let detail: PrivateConnectTranscript;
+    try { detail = this.dependencies.transcript(request.conversationId); }
+    catch { return failedResponse(request.requestId, "unavailable", "The remote transcript could not be loaded. Open this chat on the desktop."); }
     const shell = this.dependencies.shell();
     const projectedConversation = safeConversation(
       shell.conversations.find(({ id }) => id === request.conversationId)
-        ?? { ...detail.conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
-      this.promptSafety(detail.conversation),
+        ?? { ...conversation, latestTurn: null, pendingApproval: false, pendingInput: false },
+      this.promptSafety(conversation),
     );
     const pendingInput = [...(this.dependencies.inputs?.() ?? [])].find(
       ({ conversationId }) => conversationId === request.conversationId,
@@ -314,8 +320,8 @@ export class PrivateConnectRuntimeGateway {
         "Prompting is not enabled for this device.",
       );
     }
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !authorizedConversation(subject, detail)) {
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation || !authorizedConversation(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
     const receipt = this.receipts.get(request.deliveryId);
@@ -332,7 +338,7 @@ export class PrivateConnectRuntimeGateway {
     const initialRejection = this.promptBoundaryRejection(
       subject,
       request,
-      detail,
+      conversation,
     );
     if (initialRejection) return initialRejection;
     this.prunePreparedPrompts();
@@ -363,15 +369,15 @@ export class PrivateConnectRuntimeGateway {
       // Desktop readiness checks can await provider state. Re-read and
       // revalidate before issuing a one-time preparation; commit revalidates
       // once more immediately before its synchronous queue operation.
-      await this.dependencies.preparePrompt(detail.conversation);
-      const currentDetail = this.dependencies.detail(request.conversationId);
-      if (!currentDetail) {
+      await this.dependencies.preparePrompt(conversation);
+      const currentConversation = this.dependencies.conversation(request.conversationId);
+      if (!currentConversation) {
         return unavailableConversationResponse(request.requestId);
       }
       const currentRejection = this.promptBoundaryRejection(
         subject,
         request,
-        currentDetail,
+        currentConversation,
       );
       if (currentRejection) return currentRejection;
       this.prunePreparedPrompts();
@@ -457,9 +463,9 @@ export class PrivateConnectRuntimeGateway {
         "PrivateConnect prompt authorization is no longer current.",
       );
     }
-    const detail = this.dependencies.detail(request.conversationId);
-    if (!detail) return unavailableConversationResponse(request.requestId);
-    const rejection = this.promptBoundaryRejection(subject, request, detail);
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation) return unavailableConversationResponse(request.requestId);
+    const rejection = this.promptBoundaryRejection(subject, request, conversation);
     if (rejection) return rejection;
     try {
       const queued = this.dependencies.queuePrompt(
@@ -516,19 +522,19 @@ export class PrivateConnectRuntimeGateway {
   private promptBoundaryRejection(
     subject: PrivateConnectRuntimeAuthorization,
     request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
-    detail: ConversationDetail,
+    conversation: Conversation,
   ): PrivateConnectRuntimeResponse | null {
-    if (!authorizedConversation(subject, detail)) {
+    if (!authorizedConversation(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
-    if (detail.conversation.accessMode !== "supervised") {
+    if (conversation.accessMode !== "supervised") {
       return failedResponse(
         request.requestId,
         "forbidden",
         "PrivateConnect prompting requires Supervised access on the desktop.",
       );
     }
-    const safety = this.promptSafety(detail.conversation);
+    const safety = this.promptSafety(conversation);
     if (!privateConnectPromptSafetyIsUsable(safety)) {
       return failedResponse(
         request.requestId,
@@ -596,7 +602,7 @@ export class PrivateConnectRuntimeGateway {
 }
 
 function safePrivateConnectPlan(
-  plan: ConversationDetail["plans"][number] | undefined,
+  plan: AgentPlan | undefined,
 ): { steps: Array<{ label: string; status: "pending" | "inProgress" | "completed" }> } | null {
   if (!plan) return null;
   return {
@@ -675,9 +681,9 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 
 function authorizedConversation(
   subject: PrivateConnectRuntimeAuthorization,
-  detail: ConversationDetail,
+  conversation: Conversation,
 ): boolean {
-  const { id, projectId, archivedAt } = detail.conversation;
+  const { id, projectId, archivedAt } = conversation;
   return archivedAt === null
     && subject.projectIds.includes(projectId)
     && privateConnectRuntimeGrantAllowsConversation(subject.grants, projectId, id);
@@ -770,7 +776,7 @@ function safeConversation(
 }
 
 function safeActivityTitle(
-  kind: ConversationDetail["activities"][number]["kind"],
+  kind: AgentActivity["kind"],
   title: string,
 ): string {
   if (kind === "command") return "Command activity";

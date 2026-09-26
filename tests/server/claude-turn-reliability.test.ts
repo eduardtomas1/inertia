@@ -79,7 +79,7 @@ function rateLimitEvent(): SDKMessage {
     rate_limit_info: {
       status: "allowed",
       rateLimitType: "five_hour",
-      utilization: 30,
+      utilization: 0.3,
       resetsAt: 1_893_456_000,
     },
   } as unknown as SDKMessage;
@@ -230,6 +230,9 @@ describe("Claude turn reliability", () => {
     expect(events.some((event) =>
       event.type === "metadata" && event.metadata.rateLimits?.[0]?.id === "claude:five_hour"))
       .toBe(true);
+    expect(manager.cachedMetadata("claude").rateLimits).toContainEqual(expect.objectContaining({
+      id: "claude:five_hour", usedPercent: 30, remainingPercent: 70,
+    }));
     expect(events.some((event) =>
       event.type === "reasoning-summary" && event.text.includes("Checking the build")))
       .toBe(true);

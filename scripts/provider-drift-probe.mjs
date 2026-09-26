@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { requireAcpInitializeHandshake } from "./provider-drift-process.mjs";
+import { stageAntigravityCli } from "./provider-drift-antigravity.mjs";
 import { stageKimiTerminalAuthPolicy, stageOpenCodeRuntime } from "./provider-drift-staging.mjs";
 import { runBounded } from "./bounded-process-tree.mjs";
 import {
@@ -114,6 +115,26 @@ async function main() {
   await mkdir(options.workspace, { recursive: true });
   const environment = providerDriftEnvironment(isolatedConfig);
   await prepareProviderDriftEnvironment(isolatedConfig, environment);
+
+  if (process.platform === "linux" && process.arch === "x64") {
+    await check("Antigravity latest native CLI exposes its headless stream contract", async () => {
+      const antigravity = await stageAntigravityCli(
+        join(options.workspace, "antigravity"), environment, requireSuccessfulCommand,
+      );
+      report.latestPackages["antigravity-cli"] = antigravity.version;
+      const version = await requireSuccessfulCommand(antigravity.executable, ["--version"],
+        { cwd: options.workspace, environment });
+      const help = await requireSuccessfulCommand(antigravity.executable, ["--help"],
+        { cwd: options.workspace, environment });
+      if (!version.includes(antigravity.version)
+        || !/--input-format\b/u.test(help) || !/--output-format\b/u.test(help)
+        || !/stream-json/u.test(help)) {
+        throw new Error("Antigravity no longer advertises the expected headless stream surface.");
+      }
+    });
+  } else {
+    report.checks.push({ name: "Antigravity native download (Linux x64 canary only)", status: "not-run" });
+  }
 
   await check("product SDK manifests are exact and match the locked install", async () => {
     const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));

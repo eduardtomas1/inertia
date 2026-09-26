@@ -652,6 +652,11 @@
       "version": 79,
       "name": "ReferenceThisChatAndFreezeContextDeliveries",
       "digest": "fccd0531b10107c3a8e0ac46478c359fa691bec0ebfb97ae7da05b476c8223d9"
+    },
+    {
+      "version": 80,
+      "name": "PersistRuntimeQueuedMessages",
+      "digest": "9d76d66006a318ce9b4bb0af7e50865e3e57a88aec90be641ff0659d1ea59794"
     }
   ]
 }

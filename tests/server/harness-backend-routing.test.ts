@@ -150,11 +150,17 @@ describe("ProviderManager harness backend routing", () => {
       hostToolBridgeAvailable: true,
     });
     expect(verifiedContract.currentlyAvailableCount).toBeGreaterThan(0);
+    expect(verifiedContract.capabilities).toHaveLength(28);
+    expect(verifiedContract.capabilities).toContainEqual({ id: "text-streaming", state: "available" });
+    expect(verifiedContract.capabilities).toContainEqual({ id: "goals", state: "unsupported" });
+    expect(verifiedContract.capabilities).toContainEqual({ id: "performance-modes", state: "negotiation-required" });
     expect(verifiedContract.manifestDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(JSON.stringify(verifiedContract)).not.toContain("/opt/provider");
 
     rejectDetection = true;
     await expect(manager.detect("claude")).rejects.toThrow("detection failed");
+    expect(manager.providerCapabilityContract("claude").capabilities)
+      .toContainEqual({ id: "text-streaming", state: "installation-unverified" });
     expect(manager.resolveModelRoute(selected).continuationIdentity
       .providerCompatibilityToken).toBeUndefined();
     expect(manager.providerCapabilityContract("claude")).toMatchObject({

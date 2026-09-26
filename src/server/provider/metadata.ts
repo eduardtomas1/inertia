@@ -320,7 +320,7 @@ export function providerMetadataScopeForSelection(
   return normalized;
 }
 
-export function validateProviderModels(value: unknown): ProviderModel[] {
+export function validateProviderModels(value: unknown, providerId?: ProviderId): ProviderModel[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   return value.flatMap((entry) => {
@@ -370,8 +370,11 @@ export function validateProviderModels(value: unknown): ProviderModel[] {
       description,
       isDefault: model.isDefault === true,
       inputModalities: inputModalities.length > 0 ? inputModalities : ["text"],
-      reasoningOptions,
-      defaultReasoningEffort: cleanString(model.defaultReasoningEffort, 40) ?? "",
+      // Also repair catalogs persisted before Cursor effort was model-scoped.
+      // Its session metadata identifies the observed model with isDefault.
+      reasoningOptions: providerId === "cursor" && model.isDefault !== true ? [] : reasoningOptions,
+      defaultReasoningEffort: providerId === "cursor" && model.isDefault !== true
+        ? "" : cleanString(model.defaultReasoningEffort, 40) ?? "",
       fastMode,
     };
     return [validated];
@@ -622,7 +625,7 @@ export class ProviderMetadataCache {
     const scope = this.requireScope(scopeInput);
     const entry = this.entry(scope);
     const attemptedAt = this.now();
-    const models = validateProviderModels(metadata.models);
+    const models = validateProviderModels(metadata.models, scope.providerId);
     const rateLimits = validateProviderRateLimits(metadata.rateLimits);
     let learned = false;
     if (models.length > 0 && AVAILABLE_FIELDS[scope.providerId].includes("models")) {
@@ -772,7 +775,7 @@ export class ProviderMetadataCache {
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
 
     for (const field of fields) {
-      const values = field === "models" ? validateProviderModels(result.models) : validateProviderRateLimits(result.rateLimits);
+      const values = field === "models" ? validateProviderModels(result.models, scope.providerId) : validateProviderRateLimits(result.rateLimits);
       if (
         values.length === 0
         && field === "rateLimits"
@@ -802,7 +805,7 @@ export class ProviderMetadataCache {
   private hydrate(cached: PersistedProviderMetadata): void {
     const scope = normalizeCurrentProviderMetadataScope(cached.scope);
     if (!scope) return;
-    const models = validateProviderModels(cached.models);
+    const models = validateProviderModels(cached.models, scope.providerId);
     const rateLimits = validateProviderRateLimits(cached.rateLimits);
     const entry = blankProvider(scope);
     entry.models = {

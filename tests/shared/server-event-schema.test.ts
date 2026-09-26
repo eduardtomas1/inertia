@@ -1246,6 +1246,28 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
+  it("accepts bounded feature reasons and rejects inconsistent or unsafe feature evidence", () => {
+    const capabilities = [
+      { id: "images", state: "available" },
+      { id: "reasoning", state: "available" },
+      { id: "host-tool-bridge", state: "available" },
+      { id: "compaction", state: "negotiation-required" },
+    ];
+    const withCapabilities = (entries: unknown) => snapshotEvent({
+      ...provider, capabilityContract: { ...provider.capabilityContract, capabilities: entries },
+    });
+    expect(parseServerEvent(withCapabilities(capabilities))).toMatchObject({ type: "snapshot.updated" });
+    for (const entries of [
+      capabilities.slice(1),
+      [...capabilities.slice(0, 3), capabilities[0]],
+      [...capabilities.slice(0, 3), { id: "compaction", state: "invented" }],
+      [...capabilities.slice(0, 3), { id: "/private/path", state: "unsupported" }],
+      [...capabilities.slice(0, 3), { id: "compaction", state: "available" }],
+      [...capabilities.slice(0, 3), { id: "compaction", state: "unsupported", token: "private" }],
+    ]) {
+      expect(() => parseServerEvent(withCapabilities(entries))).toThrow("Malformed server event");
+    }
+  });
   it.each(["codex", "claude", "cursor", "kimi", "opencode", "antigravity"])(
     "accepts the canonical %s provider identity",
     (id) => {

@@ -87,7 +87,8 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
-import { createTurnInteractionCommandHandler } from "./runtime/commands/turn-interaction-commands";
+import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
+import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import {
@@ -108,6 +109,7 @@ import {
 } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
+import { privateConnectStoreDetail } from "./private-connect/store-detail";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
 import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
@@ -609,6 +611,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     })),
     track: trackRuntimeOperation,
   };
+  let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   turns = new TurnController(
     store,
     providers,
@@ -647,6 +650,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
       onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        (settled) => queuedMessages?.onTurnSettled(settled),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
@@ -675,8 +679,24 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     { workspaceRuns, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
+  const turnInteractionDependencies: TurnInteractionCommandDependencies = {
+    store, conversationAttachments: initializedConversationAttachments,
+    backendProfileController, turns, isolatedRuns, workspaceRuns,
+    pendingApprovals, pendingInputs, dataDirectory, enableProviders,
+    attachmentResolver, generatedAttachments,
+    prepareDocumentAttachments: options.prepareDocumentAttachments,
+    workflows: agentWorkflows, providerTerminalResumes,
+    providerInfo: () => providerInfo,
+    verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
+    broadcast, broadcastSnapshot, send,
+  };
+  queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
+    signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation,
+  });
+  queuedMessages.start();
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      queuedMessages.handler,
       usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send),
       createIssueReportCommandHandler({ store, isolatedRuns, backendProfileController, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
@@ -719,27 +739,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
       }),
-      createTurnInteractionCommandHandler({
-        store, conversationAttachments: initializedConversationAttachments,
-        backendProfileController,
-        turns,
-        isolatedRuns,
-        workspaceRuns,
-        pendingApprovals,
-        pendingInputs,
-        dataDirectory,
-        enableProviders,
-        attachmentResolver,
-        generatedAttachments,
-        prepareDocumentAttachments: options.prepareDocumentAttachments,
-        workflows: agentWorkflows,
-        providerTerminalResumes,
-        providerInfo: () => providerInfo,
-        verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
-        broadcast,
-        broadcastSnapshot,
-        send,
-      }),
+      createTurnInteractionCommandHandler(turnInteractionDependencies),
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
         store,
@@ -958,7 +958,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
 
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
-    detail: (conversationId) => store.conversationDetail(conversationId),
+    detail: (conversationId) => privateConnectStoreDetail(store, conversationId),
     isConversationActive: (conversationId) =>
       turns.isActive(conversationId) || isolatedRuns.has(conversationId),
     preparePrompt: async (conversation) => {

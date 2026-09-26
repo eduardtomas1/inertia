@@ -1134,7 +1134,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     virtualizer,
   ]);
 
-  useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem);
+  useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem, captureLayoutAnchorBeforeChange);
 
 
   const navigateTimelineFromKeyboard = useEffectEvent((

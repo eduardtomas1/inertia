@@ -984,7 +984,7 @@ export class ConversationContextPacketRepository {
     return rows.map(({ target_conversation_id }) => target_conversation_id);
   }
 
-  list(targetConversationId: string): ConversationContextPacketSummary[] {
+  list(targetConversationId: string, messageIds?: string[]): ConversationContextPacketSummary[] {
     this.context.requireConversation(targetConversationId);
     const rows = this.context.database.prepare(`
       SELECT ${PACKET_SUMMARY_COLUMNS},
@@ -996,8 +996,9 @@ export class ConversationContextPacketRepository {
         ) AS source_available
       FROM conversation_context_packets packet
       WHERE packet.target_conversation_id = ?
+        ${messageIds ? `AND (packet.consumed_message_id IS NULL OR packet.consumed_message_id IN (${messageIds.map(() => "?").join(",") || "NULL"}))` : ""}
       ORDER BY packet.created_at ASC, packet.id ASC
-    `).all(targetConversationId) as ConversationContextPacketListRow[];
+    `).all(targetConversationId, ...(messageIds ?? [])) as ConversationContextPacketListRow[];
     const legacyCohorts = new Map<string | null, number>();
     for (const row of rows) {
       if (row.transport_version !== 1) continue;

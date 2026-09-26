@@ -4,7 +4,6 @@ import type {
   AgentInputRequest,
   AppSnapshot,
   ClientCommand,
-  ConversationDetail,
 } from "../../shared/contracts";
 import {
   detachedChatCommandRejection,
@@ -14,7 +13,7 @@ import { pendingInteractionForConversation } from "./pending-interaction-registr
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
 
 interface DetachedChatRuntimeSecurityStore {
-  conversationDetail(conversationId: string): ConversationDetail | null;
+  subagentTrace(traceId: string): { conversationId: string };
   checkpoint(checkpointId: string): { conversationId: string };
 }
 
@@ -60,9 +59,9 @@ export function createDetachedChatRuntimeSecurity(
   let capabilities: DetachedRuntimeCapabilityRegistry | null = null;
   const resources: DetachedChatRuntimePolicyResources = {
     snapshot: options.snapshot,
-    detail: (conversationId) => {
+    subagentConversationId: (traceId) => {
       try {
-        return options.store.conversationDetail(conversationId);
+        return options.store.subagentTrace(traceId).conversationId;
       } catch {
         return null;
       }

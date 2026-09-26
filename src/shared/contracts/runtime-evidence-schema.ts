@@ -49,7 +49,8 @@ export function optionalProviderCapabilityContract(
     expectedProviderId as keyof typeof PROVIDER_HARNESS_IDS
   ];
   if (
-    Object.keys(value).length !== CAPABILITY_CONTRACT_KEYS.length
+    Object.keys(value).some((key) => key !== "capabilities"
+      && !CAPABILITY_CONTRACT_KEYS.includes(key as typeof CAPABILITY_CONTRACT_KEYS[number]))
     || !CAPABILITY_CONTRACT_KEYS.every((key) => Object.hasOwn(value, key))
     || value.schemaVersion !== 1
     || !currentKnownHarnessIdSchema.safeParse(value.harnessId).success
@@ -70,6 +71,21 @@ export function optionalProviderCapabilityContract(
       )
     )
   ) return false;
+  if (value.capabilities !== undefined) {
+    if (!Array.isArray(value.capabilities) || value.capabilities.length > 64
+      || value.capabilities.length !== value.declaredCapabilityCount) return false;
+    const ids = new Set<string>();
+    let available = 0;
+    for (const capability of value.capabilities) {
+      if (!record(capability) || Object.keys(capability).length !== 2
+        || typeof capability.id !== "string" || !/^[a-z][a-z-]{0,63}$/u.test(capability.id)
+        || ids.has(capability.id)
+        || !["available", "installation-unverified", "configuration-required", "negotiation-required", "unsupported"].includes(String(capability.state))) return false;
+      ids.add(capability.id);
+      if (capability.state === "available") available += 1;
+    }
+    if (available !== value.currentlyAvailableCount) return false;
+  }
   return value.installationVerified
     ? value.installedVersion !== null
     : value.installedVersion === null

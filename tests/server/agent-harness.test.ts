@@ -12,12 +12,11 @@ import {
   type ProviderRunResult,
 } from "../../src/server/providers";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
-import { providerCapabilityManifest } from "../../src/server/provider/capability-manifest";
 import { providerRunTerminal } from "../../src/server/provider/contracts";
 import {
-  LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS,
-  createLegacyCliAgentHarnessForTests,
-} from "../helpers/providers/legacy-cli-harness";
+  PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS,
+  createProcessLifecycleHarnessForTests,
+} from "../helpers/providers/process-lifecycle-harness";
 import { CODEX_APP_SERVER_HARNESS_CAPABILITIES } from "../../src/server/provider/codex-app-server-harness";
 import { nativeProviderRunFields } from "./model-route-fixture";
 
@@ -63,14 +62,14 @@ describe("agent harness architecture", () => {
     expect(registry.resolve(input("opencode")).id).toBe("opencode-sdk");
   });
 
-  it("keeps the sunset legacy CLI fixture outside the production registry", () => {
+  it("keeps process lifecycle fixture identities outside the production registry", () => {
     const productionIds = createDefaultAgentHarnessRegistry().list().map(
       ({ id }) => id,
     );
     const legacyIds = Object.keys(
-      LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS,
+      PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS,
     ).map((providerId) =>
-      createLegacyCliAgentHarnessForTests(
+      createProcessLifecycleHarnessForTests(
         providerId as "codex" | "claude" | "cursor" | "opencode",
       ).id);
 
@@ -81,117 +80,6 @@ describe("agent harness architecture", () => {
       "cursor-cli",
       "opencode-cli",
     ]);
-  });
-
-  it("freezes the exact test-only legacy CLI feature surface", () => {
-    expect(LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS).toStrictEqual({
-      codex: {
-        lifecycle: {
-          events: "push",
-          terminalStatuses: ["completed", "failed", "cancelled"],
-        },
-        session: { resume: "native", identity: "thread" },
-        cancellation: {
-          graceful: "process-tree-signal",
-          forceFallback: "process-tree-kill",
-        },
-        extension: {
-          kind: "codex-cli",
-          protocol: "exec-jsonl",
-          routing: "full-access-compatibility",
-          approvals: "unavailable",
-          questions: "unavailable",
-          plans: "unavailable",
-          reasoning: "unavailable",
-          usage: "unavailable",
-          images: "native-cli-path",
-          authentication: "codex-cli",
-          modelMetadata: "unavailable",
-        },
-      },
-      claude: {
-        lifecycle: {
-          events: "push",
-          terminalStatuses: ["completed", "failed", "cancelled"],
-        },
-        session: { resume: "native", identity: "session" },
-        cancellation: {
-          graceful: "process-tree-signal",
-          forceFallback: "process-tree-kill",
-        },
-        extension: {
-          kind: "claude-cli",
-          protocol: "stream-json",
-          partialMessages: "enabled",
-          permissionModes: "native-cli",
-          planMode: "native-cli",
-          approvals: "unavailable-in-current-harness",
-          questions: "unavailable-in-current-harness",
-          reasoning: "unavailable-in-current-harness",
-          usage: "unavailable-in-current-harness",
-          images: "prompt-path-reference",
-          authentication: "claude-cli",
-          modelMetadata: "unavailable-in-current-harness",
-        },
-      },
-      cursor: {
-        lifecycle: {
-          events: "push",
-          terminalStatuses: ["completed", "failed", "cancelled"],
-        },
-        session: { resume: "native", identity: "session" },
-        cancellation: {
-          graceful: "process-tree-signal",
-          forceFallback: "process-tree-kill",
-        },
-        extension: {
-          kind: "cursor-cli",
-          protocol: "stream-json",
-          approvals: "unavailable-in-current-harness",
-          questions: "unavailable-in-current-harness",
-          plans: "prompt-emulated",
-          reasoning: "suppressed-by-print-mode",
-          usage: "unavailable-in-current-harness",
-          images: "prompt-path-reference",
-          authentication: "cursor-cli",
-          modelMetadata: "unavailable-in-current-harness",
-        },
-      },
-      opencode: {
-        lifecycle: {
-          events: "push",
-          terminalStatuses: ["completed", "failed", "cancelled"],
-        },
-        session: { resume: "native", identity: "session" },
-        cancellation: {
-          graceful: "process-tree-signal",
-          forceFallback: "process-tree-kill",
-        },
-        extension: {
-          kind: "opencode-cli",
-          protocol: "json-events",
-          planMode: "native-agent-selection",
-          approvals: "unavailable-in-current-harness",
-          questions: "unavailable-in-current-harness",
-          reasoning: "unavailable-in-current-harness",
-          usage: "unavailable-in-current-harness",
-          images: "native-cli-file",
-          authentication: "opencode-cli",
-          modelMetadata: "unavailable-in-current-harness",
-        },
-      },
-    });
-
-    for (const providerId of ["codex", "claude", "cursor", "opencode"] as const) {
-      const harness = createLegacyCliAgentHarnessForTests(providerId);
-      expect(harness.capabilities).toBe(
-        LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
-      );
-      expect(providerCapabilityManifest(harness.id)).toBeNull();
-    }
-    expect(() => createLegacyCliAgentHarnessForTests("kimi")).toThrow(
-      "Kimi Code is available only through its native ACP harness.",
-    );
   });
 
   it("advertises typed provider extensions instead of common capability booleans", () => {
@@ -597,7 +485,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
+      capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         emit = options.callbacks?.onEvent;
@@ -647,7 +535,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
+      capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const identity = {
@@ -709,7 +597,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
+      capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const conversationId = options.input.conversationId!;
@@ -806,7 +694,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
+      capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const conversationId = options.input.conversationId!;
@@ -854,7 +742,7 @@ describe("agent harness architecture", () => {
     const harness = (id: "claude-cli" | "cursor-cli", providerId: "claude" | "cursor"): AgentHarness => ({
       id,
       providerId,
-      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
+      capabilities: PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS[providerId],
       supports: () => true,
       start: () => { throw new Error("not reached"); },
     });
@@ -866,7 +754,7 @@ describe("agent harness architecture", () => {
     );
     expect(() => new AgentHarnessRegistry([
       { ...createDefaultAgentHarnessRegistry().list("codex")[0]!, supports: () => true },
-      createLegacyCliAgentHarnessForTests("codex", { supports: () => true }),
+      createProcessLifecycleHarnessForTests("codex", { supports: () => true }),
     ]).resolve(input("codex", {
       harnessId: "codex-cli",
       access: "supervised",

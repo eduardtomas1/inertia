@@ -16,6 +16,7 @@ import {
 import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import "./ComposerSendActions.css";
+import type { QueueCommandRunner } from "./runtimeQueueClient";
 
 const ComposerQueuedActions = lazy(async () => ({
   default: (await import("./ComposerQueuedActions")).ComposerQueuedActions,
@@ -66,6 +67,7 @@ export function ComposerSendActions({
   latestTurnStatus,
   latestTurnAuthoritative = true,
   onSendQueued,
+  onQueueCommand,
   onReleaseAttachment,
   onSubmit,
   onStop,
@@ -81,6 +83,7 @@ export function ComposerSendActions({
     content: string,
     attachments: ChatAttachment[],
   ) => Promise<unknown>;
+  onQueueCommand?: QueueCommandRunner;
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -114,6 +117,7 @@ export function ComposerSendActions({
           latestTurnAuthoritative={latestTurnAuthoritative}
           queueHost={queueHost}
           onSendQueued={onSendQueued}
+          onQueueCommand={onQueueCommand}
           onReleaseAttachment={onReleaseAttachment}
         />
       </Suspense>

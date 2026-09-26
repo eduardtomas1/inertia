@@ -24,6 +24,7 @@ import { providerTerminalResumeAvailability } from "@shared/provider-terminal-re
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
 import type { ConversationContextCommandRunner, ConversationContextSourceOption } from "../conversation-context/types";
+import type { QueueCommandRunner } from "../composer/runtimeQueueClient";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 import type { useActivityActions } from "../../hooks/useActivityActions";
 import type { useAppUpdate } from "../../hooks/useAppUpdate";
@@ -233,6 +234,7 @@ export interface WorkspaceSceneActions {
   stopAgent: () => Promise<void>;
   run: (key: string, command: CommandWithoutId) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
+  runQueueCommand?: QueueCommandRunner;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -688,11 +690,13 @@ export function createWorkspaceSceneModel({
       contextSources,
       contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
+      onQueueCommand: actions.runQueueCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")
         || chatProjection.detailLoading,
       detailLoading: chatProjection.detailLoading,
+      history: projection.history,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),

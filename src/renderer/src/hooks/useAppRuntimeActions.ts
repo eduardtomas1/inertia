@@ -19,8 +19,10 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
+import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 
 export interface AppRuntimeActions {
+  runQueueCommand: QueueCommandRunner;
   sendingConversationIds: ReadonlySet<string>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
@@ -68,6 +70,32 @@ export function useAppRuntimeActions(options: {
   const [sendingConversationIds, setSendingConversationIds] = useState(
     () => new Set<string>(),
   );
+  const runQueueCommand = useCallback<QueueCommandRunner>(async (command) => {
+    const request = { ...command, requestId: command.type === "message.queue.enqueue" ? command.payload.id : crypto.randomUUID() };
+    const attachments = command.type === "message.queue.enqueue" ? command.payload.attachments : [];
+    let handoff = false;
+    let ambiguous = false;
+    try {
+      if (command.type === "message.queue.enqueue") {
+        const known = await sendCommand(withRequestId({ type: "message.queue.get", payload: {
+          conversationId: command.payload.conversationId, id: command.payload.id,
+        } }));
+        if (known.type === "request.result" && known.result.kind === "message.queue" && known.result.receipt) return known.result;
+      }
+      if (attachments.length > 0) {
+        await window.inertia.prepareAttachmentHandoff({ requestId: request.requestId, attachmentIds: attachments.map(({ id }) => id) });
+        handoff = true;
+      }
+      const event = await sendCommand(request);
+      if (event.type !== "request.result" || event.result.kind !== "message.queue") throw new Error("The local service returned an unexpected queue response.");
+      return event.result;
+    } catch (error) {
+      ambiguous = runtimeCommandDelivery(error) === "ambiguous";
+      throw error;
+    } finally {
+      if (handoff && !ambiguous) await window.inertia.finishAttachmentHandoff(request.requestId).catch(() => undefined);
+    }
+  }, [sendCommand]);
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
@@ -212,6 +240,7 @@ export function useAppRuntimeActions(options: {
   }, [sendCommand]);
 
   return {
+    runQueueCommand,
     sendingConversationIds,
     run,
     openProjectPath,

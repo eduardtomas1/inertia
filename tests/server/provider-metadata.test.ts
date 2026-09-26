@@ -52,6 +52,34 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it("repairs previously persisted Cursor effort options for unobserved models", () => {
+    let persisted: PersistedProviderMetadata | undefined;
+    const persistence = {
+      load: () => persisted ? [persisted] : [],
+      save: (metadata: PersistedProviderMetadata) => { persisted = structuredClone(metadata); },
+    };
+    const cache = new ProviderMetadataCache({ persistence });
+    const reasoning = {
+      reasoningOptions: [{ value: "high", label: "High", description: "High reasoning" }],
+      defaultReasoningEffort: "high",
+    };
+    cache.learn("cursor", cursorExecutable, { models: [
+      { ...model("model-a"), ...reasoning },
+      { ...model("model-b"), ...reasoning },
+    ] }, "session");
+    expect(cache.current("cursor").models).toMatchObject([
+      { id: "model-a", ...reasoning },
+      { id: "model-b", reasoningOptions: [], defaultReasoningEffort: "" },
+    ]);
+    // Simulate a catalog written by the previous version of Inertia.
+    Object.assign(persisted!.models[1]!, reasoning);
+    const restarted = new ProviderMetadataCache({ persistence });
+    expect(restarted.current("cursor").models).toMatchObject([
+      { id: "model-a", ...reasoning },
+      { id: "model-b", reasoningOptions: [], defaultReasoningEffort: "" },
+    ]);
+  });
+
   it("loads and retries the Antigravity catalog independently of its ready installation", async () => {
     const read = vi.fn(async () => ({ models: [model("gemini-test-high")] }));
     const cache = new ProviderMetadataCache({ read });

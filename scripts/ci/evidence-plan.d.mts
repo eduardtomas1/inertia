@@ -39,8 +39,12 @@ export interface EvidencePlan {
   omittedPlatforms: Array<{ platform: string; reason: string }>;
   suites: string[];
   matrix: { include: NativePlatform[] };
+  electronMatrix: { include: Array<NativePlatform & {
+    phase: string; check: string; evidence_artifact: string;
+  }> };
   renderer: boolean;
   benchmarks: boolean;
+  performanceSmoke: boolean;
   omissions: Array<{ job: string; reason: string }>;
 }
 export interface JobEvidence {

@@ -20,7 +20,8 @@ interface Metric {
   wallMs: number;
   cpuMs: number;
   walMiB: number | null;
-  peakRssMiB: number;
+  rssDeltaMiB: number;
+  peakRssMiB: number | null;
 }
 
 const metrics: Metric[] = [];
@@ -30,25 +31,21 @@ function measure<T>(operation: () => T): {
   result: T;
   wallMs: number;
   cpuMs: number;
-  peakRssMiB: number;
+  rssDeltaMiB: number;
 } {
   const rssBefore = process.memoryUsage().rss;
-  let peakRss = rssBefore;
-  const sampler = setInterval(() => {
-    peakRss = Math.max(peakRss, process.memoryUsage().rss);
-  }, 1);
   const cpuBefore = process.cpuUsage();
   const startedAt = performance.now();
   const result = operation();
   const wallMs = performance.now() - startedAt;
   const cpu = process.cpuUsage(cpuBefore);
-  clearInterval(sampler);
-  peakRss = Math.max(peakRss, process.memoryUsage().rss);
   return {
     result,
     wallMs,
     cpuMs: (cpu.user + cpu.system) / 1_000,
-    peakRssMiB: Math.max(0, peakRss - rssBefore) / 1024 / 1024,
+    // Synchronous native work cannot yield to a JavaScript sampling timer.
+    // Report the signed before/after change, never an unobserved peak.
+    rssDeltaMiB: (process.memoryUsage().rss - rssBefore) / 1024 / 1024,
   };
 }
 
@@ -56,6 +53,7 @@ async function measureAsync<T>(operation: () => Promise<T>): Promise<{
   result: T;
   wallMs: number;
   cpuMs: number;
+  rssDeltaMiB: number;
   peakRssMiB: number;
 }> {
   const rssBefore = process.memoryUsage().rss;
@@ -74,6 +72,7 @@ async function measureAsync<T>(operation: () => Promise<T>): Promise<{
       result,
       wallMs,
       cpuMs: (cpu.user + cpu.system) / 1_000,
+      rssDeltaMiB: (process.memoryUsage().rss - rssBefore) / 1024 / 1024,
       peakRssMiB: Math.max(0, peakRss - rssBefore) / 1024 / 1024,
     };
   } finally {
@@ -86,65 +85,69 @@ function sqliteCase(mode: "full-copy" | "append-chunks"): Metric {
   temporaryDirectories.push(directory);
   const path = join(directory, "stream.sqlite");
   const database = new Database(path);
-  database.pragma("journal_mode = WAL");
-  database.pragma("synchronous = NORMAL");
-  database.pragma("wal_autocheckpoint = 0");
-  database.exec("CREATE TABLE messages (id TEXT PRIMARY KEY, content TEXT NOT NULL)");
-  if (mode === "append-chunks") {
-    database.exec(`
-      CREATE TABLE chunks (
-        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-        message_id TEXT NOT NULL,
-        content TEXT NOT NULL
-      );
-      CREATE INDEX chunks_message_sequence_idx
-        ON chunks(message_id, sequence);
-    `);
-  }
-  database.prepare("INSERT INTO messages (id, content) VALUES ('message', '')").run();
-  const deltas = Array.from(
-    { length: 512 },
-    (_, index) => `${String(index).padStart(4, "0")}:${"x".repeat(507)}`,
-  );
-  const expected = deltas.join("");
-  const measured = measure(() => {
-    if (mode === "full-copy") {
-      const append = database.prepare(
-        "UPDATE messages SET content = content || ? WHERE id = 'message'",
-      );
-      for (const delta of deltas) append.run(delta);
-    } else {
-      const append = database.prepare(
-        "INSERT INTO chunks (message_id, content) VALUES ('message', ?)",
-      );
-      for (const delta of deltas) append.run(delta);
-      database.transaction(() => {
-        database.exec(`
-          UPDATE messages SET content = content || (
-            SELECT group_concat(content, '') FROM (
-              SELECT content FROM chunks ORDER BY sequence
-            )
-          ) WHERE id = 'message';
-          DELETE FROM chunks WHERE message_id = 'message';
-        `);
-      })();
+  try {
+    database.pragma("journal_mode = WAL");
+    database.pragma("synchronous = NORMAL");
+    database.pragma("wal_autocheckpoint = 0");
+    database.exec("CREATE TABLE messages (id TEXT PRIMARY KEY, content TEXT NOT NULL)");
+    if (mode === "append-chunks") {
+      database.exec(`
+        CREATE TABLE chunks (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id TEXT NOT NULL,
+          content TEXT NOT NULL
+        );
+        CREATE INDEX chunks_message_sequence_idx
+          ON chunks(message_id, sequence);
+      `);
     }
-    return (database.prepare(
-      "SELECT content FROM messages WHERE id = 'message'",
-    ).get() as { content: string }).content;
-  });
-  expect(measured.result).toBe(expected);
-  const walPath = `${path}-wal`;
-  const walMiB = statSync(walPath).size / 1024 / 1024;
-  database.close();
-  return {
-    case: "512 × 512-byte SQLite stream",
-    mode,
-    wallMs: measured.wallMs,
-    cpuMs: measured.cpuMs,
-    walMiB,
-    peakRssMiB: measured.peakRssMiB,
-  };
+    database.prepare("INSERT INTO messages (id, content) VALUES ('message', '')").run();
+    const deltas = Array.from(
+      { length: 512 },
+      (_, index) => `${String(index).padStart(4, "0")}:${"x".repeat(507)}`,
+    );
+    const expected = deltas.join("");
+    const measured = measure(() => {
+      if (mode === "full-copy") {
+        const append = database.prepare(
+          "UPDATE messages SET content = content || ? WHERE id = 'message'",
+        );
+        for (const delta of deltas) append.run(delta);
+      } else {
+        const append = database.prepare(
+          "INSERT INTO chunks (message_id, content) VALUES ('message', ?)",
+        );
+        for (const delta of deltas) append.run(delta);
+        database.transaction(() => {
+          database.exec(`
+            UPDATE messages SET content = content || (
+              SELECT group_concat(content, '') FROM (
+                SELECT content FROM chunks ORDER BY sequence
+              )
+            ) WHERE id = 'message';
+            DELETE FROM chunks WHERE message_id = 'message';
+          `);
+        })();
+      }
+      return (database.prepare(
+        "SELECT content FROM messages WHERE id = 'message'",
+      ).get() as { content: string }).content;
+    });
+    expect(measured.result).toBe(expected);
+    const walPath = `${path}-wal`;
+    const walMiB = statSync(walPath).size / 1024 / 1024;
+    return {
+      case: "512 × 512-byte SQLite stream",
+      mode,
+      wallMs: measured.wallMs,
+      cpuMs: measured.cpuMs,
+      walMiB,
+      rssDeltaMiB: measured.rssDeltaMiB,
+      peakRssMiB: null,
+    };
+  } finally {
+    database.close();
+  }
 }
 
 function pdfWithPages(pages: number): Uint8Array {
@@ -212,6 +215,7 @@ async function pdfCase(mode: "unbounded-8" | "bounded-2"): Promise<Metric> {
     wallMs: measured.wallMs,
     cpuMs: measured.cpuMs,
     walMiB: null,
+    rssDeltaMiB: measured.rssDeltaMiB,
     peakRssMiB: measured.peakRssMiB,
   };
 }
@@ -244,7 +248,8 @@ afterAll(() => {
     "wall ms": metric.wallMs.toFixed(1),
     "CPU ms": metric.cpuMs.toFixed(1),
     "WAL MiB": metric.walMiB?.toFixed(2) ?? "—",
-    "peak RSS +MiB": metric.peakRssMiB.toFixed(2),
+      "RSS change MiB": metric.rssDeltaMiB.toFixed(2),
+      "sampled peak RSS +MiB": metric.peakRssMiB?.toFixed(2) ?? "not sampled (synchronous)",
   })));
   for (const directory of temporaryDirectories) {
     rmSync(directory, { recursive: true, force: true });

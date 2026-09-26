@@ -41,6 +41,15 @@ export function createEvidencePlan({
       || (domains.has("macos_packaging") && artifact.startsWith("macos-"))
     ));
   const platforms = selectedPlatforms.map(({ artifact }) => artifact);
+  const electronPlatforms = selectedPlatforms.flatMap((platform) => (
+    platform.artifact === "macos-x64"
+      ? ["display-sensitive", "isolated", "runtime-recovery"].map((phase) => ({
+        ...platform, phase, check: `${platform.label}${ELECTRON_CHECK_SUFFIX} (${phase})`,
+        evidence_artifact: `${platform.artifact}-${phase}`,
+      }))
+      : [{ ...platform, phase: "all", check: `${platform.label}${ELECTRON_CHECK_SUFFIX}`,
+        evidence_artifact: platform.artifact }]
+  ));
   const code = !changes.documentationOnly || full;
   const provider = domains.has("provider_common");
   const critical = !full && code;
@@ -63,7 +72,7 @@ export function createEvidencePlan({
   const requiredChecks = requiredJobs.flatMap((job) => job === "test"
     ? selectedPlatforms.map(({ label }) => label)
     : job === "electron"
-      ? selectedPlatforms.map(({ label }) => `${label}${ELECTRON_CHECK_SUFFIX}`)
+      ? electronPlatforms.map(({ check }) => check)
     : job === "windows-unit"
       ? [1, 2, 3, 4].map((shard) => `Windows unit tests (${shard}/4)`)
       : [EVIDENCE_JOBS[job]]);
@@ -86,8 +95,11 @@ export function createEvidencePlan({
       ...platforms.filter((platform) => platform.startsWith("windows-"))
         .map((platform) => `${platform}:published-N-1-installed-upgrade`)],
     matrix: { include: selectedPlatforms },
+    electronMatrix: { include: electronPlatforms },
     renderer: critical && domains.has("renderer_ui"),
     benchmarks: lane === "nightly" || (lane === "main" && domains.has("performance")),
+    performanceSmoke: lane !== "draft" && ["performance", "renderer_ui", "turn_session",
+      "runtime_supervisor", "database_migrations"].some((domain) => domains.has(domain)),
     omissions: Object.keys(jobs).filter((job) => !jobs[job]).map((job) => ({
       job, reason: full ? "covered-by-full-native-matrix"
         : changes.documentationOnly ? "documentation-does-not-change-runtime"
@@ -102,9 +114,11 @@ export function outputsForEvidencePlan(plan) {
     base_sha: plan.base ?? "",
     plan_json: JSON.stringify(plan),
     matrix_json: JSON.stringify(plan.matrix),
+    electron_matrix_json: JSON.stringify(plan.electronMatrix),
     full_certification: plan.fullCertification,
     renderer: plan.renderer,
     benchmarks: plan.benchmarks,
+    performance_smoke: plan.performanceSmoke,
   };
   for (const job of Object.keys(EVIDENCE_JOBS)) {
     outputs[job.replaceAll("-", "_")] = plan.requiredJobs.includes(job);

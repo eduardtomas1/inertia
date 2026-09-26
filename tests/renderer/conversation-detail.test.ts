@@ -16,6 +16,7 @@ import {
   mergeConversationShell,
   resolveConversationDetail,
 } from "../../src/renderer/src/utils/conversationDetail";
+import { mergeConversationHistory } from "../../src/renderer/src/utils/conversationHistory";
 
 const conversation: Conversation = {
   id: "conversation-1",
@@ -114,6 +115,44 @@ const agentTurn: AgentTurn = {
   createdAt: conversation.createdAt,
   updatedAt: conversation.createdAt,
 };
+
+describe("paged history reconciliation", () => {
+  const older = { at: conversation.createdAt, id: "old-turn", kind: "turn" as const };
+  const page = (id: string, content: string): ConversationDetail => ({
+    ...detail, history: { older }, agentTurns: [{ ...agentTurn, id }],
+    messages: [{ ...detail.messages[0]!, id: `message-${id}`, turnId: id, content }],
+  });
+
+  it("retains older pages while refreshing the active turn authoritatively", () => {
+    const current = mergeConversationHistory(page("live", "streaming"), page("old", "saved"), "older");
+    const next = page("live", "complete");
+    const updated = mergeConversationHistory(current, next, "refresh");
+    expect(updated.messages.map(({ content }) => content).sort()).toEqual(["complete", "saved"]);
+    expect(updated.agentTurns).toHaveLength(2);
+    expect(updated.history).toEqual(current.history);
+  });
+
+  it("does not overwrite newer live data when a delayed older page overlaps it", () => {
+    const current = page("live", "complete");
+    const old = { ...page("live", "stale"), history: { older: null } };
+    expect(mergeConversationHistory(current, old, "older").messages[0]?.content).toBe("complete");
+    expect(mergeConversationHistory(current, old, "older").history?.older).toBeNull();
+  });
+
+  it("keeps the contiguous cursor when loading a distant search result", () => {
+    const current = page("recent", "recent");
+    const distant = { ...page("distant", "hit"), history: { older: null } };
+    const merged = mergeConversationHistory(current, distant, "target");
+    expect(merged.messages).toHaveLength(2);
+    expect(merged.history?.older).toEqual(older);
+  });
+
+  it("resets a disconnected latest window to avoid silently skipping offline turns", () => {
+    const current = { ...page("old", "old"), history: { older: null } };
+    const latest = page("new", "new");
+    expect(mergeConversationHistory(current, latest, "refresh")).toBe(latest);
+  });
+});
 
 function result(
   state: ConversationDetailResult["state"],

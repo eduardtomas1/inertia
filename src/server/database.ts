@@ -1,4 +1,6 @@
 import type { MessageSearchTarget } from "../shared/message-search";
+import type { ConversationHistoryRequest } from "../shared/conversation-history";
+import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
 import Database from "better-sqlite3";
 import {
   type AgentActivity,
@@ -77,6 +79,7 @@ import { SnapshotRepository } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
+import { QueuedMessageRepository } from "./persistence/queued-message-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
@@ -127,6 +130,7 @@ export class RuntimeStore {
   private readonly snapshotRepository: SnapshotRepository;
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
+  readonly queuedMessages: QueuedMessageRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
@@ -175,6 +179,7 @@ export class RuntimeStore {
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
+    this.queuedMessages = new QueuedMessageRepository(this.database);
     this.projectRepository = new ProjectRepository({
       database: this.database,
       requireProject: (projectId) => this.requireProject(projectId),
@@ -210,7 +215,7 @@ export class RuntimeStore {
     });
     this.snapshotRepository = new SnapshotRepository({
       database: this.database,
-      contextPackets: (conversationId) => this.contextPackets.list(conversationId),
+      contextPackets: (conversationId, messageIds) => this.contextPackets.list(conversationId, messageIds),
     });
     this.executionLedgerRepository = new ExecutionLedgerRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
@@ -362,18 +367,7 @@ export class RuntimeStore {
   }
 
   async backupAndClose(): Promise<void> {
-    let backupError: unknown;
-    try {
-      // Shutdown owns a 2.5s process-wide deadline. Do not begin a full online
-      // backup here; cancel any scheduled work and rely on the hourly validated
-      // rotation plus WAL crash recovery.
-      await this.backupManager.cancelAndWait();
-    } catch (error) {
-      backupError = error;
-    } finally {
-      if (this.database.open) this.database.close();
-    }
-    if (backupError !== undefined) throw backupError;
+    return closeDatabaseAfterBackupCancellation(this.database, this.backupManager);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -395,6 +389,10 @@ export class RuntimeStore {
 
   conversationDetail(conversationId: string): ConversationDetail | null {
     return this.snapshotRepository.conversationDetail(conversationId);
+  }
+
+  conversationHistory(conversationId: string, request?: ConversationHistoryRequest): ConversationDetail | null {
+    return this.snapshotRepository.conversationHistory(conversationId, request);
   }
 
   loadProviderMetadata = (): PersistedProviderMetadata[] => this.providerMetadataRepository.load();
@@ -907,9 +905,9 @@ export class RuntimeStore {
     this.transcriptRepository.appendMessageContent(messageId, delta);
   }
 
-  attachments(conversationId?: string): ChatAttachment[] { return this.transcriptRepository.attachments(conversationId); }
-  referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.transcriptRepository.referencedAttachmentIds(candidateIds); }
-  evictableAttachmentIds(): string[] { return this.transcriptRepository.evictableAttachmentIds(); }
+  attachments(conversationId?: string): ChatAttachment[] { return [...this.transcriptRepository.attachments(conversationId), ...this.queuedMessages.attachments(conversationId)]; }
+  referencedAttachmentIds(candidateIds: readonly string[]): Set<string> { return this.queuedMessages.referencedAttachmentIds(candidateIds, this.transcriptRepository.referencedAttachmentIds(candidateIds)); }
+  evictableAttachmentIds(): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds()); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(conversationId: string) { return this.transcriptRepository.continuationHistory(conversationId); }

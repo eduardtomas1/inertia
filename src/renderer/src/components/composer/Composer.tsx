@@ -92,6 +92,7 @@ export const Composer = memo(function Composer({
   conversationContextHandoffEnabled = true, promptContext,
   contextSources = [], contextPackets = [], hasVisibleHistory = false,
   agentContextRequest = null, onConversationContextCommand,
+  onQueueCommand,
   previewContextUrl,
   providerIdentityLabels,
   goal,
@@ -718,16 +719,14 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
-  const queueCurrentMessage = async (): Promise<void> => {
-    if (!canQueue || conversationContext.isReferencing()) return;
+  const queueCurrentMessage = async (): Promise<void> => { if (!canQueue || conversationContext.isReferencing()) return;
     const queuedConversationId = conversation.id;
     const queuedMessage = message;
     const queuedAttachments = attachmentsRef.current;
-    const { enqueueComposerPrompt } = await import("./ComposerQueuedActions");
-    if (conversationIdRef.current !== queuedConversationId || draftValueRef.current !== queuedMessage
-      || attachmentsRef.current !== queuedAttachments || !enqueueComposerPrompt(
-        queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
-      )) return;
+    const isCurrent = () => conversationIdRef.current === queuedConversationId && draftValueRef.current === queuedMessage && attachmentsRef.current === queuedAttachments;
+    const { queueComposerDraft } = await import("./queueComposerDraft");
+    if (!await queueComposerDraft(onQueueCommand, queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments, isCurrent,
+      (error) => { if (conversationIdRef.current === queuedConversationId) setAttachmentError(error); }) || !isCurrent()) return;
     attachmentsRef.current = []; setAttachments([]);
     setAttachmentError(null);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
@@ -1239,6 +1238,7 @@ export const Composer = memo(function Composer({
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
+          onQueueCommand={onQueueCommand}
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stop}

@@ -76,6 +76,7 @@ it.each([
   });
   expect(actual).toEqual(selected.requiredJobs);
   expect(JSON.parse(outputs.matrix_json!)).toEqual(selected.matrix);
+  expect(JSON.parse(outputs.electron_matrix_json!)).toEqual(selected.electronMatrix);
   expect(workflow.jobs.test.strategy.matrix).toBe("${{ fromJSON(needs.classify.outputs.matrix_json) }}");
   expect(workflow.jobs["windows-unit"].strategy.matrix.shard).toEqual([1, 2, 3, 4]);
 });
@@ -133,18 +134,62 @@ it("CI runs native package proof and desktop Electron projects as separate same-
     expect(job.needs).toEqual(["classify", "gate"]);
     expect(job["runs-on"]).toBe("${{ matrix.runner }}");
     expect(job.strategy["fail-fast"]).toBe(false);
-    expect(job.strategy.matrix).toBe("${{ fromJSON(needs.classify.outputs.matrix_json) }}");
+    expect(job.strategy.matrix).toBe(id === "electron"
+      ? "${{ fromJSON(needs.classify.outputs.electron_matrix_json) }}"
+      : "${{ fromJSON(needs.classify.outputs.matrix_json) }}");
     expect(job.strategy["max-parallel"]).toBe("${{ github.event_name == 'schedule' && 2 || 6 }}");
     expect(job.steps[0].uses).toMatch(/^actions\/checkout@/u);
     expect(job.steps.some((step: { uses?: string }) => step.uses === "./.github/actions/install-dependencies")).toBe(true);
   }
   expect(workflow.jobs.test["timeout-minutes"]).toBe("${{ matrix.timeout_minutes }}");
   expect(workflow.jobs.electron["timeout-minutes"]).toBe("${{ matrix.electron_timeout_minutes }}");
-  expect(workflow.jobs.electron.name).toBe("${{ matrix.label }} Electron");
+  expect(workflow.jobs.electron.name).toBe("${{ matrix.check }}");
   for (const platform of PLATFORMS) {
     expect(platform.electron_timeout_minutes).toBeGreaterThanOrEqual(40);
     expect(platform.electron_timeout_minutes).toBeLessThanOrEqual(platform.timeout_minutes);
   }
+});
+
+it("runs every macOS Intel phase on an independent runner with unique evidence", () => {
+  const plan = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["package-lock.json"] });
+  const intel = plan.electronMatrix.include.filter(({ artifact }) => artifact === "macos-x64");
+  expect(intel.map(({ phase }) => phase)).toEqual(["display-sensitive", "isolated", "runtime-recovery"]);
+  expect(new Set(plan.electronMatrix.include.map(({ evidence_artifact }) => evidence_artifact)).size)
+    .toBe(plan.electronMatrix.include.length);
+  for (const platform of intel) {
+    expect(plan.requiredChecks).toContain(platform.check);
+    const phase = workflow.jobs.electron.steps.find((step: { run?: string }) =>
+      step.run?.startsWith("npm exec -- playwright test") && step.run.includes(`--project=${platform.phase} `));
+    expect(phase.if).toContain(`matrix.phase == '${platform.phase}'`);
+    expect(phase["continue-on-error"]).not.toBe(true);
+  }
+  expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Measure desktop workloads").if)
+    .toContain("matrix.phase == 'runtime-recovery'");
+});
+
+it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {
+  const plan = createEvidencePlan({ head: "a".repeat(40), base: "b".repeat(40), paths: ["benchmarks/data-throughput.test.ts"] });
+  expect(plan.performanceSmoke).toBe(true);
+  expect(plan.benchmarks).toBe(false);
+  expect(workflow.jobs.gate.needs).toBe("classify");
+  const smoke = workflow.jobs.gate.steps.find((step: { name: string }) => step.name === "Enforce bounded streaming and rendering work");
+  expect(smoke.if).toBe("needs.classify.outputs.performance_smoke == 'true'");
+  expect(smoke["timeout-minutes"]).toBe(3);
+  expect(smoke.run).toContain("tests/renderer/streaming-render-isolation.dom.test.tsx");
+  expect(smoke["continue-on-error"]).not.toBe(true);
+});
+
+it("keeps provider canary failures visible and automatically rechecks merged drift fixes", () => {
+  const drift = parse(source(".github/workflows/provider-contract-drift.yml"));
+  expect(drift.on.push.branches).toEqual(["main"]);
+  expect(drift.on.push.paths).toContain("src/server/codex/**");
+  expect(drift.on.push.paths).toContain("scripts/provider-drift*");
+  expect(drift.jobs["provider-drift"]["continue-on-error"]).not.toBe(true);
+  const final = drift.jobs["provider-drift"].steps.at(-1);
+  expect(final.if).toBe("always()");
+  expect(final.run).toBe('test "$CANARY_FAILED" = false');
+  expect(final["continue-on-error"]).not.toBe(true);
+  expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
 });
 
 it.each([["ci.yml", "pr-linux-lifecycle"], ["ci.yml", "electron"], ["release-platforms.yml", "build"]])(

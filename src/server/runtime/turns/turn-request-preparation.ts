@@ -296,6 +296,7 @@ export function resolveTurnRequest(
     executionManifest: assembled.persistence.manifest,
   });
   const input: BeginAgentTurnInput = {
+    queuedMessageId: request.queuedMessageId,
     id: turnId,
     conversationId: conversation.id,
     runId,

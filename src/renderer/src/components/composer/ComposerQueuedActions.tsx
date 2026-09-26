@@ -5,6 +5,8 @@ import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import type { QueueCommandRunner } from "./runtimeQueueClient";
+import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
   clearComposerQueuedPromptDispatched,
@@ -36,7 +38,7 @@ export async function releaseDeletedComposerQueue(
   await navigator.locks.request(composerQueueLockName(conversationId), drain);
 }
 
-export function ComposerQueuedActions({
+function LegacyComposerQueuedActions({
   conversationId,
   canSendQueuedNow,
   running,
@@ -46,6 +48,7 @@ export function ComposerQueuedActions({
   queueHost,
   onSendQueued,
   onReleaseAttachment,
+  automaticEnabled = true,
 }: {
   conversationId: string;
   canSendQueuedNow: boolean;
@@ -59,6 +62,7 @@ export function ComposerQueuedActions({
     attachments: ChatAttachment[],
   ) => Promise<unknown>;
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
+  automaticEnabled?: boolean;
 }): React.JSX.Element | null {
   const [queuedPrompts, setQueuedPrompts] = useState(() =>
     readComposerQueue(conversationId));
@@ -166,7 +170,8 @@ export function ComposerQueuedActions({
   useEffect(() => {
     const queued = queuedPrompts[0];
     if (
-      running
+      !automaticEnabled
+      || running
       || queueSendingRef.current
       || !canSendQueuedNow
       || !queued
@@ -180,6 +185,7 @@ export function ComposerQueuedActions({
     autoQueuedTurnRef.current = terminalKey;
     void sendQueued(queued.id, "automatic");
   }, [
+    automaticEnabled,
     canSendQueuedNow,
     conversationId,
     latestTurnId,
@@ -249,4 +255,18 @@ export function ComposerQueuedActions({
     </div>
   );
   return queueHost ? createPortal(queueElement, queueHost) : queueElement;
+}
+
+export function ComposerQueuedActions(props: React.ComponentProps<typeof LegacyComposerQueuedActions> & {
+  onQueueCommand?: QueueCommandRunner;
+}): React.JSX.Element {
+  if (!props.onQueueCommand) return <LegacyComposerQueuedActions {...props} />;
+  return <>
+    <RuntimeComposerQueuedActions conversationId={props.conversationId} onCommand={props.onQueueCommand}
+      running={props.running} canSend={props.canSendQueuedNow} latestTurnId={props.latestTurnId}
+      latestTurnStatus={props.latestTurnStatus} queueHost={props.queueHost} />
+    {/* Older local drafts retain their explicit retry control; an unknown old
+        delivery must never be silently re-admitted as a new runtime intent. */}
+    <LegacyComposerQueuedActions {...props} automaticEnabled={false} />
+  </>;
 }

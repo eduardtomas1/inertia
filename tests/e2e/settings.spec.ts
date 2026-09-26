@@ -11,6 +11,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
+import { expectFlatSettingsSections } from "./support/settings-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -59,6 +60,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
+  await expectFlatSettingsSections(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(async () => {

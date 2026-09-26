@@ -52,6 +52,7 @@ import type { ComposerMenuController } from "./useComposerMenus";
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
+import type { QueueCommandRunner } from "./runtimeQueueClient";
 
 const PromptStashMenu = lazy(async () => ({
   default: (await import("./PromptStashMenu")).PromptStashMenu,
@@ -82,6 +83,7 @@ export function composerCheckoutBranch(
 }
 
 export interface ComposerToolbarProps {
+  onQueueCommand?: QueueCommandRunner;
   actions: ProjectAction[];
   disabled: boolean;
   running: boolean;
@@ -223,6 +225,7 @@ export function ComposerToolbar({
   queuedTurnStatus,
   queuedTurnAuthoritative,
   onSendQueued,
+  onQueueCommand,
   onReleaseAttachment,
   onSubmit,
   onStop,
@@ -516,6 +519,7 @@ export function ComposerToolbar({
             latestTurnStatus={queuedTurnStatus}
             latestTurnAuthoritative={queuedTurnAuthoritative}
             onSendQueued={onSendQueued}
+            onQueueCommand={onQueueCommand}
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}

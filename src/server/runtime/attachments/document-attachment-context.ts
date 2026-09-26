@@ -587,8 +587,8 @@ function extractTextDocument(
     content = decodeTextAttachment(bytes);
   } catch (error) {
     throw new DocumentAttachmentError(error instanceof TextAttachmentError
-      ? error.message
-      : "The text attachment could not be decoded.");
+      ? `${attachment.name}: ${error.message}`
+      : `${attachment.name}: The text attachment could not be decoded.`);
   }
   const bounded = boundedUtf8(content.trim(), maximumJsonBytes);
   if (!bounded.value) throw new DocumentAttachmentError(`${attachment.name} is empty.`);

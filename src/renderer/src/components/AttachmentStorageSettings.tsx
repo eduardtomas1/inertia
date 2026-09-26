@@ -70,7 +70,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       <small>Original images and documents kept on this device. This disk budget does not reserve RAM.</small>
       <small role="status">{storage?.state === "ready"
         ? `${size(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${size(storage.availableDiskBytes)} free on disk`}`
-        : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : "Attachment usage unavailable. Refresh to check again."}</small>
+        : storage?.state === "reconciling" ? "Checking stored attachments after restart…" : !storage && !notice ? "Checking attachment usage…" : "Attachment usage unavailable. Refresh to check again."}</small>
       <label>Global attachment disk budget <select aria-label="Global attachment disk budget" value={settings.attachmentStorageGiB} disabled={blocked} onChange={(event) => {
         const attachmentStorageGiB = Number(event.target.value) as AttachmentStorageGiB;
         void perform(() => onUpdate({ attachmentStorageGiB }));

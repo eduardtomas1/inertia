@@ -60,3 +60,14 @@ it("returns keyboard focus to the panel after failed updates and when cleanup le
   expect(await screen.findByText("Removed 64 files and freed 80.0 MiB.")).toBeVisible();
   await waitFor(() => expect(screen.getByRole("button", { name: "Refresh storage" })).toHaveFocus());
 });
+
+it("reports usage as loading until the first read settles and as unavailable only after it fails", async () => {
+  let fail!: (error: Error) => void;
+  const request = vi.fn(() => new Promise<ServerEvent>((_resolve, reject) => { fail = reject; }));
+  render(<AttachmentStorageSettings settings={defaultSettings} disabled={false} request={request} onUpdate={vi.fn()} />);
+  expect(screen.getByText("Checking attachment usage…")).toBeVisible();
+  expect(screen.queryByText(/Attachment usage unavailable/u)).toBeNull();
+  fail(new Error("fixture read failed"));
+  expect(await screen.findByText("Attachment usage unavailable. Refresh to check again.")).toBeVisible();
+  expect(screen.getByText(/Storage usage could not be read/u)).toBeVisible();
+});

@@ -1,45 +1,45 @@
 {
   "baselineCommit": "3f98ab74b78d60fcc2d40dcaf12f29880dd036a3",
-  "productionSourceCommit": "4b59d05020ad37817747ec1d7ba261b9122ff1f2",
-  "node": "v22.23.1",
-  "platform": "win32",
-  "architecture": "x64",
-  "method": "Production electron-vite builds on identical installed dependencies; uncompressed emitted bytes using scripts/check-renderer-bundle.mjs. Additional allowance preserves existing headroom and rounds added feature bytes up to 64 bytes.",
+  "productionSourceCommit": "f8c1b02b274e94bd232eb03af22c8d52bd11fab1",
+  "node": "v22.23.2",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "method": "Production electron-vite builds on identical installed dependencies; uncompressed emitted bytes using scripts/check-renderer-bundle.mjs. Each added allowance is the exact measured delta.",
   "measurements": {
     "mainWorkbenchFirstLoadJavaScript": {
       "baseline": 831810,
-      "candidate": 839161,
-      "delta": 7351,
+      "candidate": 840071,
+      "delta": 8261,
       "previousBudget": 831840.8,
-      "addedAllowance": 7360
+      "addedAllowance": 8261
     },
     "detachedChatFirstLoadJavaScript": {
       "baseline": 642631,
-      "candidate": 648744,
-      "delta": 6113,
+      "candidate": 649654,
+      "delta": 7023,
       "previousBudget": 642729.2,
-      "addedAllowance": 6144
+      "addedAllowance": 7023
     },
     "deferredComposerQueueJavaScript": {
       "baseline": 7755,
-      "candidate": 12703,
-      "delta": 4948,
+      "candidate": 12750,
+      "delta": 4995,
       "previousBudget": 8192,
-      "addedAllowance": 4992
+      "addedAllowance": 4995
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "baseline": 4183,
       "candidate": 5285,
       "delta": 1102,
       "previousBudget": 5120,
-      "addedAllowance": 1152
+      "addedAllowance": 1102
     },
     "coreJavaScript": {
       "baseline": 2165882,
-      "candidate": 2177341,
-      "delta": 11459,
+      "candidate": 2178648,
+      "delta": 12766,
       "previousBudget": 2165985.4,
-      "addedAllowance": 11520
+      "addedAllowance": 12766
     }
   }
 }

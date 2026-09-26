@@ -12,14 +12,29 @@ it("bounds each cleanup batch and accounts for partial removal failures", async 
   const order = [...store.records.keys()];
   expect(await describeAttachmentStorage(store, () => order)).toMatchObject({ removableRecords: 64, removableBytes: 64 * 1024 });
   let removed = 0;
+  const release = vi.fn();
+  const authorize = vi.fn(async () => ({ order: () => order, release }));
   store.removeRecord = async () => { if (++removed === 3) throw new Error("fixture unlink failed"); };
-  await expect(cleanupOldestAttachments(store, () => order)).rejects.toThrow("fixture unlink failed");
+  await expect(cleanupOldestAttachments(store, () => order, authorize)).rejects.toThrow("fixture unlink failed");
+  expect(authorize).toHaveBeenCalledWith(order.slice(0, 64));
+  expect(release).toHaveBeenCalledOnce();
   expect(store.records.size).toBe(68);
   expect(store.authoritative.has(order[0]!)).toBe(false);
   expect(store.authoritative.has(order[2]!)).toBe(true);
   store.removeRecord = vi.fn().mockResolvedValue(undefined);
-  await expect(cleanupOldestAttachments(store, () => order)).resolves.toEqual({ records: 64, bytes: 64 * 1024 });
+  await expect(cleanupOldestAttachments(store, () => order, authorize)).resolves.toEqual({ records: 64, bytes: 64 * 1024 });
   expect(store.records.size).toBe(4);
+  expect(release).toHaveBeenCalledTimes(2);
+});
+
+it("deletes only files the admission authority still allows", async () => {
+  const store = management(3);
+  const order = [...store.records.keys()];
+  const removeRecord = vi.fn().mockResolvedValue(undefined);
+  store.removeRecord = removeRecord;
+  await expect(cleanupOldestAttachments(store, () => order, async () => ({ order: () => [order[1]!], release: () => undefined })))
+    .resolves.toEqual({ records: 1, bytes: 1024 });
+  expect(removeRecord.mock.calls.map(([id]) => id)).toEqual([order[1]]);
 });
 
 it("keeps usage unknown during reconciliation instead of reporting a full or empty store", async () => {

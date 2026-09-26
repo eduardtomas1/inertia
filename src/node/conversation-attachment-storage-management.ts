@@ -37,20 +37,31 @@ export async function describeAttachmentStorage(store: AttachmentStorageManageme
   };
 }
 
-/** Called under retention's mutation queue; recheck eligibility before each unlink. */
-export async function cleanupOldestAttachments(store: AttachmentStorageManagement, order: ConversationAttachmentEvictionOrder): Promise<ConversationAttachmentUsage> {
+export interface AttachmentCleanupAuthority {
+  readonly order: ConversationAttachmentEvictionOrder;
+  release(): void;
+}
+
+export type AuthorizeAttachmentCleanup = (ids: readonly string[]) => Promise<AttachmentCleanupAuthority>;
+
+export async function cleanupOldestAttachments(store: AttachmentStorageManagement, order: ConversationAttachmentEvictionOrder,
+  authorize: AuthorizeAttachmentCleanup): Promise<ConversationAttachmentUsage> {
   const signal = AbortSignal.timeout(30_000);
-  let records = 0;
-  let bytes = 0;
-  for (const id of candidates(store, order())) {
-    signal.throwIfAborted();
-    if (!candidates(store, order()).includes(id)) continue;
-    const size = store.records.get(id) ?? 0;
-    await store.removeRecord(id, signal);
-    store.records.delete(id);
-    store.authoritative.delete(id);
-    records += 1;
-    bytes += size;
+  const authority = await authorize(candidates(store, order()));
+  try {
+    let records = 0;
+    let bytes = 0;
+    for (const id of candidates(store, authority.order())) {
+      signal.throwIfAborted();
+      const size = store.records.get(id) ?? 0;
+      await store.removeRecord(id, signal);
+      store.records.delete(id);
+      store.authoritative.delete(id);
+      records += 1;
+      bytes += size;
+    }
+    return { records, bytes };
+  } finally {
+    authority.release();
   }
-  return { records, bytes };
 }

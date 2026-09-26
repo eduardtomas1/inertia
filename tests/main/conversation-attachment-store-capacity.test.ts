@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -214,7 +215,8 @@ it("explicit cleanup protects active retentions and reports exact released bytes
     state: "ready", maxBytes: 16 * 1024 ** 3, maxRecords: 65_536,
     records: 3, bytes: 3 * png.length, removableRecords: 2, removableBytes: 2 * png.length,
   });
-  await expect(store.cleanupOldest(order)).resolves.toEqual({ records: 2, bytes: 2 * png.length });
+  await expect(store.cleanupOldest(order, async () => ({ order, release: () => undefined })))
+    .resolves.toEqual({ records: 2, bytes: 2 * png.length });
   await expect(store.preview(pending[0]!.id)).resolves.not.toBeNull();
   await expect(store.usage()).resolves.toEqual({ records: 1, bytes: png.length });
   await store.close();
@@ -224,15 +226,22 @@ it("explicit cleanup protects active retentions and reports exact released bytes
   await expect(restarted.preview(history[0]!)).resolves.toBeNull();
 });
 
-it("serializes cleanup with imports and rechecks newly active conversations before unlinking", async () => {
+it("serializes cleanup with imports and holds the admission authority until every authorized unlink finishes", async () => {
   const store = await openStore({});
   const history = await sent(store, [image(), image()]);
-  let checks = 0;
-  const cleanup = store.cleanupOldest(() => ++checks <= 2 ? history : [history[0]!]);
+  const events: string[] = [];
+  const cleanup = store.cleanupOldest(() => history, async (ids) => {
+    events.push(`authorize ${ids.join(",")}`);
+    return {
+      order: () => [history[0]!],
+      release: () => { events.push(`release ${existsSync(join(store.directory, history[0]!))}`); },
+    };
+  });
   const incoming = image();
   const retention = store.retain([incoming]);
   await expect(cleanup).resolves.toEqual({ records: 1, bytes: png.length });
   await retention;
+  expect(events).toEqual([`authorize ${history.join(",")}`, "release false"]);
   await expect(store.preview(history[1]!)).resolves.not.toBeNull();
   await expect(store.preview(incoming.attachment.id)).resolves.not.toBeNull();
   await expect(store.usage()).resolves.toEqual({ records: 2, bytes: 2 * png.length });

@@ -774,7 +774,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createSettingsBackendCommandHandler({
-        store, conversationAttachments: initializedConversationAttachments,
+        store, turns, conversationAttachments: initializedConversationAttachments,
         providers,
         backendProfileController,
         defaultWorkspacePath: options.defaultWorkspacePath,

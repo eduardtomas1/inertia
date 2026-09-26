@@ -11,7 +11,9 @@ import { providerIdForHarness } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { attachmentCleanupAuthority } from "../attachments/attachment-cleanup-authority";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
+import type { TurnController } from "../turns/turn-controller";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -20,6 +22,7 @@ import {
 export interface SettingsBackendCommandDependencies {
   conversationAttachments: import("../../../node/conversation-attachment-store").ConversationAttachmentStore;
   store: RuntimeStore;
+  turns: Pick<TurnController, "acquireTurnAdmission">;
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   defaultWorkspacePath: string;
@@ -69,7 +72,8 @@ export function createSettingsBackendCommandHandler(
       case "attachment.storage.cleanup": {
         const order = () => dependencies.store.evictableAttachmentIds();
         const removed = command.type === "attachment.storage.cleanup"
-          ? await dependencies.conversationAttachments.cleanupOldest(order) : undefined;
+          ? await dependencies.conversationAttachments.cleanupOldest(order, attachmentCleanupAuthority(dependencies.store, dependencies.turns))
+          : undefined;
         const storage = await dependencies.conversationAttachments.storageStatus(order);
         dependencies.send(socket, { type: "request.result", requestId: command.requestId,
           result: { kind: "attachment.storage", storage, ...(removed ? { removed } : {}) } });

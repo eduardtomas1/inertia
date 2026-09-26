@@ -1,5 +1,5 @@
 import { metadataFor, metadataFromUnknown, type PersistedAttachmentMetadata } from "./conversation-attachment-store-metadata.js";
-import { availableAttachmentDiskBytes, describeAttachmentStorage, cleanupOldestAttachments, type AttachmentStorageManagement } from "./conversation-attachment-storage-management.js";
+import { availableAttachmentDiskBytes, describeAttachmentStorage, cleanupOldestAttachments, type AttachmentStorageManagement, type AuthorizeAttachmentCleanup } from "./conversation-attachment-storage-management.js";
 import {
   ATTACHMENT_DISK_RESERVE_BYTES,
   ATTACHMENT_STORAGE_GIB_BYTES, DEFAULT_ATTACHMENT_STORAGE_GIB, MAX_RETAINED_ATTACHMENTS,
@@ -629,13 +629,13 @@ export class ConversationAttachmentStore {
       return await describeAttachmentStorage(this.management(), order);
     });
   }
-  async cleanupOldest(order: ConversationAttachmentEvictionOrder): Promise<ConversationAttachmentUsage> {
+  async cleanupOldest(order: ConversationAttachmentEvictionOrder, authorize: AuthorizeAttachmentCleanup): Promise<ConversationAttachmentUsage> {
     this.assertOpen();
     return await this.serialize(async () => {
       this.assertOpen();
       if (this.reconciliation || this.reconciliationFailure) throw new ConversationAttachmentStoreReconcilingError();
       await this.loadUsage();
-      return await cleanupOldestAttachments(this.management(), order);
+      return await cleanupOldestAttachments(this.management(), order, authorize);
     });
   }
 

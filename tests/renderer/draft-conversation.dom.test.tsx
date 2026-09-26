@@ -1013,6 +1013,7 @@ describe("useDraftConversation", () => {
     act(() => hook.result.current.start(projectId));
     const draftId = hook.result.current.conversation!.id;
     expect(hook.result.current.requiresWorkspaceMaterialization).toBe(true);
+    expect(hook.result.current.workspaceConversation).toBeNull();
     let sending!: Promise<unknown>;
     await act(async () => { sending = hook.result.current.sendFromComposer("Keep this prompt", []); });
     const saved = materializedSnapshot();
@@ -1025,6 +1026,7 @@ describe("useDraftConversation", () => {
     if (order === "after") hook.rerender({ current: saved });
     expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
     expect(hook.result.current.conversation).toMatchObject({ id: draftId, worktreePath: "/workspace/isolated" });
+    expect(hook.result.current.workspaceConversation).toMatchObject({ id: conversationId, worktreePath: "/workspace/isolated" });
 
     const selection = providerNativeModelSelection({ providerId: "claude", modelId: "replacement-model" });
     await act(async () => { await hook.result.current.updateConversation({ modelSelection: selection }); });

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -292,9 +293,6 @@ export function useDraftConversation({
         && current.materialized.conversationId
           === materialized.materializedConversationId
       ) {
-        // Once creation succeeds, the saved shell owns model and checkout
-        // changes even when the first message was definitely rejected.
-        // Keep only the composer identity local until acceptance is reconciled.
         replaceDraft({
           ...current,
           conversation: {
@@ -756,8 +754,18 @@ export function useDraftConversation({
     }
   };
 
+  const draftConversation = draft?.conversation;
+  const materializedConversationId = draft?.materialized?.conversationId;
+  const workspaceConversation = useMemo(
+    () => draftConversation && materializedConversationId
+      ? { ...draftConversation, id: materializedConversationId }
+      : null,
+    [draftConversation, materializedConversationId],
+  );
+
   return {
     conversation: draft?.conversation ?? null,
+    workspaceConversation,
     layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(
       draft?.payload.useWorktree && !draft.conversation.worktreePath,

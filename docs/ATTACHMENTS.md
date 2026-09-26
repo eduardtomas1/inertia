@@ -36,8 +36,7 @@ follow-ups during a running turn currently support images only.
 ZIP/TAR and other archives, executables, media, Word/PowerPoint documents, SVG,
 `.env`, and key/certificate files are not supported attachments. Extract archives
 and attach supported files, or export documents to PDF or text. Renaming a binary
-file does not make it supported. Text files can contain secrets; review what you
-choose to attach.
+file does not make it supported.
 
 Sent files can be reopened from the message or **Open a surface → Attachments**,
 including after restart, while their validated retained copy remains available.

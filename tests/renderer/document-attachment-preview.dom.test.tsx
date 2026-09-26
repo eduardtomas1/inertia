@@ -60,6 +60,17 @@ afterEach(() => {
 
 describe("document attachment previews", () => {
   it.each([
+    Buffer.from("Name\nRésumé 東京\n"),
+    Buffer.from("\ufeffName\nRésumé 東京\n", "utf16le").swap16(),
+  ])("preserves non-ASCII CSV cells in the table preview", async (bytes) => {
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(bytes, "text/csv")));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({ name: "unicode.csv", mimeType: "text/csv", size: bytes.length })]} onRemove={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Preview attachment unicode.csv" }));
+    expect(await screen.findByRole("table")).toHaveTextContent("Résumé 東京");
+  });
+
+  it.each([
     ["notes.txt", Buffer.from("\ufeffRésumé 東京\n", "utf16le"), "Résumé 東京"],
     ["app.log", Buffer.from("\x1b[31mERROR\x1b[0m: disk full\n"), "ERROR: disk full"],
   ])("previews %s with the shared text decoding", async (name, bytes, text) => {

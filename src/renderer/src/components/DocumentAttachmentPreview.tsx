@@ -280,7 +280,9 @@ export function DocumentAttachmentPreview({
             kind: "spreadsheet",
             workbook: await readSpreadsheetWorkbook(
               mimeType === "text/csv"
-                ? new TextEncoder().encode(decodeTextAttachment(bytes))
+                // SheetJS treats a byte array without a BOM as a legacy code
+                // page. Mark our decoded projection explicitly as UTF-8.
+                ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(bytes)}`)
                 : bytes,
               SPREADSHEET_PREVIEW_LIMITS,
             ),

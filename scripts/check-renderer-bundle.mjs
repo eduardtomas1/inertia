@@ -88,7 +88,7 @@ const budgets = {
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
-  deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte,
+  deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567,
   deferredThreadActionsJavaScript: 8 * kibibyte,

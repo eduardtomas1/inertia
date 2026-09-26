@@ -25,9 +25,17 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
   requestRef.current = request;
   const mounted = useRef(true);
   const busyRef = useRef(false);
-  const triggerRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | HTMLInputElement | null>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef(false);
   const confirmationRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (confirm) confirmationRef.current?.focus(); }, [confirm]);
+  useEffect(() => {
+    if (busy || confirm || !restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    const trigger = triggerRef.current;
+    (trigger && !trigger.disabled ? trigger : refreshRef.current)?.focus();
+  }, [busy, confirm]);
   useEffect(() => {
     mounted.current = true;
     let active = true;
@@ -78,13 +86,13 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       {confirm && <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm attachment deletion">
         <strong>{confirm === "cleanup" ? `Permanently remove up to ${ATTACHMENT_CLEANUP_BATCH_RECORDS} oldest files?` : "Allow automatic removal of old files?"}</strong>
         <small>This removes original images and documents from finished chats across the app, including archived chats. Messages remain, but those attachments will no longer open. Running chats are protected.</small>
-        <button type="button" className="secondary-button" disabled={blocked} onClick={() => void perform(confirm === "cleanup" ? cleanup : () => onUpdate({ autoRemoveOldAttachments: true }))}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
+        <button type="button" className="secondary-button" disabled={blocked} onClick={() => { restoreFocusRef.current = true; void perform(confirm === "cleanup" ? cleanup : () => onUpdate({ autoRemoveOldAttachments: true })); }}>{confirm === "cleanup" ? "Remove stored files" : "Allow automatic removal"}</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => { setConfirm(null); triggerRef.current?.focus(); }}>Cancel</button>
       </div>}
       {notice && <small role="status">{notice}</small>}
     </span>
     <div>
-      <button type="button" className="secondary-button" disabled={blocked} onClick={() => { setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>
+      <button ref={refreshRef} type="button" className="secondary-button" disabled={blocked} onClick={() => { setConfirm(null); setRevision((value) => value + 1); }}>Refresh storage</button>
       <button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${size(storage.removableBytes)})` : ""}</button>
     </div>
   </div>;

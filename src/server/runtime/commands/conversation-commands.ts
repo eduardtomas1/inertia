@@ -1,4 +1,5 @@
 import type WebSocket from "ws";
+import { AttachmentGalleryError } from "../../persistence/attachment-gallery-repository";
 import { resolve } from "node:path";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
@@ -112,6 +113,7 @@ export function createConversationCommandHandler(
     "conversation.select",
     "conversation.detail.load",
     "conversation.content.read",
+    "conversation.attachments.list",
     "conversation.detail.subscription",
     "conversation.context.source.load",
     "conversation.context.agent.source.load",
@@ -221,6 +223,13 @@ export function createConversationCommandHandler(
           result: dependencies.store.conversationContent(command.payload.conversationId, command.payload.cursor),
         });
         return "handled";
+      case "conversation.attachments.list": {
+        let result;
+        try { result = dependencies.store.attachmentGallery.list(command.payload.conversationId, command.payload.cursor); }
+        catch (error) { if (error instanceof AttachmentGalleryError) throw new RuntimeRequestError(error.message); throw error; }
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
+        return "handled";
+      }
       case "conversation.detail.subscription":
         dependencies.runtimeSync.setConversationSubscription(
           socket,

@@ -68,8 +68,11 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   });
 
   const historyButton = activeTurn.getByRole("button", {
-    name: "1 command, 1 edit, 320 tool calls",
+    name: "24 tool calls",
   });
+  // All 320 persisted patches remain terminal; this window mounts only the
+  // latest 24 records, whose collapsed activity group still shows five rows.
+  await expect(app.page.getByRole("button", { name: "Older history", exact: true })).toBeVisible();
   await expect(historyButton).toBeVisible();
   await expect(historyButton).toHaveAttribute("aria-expanded", "false");
   const patchRows = activeTurn.locator(".agent-activity", {

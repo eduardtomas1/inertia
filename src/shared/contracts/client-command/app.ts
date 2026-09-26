@@ -1,4 +1,5 @@
 import { usageSourceInputSchema } from "../../provider-usage-limits";
+import { attachmentGalleryCursorSchema } from "../../attachment-gallery";
 import { z } from "zod";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchCursorSchema, messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
@@ -254,10 +255,11 @@ export const appCommandSchemas = [
     type: z.literal("conversation.content.read"),
     payload: z.strictObject({ conversationId: z.string().uuid(), cursor: z.string().min(1).max(2048) }),
   }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.attachments.list"), payload: z.strictObject({ conversationId: z.string().uuid(), cursor: attachmentGalleryCursorSchema.optional() }) }),
   z
     .object({
       ...requestBase,
-      type: z.literal("conversation.detail.subscription"),
+    type: z.literal("conversation.detail.subscription"),
       payload: z.object({
         owner: z.enum(RUNTIME_DETAIL_SUBSCRIPTION_OWNERS),
         conversationId: z.string().uuid().nullable(),

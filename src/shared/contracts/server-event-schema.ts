@@ -1,4 +1,5 @@
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
+import { attachmentGalleryResultSchema } from "../attachment-gallery";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationContentResult, conversationDetailExtensions, messageQueueResult } from "./conversation-history-schema";
 import { optionalTerminalResumeEvent } from "./terminal-resume-event-schema";
@@ -1141,6 +1142,7 @@ const REQUEST_RESULT_VALIDATORS = {
       || conversationDetail(value.detail, value.conversationId as string))
     && (value.state !== "failed" || stringField(value, "message")),
   "conversation.content": conversationContentResult,
+  "conversation.attachments": (value) => attachmentGalleryResultSchema.safeParse(value).success,
   "duo.pending": (value) =>
     arrayOf(value.launchIds, (entry) => typeof entry === "string")
     && new Set(value.launchIds as unknown[]).size === (value.launchIds as unknown[]).length

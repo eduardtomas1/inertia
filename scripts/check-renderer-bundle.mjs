@@ -63,18 +63,18 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  // Durable queue admission and bounded history/search projection add 6,493 /
-  // 5,697 initial-route bytes against latest main on the same dependencies.
+  // Durable queue admission, bounded history/search projection and independent
+  // gallery routing add 6,734 / 5,732 initial-route bytes against latest main.
   // Queue actions, receipt identity, history controls and route details stay
   // deferred under separate ceilings. Retain <0.15 KiB per route; see
   // docs/pr-evidence/main-audit-reliability/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 6_572,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 6_813,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 5_722,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 5_757,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -177,11 +177,13 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  // Queue/history boundary contracts and retained projection add 9,489 core
+  // Queue/history contracts, retained projection and gallery add 11,975 core
   // bytes after the explicitly capped feature modules above are subtracted.
-  // Measured 2,175,371 bytes; retain ~0.25 KiB. The evidence also records the
+  // Measured 2,177,857 bytes; retain ~0.25 KiB. The independent attachment
+  // gallery stays deferred but remains charged here, preserving the baseline
+  // accounting. The evidence also records the
   // combined total so deferred accounting cannot conceal overall growth.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 9_647,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_133,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

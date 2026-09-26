@@ -483,9 +483,12 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await verifyFailureDiagnostics(failureDiagnostics, captureElementScenario, {
       electronApp, turnId: failed.turn.id, runId: failed.turn.runId,
     });
-    const exceptionalGeometry = await Promise.all(
-      [warningTurn, failedTurn].map((exceptionalTurn) =>
-        exceptionalTurn.evaluate((element) => {
+    const exceptionalGeometry = [];
+    // These turns may occupy different bounded pages. Measure each loaded
+    // state without requiring the previous page's DOM to remain mounted.
+    for (const [exceptionalTurn, turnId] of [[warningTurn, warning.turn.id], [failedTurn, failed.turn.id]] as const) {
+      await revealTurn(exceptionalTurn, turnId);
+      exceptionalGeometry.push(await exceptionalTurn.evaluate((element) => {
           const request = element.querySelector<HTMLElement>(
             '[data-turn-layer="user-request"]',
           )?.getBoundingClientRect();
@@ -507,8 +510,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
                 answerHeight: answer.height,
               }
             : null;
-        })),
-    );
+        }));
+    }
     for (const geometry of exceptionalGeometry) {
       expect(geometry).not.toBeNull();
       if (!geometry) continue;

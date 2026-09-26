@@ -821,7 +821,8 @@ export function createWorkspaceSceneModel({
           goal: currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0,
           plan: planSteps.length,
-          attachments: environmentSummary.attachments.length,
+          ...(detail?.history?.olderCursor || detail?.history?.newerCursor || environmentSummary.attachments.length === 60
+            ? {} : { attachments: environmentSummary.attachments.length }),
         },
         onActivateSurface: openPanelSurface,
         onOpenSurface: openPanelSurface,
@@ -835,7 +836,9 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
-      attachments: { attachments: environmentSummary.attachments },
+      attachments: { attachments: environmentSummary.attachments,
+        ...(runtimeConversation.conversationId ? { conversationId: runtimeConversation.conversationId, runtimeGeneration: connection.runtimeGeneration,
+          sendCommand: connection.sendCommand } : {}) },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,

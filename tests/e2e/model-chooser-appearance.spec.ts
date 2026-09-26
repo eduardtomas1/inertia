@@ -95,8 +95,15 @@ test("keeps branded model sources and rows legible across themes and narrow wind
       await capture(`model-chooser-${id}-${theme.toLowerCase()}`);
       // Without a viewport constraint, the frame ends with its content rather
       // than reserving a fixed-height blank area below these few model rows.
+      const details = chooser.locator(".model-route-details");
+      await expect(details.locator("summary")).toBeInViewport({ ratio: 1 });
       const content = await chooser.evaluate(modelChooserContentGeometry);
       expect(content.bottomGap).toBeLessThanOrEqual(2);
+      await details.locator("summary").click();
+      await expect(details.getByText("Provider-resolved model ID", { exact: true })).toBeVisible();
+      await expect(details.locator(".model-route-details-content")).toBeInViewport({ ratio: 1 });
+      await expectModelChooserPlacement(chooser);
+      await details.locator("summary").click();
       if (id === "codex") {
         await search.fill("Codex Beta");
         await expect(chooser.locator(".model-chooser-row-option")).toHaveCount(1);

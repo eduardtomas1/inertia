@@ -124,6 +124,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "rejected",
   },
   "conversation.content.read": { timeoutMs: 15_000, timeoutDelivery: "rejected" },
+  "conversation.attachments.list": shortRetrySafe,
   "conversation.detail.subscription": shortRetrySafe,
   "conversation.messages.search": shortRetrySafe,
   "conversation.messages.search.cancel": shortRetrySafe,

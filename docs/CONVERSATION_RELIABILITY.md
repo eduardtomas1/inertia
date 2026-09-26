@@ -9,6 +9,11 @@ History selection is remembered separately for up to 32 chats. A runtime restart
 returns remembered selections to the latest history because old cursors are no
 longer valid.
 
+The attachment gallery reads its own metadata pages, so attachments outside the
+current transcript window remain available. Each page contains up to 60 items;
+images still load only when visible. A turn's subagent controls and parent-child
+relationships remain available when newer activity fills its transcript window.
+
 Long messages, reasoning and activity details show a preview. **Read full** opens
 their stored text in bounded parts with previous/next controls. A changed record
 or runtime restart invalidates its cursor; reopen the content from the latest

@@ -34,6 +34,7 @@ import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-con
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
 import { MessageQueueRepository } from "./persistence/message-queue-repository";
+import { AttachmentGalleryRepository } from "./persistence/attachment-gallery-repository";
 import { MessageSendReceiptRepository } from "./persistence/message-send-receipt-repository";
 import { ConversationHistoryRepository, HISTORY_MAX_BYTES } from "./persistence/conversation-history-repository";
 import { PrivateConnectTranscriptRepository } from "./persistence/private-connect-transcript-repository";
@@ -118,6 +119,7 @@ export class RuntimeStore {
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
   readonly messageQueue: MessageQueueRepository;
+  readonly attachmentGallery: AttachmentGalleryRepository;
   readonly messageSendReceipts: MessageSendReceiptRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
@@ -182,6 +184,7 @@ export class RuntimeStore {
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
     this.messageQueue = new MessageQueueRepository(this.database);
+    this.attachmentGallery = new AttachmentGalleryRepository(this.database);
     this.messageSendReceipts = new MessageSendReceiptRepository(this.database);
     this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
@@ -375,9 +378,7 @@ export class RuntimeStore {
     };
   }
 
-  conversationShell(conversationId: string): ConversationShell | null {
-    return this.snapshotRepository.conversationShell(conversationId);
-  }
+  conversationShell(conversationId: string): ConversationShell | null { return this.snapshotRepository.conversationShell(conversationId); }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
     const detail = this.snapshotRepository.conversationDetail(conversationId);
@@ -392,9 +393,7 @@ export class RuntimeStore {
     return result;
   }
 
-  conversationContent(conversationId: string, cursor: string) {
-    return this.historyRepository.readContent(conversationId, cursor);
-  }
+  conversationContent(conversationId: string, cursor: string) { return this.historyRepository.readContent(conversationId, cursor); }
 
   privateConnectTranscript(conversationId: string) { return this.privateConnectTranscripts.load(conversationId); }
 

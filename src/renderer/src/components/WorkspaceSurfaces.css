@@ -52,6 +52,28 @@
   margin: 0 0 8px;
 }
 
+.attachments-surface-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachments-surface-pagination button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  background: var(--surface);
+  font-size: var(--ui-font-micro);
+  cursor: pointer;
+}
+
+.attachments-surface-pagination button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
 .workspace-surface-heading small {
   color: var(--text-muted);
   font-size: var(--ui-font-micro);

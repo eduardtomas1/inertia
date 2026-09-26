@@ -124,8 +124,8 @@
     "mascotJavaScript": 6049,
     "mascotSettingsJavaScript": 6642,
     "entryJavaScript": 222453,
-    "mainWorkbenchFirstLoadJavaScript": 838303,
-    "detachedChatFirstLoadJavaScript": 648328,
+    "mainWorkbenchFirstLoadJavaScript": 838544,
+    "detachedChatFirstLoadJavaScript": 648363,
     "entryCss": 353982,
     "colorThemesCss": 12470,
     "detachedChatCss": 2920,
@@ -156,7 +156,7 @@
     "preMergeConfidenceJavaScript": 22545,
     "morphiconsJavaScript": 15829,
     "morphingIconFeedbackJavaScript": 4380,
-    "coreJavaScript": 2175371,
+    "coreJavaScript": 2177857,
     "deferredPdfJavaScript": 437530,
     "deferredPdfWorker": 1265413
   },
@@ -179,8 +179,8 @@
     "mascotJavaScript": 0,
     "mascotSettingsJavaScript": 0,
     "entryJavaScript": -19,
-    "mainWorkbenchFirstLoadJavaScript": 6493,
-    "detachedChatFirstLoadJavaScript": 5697,
+    "mainWorkbenchFirstLoadJavaScript": 6734,
+    "detachedChatFirstLoadJavaScript": 5732,
     "entryCss": 0,
     "colorThemesCss": 0,
     "detachedChatCss": 0,
@@ -211,21 +211,21 @@
     "preMergeConfidenceJavaScript": 0,
     "morphiconsJavaScript": 0,
     "morphingIconFeedbackJavaScript": 164,
-    "coreJavaScript": 9489,
+    "coreJavaScript": 11975,
     "deferredPdfJavaScript": 0,
     "deferredPdfWorker": 0
   },
   "netStartupReductionFromInitialAuditBuildBytes": {
-    "mainWorkbench": 1129,
-    "detachedChat": 1150
+    "mainWorkbench": 888,
+    "detachedChat": 1115
   },
   "budgets": {
     "entryJavaScript": 222720,
     "mascotFirstLoadJavaScript": 6144,
     "mascotJavaScript": 6144,
     "mascotSettingsJavaScript": 6963.2,
-    "mainWorkbenchFirstLoadJavaScript": 838412.8,
-    "detachedChatFirstLoadJavaScript": 648451.2,
+    "mainWorkbenchFirstLoadJavaScript": 838653.8,
+    "detachedChatFirstLoadJavaScript": 648486.2,
     "entryCss": 354304,
     "colorThemesCss": 12840,
     "detachedChatCss": 8192,
@@ -270,7 +270,7 @@
     "preMergeConfidenceJavaScript": 28672,
     "morphiconsJavaScript": 20480,
     "morphingIconFeedbackJavaScript": 8192,
-    "coreJavaScript": 2175632.4,
+    "coreJavaScript": 2178118.4,
     "deferredPdfJavaScript": 512000,
     "deferredPdfWorker": 1382400
   },
@@ -331,8 +331,8 @@
   },
   "combinedCoreAndExplicitFeatureBytes": {
     "before": 2173637,
-    "after": 2197285,
-    "delta": 23648
+    "after": 2199771,
+    "delta": 26134
   },
   "deferredFeatureModules": [
     {
@@ -391,6 +391,16 @@
       ]
     }
   ],
+  "independentGalleryEvidence": {
+    "emittedBytes": 2965,
+    "presentInInitialClosures": [],
+    "includedModules": [
+      "<workspace>/src/renderer/src/lib/attachmentGalleryRequest.ts",
+      "<workspace>/src/renderer/src/hooks/useAttachmentGallery.ts",
+      "<workspace>/src/renderer/src/components/AttachmentsSurface.tsx"
+    ],
+    "accounting": "Remains charged to core, as in the baseline. Its bounded metadata query, request adapter and paging hook stay deferred with the surface."
+  },
   "largestApplicationModuleGrowthBeforeMinification": [
     {
       "module": "src/renderer/src/components/composer/ComposerQueuedActions.tsx",
@@ -441,6 +451,12 @@
       "delta": 1724
     },
     {
+      "module": "src/renderer/src/hooks/useAttachmentGallery.ts",
+      "beforeRenderedBytes": 0,
+      "afterRenderedBytes": 1696,
+      "delta": 1696
+    },
+    {
       "module": "src/renderer/src/components/composer/composerQueueAction.ts",
       "beforeRenderedBytes": 0,
       "afterRenderedBytes": 1648,
@@ -451,6 +467,12 @@
       "beforeRenderedBytes": 4500,
       "afterRenderedBytes": 5975,
       "delta": 1475
+    },
+    {
+      "module": "src/renderer/src/components/AttachmentsSurface.tsx",
+      "beforeRenderedBytes": 1408,
+      "afterRenderedBytes": 2704,
+      "delta": 1296
     },
     {
       "module": "src/renderer/src/components/composer/Composer.tsx",
@@ -471,6 +493,12 @@
       "delta": 1053
     },
     {
+      "module": "src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts",
+      "beforeRenderedBytes": 32440,
+      "afterRenderedBytes": 33406,
+      "delta": 966
+    },
+    {
       "module": "src/shared/message-queue.ts",
       "beforeRenderedBytes": 0,
       "afterRenderedBytes": 902,
@@ -489,32 +517,14 @@
       "delta": 796
     },
     {
-      "module": "src/renderer/src/components/response-timeline/timeline-dom-navigation.ts",
+      "module": "src/shared/attachment-gallery.ts",
       "beforeRenderedBytes": 0,
-      "afterRenderedBytes": 694,
-      "delta": 694
-    },
-    {
-      "module": "src/renderer/src/hooks/useMessageSearch.ts",
-      "beforeRenderedBytes": 1938,
-      "afterRenderedBytes": 2564,
-      "delta": 626
-    },
-    {
-      "module": "src/renderer/src/components/ModelChooser.tsx",
-      "beforeRenderedBytes": 21309,
-      "afterRenderedBytes": 21934,
-      "delta": 625
-    },
-    {
-      "module": "src/renderer/src/components/workspace-scene/createWorkspaceSceneModel.ts",
-      "beforeRenderedBytes": 32440,
-      "afterRenderedBytes": 33036,
-      "delta": 596
+      "afterRenderedBytes": 768,
+      "delta": 768
     }
   ],
   "interpretation": [
-    "The added initial-route cost is shared queue/history validation, bounded projection/navigation, search continuation, and ownership guards. Optional queue actions, provider repair, receipt fingerprinting, history controls and model details load on demand.",
+    "The added initial-route cost is shared queue/history validation, bounded projection/navigation, search continuation, gallery routing and ownership guards. Optional queue actions, provider repair, receipt fingerprinting, history controls, model details and attachment gallery paging load on demand.",
     "The gate now rejects any static entry/workbench/detached import of the explicitly deferred feature modules. Each gets a measured cap with less than 0.25 KiB spare. No CSS, Markdown, PDF, spreadsheet or unrelated feature budget increased.",
     "Module renderedLength is pre-minification attribution only and is not additive to final emitted byte deltas. Emitted asset and closure measurements are authoritative.",
     "Deferring action modules reduces initial route bytes but introduces dynamic import/chunk overhead; the combined core-plus-feature total honestly includes that overhead and all newly partitioned modules.",

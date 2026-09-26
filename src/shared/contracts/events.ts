@@ -1,5 +1,6 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { MessageQueueResult } from "../message-queue";
+import type { AttachmentGalleryResult } from "../attachment-gallery";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -229,6 +230,7 @@ export type ServerEvent =
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
         | ConversationContentResult
+        | AttachmentGalleryResult
         | MessageSearchResult;
     }
   | RuntimeMutationEvent

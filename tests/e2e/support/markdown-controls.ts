@@ -93,9 +93,9 @@ export async function revealVirtualizedTimelineTurn(input: {
   testInfo: TestInfo;
 }): Promise<void> {
   const { page, target, conversationId, turnId, testInfo } = input;
-  const virtualRows = page.locator(".response-virtual-item");
-  await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
-  await page.evaluate((detail) => {
+  const rows = page.locator(".response-virtual-item, .response-static-item");
+  await expect.poll(() => rows.count()).toBeGreaterThan(0);
+  const focusLoadedTurn = () => page.evaluate((detail) => {
     // This helper dispatches navigation without a real activating control.
     // Clear fixture auto-focus so the production focus guard sees the same
     // neutral document state that follows an intentional navigation action.
@@ -107,6 +107,27 @@ export async function revealVirtualizedTimelineTurn(input: {
   }, { conversationId, turnId });
   let consecutiveRevealedSamples = 0;
   try {
+    // Timeline focus only addresses the current server window. First try the
+    // latest window, then traverse real history controls toward older turns.
+    // A turn may span pages, so an existing fragment is not enough to choose
+    // its most recent work and final answer when moving between fixture states.
+    const latest = page.getByRole("button", { name: "Latest history", exact: true });
+    if (await latest.isVisible()) {
+      await latest.click();
+      await expect(page.locator(".conversation-history-controls button:disabled")).toHaveCount(0);
+    }
+    await focusLoadedTurn();
+    if (await target.count() === 0) {
+      for (let pageIndex = 0; pageIndex < 32; pageIndex += 1) {
+        await focusLoadedTurn();
+        try { await target.waitFor({ state: "attached", timeout: 500 }); break; } catch { /* Try the next bounded history page. */ }
+        const older = page.getByRole("button", { name: "Older history", exact: true });
+        await expect(older).toBeVisible();
+        await older.click();
+        await expect(page.locator(".conversation-history-controls button:disabled")).toHaveCount(0);
+      }
+    }
+    await focusLoadedTurn();
     await expect.poll(async () => {
       const evidence = await inspectFreshTarget(target);
       const revealed = targetIsRevealed(evidence);
@@ -154,9 +175,9 @@ export async function verifyDesktopMarkdownControls(input: {
     const y = bounds.top + bounds.height / 2;
     const target = document.elementFromPoint(x, y);
     const styles = getComputedStyle(button);
-    const virtualRow = button.closest<HTMLElement>(".response-virtual-item");
+    const transcriptRow = button.closest<HTMLElement>(".response-virtual-item, .response-static-item");
     const overlappingRows = [...document.querySelectorAll<HTMLElement>(
-      ".response-virtual-item",
+      ".response-virtual-item, .response-static-item",
     )].filter((row) => {
       const rowBounds = row.getBoundingClientRect();
       return x >= rowBounds.left && x <= rowBounds.right
@@ -191,13 +212,14 @@ export async function verifyDesktopMarkdownControls(input: {
       display: styles.display,
       opacity: styles.opacity,
       appRegion: styles.getPropertyValue("-webkit-app-region"),
-      virtualRow: virtualRow
+      transcriptRow: transcriptRow
         ? {
-            index: virtualRow.dataset.index ?? null,
-            bounds: virtualRow.getBoundingClientRect().toJSON(),
+            virtualized: transcriptRow.classList.contains("response-virtual-item"),
+            index: transcriptRow.dataset.index ?? null,
+            bounds: transcriptRow.getBoundingClientRect().toJSON(),
           }
         : null,
-      overlappingVirtualRows: overlappingRows.map((row) =>
+      overlappingTranscriptRows: overlappingRows.map((row) =>
         row.dataset.index ?? null),
     };
   });
@@ -208,8 +230,8 @@ export async function verifyDesktopMarkdownControls(input: {
   expect(wrapHitTest.ownsTarget).toBe(true);
   expect(wrapHitTest.pointerEvents).toBe("auto");
   expect(wrapHitTest.inertAncestor).toBeNull();
-  expect(wrapHitTest.virtualRow).not.toBeNull();
-  expect(wrapHitTest.overlappingVirtualRows).toHaveLength(1);
+  expect(wrapHitTest.transcriptRow).not.toBeNull();
+  expect(wrapHitTest.overlappingTranscriptRows).toHaveLength(1);
   const firstPre = codeBlocks.nth(0).locator("pre");
   const beforeWrap = await firstPre.evaluate((element) => {
     const code = element.querySelector("code");

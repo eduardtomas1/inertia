@@ -128,6 +128,7 @@ export const createQuietLedgerFixture = ({
       title: `Verified implementation step ${index + 1}`,
       detail: index === 7 ? "The focused renderer checks are green." : null,
       status: "completed",
+      createdAt: new Date(Date.parse(completed.startedAt) + (index + 1) * 1_000).toISOString(),
     });
   }
   const completedAnswer = settleTurn(completed, [
@@ -234,6 +235,7 @@ export const createQuietLedgerFixture = ({
       title,
       detail: index === 3 ? "The visible row stays fixed while disclosure height changes." : null,
       status: "completed",
+      createdAt: new Date(Date.parse(detailed.startedAt) + (index + 1) * 1_000).toISOString(),
     });
   }
   settleTurn(
@@ -256,6 +258,7 @@ export const createQuietLedgerFixture = ({
     title: "Resolved the persisted backend route",
     detail: null,
     status: "completed",
+    createdAt: new Date(Date.parse(kimi.startedAt) + 1_000).toISOString(),
   });
   settleTurn(
     kimi,
@@ -275,6 +278,7 @@ export const createQuietLedgerFixture = ({
     title: "Applied the compatible fallback",
     detail: null,
     status: "completed",
+    createdAt: new Date(Date.parse(warning.startedAt) + 1_000).toISOString(),
   });
   store.addActivity({
     conversationId: conversation.id,
@@ -284,6 +288,7 @@ export const createQuietLedgerFixture = ({
     title: "Warning: optional provider capability skipped",
     detail: "The final result is complete, but one optional capability was unavailable.",
     status: "completed",
+    createdAt: new Date(Date.parse(warning.startedAt) + 2_000).toISOString(),
   });
   settleTurn(
     warning,
@@ -303,6 +308,7 @@ export const createQuietLedgerFixture = ({
     title: "Prepared the verification environment",
     detail: null,
     status: "completed",
+    createdAt: new Date(Date.parse(failed.startedAt) + 1_000).toISOString(),
   });
   store.addActivity({
     conversationId: conversation.id,
@@ -312,6 +318,7 @@ export const createQuietLedgerFixture = ({
     title: "Renderer verification failed",
     detail: "One actionable assertion needs attention.",
     status: "failed",
+    createdAt: new Date(Date.parse(failed.startedAt) + 2_000).toISOString(),
   });
   store.addActivity({
     conversationId: conversation.id,
@@ -336,6 +343,7 @@ export const createQuietLedgerFixture = ({
       "The diagnostic tail was retained after redaction.",
     ].join("\n"),
     status: "failed",
+    createdAt: new Date(Date.parse(failed.startedAt) + 3_000).toISOString(),
   });
   settleTurn(
     failed,
@@ -356,6 +364,7 @@ export const createQuietLedgerFixture = ({
     title: "Inspected the cancellation boundary",
     detail: null,
     status: "completed",
+    createdAt: new Date(Date.parse(cancelled.startedAt) + 1_000).toISOString(),
   });
   settleTurn(
     cancelled,

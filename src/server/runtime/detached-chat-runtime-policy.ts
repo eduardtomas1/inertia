@@ -60,6 +60,7 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.detail.load":
     case "conversation.content.read":
+    case "conversation.attachments.list":
       return owns(command.payload.conversationId) ? null : REJECTION;
     case "agent.workflow.load":
     case "agent.workflow.saved.load":

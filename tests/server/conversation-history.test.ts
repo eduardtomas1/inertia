@@ -102,6 +102,26 @@ describe("bounded durable conversation history", () => {
     expect(seen.size).toBe(50);
   });
 
+  it("retains subagent controls and ancestry after newer activity fills the page", () => {
+    const { store, conversation, repository } = fixture();
+    const { turn } = store.beginAgentTurn({ id: randomUUID(), conversationId: conversation.id, runId: randomUUID(), content: "Delegate", providerId: "claude", harnessId: "claude-agent-sdk", backendProfileId: "claude", model: "test", reasoningEffort: "", interactionMode: "build", accessMode: "supervised", configurationRevision: 0, association: "authoritative", requestedAt: "2026-01-01T00:00:00.000Z" });
+    const input = { conversationId: conversation.id, runId: turn.runId, turnId: turn.id, providerId: "claude" as const,
+      parentProviderAgentId: null, parentProviderToolUseId: null, providerToolUseId: null, providerRole: null,
+      providerName: null, status: "running" as const, isLive: true, description: "Working", progress: null, result: null,
+      sequence: 1, updatedAt: "2026-01-01T00:00:01.000Z" };
+    const parent = store.upsertSubagentTrace({ ...input, providerAgentId: "parent-agent", providerTaskId: "parent-task" })!.trace;
+    const child = store.upsertSubagentTrace({ ...input, providerAgentId: "child-agent", providerTaskId: "child-task", parentProviderAgentId: "parent-agent" })!.trace;
+    for (let index = 0; index < 40; index++) store.addActivity({ conversationId: conversation.id, turnId: turn.id, runId: turn.runId,
+      kind: "tool", title: `New activity ${index}`, detail: null, status: "completed", createdAt: "2026-01-01T00:01:00.000Z" });
+    const detail = repository.load(conversation.id)!;
+    validDetail(detail);
+    expect(detail.history!.recordCount).toBe(HISTORY_PAGE_RECORDS);
+    expect(detail.activities).toHaveLength(HISTORY_PAGE_RECORDS);
+    expect(detail.subagents.map(({ id }) => id)).toEqual(expect.arrayContaining([parent.id, child.id]));
+    expect(detail.subagents.find(({ id }) => id === child.id)?.parentTraceId).toBe(parent.id);
+    expect(detail.agentTurns.map(({ id }) => id)).toContain(turn.id);
+  });
+
   it("binds cursors to chat and runtime and rejects stale same-length text replacements", () => {
     const { store, database, conversation, repository, project } = fixture();
     const message = store.createMessage(conversation.id, "a".repeat(40_000));

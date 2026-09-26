@@ -19,9 +19,14 @@ export function modelChooserContentGeometry(element: Element): {
   if (!list) throw new Error("The model chooser results list is missing.");
   const frame = element.getBoundingClientRect();
   const results = list.getBoundingClientRect();
+  const details = element.querySelector(":scope > .model-route-details")?.getBoundingClientRect();
   return {
     frameHeight: frame.height,
-    bottomGap: Math.abs(frame.bottom - results.bottom),
+    // A real details footer is content. Still detect blank space above it as
+    // well as below it, instead of allowing a footer to conceal list slack.
+    bottomGap: details
+      ? Math.max(Math.abs(frame.bottom - details.bottom), Math.abs(details.top - results.bottom))
+      : Math.abs(frame.bottom - results.bottom),
   };
 }
 

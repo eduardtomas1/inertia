@@ -15,6 +15,7 @@ import {
   imageAttachmentTooLargeMessage,
 } from "./attachment-image-validation.js";
 import { validateAttachmentImport } from "./attachment-import.js";
+import { TextAttachmentError } from "../shared/text-attachment.js";
 
 const OWNED_STAGED_ATTACHMENT =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls)$/iu;
@@ -57,6 +58,8 @@ export interface AttachmentImportValidationRunner {
 export type AttachmentImportValidationFailure =
   | "content"
   | "image-too-large"
+  | "text-content"
+  | "text-size"
   | "unsafe";
 
 export interface AttachmentImportImageSize {
@@ -78,6 +81,9 @@ function validationFailureMessage(
   code: AttachmentImportValidationFailure,
   image: AttachmentImportImageSize | null,
 ): string {
+  if (code === "text-content" || code === "text-size") {
+    return new TextAttachmentError(code).message;
+  }
   if (code === "image-too-large" && image) {
     return imageAttachmentTooLargeMessage(image.width, image.height);
   }
@@ -89,7 +95,7 @@ function validationFailureMessage(
 export class AttachmentImportValidationError extends Error {
   readonly image: AttachmentImportImageSize | null;
 
-  constructor(code: "content" | "unsafe");
+  constructor(code: "content" | "unsafe" | "text-content" | "text-size");
   constructor(code: "image-too-large", image: AttachmentImportImageSize);
   constructor(
     readonly code: AttachmentImportValidationFailure,
@@ -323,6 +329,9 @@ export async function validateAttachmentImportFile(
         data: bytes,
       });
     } catch (error) {
+      if (error instanceof TextAttachmentError) {
+        throw new AttachmentImportValidationError(error.code);
+      }
       if (
         error instanceof ImageAttachmentTooLargeError
         && isReportedImageSide(error.width)

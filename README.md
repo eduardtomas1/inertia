@@ -51,6 +51,8 @@ Keep an objective in view alongside the latest conversation plan. Goals distingu
 
 Open image attachments without leaving the chat, zoom into details, and pan across larger images. Browse sent files in **Open a surface → Attachments**, with previews and a scrollable gallery.
 
+See [supported attachment formats and provider limits](docs/ATTACHMENTS.md) for text/log encodings, source/configuration files, documents, and spreadsheets.
+
 ![Zooming into an attached interface screenshot](docs/screenshots/inertia-image-preview.png)
 
 ## Local by default

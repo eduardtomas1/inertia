@@ -27,7 +27,7 @@ export type AttachmentImportWorkerEvent = {
   readonly type: "attachment-import.result";
   readonly operationId: string;
   readonly ok: false;
-  readonly code: "content" | "unsafe";
+  readonly code: "content" | "unsafe" | "text-content" | "text-size";
 } | {
   readonly type: "attachment-import.result";
   readonly operationId: string;
@@ -118,7 +118,8 @@ export function parseAttachmentImportWorkerEvent(
   ) return null;
   if (value.ok === false) {
     const keys = Object.keys(value).length;
-    if (value.code === "content" || value.code === "unsafe") {
+    if (value.code === "content" || value.code === "unsafe"
+      || value.code === "text-content" || value.code === "text-size") {
       return keys === 4
         ? {
             type: value.type,

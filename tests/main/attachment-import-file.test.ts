@@ -95,6 +95,25 @@ afterEach(async () => {
 });
 
 describe("private staged attachment validation", () => {
+  it("validates UTF-16 bytes without rewriting the staged file or digest", async () => {
+    const bytes = Buffer.from("\ufeffRésumé 東京\n", "utf16le");
+    const { operation, path } = await stage("notes.txt", "text/plain", bytes);
+    expect(await validateAttachmentImportFile(operation)).toMatchObject({
+      displayName: "notes.txt",
+      mimeType: "text/plain",
+      size: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    });
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
+  it("returns a bounded text-content error for an ambiguous encoding", async () => {
+    const { operation } = await stage("notes.txt", "text/plain", Buffer.from("caf\xe9", "latin1"));
+    await expect(validateAttachmentImportFile(operation)).rejects.toMatchObject({
+      code: "text-content",
+      message: expect.stringContaining("Convert the file to UTF-8"),
+    });
+  });
   it.each([
     {
       name: "brief.pdf",

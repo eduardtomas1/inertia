@@ -59,6 +59,17 @@ afterEach(() => {
 });
 
 describe("document attachment previews", () => {
+  it.each([
+    ["notes.txt", Buffer.from("\ufeffRésumé 東京\n", "utf16le"), "Résumé 東京"],
+    ["app.log", Buffer.from("\x1b[31mERROR\x1b[0m: disk full\n"), "ERROR: disk full"],
+  ])("previews %s with the shared text decoding", async (name, bytes, text) => {
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(bytes, "text/plain")));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({ name, mimeType: "text/plain", size: bytes.length })]} onRemove={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: `Preview attachment ${name}` }));
+    await waitFor(() => expect(screen.getByLabelText(`Text preview of ${name}`)).toHaveTextContent(text));
+    expect(screen.getByLabelText(`Text preview of ${name}`).textContent).not.toContain("\x1b");
+  });
   it("projects document visibility onto the body-level preview portal", async () => {
     let visibility: DocumentVisibilityState = "visible";
     vi.spyOn(document, "visibilityState", "get")
@@ -199,6 +210,11 @@ describe("document attachment previews", () => {
       name: "forecast.csv",
       mimeType: "text/csv",
       bytes: new TextEncoder().encode("Region,Revenue\nNorth,1200\n"),
+    },
+    {
+      name: "utf16.csv",
+      mimeType: "text/csv",
+      bytes: Buffer.from("\ufeffRegion,Revenue\nNorth,1200\n", "utf16le").swap16(),
     },
   ] satisfies Array<{
     name: string;

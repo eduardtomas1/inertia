@@ -34,7 +34,7 @@ describe("chat attachment contract", () => {
   });
 
   it("accepts plain-text source, markup and configuration names as text beside the pinned lookup", () => {
-    for (const name of ["config.yaml", "main.ts", "index.html", "query.sql", "Dockerfile.patch", "app.log", "rows.tsv"]) {
+    for (const name of ["config.yaml", "main.ts", "index.html", "query.sql", "Dockerfile.patch", "app.log", "rows.tsv", "Dockerfile", "Makefile", ".gitignore", "settings.jsonc", "notebook.ipynb"]) {
       expect(chatAttachmentMimeTypeForName(name), name).toBe("text/plain");
     }
     // The lookup migration 56 pins is unchanged; the names it knows keep their own type.
@@ -51,6 +51,10 @@ describe("chat attachment contract", () => {
     expect(isPotentialChatAttachment("script.py", "text/x-python")).toBe(true);
     expect(isPotentialChatAttachment("script.py", "")).toBe(true);
     expect(isPotentialChatAttachment("script.py", "application/octet-stream")).toBe(true);
+    expect(isPotentialChatAttachment("notes.txt", " BINARY/OCTET-STREAM; charset=utf-16 ")).toBe(true);
+    expect(isPotentialChatAttachment("app.log", "application/unknown")).toBe(true);
+    expect(isPotentialChatAttachment("settings.jsonc", "application/json")).toBe(true);
+    expect(isPotentialChatAttachment("Dockerfile", "")).toBe(true);
     expect(isPotentialChatAttachment("index.html", "image/png")).toBe(false);
     expect(isPotentialChatAttachment("index.html", "application/pdf")).toBe(false);
     expect(isPotentialChatAttachment("index.html", "application/zip")).toBe(false);

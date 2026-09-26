@@ -78,7 +78,7 @@ describe("ProviderBrandIcon", () => {
         <ProviderBrandIcon providerId="codex" size={18} />
         <ProviderBrandIcon providerId="claude" />
         <ProviderBrandIcon providerId="cursor" />
-        <ProviderBrandIcon providerId="kimi" />
+        <ProviderBrandIcon providerId="kimi" size={13} />
         <ProviderBrandIcon providerId="opencode" />
         <ProviderBrandIcon providerId="antigravity" size={16} />
       </>,
@@ -93,8 +93,13 @@ describe("ProviderBrandIcon", () => {
       .toHaveAttribute("data-provider-brand", "anthropic");
     expect(screen.getByRole("img", { name: "Cursor icon" }).querySelectorAll("img"))
       .toHaveLength(2);
-    expect(screen.getByRole("img", { name: "Kimi Code icon" }))
-      .toHaveAttribute("data-provider-brand", "kimi");
+    const kimi = screen.getByRole("img", { name: "Kimi Code icon" });
+    expect(kimi).toHaveAttribute("data-provider-brand", "kimi");
+    expect(kimi).toHaveAttribute("data-provider-icon-kind", "official");
+    expect(kimi).toHaveStyle("--provider-icon-size: 13px");
+    expect(kimi).toHaveClass("is-dark-invert");
+    expect(kimi.querySelector("img"))
+      .toHaveAttribute("src", expect.stringMatching(/kimi\.svg(?:\?|$)/u));
     expect(screen.getByRole("img", { name: "OpenCode icon" }).querySelectorAll("img"))
       .toHaveLength(2);
     const antigravity = screen.getByRole("img", { name: "Antigravity icon" });
@@ -139,10 +144,10 @@ describe("ProviderBrandIcon", () => {
     expect(fallback.querySelector("img")).toBeNull();
   });
 
-  it("keeps decorative row icons out of the accessibility tree", () => {
-    render(<ProviderBrandIcon providerId="codex" decorative />);
+  it.each(["codex", "kimi"])("keeps decorative %s row icons out of the accessibility tree", (providerId) => {
+    render(<ProviderBrandIcon providerId={providerId} decorative />);
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    const icon = document.querySelector('[data-provider-brand="openai"]');
+    const icon = document.querySelector(`[data-provider-id="${providerId}"]`);
     expect(icon).toHaveAttribute("aria-hidden", "true");
   });
 });

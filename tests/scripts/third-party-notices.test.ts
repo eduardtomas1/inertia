@@ -66,6 +66,8 @@ describe("third-party notice generation", () => {
     expect(output).toContain("Copyright 2023 Anthropic, PBC.");
     expect(output).toContain("Copyright Anysphere, Inc.");
     expect(output).toContain("Copyright (c) 2025 opencode");
+    expect(output).toContain("Kimi Code mark");
+    expect(output).toContain("bb1b44abe4f035ff75f4adfba18537b5470bd000, file kimi/icon.svg");
   });
 
   it("includes the vendored thinking-orbs engine license in packaged notices", () => {

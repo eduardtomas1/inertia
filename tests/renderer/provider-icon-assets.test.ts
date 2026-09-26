@@ -13,6 +13,7 @@ const assetDirectory = join(
 );
 
 const assetDigests = {
+  "kimi.svg": "e3354675d761f2b27651dce3afda0fcf7351c174bc19ecffe6c907b7121165d5",
   "anthropic.svg": "7e78883e38ac9a21881a900bcfad4ac91d04dd0db27ceed7ed8d8590dc174674",
   "cursor-dark.svg": "c4be4f61e5fcc666e8c62f20d7b894e7c235f867b9724b982be660a2d24b6916",
   "cursor-light.svg": "68ade1cd692678d00087a72058992ab7d29ff5e4efe565dbef2cf973fd24df1d",
@@ -65,6 +66,8 @@ describe("provider icon assets", () => {
     const contrastPairs = [
       ["OpenAI light", "#000000", "#ebebee"],
       ["OpenAI dark", "#ffffff", "#050507"],
+      ["Kimi light", "#000000", "#ebebee"],
+      ["Kimi dark", "#ffffff", "#050507"],
       ["Anthropic light backing", "#D97757", "#ffffff"],
       ["Anthropic dark", "#D97757", "#050507"],
       ["Cursor light", "#26251e", "#ebebee"],

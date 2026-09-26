@@ -1038,6 +1038,10 @@ function handleCursorUpdate(
       // falsely append historical context to the current answer.
       compactions.observeSummaryChunk(update);
       return;
+    case "notice":
+      // ACP 1.5 notices are opt-in. This client does not advertise them;
+      // preserve the protocol failure instead of silently losing a warning.
+      throw new Error("Cursor ACP sent a notice without negotiated support.");
   }
   const unsupportedUpdate: never = update;
   throw new Error(

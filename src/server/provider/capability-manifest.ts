@@ -304,8 +304,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "cursor",
     harnessId: "cursor-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-1.4.0/cursor",
-    bundledSdkVersion: "1.4.0",
+    protocolRevision: "acp-v1/sdk-1.5.0/cursor",
+    bundledSdkVersion: "1.5.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -321,8 +321,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-1.4.0/kimi",
-    bundledSdkVersion: "1.4.0",
+    protocolRevision: "acp-v1/sdk-1.5.0/kimi",
+    bundledSdkVersion: "1.5.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",

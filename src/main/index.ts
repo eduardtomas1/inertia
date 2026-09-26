@@ -99,9 +99,7 @@ import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js
 import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
-import {
-  finishPrivilegedExit, RetryablePrivilegedCleanup,
-} from "./privileged-shutdown.js";
+import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-bootstrap.js";
@@ -130,6 +128,8 @@ import { handleStartupFailure } from "./startup-failure.js";
 import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
 import { testCleanupOwners, createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 import { installedUpdateTestFixture } from "./test-installed-update.js";
+import { disableShutdownBlockingProfileFeatures } from "./chromium-profile-features.js";
+disableShutdownBlockingProfileFeatures(app.commandLine);
 const installedUpdateFixture = installedUpdateTestFixture();
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {

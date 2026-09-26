@@ -1119,6 +1119,8 @@ function handleKimiUpdate(
       // ordinary-turn evidence.
       compactions.observeSummaryChunk(update);
       return;
+    case "notice":
+      throw new Error("Kimi ACP sent a notice without negotiated support.");
   }
   const unsupportedUpdate: never = update;
   throw new Error(

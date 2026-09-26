@@ -1038,6 +1038,8 @@ function handleCursorUpdate(
       // falsely append historical context to the current answer.
       compactions.observeSummaryChunk(update);
       return;
+    case "notice":
+      throw new Error("Cursor ACP sent a notice without negotiated support.");
   }
   const unsupportedUpdate: never = update;
   throw new Error(

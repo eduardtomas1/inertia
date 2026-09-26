@@ -206,17 +206,67 @@ describe("bounded macOS Electron main-process evidence", () => {
     });
     expect(f.diagnostic.samples[1]!.output).not.toContain("secret");
     expect(f.spawnSample.mock.calls[2]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-o", "ppid=,lstart=", "-p", "777"],
+    ]);
+    const identity = "123456 Sat Sep 26 20:00:00 2026";
+    f.samplers[2]!.stdout!.emit("data", Buffer.from(`  ${identity}\n`));
+    f.samplers[2]!.emit("close", 0, null);
+    expect(f.spawnSample.mock.calls[3]!.slice(0, 2)).toEqual([
       "/usr/bin/sample", ["777", "1", "10", "-file", "/dev/stdout"],
     ]);
     expect(f.diagnostic.samples[2]).toMatchObject({
       pid: 777, reason: "gpu-helper-still-pending", status: "sampling",
     });
+    f.samplers[3]!.stdout!.emit("data", Buffer.from("gpu stack"));
+    f.samplers[3]!.emit("close", 0, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({ status: "validating-helper-identity", output: "" });
+    expect(f.spawnSample.mock.calls[4]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-o", "ppid=,lstart=", "-p", "777"],
+    ]);
+    f.samplers[4]!.stdout!.emit("data", Buffer.from(`${identity}\n`));
+    f.samplers[4]!.emit("close", 0, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({ status: "completed", output: "gpu stack" });
+    expect(f.diagnostic.samples).toHaveLength(3);
     f.diagnostic.stop();
-    expect(f.killGroup.mock.calls).toEqual([[123458], [123457], [123459]]);
     expect(f.diagnostic.samples[0]!.status).toBe("cancelled-at-fixture-exit-or-kill-deadline");
-    expect(f.diagnostic.samples[2]!.status).toBe("cancelled-at-fixture-exit-or-kill-deadline");
     expect(f.main.kill).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ["a reused PID", "123456 Sat Sep 26 20:00:05 2026"],
+    ["an exited helper", ""],
+  ])("discards a GPU helper sample when the helper identity changes to %s", async (_label, afterIdentity) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from("777 123456 U /tmp/Electron Helper (GPU) --type=gpu-process"));
+    f.samplers[1]!.emit("close", 0, null);
+    f.samplers[2]!.stdout!.emit("data", Buffer.from("123456 Sat Sep 26 20:00:00 2026"));
+    f.samplers[2]!.emit("close", 0, null);
+    f.samplers[3]!.stdout!.emit("data", Buffer.from("unrelated process stack"));
+    f.samplers[3]!.emit("close", 0, null);
+    f.samplers[4]!.stdout!.emit("data", Buffer.from(afterIdentity));
+    f.samplers[4]!.emit("close", afterIdentity ? 0 : 1, null);
+    expect(f.diagnostic.samples[2]).toMatchObject({
+      pid: 777, status: "discarded-helper-identity-changed", output: "",
+    });
+    f.diagnostic.stop();
+  });
+
+  it("never samples a GPU helper whose parent is no longer the retained main process", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 12_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from("777 123456 U /tmp/Electron Helper (GPU) --type=gpu-process"));
+    f.samplers[1]!.emit("close", 0, null);
+    f.samplers[2]!.stdout!.emit("data", Buffer.from("1 Sat Sep 26 20:00:00 2026"));
+    f.samplers[2]!.emit("close", 0, null);
+    expect(f.spawnSample).toHaveBeenCalledTimes(3);
+    expect(f.diagnostic.samples).toHaveLength(2);
+    f.diagnostic.stop();
   });
 
   it("bounds the helper table and skips the GPU sample once the main process exits", async () => {

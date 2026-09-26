@@ -7,6 +7,7 @@ const QUIT_WATCHDOG_MS = 1_000;
 const MAX_SAMPLE_BYTES = 128 * 1024;
 const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const MAX_PROCESS_TABLE_BYTES = 4 * 1024 * 1024;
+const MAX_HELPER_IDENTITY_BYTES = 1024;
 const MAX_HELPER_ROWS = 64;
 const HELPER_ROLE = /(?:^|\s)--type=([a-z0-9_.-]{1,64})(?=\s|$)/u;
 const UTILITY_ROLE = /(?:^|\s)--utility-sub-type=([a-zA-Z0-9_.-]{1,96})(?=\s|$)/u;
@@ -190,6 +191,58 @@ export function createElectronMainProcessDiagnostic(
       onSettled();
     });
   };
+  const readHelperIdentity = (
+    helperPid: number,
+    deadlineAt: number,
+    onIdentity: (identity: string | null) => void,
+  ): void => {
+    const timeoutMs = Math.min(
+      PROCESS_TABLE_TIMEOUT_MS,
+      deadlineAt - Date.now() - SAMPLE_HEADROOM_MS,
+    );
+    if (timeoutMs <= 0 || !ownsLiveMain()) {
+      onIdentity(null);
+      return;
+    }
+    const probe: ElectronMainProcessSample = {
+      pid: helperPid, reason: "helper-identity", status: "starting", output: "", truncated: false,
+    };
+    run(probe, "/bin/ps", ["-o", "ppid=,lstart=", "-p", String(helperPid)], timeoutMs,
+      MAX_HELPER_IDENTITY_BYTES, (status, output) => {
+        const identity = output.trim();
+        onIdentity(status === "completed" && identity.split(/\s+/u)[0] === String(pid)
+          ? identity
+          : null);
+      });
+  };
+  const sampleHelper = (helperPid: number, deadlineAt: number): void => {
+    readHelperIdentity(helperPid, deadlineAt, (before) => {
+      if (before === null || !ownsLiveMain()) return;
+      const record: ElectronMainProcessSample = {
+        pid: helperPid, reason: "gpu-helper-still-pending", status: "starting",
+        output: "", truncated: false,
+      };
+      samples.push(record);
+      const timeoutMs = sampleBudget(deadlineAt);
+      if (timeoutMs < MIN_SAMPLE_TIMEOUT_MS) {
+        record.status = "skipped-insufficient-existing-budget";
+        return;
+      }
+      run(record, "/usr/bin/sample", [
+        String(helperPid), "1", "10", "-file", "/dev/stdout",
+      ], timeoutMs, MAX_SAMPLE_BYTES, (status, output) => {
+        record.status = "validating-helper-identity";
+        readHelperIdentity(helperPid, deadlineAt, (after) => {
+          if (after !== before) {
+            record.status = "discarded-helper-identity-changed";
+            return;
+          }
+          record.status = status;
+          record.output = output;
+        });
+      });
+    });
+  };
   const capture = (reason: string, deadlineAt: number): void => {
     if (platform !== "darwin" || !ownsLiveMain() || mainSampling
       || mainSamples >= 2) return;
@@ -224,9 +277,7 @@ export function createElectronMainProcessDiagnostic(
             `${helper.pid} ${helper.ppid} ${helper.stat} ${helper.role}`).join("\n");
         const gpu = helpers.find((helper) =>
           helper.role === "gpu-process" && helper.ppid === pid);
-        if (gpu && ownsLiveMain()) {
-          sampleProcess(gpu.pid, "gpu-helper-still-pending", deadlineAt, () => undefined);
-        }
+        if (gpu && ownsLiveMain()) sampleHelper(gpu.pid, deadlineAt);
       });
   };
   if (platform === "darwin") main.once("exit", stop);

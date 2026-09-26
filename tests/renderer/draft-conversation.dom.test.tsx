@@ -992,6 +992,52 @@ describe("useDraftConversation", () => {
     expect(values.has(promptStorageKey)).toBe(false);
   });
 
+  it.each(["before", "after"])("refreshes the saved checkout and model when its snapshot arrives %s first-send rejection", async (order) => {
+    const settings = { ...defaultSettings, newThreadMode: "worktree" as const };
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result", requestId: "create",
+      result: { kind: "conversation.created", conversationId },
+    }));
+    let rejectSend!: (error: Error) => void;
+    const firstSend = new Promise<never>((_resolve, reject) => { rejectSend = reject; });
+    const sendMessage = vi.fn().mockReturnValueOnce(firstSend)
+      .mockResolvedValueOnce({
+        kind: "message.accepted", conversationId, turnId: "retry-turn",
+        userMessageId: "retry-message", disposition: "new-turn",
+      });
+    const updatePersistedConversation = vi.fn(async () => undefined);
+    const hook = renderHook(({ current }) => useDraftConversation({
+      snapshot: current, settings, run, sendMessage,
+      persistedConversationId: null, updatePersistedConversation,
+    }), { initialProps: { current: snapshot } });
+    act(() => hook.result.current.start(projectId));
+    const draftId = hook.result.current.conversation!.id;
+    expect(hook.result.current.requiresWorkspaceMaterialization).toBe(true);
+    let sending!: Promise<unknown>;
+    await act(async () => { sending = hook.result.current.sendFromComposer("Keep this prompt", []); });
+    const saved = materializedSnapshot();
+    saved.conversations[0] = { ...saved.conversations[0]!, worktreePath: "/workspace/isolated", branch: "inertia/draft" };
+    if (order === "before") hook.rerender({ current: saved });
+    await act(async () => {
+      rejectSend(new RuntimeCommandError("Provider unavailable", "rejected"));
+      await expect(sending).rejects.toThrow("Provider unavailable");
+    });
+    if (order === "after") hook.rerender({ current: saved });
+    expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
+    expect(hook.result.current.conversation).toMatchObject({ id: draftId, worktreePath: "/workspace/isolated" });
+
+    const selection = providerNativeModelSelection({ providerId: "claude", modelId: "replacement-model" });
+    await act(async () => { await hook.result.current.updateConversation({ modelSelection: selection }); });
+    expect(updatePersistedConversation).toHaveBeenCalledWith(conversationId, { modelSelection: selection });
+    hook.rerender({ current: { ...saved, conversations: [{
+      ...saved.conversations[0]!, modelSelection: selection, providerId: "claude", model: "replacement-model",
+    }] } });
+    expect(hook.result.current.conversation).toMatchObject({ id: draftId, modelSelection: selection, providerId: "claude" });
+    await act(async () => { await hook.result.current.sendFromComposer("Keep this prompt", []); });
+    expect(run).toHaveBeenCalledOnce();
+    expect(sendMessage).toHaveBeenLastCalledWith(conversationId, "Keep this prompt", [], undefined, true);
+  });
+
   it("retries a definitely unsent first message against the same materialized chat", async () => {
     const values = new Map<string, string>();
     Object.defineProperty(window, "localStorage", {

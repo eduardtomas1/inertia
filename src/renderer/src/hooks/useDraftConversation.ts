@@ -291,8 +291,10 @@ export function useDraftConversation({
         current?.materialized
         && current.materialized.conversationId
           === materialized.materializedConversationId
-        && current.materialized.awaitingReconciliation
       ) {
+        // Once creation succeeds, the saved shell owns model and checkout
+        // changes even when the first message was definitely rejected.
+        // Keep only the composer identity local until acceptance is reconciled.
         replaceDraft({
           ...current,
           conversation: {
@@ -569,9 +571,9 @@ export function useDraftConversation({
           draftRef.current?.materialized?.conversationId === conversationId
         ) {
           replaceDraft({
-            ...materializedState,
+            ...draftRef.current,
             materialized: {
-              ...materializedState.materialized!,
+              ...draftRef.current.materialized,
               awaitingReconciliation: true,
               recoveryMode: true,
             },
@@ -593,9 +595,9 @@ export function useDraftConversation({
         draftRef.current?.materialized?.conversationId === conversationId
       ) {
         replaceDraft({
-          ...materializedState,
+          ...draftRef.current,
           materialized: {
-            ...materializedState.materialized!,
+            ...draftRef.current.materialized,
             acceptedTurnId: acceptance.turnId,
             acceptedUserMessageId: acceptance.userMessageId,
           },
@@ -612,9 +614,9 @@ export function useDraftConversation({
         draftRef.current?.materialized?.conversationId === conversationId
       ) {
         replaceDraft({
-          ...materializedState,
+          ...draftRef.current,
           materialized: {
-            ...materializedState.materialized!,
+            ...draftRef.current.materialized,
             awaitingReconciliation:
               runtimeCommandDelivery(error) === "ambiguous"
               || runtimeCommandDelivery(error) === null,
@@ -663,9 +665,9 @@ export function useDraftConversation({
               === current.materialized.conversationId
           ) {
             replaceDraft({
-              ...current,
+              ...draftRef.current,
               materialized: {
-                ...current.materialized,
+                ...draftRef.current.materialized,
                 awaitingReconciliation: true,
                 recoveryMode: true,
               },
@@ -688,9 +690,9 @@ export function useDraftConversation({
             === current.materialized.conversationId
         ) {
           replaceDraft({
-            ...current,
+            ...draftRef.current,
             materialized: {
-              ...current.materialized,
+              ...draftRef.current.materialized,
               acceptedTurnId: acceptance.turnId,
               acceptedUserMessageId: acceptance.userMessageId,
               recoveryMode: false,
@@ -710,9 +712,9 @@ export function useDraftConversation({
             === current.materialized.conversationId
         ) {
           replaceDraft({
-            ...current,
+            ...draftRef.current,
             materialized: {
-              ...current.materialized,
+              ...draftRef.current.materialized,
               awaitingReconciliation:
                 runtimeCommandDelivery(error) === "ambiguous"
                 || runtimeCommandDelivery(error) === null,
@@ -758,7 +760,7 @@ export function useDraftConversation({
     conversation: draft?.conversation ?? null,
     layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(
-      draft?.payload.useWorktree && !draft.payload.worktreePath,
+      draft?.payload.useWorktree && !draft.conversation.worktreePath,
     ),
     start,
     changeProject,

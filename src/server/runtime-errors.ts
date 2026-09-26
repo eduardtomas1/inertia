@@ -10,7 +10,7 @@ import { BackendProfileControllerError } from "./runtime/backends/backend-profil
 import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
-import { ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
+import { ConversationAttachmentDiskFullError, ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
 import {
   ATTACHMENT_RESOLUTION_PUBLIC_ERROR,
   AttachmentResolutionError,
@@ -43,6 +43,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof ProviderMaintenanceError
     || error instanceof WorkspacePathAuthorityError
     || error instanceof PromptPresetRepositoryError
+    || error instanceof ConversationAttachmentDiskFullError
     || error instanceof ConversationAttachmentStorageFullError
   ) return error.message;
   return "The request could not be completed.";

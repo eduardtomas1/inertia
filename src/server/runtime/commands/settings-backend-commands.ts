@@ -18,6 +18,7 @@ import {
 } from "./command-router";
 
 export interface SettingsBackendCommandDependencies {
+  conversationAttachments: import("../../../node/conversation-attachment-store").ConversationAttachmentStore;
   store: RuntimeStore;
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
@@ -47,6 +48,8 @@ export function createSettingsBackendCommandHandler(
   };
   return defineRuntimeCommandHandler([
     "settings.update",
+    "attachment.storage.get",
+    "attachment.storage.cleanup",
     "prompt-preset.create",
     "prompt-preset.update",
     "prompt-preset.duplicate",
@@ -62,6 +65,16 @@ export function createSettingsBackendCommandHandler(
     "backend.default.clear",
   ], async (socket, command) => {
     switch (command.type) {
+      case "attachment.storage.get":
+      case "attachment.storage.cleanup": {
+        const order = () => dependencies.store.evictableAttachmentIds();
+        const removed = command.type === "attachment.storage.cleanup"
+          ? await dependencies.conversationAttachments.cleanupOldest(order) : undefined;
+        const storage = await dependencies.conversationAttachments.storageStatus(order);
+        dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+          result: { kind: "attachment.storage", storage, ...(removed ? { removed } : {}) } });
+        return "handled";
+      }
       case "settings.update": {
         if (command.payload.codexBinaryPath !== undefined) {
           assertMaintenanceIdle("codex");
@@ -97,6 +110,12 @@ export function createSettingsBackendCommandHandler(
           );
         }
         dependencies.store.updateSettings(command.payload);
+        if (command.payload.attachmentStorageGiB !== undefined || command.payload.autoRemoveOldAttachments !== undefined) {
+          const settings = dependencies.store.shellSnapshot().settings;
+          dependencies.conversationAttachments.setStoragePolicy(
+            settings.attachmentStorageGiB * 1024 ** 3, settings.autoRemoveOldAttachments,
+          );
+        }
         if (command.payload.codexBinaryPath !== undefined) {
           await dependencies.refreshProviderInfo("codex", true, true);
         }

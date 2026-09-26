@@ -1096,8 +1096,8 @@ describe("main-owned attachment registry", () => {
       });
 
       expect(storage.reservation).toEqual({
-        records: 256,
-        bytes: 512 * 1024 * 1024,
+        records: 1_024,
+        bytes: 1024 * 1024 * 1024,
       });
       expect((await lstat(link)).isSymbolicLink()).toBe(true);
       expect((await lstat(previous)).isDirectory()).toBe(true);
@@ -1126,8 +1126,8 @@ describe("main-owned attachment registry", () => {
     await writeFile(owned, Buffer.alloc(1_024 * 1_024));
 
     expect(storage.reservation).toEqual({
-      records: 256,
-      bytes: 512 * 1024 * 1024,
+      records: 1_024,
+      bytes: 1024 * 1024 * 1024,
     });
     const registry = new AttachmentRegistry(storage.directory, {
       reservedRecords: storage.reservation.records,

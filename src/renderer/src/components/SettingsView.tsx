@@ -1,3 +1,4 @@
+import { AttachmentStorageSettings } from "./AttachmentStorageSettings";
 import { INTERFACE_LOCALE } from "../lib/locale";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1158,6 +1159,7 @@ export function SettingsView({
                   <button type="button" className="secondary-button" disabled={clearingCache || !appHealth} onClick={() => { void clearAppCache(); }}><Trash2 size={14} />{clearingCache ? "Clearing…" : "Clear browser cache"}</button>
                 </div>
               </div>
+              {onReportCommand && <AttachmentStorageSettings settings={settings} disabled={disabled} request={onReportCommand} onUpdate={updateSettingsRequest} />}
               {healthStatus && <p className="settings-card-note" role="status">{healthStatus}</p>}
               <div className="codex-binary-path runtime-log-setting">
                 <span>

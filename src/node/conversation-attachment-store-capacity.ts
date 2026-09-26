@@ -1,5 +1,5 @@
 export const CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE =
-  "Attachment storage is full and every stored attachment still belongs to a running chat. Try again after it finishes.";
+  "Attachment storage is full. Increase the global disk budget or remove old stored files in Settings → Archive & data. Attachments used by running chats are protected.";
 
 export class ConversationAttachmentStorageFullError extends Error {
   constructor() { super(CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE); }
@@ -43,4 +43,10 @@ export function conversationAttachmentEvictions(options: {
   return records >= options.excessRecords && bytes >= options.excessBytes
     ? victims
     : null;
+}
+
+export class ConversationAttachmentDiskFullError extends Error {
+  constructor() {
+    super("Not enough free disk space to keep these attachments. Free disk space or remove stored attachments in Settings → Archive & data.");
+  }
 }

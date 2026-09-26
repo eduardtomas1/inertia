@@ -165,8 +165,6 @@ setInterval(() => {}, 1000);
       .toEqual({ command: "/usr/local/bin/kimi", args: ["acp"] });
     expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux", ["--login"]))
       .toEqual({ command: "/usr/local/bin/kimi", args: ["acp", "--login"] });
-
-
   });
 
   it("recognizes only coherent Kimi question and plan-review envelopes as input", () => {

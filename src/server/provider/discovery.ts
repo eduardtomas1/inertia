@@ -34,6 +34,7 @@ import {
 } from "./contracts";
 import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
+import { resolveClaudeLaunchTarget } from "./claude-launch-target";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
 import {
@@ -737,6 +738,26 @@ export async function detectProvider(
         ? `${provider.name} probe cleanup could not be confirmed stopped`
         : "Codex App Server is unsupported; update the selected CLI",
     };
+  }
+
+  if (providerId === "claude") {
+    const launch = resolveClaudeLaunchTarget(
+      selected.executable,
+      providerChildEnvironment(providerId, discoveredEnvironment.env),
+    );
+    if (!launch.ok) {
+      return {
+        provider,
+        available: true,
+        executable: selected.executable,
+        ...(selected.version ? { version: selected.version } : {}),
+        installState: "installed",
+        authState: "unknown",
+        canRun: false,
+        cleanupConfirmed: true,
+        statusMessage: launch.reason,
+      };
+    }
   }
 
   const providerAuthArgs = providerAuthStatusArgs(providerId);

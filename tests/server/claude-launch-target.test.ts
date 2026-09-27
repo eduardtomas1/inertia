@@ -1,0 +1,180 @@
+// @inertia-test-suite portable
+import { win32 } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import {
+  resolveClaudeLaunchTarget,
+  type ClaudeLaunchFileSystem,
+} from "../../src/server/provider/claude-launch-target";
+
+const NPM = "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm";
+const PACKAGE = `${NPM}\\node_modules\\@anthropic-ai\\claude-code`;
+const MANIFEST = `${PACKAGE}\\package.json`;
+const ENTRY = `${PACKAGE}\\cli.js`;
+
+function fakeFileSystem(
+  files: Record<string, string>,
+  links: Record<string, string> = {},
+): ClaudeLaunchFileSystem {
+  const key = (path: string): string => win32.normalize(path).toLowerCase();
+  const contents = new Map(Object.entries(files).map(([path, value]) => [key(path), value]));
+  const realpaths = new Map(Object.entries(links).map(([path, value]) => [key(path), value]));
+  return {
+    readFile: (path) => {
+      const value = contents.get(key(path));
+      if (value === undefined) throw new Error("ENOENT");
+      return Buffer.from(value, "utf8");
+    },
+    realpath: (path) => {
+      const normalized = win32.normalize(path);
+      const linked = realpaths.get(key(normalized));
+      if (linked) return linked;
+      if (contents.has(key(normalized)) || key(normalized) === key(PACKAGE)) return normalized;
+      throw new Error("ENOENT");
+    },
+    fileSize: (path) => {
+      const value = contents.get(key(path));
+      return value === undefined ? null : Buffer.byteLength(value);
+    },
+  };
+}
+
+function manifest(bin: unknown, name = "@anthropic-ai/claude-code"): string {
+  return JSON.stringify({ name, bin });
+}
+
+const resolve = (
+  shim: string,
+  fileSystem: ClaudeLaunchFileSystem,
+  environment: NodeJS.ProcessEnv = {},
+  electronExecutable?: string,
+) => resolveClaudeLaunchTarget(shim, environment, {
+  platform: "win32",
+  fileSystem,
+  ...(electronExecutable ? { electronExecutable } : {}),
+});
+
+describe("Claude Windows launch target", () => {
+  it("runs an npm shim's package entry with the node.exe installed beside the shim", () => {
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest({ claude: "cli.js" }),
+      [ENTRY]: "entry",
+      [`${NPM}\\node.exe`]: "node",
+    });
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem)).toEqual({
+      ok: true,
+      target: { command: `${NPM}\\node.exe`, scriptPrefix: [ENTRY] },
+    });
+  });
+
+  it("accepts a string bin for the package-named shim and a batch extension", () => {
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest("cli.js"),
+      [ENTRY]: "entry",
+      [`${NPM}\\node.exe`]: "node",
+    });
+
+    expect(resolve(`${NPM}\\claude-code.BAT`, fileSystem)).toMatchObject({
+      ok: true,
+      target: { scriptPrefix: [ENTRY] },
+    });
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem)).toMatchObject({ ok: false });
+  });
+
+  it("falls back to node.exe from the sanitized provider PATH but never to Electron", () => {
+    const nodeDirectory = "C:\\Program Files\\nodejs";
+    const electron = "C:\\Program Files\\Inertia\\node.exe";
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest({ claude: "cli.js" }),
+      [ENTRY]: "entry",
+      [electron]: "electron",
+      [`${nodeDirectory}\\node.exe`]: "node",
+    });
+    const environment = { Path: `relative\\bin;C:\\Program Files\\Inertia;${nodeDirectory}` };
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem, environment, electron)).toEqual({
+      ok: true,
+      target: { command: `${nodeDirectory}\\node.exe`, scriptPrefix: [ENTRY] },
+    });
+  });
+
+  it("reports a missing Node.js runtime instead of guessing one", () => {
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest({ claude: "cli.js" }),
+      [ENTRY]: "entry",
+    });
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem, { PATH: "C:\\Windows\\System32" })).toEqual({
+      ok: false,
+      reason: expect.stringContaining("no Node.js runtime was found"),
+    });
+  });
+
+  it("launches a native executable named by the package bin directly", () => {
+    const nativeEntry = `${PACKAGE}\\bin\\claude.exe`;
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest({ claude: "bin/claude.exe" }),
+      [nativeEntry]: "native",
+    });
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem)).toEqual({
+      ok: true,
+      target: { command: nativeEntry, scriptPrefix: [] },
+    });
+  });
+
+  it.each([
+    ["an entry junction outside the package", { claude: "cli.js" }, { [ENTRY]: "C:\\Elsewhere\\cli.js" }],
+    ["a parent-relative entry", { claude: "..\\..\\evil.js" }, {}],
+    ["an absolute entry", { claude: "C:\\Elsewhere\\cli.js" }, {}],
+    ["an unsupported entry type", { claude: "cli.ps1" }, {}],
+    ["a missing bin for the shim", { other: "cli.js" }, {}],
+  ])("rejects %s", (_label, bin, links) => {
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: manifest(bin),
+      [ENTRY]: "entry",
+      [`${PACKAGE}\\cli.ps1`]: "script",
+      [`${NPM}\\evil.js`]: "evil",
+      ["C:\\Elsewhere\\cli.js"]: "outside",
+      [`${NPM}\\node.exe`]: "node",
+    }, links);
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem)).toEqual({
+      ok: false,
+      reason: expect.stringContaining("cannot launch safely"),
+    });
+  });
+
+  it.each([
+    ["an oversize manifest", JSON.stringify({ name: "@anthropic-ai/claude-code", bin: { claude: "cli.js" }, padding: "x".repeat(300 * 1024) })],
+    ["a malformed manifest", "{not json"],
+    ["a different package", manifest({ claude: "cli.js" }, "claude-code-impostor")],
+  ])("rejects %s", (_label, content) => {
+    const fileSystem = fakeFileSystem({
+      [MANIFEST]: content,
+      [ENTRY]: "entry",
+      [`${NPM}\\node.exe`]: "node",
+    });
+
+    expect(resolve(`${NPM}\\claude.cmd`, fileSystem)).toMatchObject({ ok: false });
+  });
+
+  it.each([
+    ["pnpm", "C:\\Users\\Calm Dev\\AppData\\Local\\pnpm\\claude.cmd"],
+    ["yarn", "C:\\Users\\Calm Dev\\AppData\\Local\\Yarn\\bin\\claude.cmd"],
+  ])("reports a %s shim without an adjacent npm package as not launchable", (_manager, shim) => {
+    expect(resolve(shim, fakeFileSystem({}))).toMatchObject({ ok: false });
+  });
+
+  it.each([
+    ["win32", "C:\\Program Files\\Claude\\claude.exe"],
+    ["linux", "/usr/local/bin/claude"],
+    ["darwin", "/opt/homebrew/bin/claude.cmd"],
+  ] as const)("leaves a %s executable unchanged", (platform, executable) => {
+    expect(resolveClaudeLaunchTarget(executable, {}, { platform, fileSystem: fakeFileSystem({}) })).toEqual({
+      ok: true,
+      target: { command: executable, scriptPrefix: [] },
+    });
+  });
+});

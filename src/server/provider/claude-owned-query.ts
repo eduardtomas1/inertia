@@ -19,6 +19,10 @@ import {
 } from "../../node/runtime-owned-processes";
 import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
 import { providerProcessInvocation } from "./process";
+import {
+  resolveClaudeLaunchTarget,
+  type ClaudeLaunchTargetOptions,
+} from "./claude-launch-target";
 
 const MAX_CLAUDE_STDERR_TAIL_CHARS = 4 * 1024;
 
@@ -30,6 +34,7 @@ export interface ClaudeOwnedQueryDependencies {
   /** Small deterministic wire budgets for synthetic transport tests. */
   transportLimits?: ClaudeTransportLimits;
   platform?: NodeJS.Platform;
+  launchTarget?: Omit<ClaudeLaunchTargetOptions, "platform">;
 }
 
 export interface ClaudeOwnedQueryProcess {
@@ -84,9 +89,14 @@ export function createClaudeOwnedQueryProcess(
         "Claude Agent SDK attempted to spawn more than one process for a single query.",
       );
     }
+    const launch = resolveClaudeLaunchTarget(spawnOptions.command, spawnOptions.env, {
+      ...dependencies.launchTarget,
+      ...(dependencies.platform ? { platform: dependencies.platform } : {}),
+    });
+    if (!launch.ok) throw new Error(`${launch.reason}.`);
     const invocation = providerProcessInvocation(
-      spawnOptions.command,
-      spawnOptions.args,
+      launch.target.command,
+      [...launch.target.scriptPrefix, ...spawnOptions.args],
       spawnOptions.env,
       dependencies.platform,
     );

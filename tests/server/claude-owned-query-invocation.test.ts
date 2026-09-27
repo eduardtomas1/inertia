@@ -1,9 +1,15 @@
 import type { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { win32 } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
+import type { ClaudeLaunchFileSystem } from "../../src/server/provider/claude-launch-target";
 import { createClaudeOwnedQueryProcess } from "../../src/server/provider/claude-owned-query";
+
+const NPM = "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm";
+const ENTRY = `${NPM}\\node_modules\\@anthropic-ai\\claude-code\\cli.js`;
+const MANAGED_SETTINGS = "{\"disableAllHooks\":true,\"allowedMcpServers\":[]}";
 
 function fakeChild(): ChildProcessWithoutNullStreams {
   return Object.assign(new EventEmitter(), {
@@ -17,55 +23,80 @@ function fakeChild(): ChildProcessWithoutNullStreams {
   }) as unknown as ChildProcessWithoutNullStreams;
 }
 
+function npmShimFileSystem(withNode: boolean): ClaudeLaunchFileSystem {
+  const files = new Map<string, string>([
+    [`${NPM}\\node_modules\\@anthropic-ai\\claude-code\\package.json`, JSON.stringify({
+      name: "@anthropic-ai/claude-code",
+      bin: { claude: "cli.js" },
+    })],
+    [ENTRY, "entry"],
+    ...(withNode ? [[`${NPM}\\node.exe`, "node"] as const] : []),
+  ].map(([path, value]) => [path.toLowerCase(), value]));
+  return {
+    readFile: (path) => Buffer.from(files.get(win32.normalize(path).toLowerCase()) ?? ""),
+    realpath: (path) => win32.normalize(path),
+    fileSize: (path) => {
+      const value = files.get(win32.normalize(path).toLowerCase());
+      return value === undefined ? null : value.length;
+    },
+  };
+}
+
 function spawnFor(
   platform: NodeJS.Platform,
   command: string,
   args: string[],
+  fileSystem?: ClaudeLaunchFileSystem,
 ) {
   const spawnProcess = vi.fn((
     _command: string,
     _args: readonly string[],
-    _options: { windowsVerbatimArguments?: boolean },
+    _options: { shell?: boolean; windowsVerbatimArguments?: boolean },
   ) => fakeChild());
   const owned = createClaudeOwnedQueryProcess("Claude invocation fixture", {
     spawnProcess: spawnProcess as unknown as typeof spawn,
     platform,
+    ...(fileSystem ? { launchTarget: { fileSystem } } : {}),
   });
   const spawned = () => owned.spawnClaudeCodeProcess({
     command,
     args,
     cwd: process.cwd(),
-    env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    env: { PATH: "C:\\Windows\\System32" },
     signal: new AbortController().signal,
   });
   return { spawnProcess, spawned };
 }
 
 describe("Claude owned query invocation", () => {
-  it.each([
-    ["cmd", "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm\\claude.cmd"],
-    ["bat", "C:\\Users\\Calm Dev\\Tools\\claude.BAT"],
-  ])("launches a Windows .%s shim through the hardened cmd.exe invocation", (_extension, command) => {
+  it.each(["claude.cmd", "claude.BAT"])("runs the npm package entry of a Windows %s shim with node and no shell", (shim) => {
     const { spawnProcess, spawned } = spawnFor(
       "win32",
-      command,
-      ["--output-format", "stream-json"],
+      `${NPM}\\${shim}`,
+      ["--output-format", "stream-json", "--managed-settings", MANAGED_SETTINGS],
+      npmShimFileSystem(true),
     );
 
     spawned();
 
-    const escaped = command.replaceAll(" ", "^ ");
     expect(spawnProcess).toHaveBeenCalledExactlyOnceWith(
-      "C:\\Windows\\System32\\cmd.exe",
-      [
-        "/d",
-        "/s",
-        "/v:off",
-        "/c",
-        `"${escaped} ^"--output-format^" ^"stream-json^""`,
-      ],
-      expect.objectContaining({ shell: false, windowsVerbatimArguments: true }),
+      `${NPM}\\node.exe`,
+      [ENTRY, "--output-format", "stream-json", "--managed-settings", MANAGED_SETTINGS],
+      expect.objectContaining({ shell: false }),
     );
+    expect(spawnProcess.mock.calls[0]?.[2]?.windowsVerbatimArguments).toBeFalsy();
+  });
+
+  it("refuses an npm shim it cannot run without a Node.js runtime, before spawning", () => {
+    const { spawnProcess, spawned } = spawnFor(
+      "win32",
+      `${NPM}\\claude.cmd`,
+      ["--managed-settings", MANAGED_SETTINGS],
+      npmShimFileSystem(false),
+    );
+
+    expect(spawned).toThrow("no Node.js runtime was found");
+    expect(spawnProcess).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -76,27 +107,16 @@ describe("Claude owned query invocation", () => {
     const { spawnProcess, spawned } = spawnFor(
       platform,
       command,
-      ["--output-format", "stream-json"],
+      ["--managed-settings", MANAGED_SETTINGS],
     );
 
     spawned();
 
     expect(spawnProcess).toHaveBeenCalledExactlyOnceWith(
       command,
-      ["--output-format", "stream-json"],
+      ["--managed-settings", MANAGED_SETTINGS],
       expect.objectContaining({ shell: false }),
     );
     expect(spawnProcess.mock.calls[0]?.[2]?.windowsVerbatimArguments).toBeFalsy();
-  });
-
-  it("refuses a Windows shim argument that cmd.exe cannot carry safely", () => {
-    const { spawnProcess, spawned } = spawnFor(
-      "win32",
-      "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm\\claude.cmd",
-      ["--managed-settings", "{\"disableAllHooks\":true}"],
-    );
-
-    expect(spawned).toThrow("cannot be passed safely to a Windows command shim");
-    expect(spawnProcess).not.toHaveBeenCalled();
   });
 });

@@ -63,6 +63,8 @@ interface ActiveRun {
   settled: boolean;
   detach: () => boolean;
   quarantine: (reason: string) => void;
+  refusedOwners: Set<string>;
+  refusedOwnerOverflow: boolean;
   hardKillTimer?: NodeJS.Timeout;
 }
 
@@ -105,6 +107,11 @@ export interface ProviderRunCoordinatorOptions {
 const MAX_OWNED_STOP_GRACE_MS = 30_000;
 const FORCE_DETACH_GRACE_MS = 250;
 const MAX_CLEANUP_RECEIPTS = 256;
+const MAX_REFUSED_OWNERS_PER_RUN = 64;
+
+function runOwnerKey(identity: { runId: string; turnId: string }): string {
+  return JSON.stringify([identity.runId, identity.turnId]);
+}
 
 function capabilitiesForEvent(
   event: ProviderEvent,
@@ -168,7 +175,6 @@ export class ProviderRunCoordinator {
    * lifecycle owner asks stopOwned() for the same barrier.
    */
   private readonly cleanupReceipts = new Map<string, ProviderRunIdentity>();
-  private readonly refusalReceipts = new Map<string, ProviderRunIdentity>();
 
   constructor(private readonly options: ProviderRunCoordinatorOptions) {}
 
@@ -602,6 +608,8 @@ export class ProviderRunCoordinator {
         compatibilityEmitter.close();
         active.installationUse.quarantine(reason);
       },
+      refusedOwners: new Set(),
+      refusedOwnerOverflow: false,
     };
     this.activeRuns.set(conversationId, active);
     this.cleanupReceipts.delete(conversationId);
@@ -875,17 +883,17 @@ export class ProviderRunCoordinator {
     graceMs = this.options.cancelGraceMs,
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
-    const receipted = (receipts: Map<string, ProviderRunIdentity>): boolean => {
-      const receipt = receipts.get(conversationId);
-      return receipt?.runId === identity.runId && receipt.turnId === identity.turnId;
-    };
     if (!active || active.settled) {
-      return receipted(this.cleanupReceipts) || receipted(this.refusalReceipts)
+      const receipt = this.cleanupReceipts.get(conversationId);
+      return receipt
+        && receipt.runId === identity.runId
+        && receipt.turnId === identity.turnId
         ? "settled"
         : "missing";
     }
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
-      if (receipted(this.refusalReceipts)) return "settled";
+      if (active.refusedOwners.delete(runOwnerKey(identity))) return "settled";
+      if (active.refusedOwnerOverflow) return "identity-mismatch";
       active.quarantine("provider-run-stop-owner-mismatch");
       this.cancelStartedHarness(active);
       return "identity-mismatch";
@@ -915,16 +923,13 @@ export class ProviderRunCoordinator {
     return "force-detached";
   }
 
-  private rememberCleanupReceipt(
-    identity: ProviderRunIdentity,
-    receipts = this.cleanupReceipts,
-  ): void {
-    receipts.delete(identity.conversationId);
-    receipts.set(identity.conversationId, identity);
-    while (receipts.size > MAX_CLEANUP_RECEIPTS) {
-      const oldest = receipts.keys().next().value;
+  private rememberCleanupReceipt(identity: ProviderRunIdentity): void {
+    this.cleanupReceipts.delete(identity.conversationId);
+    this.cleanupReceipts.set(identity.conversationId, identity);
+    while (this.cleanupReceipts.size > MAX_CLEANUP_RECEIPTS) {
+      const oldest = this.cleanupReceipts.keys().next().value;
       if (oldest === undefined) break;
-      receipts.delete(oldest);
+      this.cleanupReceipts.delete(oldest);
     }
   }
 
@@ -932,9 +937,14 @@ export class ProviderRunCoordinator {
     const active = this.activeRuns.get(identity.conversationId);
     if (!active) {
       this.rememberCleanupReceipt(identity);
-    } else if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
-      this.rememberCleanupReceipt(identity, this.refusalReceipts);
+      return;
     }
+    if (active.runId === identity.runId && active.turnId === identity.turnId) return;
+    if (active.refusedOwners.size >= MAX_REFUSED_OWNERS_PER_RUN) {
+      active.refusedOwnerOverflow = true;
+      return;
+    }
+    active.refusedOwners.add(runOwnerKey(identity));
   }
 
   async disposeAll(): Promise<boolean> {

@@ -110,7 +110,7 @@ export const privateConnectRuntimeSafeConversationDetailSchema = z.object({
   plan: z.object({
     steps: z.array(z.object({
       label: safeLabel,
-      status: z.enum(["pending", "inProgress", "completed"]),
+      status: z.enum(["pending", "inProgress", "completed", "cancelled"]),
     }).strict()).max(100),
   }).strict().nullable().optional(),
   inputRequestId: uuid.nullable().optional(),

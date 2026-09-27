@@ -101,6 +101,24 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
     ]);
     await expect(turn("fresh")).resolves.toEqual([["E:pending"]]);
   });
+
+  it("keeps cancelled native todos cancelled across later updates", async () => {
+    const turn = await runTurns({
+      first: [
+        { merge: false, todos: [{ id: "a", content: "A", status: "completed" }, { id: "b", content: "B", status: "cancelled" }] },
+        { merge: true, todos: [{ id: "c", content: "C", status: "pending" }] },
+      ],
+      second: [{ merge: true, todos: [{ id: "c", status: "completed" }] }],
+    });
+
+    await expect(turn("first")).resolves.toEqual([
+      ["A:completed", "B:cancelled"],
+      ["A:completed", "B:cancelled", "C:pending"],
+    ]);
+    await expect(turn("second", "cursor-todo-session")).resolves.toEqual([
+      ["A:completed", "B:cancelled", "C:completed"],
+    ]);
+  });
 });
 
 describe("Cursor todo session state", () => {

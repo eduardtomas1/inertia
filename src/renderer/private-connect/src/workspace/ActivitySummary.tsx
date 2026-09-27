@@ -9,7 +9,7 @@ export function ActivitySummary({ detail }: { detail: Detail }): React.JSX.Eleme
     <details className="work-summary">
       <summary>Current work</summary>
       {steps.length > 0 && (
-        <section><h3>Plan</h3><ol>{steps.map((step, index) => <li key={`${index}-${step.label}`} data-status={step.status}>{step.label}</li>)}</ol></section>
+        <section><h3>Plan</h3><ol>{steps.map((step, index) => <li key={`${index}-${step.label}`} data-status={step.status}>{step.label}{step.status === "cancelled" ? " (cancelled)" : ""}</li>)}</ol></section>
       )}
       {activities.length > 0 && (
         <section><h3>Recent activity</h3><ul>{activities.map((activity) => <li key={activity.id}><span>{activity.title}</span><small>{activity.status}</small></li>)}</ul></section>

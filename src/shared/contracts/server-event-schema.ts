@@ -510,7 +510,7 @@ function agentPlan(value: unknown): boolean {
     && nullableStringField(value, "explanation")
     && arrayOf(value.steps, (step) =>
       recordWithStrings(step, "step", "status")
-      && oneOf(step, "status", ["pending", "inProgress", "completed"]));
+      && oneOf(step, "status", ["pending", "inProgress", "completed", "cancelled"]));
 }
 
 function agentGoal(value: unknown): boolean {

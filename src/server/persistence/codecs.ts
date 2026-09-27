@@ -813,6 +813,7 @@ export function planFromRow(row: AgentPlanRow): AgentPlan {
           value.status === "pending"
           || value.status === "inProgress"
           || value.status === "completed"
+          || value.status === "cancelled"
         )
           ? value.status
           : undefined;

@@ -763,7 +763,7 @@ describe("RuntimeStore conversation lifecycle", () => {
       runId: secondTurn.runId,
       turnId: secondTurn.id,
       explanation: "Second-turn plan.",
-      steps: [{ step: "Verify", status: "pending" }],
+      steps: [{ step: "Verify", status: "pending" }, { step: "Drop", status: "cancelled" }],
     });
 
     const otherConversation = store.createConversation(conversation.projectId, "Other plans");
@@ -804,7 +804,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         runId: secondTurn.runId,
         turnId: secondTurn.id,
         explanation: "Second-turn plan.",
-        steps: [{ step: "Verify", status: "pending" }],
+        steps: [{ step: "Verify", status: "pending" }, { step: "Drop", status: "cancelled" }],
       },
     ]);
     store.close();
@@ -822,6 +822,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         runId: secondTurn.runId,
         turnId: secondTurn.id,
         explanation: "Second-turn plan.",
+        steps: [{ step: "Verify", status: "pending" }, { step: "Drop", status: "cancelled" }],
       }),
     ]);
     reopened.close();

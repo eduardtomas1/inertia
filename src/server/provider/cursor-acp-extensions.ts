@@ -282,9 +282,11 @@ export function cursorTodoSteps(
       step: bounded(step),
       status: todo.status === "completed"
         ? "completed" as const
-        : todo.status === "in_progress" || todo.status === "inProgress"
-          ? "inProgress" as const
-          : "pending" as const,
+        : todo.status === "cancelled"
+          ? "cancelled" as const
+          : todo.status === "in_progress" || todo.status === "inProgress"
+            ? "inProgress" as const
+            : "pending" as const,
     }];
   });
   return steps.length > 0

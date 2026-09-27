@@ -1,7 +1,7 @@
 import clsx from "clsx";
-import { AlertCircle, Check, Circle, ListChecks, LoaderCircle, Play, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, Circle, CircleSlash, ListChecks, LoaderCircle, Play, RotateCcw } from "lucide-react";
 
-export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked";
+export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
 export type PlanStep = {
   id: string;
@@ -24,6 +24,7 @@ function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
   if (status === "completed") return <Check size={14} aria-hidden="true" />;
   if (status === "in-progress") return <LoaderCircle size={15} aria-hidden="true" />;
   if (status === "blocked") return <AlertCircle size={15} aria-hidden="true" />;
+  if (status === "cancelled") return <CircleSlash size={14} aria-hidden="true" />;
   return <Circle size={14} aria-hidden="true" />;
 }
 

@@ -716,6 +716,77 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.getByText("1 selected lines")).toBeInTheDocument();
   });
 
+  it("drops the retained diff and review draft when the workspace owner changes behind the same paths", async () => {
+    const onAsk = vi.fn(async () => undefined);
+    const props = {
+      projectName: "Inertia",
+      summary: null,
+      onRefresh: vi.fn(),
+      onOpenWorkspaceFile: vi.fn(),
+      onAsk,
+      onRequestRevision: vi.fn(async () => undefined),
+      onRevert: vi.fn(async () => undefined),
+      onSetReviewState: vi.fn(async () => undefined),
+      onCreateNote: vi.fn(async () => undefined),
+      onUpdateNote: vi.fn(async () => undefined),
+      onDeleteNote: vi.fn(async () => undefined),
+      onAddTextToPrompt: vi.fn(),
+      onAddToPrompt: vi.fn(),
+    };
+    const diff = (repositoryPath: string, filePath?: string) => ({
+      repositoryPath,
+      patch: patchFor(filePath ?? "README.md"),
+      truncated: false,
+      files: [changedFile(filePath ?? "README.md")],
+    });
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<WorkspaceChangesPanel
+        {...props}
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        snapshot={snapshot}
+        onLoadRepositoryDiff={vi.fn(async (repositoryPath: string, filePath?: string) => diff(repositoryPath, filePath))}
+      />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+      target: { value: "Question for the first chat" },
+    });
+
+    for (const owner of [
+      { projectId: "11111111-1111-4111-8111-111111111111", conversationId: "33333333-3333-4333-8333-333333333333" },
+      { projectId: "44444444-4444-4444-8444-444444444444", conversationId: "33333333-3333-4333-8333-333333333333" },
+    ]) {
+      let finishLoad!: () => void;
+      const pendingLoad = vi.fn((repositoryPath: string, filePath?: string) => new Promise<ReturnType<typeof diff>>((resolve) => {
+        finishLoad = () => resolve(diff(repositoryPath, filePath));
+      }));
+      view.rerender(<WorkspaceChangesPanel
+        {...props}
+        {...owner}
+        snapshot={snapshot}
+        onLoadRepositoryDiff={pendingLoad}
+      />);
+
+      expect(pendingLoad).toHaveBeenCalledWith(".", "README.md");
+      expect(screen.queryByRole("region", { name: "Diff content for README.md" }))
+        .not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("What would you like to know?"))
+        .not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ask agent" })).not.toBeInTheDocument();
+
+      await act(async () => finishLoad());
+      expect(await screen.findByRole("region", { name: "Diff content for README.md" }))
+        .toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("What would you like to know?"))
+        .not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ask about" })).not.toBeInTheDocument();
+    }
+    expect(onAsk).not.toHaveBeenCalled();
+  });
+
   it("labels copied, type-changed, and unknown repository files like the review list", async () => {
     const files = [
       { ...changedFile("copied.ts"), status: "copied" },

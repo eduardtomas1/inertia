@@ -410,7 +410,11 @@ export function WorkspaceChangesPanel({
       return;
     }
     let cancelled = false;
-    const identity = workspaceGitIdentity(effectiveSelection);
+    const identity = JSON.stringify([
+      projectId ?? null,
+      conversationId ?? null,
+      workspaceGitIdentity(effectiveSelection),
+    ]);
     if (diffIdentityRef.current !== identity) {
       diffIdentityRef.current = identity;
       setDiff(null);
@@ -449,8 +453,10 @@ export function WorkspaceChangesPanel({
     activeFiles.length,
     activeRepository?.state,
     activeRepositoryPath,
+    conversationId,
     effectiveSelection,
     onLoadRepositoryDiff,
+    projectId,
     selectedFileRevision,
     snapshot,
   ]);

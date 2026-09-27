@@ -168,6 +168,7 @@ export class ProviderRunCoordinator {
    * lifecycle owner asks stopOwned() for the same barrier.
    */
   private readonly cleanupReceipts = new Map<string, ProviderRunIdentity>();
+  private readonly refusalReceipts = new Map<string, ProviderRunIdentity>();
 
   constructor(private readonly options: ProviderRunCoordinatorOptions) {}
 
@@ -196,8 +197,15 @@ export class ProviderRunCoordinator {
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderRunResult> {
-    const conversationId = validateProviderRunInput(input);
+    let conversationId: string;
+    try {
+      conversationId = validateProviderRunInput(input);
+    } catch (error) {
+      this.rememberRefusal(providerRunIdentity(input));
+      throw error;
+    }
     if (this.activeRuns.has(conversationId)) {
+      this.rememberRefusal(providerRunIdentity(input));
       throw new ProviderRuntimeError(
         "already_running",
         "This conversation already has an active provider run.",
@@ -867,15 +875,17 @@ export class ProviderRunCoordinator {
     graceMs = this.options.cancelGraceMs,
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
+    const receipted = (receipts: Map<string, ProviderRunIdentity>): boolean => {
+      const receipt = receipts.get(conversationId);
+      return receipt?.runId === identity.runId && receipt.turnId === identity.turnId;
+    };
     if (!active || active.settled) {
-      const receipt = this.cleanupReceipts.get(conversationId);
-      return receipt
-        && receipt.runId === identity.runId
-        && receipt.turnId === identity.turnId
+      return receipted(this.cleanupReceipts) || receipted(this.refusalReceipts)
         ? "settled"
         : "missing";
     }
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
+      if (receipted(this.refusalReceipts)) return "settled";
       active.quarantine("provider-run-stop-owner-mismatch");
       this.cancelStartedHarness(active);
       return "identity-mismatch";
@@ -905,13 +915,25 @@ export class ProviderRunCoordinator {
     return "force-detached";
   }
 
-  private rememberCleanupReceipt(identity: ProviderRunIdentity): void {
-    this.cleanupReceipts.delete(identity.conversationId);
-    this.cleanupReceipts.set(identity.conversationId, identity);
-    while (this.cleanupReceipts.size > MAX_CLEANUP_RECEIPTS) {
-      const oldest = this.cleanupReceipts.keys().next().value;
+  private rememberCleanupReceipt(
+    identity: ProviderRunIdentity,
+    receipts = this.cleanupReceipts,
+  ): void {
+    receipts.delete(identity.conversationId);
+    receipts.set(identity.conversationId, identity);
+    while (receipts.size > MAX_CLEANUP_RECEIPTS) {
+      const oldest = receipts.keys().next().value;
       if (oldest === undefined) break;
-      this.cleanupReceipts.delete(oldest);
+      receipts.delete(oldest);
+    }
+  }
+
+  private rememberRefusal(identity: ProviderRunIdentity): void {
+    const active = this.activeRuns.get(identity.conversationId);
+    if (!active) {
+      this.rememberCleanupReceipt(identity);
+    } else if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
+      this.rememberCleanupReceipt(identity, this.refusalReceipts);
     }
   }
 

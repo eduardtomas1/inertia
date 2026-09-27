@@ -66,6 +66,7 @@ import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   cursorQuestions,
+  CursorTodoSessions,
   cursorTodoSteps,
   parseCursorGenerateImageNotification,
   parseCursorPlanRequest,
@@ -155,6 +156,7 @@ export interface CursorAcpHarnessOptions {
 export function createCursorAcpHarness(
   options: CursorAcpHarnessOptions = {},
 ): AgentHarness {
+  const todoSessions = new CursorTodoSessions();
   return {
     id: "cursor-acp",
     providerId: "cursor",
@@ -167,6 +169,7 @@ export function createCursorAcpHarness(
         options.commandAdvertisementTimeoutMs,
         options.controlRpcTimeoutMs,
         options.createHostMcpSession,
+        todoSessions,
       ),
   };
 }
@@ -177,6 +180,7 @@ function startCursorRun(
   commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession: typeof createProviderHostToolMcpSession = createProviderHostToolMcpSession,
+  todoSessions = new CursorTodoSessions(),
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -403,10 +407,11 @@ function startCursorRun(
       return { outcome: { outcome: decision.outcome.optionId === "accept-plan" ? "accepted" : "rejected" } };
     })
     .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt()) return;
+      if (!ownsActivePrompt() || !sessionId) return;
+      const todoSessionId = sessionId;
       handleCursorProviderEvent(() => {
         const params = parseCursorTodosRequest(redactHostMcpPayload(rawParams));
-        emitter.rich({ type: "plan", explanation: null, steps: cursorTodoSteps(params.todos) });
+        emitter.rich({ type: "plan", explanation: null, steps: cursorTodoSteps(todoSessions.apply(todoSessionId, params)) });
       }, "Cursor ACP sent an invalid todo update.");
     })
     .onNotification("cursor/task", (value) => value, ({ params: rawParams }) => {
@@ -566,6 +571,7 @@ function startCursorRun(
         mcpServers: hostMcpServers,
       }), "session/new");
       sessionId = created.sessionId;
+      todoSessions.reset(sessionId);
       emitter.session(sessionId);
       modes = created.modes;
       configOptions = created.configOptions;

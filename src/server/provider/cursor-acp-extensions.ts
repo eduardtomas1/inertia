@@ -10,6 +10,8 @@ const MAX_QUESTION_TITLE_CHARS = 256;
 const MAX_OPTION_LABEL_CHARS = 512;
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
+const MAX_CURSOR_TODOS = 100;
+const MAX_CURSOR_TODO_SESSIONS = 64;
 
 export interface CursorQuestionParams {
   toolCallId: string;
@@ -245,6 +247,30 @@ export function cursorQuestions(
   };
 }
 
+export class CursorTodoSessions {
+  private readonly sessions = new Map<string, Map<string, CursorTodo>>();
+
+  reset(sessionId: string): void {
+    this.sessions.delete(sessionId);
+  }
+
+  apply(sessionId: string, params: CursorTodosParams): CursorTodo[] {
+    const todos = new Map(params.merge ? this.sessions.get(sessionId) : undefined);
+    for (const todo of params.todos) {
+      const key = todo.id === undefined ? `anonymous:${todos.size}` : `id:${todo.id}`;
+      const existing = todos.get(key);
+      if (existing || todos.size < MAX_CURSOR_TODOS) todos.set(key, { ...existing, ...todo });
+    }
+    this.sessions.delete(sessionId);
+    this.sessions.set(sessionId, todos);
+    for (const staleSessionId of this.sessions.keys()) {
+      if (this.sessions.size <= MAX_CURSOR_TODO_SESSIONS) break;
+      this.sessions.delete(staleSessionId);
+    }
+    return [...todos.values()];
+  }
+}
+
 export function cursorTodoSteps(
   todos: CursorTodo[],
   fallback?: string,
@@ -269,7 +295,7 @@ export function cursorTodoSteps(
 }
 
 function parseTodos(value: unknown): CursorTodo[] {
-  return requireArray(value, "todos").slice(0, 100).map((raw) => {
+  return requireArray(value, "todos").slice(0, MAX_CURSOR_TODOS).map((raw) => {
     const todo = requireObject(raw, "todo");
     return {
       ...(typeof todo.id === "string" ? { id: bounded(todo.id) } : {}),

@@ -16,7 +16,8 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
-import { attachElectronFixtureCloseFailure } from "./electron-failure-evidence";
+import { attachElectronFixtureCloseFailure,
+  attachElectronGpuHelperRecovery } from "./electron-failure-evidence";
 import { attachRuntimeCleanupEvidence } from "./runtime-shutdown-trace-evidence";
 import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
   readElectronPrivilegedCleanupPhase, requestElectronApplicationQuit } from "./electron-runtime-shutdown";
@@ -962,7 +963,7 @@ export async function createAppFixture(
     close: async () => {
       const activeApp = electronApp;
       electronApp = null;
-      await closeElectronFixtureBounded({
+      const recovery = await closeElectronFixtureBounded({
         current: activeApp,
         readRuntimePid: async () => activeApp ? (await runtimeSnapshot(activeApp)).pid : null,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
@@ -979,6 +980,7 @@ export async function createAppFixture(
         await attachElectronFixtureCloseFailure(() => test.info(), error);
         throw error;
       });
+      if (recovery) await attachElectronGpuHelperRecovery(() => test.info(), recovery);
     },
   };
 }

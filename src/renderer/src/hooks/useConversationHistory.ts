@@ -19,12 +19,14 @@ export function useConversationHistory({ conversationId, online, detailState, se
   const generation = useRef(0);
   const pending = useRef(false);
   const failedTarget = useRef<string | null>(null);
+  const interruptedOlder = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     generation.current += 1;
     pending.current = false;
     failedTarget.current = null;
+    if (interruptedOlder.current !== conversationId) interruptedOlder.current = null;
     setLoading(false);
     setError(null);
     return () => { generation.current += 1; };
@@ -34,11 +36,13 @@ export function useConversationHistory({ conversationId, online, detailState, se
     const owner = generation.current;
     const targetKey = history.messageId ?? history.turnId ?? null;
     pending.current = true;
+    if (mode === "older") interruptedOlder.current = conversationId;
     setLoading(true);
     setError(null);
     try {
       const event = await request({ type: "conversation.detail.load", payload: { conversationId, history } });
       if (owner !== generation.current) return;
+      if (mode === "older") interruptedOlder.current = null;
       if (event.type !== "request.result" || event.result.kind !== "conversation.detail"
         || event.result.conversationId !== conversationId) throw new Error("The chat history response was not recognized.");
       const result = event.result;
@@ -64,6 +68,9 @@ export function useConversationHistory({ conversationId, online, detailState, se
     const before = state.detail.history?.older;
     if (before) void load({ before }, "older");
   }, [conversationId, load]);
+  useEffect(() => {
+    if (online && conversationId && interruptedOlder.current === conversationId) loadOlder();
+  }, [conversationId, loadOlder, online]);
   useEffect(() => {
     const focusMessage = () => {
       if (!conversationId) return;
@@ -95,6 +102,6 @@ export function useConversationHistory({ conversationId, online, detailState, se
   }, [conversationId, detailState?.state, load, loading]);
   const hasOlder = detailState?.state === "ready" && Boolean(detailState.detail.history?.older);
   const omittedTurnIds = detailState?.state === "ready" ? detailState.detail.history?.omittedTurnIds : undefined;
-  return useMemo(() => ({ hasOlder, loading, error, loadOlder, omittedTurnIds }),
-    [hasOlder, loading, error, loadOlder, omittedTurnIds]);
+  return useMemo(() => ({ hasOlder, loading, error, loadOlder, omittedTurnIds, online }),
+    [hasOlder, loading, error, loadOlder, omittedTurnIds, online]);
 }

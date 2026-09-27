@@ -8,7 +8,7 @@ type ProcessStage = "launcher-exit" | "launcher-close" | "main-window-page-close
   | "transport-started" | "transport-settled" | "transport-timed-out"
   | "directory-remove-started" | "directory-remove-fulfilled"
   | "directory-remove-rejected" | "directory-remove-timed-out"
-  | "window-destroy-entered" | "window-destroy-returned" | "process-exit-called"
+  | "window-destroy-entered" | "window-destroy-returned" | "gpu-helper-terminated" | "process-exit-called"
   | "app-quit-entered" | "app-quit-tail-observed" | "native-exit-returned"
   | "window-created-after-cleanup" | "activated-after-cleanup" | "quit-events-observer-unavailable"
   | "window-identity-unavailable" | "window-observer-unavailable"
@@ -27,6 +27,7 @@ export interface ElectronProcessEvidenceSnapshot {
 
 export interface ElectronProcessEvidence {
   record: (stage: ProcessStage) => void;
+  onStage: (listener: (stage: ProcessStage) => void) => () => void;
   captureMainPid: (readPid: () => Promise<unknown>) => void;
   observeMainPresence: (probe?: (pid: number) => void) => void;
   snapshot: () => ElectronProcessEvidenceSnapshot;
@@ -49,12 +50,14 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
   let launcherCloseObserved = false;
   const stages: { stage: ProcessStage; elapsedMs: number }[] = [];
   let observingStderr = false;
+  const listeners = new Set<(stage: ProcessStage) => void>();
   const record = (stage: ProcessStage): void => {
     if (stages.length < 24) stages.push({ stage, elapsedMs: Math.max(0, Date.now() - startedAt) });
     if (stage === "quit-requested" && !observingStderr) {
       observingStderr = true;
       child.stderr?.on("data", onStderr);
     }
+    for (const listener of listeners) listener(stage);
   };
   const stderrStages = new Map<string, ProcessStage>([
     ["[Inertia test exit: window-destroy-entered]", "window-destroy-entered"],
@@ -92,6 +95,10 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
   child.once("close", onClose);
   const evidence: ElectronProcessEvidence = {
     record,
+    onStage: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
     observeMainPresence: (probe = (pid) => { process.kill(pid, 0); }) => {
       // The captured PID may have been reused. This is advisory presence only,
       // never process identity, exit confirmation, or permission to terminate.
@@ -131,6 +138,7 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
       child.off("close", onClose);
       child.stderr?.off("data", onStderr);
       stderrLine = "";
+      listeners.clear();
       clearTimeout(identityTimer);
       if (mainIdentity === "pending") mainIdentity = "unavailable";
     },

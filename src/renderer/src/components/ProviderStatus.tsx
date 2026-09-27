@@ -9,7 +9,7 @@ export type { ProviderSetupAction } from "../utils/providerStatus";
 export function ProviderStatus({ provider, compact = false }: { provider: ProviderInfo; compact?: boolean }): React.JSX.Element {
   const checking = provider.installState === "checking" || provider.authState === "checking";
   const ready = provider.canRun;
-  const unavailable = provider.installState === "not-installed" || provider.installState === "error" || provider.authState === "error";
+  const unavailable = provider.installState === "not-installed" || provider.installState === "unresponsive" || provider.installState === "error" || provider.authState === "error";
   const StatusIcon = checking ? LoaderCircle : unavailable ? CircleAlert : ready ? CheckCircle2 : CircleDot;
 
   return (

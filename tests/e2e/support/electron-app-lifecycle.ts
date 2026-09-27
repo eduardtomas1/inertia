@@ -15,6 +15,7 @@ import { forceStopWindowsElectronLauncher,
   type WindowsElectronProcessDependencies } from "./electron-windows-process";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
+export const GPU_HELPER_RECOVERY_GRACE_MS = 2_000;
 const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
 const WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS = 2_000;
 const MAX_RENDERER_DIAGNOSTIC_ENTRIES = 40;
@@ -274,6 +275,12 @@ interface ElectronAppCloseOptions {
 export interface ElectronAppQuitOptions extends ElectronAppCloseOptions {
   readonly quitRequestTimeoutMs?: number;
   readonly mainProcessDiagnostic?: ElectronMainProcessDiagnostic;
+  readonly recoverStalledWindowDestroy?: boolean;
+}
+
+export interface ElectronGpuHelperRecovery {
+  readonly processEvidence: ElectronProcessEvidenceSnapshot | null;
+  readonly mainProcessSamples: ElectronMainProcessSample[];
 }
 
 export class ElectronFixtureCloseError extends AggregateError {
@@ -301,6 +308,43 @@ export interface ElectronAppQuitResult<T> {
   readonly outcome: "graceful" | "abnormal" | "forced";
   readonly requestResult: BoundedOperationResult<T>;
   readonly transportSettled: boolean;
+  readonly gpuHelperTerminated: boolean;
+}
+
+function watchStalledWindowDestroy(
+  evidence: ElectronProcessEvidence,
+  diagnostic: ElectronMainProcessDiagnostic,
+  deadlineAt: number,
+): { stop: () => void; terminated: () => boolean } {
+  let returned = false;
+  let stopped = false;
+  let terminated = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const stop = (): void => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    unsubscribe();
+  };
+  const unsubscribe = evidence.onStage((stage) => {
+    if (stage === "window-destroy-returned") {
+      returned = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    }
+    if (stage !== "window-destroy-entered" || timer || returned || stopped) return;
+    timer = setTimeout(() => {
+      timer = null;
+      void diagnostic.terminateStalledGpuHelper(deadlineAt, () => !returned && !stopped)
+        .then((killed) => {
+          if (!killed) return;
+          terminated = true;
+          evidence.record("gpu-helper-terminated");
+        });
+    }, GPU_HELPER_RECOVERY_GRACE_MS);
+    timer.unref();
+  });
+  return { stop, terminated: () => terminated };
 }
 
 export interface ElectronPrivilegedCleanupReceipt {
@@ -329,7 +373,13 @@ export async function quitElectronAppBounded<T>(
   const gracefulDeadlineAt = Date.now() + gracefulTimeoutMs;
   const naturalExit = waitForChildExitBounded(child, gracefulTimeoutMs);
   const stopWatchdog = options.mainProcessDiagnostic?.watchQuit(gracefulDeadlineAt);
+  const recovery = options.recoverStalledWindowDestroy && options.mainProcessDiagnostic
+    && (options.platform ?? process.platform) === "darwin"
+    ? watchStalledWindowDestroy(evidence, options.mainProcessDiagnostic, gracefulDeadlineAt)
+    : null;
   const exitedNaturally = await naturalExit;
+  const gpuHelperTerminated = recovery?.terminated() ?? false;
+  recovery?.stop();
   stopWatchdog?.();
   let outcome: ElectronAppQuitResult<T>["outcome"];
   if (exitedNaturally) {
@@ -364,6 +414,7 @@ export async function quitElectronAppBounded<T>(
     outcome,
     requestResult: await requestResultPromise,
     transportSettled: transportResult.status !== "timed-out",
+    gpuHelperTerminated,
   };
 }
 
@@ -431,8 +482,9 @@ export async function closeElectronFixtureBounded(options: {
   readonly serverTimeoutMs?: number;
   readonly removeTimeoutMs?: number;
   readonly createMainProcessDiagnostic?: typeof createElectronMainProcessDiagnostic;
-}): Promise<void> {
+}): Promise<ElectronGpuHelperRecovery | undefined> {
   const cleanupErrors: unknown[] = [];
+  let gpuHelperTerminated = false;
   let diagnostic: ElectronMainProcessDiagnostic | null = null;
   let evidence: ElectronProcessEvidence | null = null;
   let runtimePid: number | null = options.priorRuntimePid ?? null;
@@ -541,6 +593,7 @@ export async function closeElectronFixtureBounded(options: {
               platform: options.platform,
               windowsProcessDependencies: options.windowsProcessDependencies,
               ...(diagnostic ? { mainProcessDiagnostic: diagnostic } : {}),
+              recoverStalledWindowDestroy: cleanupPrepared && options.prepareRuntimeQuit !== undefined,
               quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
               ...(options.prepareRuntimeQuit
                 ? {
@@ -552,6 +605,7 @@ export async function closeElectronFixtureBounded(options: {
             },
           );
           quitResult = appQuit.requestResult;
+          gpuHelperTerminated = appQuit.gpuHelperTerminated;
           appCloseConfirmed = appQuit.outcome === "graceful";
           if (!appQuit.transportSettled && appCloseConfirmed) {
             cleanupErrors.push(new Error(
@@ -647,4 +701,7 @@ export async function closeElectronFixtureBounded(options: {
   if (cleanupErrors.length > 0) {
     throw new ElectronFixtureCloseError(cleanupErrors, diagnostic?.samples ?? [], evidence?.snapshot() ?? null);
   }
+  return gpuHelperTerminated
+    ? { processEvidence: evidence?.snapshot() ?? null, mainProcessSamples: diagnostic?.samples ?? [] }
+    : undefined;
 }

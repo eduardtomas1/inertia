@@ -131,8 +131,11 @@ with its own `npm run build:packaged` for its exact source/target/configuration:
   macOS x64 expands this into three required checks named
   `macOS x64 Electron (display-sensitive)`, `macOS x64 Electron (isolated)` and
   `macOS x64 Electron (runtime-recovery)`. Each builds the exact candidate on a
-  separate runner; only the recovery job runs its desktop benchmark. Display
-  and recovery retain their serial project settings internally.
+  separate runner. Only the display-sensitive job runs the desktop benchmark,
+  after its end-to-end tests, as the single job did before the split. The
+  recovery job reached its benchmark 4 to 7 minutes after the runner started,
+  and those samples showed inflated long tasks and cold startup.
+  Display and recovery retain their serial project settings internally.
 
 All are required checks in the plan (`requiredChecks` lists every Electron
 phase for macOS x64) and all are enumerated by `merge-ready` from the

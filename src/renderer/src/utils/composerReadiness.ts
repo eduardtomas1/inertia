@@ -93,6 +93,14 @@ function providerInstallReadiness(
       "install",
     );
   }
+  if (provider.installState === "unresponsive") {
+    return unavailable(
+      "Unavailable",
+      `${harness} is not responding`,
+      provider.statusMessage ?? "Refresh agent status to check again.",
+      "refresh",
+    );
+  }
   if (
     provider.installState === "error"
     || !provider.available

@@ -554,7 +554,7 @@ describe("draft turn anchoring", () => {
   it("keeps keyboard focus through loading earlier messages and after the last page", async () => {
     const loadOlder = vi.fn();
     const props = workspaceProps(conversation("conversation-history-focus"), async () => null);
-    const history = { hasOlder: true, loading: false, error: null, loadOlder };
+    const history = { hasOlder: true, loading: false, error: null, loadOlder, online: true };
     const view = render(<ChatWorkspace {...props} history={history} />);
     const earlier = screen.getByRole("button", { name: "Load earlier messages" });
     earlier.focus();
@@ -575,6 +575,31 @@ describe("draft turn anchoring", () => {
     view.rerender(<ChatWorkspace {...props} history={{ ...history, hasOlder: false }} />);
     expect(screen.queryByRole("button", { name: /earlier messages/u })).toBeNull();
     await waitFor(() => expect(screen.getByLabelText("Thread transcript")).toHaveFocus());
+  });
+
+  it("marks Load earlier messages unavailable while offline and restores it when online", () => {
+    const loadOlder = vi.fn();
+    const props = workspaceProps(conversation("conversation-history-offline"), async () => null);
+    const history = { hasOlder: true, loading: false, error: null, loadOlder, online: false };
+    const view = render(<ChatWorkspace {...props} history={history} />);
+    const earlier = screen.getByRole("button", { name: "Load earlier messages" });
+    earlier.focus();
+    expect(earlier).toHaveAttribute("aria-disabled", "true");
+    expect(earlier).not.toBeDisabled();
+    expect(earlier).toHaveAccessibleDescription("Earlier messages are unavailable while the local service is offline.");
+    fireEvent.click(earlier);
+    fireEvent.keyDown(earlier, { key: "Enter" });
+    expect(loadOlder).not.toHaveBeenCalled();
+    expect(earlier).toHaveFocus();
+
+    view.rerender(<ChatWorkspace {...props} history={{ ...history, online: true }} />);
+    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBe(earlier);
+    expect(earlier).not.toHaveAttribute("aria-disabled");
+    expect(earlier).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText("Earlier messages are unavailable while the local service is offline.")).toBeNull();
+    expect(earlier).toHaveFocus();
+    fireEvent.click(earlier);
+    expect(loadOlder).toHaveBeenCalledOnce();
   });
 
   it("passes project choice into the empty-chat composer", () => {

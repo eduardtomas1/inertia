@@ -32,6 +32,33 @@ describe("provider compatibility status", () => {
     expect(providerSetupAction(provider)).toBe("refresh");
   });
 
+  it("offers refresh instead of sign-in when a Codex check did not respond in time", () => {
+    const provider: ProviderInfo = {
+      id: "codex",
+      label: "Codex",
+      command: "codex",
+      available: true,
+      version: "0.1.0",
+      installState: "installed",
+      authState: "error",
+      canRun: false,
+      statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+      models: [],
+      rateLimits: [],
+      metadataState: {
+        models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+        rateLimits: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },
+      },
+    };
+
+    expect(providerStateLabel(provider)).toBe("Connection issue");
+    expect(providerSetupAction(provider)).toBe("refresh");
+    const unresponsive = { ...provider, available: false, installState: "unresponsive" as const, authState: "unknown" as const, statusMessage: null };
+    expect(providerStateLabel(unresponsive)).toBe("Not responding");
+    expect(providerStateDetail(unresponsive)).toBe("Codex did not respond in time.");
+    expect(providerSetupAction(unresponsive)).toBe("refresh");
+  });
+
   it("treats Antigravity sign-in as checked per turn and version-gated", () => {
     const metadataState: ProviderInfo["metadataState"] = {
       models: { freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false },

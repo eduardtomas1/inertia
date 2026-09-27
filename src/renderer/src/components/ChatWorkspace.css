@@ -46,6 +46,10 @@
   cursor: progress;
 }
 
+.conversation-history-controls button[aria-disabled="true"][aria-describedby] {
+  cursor: default;
+}
+
 .response-turn-omitted {
   margin: 8px 0 0;
   color: var(--text-muted);

@@ -9,6 +9,9 @@ const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const MAX_PROCESS_TABLE_BYTES = 4 * 1024 * 1024;
 const MAX_HELPER_IDENTITY_BYTES = 1024;
 const MAX_HELPER_ROWS = 64;
+const GPU_RECOVERY_EXIT_RESERVE_MS = 2_000;
+const GPU_RECOVERY_PROBE_RESERVE_MS = 2_000;
+const GPU_STALL_NANOSLEEP_SHARE = 0.8;
 const HELPER_ROLE = /(?:^|\s)--type=([a-z0-9_.-]{1,64})(?=\s|$)/u;
 const UTILITY_ROLE = /(?:^|\s)--utility-sub-type=([a-zA-Z0-9_.-]{1,96})(?=\s|$)/u;
 
@@ -23,6 +26,7 @@ export interface ElectronMainProcessSample {
 export interface ElectronMainProcessDiagnostic {
   capture: (reason: string, deadlineAt: number) => void;
   watchQuit: (deadlineAt: number) => () => void;
+  terminateStalledGpuHelper: (deadlineAt: number, stillStalled: () => boolean) => Promise<boolean>;
   stop: () => void;
   samples: ElectronMainProcessSample[];
 }
@@ -66,12 +70,36 @@ export function electronHelperProcesses(
   return helpers;
 }
 
+export function mainThreadNanosleepShare(sample: string): number | null {
+  const lines = sample.split(/\r?\n/u);
+  const start = lines.findIndex((line) =>
+    /^ {4}\d+ Thread_\S+.*\bcom\.apple\.main-thread\b/u.test(line));
+  if (start < 0) return null;
+  const total = Number(/^ {4}(\d+)/u.exec(lines[start]!)![1]);
+  if (!Number.isSafeInteger(total) || total <= 0) return null;
+  let sleeping = 0;
+  let countedDepth = Number.POSITIVE_INFINITY;
+  for (const line of lines.slice(start + 1)) {
+    const frame = /^( {4}[+!:| ]*)(\d+) +(.*)$/u.exec(line);
+    if (!frame || !frame[1]!.includes("+")) break;
+    const depth = frame[1]!.length;
+    if (depth > countedDepth) continue;
+    countedDepth = Number.POSITIVE_INFINITY;
+    if (/^nanosleep\s+\(in libsystem_c\.dylib\)/u.test(frame[3]!)) {
+      sleeping += Number(frame[2]);
+      countedDepth = depth;
+    }
+  }
+  return Math.min(1, sleeping / total);
+}
+
 export function createElectronMainProcessDiagnostic(
   main: ChildProcess,
   dependencies: {
     platform?: NodeJS.Platform;
     spawn?: typeof spawn;
     killGroup?: (pid: number) => void;
+    signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   } = {},
 ): ElectronMainProcessDiagnostic {
   const platform = dependencies.platform ?? process.platform;
@@ -79,12 +107,18 @@ export function createElectronMainProcessDiagnostic(
   const killGroup = dependencies.killGroup ?? ((pid: number) => {
     process.kill(-pid, "SIGKILL");
   });
+  const signalProcess = dependencies.signalProcess ?? ((target: number, signal: NodeJS.Signals) => {
+    process.kill(target, signal);
+  });
   const pid = main.pid;
   const samples: ElectronMainProcessSample[] = [];
   const active = new Set<() => void>();
   let mainSamples = 0;
   let mainSampling = false;
   let helpersCaptured = false;
+  let helperEvidencePending = false;
+  const helperEvidenceWaiters = new Set<() => void>();
+  const validatedHelperSamples = new Map<ElectronMainProcessSample, string>();
   let stopped = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   const ownsLiveMain = (): boolean => !stopped
@@ -215,9 +249,9 @@ export function createElectronMainProcessDiagnostic(
           : null);
       });
   };
-  const sampleHelper = (helperPid: number, deadlineAt: number): void => {
+  const sampleHelper = (helperPid: number, deadlineAt: number, done: () => void): void => {
     readHelperIdentity(helperPid, deadlineAt, (before) => {
-      if (before === null || !ownsLiveMain()) return;
+      if (before === null || !ownsLiveMain()) return done();
       const record: ElectronMainProcessSample = {
         pid: helperPid, reason: "gpu-helper-still-pending", status: "starting",
         output: "", truncated: false,
@@ -226,7 +260,7 @@ export function createElectronMainProcessDiagnostic(
       const timeoutMs = sampleBudget(deadlineAt);
       if (timeoutMs < MIN_SAMPLE_TIMEOUT_MS) {
         record.status = "skipped-insufficient-existing-budget";
-        return;
+        return done();
       }
       run(record, "/usr/bin/sample", [
         String(helperPid), "1", "10", "-file", "/dev/stdout",
@@ -235,14 +269,129 @@ export function createElectronMainProcessDiagnostic(
         readHelperIdentity(helperPid, deadlineAt, (after) => {
           if (after !== before) {
             record.status = "discarded-helper-identity-changed";
-            return;
+          } else {
+            record.status = status;
+            record.output = output;
+            if (status === "completed") validatedHelperSamples.set(record, before);
           }
-          record.status = status;
-          record.output = output;
+          done();
         });
       });
     });
   };
+  const settleHelperEvidence = (): void => {
+    helperEvidencePending = false;
+    for (const waiter of helperEvidenceWaiters) waiter();
+  };
+  const afterHelperEvidence = (latestAt: number, next: () => void): void => {
+    if (!helperEvidencePending) return next();
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      active.delete(release);
+      helperEvidenceWaiters.delete(release);
+      next();
+    };
+    const timer = setTimeout(release, Math.max(0, latestAt - Date.now()));
+    timer.unref();
+    active.add(release);
+    helperEvidenceWaiters.add(release);
+  };
+  const readHelperTable = (
+    record: ElectronMainProcessSample,
+    deadlineAt: number,
+    onHelpers: (helpers: ElectronHelperProcess[] | null) => void,
+  ): void => {
+    const timeoutMs = Math.min(
+      PROCESS_TABLE_TIMEOUT_MS,
+      deadlineAt - Date.now() - SAMPLE_HEADROOM_MS,
+    );
+    if (timeoutMs <= 0) {
+      record.status = "skipped-insufficient-existing-budget";
+      onHelpers(null);
+      return;
+    }
+    run(record, "/bin/ps", ["-axww", "-o", "pid=,ppid=,stat=,command="], timeoutMs,
+      MAX_PROCESS_TABLE_BYTES, (status, output) => {
+        record.status = status;
+        onHelpers(status === "completed" ? electronHelperProcesses(pid!, output) : null);
+      });
+  };
+  const directGpuHelpers = (helpers: ElectronHelperProcess[]): ElectronHelperProcess[] =>
+    helpers.filter((helper) => helper.role === "gpu-process" && helper.ppid === pid);
+  const findGpuHelper = (
+    deadlineAt: number,
+    onGpu: (gpu: ElectronHelperProcess | null, status: string) => void,
+  ): void => {
+    if (!ownsLiveMain()) return onGpu(null, "main-process-exited");
+    const probe: ElectronMainProcessSample = {
+      pid: pid!, reason: "gpu-helper-table", status: "starting", output: "", truncated: false,
+    };
+    readHelperTable(probe, deadlineAt, (helpers) => {
+      if (!helpers) return onGpu(null, `helper-table-${probe.status}`);
+      const gpus = directGpuHelpers(helpers);
+      onGpu(gpus.length === 1 ? gpus[0]! : null,
+        gpus.length === 0 ? "no-gpu-helper" : "ambiguous-gpu-helper");
+    });
+  };
+  const gpuStallEvidence = (gpu: ElectronHelperProcess, identity: string): string | null => {
+    if (gpu.stat.startsWith("T")) return "stopped";
+    for (const [sample, sampledIdentity] of validatedHelperSamples) {
+      if (sample.pid !== gpu.pid || sampledIdentity !== identity) continue;
+      const share = mainThreadNanosleepShare(sample.output);
+      if (share !== null && share >= GPU_STALL_NANOSLEEP_SHARE) {
+        return `main-thread-nanosleep=${Math.round(share * 100)}%`;
+      }
+    }
+    return null;
+  };
+  const terminateStalledGpuHelper = (
+    deadlineAt: number,
+    stillStalled: () => boolean,
+  ): Promise<boolean> => new Promise<boolean>((resolve) => {
+    if (platform !== "darwin" || !ownsLiveMain()) return resolve(false);
+    const record: ElectronMainProcessSample = {
+      pid: pid!, reason: "gpu-helper-recovery", status: "waiting-for-helper-evidence",
+      output: "", truncated: false,
+    };
+    samples.push(record);
+    const finish = (status: string, terminated = false): void => {
+      record.status = status;
+      resolve(terminated);
+    };
+    const probeDeadlineAt = deadlineAt - GPU_RECOVERY_EXIT_RESERVE_MS;
+    afterHelperEvidence(probeDeadlineAt - GPU_RECOVERY_PROBE_RESERVE_MS, () => {
+      record.status = "identifying-gpu-helper";
+      findGpuHelper(probeDeadlineAt, (gpu, status) => {
+        if (!gpu) return finish(status);
+        record.output = `${gpu.pid} ${gpu.ppid} ${gpu.stat} ${gpu.role}`;
+        readHelperIdentity(gpu.pid, probeDeadlineAt, (before) => {
+          if (before === null) return finish("helper-identity-unavailable");
+          findGpuHelper(probeDeadlineAt, (confirmed, confirmStatus) => {
+            if (!confirmed) return finish(confirmStatus);
+            if (confirmed.pid !== gpu.pid) return finish("discarded-helper-identity-changed");
+            record.output = `${confirmed.pid} ${confirmed.ppid} ${confirmed.stat} ${confirmed.role}`;
+            readHelperIdentity(gpu.pid, probeDeadlineAt, (after) => {
+              if (after !== before) return finish("discarded-helper-identity-changed");
+              if (!ownsLiveMain()) return finish("main-process-exited");
+              if (!stillStalled()) return finish("window-destroy-returned");
+              const stall = gpuStallEvidence(confirmed, before);
+              if (stall === null) return finish("gpu-stall-unconfirmed");
+              record.output += ` stall=${stall}`;
+              try {
+                signalProcess(gpu.pid, "SIGKILL");
+              } catch (error) {
+                return finish(`signal-failed: ${String(error).slice(0, 512)}`);
+              }
+              finish("terminated", true);
+            });
+          });
+        });
+      });
+    });
+  });
   const capture = (reason: string, deadlineAt: number): void => {
     if (platform !== "darwin" || !ownsLiveMain() || mainSampling
       || mainSamples >= 2) return;
@@ -253,36 +402,26 @@ export function createElectronMainProcessDiagnostic(
   const captureHelpers = (deadlineAt: number): void => {
     if (helpersCaptured || !ownsLiveMain()) return;
     helpersCaptured = true;
+    helperEvidencePending = true;
     const record: ElectronMainProcessSample = {
       pid: pid!, reason: "electron-helper-processes", status: "starting",
       output: "", truncated: false,
     };
     samples.push(record);
-    const timeoutMs = Math.min(
-      PROCESS_TABLE_TIMEOUT_MS,
-      deadlineAt - Date.now() - SAMPLE_HEADROOM_MS,
-    );
-    if (timeoutMs <= 0) {
-      record.status = "skipped-insufficient-existing-budget";
-      return;
-    }
-    run(record, "/bin/ps", ["-axww", "-o", "pid=,ppid=,stat=,command="], timeoutMs,
-      MAX_PROCESS_TABLE_BYTES, (status, output) => {
-        record.status = status;
-        if (status !== "completed") return;
-        const helpers = electronHelperProcesses(pid!, output);
-        record.output = helpers.length === 0
-          ? "no-helper-processes"
-          : helpers.map((helper) =>
-            `${helper.pid} ${helper.ppid} ${helper.stat} ${helper.role}`).join("\n");
-        const gpu = helpers.find((helper) =>
-          helper.role === "gpu-process" && helper.ppid === pid);
-        if (gpu && ownsLiveMain()) sampleHelper(gpu.pid, deadlineAt);
-      });
+    readHelperTable(record, deadlineAt, (helpers) => {
+      if (!helpers) return settleHelperEvidence();
+      record.output = helpers.length === 0
+        ? "no-helper-processes"
+        : helpers.map((helper) =>
+          `${helper.pid} ${helper.ppid} ${helper.stat} ${helper.role}`).join("\n");
+      const gpu = directGpuHelpers(helpers)[0];
+      if (gpu && ownsLiveMain()) sampleHelper(gpu.pid, deadlineAt, settleHelperEvidence);
+      else settleHelperEvidence();
+    });
   };
   if (platform === "darwin") main.once("exit", stop);
   return {
-    capture, samples, stop,
+    capture, samples, stop, terminateStalledGpuHelper,
     watchQuit: (deadlineAt) => {
       clearWatchdog();
       if (platform === "darwin" && ownsLiveMain()

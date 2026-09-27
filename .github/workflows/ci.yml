@@ -890,7 +890,7 @@ jobs:
           retention-days: 14
 
       - name: Measure desktop workloads
-        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
+        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
         run: npm run benchmark:desktop:built
 
       - name: Measure desktop workloads under Xvfb
@@ -907,7 +907,7 @@ jobs:
           retention-days: 7
 
       - name: Keep desktop performance evidence
-        if: always() && (needs.classify.outputs.benchmarks == 'true') && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
+        if: always() && (needs.classify.outputs.benchmarks == 'true') && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-electron-${{ matrix.artifact }}

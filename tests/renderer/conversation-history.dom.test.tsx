@@ -23,8 +23,18 @@ function ready(id: string): ServerEvent {
 }
 function deferred() {
   let resolve!: (event: ServerEvent) => void;
-  const promise = new Promise<ServerEvent>((done) => { resolve = done; });
-  return { resolve, promise };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<ServerEvent>((done, fail) => { resolve = done; reject = fail; });
+  return { resolve, reject, promise };
+}
+function connectedHistory(request: (command: unknown) => Promise<ServerEvent>) {
+  return renderHook(({ conversationId, online }) => {
+    const [state, setState] = useState<ConversationDetailViewState | null>({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") });
+    return { state, history: useConversationHistory({ conversationId, online, detailState: state, setDetailState: setState, request }) };
+  }, { initialProps: { conversationId: "chat", online: true } });
+}
+function loadedMessageIds(state: ConversationDetailViewState | null) {
+  return state?.state === "ready" ? state.detail.messages.map(({ id }) => id) : [];
 }
 afterEach(() => { cleanup(); clearMessageSearchFocus(); clearTimelineFocus(); });
 
@@ -127,6 +137,70 @@ describe("history navigation lifecycle", () => {
     hook.rerender();
     await act(async () => undefined);
     expect(request).toHaveBeenCalledOnce();
+  });
+});
+
+describe("history loads interrupted by the connection", () => {
+  it("retries an older page once when the connection returns before the dropped request settles", async () => {
+    const dropped = deferred();
+    const request = vi.fn().mockImplementationOnce(() => dropped.promise).mockResolvedValue(ready("old"));
+    const hook = connectedHistory(request);
+    act(() => hook.result.current.history.loadOlder());
+    expect(hook.result.current.history.loading).toBe(true);
+    hook.rerender({ conversationId: "chat", online: false });
+    expect(hook.result.current.history.loading).toBe(false);
+    expect(request).toHaveBeenCalledOnce();
+    hook.rerender({ conversationId: "chat", online: true });
+    await waitFor(() => expect(loadedMessageIds(hook.result.current.state)).toEqual(["message-old", "message-recent"]));
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]?.[0]).toMatchObject({ payload: { conversationId: "chat", history: { before: cursor } } });
+    await act(async () => dropped.resolve(ready("stale")));
+    hook.rerender({ conversationId: "chat", online: true });
+    expect(loadedMessageIds(hook.result.current.state)).toEqual(["message-old", "message-recent"]);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.history).toMatchObject({ loading: false, error: null });
+  });
+
+  it("retries an older page once when the disconnect rejects the request before the status changes", async () => {
+    const dropped = deferred();
+    const request = vi.fn().mockImplementationOnce(() => dropped.promise).mockResolvedValue(ready("old"));
+    const hook = connectedHistory(request);
+    act(() => hook.result.current.history.loadOlder());
+    await act(async () => dropped.reject(new Error("The local service disconnected before finishing the request.")));
+    hook.rerender({ conversationId: "chat", online: false });
+    expect(request).toHaveBeenCalledOnce();
+    hook.rerender({ conversationId: "chat", online: true });
+    await waitFor(() => expect(loadedMessageIds(hook.result.current.state)).toEqual(["message-old", "message-recent"]));
+    hook.rerender({ conversationId: "chat", online: true });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.history).toMatchObject({ loading: false, error: null });
+  });
+
+  it("does not carry an interrupted page into another chat or back after leaving it", async () => {
+    const dropped = deferred();
+    const request = vi.fn().mockImplementationOnce(() => dropped.promise).mockResolvedValue(ready("old"));
+    const hook = connectedHistory(request);
+    act(() => hook.result.current.history.loadOlder());
+    hook.rerender({ conversationId: "chat", online: false });
+    hook.rerender({ conversationId: "other", online: false });
+    hook.rerender({ conversationId: "other", online: true });
+    hook.rerender({ conversationId: "chat", online: true });
+    await act(async () => dropped.resolve(ready("stale")));
+    expect(request).toHaveBeenCalledOnce();
+    expect(loadedMessageIds(hook.result.current.state)).toEqual(["message-recent"]);
+    expect(hook.result.current.history.loading).toBe(false);
+  });
+
+  it("reports whether history can be requested and ignores older loads while offline", () => {
+    const request = vi.fn().mockResolvedValue(ready("old"));
+    const hook = connectedHistory(request);
+    hook.rerender({ conversationId: "chat", online: false });
+    expect(hook.result.current.history.online).toBe(false);
+    act(() => hook.result.current.history.loadOlder());
+    expect(request).not.toHaveBeenCalled();
+    hook.rerender({ conversationId: "chat", online: true });
+    expect(hook.result.current.history.online).toBe(true);
+    expect(request).not.toHaveBeenCalled();
   });
 });
 

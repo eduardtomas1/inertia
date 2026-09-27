@@ -164,7 +164,9 @@ it("runs every macOS Intel phase on an independent runner with unique evidence",
     expect(phase["continue-on-error"]).not.toBe(true);
   }
   expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Measure desktop workloads").if)
-    .toContain("matrix.phase == 'runtime-recovery'");
+    .toContain("matrix.phase == 'display-sensitive'");
+  expect(workflow.jobs.electron.steps.find((step: { name: string }) => step.name === "Keep desktop performance evidence").if)
+    .toContain("matrix.phase == 'display-sensitive'");
 });
 
 it("runs bounded operation-count performance checks before native jobs for a performance PR", () => {

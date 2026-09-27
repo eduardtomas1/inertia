@@ -204,7 +204,7 @@ type ChatWorkspaceProps = {
   loading: boolean;
   detailLoading?: boolean;
   history?: { hasOlder: boolean; loading: boolean; error: string | null; loadOlder: () => void;
-    omittedTurnIds?: readonly string[] };
+    online: boolean; omittedTurnIds?: readonly string[] };
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
@@ -364,6 +364,7 @@ export function ChatWorkspace({
   const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
     ?.trim().toLowerCase() ?? "";
   const keyboardHelpId = useId();
+  const historyOfflineId = useId();
   const stopRestoreSequenceRef = useRef(0);
   const stopsInFlightRef = useRef(new Map<string, Promise<void>>());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -950,14 +951,18 @@ export function ChatWorkspace({
           {history && (history.hasOlder || history.error) && (
             <div className="conversation-history-controls">
               {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"
-                aria-disabled={history.loading || undefined}
+                aria-disabled={history.loading || !history.online || undefined}
+                aria-describedby={history.online ? undefined : historyOfflineId}
                 onClick={() => {
-                  if (history.loading) return;
+                  if (history.loading || !history.online) return;
                   noteResponseTimelineNavigationIntent();
                   history.loadOlder();
                 }}>
                 {history.loading ? "Loading earlier messages…" : "Load earlier messages"}
               </button>}
+              {history.hasOlder && !history.online && <p id={historyOfflineId}>
+                Earlier messages are unavailable while the local service is offline.
+              </p>}
               {history.error && <p role="alert">{history.error}</p>}
             </div>
           )}

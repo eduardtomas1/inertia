@@ -82,6 +82,11 @@ export function antigravitySessionId(
   return value && isProviderTerminalSessionId(value) ? value : undefined;
 }
 
+function conversationIdentity(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === "") return null;
+  return typeof value === "string" ? antigravitySessionId(value) : undefined;
+}
+
 export function antigravityArguments(
   input: Pick<
     ProviderRunInput,
@@ -141,13 +146,17 @@ export function parseAntigravityLine(
   if (!isObject(value) || typeof value.event !== "string") return null;
   const nested = value[value.event];
   const payload = isObject(nested) ? nested : value;
-  const conversationId = antigravitySessionId(nonEmptyText(payload.conversation_id));
+  const outerId = conversationIdentity(value.conversation_id);
+  const innerId = payload === value ? outerId : conversationIdentity(payload.conversation_id);
+  if (outerId === undefined || innerId === undefined) return null;
+  if (outerId && innerId && outerId !== innerId) return null;
+  const conversationId = outerId ?? innerId;
   if (value.event === "result") {
     return [{
       kind: "result",
       result: {
         status: nonEmptyText(payload.status) ?? "",
-        conversationId: conversationId ?? null,
+        conversationId,
         response: typeof payload.response === "string" ? payload.response : "",
         error: nonEmptyText(payload.error),
         usage: antigravityUsage(payload.usage),

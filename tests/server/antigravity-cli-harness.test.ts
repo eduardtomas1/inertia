@@ -277,6 +277,41 @@ describe("Antigravity stream parsing", () => {
     expect(parseAntigravityLine(JSON.stringify({ event: "future_event" }))).toEqual([]);
   });
 
+  it("reads the conversation identity from the documented and legacy init envelopes", () => {
+    const canonical = {
+      event: "init",
+      conversation_id: CONVERSATION,
+      init: { cwd: "/workspace", tools: ["run_command"], permission_mode: "request-review" },
+    };
+    expect(parseAntigravityLine(JSON.stringify(canonical)))
+      .toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+    expect(parseAntigravityLine(JSON.stringify({ event: "init", init: { conversation_id: CONVERSATION } })))
+      .toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+    expect(parseAntigravityLine(JSON.stringify({
+      ...canonical,
+      init: { ...canonical.init, conversation_id: CONVERSATION },
+    }))).toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+  });
+
+  it("rejects conflicting or malformed conversation identities", () => {
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    for (const value of [
+      { event: "init", conversation_id: CONVERSATION, init: { conversation_id: foreign } },
+      { event: "step_update", conversation_id: foreign, step_update: { conversation_id: CONVERSATION, text_delta: "Hi" } },
+      { event: "result", conversation_id: foreign, result: { conversation_id: CONVERSATION, status: "SUCCESS" } },
+      { event: "init", conversation_id: "not a conversation", init: {} },
+      { event: "init", conversation_id: 7, init: {} },
+      { event: "init", init: { conversation_id: "../escape" } },
+      { event: "step_update", step_update: { conversation_id: "x".repeat(400), text_delta: "Hi" } },
+    ]) {
+      expect(parseAntigravityLine(JSON.stringify(value))).toBeNull();
+    }
+    expect(parseAntigravityLine(JSON.stringify({
+      event: "result",
+      result: { conversation_id: "", status: "ERROR", error: "authentication failed or timed out" },
+    }))).toMatchObject([{ kind: "result", result: { conversationId: null } }]);
+  });
+
   it("rejects malformed lines", () => {
     for (const line of ["not json", "[]", "{}", JSON.stringify({ event: 3 })]) {
       expect(parseAntigravityLine(line)).toBeNull();
@@ -320,7 +355,7 @@ describe("Antigravity CLI harness", { concurrent: false }, () => {
   it("streams a completed turn with session identity, tools, and usage", async () => {
     const root = fixtureRoot("antigravity success");
     const { command, capturePath } = fakeAgy(root, `
-emit({ event: "init", init: { conversation_id: ${JSON.stringify(CONVERSATION)} } });
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { cwd: process.cwd(), tools: ["view_file"], permission_mode: "request-review" } });
 emit({ event: "step_update", step_update: { conversation_id: ${JSON.stringify(CONVERSATION)}, step_index: 0, state: "ACTIVE", text_delta: "Hello " } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "ACTIVE", tool_name: "view_file" } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "view_file" } });
@@ -428,6 +463,67 @@ process.exit(0);
       kind === "resumed" ? { sessionId: CONVERSATION } : {}))).resolves.toMatchObject({
       status: "completed", sessionId: CONVERSATION, text: "Valid answer", cleanupConfirmed: true,
     });
+  });
+
+  it("keeps the documented init identity when the turn stops before a result", async () => {
+    const root = fixtureRoot("antigravity canonical init");
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { cwd: process.cwd(), tools: [], permission_mode: "request-review" } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+process.exit(0);
+`);
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
+      failure: { reason: "process-exit" },
+    });
+    expect(sessions).toEqual([CONVERSATION]);
+  });
+
+  it("rejects a documented init for a different conversation in a resumed run", async () => {
+    const root = fixtureRoot("antigravity canonical init foreign");
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(foreign)}, init: { cwd: process.cwd(), tools: [] } });
+emit({ event: "step_update", step_update: { text_delta: "Foreign answer" } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Foreign answer" } });
+hang();
+`);
+    const text: string[] = [];
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root, { sessionId: CONVERSATION }), {
+      onText: (event) => text.push(event.text),
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(text).toEqual([]);
+    expect(sessions).not.toContain(foreign);
+  });
+
+  it("fails closed when an init carries conflicting conversation identities", async () => {
+    const root = fixtureRoot("antigravity conflicting init");
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { conversation_id: ${JSON.stringify(foreign)} } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Answer" } });
+hang();
+`);
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(result.sessionId).toBeUndefined();
+    expect(sessions).toEqual([]);
   });
 
   it("fails fast into the Connect prompt when Antigravity reports missing sign-in", async () => {

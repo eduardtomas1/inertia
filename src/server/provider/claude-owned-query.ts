@@ -29,7 +29,6 @@ export interface ClaudeOwnedQueryDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
   /** Small deterministic wire budgets for synthetic transport tests. */
   transportLimits?: ClaudeTransportLimits;
-  /** Test seam for platform-specific executable invocation. */
   platform?: NodeJS.Platform;
 }
 

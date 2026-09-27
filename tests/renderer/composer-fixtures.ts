@@ -33,6 +33,27 @@ export const provider: ProviderInfo = {
   },
 };
 
+export const routedProvider: ProviderInfo = {
+  ...provider,
+  models: [{
+    id: "agent",
+    label: "Routed Agent",
+    description: "",
+    isDefault: true,
+    inputModalities: ["text"],
+    reasoningOptions: [],
+    defaultReasoningEffort: "",
+  }],
+  metadataState: {
+    ...provider.metadataState,
+    models: {
+      ...provider.metadataState.models,
+      freshness: "fresh",
+      provenance: "provider",
+    },
+  },
+};
+
 export function conversation(id: string): Conversation {
   return {
     id,

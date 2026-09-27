@@ -52,7 +52,7 @@ import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
-import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
+import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -122,7 +122,7 @@ export const Composer = memo(function Composer({
   onClearPromptContext,
 }: ComposerProps): React.JSX.Element {
   const [message, setMessage] = useState(
-    () => window.localStorage.getItem(`inertia:draft:${conversation.id}`) ?? "",
+    () => readComposerDraft(conversation.id),
   );
   const [promptStash, setPromptStash] = useComposerPromptStash(
     promptStashEnabled,
@@ -328,9 +328,7 @@ export const Composer = memo(function Composer({
     }
     submittingRef.current = false;
     setSubmitting(false);
-    const nextDraft = window.localStorage.getItem(
-      `inertia:draft:${conversation.id}`,
-    ) ?? "";
+    const nextDraft = readComposerDraft(conversation.id);
     draftValueRef.current = nextDraft;
     setMessage(nextDraft);
     for (const attachment of attachmentsRef.current) {

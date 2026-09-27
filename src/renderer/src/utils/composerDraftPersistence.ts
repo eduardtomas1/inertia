@@ -8,6 +8,7 @@ type ComposerDraftPersistenceListener = (
 ) => void;
 
 const listeners = new Set<ComposerDraftPersistenceListener>();
+const draftHandoffs = new Map<string, string>();
 
 function notifyComposerDraftPersistence(
   persistence: ComposerDraftPersistence,
@@ -26,6 +27,7 @@ export function persistComposerDraft(
   conversationId: string,
   draft: string,
 ): void {
+  draftHandoffs.delete(conversationId);
   try {
     const key = `inertia:draft:${conversationId}`;
     if (draft) window.localStorage.setItem(key, draft);
@@ -41,6 +43,9 @@ export function clearPersistedComposerDraft(
   conversationId: string,
   expectedDraft: string,
 ): void {
+  if (draftHandoffs.get(conversationId) === expectedDraft) {
+    draftHandoffs.delete(conversationId);
+  }
   try {
     const key = `inertia:draft:${conversationId}`;
     if (window.localStorage.getItem(key) !== expectedDraft) return;
@@ -49,6 +54,24 @@ export function clearPersistedComposerDraft(
     // The accepted in-memory draft still owns the detached mirror.
   }
   notifyComposerDraftPersistence({ conversationId, draft: "" });
+}
+
+export function handOffComposerDraft(
+  conversationId: string,
+  draft: string,
+): void {
+  persistComposerDraft(conversationId, draft);
+  draftHandoffs.set(conversationId, draft);
+}
+
+export function readComposerDraft(conversationId: string): string {
+  const handoff = draftHandoffs.get(conversationId);
+  if (handoff !== undefined) return handoff;
+  try {
+    return window.localStorage.getItem(`inertia:draft:${conversationId}`) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 export function onComposerDraftPersisted(

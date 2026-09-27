@@ -1,11 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ProviderInfo } from "../../src/shared/contracts";
 import { Composer } from "../../src/renderer/src/components/Composer";
-import { persistComposerDraft } from "../../src/renderer/src/utils/composerDraftPersistence";
+import {
+  clearPersistedComposerDraft,
+  handOffComposerDraft,
+  persistComposerDraft,
+  readComposerDraft,
+} from "../../src/renderer/src/utils/composerDraftPersistence";
 
-import { composerProps, conversation, provider } from "./composer-fixtures";
+import { composerProps, conversation, routedProvider } from "./composer-fixtures";
 
 vi.mock("../../src/renderer/src/utils/modelRouteTransition", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/renderer/src/utils/modelRouteTransition")>();
@@ -22,27 +26,6 @@ vi.mock("../../src/renderer/src/utils/modelRouteTransition", async (importOrigin
     }),
   };
 });
-
-const routedProvider: ProviderInfo = {
-  ...provider,
-  models: [{
-    id: "agent",
-    label: "Routed Agent",
-    description: "",
-    isDefault: true,
-    inputModalities: ["text"],
-    reasoningOptions: [],
-    defaultReasoningEffort: "",
-  }],
-  metadataState: {
-    ...provider.metadataState,
-    models: {
-      ...provider.metadataState.models,
-      freshness: "fresh",
-      provenance: "provider",
-    },
-  },
-};
 
 afterEach(() => {
   window.localStorage.clear();
@@ -85,5 +68,26 @@ describe("composer route transfer", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
     expect(window.localStorage.getItem(`inertia:draft:${source.id}`)).toBeNull();
     expect(window.localStorage.getItem(`inertia:draft:${target.id}`)).toBe(text);
+  });
+
+  it("releases an in-memory handoff once the composer accepts or replaces it", () => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is full.", "QuotaExceededError");
+    });
+    try {
+      handOffComposerDraft("handoff-sent", "Handed-off text");
+      handOffComposerDraft("handoff-kept", "Handed-off text");
+      expect(readComposerDraft("handoff-sent")).toBe("Handed-off text");
+
+      clearPersistedComposerDraft("handoff-sent", "Handed-off text");
+      clearPersistedComposerDraft("handoff-kept", "A different draft");
+      expect(readComposerDraft("handoff-sent")).toBe("");
+      expect(readComposerDraft("handoff-kept")).toBe("Handed-off text");
+
+      persistComposerDraft("handoff-kept", "");
+      expect(readComposerDraft("handoff-kept")).toBe("");
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

@@ -67,7 +67,7 @@ import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
-import { persistComposerDraft } from "./utils/composerDraftPersistence";
+import { handOffComposerDraft } from "./utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
@@ -710,7 +710,7 @@ export default function App(): React.JSX.Element {
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
     if (options?.prefillText) {
-      persistComposerDraft(event.result.conversationId, options.prefillText);
+      handOffComposerDraft(event.result.conversationId, options.prefillText);
     }
     if (
       selectionGeneration !== conversationSelectionGenerationRef.current

@@ -337,6 +337,10 @@ function startCursorRun(
         return;
       }
       if (!ownsActivePrompt()) return;
+      const planUpdate = safeParams.update.sessionUpdate;
+      if (sessionId && (planUpdate === "plan" || planUpdate === "plan_update" || planUpdate === "plan_removed")) {
+        todoSessions.reset(sessionId);
+      }
       handleCursorProviderEvent(() => {
         handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions);
       }, "Cursor ACP sent an invalid update.");
@@ -383,7 +387,7 @@ function startCursorRun(
         return { outcome: { outcome: "cancelled" } };
       }
       const params = parseCursorPlanRequest(redactHostMcpPayload(rawParams));
-      emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(params.todos, params.plan) });
+      emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(todoSessions.apply(sessionId, { merge: false, todos: params.todos }), params.plan) });
       // Acceptance lets Cursor persist a plan artifact. Reuse the same
       // one-shot file-change policy as native ACP edit permission requests;
       // displaying a plan does not itself grant supervised write authority.

@@ -13,7 +13,10 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-type TodoUpdate = { merge: boolean; todos: Array<Record<string, string>> };
+type TodoUpdate =
+  | { merge: boolean; todos: Array<Record<string, string>> }
+  | { createPlan: Array<Record<string, string>> }
+  | { plan: Array<Record<string, string>> };
 
 function todoAgent(root: string, turns: Record<string, TodoUpdate[]>): string {
   const command = portableNodeExecutable(root, "cursor-agent");
@@ -30,10 +33,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/load") return send({ jsonrpc: "2.0", id: message.id, result: { modes, configOptions: [] } });
   if (message.method === "session/prompt") {
     const prompt = message.params.prompt.find((block) => block.type === "text").text;
-    for (const update of turns[prompt] ?? []) {
-      send({ jsonrpc: "2.0", method: "cursor/update_todos", params: { toolCallId: "todo-tool", ...update } });
-    }
-    return setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } }), 20);
+    const updates = turns[prompt] ?? [];
+    updates.forEach((update, index) => setTimeout(() => {
+      if (update.createPlan) send({ jsonrpc: "2.0", id: "plan-" + index, method: "cursor/create_plan", params: { toolCallId: "plan-tool", plan: "Replacement plan", todos: update.createPlan } });
+      else if (update.plan) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: update.plan } } });
+      else send({ jsonrpc: "2.0", method: "cursor/update_todos", params: { toolCallId: "todo-tool", ...update } });
+    }, index * 20));
+    return setTimeout(() => send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } }), updates.length * 20 + 20);
   }
 });
 `);
@@ -55,7 +61,7 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
       { commands: { cursor: todoAgent(root, turns) } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
-    return async (prompt: string, sessionId?: string) => {
+    return async (prompt: string, sessionId?: string, access: "supervised" | "full" = "supervised") => {
       const plans: string[][] = [];
       await expect(manager.run(nativeProviderRunInput({
         providerId: "cursor",
@@ -63,7 +69,7 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
         cwd: root,
         prompt,
         interactionMode: "build",
-        access: "supervised",
+        access,
         ...(sessionId ? { sessionId } : {}),
       }), {
         onPlan: (event) => plans.push(snapshot(event.steps)),
@@ -100,6 +106,26 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
       ["D:pending"],
     ]);
     await expect(turn("fresh")).resolves.toEqual([["E:pending"]]);
+  });
+
+  it("replaces cached todos when Cursor sends a full plan", async () => {
+    const turn = await runTurns({
+      first: [
+        { merge: false, todos: [{ id: "a", content: "A", status: "pending" }, { id: "b", content: "B", status: "pending" }] },
+        { createPlan: [{ id: "c", content: "C", status: "pending" }, { id: "d", content: "D", status: "pending" }] },
+        { merge: true, todos: [{ id: "c", status: "completed" }] },
+        { plan: [{ content: "E", priority: "medium", status: "pending" }] },
+        { merge: true, todos: [{ id: "f", content: "F", status: "pending" }] },
+      ],
+    });
+
+    await expect(turn("first", undefined, "full")).resolves.toEqual([
+      ["A:pending", "B:pending"],
+      ["C:pending", "D:pending"],
+      ["C:completed", "D:pending"],
+      ["E:pending"],
+      ["F:pending"],
+    ]);
   });
 
   it("keeps cancelled native todos cancelled across later updates", async () => {

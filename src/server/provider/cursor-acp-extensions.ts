@@ -254,7 +254,7 @@ export class CursorTodoSessions {
     this.sessions.delete(sessionId);
   }
 
-  apply(sessionId: string, params: CursorTodosParams): CursorTodo[] {
+  apply(sessionId: string, params: Pick<CursorTodosParams, "merge" | "todos">): CursorTodo[] {
     const todos = new Map(params.merge ? this.sessions.get(sessionId) : undefined);
     for (const todo of params.todos) {
       const key = todo.id === undefined ? `anonymous:${todos.size}` : `id:${todo.id}`;

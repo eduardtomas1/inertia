@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import {
+  terminateProcessTreeAndWait,
+  type ProcessTreeTerminator,
+} from "../../src/server/process-lifecycle";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { windowsCleanupFailures } from "../../src/server/windows-cleanup-diagnostics";
 import {
@@ -19,7 +23,11 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 
 type Scenario = Parameters<typeof lifecycleServerSource>[2];
 
-function lifecycleManager(scenario: Scenario, label: string) {
+function lifecycleManager(
+  scenario: Scenario,
+  label: string,
+  terminateProcessTree?: ProcessTreeTerminator,
+) {
   const root = portableFixtureRoot(label);
   const capturePath = join(root, "capture.json");
   const command = portableNodeExecutable(root, "opencode");
@@ -29,6 +37,7 @@ function lifecycleManager(scenario: Scenario, label: string) {
     new AgentHarnessRegistry([createOpenCodeSdkHarness({
       runDeadlineMs: 12_000,
       eventInactivityDeadlineMs: 8_000,
+      ...(terminateProcessTree ? { terminateProcessTree } : {}),
     })]),
   );
   const input = nativeProviderRunInput({
@@ -48,9 +57,10 @@ describe("OpenCode owned-server loss", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  it("fails the run promptly when the owned server exits after the prompt", async () => {
+  it("fails the run promptly when the owned server exits after the prompt, with its tree unprovable only on Windows", async () => {
     const { root, manager, input } = lifecycleManager("server-exit", "OpenCode server exit");
     roots.push(root);
+    const windows = process.platform === "win32";
 
     const result = await manager.run(input);
     const evidence = JSON.stringify({
@@ -61,16 +71,55 @@ describe("OpenCode owned-server loss", { concurrent: false }, () => {
       windowsCleanupFailures: windowsCleanupFailures(),
     });
 
-    expect(result, evidence).toMatchObject({
+    expect(result, evidence).toMatchObject(windows
+      ? {
+          status: "failed",
+          failure: { phase: "cleanup", terminalEvent: "process-tree/cleanup" },
+          cleanupConfirmed: false,
+        }
+      : {
+          status: "failed",
+          failure: { phase: "runtime" },
+          cleanupConfirmed: true,
+        });
+    expect(result.error, evidence).toMatch(
+      /^(?:The OpenCode server exited|OpenCode closed its event stream) before the session completed\./u,
+    );
+    if (windows) {
+      expect(result.error, evidence).toContain(
+        "Cleanup also failed: OpenCode server process tree could not be confirmed stopped.",
+      );
+      expect(manager.activeConversationIds()).toEqual([input.conversationId]);
+    } else {
+      expect([
+        ["The OpenCode server exited before the session completed.", "process-exit"],
+        ["OpenCode closed its event stream before the session completed.", "transport-closed"],
+      ]).toContainEqual([result.error, result.failure?.reason]);
+      expect(manager.activeConversationIds()).toEqual([]);
+    }
+  });
+
+  it("reports the server loss with unconfirmed cleanup when its process tree cannot be proven stopped", async () => {
+    const unprovableTerminator: ProcessTreeTerminator = async (child, force) => {
+      await terminateProcessTreeAndWait(child, force);
+      return false;
+    };
+    const { root, manager, input } = lifecycleManager(
+      "server-exit",
+      "OpenCode server exit unprovable",
+      unprovableTerminator,
+    );
+    roots.push(root);
+
+    await expect(manager.run(input)).resolves.toMatchObject({
       status: "failed",
-      failure: { phase: "runtime" },
-      cleanupConfirmed: true,
+      error: expect.stringMatching(
+        /(?:exited|closed its event stream) before the session completed\..*Cleanup also failed: OpenCode server process tree could not be confirmed stopped\./u,
+      ),
+      failure: { phase: "cleanup", terminalEvent: "process-tree/cleanup" },
+      cleanupConfirmed: false,
     });
-    expect([
-      ["The OpenCode server exited before the session completed.", "process-exit"],
-      ["OpenCode closed its event stream before the session completed.", "transport-closed"],
-    ]).toContainEqual([result.error, result.failure?.reason]);
-    expect(manager.activeConversationIds()).toEqual([]);
+    expect(manager.activeConversationIds()).toEqual([input.conversationId]);
   });
 
   it("fails instead of reconnecting when the event stream drops", async () => {

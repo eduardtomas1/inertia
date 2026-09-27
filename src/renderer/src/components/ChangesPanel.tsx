@@ -76,13 +76,13 @@ const loadReviewNoteDialog = createSurfaceLoader(() => import("./ReviewNoteDialo
 type ReviewAction = "ask" | "revise" | "revert" | "note";
 type ReviewFilter = "all" | "unreviewed" | "reviewed";
 
-function pathParts(path: string): { name: string; parent: string } {
+export function changedFilePathParts(path: string): { name: string; parent: string } {
   // Git's wire paths use "/" on every platform. A backslash can be a literal
   // filename character on POSIX and must remain part of the visible basename.
   const parts = path.split("/");
   return { name: parts.at(-1) ?? path, parent: parts.slice(0, -1).join("/") };
 }
-function statusLabel(file: ChangedFile): string {
+export function changedFileStatusLabel(file: ChangedFile): string {
   const status = file.status.trim().toLowerCase();
   if (file.untracked || status === "??" || status === "untracked") return "Untracked";
   if (status === "a" || status === "added") return "Added";
@@ -95,8 +95,8 @@ function statusLabel(file: ChangedFile): string {
   return "Modified";
 }
 
-function statusCode(file: ChangedFile): string {
-  const label = statusLabel(file);
+export function changedFileStatusCode(file: ChangedFile): string {
+  const label = changedFileStatusLabel(file);
   if (label === "Untracked") return "U";
   if (label === "Conflict") return "!";
   if (label === "Type changed") return "T";
@@ -104,11 +104,27 @@ function statusCode(file: ChangedFile): string {
   return label.charAt(0);
 }
 
+export function changedFileWorkingState(file: ChangedFile): string {
+  if (file.untracked) return "untracked";
+  if (file.staged && file.unstaged) return "staged + unstaged";
+  if (file.staged) return "staged";
+  return "unstaged";
+}
+
 function actionLabel(action: ReviewAction): string {
   if (action === "ask") return "Ask agent";
   if (action === "revise") return "Request revision";
   if (action === "note") return "Save local note";
   return "Revert selected lines";
+}
+
+function hunkNoteKind(note: DiffReviewNote): string {
+  return note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "hunk note";
+}
+
+function noteControlLabel(action: "Edit" | "Delete", kind: string, note: DiffReviewNote): string {
+  const body = note.body.trim().replace(/\s+/gu, " ");
+  return `${action} ${kind}: ${body.length > 60 ? `${body.slice(0, 59)}…` : body}`;
 }
 
 const classificationLabels: Record<DiffReviewClassificationHint["classification"], string> = {
@@ -186,6 +202,8 @@ export function ChangesPanel({
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const restoreQuestionFocusRef = useRef(false);
+  const draftRef = useRef({ selection, reviewAction, comment });
+  draftRef.current = { selection, reviewAction, comment };
   const questionStopVisible = questionRunning
     || (reviewAction === "ask" && submitting);
   const persistentReview = capabilities?.persistentReview ?? true;
@@ -211,12 +229,18 @@ export function ChangesPanel({
   const toolbarFiles = headerMetrics?.files ?? files.length;
   const toolbarInsertions = headerMetrics?.insertions ?? totals.insertions;
   const toolbarDeletions = headerMetrics?.deletions ?? totals.deletions;
+  const fingerprints = useMemo(() => ({
+    files: new Map<DiffFile, string>(structured.files.map((file) => [file, diffFileFingerprint(file)])),
+    hunks: new Map<DiffHunk, string>(structured.files.flatMap((file) => file.hunks.map((hunk) => [hunk, diffHunkFingerprint(file, hunk)]))),
+  }), [structured.files]);
+  const hunkFingerprint = (file: DiffFile, hunk: DiffHunk): string => fingerprints.hunks.get(hunk) ?? diffHunkFingerprint(file, hunk);
+  const fileFingerprint = (file: DiffFile): string => fingerprints.files.get(file) ?? diffFileFingerprint(file);
   const hunkReviewed = (file: DiffFile, hunk: DiffHunk): boolean => {
-    const fingerprint = diffHunkFingerprint(file, hunk);
+    const fingerprint = hunkFingerprint(file, hunk);
     return reviewStates.some((state) => state.scope === "hunk" && state.path === file.path && state.hunkId === hunk.id && state.targetFingerprint === fingerprint && state.reviewed && !state.stale);
   };
   const fileReviewed = (file: DiffFile): boolean => {
-    const fingerprint = diffFileFingerprint(file);
+    const fingerprint = fileFingerprint(file);
     return reviewStates.some((state) => state.scope === "file" && state.path === file.path && state.targetFingerprint === fingerprint && state.reviewed && !state.stale);
   };
   const effectivelyReviewed = (file: DiffFile, hunk: DiffHunk): boolean => fileReviewed(file) || hunkReviewed(file, hunk);
@@ -306,7 +330,9 @@ export function ChangesPanel({
   const submit = async (file: DiffFile, hunk: DiffHunk) => {
     const selected = reviewSelection(file, hunk);
     if (!selected || !reviewAction || submitting) return;
+    const submitted = draftRef.current;
     setSubmitting(true);
+    setSelectionError(null);
     try {
       if (reviewAction === "ask") await onAsk(selected, comment);
       if (reviewAction === "revise") await onRequestRevision(selected, comment);
@@ -319,7 +345,14 @@ export function ChangesPanel({
         targetFingerprint: selectedLineFingerprint(file, hunk, selected.lineIds),
         body: comment,
       });
-      clearSelection();
+      const current = draftRef.current;
+      if (
+        current.selection === submitted.selection
+        && current.reviewAction === submitted.reviewAction
+        && current.comment === submitted.comment
+      ) clearSelection();
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);
     } finally {
       setSubmitting(false);
     }
@@ -335,14 +368,18 @@ export function ChangesPanel({
   };
   const toggleState = async (file: DiffFile, hunk?: DiffHunk) => {
     const currentReviewed = hunk ? hunkReviewed(file, hunk) : fileReviewed(file);
-    await onSetReviewState({
-      repositoryPath,
-      scope: hunk ? "hunk" : "file",
-      path: file.path,
-      hunkId: hunk?.id ?? null,
-      targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
-      reviewed: !currentReviewed,
-    });
+    try {
+      await onSetReviewState({
+        repositoryPath,
+        scope: hunk ? "hunk" : "file",
+        path: file.path,
+        hunkId: hunk?.id ?? null,
+        targetFingerprint: hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file),
+        reviewed: !currentReviewed,
+      });
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : "The review mark could not be saved.");
+    }
   };
   const createScopedNote = (file: DiffFile, hunk?: DiffHunk) => {
     setNoteDraft({
@@ -353,7 +390,7 @@ export function ChangesPanel({
         path: file.path,
         hunkId: hunk?.id ?? null,
         lineIds: [],
-        targetFingerprint: hunk ? diffHunkFingerprint(file, hunk) : diffFileFingerprint(file),
+        targetFingerprint: hunk ? hunkFingerprint(file, hunk) : fileFingerprint(file),
         body,
       }),
     });
@@ -463,17 +500,17 @@ export function ChangesPanel({
         <div className="panel-empty changes-empty"><GitCompareArrows size={22} /><h3>{emptyState?.title ?? "No local changes"}</h3><p>{emptyState?.detail ?? "Edits made in this workspace will appear here."}</p></div>
       ) : (
         <div className="changes-layout">
-          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{statusCode(file)} · {file.path}</option>)}</select></div>}
+          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
           {fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
-              const parts = pathParts(file.path);
+              const parts = changedFilePathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={statusLabel(file)}>{statusCode(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
-                  <span>{file.staged ? "staged" : ""}{file.staged && file.unstaged ? " + " : ""}{file.unstaged ? "unstaged" : ""}</span>
+                  <span>{changedFileWorkingState(file)}</span>
                   <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
                   {diffFile && fileReviewed(diffFile) && <Check size={11} aria-label="File reviewed" />}
                 </span>
@@ -498,19 +535,19 @@ export function ChangesPanel({
                   <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
                     <span><StickyNote size={12} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId !== null && note.stale && !selectedFile.hunks.some((hunk) => hunk.id === note.hunkId)).map((note) => (
                   <div className="diff-review-note is-stale" key={note.id}>
                     <span><StickyNote size={12} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
-                <p className="diff-selection-help">Select a line, then Shift-click another to review a range.</p>
+                <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
                 {selectedFile.hunks.map((hunk) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);
@@ -540,8 +577,8 @@ export function ChangesPanel({
                         <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                         {agentRevision && <button type="button" disabled={note.stale} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
-                        <IconButton label="Edit note" onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                        <IconButton label="Delete note" onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                        <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
+                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                       </div>
                     ))}
                     {hunk.lines.map((line, index) => <div key={line.id}>
@@ -549,6 +586,11 @@ export function ChangesPanel({
                         type="button"
                         className={clsx("diff-line", `is-${line.kind}`, selected?.lineIds.includes(line.id) && "is-selected")}
                         onClick={(event) => chooseLine(hunk, index, event.shiftKey)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || !event.shiftKey) return;
+                          event.preventDefault();
+                          chooseLine(hunk, index, true);
+                        }}
                         disabled={line.kind === "meta"}
                       >
                         <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>

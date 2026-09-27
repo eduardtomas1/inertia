@@ -382,7 +382,7 @@ export function useWorkspaceGit({
         ignoreWhitespace,
         ...(commitReview ? { commitReview: true } : {}),
       },
-    }));
+    }, { passive: !commitReview }));
     if (event.result.kind !== "git.workspace.diff") {
       throw new Error("Unexpected workspace diff response.");
     }

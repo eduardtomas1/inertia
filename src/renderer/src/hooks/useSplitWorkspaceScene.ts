@@ -196,10 +196,14 @@ export function useSplitWorkspaceScene({
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
+    runOptions?: { passive?: boolean },
   ): Promise<ServerEvent> => {
     const busyKey = `${busyPrefix}${key}`;
-    setBusyAction(busyKey);
-    setActionError(null);
+    const passive = runOptions?.passive === true;
+    if (!passive) {
+      setBusyAction(busyKey);
+      setActionError(null);
+    }
     try {
       const event = await connection.sendCommand(withRequestId(command));
       if (commandRefreshesConversationDetail(command, event)) {
@@ -214,7 +218,7 @@ export function useSplitWorkspaceScene({
       );
       throw error;
     } finally {
-      setBusyAction((current) => current === busyKey ? null : current);
+      if (!passive) setBusyAction((current) => current === busyKey ? null : current);
     }
   }, [
     busyPrefix,

@@ -1,7 +1,8 @@
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewPanel } from "../../src/renderer/src/components/PreviewPanel";
+import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 
 let notifyResize: (() => void) | undefined;
 
@@ -114,5 +115,63 @@ describe("PreviewPanel native bounds", () => {
 
     view.unmount();
     expect(onBoundsChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("delivers mounted bounds to the lease of every chat the pane shows", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 20,
+      y: 30,
+      width: 640,
+      height: 420,
+      top: 30,
+      left: 20,
+      right: 660,
+      bottom: 450,
+      toJSON: () => ({}),
+    });
+    const previewSetBounds = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        previewConnect: vi.fn(async () => ({
+          url: "", loading: false, canGoBack: false, canGoForward: false,
+          activeTabId: null, tabs: [], agentActivity: null,
+          evidence: { revision: 0, entries: [], omitted: false },
+        })),
+        previewClose: vi.fn(async () => undefined),
+        previewSetBounds,
+        onPreviewState: vi.fn(() => () => undefined),
+      },
+    });
+    function Harness({ contextId }: { contextId: string }): React.JSX.Element {
+      const tools = useDesktopTools({
+        setActionError: vi.fn(),
+        previewOwnerId: "primary",
+        previewContextId: contextId,
+      });
+      return (
+        <PreviewPanel
+          owner="primary"
+          contextId={contextId}
+          url={tools.previewUrl}
+          onNavigate={vi.fn()}
+          onOpenExternal={vi.fn()}
+          onBoundsChange={tools.setPreviewBounds}
+        />
+      );
+    }
+    const bounds = { x: 20, y: 30, width: 640, height: 420 };
+    const view = render(<Harness contextId="chat-a" />);
+
+    await waitFor(() => expect(previewSetBounds).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: "chat-a", bounds }),
+    ));
+
+    view.rerender(<Harness contextId="chat-b" />);
+
+    await waitFor(() => expect(previewSetBounds).toHaveBeenLastCalledWith(
+      expect.objectContaining({ contextId: "chat-b", bounds }),
+    ));
   });
 });

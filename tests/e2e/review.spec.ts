@@ -90,7 +90,7 @@ test("creates and edits a review note with keyboard access in the native window"
   await dialog.getByRole("button", { name: "Save note" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Explain why this exported value changes.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Edit note", exact: true }).first().click();
+  await page.getByRole("button", { name: "Edit file note: Explain why this exported value changes.", exact: true }).first().click();
   const editor = page.getByRole("dialog", { name: "Edit review note" });
   await expect(editor.getByRole("textbox", { name: "Review note" })).toHaveValue("Explain why this exported value changes.");
   await editor.getByRole("textbox", { name: "Review note" }).fill("Verified with the neighboring call sites.");

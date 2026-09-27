@@ -30,6 +30,36 @@ it.each([true, false])("retains busy cleanup and propagates failure with global 
   expect(clear("other operation")).toBe("other operation");
 });
 
+it("runs a passive command without clearing the visible error or toggling busy state", async () => {
+  const setActionError = vi.fn();
+  const setBusyAction = vi.fn();
+  const refreshDetail = vi.fn();
+  const event = {
+    type: "request.result" as const,
+    requestId: "request",
+    result: {
+      kind: "git.workspace.diff" as const,
+      diff: { repositoryPath: ".", reviewMetadataChanged: true, patch: "", truncated: false, files: [] },
+    },
+  };
+  const { result } = renderHook(() => useAppRuntimeActions({
+    sendCommand: vi.fn().mockResolvedValue(event), refreshDetail, setActionError, setBusyAction,
+  }));
+  const diffCommand: CommandWithoutId = {
+    type: "git.workspace.diff",
+    payload: {
+      projectId: "11111111-1111-4111-8111-111111111111", repositoryPath: ".",
+      authorityRef: "22222222-2222-4222-8222-222222222222",
+    },
+  };
+  await act(async () => {
+    await expect(result.current.run(diffCommand.type, diffCommand, { passive: true })).resolves.toBe(event);
+  });
+  expect(setActionError).not.toHaveBeenCalled();
+  expect(setBusyAction).not.toHaveBeenCalled();
+  expect(refreshDetail).toHaveBeenCalledOnce();
+});
+
 it.each([
   ["ambiguous", true],
   ["rejected", false],

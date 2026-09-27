@@ -970,6 +970,8 @@ export function createWorkspaceSceneModel({
         fontSize: settings.terminalFontSize,
         theme: settings.theme,
         colorTheme: settings.colorTheme,
+        lightColorTheme: settings.lightColorTheme,
+        darkColorTheme: settings.darkColorTheme,
         sendCommand: connection.sendCommand,
         subscribe: connection.subscribe,
         providerResumes: terminalResumeOptions,

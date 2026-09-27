@@ -7771,13 +7771,13 @@ button.header-breadcrumb-project:hover {
   box-shadow: inset 0 -1px color-mix(in srgb, var(--accent) 58%, var(--border));
   color: var(--text-soft);
 }
-.file-entry-list[role="tree"] { position: relative; }
+.file-entry-list { position: relative; }
 .files-layout.is-explorer-open .file-entry-list {
   border-right: 0;
   border-left: 1px solid var(--border);
 }
 .file-tree-row-group { min-width: 0; }
-.file-entry-list[role="tree"] .file-entry {
+.file-entry-list .file-entry {
   min-height: 34px;
   padding: 4px 8px 4px calc(7px + var(--file-tree-indent, 0px));
 }

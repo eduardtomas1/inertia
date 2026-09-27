@@ -285,6 +285,168 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.getByRole("button", { name: "Ask about" })).toBeDisabled();
   });
 
+  it("keeps a selection drafted while an earlier question was still answering", async () => {
+    let finishQuestion!: () => void;
+    const onAsk = vi.fn(() => new Promise<void>((resolve) => {
+      finishQuestion = resolve;
+    }));
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{ patch: patchFor("README.md"), truncated: false, files: [changedFile("README.md")] }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onAsk={onAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+      target: { value: "First question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+    expect(onAsk).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "− before" }));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".diff-selection-popover")!)
+      .getByRole("button", { name: "Note" }));
+    fireEvent.change(screen.getByPlaceholderText("Write a local note about this range…"), {
+      target: { value: "Second draft" },
+    });
+    await act(async () => finishQuestion());
+
+    expect(screen.getByPlaceholderText("Write a local note about this range…"))
+      .toHaveValue("Second draft");
+  });
+
+  it("shows review action failures without losing the draft", async () => {
+    const onAsk = vi.fn(async () => {
+      throw new Error("The review question could not be sent.");
+    });
+    const onSetReviewState = vi.fn(async () => {
+      throw new Error("The review mark could not be saved.");
+    });
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{ patch: patchFor("README.md"), truncated: false, files: [changedFile("README.md")] }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onAsk={onAsk}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={onSetReviewState}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+      target: { value: "Keep this question" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The review question could not be sent.",
+    );
+    expect(screen.getByPlaceholderText("What would you like to know?"))
+      .toHaveValue("Keep this question");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark file reviewed" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(
+      "The review mark could not be saved.",
+    ));
+  });
+
+  it("extends a line selection from the keyboard", () => {
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{ patch: patchFor("README.md"), truncated: false, files: [changedFile("README.md")] }}
+        selectedPath="README.md"
+        summary={null}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "− before" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "+ after" }), {
+      key: "Enter",
+      shiftKey: true,
+    });
+    fireEvent.click(within(document.querySelector<HTMLElement>(".diff-selection-popover")!)
+      .getByRole("button", { name: "Note" }));
+    expect(screen.getByText("2 selected lines")).toBeInTheDocument();
+    expect(screen.getByText(/Shift\+Enter/u)).toBeInTheDocument();
+  });
+
+  it("names each review note control after its note", () => {
+    const note = (id: string, hunkId: string | null, body: string) => ({
+      id,
+      conversationId: "11111111-1111-4111-8111-111111111111",
+      repositoryPath: ".",
+      path: "README.md",
+      hunkId,
+      lineIds: [],
+      targetFingerprint: "a".repeat(64),
+      body,
+      stale: hunkId !== null,
+      createdAt: "2026-09-27T12:00:00.000Z",
+      updatedAt: "2026-09-27T12:00:00.000Z",
+    });
+    render(
+      <ChangesPanel
+        files={[changedFile("README.md")]}
+        diff={{ patch: patchFor("README.md"), truncated: false, files: [changedFile("README.md")] }}
+        selectedPath="README.md"
+        summary={null}
+        notes={[
+          note("note-file", null, "Explain the rename"),
+          note("note-stale", "hunk-missing", "Check the heading"),
+        ]}
+        onSelectFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Edit file note: Explain the rename" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete file note: Explain the rename" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit stale note: Check the heading" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit note" })).not.toBeInTheDocument();
+  });
+
   it("clears a completed stop attempt before a later question starts", async () => {
     const onCancelAsk = vi.fn(async () => undefined);
     const panel = (questionRunning: boolean): React.JSX.Element => (
@@ -498,6 +660,102 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.queryByText(/alpha after/u)).not.toBeInTheDocument();
     expect(screen.getByText("modules/clean is clean", { exact: true }))
       .toBeInTheDocument();
+  });
+
+  it("keeps the loaded diff and an in-progress review comment across a same-file refresh", async () => {
+    const props = {
+      projectName: "Inertia",
+      summary: null,
+      onRefresh: vi.fn(),
+      onOpenWorkspaceFile: vi.fn(),
+      onAsk: vi.fn(async () => undefined),
+      onRequestRevision: vi.fn(async () => undefined),
+      onRevert: vi.fn(async () => undefined),
+      onSetReviewState: vi.fn(async () => undefined),
+      onCreateNote: vi.fn(async () => undefined),
+      onUpdateNote: vi.fn(async () => undefined),
+      onDeleteNote: vi.fn(async () => undefined),
+      onAddTextToPrompt: vi.fn(),
+      onAddToPrompt: vi.fn(),
+    };
+    const loader = () => vi.fn(async (repositoryPath: string, filePath?: string) => ({
+      repositoryPath,
+      patch: patchFor(filePath ?? "README.md"),
+      truncated: false,
+      files: [changedFile(filePath ?? "README.md")],
+    }));
+    const firstLoader = loader();
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<WorkspaceChangesPanel
+        {...props}
+        snapshot={snapshot}
+        onLoadRepositoryDiff={firstLoader}
+      />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+    fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+      target: { value: "Why this change?" },
+    });
+
+    const refreshedLoader = loader();
+    await act(async () => {
+      view.rerender(<WorkspaceChangesPanel
+        {...props}
+        snapshot={structuredClone(snapshot)}
+        onLoadRepositoryDiff={refreshedLoader}
+      />);
+    });
+
+    expect(refreshedLoader).toHaveBeenCalledWith(".", "README.md");
+    expect(screen.getByRole("region", { name: "Diff content for README.md" }))
+      .toBeInTheDocument();
+    expect(screen.getByPlaceholderText("What would you like to know?"))
+      .toHaveValue("Why this change?");
+    expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+  });
+
+  it("labels copied, type-changed, and unknown repository files like the review list", async () => {
+    const files = [
+      { ...changedFile("copied.ts"), status: "copied" },
+      { ...changedFile("link.ts"), status: "type-changed" },
+      { ...changedFile("odd.ts"), status: "unknown" },
+      { ...changedFile("new.ts"), status: "untracked", untracked: true },
+    ];
+    await act(async () => {
+      render(<WorkspaceChangesPanel
+        projectName="Inertia"
+        snapshot={{ ...snapshot, repositories: [{ ...snapshot.repositories[0]!, files }] }}
+        summary={null}
+        onRefresh={vi.fn()}
+        onLoadRepositoryDiff={async (repositoryPath, filePath) => ({
+          repositoryPath, patch: patchFor(filePath!), files, truncated: false,
+        })}
+        onOpenWorkspaceFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={vi.fn(async () => undefined)}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />);
+    });
+    const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
+    expect([...navigator.querySelectorAll(".change-file-status")].map((node) => [
+      node.textContent,
+      node.getAttribute("title"),
+    ])).toEqual([
+      ["C", "Copied"],
+      ["T", "Type changed"],
+      ["?", "Unknown"],
+      ["U", "Untracked"],
+    ]);
+    expect(screen.getByRole("combobox", { name: "Repository and changed file" }))
+      .toHaveTextContent("C · copied.ts");
   });
 
   it("runs requested commit and push actions against the exact nested repository identity", async () => {

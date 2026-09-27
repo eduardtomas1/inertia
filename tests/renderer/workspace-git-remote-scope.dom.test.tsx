@@ -96,6 +96,47 @@ describe("remote Git workspace scope", () => {
     expect(hook.result.current.workspaceGitStatus).toBeNull();
     expect(options.setActionError).not.toHaveBeenCalled();
   });
+  it("loads review diffs passively and keeps the commit review user-initiated", async () => {
+    const authorityRef = "66666666-6666-4666-8666-666666666666";
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") return result({ kind: "git.status", status: {
+        isRepository: true, root: alpha.path, branch: "main", upstream: null, ahead: 0, behind: 0,
+        hasRemote: false, files: [], insertions: 0, deletions: 0,
+      } });
+      if (command.type === "git.workspace.refresh") return result({ kind: "git.workspace.status", status: {
+        repositories: [{
+          repositoryPath: ".", authorityRef, state: "ready", error: null, branch: "main", upstream: null,
+          ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0, clean: true, truncated: false,
+        }],
+        files: 0, insertions: 0, deletions: 0, scannedDirectories: 1, skippedDirectories: 0,
+        discoveredRepositories: 1, repositoryLimit: 16, partial: false, truncated: false, issues: [],
+      } });
+      throw new Error(`Unexpected ${command.type}`);
+    });
+    const run = vi.fn(async (): Promise<ServerEvent> => result({ kind: "git.workspace.diff", diff: {
+      repositoryPath: ".", patch: "", truncated: false, files: [],
+    } }));
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      project: alpha, conversation: alphaChat, enabled: true, online: true, loadStatusOnMount: true,
+      loadWorkspaceOnMount: true, statusOnly: true, ignoreWhitespace: false, refreshVersion: 0, request, run,
+      subscribe: noopSubscribe, setActionError,
+    }));
+    await waitFor(() => expect(hook.result.current.workspaceGitStatus).not.toBeNull());
+
+    await act(async () => {
+      await hook.result.current.loadWorkspaceRepositoryDiff(".", "README.md");
+      await hook.result.current.loadWorkspaceRepositoryDiff(".");
+      await hook.result.current.loadWorkspaceRepositoryDiff(".", undefined, true);
+    });
+
+    expect(run.mock.calls.map((call: unknown[]) => call[2])).toEqual([
+      { passive: true },
+      { passive: true },
+      { passive: false },
+    ]);
+  });
+
   it.each(["git.fetch", "git.pull", "git.push"] as const)("keeps %s in the loaded chat or draft workspace scope", async (type) => {
     const alphaAuthority = "66666666-6666-4666-8666-666666666666";
     const betaAuthority = "77777777-7777-4777-8777-777777777777";

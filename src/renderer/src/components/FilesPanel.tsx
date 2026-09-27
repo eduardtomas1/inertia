@@ -16,13 +16,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
   AlertCircle,
-  ChevronRight,
   Code2,
   Eye,
   ExternalLink,
-  File,
   FileSearch,
-  Folder,
   FolderTree,
   Pencil,
   RefreshCw,
@@ -57,6 +54,8 @@ import {
 import { IconButton, LoadingMark } from "./ui";
 import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
+import { FileTree } from "./FileTree";
+import { useStableActions } from "../hooks/useStableController";
 import { buildFileTreeGitIndex, type FileTreeGitState } from "../utils/fileTreeGit";
 import { directoryChain, freshWorkspaceDirectoryPages, visibleDirectoryEntries } from "../utils/workspaceDirectoryPages";
 export { freshWorkspaceDirectoryPages, type DirectoryPage } from "../utils/workspaceDirectoryPages";
@@ -71,7 +70,6 @@ const loadResponseMarkdown: ResponseMarkdownLoader = (_attempt) =>
   import("./ResponseMarkdown");
 const FILE_PREVIEW_CLASS = "file-preview";
 const FILE_ENTRY_CLASS = "file-entry";
-const FILE_TREE_CLASS = "file-tree";
 const FILE_PANEL_ERROR_CLASS = "file-panel-error";
 const FILE_PREVIEW_TRUNCATED_CLASS = "file-preview-truncated";
 const FILE_LIST_TRUNCATED_CLASS = "file-list-truncated";
@@ -760,6 +758,7 @@ export function FilesPanel({
       toggleDirectory(action.path);
     }
   };
+  const treeActions = useStableActions({ activate: activateRow, keyDown: onTreeKeyDown });
 
   useEffect(() => {
     setFileExplorerOpen(true);
@@ -874,9 +873,6 @@ export function FilesPanel({
           className={`${FILE_ENTRY_CLASS}-list`}
           hidden={!fileExplorerOpen}
           ref={fileListRef}
-          role="tree"
-          aria-label={searchActive ? "Search results" : "Files"}
-          aria-busy={treeBusy}
         >
           {git && <p className="file-git-status" role="status">{gitIndex.notice}</p>}
           {showTreeLoading ? (
@@ -894,103 +890,22 @@ export function FilesPanel({
               <FileSearch size={20} aria-hidden="true" />
               <p>{searchActive ? "No matches." : "Empty project."}</p>
             </div>
-          ) : rows.map((row) => {
-            const { entry } = row;
-            const name = workspacePathName(entry.path);
-            const entryLanguage = entry.kind === "file"
-              ? sourceLanguageForFile(entry.path)
-              : null;
-            const parent = searchActive ? workspaceParentPath(entry.path) : "";
-            const gitDescription = entry.kind === "directory"
-              ? gitIndex.directories.has(entry.path) ? "Contains Git changes" : undefined
-              : gitIndex.files.has(entry.path) ? `Git: ${gitIndex.files.get(entry.path)!.label}` : undefined;
-            const directoryPage = entry.kind === "directory"
-              ? directoryPages.get(entry.path)
-              : undefined;
-            const directoryLoading = loadingDirectories.has(entry.path);
-            const directoryError = directoryErrors.get(entry.path);
-            const showDirectoryStatus = !searchActive
-              && entry.kind === "directory"
-              && row.expanded
-              && (
-                directoryLoading
-                || Boolean(directoryError)
-                || (directoryPage !== undefined && directoryPage.entries.length === 0)
-                || directoryPage?.truncated
-              );
-            return (
-              <div className={`${FILE_TREE_CLASS}-row-group`} key={`${searchActive ? "search" : "tree"}:${entry.path}`}>
-                <button
-                  type="button"
-                  role="treeitem"
-                  aria-label={parent ? `${name} ${parent}` : name}
-                  aria-description={gitDescription}
-                  className={clsx(
-                    FILE_ENTRY_CLASS,
-                    `is-${entry.kind}`,
-                    selectedPath === entry.path && "is-selected",
-                  )}
-                  aria-level={row.depth}
-                  aria-expanded={entry.kind === "directory" && !searchActive ? row.expanded : undefined}
-                  aria-selected={entry.kind === "file" && selectedPath === entry.path}
-                  aria-current={entry.kind === "file" && selectedPath === entry.path ? "true" : undefined}
-                  onClick={() => activateRow(row)}
-                  onKeyDown={(event) => onTreeKeyDown(event, row)}
-                  ref={(node) => {
-                    if (node) itemRefs.current.set(entry.path, node);
-                    else itemRefs.current.delete(entry.path);
-                  }}
-                  tabIndex={entry.path === rovingPath ? 0 : -1}
-                  style={{
-                    "--file-tree-indent": `${Math.min((row.depth - 1) * 13, 91)}px`,
-                  } as React.CSSProperties}
-                  title={entry.path}
-                  data-language-family={entryLanguage?.family}
-                >
-                  {entry.kind === "directory" && !searchActive ? (
-                    <ChevronRight
-                      className={`${FILE_TREE_CLASS}-chevron`}
-                      size={13}
-                      aria-hidden="true"
-                    />
-                  ) : (
-                    <span className={`${FILE_TREE_CLASS}-chevron-spacer`} aria-hidden="true" />
-                  )}
-                  {entry.kind === "directory"
-                    ? <Folder size={15} aria-hidden="true" />
-                    : (
-                        <File
-                          className={`${FILE_LANGUAGE_CLASS}-icon`}
-                          size={15}
-                          aria-hidden="true"
-                        />
-                      )}
-                  <span className={`${FILE_ENTRY_CLASS}-copy`}>
-                    <span className={`${FILE_ENTRY_CLASS}-name`}>{name}</span>
-                    {parent && <span className={`${FILE_ENTRY_CLASS}-path`}>{parent}</span>}
-                  </span>
-                  <FileGitBadge index={gitIndex} path={entry.path} directory={entry.kind === "directory"} />
-                </button>
-                {showDirectoryStatus && (
-                  <div
-                    className={clsx(`${FILE_TREE_CLASS}-status`, directoryError && "is-error")}
-                    role={directoryError ? "alert" : "status"}
-                    style={{
-                      "--file-tree-indent": `${Math.min(row.depth * 13, 104)}px`,
-                    } as React.CSSProperties}
-                  >
-                    {directoryLoading
-                      ? `Loading ${name}…`
-                      : directoryError
-                        ? `${directoryError} Enter retries.`
-                        : directoryPage?.truncated
-                          ? `More in ${name}.`
-                          : `${name} is empty.`}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          ) : null}
+          <FileTree
+            label={searchActive ? "Search results" : "Files"}
+            busy={treeBusy}
+            rows={rows}
+            searchActive={searchActive}
+            selectedPath={selectedPath}
+            rovingPath={rovingPath}
+            gitIndex={gitIndex}
+            directoryPages={directoryPages}
+            loadingDirectories={loadingDirectories}
+            directoryErrors={directoryErrors}
+            itemRefs={itemRefs}
+            onActivate={treeActions.activate}
+            onKeyDown={treeActions.keyDown}
+          />
           {!searchActive && error && treeRows.length > 0 && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>
           )}

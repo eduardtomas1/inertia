@@ -73,8 +73,6 @@ describe("Claude cancellation settlement", () => {
           yield { type: "assistant", session_id: CLAUDE_PROTOCOL_SESSION_ID, parent_tool_use_id: null,
             message: { content: [{ type: "text", text: "The answer is already visible." }] } } as SDKMessage;
           markWaiting();
-          // A closed SDK transport need not settle an already-pending read.
-          // Neither interrupt nor close releases this synthetic SDK iterator.
           await readReleased;
         })(), { close, interrupt: () => new Promise(() => {}) });
       },

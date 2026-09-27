@@ -16,8 +16,6 @@ export async function nextClaudeMessage(
     signal.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    // Closing the SDK transport may leave its current read unresolved. Force
-    // cancellation must still enter the harness's owned cleanup barrier.
     const pending: Array<Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>> = [iterator.next(), cancelled];
     if (timeoutMs !== null) pending.push(new Promise((resolve) => {
       timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);

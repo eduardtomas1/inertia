@@ -1,6 +1,6 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 
 import { executableProcessExists } from "../helpers/executable-process";
@@ -347,7 +347,8 @@ setInterval(() => {}, 1_000);
 
 let app!: AppFixture;
 let state = "";
-const knownLogins = new Set<number>();
+const consumedLogins = new Map<ProviderKey, number>();
+const loginLines = new Map<number, number>();
 
 async function wire(): Promise<WireEvent[]> {
   const text = await readFile(join(state, "wire.jsonl"), "utf8").catch(() => "");
@@ -355,19 +356,23 @@ async function wire(): Promise<WireEvent[]> {
 }
 
 async function nextLoginPid(provider: ProviderKey): Promise<number> {
+  const consumed = consumedLogins.get(provider) ?? 0;
   let pid = 0;
+  let line = 0;
   await expect.poll(async () => {
-    const login = (await wire()).find((event) =>
-      event.provider === provider && event.kind === "login" && !knownLogins.has(event.pid));
-    pid = login?.pid ?? 0;
+    const logins = (await wire()).flatMap((event, index) =>
+      event.provider === provider && event.kind === "login" ? [{ pid: event.pid, index }] : []);
+    pid = logins[consumed]?.pid ?? 0;
+    line = logins[consumed]?.index ?? 0;
     return pid;
   }, { timeout: 20_000 }).toBeGreaterThan(0);
-  knownLogins.add(pid);
+  consumedLogins.set(provider, consumed + 1);
+  loginLines.set(pid, line);
   return pid;
 }
 
 async function eventsFor(pid: number, kind: string): Promise<WireEvent[]> {
-  return (await wire()).filter((event) => event.pid === pid && event.kind === kind);
+  return (await wire()).slice(loginLines.get(pid) ?? 0).filter((event) => event.pid === pid && event.kind === kind);
 }
 
 async function stdinFor(pid: number): Promise<string> {
@@ -457,7 +462,9 @@ async function expectCompleted(dialog: Locator, label: string, status: string): 
 }
 
 async function approveInBrowser(provider: "cursor" | "kimi", decision: string): Promise<void> {
-  await writeFile(join(state, `${provider}-browser-decision`), decision, "utf8");
+  const target = join(state, `${provider}-browser-decision`);
+  await writeFile(`${target}.tmp`, decision, "utf8");
+  await rename(`${target}.tmp`, target);
 }
 
 async function codexBrowserCallback(code: string): Promise<number> {

@@ -588,7 +588,6 @@ function startKimiRun(
         promptInFlight = false;
       }));
       if (wireError) throw wireError;
-      finishOutputStreams();
       if (response.usage) {
         emitKimiPromptUsage(response.usage, contextUsage, emitter);
       }
@@ -596,6 +595,15 @@ function startKimiRun(
         && compactions.completionEvidence() !== "completed"
         ? unconfirmedAcpCompactionFailure("Kimi")
         : undefined;
+      if (
+        !cancelRequested
+        && response.stopReason === "end_turn"
+        && (options.input.operation?.kind === "compact" ? !compactionFailure : turnEvidence.seen)
+      ) {
+        finishOutputStreams();
+      } else {
+        secretRedactor.discardStreams();
+      }
       const outcome = cancelRequested || response.stopReason === "cancelled"
         ? finish("cancelled")
         : response.stopReason === "end_turn"

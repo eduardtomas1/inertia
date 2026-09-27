@@ -634,12 +634,16 @@ function startCursorRun(
       promptInFlight = false;
     }));
     if (providerEventError) throw providerEventError;
-    finishOutputStreams();
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter);
     const compactionFailure = options.input.operation?.kind === "compact"
       && compactions.completionEvidence() !== "completed"
       ? unconfirmedAcpCompactionFailure("Cursor")
       : undefined;
+    if (!cancelRequested && response.stopReason === "end_turn" && !compactionFailure) {
+      finishOutputStreams();
+    } else {
+      secretRedactor.discardStreams();
+    }
     const outcome = cancelRequested || response.stopReason === "cancelled"
       ? finish("cancelled")
       : response.stopReason !== "end_turn"

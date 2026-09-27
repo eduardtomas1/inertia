@@ -53,6 +53,8 @@ function isolatedEnvironment(home: string): NodeJS.ProcessEnv {
   };
 }
 
+const SETTLED_DISCOVERY_TIMEOUT_MS = 45_000;
+
 export async function measureDesktopDiscovery<Run extends DiscoveryRun>(
   options: DiscoveryBenchmarkOptions<Run>,
 ) {
@@ -102,7 +104,7 @@ export async function measureDesktopDiscovery<Run extends DiscoveryRun>(
       const status = run.page.locator(".provider-settings-list-row").filter({
         has: run.page.getByRole("button", { name: "Configure Codex", exact: true }),
       }).locator(".provider-status");
-      await expect(status).not.toHaveClass(/is-checking/u, { timeout: 20_000 });
+      await expect(status).not.toHaveClass(/is-checking/u, { timeout: SETTLED_DISCOVERY_TIMEOUT_MS });
       await expect(status).toHaveClass(installedCase ? /is-ready/u : /is-unavailable/u);
       const discoveryVisibleMs = performance.now() - startedAt;
       const shutdownMs = await options.close(run);
@@ -135,7 +137,7 @@ export async function measureDesktopDiscovery<Run extends DiscoveryRun>(
     outcome: "measured" as const,
     scope: "Credential-free synthetic Codex; global provider-root absence checked before launch; no authenticated upstream requests.",
     discoveryClock: "Main-host elapsed time until settled provider status is visible in Settings, including opening Settings; not internal probe-only latency.",
-    slowFixture: "Version probe deliberately never exits; production discovery timeout and owned-process cleanup are unchanged.",
+    slowFixture: "Version probe deliberately never exits. Discovery shows Checking through its bounded retries (four 4 s probes with 1, 3 and 9 s waits) before Not responding; owned-process cleanup is unchanged.",
     samples,
   };
 }

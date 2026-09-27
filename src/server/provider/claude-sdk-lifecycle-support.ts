@@ -5,18 +5,26 @@ export const CLAUDE_MESSAGE_DRAIN_TIMEOUT = Symbol("claude-message-drain-timeout
 export async function nextClaudeMessage(
   iterator: AsyncIterator<SDKMessage>,
   timeoutMs: number | null,
+  signal: AbortSignal,
 ): Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT> {
-  if (timeoutMs === null) return await iterator.next();
-  if (timeoutMs <= 0) return CLAUDE_MESSAGE_DRAIN_TIMEOUT;
+  signal.throwIfAborted();
+  if (timeoutMs !== null && timeoutMs <= 0) return CLAUDE_MESSAGE_DRAIN_TIMEOUT;
   let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>((resolve) => {
-    timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);
-    timer.unref();
+  let onAbort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    return await Promise.race([iterator.next(), timeout]);
+    const pending: Array<Promise<IteratorResult<SDKMessage> | typeof CLAUDE_MESSAGE_DRAIN_TIMEOUT>> = [iterator.next(), cancelled];
+    if (timeoutMs !== null) pending.push(new Promise((resolve) => {
+      timer = setTimeout(() => resolve(CLAUDE_MESSAGE_DRAIN_TIMEOUT), timeoutMs);
+      timer.unref();
+    }));
+    return await Promise.race(pending);
   } finally {
     if (timer) clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 

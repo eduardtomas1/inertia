@@ -1,7 +1,7 @@
 import type { AgentBrowserRequest } from "../shared/agent-browser-approval.js";
 import { PreviewAgentApprovalRegistry, type BrowserApprovalGuard } from "./preview-agent-approvals.js";
 import { AgentBrowserRefusal, changedGeometry, sameBounds, providerVisiblePageUrl, stopForAbort, waitForNavigationCommand } from "./preview-agent-action.js";
-import type { BrowserWindow, NativeImage, Rectangle, WebContents } from "electron";
+import type { BrowserWindow, NativeImage, Rectangle, Session, WebContents } from "electron";
 import type {
   AgentBrowserActivity,
   AgentBrowserResult,
@@ -45,6 +45,7 @@ export { createPreviewPartition, hardenDesktopSession } from "./preview-session.
 interface PreviewSlot {
   contextId: string;
   partition: string;
+  session: Session | null;
   tabs: Map<string, PreviewTab>;
   activeTabId: string;
   bounds: Rectangle | null;
@@ -79,6 +80,11 @@ export class PreviewBroker {
   }>();
   readonly #captureLocked = new WeakSet<PreviewTab["view"]["webContents"]>();
   constructor(private readonly options: PreviewBrokerOptions) {}
+
+  #window(): BrowserWindow | null {
+    const window = this.options.getWindow();
+    return window && !window.isDestroyed() ? window : null;
+  }
 
   connect(value: unknown): PreviewState {
     const { ownerId, contextId, priorContextId, accepted } = this.#registeredContexts.connect(value);
@@ -343,7 +349,7 @@ export class PreviewBroker {
     ].every((entry) => Number.isInteger(entry))) {
       throw new Error("Invalid preview bounds");
     }
-    const content = this.options.getWindow()?.getContentBounds();
+    const content = this.#window()?.getContentBounds();
     if (!content) return true;
     const x = Math.max(0, Math.min(candidate.x as number, content.width));
     const y = Math.max(0, Math.min(candidate.y as number, content.height));
@@ -388,8 +394,7 @@ export class PreviewBroker {
       if (!contextId || pending?.contextId === contextId) this.#pendingBounds.delete(id);
       if (!slot || (contextId && slot.contextId !== contextId)) continue;
       this.#slots.delete(id);
-      const browserSession = slot.tabs.values().next().value
-        ?.view.webContents.session;
+      const browserSession = slot.session;
       slot.evidenceInspectors.close();
       slot.evidence.close();
       for (const tab of slot.tabs.values()) this.#destroyTab(tab);
@@ -559,7 +564,7 @@ export class PreviewBroker {
     };
   }
   #publish(ownerId: PreviewOwner, contextId: string): void {
-    const window = this.options.getWindow(), slot = this.#ownedSlot(ownerId, contextId);
+    const window = this.#window(), slot = this.#ownedSlot(ownerId, contextId);
     if (!window || window.webContents.isDestroyed() || !slot) return;
     slot.evidenceInspectors.closeUnavailable((id) => Boolean(slot.evidence.image(id)));
     const evidenceRevision = slot.evidence.revision(), publishEvidence = slot.publishedEvidenceRevision !== evidenceRevision;
@@ -594,6 +599,7 @@ export class PreviewBroker {
     slot = {
       contextId,
       partition: createPreviewPartition(this.options.partitionPrefix),
+      session: null,
       tabs: new Map(),
       activeTabId: "",
       bounds: null,
@@ -609,7 +615,8 @@ export class PreviewBroker {
     const tab = this.#openTab(ownerId, slot);
     slot.activeTabId = tab.id;
     this.#slots.set(ownerId, slot);
-    evidence.installSession(tab.view.webContents.session, (webContentsId) => {
+    slot.session = tab.view.webContents.session;
+    evidence.installSession(slot.session, (webContentsId) => {
       if (typeof webContentsId !== "number" || !Number.isInteger(webContentsId)) return null;
       const requestTab = [...slot.tabs.values()].find(
         (candidate) => candidate.view.webContents.id === webContentsId,
@@ -625,7 +632,7 @@ export class PreviewBroker {
     const bounds = pending?.contextId === contextId ? pending.bounds : undefined;
     tab.view.setBounds(bounds ?? { x: 0, y: 0, width: 0, height: 0 });
     if (bounds) slot.bounds = bounds;
-    this.options.getWindow()?.contentView.addChildView(tab.view);
+    this.#window()?.contentView.addChildView(tab.view);
     this.#publish(ownerId, contextId);
     return slot;
   }
@@ -634,7 +641,7 @@ export class PreviewBroker {
     if (slot.tabs.size >= MAX_BROWSER_TABS) {
       throw new Error("Inertia Browser allows at most eight tabs per chat.");
     }
-    const window = this.options.getWindow();
+    const window = this.#window();
     if (!window) throw new Error("The preview window is unavailable");
     const publish = () => this.#publish(ownerId, slot.contextId);
     const tab = createPreviewTab({
@@ -642,7 +649,7 @@ export class PreviewBroker {
       pageNumber: slot.nextPageNumber += 1,
       captureLocked: this.#captureLocked,
       registerHealthRenderer: this.options.registerHealthRenderer,
-      targetContents: () => this.options.getWindow()?.webContents,
+      targetContents: () => this.#window()?.webContents,
       guardNavigation: (event, url) => this.#guardNavigation(event, url),
       publish,
       navigated: (currentTab, url, sameDocument) => {
@@ -686,7 +693,7 @@ export class PreviewBroker {
   #activateTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
     const next = slot.tabs.get(tabId);
     if (!next) throw new Error("That Inertia Browser tab no longer exists.");
-    const window = this.options.getWindow();
+    const window = this.#window();
     if (!window) throw new Error("The preview window is unavailable");
     const previous = slot.tabs.get(slot.activeTabId);
     if (previous && previous !== next) {
@@ -716,7 +723,7 @@ export class PreviewBroker {
 
   #destroyTab(tab: PreviewTab): void {
     tab.unregisterHealth();
-    this.options.getWindow()?.contentView.removeChildView(tab.view);
+    this.#window()?.contentView.removeChildView(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
   }
 

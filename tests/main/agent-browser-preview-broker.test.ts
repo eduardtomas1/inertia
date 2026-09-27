@@ -31,6 +31,8 @@ const electronState = vi.hoisted(() => ({
     emit(name: string, ...args: unknown[]): void;
     on(name: string, handler: (...args: unknown[]) => void): void;
     getURL(): string;
+    isDestroyed(): boolean;
+    close(): void;
     insertedText: string[];
     sentInputs: Array<Record<string, unknown>>;
     setTitle(title: string): void;
@@ -318,6 +320,7 @@ function harness() {
     };
   }> = [];
   const window = {
+    isDestroyed: vi.fn(() => false),
     contentView: {
       children,
       addChildView: (view: typeof children[number]) => {
@@ -334,16 +337,65 @@ function harness() {
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
   const recordOperationFailure = vi.fn();
+  const getWindow = vi.fn(() => window as typeof window | null);
+  const unregisterHealth: Array<ReturnType<typeof vi.fn>> = [];
   const broker = new PreviewBroker({
-    getWindow: () => window as never,
+    getWindow: () => getWindow() as never,
     openExternal: vi.fn(async () => undefined),
     stateChannel: "preview-state",
     recordOperationFailure,
+    registerHealthRenderer: () => {
+      const unregister = vi.fn();
+      unregisterHealth.push(unregister);
+      return unregister;
+    },
   });
-  return { broker, children, recordOperationFailure, window };
+  return { broker, children, recordOperationFailure, window, getWindow, unregisterHealth };
 }
 
 describe("agent-owned native Browser", () => {
+  it.each(["live", "destroyed", "missing", "destroyed-tabs"] as const)("releases every tab and session when its host is %s", async (state) => {
+    const { broker, window, getWindow, unregisterHealth } = harness();
+    const offset = electronState.contents.length;
+    const sessionOffset = electronState.sessions.length;
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    broker.connect(owner);
+    broker.setBounds({ ...owner, bounds: { x: 0, y: 0, width: 800, height: 600 } });
+    await broker.tab({ ...owner, action: "open" });
+    const tabs = electronState.contents.slice(offset);
+    expect(tabs).toHaveLength(2);
+    const closes = tabs.map((contents) => {
+      const close = contents.close.bind(contents);
+      return vi.spyOn(contents, "close").mockImplementation(() => {
+        close();
+        contents.emit("did-stop-loading");
+      });
+    });
+    if (state === "destroyed" || state === "destroyed-tabs") {
+      window.isDestroyed.mockReturnValue(true);
+      for (const property of ["contentView", "webContents"]) {
+        Object.defineProperty(window, property, { get: () => { throw new TypeError("Object has been destroyed"); } });
+      }
+    } else if (state === "missing") getWindow.mockReturnValue(null);
+    if (state === "destroyed-tabs") {
+      for (const contents of tabs) {
+        closes[tabs.indexOf(contents)]!.mockRestore();
+        contents.close();
+        Object.defineProperty(contents, "session", { get: () => { throw new TypeError("Object has been destroyed"); } });
+      }
+    }
+    expect(() => broker.close()).not.toThrow();
+    expect(() => broker.close()).not.toThrow();
+    expect(tabs.every((contents) => contents.isDestroyed())).toBe(true);
+    if (state !== "destroyed-tabs") for (const close of closes) expect(close).toHaveBeenCalledOnce();
+    for (const unregister of unregisterHealth) expect(unregister).toHaveBeenCalledOnce();
+    for (const session of electronState.sessions.slice(sessionOffset)) {
+      expect(session.clearStorageData).toHaveBeenCalledOnce();
+      expect(session.hasEvidenceListeners()).toBe(false);
+    }
+    expect((await broker.perform(conversationId, { action: "snapshot" })).ok).toBe(false);
+  });
+
   it("opens one shared blank Browser page directly from empty visible bounds", () => {
     const { broker, children, window } = harness();
 

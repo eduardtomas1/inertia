@@ -23,6 +23,7 @@ import type {
   ProviderStatusEvent,
   ProviderUsageEvent,
 } from "../../src/server/provider/contracts";
+import { MAX_PROVIDER_ACTIVITY_DETAIL_CHARS } from "../../src/server/provider/activity-detail";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -246,6 +247,33 @@ describe("Antigravity stream parsing", () => {
     }))).toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
   });
 
+  it("maps a tool that reports an error to failed activity with its detail", () => {
+    const step = (fields: Record<string, unknown>) => parseAntigravityLine(JSON.stringify({
+      event: "step_update",
+      step_update: { step_index: 4, step_type: "tool", tool_name: "run_command", ...fields },
+    }));
+    expect(step({
+      state: "DONE",
+      tool_info: { name: "run_command", parameters: { CommandLine: "false" }, output: "" },
+    })).toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
+    expect(step({
+      state: "DONE",
+      tool_info: { name: "run_command", error: { type: "CommandFailed", message: "exit status 1" } },
+    })).toEqual([{
+      kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "CommandFailed: exit status 1",
+    }]);
+    expect(step({ state: "DONE", tool_info: { error: { message: "denied" } } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "denied" }]);
+    expect(step({ state: "DONE", tool_info: { error: "timed out" } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "timed out" }]);
+    for (const error of [null, {}, 7, "", { type: 3, message: [] }]) {
+      expect(step({ state: "DONE", tool_info: { error } }))
+        .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
+    }
+    expect(step({ state: "ACTIVE", tool_info: { name: "run_command" } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "started" }]);
+  });
+
   it("reads the documented result envelope and ignores unknown events", () => {
     expect(parseAntigravityLine(JSON.stringify({
       event: "result",
@@ -275,6 +303,41 @@ describe("Antigravity stream parsing", () => {
     }]);
     expect(parseAntigravityLine(JSON.stringify({ event: "init", init: {} }))).toEqual([]);
     expect(parseAntigravityLine(JSON.stringify({ event: "future_event" }))).toEqual([]);
+  });
+
+  it("reads the conversation identity from the documented and legacy init envelopes", () => {
+    const canonical = {
+      event: "init",
+      conversation_id: CONVERSATION,
+      init: { cwd: "/workspace", tools: ["run_command"], permission_mode: "request-review" },
+    };
+    expect(parseAntigravityLine(JSON.stringify(canonical)))
+      .toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+    expect(parseAntigravityLine(JSON.stringify({ event: "init", init: { conversation_id: CONVERSATION } })))
+      .toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+    expect(parseAntigravityLine(JSON.stringify({
+      ...canonical,
+      init: { ...canonical.init, conversation_id: CONVERSATION },
+    }))).toEqual([{ kind: "session", conversationId: CONVERSATION }]);
+  });
+
+  it("rejects conflicting or malformed conversation identities", () => {
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    for (const value of [
+      { event: "init", conversation_id: CONVERSATION, init: { conversation_id: foreign } },
+      { event: "step_update", conversation_id: foreign, step_update: { conversation_id: CONVERSATION, text_delta: "Hi" } },
+      { event: "result", conversation_id: foreign, result: { conversation_id: CONVERSATION, status: "SUCCESS" } },
+      { event: "init", conversation_id: "not a conversation", init: {} },
+      { event: "init", conversation_id: 7, init: {} },
+      { event: "init", init: { conversation_id: "../escape" } },
+      { event: "step_update", step_update: { conversation_id: "x".repeat(400), text_delta: "Hi" } },
+    ]) {
+      expect(parseAntigravityLine(JSON.stringify(value))).toBeNull();
+    }
+    expect(parseAntigravityLine(JSON.stringify({
+      event: "result",
+      result: { conversation_id: "", status: "ERROR", error: "authentication failed or timed out" },
+    }))).toMatchObject([{ kind: "result", result: { conversationId: null } }]);
   });
 
   it("rejects malformed lines", () => {
@@ -320,7 +383,7 @@ describe("Antigravity CLI harness", { concurrent: false }, () => {
   it("streams a completed turn with session identity, tools, and usage", async () => {
     const root = fixtureRoot("antigravity success");
     const { command, capturePath } = fakeAgy(root, `
-emit({ event: "init", init: { conversation_id: ${JSON.stringify(CONVERSATION)} } });
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { cwd: process.cwd(), tools: ["view_file"], permission_mode: "request-review" } });
 emit({ event: "step_update", step_update: { conversation_id: ${JSON.stringify(CONVERSATION)}, step_index: 0, state: "ACTIVE", text_delta: "Hello " } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "ACTIVE", tool_name: "view_file" } });
 emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "view_file" } });
@@ -331,18 +394,25 @@ process.exit(0);
     const sessions: ProviderSessionEvent[] = [];
     const activities: ProviderActivityEvent[] = [];
     const usage: ProviderUsageEvent[] = [];
+    const text: string[] = [];
+    const snapshots: string[] = [];
     const result = await managerFor(command).run(antigravityInput(root), {
       onSession: (event) => sessions.push(event),
       onActivity: (event) => activities.push(event),
       onUsage: (event) => usage.push(event),
+      onText: (event) => text.push(event.text),
+      onTextSnapshot: (event) => snapshots.push(event.text),
     });
 
     expect(result).toMatchObject({
       status: "completed",
       text: "Hello world",
+      textTruncated: false,
       sessionId: CONVERSATION,
       cleanupConfirmed: true,
     });
+    expect(text).toEqual(["Hello ", "world"]);
+    expect(snapshots).toEqual([]);
     expect(sessions.map((event) => event.sessionId)).toEqual([CONVERSATION]);
     expect(activities.filter((event) => event.kind === "tool").map((event) => [
       event.phase,
@@ -427,6 +497,153 @@ process.exit(0);
     await expect(managerFor(command).run(antigravityInput(root,
       kind === "resumed" ? { sessionId: CONVERSATION } : {}))).resolves.toMatchObject({
       status: "completed", sessionId: CONVERSATION, text: "Valid answer", cleanupConfirmed: true,
+    });
+  });
+
+  it("keeps the documented init identity when the turn stops before a result", async () => {
+    const root = fixtureRoot("antigravity canonical init");
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { cwd: process.cwd(), tools: [], permission_mode: "request-review" } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Partial" } });
+process.exit(0);
+`);
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
+      failure: { reason: "process-exit" },
+    });
+    expect(sessions).toEqual([CONVERSATION]);
+  });
+
+  it("rejects a documented init for a different conversation in a resumed run", async () => {
+    const root = fixtureRoot("antigravity canonical init foreign");
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(foreign)}, init: { cwd: process.cwd(), tools: [] } });
+emit({ event: "step_update", step_update: { text_delta: "Foreign answer" } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Foreign answer" } });
+hang();
+`);
+    const text: string[] = [];
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root, { sessionId: CONVERSATION }), {
+      onText: (event) => text.push(event.text),
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", sessionId: CONVERSATION, cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(text).toEqual([]);
+    expect(sessions).not.toContain(foreign);
+  });
+
+  it("fails closed when an init carries conflicting conversation identities", async () => {
+    const root = fixtureRoot("antigravity conflicting init");
+    const foreign = "5f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a12";
+    const { command } = fakeAgy(root, `
+emit({ event: "init", conversation_id: ${JSON.stringify(CONVERSATION)}, init: { conversation_id: ${JSON.stringify(foreign)} } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Answer" } });
+hang();
+`);
+    const sessions: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onSession: (event) => sessions.push(event.sessionId),
+    });
+    expect(result).toMatchObject({
+      status: "failed", cleanupConfirmed: true,
+      failure: { reason: "malformed-protocol" },
+    });
+    expect(result.sessionId).toBeUndefined();
+    expect(sessions).toEqual([]);
+  });
+
+  it("records a failed tool once with bounded, scrubbed detail and lets the result decide the turn", async () => {
+    const root = fixtureRoot("antigravity failed tool");
+    const { command } = fakeAgy(root, `
+const failed = { event: "step_update", step_update: { step_index: 3, state: "DONE", step_type: "tool", tool_name: "run_command",
+  tool_info: { name: "run_command", error: { type: "CommandFailed", message: "api_key=sk-abcdefghijklmnopqrstuvwxyz0123 in " + ${JSON.stringify(root)} + " " + "x".repeat(100000) } } } };
+emit({ event: "step_update", step_update: { step_index: 3, state: "ACTIVE", step_type: "tool", tool_name: "run_command" } });
+emit(failed);
+emit(failed);
+emit({ event: "step_update", step_update: { step_index: 3, state: "DONE", step_type: "tool", tool_name: "run_command" } });
+emit({ event: "step_update", step_update: { step_index: 4, state: "DONE", text_delta: "Recovered" } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Recovered", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    const activities: ProviderActivityEvent[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onActivity: (event) => activities.push(event),
+    });
+    expect(result).toMatchObject({ status: "completed", text: "Recovered", cleanupConfirmed: true });
+    const tools = activities.filter((event) => event.kind === "tool");
+    expect(tools.map((event) => event.phase)).toEqual(["started", "failed"]);
+    expect(new Set(tools.map((event) => event.activityId)).size).toBe(1);
+    const detail = tools[1]!.detail ?? "";
+    expect(detail).toMatch(/^CommandFailed: .*\[redacted\] in <workspace> x/u);
+    expect(detail).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123");
+    expect(detail).not.toContain(root);
+    expect(detail.length).toBeLessThanOrEqual(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS);
+  });
+
+  it("fails closed when Antigravity reports a tool failure and then a failed result", async () => {
+    const root = fixtureRoot("antigravity failed tool failed turn");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "run_command", tool_info: { error: { message: "exit status 1" } } } });
+emit({ event: "result", result: { status: "ERROR", response: "", error: "Model quota is exhausted." } });
+process.exit(0);
+`);
+    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+      status: "failed", failure: { terminalEvent: "result:error" }, cleanupConfirmed: true,
+    });
+  });
+
+  it.each([
+    { response: "First. Second.", text: "First. Second.", snapshots: ["First. Second."], textTruncated: false },
+    { response: "", text: "First. ", snapshots: [], textTruncated: true },
+  ])("reconciles skipped oversized output with the final response $response", async (expected) => {
+    const root = fixtureRoot("antigravity oversized frame");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "First. " } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Second." + " ".repeat(1100000) } });
+emit({ event: "result", result: { status: "SUCCESS", response: ${JSON.stringify(expected.response)}, error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    const text: string[] = [];
+    const snapshots: string[] = [];
+    const notices: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onText: (event) => text.push(event.text),
+      onTextSnapshot: (event) => snapshots.push(event.text),
+      onActivity: (event) => { if (event.kind === "system") notices.push(event.label); },
+    });
+    expect(result).toMatchObject({
+      status: "completed",
+      text: expected.text,
+      textTruncated: expected.textTruncated,
+      cleanupConfirmed: true,
+    });
+    expect(text).toEqual(["First. "]);
+    expect(snapshots).toEqual(expected.snapshots);
+    expect(notices).toEqual(["Antigravity sent an oversized line that Inertia skipped"]);
+  });
+
+  it("fails safely when the terminal result is oversized", async () => {
+    const root = fixtureRoot("antigravity oversized result");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "First. " } });
+emit({ event: "result", result: { status: "SUCCESS", response: "First. " + "x".repeat(1100000), error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+      status: "failed",
+      text: "First. ",
+      textTruncated: true,
+      failure: { reason: "process-exit" },
+      cleanupConfirmed: true,
     });
   });
 

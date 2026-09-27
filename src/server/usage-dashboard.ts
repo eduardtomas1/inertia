@@ -269,6 +269,19 @@ function hasComparableCumulativeProvenance(turn: UsageDashboardTurn): boolean {
     );
 }
 
+function isClaudeAgentSdkTurn(turn: UsageDashboardTurn): boolean {
+  return turn.providerId === "claude"
+    && turn.modelSelection.harnessId === "claude-agent-sdk";
+}
+
+function startsFreshClaudeSession(turn: UsageDashboardTurn): boolean {
+  return isClaudeAgentSdkTurn(turn)
+    && turn.usageAtCompletion?.totalProcessedScope === "session"
+    && turn.usageAtCompletion.providerSessionBound === true
+    && turn.providerSessionBefore === null
+    && turn.providerSessionAfter !== null;
+}
+
 export function measuredProcessedTokens(turn: UsageDashboardTurn): number | null {
   const completion = turn.usageAtCompletion;
   const completionTotal = completion?.totalProcessedTokens;
@@ -276,7 +289,7 @@ export function measuredProcessedTokens(turn: UsageDashboardTurn): number | null
   if (completionTotal === null || completionTotal === undefined || !scope) {
     return null;
   }
-  if (scope === "run") return completionTotal;
+  if (scope === "run" || startsFreshClaudeSession(turn)) return completionTotal;
   const start = turn.usageAtStart;
   if (
     !hasComparableCumulativeProvenance(turn)
@@ -305,20 +318,20 @@ function measuredTokenField(
     // total carried by `tokenUsage.total`.
     return completionValue;
   }
+  const claude = isClaudeAgentSdkTurn(turn);
   if (
-    turn.providerId === "claude"
-    && harnessId === "claude-agent-sdk"
-    && completion.totalProcessedScope === "run"
+    (claude && completion.totalProcessedScope === "run")
+    || startsFreshClaudeSession(turn)
   ) {
-    // Claude result usage is an aggregate for this run. Context-only control
-    // usage has no run scope and must not be promoted to a turn total.
+    // Claude main-loop usage is run-local. Context-only control usage has no
+    // processed scope and must not be promoted to a turn total.
     return completionValue;
   }
-  if (
-    turn.providerId !== "cursor"
-    || harnessId !== "cursor-acp"
-    || !hasComparableCumulativeProvenance(turn)
-  ) {
+  const cumulative = claude
+    ? completion.totalProcessedScope === "session"
+      && turn.usageAtStart?.totalProcessedScope === "session"
+    : turn.providerId === "cursor" && harnessId === "cursor-acp";
+  if (!cumulative || !hasComparableCumulativeProvenance(turn)) {
     // OpenCode reports only the latest message breakdown; CLI, unknown, and
     // synthetic harnesses have no durable per-turn category contract.
     return null;
@@ -330,7 +343,8 @@ function measuredTokenField(
     || startValue === undefined
     || completionValue < startValue
   ) return null;
-  // ACP v1 category fields are cumulative across the resumed session.
+  // ACP v1 and Claude model category fields are cumulative across the
+  // resumed session.
   return completionValue - startValue;
 }
 

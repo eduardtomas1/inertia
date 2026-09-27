@@ -667,7 +667,7 @@ export async function detectProvider(
           probeEnvironment,
           terminateProcessTree,
         )
-    : { cleanupConfirmed: true, verified: true };
+    : { cleanupConfirmed: true, outcome: "verified" };
   if (options.signal?.aborted) {
     if (!openCodeIsolation.cleanupConfirmed) {
       throw new ProcessTreeTerminationError(
@@ -676,21 +676,28 @@ export async function detectProvider(
     }
     throw new Error("Provider discovery was cancelled.");
   }
-  if (!openCodeIsolation.verified) {
+  if (openCodeIsolation.outcome !== "verified") {
     const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
       && versionProbeCleanupConfirmed;
+    if (cleanupConfirmed && openCodeIsolation.outcome === "timed-out") {
+      return unresponsive(selected);
+    }
+    const operationalFailure = cleanupConfirmed
+      && openCodeIsolation.outcome !== "incompatible";
     return {
       provider,
       available: true,
       executable: selected.executable,
       ...(selected.version ? { version: selected.version } : {}),
-      installState: "installed",
+      installState: operationalFailure ? "error" : "installed",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed,
-      statusMessage: cleanupConfirmed
-        ? "OpenCode failed secure plugin-free runtime verification; update the selected CLI"
-        : "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+      statusMessage: !cleanupConfirmed
+        ? "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped"
+        : operationalFailure
+          ? "OpenCode could not complete secure plugin-free runtime verification; refresh to try again"
+          : "OpenCode failed secure plugin-free runtime verification; update the selected CLI",
     };
   }
 

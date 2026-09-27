@@ -27,6 +27,8 @@ export class OpenCodeServerCleanupUnconfirmedError extends Error {
   }
 }
 
+export class OpenCodeServerTimeoutError extends Error {}
+
 export function openCodeCleanupFailureMessage(
   priorError: string | undefined,
   cleanupError: unknown,
@@ -138,7 +140,7 @@ export async function startOwnedOpenCodeServer(
   try {
     startupTimer = setTimeout(() => {
       settleStartup(() => rejectReady(
-        new Error("Timed out waiting for the OpenCode server to start."),
+        new OpenCodeServerTimeoutError("Timed out waiting for the OpenCode server to start."),
       ));
     }, START_TIMEOUT_MS);
     startupTimer.unref();
@@ -226,7 +228,7 @@ export async function withOpenCodeRequestDeadline<T>(
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
-      reject(new Error(timeoutMessage));
+      reject(new OpenCodeServerTimeoutError(timeoutMessage));
     }, timeoutMs);
     timer.unref();
   });

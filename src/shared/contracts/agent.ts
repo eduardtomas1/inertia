@@ -349,7 +349,7 @@ export interface AgentInputRequest {
 
 export interface AgentPlanStep {
   step: string;
-  status: "pending" | "inProgress" | "completed";
+  status: "pending" | "inProgress" | "completed" | "cancelled";
 }
 
 export interface AgentPlan {

@@ -1663,6 +1663,11 @@ describe("server event remaining discriminant and identity boundary", () => {
       request,
     })).toThrow("Malformed server event");
   });
+  it("accepts cancelled plan steps and rejects unknown plan step statuses", () => {
+    const plan = { ...conversationDetail.plans[0], steps: [{ step: "Inspect", status: "completed" }, { step: "Skip", status: "cancelled" }] };
+    expect(parseServerEvent({ type: "agent.plan.updated", plan })).toMatchObject({ plan });
+    expect(() => parseServerEvent({ type: "agent.plan.updated", plan: { ...plan, steps: [{ step: "Skip", status: "skipped" }] } })).toThrow("Malformed server event");
+  });
   it("rejects malformed input and cleared-goal provider discriminants", () => {
     expect(parseServerEvent({
       type: "agent.goal.cleared",

@@ -4,7 +4,7 @@ import type {
   Conversation,
   ConversationDetail,
 } from "../../shared/contracts";
-import type { AgentInputRequest } from "../../shared/contracts";
+import type { AgentInputRequest, AgentPlanStep } from "../../shared/contracts";
 import type { RuntimePrivateConnectPromptPreparation } from "../../node/runtime-process-protocol";
 import {
   PRIVATE_CONNECT_RUNTIME_LIMITS,
@@ -598,7 +598,7 @@ export class PrivateConnectRuntimeGateway {
 
 function safePrivateConnectPlan(
   plan: ConversationDetail["plans"][number] | undefined,
-): { steps: Array<{ label: string; status: "pending" | "inProgress" | "completed" }> } | null {
+): { steps: Array<{ label: string; status: AgentPlanStep["status"] }> } | null {
   if (!plan) return null;
   return {
     steps: plan.steps.slice(0, 100).map((step) => ({

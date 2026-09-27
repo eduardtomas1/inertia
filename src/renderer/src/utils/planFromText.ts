@@ -3,7 +3,7 @@ import type { Conversation } from "@shared/contracts";
 export interface TextPlanStep {
   id: string;
   title: string;
-  status: "pending" | "in-progress" | "completed";
+  status: "pending" | "in-progress" | "completed" | "cancelled";
 }
 
 export function planFromText(

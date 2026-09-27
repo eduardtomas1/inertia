@@ -52,7 +52,7 @@ describe("Claude Agent SDK usage accounting", () => {
     });
   });
 
-  it("counts subagent and helper model calls in run totals without inflating context occupancy", () => {
+  it("counts subagent and helper model calls in session totals without inflating context occupancy", () => {
     const result = {
       num_turns: 1,
       usage: {
@@ -82,7 +82,7 @@ describe("Claude Agent SDK usage accounting", () => {
     expect(parseClaudeUsage(result, { selectedModelId: "claude-sonnet-test" })).toEqual({
       usedTokens: 1_700,
       totalProcessedTokens: 7_700,
-      totalProcessedScope: "run",
+      totalProcessedScope: "session",
       maxTokens: 200_000,
       inputTokens: 6_800,
       cachedInputTokens: 1_500,
@@ -96,6 +96,7 @@ describe("Claude Agent SDK usage accounting", () => {
       modelUsage: { "claude-sonnet-test": { inputTokens: 0, outputTokens: 0, contextWindow: 200_000 } },
     }, { selectedModelId: "claude-sonnet-test" })).toMatchObject({
       totalProcessedTokens: 1_700,
+      totalProcessedScope: "run",
       inputTokens: 1_500,
       outputTokens: 200,
     });

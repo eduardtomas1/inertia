@@ -4,6 +4,8 @@ type LifecycleScenario =
   | "resume"
   | "resume-rejected-steer"
   | "resume-stuck-steer"
+  | "resume-refused-steer"
+  | "resume-dropped-steer"
   | "resume-admitted-stuck-steer"
   | "early-permission-follow-up"
   | "idle-before-prompt-receipt"
@@ -348,7 +350,7 @@ const server = http.createServer((req, res) => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", sessionID, role: "user" } } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "mutating-message", parentID: parsed.messageID, sessionID, role: "assistant" } } });
       }, 10);
-      if (["resume", "resume-rejected-steer", "resume-stuck-steer", "resume-admitted-stuck-steer"].includes(scenario)) setTimeout(() => {
+      if (["resume", "resume-rejected-steer", "resume-stuck-steer", "resume-refused-steer", "resume-dropped-steer", "resume-admitted-stuck-steer"].includes(scenario)) setTimeout(() => {
         sendEvent({ type: "session.idle", properties: { sessionID: "stale-session" } });
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant", parentID: parsed.messageID, sessionID, role: "assistant", tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
         sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "text", sessionID, messageID: "assistant", type: "text", text: "Resumed OpenCode response" } } });
@@ -394,6 +396,8 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/prompt") {
       if (scenario === "resume-stuck-steer") return;
+      if (scenario === "resume-refused-steer") return setTimeout(() => json(res, { name: "SteerRejected", data: { message: "Session is not accepting steering." } }, 409), 50);
+      if (scenario === "resume-dropped-steer") return setTimeout(() => req.socket.destroy(), 50);
       if (scenario === "early-permission-follow-up") {
         followUpPromptID = parsed.id;
         sendEvent({ type: "permission.asked", properties: { id: "steer-early", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });

@@ -21,6 +21,7 @@ import {
 } from "./agent-harness";
 import {
   providerRunTerminal,
+  ProviderSteerDeliveryUnknownError,
   type ProviderRunFailure,
   type ProviderRunResult,
 } from "./contracts";
@@ -62,6 +63,10 @@ import {
   createOpenCodeHostTools,
   openCodePermissions,
 } from "./opencode-host-tools";
+import {
+  boundedOpenCodeInteractionReplies,
+  type OpenCodeInteractionReplies,
+} from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
 import { openCodeModels } from "./opencode-sdk-metadata";
@@ -71,7 +76,6 @@ import {
   handleOpenCodeEvent,
   openCodeEventRequiresPromptAdmission,
   openCodeWorkingActivityId,
-  replyOpenCodePermission,
   type OpenCodeFailureState,
   type OpenCodePendingApproval,
   type OpenCodePendingInput,
@@ -83,6 +87,7 @@ import {
   imageMime,
   isOpenCodeIdleEvent,
   objectValue,
+  openCodeRequestRefused,
   openCodeRuntimeFailure,
   resolveOpenCodeAgent,
   resolveOpenCodeModel,
@@ -241,6 +246,7 @@ function startOpenCodeRun(
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let client: OpencodeClient | undefined;
+  let replies: OpenCodeInteractionReplies | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
   let terminateOwnedRun: OwnedProcessTreeTermination | undefined;
   let cancelRequested = false;
@@ -315,7 +321,7 @@ function startOpenCodeRun(
   };
   const settleApproval = (requestId: string, decision: AgentApprovalDecision): boolean => {
     const pending = approvals.get(requestId);
-    if (!pending || pending.settled || !client) return false;
+    if (!pending || pending.settled || !replies) return false;
     pending.settled = true;
     armEventInactivityDeadline();
     if (decision === "cancel") {
@@ -325,13 +331,7 @@ function startOpenCodeRun(
       return true;
     }
     const reply = decision === "approve" ? "once" : "reject";
-    void replyOpenCodePermission(
-      client,
-      pending.protocol,
-      pending.sessionId,
-      pending.nativeId,
-      reply,
-    ).then(() => {
+    void replies.permission(pending, reply).then(() => {
       if (approvals.get(requestId) !== pending) return;
       approvals.delete(requestId);
       emitter.rich({ type: "approval-resolved", requestId, decision });
@@ -344,7 +344,7 @@ function startOpenCodeRun(
   };
   const settleInput = (requestId: string, answers: Record<string, string[]>): boolean => {
     const pending = inputs.get(requestId);
-    if (!pending || pending.settled || !client) return false;
+    if (!pending || pending.settled || !replies) return false;
     pending.settled = true;
     armEventInactivityDeadline();
     const ordered = pending.questions.map((question, index) => {
@@ -354,7 +354,7 @@ function startOpenCodeRun(
       ]));
       return (answers[openCodeQuestionId(index)] ?? []).map((value) => labelsById.get(value) ?? value);
     });
-    void replyOpenCodeQuestion(client, pending, ordered).then(() => {
+    void replies.question(pending, ordered).then(() => {
       if (inputs.get(requestId) !== pending) return;
       inputs.delete(requestId);
       emitter.rich({ type: "input-resolved", requestId });
@@ -366,23 +366,17 @@ function startOpenCodeRun(
     return true;
   };
   const rejectPending = (): void => {
-    if (!client) return;
+    if (!replies) return;
     for (const [requestId, pending] of approvals) {
       pending.settled = true;
       approvals.delete(requestId);
-      void replyOpenCodePermission(
-        client,
-        pending.protocol,
-        pending.sessionId,
-        pending.nativeId,
-        "reject",
-      ).catch(() => {});
+      void replies.permission(pending, "reject").catch(() => {});
       emitter.rich({ type: "approval-resolved", requestId, decision: "cancelled" });
     }
     for (const [requestId, pending] of inputs) {
       pending.settled = true;
       inputs.delete(requestId);
-      void rejectOpenCodeQuestion(client, pending).catch(() => {});
+      void replies.rejectQuestion(pending).catch(() => {});
       emitter.rich({ type: "input-resolved", requestId });
     }
   };
@@ -426,6 +420,7 @@ function startOpenCodeRun(
       if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
       client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
+      replies = boundedOpenCodeInteractionReplies(client, deadlines.initializationTimeoutMs, eventAbort.signal);
       await waitForOpenCodeHealth(
         client,
         child,
@@ -584,7 +579,7 @@ function startOpenCodeRun(
           handleOpenCodeInteractionEvent(
             safeEvent,
             options,
-            client!,
+            replies!,
             emitter,
             approvals,
             inputs,
@@ -609,7 +604,7 @@ function startOpenCodeRun(
           handleOpenCodeEvent(
             safeEvent,
             options,
-            client!,
+            replies!,
             text,
             emitter,
             approvals,
@@ -983,9 +978,14 @@ function startOpenCodeRun(
               ownership.rejectFollowUp(id);
             }
             return accepted;
-          } catch {
-            ownership.rejectFollowUp(id);
-            return false;
+          } catch (error) {
+            if (openCodeRequestRefused(error)) {
+              ownership.rejectFollowUp(id);
+              return false;
+            }
+            hasAdmittedV2Work = true;
+            ownership.rejectPromptAdmission(id);
+            throw new ProviderSteerDeliveryUnknownError();
           } finally {
             activeV2Operations -= 1;
           }
@@ -999,42 +999,6 @@ function startOpenCodeRun(
       },
     },
   };
-}
-
-async function replyOpenCodeQuestion(
-  client: OpencodeClient,
-  pending: OpenCodePendingInput,
-  answers: string[][],
-): Promise<void> {
-  if (pending.protocol === "v2") {
-    await client.v2.session.question.reply({
-      sessionID: pending.sessionId,
-      requestID: pending.nativeId,
-      questionV2Reply: { answers },
-    }, { throwOnError: true });
-    return;
-  }
-  await client.question.reply(
-    { requestID: pending.nativeId, answers },
-    { throwOnError: true },
-  );
-}
-
-async function rejectOpenCodeQuestion(
-  client: OpencodeClient,
-  pending: OpenCodePendingInput,
-): Promise<void> {
-  if (pending.protocol === "v2") {
-    await client.v2.session.question.reject({
-      sessionID: pending.sessionId,
-      requestID: pending.nativeId,
-    }, { throwOnError: true });
-    return;
-  }
-  await client.question.reject(
-    { requestID: pending.nativeId },
-    { throwOnError: true },
-  );
 }
 
 async function waitForOpenCodeExternalResolution(

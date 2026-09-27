@@ -387,7 +387,7 @@ export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }
       <span><ListChecks size={13} aria-hidden="true" />Plan</span>
       {plan.explanation && <p>{plan.explanation}</p>}
       {plan.steps.length > 0 && (
-        <p>{plan.steps.map(({ step, status }) => `${status === "completed" ? "✓" : status === "inProgress" ? "•" : "○"} ${step}`).join("\n")}</p>
+        <p>{plan.steps.map(({ step, status }) => `${status === "completed" ? "✓" : status === "cancelled" ? "✕" : status === "inProgress" ? "•" : "○"} ${step}`).join("\n")}</p>
       )}
     </div>
   );

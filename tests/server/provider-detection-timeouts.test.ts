@@ -24,7 +24,7 @@ function route(provider: ProviderInfo): ReturnType<typeof composerRouteReadiness
   return composerRouteReadiness({
     provider,
     profile: undefined,
-    selection: providerNativeModelSelection({ providerId: "codex" }),
+    selection: providerNativeModelSelection({ providerId: provider.id }),
   });
 }
 
@@ -81,18 +81,20 @@ if ((hangs[stage] ?? 0) !== 0) {
   function harness(
     fake: { root: string; command: string },
     retryDelaysMs: readonly number[] = [20, 20, 20],
+    providerId: ProviderInfo["id"] = "codex",
+    fakes: Parameters<typeof detectProvider>[2] = {},
   ) {
     const lifetime = new AbortController();
     const requestedTimeouts: number[] = [];
     const manager = ProviderManager.createForTests({
-      commands: { codex: fake.command },
+      commands: { [providerId]: fake.command },
       lifetimeSignal: lifetime.signal,
       detectProvider: async (providerId, options, dependencies) => {
         requestedTimeouts.push(options?.timeoutMs ?? 0);
         return await detectProvider(
           providerId,
           { ...options, timeoutMs: PROBE_TIMEOUT_MS },
-          dependencies,
+          { ...dependencies, ...fakes },
         );
       },
     });
@@ -107,7 +109,7 @@ if ((hangs[stage] ?? 0) !== 0) {
       providerInfo: () => providerInfo,
       replaceProviderInfo: (value) => { providerInfo = value; },
       broadcastSnapshot: () => {
-        published.push(structuredClone(providerInfo.find(({ id }) => id === "codex")!));
+        published.push(structuredClone(providerInfo.find(({ id }) => id === providerId)!));
       },
       isClosed: () => closed,
       track: async (operation) => await operation(),
@@ -118,7 +120,7 @@ if ((hangs[stage] ?? 0) !== 0) {
       refresh,
       published,
       requestedTimeouts,
-      codex: () => providerInfo.find(({ id }) => id === "codex")!,
+      codex: () => providerInfo.find(({ id }) => id === providerId)!,
       close: () => {
         closed = true;
         lifetime.abort(new Error("The runtime is shutting down."));
@@ -272,6 +274,49 @@ if ((hangs[stage] ?? 0) !== 0) {
     expect(kimi).toMatchObject({ installState: "installed", authState: "unknown", canRun: true });
     expect(kimi.probeTimedOut).toBeUndefined();
   });
+
+  it("retries an OpenCode isolation proof timeout instead of asking for an update", async () => {
+    const root = portableFixtureRoot("opencode isolation timeout");
+    roots.push(root);
+    const executable = join(root, "opencode");
+    const proofs: string[] = [];
+    const runtime = harness({ root, command: executable }, [20, 20, 20], "opencode", {
+      executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => {
+        const outcome = proofs.length === 0 ? "timed-out" as const : "verified" as const;
+        proofs.push(outcome);
+        return { cleanupConfirmed: true, outcome };
+      },
+      probeProcess: async (_candidate, args) => ({
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+        exitCode: 0,
+        output: args[0] === "--version" ? "opencode 1.18.26"
+          : args[0] === "serve" ? "--pure run without external plugins"
+            : "Credentials\n0 credentials",
+      }),
+    });
+
+    await runtime.refresh("opencode");
+    expect(runtime.codex()).toMatchObject({
+      installState: "checking",
+      authState: "checking",
+      canRun: false,
+      statusMessage: "OpenCode is slow to respond; checking again",
+    });
+    expect(route(runtime.codex())).toMatchObject({ badge: "Checking", action: null, transient: true });
+    await waitFor("the isolation proof retry", () => proofs.length === 2 && runtime.published.length === 2, 10_000);
+
+    expect(proofs).toEqual(["timed-out", "verified"]);
+    expect(runtime.codex()).toMatchObject({
+      installState: "installed",
+      authState: "unknown",
+      statusMessage: "Installed; connection not confirmed",
+    });
+    expect(runtime.published.map(({ statusMessage }) => statusMessage).join("\n")).not.toMatch(/update/iu);
+    runtime.close();
+  }, 30_000);
 
   it("cancels a pending retry on shutdown without probing again", async () => {
     const fake = fakeCodex({ login: 1 });

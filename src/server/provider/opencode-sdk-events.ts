@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import type {
   Event,
-  OpencodeClient,
   PermissionV2Reply,
   QuestionInfo,
 } from "@opencode-ai/sdk/v2";
@@ -18,6 +17,7 @@ import {
   openCodeQuestionPayload,
   openCodeQuestions,
 } from "./opencode-boundary";
+import type { OpenCodeInteractionReplies } from "./opencode-interaction-replies";
 import {
   emitOpenCodeNextActivity,
   emitOpenCodeUsage,
@@ -112,7 +112,7 @@ export function openCodeEventRequiresPromptAdmission(event: Event): boolean {
 export function handleOpenCodeInteractionEvent(
   event: Event,
   options: AgentHarnessStartOptions,
-  client: OpencodeClient,
+  replies: OpenCodeInteractionReplies,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   approvals: Map<string, OpenCodePendingApproval>,
   inputs: Map<string, OpenCodePendingInput>,
@@ -148,13 +148,13 @@ export function handleOpenCodeInteractionEvent(
       options.input.access === "full"
       || (options.input.access === "auto-edit" && permission === "edit")
     ) {
-      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "once")
+      void replies.permission({ protocol, sessionId, nativeId }, "once")
         .catch(onFailure);
       return true;
     }
     const display = openCodeApprovalDisplay(properties, permission);
     if (!display) {
-      void replyOpenCodePermission(client, protocol, sessionId, nativeId, "reject")
+      void replies.permission({ protocol, sessionId, nativeId }, "reject")
         .catch(onFailure);
       return true;
     }
@@ -244,7 +244,7 @@ export function handleOpenCodeInteractionEvent(
 export function handleOpenCodeEvent(
   event: Event,
   options: AgentHarnessStartOptions,
-  client: OpencodeClient,
+  replies: OpenCodeInteractionReplies,
   resultText: CappedProviderBuffer,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   approvals: Map<string, OpenCodePendingApproval>,
@@ -273,7 +273,7 @@ export function handleOpenCodeEvent(
   if (handleOpenCodeInteractionEvent(
     event,
     options,
-    client,
+    replies,
     emitter,
     approvals,
     inputs,
@@ -658,26 +658,6 @@ export function handleOpenCodeEvent(
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
     emitter.activity("system", "info", "OpenCode compacted the session context");
   }
-}
-
-export async function replyOpenCodePermission(
-  client: OpencodeClient,
-  protocol: OpenCodeInteractionProtocol,
-  sessionId: string,
-  nativeId: string,
-  reply: "once" | "reject",
-): Promise<void> {
-  if (protocol === "v2") {
-    await client.v2.session.permission.reply(
-      { sessionID: sessionId, requestID: nativeId, reply },
-      { throwOnError: true },
-    );
-    return;
-  }
-  await client.permission.reply(
-    { requestID: nativeId, reply },
-    { throwOnError: true },
-  );
 }
 
 function ownsOpenCodeInteractionSource(

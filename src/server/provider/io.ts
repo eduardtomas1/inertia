@@ -98,7 +98,7 @@ export class ProviderRunEventBudget {
     options: ProviderRunEventBudgetOptions = {},
   ) {
     this.windowMs = options.windowMs ?? PROVIDER_EVENT_BUDGET_WINDOW_MS;
-    this.now = options.now ?? Date.now;
+    this.now = options.now ?? (() => performance.now());
     this.maxRunEvents = options.maxRunEvents
       ?? maxEvents * PROVIDER_RUN_BUDGET_BURSTS;
     this.maxRunBytes = options.maxRunBytes

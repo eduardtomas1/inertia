@@ -1156,6 +1156,47 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     await expect(followUp).resolves.toBe(false);
   });
 
+  it.each([
+    ["resume-stuck-steer", { name: "ProviderSteerDeliveryUnknownError" }],
+    ["resume-dropped-steer", { name: "ProviderSteerDeliveryUnknownError" }],
+    ["resume-refused-steer", false],
+  ] as const)("classifies an unconfirmed steer admission: %s", async (scenario, outcome) => {
+    const root = portableFixtureRoot(`OpenCode ${scenario}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, scenario));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({ initializationTimeoutMs: 500 })]),
+    );
+    let followUp: Promise<boolean> | null = null;
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: `opencode-${scenario}`,
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onStatus: (event) => {
+        if (event.status !== "running" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Keep this follow-up attributable.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+        followUp.catch(() => undefined);
+      },
+    })).resolves.toMatchObject({ status: "completed" });
+    if (outcome === false) await expect(followUp).resolves.toBe(false);
+    else await expect(followUp).rejects.toMatchObject(outcome);
+    const capture = readStableCapture<{ captured: Array<{ path: string }> }>(capturePath);
+    expect(capture.captured.filter(({ path }) =>
+      path === "/api/session/opencode-lifecycle-session/prompt")).toHaveLength(1);
+  }, 10_000);
+
   it("cancels within the force deadline while a steer receipt is pending", async () => {
     const root = portableFixtureRoot("OpenCode pending steer cancellation");
     roots.push(root);
@@ -1188,6 +1229,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           content: "Hold this follow-up.",
           imagePaths: [],
         }, { runId: event.runId, turnId: event.turnId! });
+        followUp.catch(() => undefined);
         expect(manager.cancel(event.conversationId)).toBe(true);
         cancel();
       },
@@ -1195,7 +1237,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
 
     await cancelRequested;
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
-    await expect(followUp).resolves.toBe(false);
+    await expect(followUp).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });
     const capture = readStableCapture<{
       captured: Array<{ path: string }>;
     }>(capturePath);

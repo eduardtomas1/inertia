@@ -48,16 +48,19 @@ import {
   launchCredentialValues,
   sanitizeProviderFailureDetail,
 } from "../provider/activity-detail";
-import type {
-  ProviderGoalMutation,
-  ProviderGoalSnapshot,
-  ProviderRunFailure,
-  ProviderSteerInput,
+import {
+  ProviderSteerDeliveryUnknownError,
+  type ProviderGoalMutation,
+  type ProviderGoalSnapshot,
+  type ProviderRunFailure,
+  type ProviderSteerInput,
 } from "../provider/contracts";
 import { providerProcessInvocation } from "../provider/process";
 import {
   createOwnedProcessTreeTermination,
 } from "../process-lifecycle";
+
+class CodexRequestRefusedError extends Error {}
 
 interface PendingClientRequest {
   method: string;
@@ -381,12 +384,12 @@ export function startCodexAppServerRun(
         "Too many Codex App Server requests were pending.",
         message,
       );
-      return Promise.reject(new Error(message));
+      return Promise.reject(new CodexRequestRefusedError(message));
     }
     if (!Number.isSafeInteger(nextRequestId)) {
       const message = "The Codex App Server JSON-RPC id space was exhausted.";
       rememberFailure("malformed-protocol", message);
-      return Promise.reject(new Error(message));
+      return Promise.reject(new CodexRequestRefusedError(message));
     }
     const id = nextRequestId;
     nextRequestId += 1;
@@ -414,7 +417,7 @@ export function startCodexAppServerRun(
       if (!writeMessage({ method, id, params })) {
         clearTimeout(timeout);
         pendingRequests.delete(id);
-        reject(new Error(`Could not send ${method}.`));
+        reject(new CodexRequestRefusedError(`Could not send ${method}.`));
       }
     });
   };
@@ -580,7 +583,7 @@ export function startCodexAppServerRun(
             errorMessage,
           );
         }
-        pending.reject(new Error(errorMessage));
+        pending.reject(new CodexRequestRefusedError(errorMessage));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
       }
@@ -770,8 +773,9 @@ export function startCodexAppServerRun(
       // Capture ownership before awaiting: completion can share the response's
       // stdout batch, but only this exact provider turn can acknowledge input.
       return receipt.turnId === expectedTurnId;
-    } catch {
-      return false;
+    } catch (error) {
+      if (error instanceof CodexRequestRefusedError) return false;
+      throw new ProviderSteerDeliveryUnknownError();
     }
   };
 

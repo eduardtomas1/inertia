@@ -59,3 +59,75 @@ describe("Codex follow-up acknowledgement ownership", () => {
     }
   });
 });
+
+describe("Codex follow-up delivery uncertainty", () => {
+  const input = { content: "Include the edge case.", imagePaths: [] };
+  const unknownDelivery = { name: "ProviderSteerDeliveryUnknownError" };
+
+  async function withSteerRun(
+    scenario: string,
+    rpcTimeoutMs: number | undefined,
+    body: (run: ReturnType<typeof startCodexAppServerRun>, capturePath: string) => Promise<void>,
+  ): Promise<void> {
+    const roots: string[] = [];
+    const fake = fakeAppServer(roots);
+    let running = false;
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      cwd: fake.root,
+      environment: {
+        ...process.env,
+        INERTIA_APP_SERVER_CAPTURE: fake.capturePath,
+        INERTIA_APP_SERVER_SCENARIO: scenario,
+      },
+      prompt: "Wait for a follow-up.",
+      access: "full",
+      planMode: false,
+      ...(rpcTimeoutMs === undefined ? {} : { rpcTimeoutMs }),
+      onStatus: (status) => { running = status === "running"; },
+    });
+    try {
+      await waitFor("the Codex turn to start", () => running);
+      await body(run, fake.capturePath);
+    } finally {
+      run.cancel(true);
+      await run.result;
+      await Promise.all(roots.map(removePortableFixture));
+    }
+  }
+
+  const steerRequests = (capturePath: string) =>
+    captured(capturePath).filter(({ method }) => method === "turn/steer");
+
+  it("reports a lost steer acknowledgement as unknown delivery", async () => {
+    await withSteerRun("steer-receipt-lost", 1_000, async (run, capturePath) => {
+      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      expect(steerRequests(capturePath)).toHaveLength(1);
+    });
+  });
+
+  it("keeps a late steer acknowledgement unknown without resending", async () => {
+    await withSteerRun("steer-receipt-late", 1_000, async (run, capturePath) => {
+      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
+      expect(steerRequests(capturePath)).toHaveLength(1);
+    });
+  });
+
+  it("keeps an explicit native steer rejection rejected", async () => {
+    await withSteerRun("steer-receipt-refused", undefined, async (run) => {
+      await expect(run.steer!(input)).resolves.toBe(false);
+    });
+  });
+
+  it("reports a steer pending during Stop as unknown delivery", async () => {
+    await withSteerRun("steer-receipt-lost", undefined, async (run, capturePath) => {
+      const steering = run.steer!(input);
+      await waitFor("the steer request to reach Codex", () => steerRequests(capturePath).length === 1);
+      run.cancel();
+      await expect(steering).rejects.toMatchObject(unknownDelivery);
+      await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
+      expect(steerRequests(capturePath)).toHaveLength(1);
+    });
+  });
+});

@@ -443,7 +443,7 @@ describe("Private Connect service lifecycle", () => {
               generatedAt: "2030-01-01T00:00:00.000Z",
               conversation: { id: conversationId, projectId, title: "Conversation", providerLabel: "Test", runId: null, status: "needs-input", pendingLocalApproval: false, promptSafety: { supported: true, headline: "Supported", explanation: "Supervised." }, updatedAt: "2030-01-01T00:00:00.000Z" },
               messages: [], activities: [], subagents: [],
-              plan: { steps: [{ label: "Investigate", status: "inProgress" }] },
+              plan: { steps: [{ label: "Investigate", status: "inProgress" }, { label: "Rewrite", status: "cancelled" }] },
               inputRequestId,
               questions: [{
                 id: providerQuestionId,
@@ -488,6 +488,7 @@ describe("Private Connect service lifecycle", () => {
       allowCustomAnswer: true,
     });
     expect(parsed.data.inputRequestId).toBe(inputRequestId);
+    expect(parsed.data.plan?.steps.map(({ status }) => status)).toEqual(["inProgress", "cancelled"]);
   });
 
   it("enables, pairs, grants, authenticates, and revokes a browser", async () => {

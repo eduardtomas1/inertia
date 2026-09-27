@@ -885,7 +885,7 @@ setInterval(() => {}, 1000);
       executableCandidates: async () => [executable],
       probeOpenCodePureIsolation: async () => ({
         cleanupConfirmed: true,
-        verified: true,
+        outcome: "verified",
       }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
@@ -913,7 +913,7 @@ setInterval(() => {}, 1000);
       executableCandidates: async () => [executable],
       probeOpenCodePureIsolation: async () => ({
         cleanupConfirmed: true,
-        verified: true,
+        outcome: "verified",
       }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
@@ -962,23 +962,49 @@ setInterval(() => {}, 1000);
 
   it.each([
     {
+      outcome: "incompatible",
       cleanupConfirmed: true,
+      installState: "installed",
       statusMessage: "OpenCode failed secure plugin-free runtime verification; update the selected CLI",
     },
     {
-      cleanupConfirmed: false,
-      statusMessage: "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+      outcome: "operational-error",
+      cleanupConfirmed: true,
+      installState: "error",
+      statusMessage: "OpenCode could not complete secure plugin-free runtime verification; refresh to try again",
     },
-  ])("fails closed when selected OpenCode semantic isolation is rejected", async ({
+    {
+      outcome: "cancelled",
+      cleanupConfirmed: true,
+      installState: "error",
+      statusMessage: "OpenCode could not complete secure plugin-free runtime verification; refresh to try again",
+    },
+    {
+      outcome: "timed-out",
+      cleanupConfirmed: true,
+      installState: "unresponsive",
+      probeTimedOut: true,
+      statusMessage: "OpenCode did not respond in time; refresh to try again",
+    },
+    ...(["incompatible", "operational-error", "timed-out"] as const).map((outcome) => ({
+      outcome,
+      cleanupConfirmed: false,
+      installState: "installed",
+      statusMessage: "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+    })),
+  ] as const)("fails closed when selected OpenCode semantic isolation is $outcome with cleanup $cleanupConfirmed", async ({
+    outcome,
     cleanupConfirmed,
+    installState,
     statusMessage,
+    ...expected
   }) => {
     const executable = join(temporaryRoot(), "opencode");
     const isolationProbe = vi.fn(async () => ({
       cleanupConfirmed,
-      verified: false,
+      outcome,
     }));
-    await expect(detectProvider("opencode", { command: executable }, {
+    const detected = await detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
       probeOpenCodePureIsolation: isolationProbe,
       probeProcess: async (_candidate, args) => ({
@@ -990,14 +1016,17 @@ setInterval(() => {}, 1000);
         timedOut: false,
         cleanupConfirmed: true,
       }),
-    })).resolves.toMatchObject({
+    });
+    expect(detected).toMatchObject({
       available: true,
-      installState: "installed",
+      executable,
+      installState,
       authState: "unknown",
       canRun: false,
       cleanupConfirmed,
       statusMessage,
     });
+    expect(detected.probeTimedOut).toBe("probeTimedOut" in expected ? true : undefined);
     expect(isolationProbe).toHaveBeenCalledWith(
       executable,
       "1.18.26",

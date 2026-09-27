@@ -22,6 +22,7 @@ export function createQueuedMessageRuntime(
   const running = new Map<string, Promise<void>>();
   const enqueueing = new Map<string, Promise<void>>();
   const again = new Set<string>();
+  const manualRetries = new Map<string, string>();
   const result = (conversationId: string, id?: string): MessageQueueResult => ({
     kind: "message.queue", conversationId, entries: store.queuedMessages.list(conversationId),
     receipt: id ? store.queuedMessages.get(conversationId, id) : null,
@@ -34,23 +35,27 @@ export function createQueuedMessageRuntime(
     if (conversation.archivedAt !== null) throw new RuntimeRequestError("Unarchive this chat before changing its queue.");
     return conversation;
   };
-  const retryAfterCleanup = (conversationId: string): void => {
+  const retryAfterCleanup = (conversationId: string, manualId?: string): void => {
+    if (manualId) manualRetries.set(conversationId, manualId);
     void turns.waitForProviderCleanup([conversationId]).then(() => schedule(conversationId)).catch(() => undefined);
   };
 
   async function dispatch(conversationId: string, manualId?: string): Promise<void> {
     if (options.signal.aborted || !dependencies.enableProviders || turns.isClosing()) return;
     const first = store.queuedMessages.list(conversationId)[0];
+    const retry = manualRetries.get(conversationId);
+    manualRetries.delete(conversationId);
     if (!first || (manualId && first.id !== manualId)) return;
-    if (!manualId && first.state !== "waiting") return;
+    const manual = manualId ?? (retry === first.id && first.state === "waiting" ? retry : undefined);
+    if (!manual && first.state !== "waiting") return;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
-      retryAfterCleanup(conversationId);
+      retryAfterCleanup(conversationId, manualId);
       return;
     }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt !== null) return;
-    if (!manualId && store.latestAgentTurnForConversation(conversationId)?.status !== "completed") return;
+    if (!manual && store.latestAgentTurnForConversation(conversationId)?.status !== "completed") return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
       store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
       changed(conversationId);
@@ -68,7 +73,7 @@ export function createQueuedMessageRuntime(
         payload: { conversationId, content: first.content, attachments: [], activate: false },
       });
     } catch (error) {
-      if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId);
+      if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
       else store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
     } finally {
       changed(conversationId);

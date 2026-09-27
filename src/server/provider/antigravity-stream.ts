@@ -36,7 +36,7 @@ export interface AntigravityResult {
 export type AntigravityStreamEvent =
   | { kind: "session"; conversationId: string }
   | { kind: "text"; text: string }
-  | { kind: "tool"; id: string; label: string; phase: ProviderActivityPhase }
+  | { kind: "tool"; id: string; label: string; phase: ProviderActivityPhase; detail?: string }
   | { kind: "result"; result: AntigravityResult };
 
 export type AntigravityFailureKind =
@@ -76,10 +76,24 @@ function tokenCount(value: unknown): number | null {
     : null;
 }
 
+function toolError(toolInfo: unknown): string | null {
+  if (!isObject(toolInfo)) return null;
+  const { error } = toolInfo;
+  if (!isObject(error)) return nonEmptyText(error);
+  const parts = [nonEmptyText(error.type), nonEmptyText(error.message)]
+    .filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(": ") : null;
+}
+
 export function antigravitySessionId(
   value: string | null | undefined,
 ): string | undefined {
   return value && isProviderTerminalSessionId(value) ? value : undefined;
+}
+
+function conversationIdentity(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === "") return null;
+  return typeof value === "string" ? antigravitySessionId(value) : undefined;
 }
 
 export function antigravityArguments(
@@ -141,13 +155,17 @@ export function parseAntigravityLine(
   if (!isObject(value) || typeof value.event !== "string") return null;
   const nested = value[value.event];
   const payload = isObject(nested) ? nested : value;
-  const conversationId = antigravitySessionId(nonEmptyText(payload.conversation_id));
+  const outerId = conversationIdentity(value.conversation_id);
+  const innerId = payload === value ? outerId : conversationIdentity(payload.conversation_id);
+  if (outerId === undefined || innerId === undefined) return null;
+  if (outerId && innerId && outerId !== innerId) return null;
+  const conversationId = outerId ?? innerId;
   if (value.event === "result") {
     return [{
       kind: "result",
       result: {
         status: nonEmptyText(payload.status) ?? "",
-        conversationId: conversationId ?? null,
+        conversationId,
         response: typeof payload.response === "string" ? payload.response : "",
         error: nonEmptyText(payload.error),
         usage: antigravityUsage(payload.usage),
@@ -161,11 +179,13 @@ export function parseAntigravityLine(
   const toolName = nonEmptyText(payload.tool_name);
   if (toolName) {
     const stepIndex = tokenCount(payload.step_index);
+    const error = toolError(payload.tool_info);
     events.push({
       kind: "tool",
       id: stepIndex === null ? toolName : String(stepIndex),
       label: toolName.slice(0, MAX_LABEL_CHARS),
-      phase: payload.state === "DONE" ? "completed" : "started",
+      phase: error ? "failed" : payload.state === "DONE" ? "completed" : "started",
+      ...(error ? { detail: error } : {}),
     });
     return events;
   }

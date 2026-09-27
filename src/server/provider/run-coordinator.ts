@@ -26,6 +26,7 @@ import {
   type ProviderRunIdentity,
   type ProviderRunInput,
   type ProviderRunResult,
+  ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
 import {
@@ -787,7 +788,8 @@ export class ProviderRunCoordinator {
     if (!steer) return false;
     try {
       return await steer(input);
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderSteerDeliveryUnknownError) throw error;
       return false;
     }
   }

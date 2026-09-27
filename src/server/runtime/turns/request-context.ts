@@ -374,15 +374,18 @@ function readPinnedFileReference(path: string, identity: Stats, displayPath: str
     if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) {
       throw new Error(`File reference ${displayPath} changed while it was being read.`);
     }
-    const buffer = Buffer.alloc(MAX_FILE_SOURCE_BYTES + 1);
+    if (opened.size > MAX_FILE_SOURCE_BYTES) {
+      throw new Error("File reference is too large to inspect safely.");
+    }
+    const buffer = Buffer.alloc(opened.size + 1);
     let offset = 0;
     while (offset < buffer.length) {
       const bytesRead = readSync(descriptor, buffer, offset, buffer.length - offset, offset);
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
-    if (offset > MAX_FILE_SOURCE_BYTES) {
-      throw new Error("File reference is too large to inspect safely.");
+    if (offset > opened.size) {
+      throw new Error(`File reference ${displayPath} changed while it was being read.`);
     }
     return buffer.subarray(0, offset).toString("utf8");
   } finally {

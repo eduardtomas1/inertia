@@ -109,7 +109,7 @@ import { SecureFileBroker } from "./secure-file-broker.js";
 import { initialPackageSmokeEnvironment, writePackageSmokeStage } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import { APP_HOST, createAppProtocolRegistrar } from "./app-protocol.js";
-import { initializeInertiaReleaseChannel, releaseRuntimeOverride } from "./release-channel.js";
+import { initializeInertiaReleaseChannel, releaseRuntimeOverride, temporaryAttachmentRoot } from "./release-channel.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -238,7 +238,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
 function attachmentStorageRoot(): string {
-  return join(app.getPath("temp"), releaseChannel.temporaryAttachmentDirectoryName);
+  return temporaryAttachmentRoot((name) => app.getPath(name), releaseChannel);
 }
 function configuredRuntimeDataDirectory(): string {
   const configured = releaseRuntimeOverride({

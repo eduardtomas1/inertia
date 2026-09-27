@@ -378,7 +378,6 @@ describe("agent-owned native Browser", () => {
       }
     } else if (state === "missing") getWindow.mockReturnValue(null);
     if (state === "destroyed-tabs") {
-      // Electron accessors on a previously destroyed WebContents also throw.
       for (const contents of tabs) {
         closes[tabs.indexOf(contents)]!.mockRestore();
         contents.close();

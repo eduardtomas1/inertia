@@ -4,7 +4,6 @@ import { app, BrowserWindow, type Session, type WebContents } from "electron";
 import { PreviewBroker } from "../../../src/main/preview-broker";
 
 app.disableHardwareAcceleration();
-// Keep the test process alive between native window-close orderings.
 app.on("window-all-closed", () => undefined);
 const deadline = setTimeout(() => { console.error("Preview shutdown deadline"); app.exit(91); }, 25_000);
 deadline.unref();
@@ -50,8 +49,6 @@ async function run(): Promise<void> {
       const destroyed = tabs.map((contents) => new Promise<void>((resolve) => contents.once("destroyed", resolve)));
       const closed = new Promise<void>((resolve, reject) => window.once("closed", () => {
         try {
-          // Match the production closed handler: its getter still returns the
-          // destroyed BrowserWindow until preview cleanup finishes.
           assert(window.isDestroyed());
           assert.throws(() => window.contentView, /destroyed/u);
           if (closeContentsFirst) for (const contents of tabs) if (!contents.isDestroyed()) contents.close();

@@ -41,6 +41,7 @@ import {
   readBenchmarkLoginMarker,
   readBenchmarkRuntimeReadiness,
 } from "../helpers/desktop-benchmark-readiness-diagnostic";
+import { loadSeededConversationTurns } from "../e2e/support/conversation-history";
 import { attachRuntimeLifecycleFailureDiagnostic } from "../e2e/support/runtime-lifecycle-diagnostics";
 import { collectGuardianFailureCodes, type GuardianFailureCode } from "../helpers/guardian-failure-codes";
 import {
@@ -624,6 +625,7 @@ async function processSample(electronApp: ElectronApplication) {
 
 async function authoritativeScrollSample(page: Page, expectedRows = 300) {
   await expect(page.locator(".orphan-run-flow")).toHaveCount(0);
+  await loadSeededConversationTurns(page, expectedRows);
   const viewportLocator = page.locator(".message-scroll");
   await viewportLocator.hover();
   await page.mouse.wheel(0, -1);
@@ -631,16 +633,18 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
   // scrolling. A stable bottom-only range can still contain estimates for the
   // first rows; their first mount then changes the total height mid-sample.
   for (const index of [0, expectedRows - 1]) {
-    await viewportLocator.evaluate((viewport, atTop) => {
-      viewport.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true,
-        deltaY: atTop ? -1 : 1,
-      }));
-      viewport.scrollTop = atTop ? 0 : viewport.scrollHeight;
-    }, index === 0);
-    await expect(viewportLocator.locator(
-      `.response-virtual-item[data-index="${index}"]`,
-    )).toBeInViewport();
+    await expect(async () => {
+      await viewportLocator.evaluate((viewport, atTop) => {
+        viewport.dispatchEvent(new WheelEvent("wheel", {
+          bubbles: true,
+          deltaY: atTop ? -1 : 1,
+        }));
+        viewport.scrollTop = atTop ? 0 : viewport.scrollHeight;
+      }, index === 0);
+      await expect(viewportLocator.locator(
+        `.response-virtual-item[data-index="${index}"]`,
+      )).toBeInViewport({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
     if (index === 0) {
       // Intersection alone can precede the virtualizer's deferred ResizeObserver
       // measurement. Keep these rows mounted through consecutive stable frames.

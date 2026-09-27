@@ -428,6 +428,17 @@ export async function validatedPaths(
               "A selected file uses an unsafe symbolic link.",
             );
           }
+          const canonicalAncestor = await awaitPathInspection(
+            async () => await realpath(ancestor),
+            options,
+          );
+          requirePathInspectionTime(options);
+          if (!isContained(root, canonicalAncestor)) {
+            throw new GitError(
+              "invalid-input",
+              "A selected file resolves outside the repository.",
+            );
+          }
           break;
         } catch (ancestorError) {
           if (ancestorError instanceof GitError) throw ancestorError;

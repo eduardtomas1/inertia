@@ -396,6 +396,54 @@ describe("ProviderMaintenanceController", () => {
     expect(started.providerId).toBe("claude");
   });
 
+  it("quarantines and releases a provider whose journal fails while settling a cancelled update", async () => {
+    const first = deferred<ProviderMaintenanceRunResult>();
+    const journal = providerMaintenanceJournalTestDouble();
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: {
+        ...journal,
+        markVerified: (operationId, observedIdentity) => {
+          if (observedIdentity.providerId === "opencode") {
+            throw new Error("A provider maintenance journal record is invalid.");
+          }
+          return journal.markVerified(operationId, observedIdentity);
+        },
+        abandonUnadmitted: (operationId, identity) => {
+          if (identity.providerId === "opencode") {
+            throw new Error("A provider maintenance journal record is invalid.");
+          }
+          return journal.abandonUnadmitted(operationId, identity);
+        },
+      },
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      runAction: async (action) => action.executable.endsWith("claude")
+        ? await first.promise
+        : success(),
+      operationId: operationIds(),
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const claude = await controller.startUpdate("claude");
+    const opencode = await controller.startUpdate("opencode");
+    controller.cancel(opencode.id);
+
+    expect(await waitForTerminal(operations, opencode.id)).toMatchObject({
+      status: "cancelled",
+    });
+    await vi.waitFor(() => expect(controller.diagnosticStates()).toContainEqual({
+      providerId: "opencode",
+      state: "quarantined",
+    }));
+    await expect(controller.startUpdate("opencode")).rejects.toThrow(
+      "Provider maintenance ownership could not be recorded durably.",
+    );
+    first.resolve(success());
+    await waitForTerminal(operations, claude.id);
+  });
+
   it("aborts and awaits owned operations during disposal", async () => {
     const operations: ProviderMaintenanceOperation[] = [];
     const runAction = vi.fn(async (

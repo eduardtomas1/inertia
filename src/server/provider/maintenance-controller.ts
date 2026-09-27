@@ -624,38 +624,43 @@ export class ProviderMaintenanceController {
         });
       }
     } finally {
-      if (active.installationLease && !installationAuthoritySettled) {
-        if (!commandStarted) {
-          installationAuthoritySettled = await this.completeInstallationAuthority(
-            active,
+      try {
+        if (active.installationLease && !installationAuthoritySettled) {
+          if (!commandStarted) {
+            installationAuthoritySettled = await this.completeInstallationAuthority(
+              active,
+              active.installationIdentity,
+            );
+          } else {
+            this.quarantineInstallation(
+              active,
+              result?.cleanupConfirmed === true
+                ? "maintenance-terminal-state-unverified"
+                : "maintenance-process-cleanup-unconfirmed",
+            );
+            this.cleanupUnconfirmed ||= result?.cleanupConfirmed !== true;
+            await this.invalidateUncertainInstallationEvidence(active);
+            installationAuthoritySettled = true;
+          }
+        }
+        if (
+          !active.installationLease
+          && !commandStarted
+          && !active.journalQuarantined
+          && !active.journalRetired
+        ) {
+          active.journalRetired = this.options.maintenanceJournal.abandonUnadmitted(
+            active.operation.id,
             active.installationIdentity,
           );
-        } else {
-          this.quarantineInstallation(
-            active,
-            result?.cleanupConfirmed === true
-              ? "maintenance-terminal-state-unverified"
-              : "maintenance-process-cleanup-unconfirmed",
-          );
-          this.cleanupUnconfirmed ||= result?.cleanupConfirmed !== true;
-          await this.invalidateUncertainInstallationEvidence(active);
-          installationAuthoritySettled = true;
+          if (!active.journalRetired) {
+            this.quarantinedProviders.add(active.operation.providerId);
+            active.journalQuarantined = true;
+          }
         }
-      }
-      if (
-        !active.installationLease
-        && !commandStarted
-        && !active.journalQuarantined
-        && !active.journalRetired
-      ) {
-        active.journalRetired = this.options.maintenanceJournal.abandonUnadmitted(
-          active.operation.id,
-          active.installationIdentity,
-        );
-        if (!active.journalRetired) {
-          this.quarantinedProviders.add(active.operation.providerId);
-          active.journalQuarantined = true;
-        }
+      } catch {
+        this.quarantineInstallation(active, "maintenance-journal-unavailable");
+        await this.invalidateUncertainInstallationEvidence(active);
       }
       if (this.active.get(providerId)?.operation.id === active.operation.id) {
         this.active.delete(providerId);

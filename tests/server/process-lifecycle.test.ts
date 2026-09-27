@@ -440,6 +440,43 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("bounds graceful, forced and close phases of a Windows termination by one wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      child.kill = vi.fn(() => true);
+      const graceful = fakeTaskkill();
+      const forced = fakeTaskkill();
+      const spawnProcess = vi.fn()
+        .mockReturnValueOnce(graceful)
+        .mockReturnValueOnce(forced);
+      let result: boolean | undefined;
+      void terminateProcessTreeAndWait(
+        child as never,
+        false,
+        {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        },
+      ).then((value) => { result = value; });
+
+      await vi.advanceTimersByTimeAsync(40);
+      graceful.emit("close", 128);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not escalate a refused graceful Windows taskkill after the root has exited", async () => {
     const child = fakeChild();
     const graceful = fakeTaskkill();

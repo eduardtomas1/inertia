@@ -669,19 +669,22 @@ export async function terminateProcessTreeAndWait(
     }
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const startedAt = performance.now();
+    const deadlineAt = Date.now() + waitMs;
+    const remainingMs = (): number => Math.max(0, deadlineAt - Date.now());
     const taskkill = (forced: boolean): Promise<boolean> =>
       terminateWindowsProcessTree(
         pid,
         forced,
         spawnProcess,
         windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
-        waitMs,
+        remainingMs(),
         "child",
       );
     const treeTerminated = await taskkill(force) || (
       !force
       && child.exitCode === null
       && child.signalCode === null
+      && remainingMs() > 0
       && await taskkill(true)
     );
     if (treeTerminated) {
@@ -691,7 +694,7 @@ export async function terminateProcessTreeAndWait(
       // executables or other owned resources before that handle is closed.
       const closed = await confirmWindowsChildResourcesClosed(
         waitForObservedDirectChildClose,
-        waitMs,
+        remainingMs(),
       );
       if (!closed) recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
         elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
@@ -702,7 +705,7 @@ export async function terminateProcessTreeAndWait(
     // descendants stopped, even if the child releases its handles.
     await confirmWindowsChildResourcesClosed(
       waitForObservedDirectChildClose,
-      waitMs,
+      remainingMs(),
     );
     return false;
   }

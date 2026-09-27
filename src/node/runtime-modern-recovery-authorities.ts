@@ -19,7 +19,6 @@ import {
   type RuntimeGenerationLease,
 } from "./runtime-generation-leases.js";
 import { RuntimeOwnedProcessJournal } from "./runtime-owned-processes.js";
-import { sameProcess } from "./runtime-owned-process-journal.js";
 import {
   readDarwinProcessIdentity,
   type DarwinProcessIdentity,
@@ -519,7 +518,7 @@ export function modernDarwinRecoverySnapshotRootsAbsent(
           if (Date.now() >= deadlineAt) return false;
           observed = readIdentity(expected.pid);
         }
-        if (observed && sameProcess(expected, observed)) {
+        if (observed && JSON.stringify(observed) === JSON.stringify(expected)) {
           return false;
         }
       }

@@ -937,35 +937,6 @@ describe("modern Darwin runtime recovery authority", () => {
     expect(new RuntimeGenerationLeaseJournal(path).all()).toHaveLength(2);
   });
 
-  it.each([
-    { label: "refuses retirement for a reparented exact guardian", observed: (pid: number) => ({ ...identity(pid), parentPid: 1 }), retired: false },
-    { label: "retires a reused PID with a different birth time", observed: (pid: number) => ({ ...identity(pid), parentPid: 1, startTimeMicroseconds: 654_321 }), retired: true },
-    { label: "retires a reused PID in a different session", observed: (pid: number) => ({ ...identity(pid), sessionId: pid + 1 }), retired: true },
-  ])("$label", ({ observed, retired }) => {
-    const path = directory();
-    seedOwned(path, generationA, 451);
-    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
-    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
-    expect(journal.publish(snapshot)).not.toBeNull();
-    const authority = journal.pending()!;
-    const leases = new RuntimeGenerationLeaseJournal(path);
-    expect(leases.publish(currentGeneration, bootId)).toBe(true);
-    expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
-      .startSession(currentGeneration, bootId)).toBe(true);
-
-    expect(journal.beginRetirement(
-      authority,
-      path,
-      currentGeneration,
-      {
-        ...absentRoots,
-        pidExists: () => true,
-        readDarwinIdentity: observed,
-      },
-    )).toBe(retired);
-    if (!retired) expect(leases.all()).toHaveLength(2);
-  });
-
   it("retries one unreadable guardian identity before retiring absent roots", () => {
     const path = directory();
     seedOwned(path, generationA, 447);

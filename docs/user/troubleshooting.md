@@ -12,6 +12,12 @@ Find what you're seeing below.
 
 In **Supervised** mode the agent pauses for your approval. Open the chat and answer the request. The **Work** tab marks chats that need input.
 
+OpenCode keeps admitted approval and question requests open while you decide. Its inactivity limit resumes after you answer; the overall run limit still applies.
+
+## A provider feature is unavailable
+
+Open **Settings → Providers → Feature availability** to see which features are ready, need setup, or are checked when a chat starts. The installation status above it shows the version Inertia verified. Some features depend on the selected model; Cursor only offers reasoning choices observed for that model.
+
 ## I can't open another chat window
 
 Up to eight chats can have their own windows at once. Close one, or bring a chat back into the main window, then try again.
@@ -19,6 +25,12 @@ Up to eight chats can have their own windows at once. Close one, or bring a chat
 ## A chat can't be added to split view
 
 A chat that already has its own window can't join split view. Choose the chat in the sidebar to focus its window, or close that window first.
+
+## Find earlier messages in a long chat
+
+Chats open with recent history. Choose **Load earlier messages** at the top of the transcript to read more. Message search and turn links load their destination when it is outside the current page, including in split and detached windows. Loading a page preserves your reading position.
+
+If an individual turn is too large to display, Inertia reports that without disconnecting your other chats. Its saved history remains in the database and can be included in a data export from Settings.
 
 ## Pull, push or commit fails
 
@@ -31,6 +43,10 @@ A countdown reaching zero doesn't refill the bar. Choose **Refresh limits** to g
 ## Inertia says it restored a backup or started with empty data
 
 The recovery notice explains what happened and offers recovery actions, including copying a report. See [Database recovery](../DATABASE_RECOVERY.md).
+
+## Check local storage and backups
+
+Open **Settings → Report an issue → View storage & backups** (also under **Archive & data**). The page measures the database, browser cache and temporary attachments while open, and shows backup retention and the last validated backup. Backup files and saved attachment files are excluded from those measured totals. Clearing browser cache keeps chats and backups; archiving a chat keeps its data.
 
 ## Startup is blocked on Windows after an update
 

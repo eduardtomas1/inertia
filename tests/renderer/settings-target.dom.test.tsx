@@ -41,6 +41,18 @@ describe("Settings external section targets", () => {
       notice: null,
     };
     const updatePrivateConnectDevice = vi.fn(async () => state);
+    const getAppHealth = vi.fn(async () => ({
+      sampledAt: "2026-09-26T10:00:00.000Z",
+      totalMemoryBytes: 1_024,
+      mainProcess: null,
+      rendererProcesses: [],
+      runtimeProcess: null,
+      runtimePhase: "idle" as const,
+      databaseBytes: 5 * 1_024 * 1_024,
+      cacheBytes: null,
+      temporaryAttachmentBytes: 0,
+      warnings: [{ code: "cache" as const, message: "Browser cache storage could not be measured." }],
+    }));
     let publishPrivateConnectState:
       | ((next: PrivateConnectStateView) => void)
       | null = null;
@@ -54,6 +66,7 @@ describe("Settings external section targets", () => {
           return vi.fn();
         }),
         updatePrivateConnectDevice,
+        getAppHealth,
       },
     });
     const providersTarget = { section: "providers" as const };
@@ -168,7 +181,16 @@ describe("Settings external section targets", () => {
     />);
     expect(await screen.findByLabelText("Phone access")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
+    expect(getAppHealth).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "View storage & backups" }));
+    await waitFor(() => expect(getAppHealth).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("5.0 MB")).toBeVisible();
+    expect(screen.getByText("Unavailable")).toBeVisible();
+    expect(screen.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
+    expect(screen.getByText(/targeting 5 copies and 512 MB/u)).toBeVisible();
+    expect(screen.getByText(/The newest validated copy is kept even above that target/u)).toBeVisible();
+    expect(screen.getByText(/Chats stay stored until you delete them/u)).toBeVisible();
     expect(screen.getByText("Full local database backup")).toBeVisible();
     expect(screen.getByText(
       /Validated SQLite copies include presets/u,

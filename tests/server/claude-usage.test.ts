@@ -4,6 +4,7 @@ import {
   parseClaudeRateLimitEvent,
   parseClaudeUsage,
 } from "../../src/server/provider/claude-usage";
+import { parseClaudeRateLimits } from "../../src/server/provider/claude-agent-sdk-metadata";
 
 describe("Claude Agent SDK usage accounting", () => {
   it("separates aggregate run processing from the last active iteration", () => {
@@ -272,7 +273,7 @@ describe("Claude Agent SDK usage accounting", () => {
       rate_limit_info: {
         status: "allowed_warning",
         rateLimitType: "five_hour",
-        utilization: 72.5,
+        utilization: 0.725,
         resetsAt: 1_893_456_000,
       },
     })).toEqual({
@@ -287,4 +288,30 @@ describe("Claude Agent SDK usage accounting", () => {
       rate_limit_info: { rateLimitType: "five_hour" },
     })).toBeNull();
   });
+
+  it.each([0, 0.725, 1])("agrees with fetched quota percentages for live fraction %s", (fraction) => {
+    const live = parseClaudeRateLimitEvent({
+      rate_limit_info: { rateLimitType: "five_hour", utilization: fraction },
+    });
+    const fetched = parseClaudeRateLimits({
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: fraction * 100, resets_at: null } },
+    });
+    expect(live).toEqual(fetched[0]);
+    expect(live?.remainingPercent).toBe(100 - fraction * 100);
+  });
+
+  it.each([1.01, 72.5, Number.MAX_VALUE])("clamps a live quota fraction %s above one to a full quota", (utilization) => {
+    expect(parseClaudeRateLimitEvent({
+      rate_limit_info: { rateLimitType: "five_hour", utilization },
+    })).toMatchObject({ id: "claude:five_hour", usedPercent: 100, remainingPercent: 0 });
+  });
+
+  it.each([-0.1, Number.NaN, Number.POSITIVE_INFINITY, "0.5"])(
+    "does not publish an invalid live quota fraction %s", (utilization) => {
+      expect(parseClaudeRateLimitEvent({
+        rate_limit_info: { rateLimitType: "five_hour", utilization },
+      })).toBeNull();
+    },
+  );
 });

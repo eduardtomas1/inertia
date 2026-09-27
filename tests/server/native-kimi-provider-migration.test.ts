@@ -57,11 +57,13 @@ function tableColumns(database: Database.Database, table: string): string[] {
 function rowsByTable(
   database: Database.Database,
   agentTurnColumns?: string[],
+  operationColumns?: string[],
 ): Record<string, unknown[]> {
   return Object.fromEntries(PRESERVED_TABLES.map((table) => [
     table,
     database.prepare(`SELECT ${table === "agent_turns" && agentTurnColumns
       ? agentTurnColumns.join(", ")
+      : table === "agent_thread_operations" && operationColumns ? operationColumns.join(", ")
       : "*"} FROM ${table} ORDER BY 1`).all(),
   ]));
 }
@@ -279,10 +281,13 @@ describe("native Kimi provider migration", { concurrent: false }, () => {
     const database = new Database(fixture.databasePath);
     database.pragma("foreign_keys = ON");
     const agentTurnColumns = tableColumns(database, "agent_turns");
-    const before = rowsByTable(database, agentTurnColumns);
+    const operationColumns = tableColumns(database, "agent_thread_operations");
+    const before = rowsByTable(database, agentTurnColumns, operationColumns);
     const beforeTriggers = pairedDeletionTriggers(database);
     migrateRuntimeDatabase(database);
-    expect(rowsByTable(database, agentTurnColumns)).toEqual(before);
+    expect(rowsByTable(database, agentTurnColumns, operationColumns)).toEqual(before);
+    expect(database.prepare("SELECT target_turn_id, target_run_id FROM agent_thread_operations").all())
+      .toEqual(expect.arrayContaining([{ target_turn_id: null, target_run_id: null }]));
     expect(database.prepare(`
       SELECT run_state, provider_state, run_state_revision FROM agent_turns
     `).get()).toEqual({ run_state: "queued", provider_state: null, run_state_revision: 0 });

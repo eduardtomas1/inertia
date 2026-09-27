@@ -11,6 +11,7 @@ import {
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
+import { expectFlatSettingsSections } from "./support/settings-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -59,6 +60,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await expect(page.getByRole("main", { name: "Settings" })).toBeFocused();
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
+  await expectFlatSettingsSections(page.getByRole("main", { name: "Settings" }));
   await page.getByRole("radio", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(async () => {
@@ -334,8 +336,12 @@ test("changes the theme only from Settings", async () => {
 
 test("keeps runtime support and application update checks explicit in settings", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Archive & data", exact: true }).click();
+  await page.getByRole("button", { name: "Report an issue", exact: true }).click();
+  await page.getByRole("button", { name: "View storage & backups", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Archive & data", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "Local data" })).toBeVisible();
+  await expect(page.getByText(/targeting 5 copies and 512 MB in total/u)).toBeVisible();
+  await expect(page.getByText(/backup files and saved attachment files are not included/u)).toBeVisible();
   const exportPath = join(testDirectory, "settings-recovery-export.json");
   await electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showSaveDialog", async () => ({

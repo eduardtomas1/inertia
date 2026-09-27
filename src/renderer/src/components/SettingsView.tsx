@@ -1,4 +1,3 @@
-import { INTERFACE_LOCALE } from "../lib/locale";
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -77,6 +76,7 @@ import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { ThemeLibrary } from "./ThemeLibrary";
 import { WorkingIndicatorSettings } from "./working-indicator/WorkingIndicatorSettings";
+import { StorageStatusSettings } from "./StorageStatusSettings";
 import "./SettingsView.css";
 
 export type SettingsViewProps = {
@@ -194,21 +194,6 @@ function overlayDirtyProviderIdentityLabels(
     else delete providerIdentityLabels[providerId];
   }
   return providerIdentityLabels;
-}
-
-export function formatStorageBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"] as const;
-  const unit = Math.min(
-    units.length - 1,
-    Math.floor(Math.log(bytes) / Math.log(1_024)),
-  );
-  const value = bytes / 1_024 ** unit;
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
-}
-
-export function formatHealthBytes(bytes: number | null): string {
-  return bytes === null ? "Unavailable" : formatStorageBytes(bytes);
 }
 
 function SettingsSectionFallback(): React.JSX.Element {
@@ -1120,6 +1105,12 @@ export function SettingsView({
         )}
 
         {section === "support" && (
+          <section className="settings-card" aria-labelledby="storage-support-heading">
+            <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="storage-support-heading">Storage & backups</h3><p>Check local usage, retention and the last validated backup.</p></span></div>
+            <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={() => setSection("archive")}><Database size={14} />View storage & backups</button></div>
+          </section>
+        )}
+        {section === "support" && (
           <section className="settings-card" aria-labelledby="welcome-guide-heading">
             <div className="settings-card-heading"><div><Compass size={18} /></div><span><h3 id="welcome-guide-heading">Welcome guide</h3><p>Replay the quick tour of split view, the Work tab, Duo, review and limits.</p></span></div>
             <div className="settings-toolbar"><button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} />Show welcome guide</button></div>
@@ -1136,43 +1127,9 @@ export function SettingsView({
             <section className="settings-card" aria-labelledby="data-heading">
               <div className="settings-card-heading"><div><Database size={18} /></div><span><h3 id="data-heading">Local data</h3><p>Database backups and portable recovery exports.</p></span></div>
               <div className="settings-data-note"><ShieldCheck size={17} /><span><strong>Provider credentials stay outside Inertia.</strong><small>Account authentication remains in each provider’s own secure storage.</small></span></div>
-              <div className="codex-binary-path runtime-log-setting app-health-setting">
-                <span>
-                  <strong><Activity size={14} />Local resource health</strong>
-                  <small>Sampled only while open; covers Inertia processes and app storage, never project files.</small>
-                  {appHealth ? (
-                    <span className="app-health-grid">
-                      <span><b>{formatHealthBytes(appHealth.totalMemoryBytes)}</b><small>App memory</small></span>
-                      <span><b>{formatHealthBytes(appHealth.databaseBytes)}</b><small>Database</small></span>
-                      <span><b>{formatHealthBytes(appHealth.cacheBytes)}</b><small>Browser cache</small></span>
-                      <span><b>{formatHealthBytes(appHealth.temporaryAttachmentBytes)}</b><small>Temporary attachments</small></span>
-                    </span>
-                  ) : <small>Measuring local usage…</small>}
-                  {appHealth && <small>Memory breakdown: main {appHealth.mainProcess ? `${formatStorageBytes(appHealth.mainProcess.memoryBytes)} (${appHealth.mainProcess.cpuPercent.toFixed(1)}% CPU)` : "unavailable"} · UI {appHealth.rendererProcesses ? `${formatStorageBytes(appHealth.rendererProcesses.reduce((total, process) => total + process.memoryBytes, 0))} across ${appHealth.rendererProcesses.length} ${appHealth.rendererProcesses.length === 1 ? "process" : "processes"}` : "unavailable"} · local service {appHealth.runtimeProcess ? formatStorageBytes(appHealth.runtimeProcess.memoryBytes) : "unavailable"} ({appHealth.runtimePhase ?? "state unavailable"}).</small>}
-                  {appHealth && appHealth.warnings.length > 0 && (
-                    <small className="settings-card-note" role="status">
-                      <strong>Partial health data</strong>
-                      {`: ${appHealth.warnings.map(({ message }) => message).join(" ")}`}
-                    </small>
-                  )}
-                </span>
-                <div>
-                  <button type="button" className="secondary-button" disabled={clearingCache || !appHealth} onClick={() => { void clearAppCache(); }}><Trash2 size={14} />{clearingCache ? "Clearing…" : "Clear browser cache"}</button>
-                </div>
-              </div>
+              <StorageStatusSettings health={appHealth} healthStatus={healthStatus} clearingCache={clearingCache}
+                backup={databaseBackup} onClearCache={clearAppCache} />
               {onReportCommand && (AttachmentStorageSettings ? <AttachmentStorageSettings settings={settings} disabled={disabled} request={onReportCommand} onUpdate={updateSettingsRequest} /> : <SettingsSectionFallback />)}
-              {healthStatus && <p className="settings-card-note" role="status">{healthStatus}</p>}
-              <div className="codex-binary-path runtime-log-setting">
-                <span>
-                  <strong>Full local database backup</strong>
-                  <small>Validated SQLite copies include presets, session references, execution context, Git artifacts, and attachment records—not secrets or attachment bytes.</small>
-                  <small>
-                    {databaseBackup?.lastValidatedAt
-                      ? <>Last validated backup: <time dateTime={databaseBackup.lastValidatedAt} title={databaseBackup.lastValidatedAt}>{new Date(databaseBackup.lastValidatedAt).toLocaleString(INTERFACE_LOCALE)}</time>.</>
-                      : "No validated backup yet. Inertia creates one after a short startup quiet period or the first completed turn, then keeps an hourly rotation."}
-                  </small>
-                </span>
-              </div>
               <div className="codex-binary-path runtime-log-setting">
                 <span>
                   <strong>Portable conversation recovery export</strong>

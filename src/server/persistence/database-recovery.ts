@@ -40,14 +40,21 @@ import {
 } from "./provider-run-ownership-schema";
 import { systemSuspendTimingSchemaIsValid } from "./system-suspend-schema";
 import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
+import {
+  DATABASE_BACKUP_INTERVAL_MS,
+  DATABASE_BACKUP_MAX_COUNT,
+  DATABASE_BACKUP_MAX_TOTAL_BYTES,
+} from "../../shared/storage-policy";
+export {
+  DATABASE_BACKUP_INTERVAL_MS,
+  DATABASE_BACKUP_MAX_COUNT,
+  DATABASE_BACKUP_MAX_TOTAL_BYTES,
+} from "../../shared/storage-policy";
 
-export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
 export const DATABASE_INITIAL_BACKUP_QUIET_MS = 30 * 1_000;
 export const DATABASE_INITIAL_BACKUP_GRACE_MS = 1_000;
 export const DATABASE_INITIAL_BACKUP_RETRY_MS = 5_000;
 export const DATABASE_INITIAL_BACKUP_MAX_RETRIES = 5;
-export const DATABASE_BACKUP_MAX_COUNT = 5;
-export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;

@@ -23,6 +23,7 @@ import {
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
 import {
+  MESSAGE_ADMISSION_UNAVAILABLE,
   publicRuntimeError,
   RuntimeRequestError,
 } from "../../runtime-errors";
@@ -51,6 +52,7 @@ import {
   messageSendPreparationExpired,
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
+import type { QueuedMessage } from "../../../shared/queued-messages";
 
 type MessageSendStage =
   | "conversation-state"
@@ -89,25 +91,28 @@ function classifiedMessageSendError(
   error: unknown,
   stage: MessageSendStage,
 ): RuntimeRequestError {
+  const code = `message-send/${stage}/unexpected`;
+  if (stage === "turn-publication") {
+    return new RuntimeRequestError(`The turn was admitted but could not start cleanly. Refresh this chat before retrying. [${code}]`, code, "ambiguous");
+  }
+  if (stage === "follow-up-publication") {
+    return new RuntimeRequestError(`The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [${code}]`, code, "ambiguous");
+  }
   if (error instanceof RuntimeRequestError) return error;
   const publicMessage = publicRuntimeError(error);
   if (publicMessage !== "The request could not be completed.") {
     return new RuntimeRequestError(publicMessage);
   }
-  const code = `message-send/${stage}/unexpected`;
   return new RuntimeRequestError(
-    stage === "turn-publication"
-      ? `The turn was admitted but could not start cleanly. Refresh this chat before retrying. [${code}]`
-      : stage === "follow-up-publication"
-        ? `The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [${code}]`
-        : stage === "follow-up-preparation"
-          ? `The follow-up could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No follow-up was submitted; try again. [${code}]`
+    stage === "follow-up-preparation"
+      ? `The follow-up could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No follow-up was submitted; try again. [${code}]`
       : `The message could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No turn was started; try again. [${code}]`,
     code,
   );
 }
 
 export interface TurnInteractionCommandDependencies {
+  queuedMessage?: QueuedMessage;
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -154,6 +159,12 @@ export function createTurnInteractionCommandHandler(
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
+          if (dependencies.queuedMessage && (
+            dependencies.queuedMessage.conversationId !== conversation.id
+            || conversation.archivedAt !== null
+            || dependencies.turns.isActive(conversation.id)
+            || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, conversation)
+          )) throw new RuntimeRequestError("The chat changed before its queued message could start.");
           contextPacketIds =
             command.payload.context?.conversationContextPacketIds ?? [];
           resolvedTurnContext = command.payload.context;
@@ -217,6 +228,7 @@ export function createTurnInteractionCommandHandler(
           let retention: Promise<ChatAttachment[]> | null = null;
           let attachments: ChatAttachment[] = [];
           let followUpPersisted = false;
+          let providerAcknowledged = false;
           let sourceClaimSettled = false;
           try {
             let resolvedAttachments: Awaited<
@@ -279,6 +291,8 @@ export function createTurnInteractionCommandHandler(
               },
               attachments,
               () => {
+                providerAcknowledged = true;
+                messageSendStage = "follow-up-publication";
                 if (!retentionId) return;
                 dependencies.conversationAttachments.acceptRetention(retentionId);
                 retentionAccepted = true;
@@ -313,7 +327,15 @@ export function createTurnInteractionCommandHandler(
             dependencies.broadcastSnapshot();
             return "handled";
           } catch (error) {
-            if (retentionId && !retentionAccepted) {
+            const deferRetentionCleanup = providerAcknowledged && !followUpPersisted && retentionId !== null;
+            if (deferRetentionCleanup) {
+              const exactRetentionId = retentionId!;
+              dependencies.turns.deferFollowUpAttachmentCleanup(admission, async () => {
+                if (retentionAccepted) await dependencies.conversationAttachments.release(attachments.map(({ id }) => id));
+                else await dependencies.conversationAttachments.releaseRetention(exactRetentionId);
+              });
+            }
+            if (retentionId && !retentionAccepted && !deferRetentionCleanup) {
               const exactRetentionId = retentionId;
               if (retention && !retentionCompleted) {
                 void retention.then(
@@ -329,7 +351,7 @@ export function createTurnInteractionCommandHandler(
             }
             if (retentionAccepted) {
               await Promise.all([
-                followUpPersisted
+                followUpPersisted || deferRetentionCleanup
                   ? undefined
                   : dependencies.conversationAttachments.release(
                       attachments.map(({ id }) => id),
@@ -341,9 +363,8 @@ export function createTurnInteractionCommandHandler(
                     ),
               ]);
             } else if (!sourceClaimSettled) {
-              await dependencies.attachmentResolver?.relinquishAll(
-                sourceAttachmentIds,
-              );
+              if (providerAcknowledged) await dependencies.attachmentResolver?.releaseAll(sourceAttachmentIds);
+              else await dependencies.attachmentResolver?.relinquishAll(sourceAttachmentIds);
             }
             throw error;
           } finally {
@@ -385,6 +406,7 @@ export function createTurnInteractionCommandHandler(
           throw classifiedMessageSendError(
             new RuntimeRequestError(
               "Message admission did not become available. Try again in a moment.",
+              MESSAGE_ADMISSION_UNAVAILABLE,
             ),
             messageSendStage,
           );
@@ -394,7 +416,15 @@ export function createTurnInteractionCommandHandler(
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
         > = [];
-        if (command.payload.attachments.length > 0) {
+        if (dependencies.queuedMessage) {
+          for (const attachment of dependencies.queuedMessage.attachments) {
+            const preview = await awaitMessageSendPreparation(
+              dependencies.conversationAttachments.preview(attachment.id), preparationDeadlineAt,
+            );
+            if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
+            resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
+          }
+        } else if (command.payload.attachments.length > 0) {
           const resolver = dependencies.attachmentResolver;
           if (!resolver) {
             throw new RuntimeRequestError(
@@ -738,6 +768,14 @@ export function createTurnInteractionCommandHandler(
         let durableTurnPersisted = false;
         let deriveInitialTitle = false;
         try {
+          if (dependencies.queuedMessage) {
+            const current = dependencies.store.conversation(conversation.id);
+            const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
+            if (current.archivedAt !== null || item?.state !== "dispatching"
+              || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, current)) {
+              throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
+            }
+          }
           // A real first-message title can itself equal an untitled placeholder.
           // Capture history before queue/createMessage persists this message.
           deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")
@@ -755,6 +793,7 @@ export function createTurnInteractionCommandHandler(
           }
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
+                queuedMessageId: dependencies.queuedMessage?.id,
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,

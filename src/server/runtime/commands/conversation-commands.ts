@@ -180,8 +180,9 @@ export function createConversationCommandHandler(
           return "handled";
         }
         try {
-          const detail = dependencies.store.conversationDetail(
+          const detail = dependencies.store.conversationHistory(
             conversationId,
+            command.payload.history,
           );
           dependencies.send(socket, {
             type: "request.result",

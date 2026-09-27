@@ -322,7 +322,6 @@
     "tests/renderer/sent-message-attachments.dom.test.tsx": 484,
     "tests/renderer/settings-composite-updates.dom.test.tsx": 1581,
     "tests/renderer/settings-health.test.ts": 5,
-    "tests/renderer/settings-simplicity.test.ts": 6,
     "tests/renderer/settings-target.dom.test.tsx": 471,
     "tests/renderer/sidebar-index-motion.dom.test.tsx": 131,
     "tests/renderer/sidebar-index-presentation.test.ts": 9,

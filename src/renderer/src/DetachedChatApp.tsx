@@ -587,6 +587,7 @@ export default function DetachedChatApp({
             skillsError={workflow.error}
             promptPresetsEnabled={false}
             promptStashEnabled={false}
+            onQueueCommand={runtimeActions.runQueueCommand}
             conversationContextHandoffEnabled={false}
             goal={{
               workflow: workflowState,
@@ -620,6 +621,7 @@ export default function DetachedChatApp({
             providerIdentityLabels={settings.providerIdentityLabels}
             loading={false}
             detailLoading={detailLoading}
+            history={projection.history}
             sending={runtimeActions.sendingConversationIds.has(conversationId)}
             onAddProject={dockInMain}
             onCreateConversation={dockInMain}

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatHealthBytes,
   formatStorageBytes,
-} from "../../src/renderer/src/components/SettingsView";
+} from "../../src/renderer/src/components/StorageStatusSettings";
 
 describe("settings health presentation", () => {
   it("formats bounded byte counts without overstating precision", () => {

@@ -28,6 +28,7 @@ describe("explainable CI plan", () => {
     expect(plan(["docs/CI_EVIDENCE.md"], { event: "schedule" }).benchmarks).toBe(true);
     for (const options of [{ event: "pull_request" }, { event: "pull_request", draft: true }, { event: "merge_group" }]) {
       expect(plan(performancePaths, options).benchmarks).toBe(false);
+      expect(plan(performancePaths, options).performanceSmoke).toBe(!("draft" in options && options.draft));
     }
     expect(plan(["docs/CI_EVIDENCE.md"], { event: "push" }).benchmarks).toBe(false);
   });
@@ -41,6 +42,7 @@ describe("explainable CI plan", () => {
     const renderer = plan(["src/renderer/src/App.tsx"]);
     expect(renderer.platforms).toEqual([]);
     expect(renderer.renderer).toBe(true);
+    expect(renderer.performanceSmoke).toBe(true);
     expect(renderer.requiredJobs).toEqual(["gate", "lineage", "pr-linux-core", "pr-linux-lifecycle"]);
   });
 
@@ -69,7 +71,7 @@ describe("explainable CI plan", () => {
       "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
       "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
-      "macOS arm64 Electron", "macOS x64 Electron",
+      "macOS arm64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
       "Windows unit tests (1/4)", "Windows unit tests (2/4)",
       "Windows unit tests (3/4)", "Windows unit tests (4/4)",
     ]);
@@ -77,7 +79,7 @@ describe("explainable CI plan", () => {
     expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
     for (const missingName of [
       "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
-      "Linux x64 Electron", "Windows ARM64 Electron", "macOS x64 Electron",
+      "Linux x64 Electron", "Windows ARM64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
     ]) {
       const missingNative = evidence(selected);
       missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
@@ -116,7 +118,7 @@ describe("explainable CI plan", () => {
     expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "electron", "windows-unit"]);
     expect(selected.requiredChecks.filter((name: string) => name.startsWith("Windows unit tests")))
       .toHaveLength(4);
-    expect(selected.requiredChecks.filter((name: string) => name.endsWith(" Electron"))).toHaveLength(6);
+    expect(selected.requiredChecks.filter((name: string) => name.includes(" Electron"))).toHaveLength(8);
   });
 
   it("missing baseline overrides an apparently harmless latest push", () => {
@@ -205,7 +207,7 @@ it("enumerates every shadow omission without changing canonical current-candidat
     "Node 22.13 minimum runtime", "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64",
     "macOS arm64", "macOS x64",
     "Linux x64 Electron", "Linux ARM64 Electron", "Windows x64 Electron", "Windows ARM64 Electron",
-    "macOS arm64 Electron", "macOS x64 Electron",
+    "macOS arm64 Electron", "macOS x64 Electron (display-sensitive)", "macOS x64 Electron (isolated)", "macOS x64 Electron (runtime-recovery)",
     "Windows unit tests (1/4)", "Windows unit tests (2/4)",
     "Windows unit tests (3/4)", "Windows unit tests (4/4)",
   ]);

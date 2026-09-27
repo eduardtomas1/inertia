@@ -5,7 +5,6 @@ import type {
   AgentInputRequest,
   AppSnapshot,
   ClientCommand,
-  ConversationDetail,
   RuntimeSequencedFrame,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts/app";
@@ -121,8 +120,8 @@ function resources(): DetachedChatRuntimePolicyResources {
   const current = snapshot();
   return {
     snapshot: () => current,
-    detail: (conversationId) => conversationId === CONVERSATION
-      ? ({ subagents: [{ id: REQUEST }] } as ConversationDetail)
+    subagentConversationId: (traceId) => traceId === REQUEST
+      ? CONVERSATION
       : null,
     checkpointConversationId: (checkpointId) =>
       checkpointId === CHECKPOINT ? CONVERSATION : OTHER_CONVERSATION,
@@ -336,6 +335,16 @@ describe("detached chat runtime authority", () => {
       requestId: REQUEST,
       payload: { conversationId: CONVERSATION, traceId: REQUEST },
     })).toBeNull();
+    expect(detachedChatCommandRejection(authority, {
+      type: "agent.subagent.stop",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: REQUEST },
+    }, { ...resources(), subagentConversationId: () => OTHER_CONVERSATION })).not.toBeNull();
+    expect(rejection({
+      type: "agent.subagent.stop",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, traceId: OTHER_CONVERSATION },
+    })).not.toBeNull();
     expect(rejection({
       type: "activity.mark-seen",
       requestId: REQUEST,

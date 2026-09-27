@@ -136,6 +136,7 @@ export interface AgentTurnLifecycleUpdate {
 
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
+  queuedMessageId?: string;
   content: string;
   privateConnectDeviceId?: string;
   attachments?: ChatAttachment[];

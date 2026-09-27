@@ -94,6 +94,7 @@ export interface ProviderModel {
   defaultReasoningEffort: string;
   /** Missing is accepted only for metadata cached before Fast mode shipped. */
   fastMode?: ProviderFastMode | null;
+  reasoningObserved?: boolean;
 }
 
 export interface ProviderRateLimit {
@@ -135,6 +136,11 @@ export interface ProviderCapabilityContractView {
   currentlyAvailableCount: number;
   declaredCapabilityCount: number;
   hostToolBridgeAvailable: boolean;
+  capabilities?: Array<{
+    id: string;
+    state: "available" | "installation-unverified" | "configuration-required"
+      | "negotiation-required" | "unsupported";
+  }>;
 }
 
 export interface ProviderInfo {

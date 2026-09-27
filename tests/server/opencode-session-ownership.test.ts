@@ -51,6 +51,47 @@ describe("OpenCode descendant session ownership", () => {
     expect(ownership.observe(event({ ...busy, id: "repeated-child-busy" })))
       .toEqual({ scope: "descendant", active: false });
     expect(ownership.hasLiveDescendants()).toBe(true);
+    expect(ownership.observe(event({
+      id: "second-child-idle", type: "session.idle",
+      properties: { sessionID: "child-session" },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(false);
+    ownership.observe(busy);
+    expect(ownership.hasLiveDescendants()).toBe(false);
+  });
+
+  it.each(["session.idle", "session.status"] as const)(
+    "settles repeated work cycles with fresh %s identities without granting replay progress",
+    (type) => {
+      const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
+      ownership.observe(created("child-session", "root-session"));
+      const idle = (id: string) => event({ id, type, properties: {
+        sessionID: "child-session", ...(type === "session.status" ? { status: { type: "idle" } } : {}),
+      } });
+      ownership.observe(idle("idle-1"));
+      for (let cycle = 2; cycle <= 4; cycle += 1) {
+        ownership.observe(event({ id: `busy-${cycle}`, type: "session.status", properties: {
+          sessionID: "child-session", status: { type: "busy" },
+        } }));
+        expect(ownership.hasLiveDescendants()).toBe(true);
+        ownership.observe(idle("idle-1"));
+        expect(ownership.hasLiveDescendants()).toBe(true);
+        expect(ownership.observe(idle(`idle-${cycle}`)))
+          .toEqual({ scope: "descendant", active: false });
+        expect(ownership.hasLiveDescendants()).toBe(false);
+      }
+    },
+  );
+
+  it("rejects an event identity reused with a different payload", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
+    ownership.observe(created("child-session", "root-session"));
+    const status = (type: string) => event({ id: "same-event", type: "session.status", properties: {
+      sessionID: "child-session", status: { type },
+    } });
+    ownership.observe(status("busy"));
+    expect(() => ownership.observe(status("idle"))).toThrow("changed a retained event identity");
+    expect(ownership.hasLiveDescendants()).toBe(true);
   });
 
   it("tracks verified descendant liveness independently across the session graph", () => {
@@ -99,7 +140,7 @@ describe("OpenCode descendant session ownership", () => {
 
     ownership.observe(childWork("fresh-after-idle"));
     expect(ownership.hasLiveDescendants()).toBe(true);
-    expect(ownership.observe(event({ ...childIdle, id: "replayed-idle" })))
+    expect(ownership.observe(childIdle))
       .toEqual({ scope: "descendant", active: false });
     expect(ownership.hasLiveDescendants()).toBe(true);
     expect(ownership.observe(event({

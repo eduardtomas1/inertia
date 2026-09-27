@@ -3,7 +3,6 @@ import type {
   AgentInputRequest,
   AppSnapshot,
   ClientCommand,
-  ConversationDetail,
 } from "../../shared/contracts";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
 
@@ -11,7 +10,7 @@ const REJECTION = "That request is unavailable in a detached chat.";
 
 export interface DetachedChatRuntimePolicyResources {
   snapshot(): AppSnapshot;
-  detail(conversationId: string): ConversationDetail | null;
+  subagentConversationId(traceId: string): string | null;
   checkpointConversationId(checkpointId: string): string | null;
   pendingApproval(
     conversationId: string,
@@ -67,6 +66,10 @@ export function detachedChatCommandRejection(
     case "agent.goal.clear":
     case "agent.stop":
     case "conversation.compact":
+    case "message.queue.get":
+    case "message.queue.enqueue":
+    case "message.queue.remove":
+    case "message.queue.send":
       return ownsExistingConversation(command.payload.conversationId)
         ? null
         : REJECTION;
@@ -99,8 +102,7 @@ export function detachedChatCommandRejection(
       if (!ownsExistingConversation(command.payload.conversationId)) {
         return REJECTION;
       }
-      const detail = resources.detail(authority.conversationId);
-      return detail?.subagents.some(({ id }) => id === command.payload.traceId)
+      return resources.subagentConversationId(command.payload.traceId) === authority.conversationId
         ? null
         : REJECTION;
     }

@@ -216,7 +216,7 @@ const owners = {
   ],
 };
 
-function attachmentGallerySummary(messages: readonly ChatMessage[]) {
+function attachmentGallerySummary(messages: readonly ChatMessage[], attachmentGallery?: Parameters<typeof buildWorkspaceSurfaceSummary>[0]["attachmentGallery"], liveMessages?: readonly ChatMessage[]) {
   return buildWorkspaceSurfaceSummary({
     projectId: "project-1",
     projectName: "Inertia",
@@ -227,10 +227,36 @@ function attachmentGallerySummary(messages: readonly ChatMessage[]) {
     runs: [],
     subagents: [],
     messages,
+    attachmentGallery,
+    liveMessages,
   });
 }
 
 describe("environment summary projection", () => {
+  it("uses bounded gallery metadata independently of the loaded transcript page", () => {
+    const gallery = [{ id: "old-image", name: "old.png", mimeType: "image/png" as const, size: 42 }];
+    expect(attachmentGallerySummary([], gallery).attachments).toBe(gallery);
+    expect(attachmentGallerySummary([message("new", "new.png")], []).attachments).toEqual([]);
+  });
+
+  it("adds live follow-up images immediately without promoting older search pages", () => {
+    const historical = [message("old-search-result", "old.png")];
+    const live = [message("follow-up", "new.png")];
+    const current = Array.from({ length: 60 }, (_, index) => ({ id: `current-${index}`,
+      name: `current-${index}.png`, mimeType: "image/png" as const, size: 42 }));
+    const summary = attachmentGallerySummary([...historical, ...live], current, live);
+    expect(summary.attachments).toHaveLength(60);
+    expect(summary.attachments.map(({ id }) => id)).toEqual([
+      "attachment-follow-up", ...current.slice(0, 59).map(({ id }) => id),
+    ]);
+    expect(attachmentGallerySummary(historical, current, live).attachments).toBe(summary.attachments);
+    expect(attachmentGallerySummary(live, [], live).attachments).toEqual([{
+      id: "attachment-follow-up", name: "new.png", mimeType: "image/png", size: 128,
+    }]);
+    expect(JSON.stringify(summary.attachments)).not.toContain("/private/");
+    const refreshed = [summary.attachments[0]!, ...current.slice(0, 59)];
+    expect(attachmentGallerySummary(live, refreshed, live).attachments).toEqual(refreshed);
+  });
   it("collects the newest attachments for the gallery and caps the scan", () => {
     const messages = Array.from(
       { length: ENVIRONMENT_ATTACHMENT_GALLERY_LIMIT + 8 },

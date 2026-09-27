@@ -180,7 +180,7 @@ describe("TurnFollowUpCoordinator", () => {
     admission.release();
   });
 
-  it("does not acknowledge or persist a follow-up when its owner settles during provider steering", async () => {
+  it.each([true, false])("preserves provider acceptance (%s) without persisting against a settled owner", async (accepted) => {
     let accept!: (accepted: boolean) => void;
     const steer = vi.fn(async () => await new Promise<boolean>((resolve) => {
       accept = resolve;
@@ -207,10 +207,15 @@ describe("TurnFollowUpCoordinator", () => {
     await flushPromises();
     expect(steer).toHaveBeenCalledTimes(1);
     active.runState.requestTerminal("cancelled", "test-cancelled");
-    accept(true);
+    accept(accepted);
 
-    await expect(pending).resolves.toBeNull();
-    expect(acknowledged).not.toHaveBeenCalled();
+    if (accepted) {
+      await expect(pending).rejects.toMatchObject({ delivery: "ambiguous" });
+      expect(acknowledged).toHaveBeenCalledOnce();
+    } else {
+      await expect(pending).resolves.toBeNull();
+      expect(acknowledged).not.toHaveBeenCalled();
+    }
     expect(persist).not.toHaveBeenCalled();
     admission.release();
   });

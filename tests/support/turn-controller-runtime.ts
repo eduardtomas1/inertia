@@ -114,6 +114,7 @@ export function turnControllerTestContinuationState(
 }
 
 interface TurnControllerTestRuntimeOptions {
+  clock?: () => Date;
   interactionMode?: "build" | "plan";
   modelSelection?: ModelSelection;
   resolveModelRoute?: TurnProviderRuntime["resolveModelRoute"];
@@ -189,7 +190,7 @@ export async function createTurnControllerTestRuntime(
     },
     {
       scheduler,
-      clock: () => new Date(clockMs++),
+      clock: options.clock ?? (() => new Date(clockMs++)),
       id: () => `controller-id-${++sequence}`,
       turnTimeoutMs: 1_000,
     },

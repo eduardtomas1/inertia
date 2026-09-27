@@ -30,6 +30,7 @@ jobs:
       base_sha: ${{ steps.changes.outputs.base_sha }}
       plan_json: ${{ steps.changes.outputs.plan_json }}
       matrix_json: ${{ steps.changes.outputs.matrix_json }}
+      electron_matrix_json: ${{ steps.changes.outputs.electron_matrix_json }}
       node_22_minimum: ${{ steps.changes.outputs.node_22_minimum }}
       pr_linux_core: ${{ steps.changes.outputs.pr_linux_core }}
       pr_linux_lifecycle: ${{ steps.changes.outputs.pr_linux_lifecycle }}
@@ -40,6 +41,7 @@ jobs:
       windows_unit: ${{ steps.changes.outputs.windows_unit }}
       renderer: ${{ steps.changes.outputs.renderer }}
       benchmarks: ${{ steps.changes.outputs.benchmarks }}
+      performance_smoke: ${{ steps.changes.outputs.performance_smoke }}
       full_certification: ${{ steps.changes.outputs.full_certification }}
 
     steps:
@@ -72,6 +74,7 @@ jobs:
   # Windows, macOS, and ARM runner pools that the rest of the matrix queues on.
   gate:
     name: Quality gate
+    needs: classify
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -111,6 +114,18 @@ jobs:
 
       - name: Enforce the isolated browser-evidence CPU budget
         run: npm run test:browser-evidence-cpu-budget
+
+      # Operation counts and fake-clock bounds catch amplification without a
+      # hosted-runner wall-time threshold. Run before buying native runners.
+      - name: Enforce bounded streaming and rendering work
+        if: needs.classify.outputs.performance_smoke == 'true'
+        timeout-minutes: 3
+        run: >-
+          npm exec -- vitest run --maxWorkers=1
+          tests/server/runtime-sync-serialization.test.ts
+          tests/server/turn-stream-coalescer.test.ts
+          tests/renderer/streaming-render-isolation.dom.test.tsx
+          tests/renderer/response-timeline-virtualization.test.ts
 
   node-22-minimum:
     name: Node 22.13 minimum runtime
@@ -775,14 +790,14 @@ jobs:
   # therefore never suppressed by a later display assertion, and a failed
   # fixture cannot leave an unconfirmed runner for the package phases.
   electron:
-    name: ${{ matrix.label }} Electron
+    name: ${{ matrix.check }}
     if: needs.classify.outputs.electron == 'true'
     runs-on: ${{ matrix.runner }}
     needs: [classify, gate]
     timeout-minutes: ${{ matrix.electron_timeout_minutes }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.classify.outputs.matrix_json) }}
+      matrix: ${{ fromJSON(needs.classify.outputs.electron_matrix_json) }}
       max-parallel: ${{ github.event_name == 'schedule' && 2 || 6 }}
     env:
       CI: "true"
@@ -837,20 +852,20 @@ jobs:
         run: node -e "console.log(require('electron'))"
 
       - name: Run display-sensitive Electron end-to-end tests
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'display-sensitive')
         run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       # Do not continue native work after a failed phase whose fixture cleanup
       # may be unconfirmed.
       - name: Run isolated Electron end-to-end tests
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'isolated')
         env:
           # Bound Windows load after hosted socket-buffer exhaustion.
           INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
         run: npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
         run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
@@ -875,7 +890,7 @@ jobs:
           retention-days: 14
 
       - name: Measure desktop workloads
-        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux'
+        if: (needs.classify.outputs.benchmarks == 'true') && runner.os != 'Linux' && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
         run: npm run benchmark:desktop:built
 
       - name: Measure desktop workloads under Xvfb
@@ -886,13 +901,13 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ci-test-results-electron-${{ matrix.artifact }}
+          name: ci-test-results-electron-${{ matrix.evidence_artifact }}
           path: test-results
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Keep desktop performance evidence
-        if: always() && (needs.classify.outputs.benchmarks == 'true')
+        if: always() && (needs.classify.outputs.benchmarks == 'true') && (matrix.phase == 'all' || matrix.phase == 'runtime-recovery')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-electron-${{ matrix.artifact }}
@@ -904,7 +919,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: electron-timings-${{ matrix.artifact }}-${{ github.run_attempt }}
+          name: electron-timings-${{ matrix.evidence_artifact }}-${{ github.run_attempt }}
           path: ci-test-timings/*.json
           if-no-files-found: ignore
           retention-days: 7

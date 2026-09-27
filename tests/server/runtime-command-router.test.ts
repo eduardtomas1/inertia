@@ -2,6 +2,7 @@ import type WebSocket from "ws";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import {
   createRuntimeCommandExecutor,
   defineRuntimeCommandHandler,
@@ -27,6 +28,20 @@ describe("runtime command router", () => {
     RUNTIME_COMMAND_TYPES,
     handler,
   );
+
+  it("preserves ambiguous delivery after provider acceptance", async () => {
+    const send = vi.fn();
+    const execute = createRuntimeCommandExecutor({
+      handlers: [allCommands(async () => { throw new RuntimeRequestError("Accepted but not saved", undefined, "ambiguous"); })],
+      broadcastSnapshot: vi.fn(), send, publicError: (error) => (error as Error).message,
+    });
+    const selected = command();
+    await execute({} as WebSocket, selected);
+    expect(send).toHaveBeenCalledWith(expect.anything(), {
+      type: "request.error", requestId: selected.requestId,
+      message: "Accepted but not saved", delivery: "ambiguous",
+    });
+  });
 
   it("publishes a mutation snapshot before settling the request", async () => {
     const order: string[] = [];

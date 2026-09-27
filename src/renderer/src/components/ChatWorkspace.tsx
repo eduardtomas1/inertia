@@ -82,6 +82,7 @@ import {
   markTestStreamingReaderActivityReceipt,
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
+import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type {
   NewChatProjectPicker,
@@ -197,10 +198,13 @@ type ChatWorkspaceProps = {
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
+  onQueueCommand?: QueueCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
   loading: boolean;
   detailLoading?: boolean;
+  history?: { hasOlder: boolean; loading: boolean; error: string | null; loadOlder: () => void;
+    omittedTurnIds?: readonly string[] };
   sending: boolean;
   onAddProject: () => void;
   onCreateConversation: () => void;
@@ -308,10 +312,12 @@ export function ChatWorkspace({
   contextSources = EMPTY_CONTEXT_SOURCES,
   contextPackets = EMPTY_CONTEXT_PACKETS,
   onConversationContextCommand,
+  onQueueCommand,
   previewContextUrl,
   providerIdentityLabels,
   loading,
   detailLoading = false,
+  history,
   sending,
   onAddProject,
   onCreateConversation,
@@ -361,6 +367,11 @@ export function ChatWorkspace({
   const stopRestoreSequenceRef = useRef(0);
   const stopsInFlightRef = useRef(new Map<string, Promise<void>>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const keepHistoryFocus = useCallback((button: HTMLButtonElement | null) => () => {
+    if (button && document.activeElement === button) queueMicrotask(() => {
+      if (!button.isConnected && document.activeElement === document.body) scrollRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
   const followCorrectionFrameRef = useRef<number | null>(null);
@@ -936,6 +947,20 @@ export function ChatWorkspace({
           Alt plus End for the final answer, and Alt plus G for the turn artifact.
         </span>
         <div ref={timelineRef} className="response-timeline">
+          {history && (history.hasOlder || history.error) && (
+            <div className="conversation-history-controls">
+              {history.hasOlder && <button ref={keepHistoryFocus} type="button" className="subtle-button"
+                aria-disabled={history.loading || undefined}
+                onClick={() => {
+                  if (history.loading) return;
+                  noteResponseTimelineNavigationIntent();
+                  history.loadOlder();
+                }}>
+                {history.loading ? "Loading earlier messages…" : "Load earlier messages"}
+              </button>}
+              {history.error && <p role="alert">{history.error}</p>}
+            </div>
+          )}
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {isEmptyThread && (
             <div className="empty-thread">
@@ -959,6 +984,7 @@ export function ChatWorkspace({
               reasonings={ownedReasonings}
               plans={ownedPlans}
               checkpoints={ownedCheckpoints}
+              omittedTurnIds={history?.omittedTurnIds}
               gitArtifacts={ownedTurnGitArtifacts}
               projectRoot={projectRoot}
               projectId={project.id}
@@ -1073,6 +1099,7 @@ export function ChatWorkspace({
           hasVisibleHistory={hasVisibleHistory}
           agentContextRequest={agentContextRequest}
           onConversationContextCommand={onConversationContextCommand}
+          onQueueCommand={onQueueCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}
           disabled={!conversation}

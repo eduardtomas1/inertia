@@ -61,6 +61,19 @@ const readyProvider = {
 } as const;
 
 describe("renderer error visibility boundary", () => {
+  it("keeps an accepted message failure ambiguous through event decoding", async () => {
+    const reject = vi.fn();
+    const pending = new Map<string, PendingConnectionRequest>([["accepted-send", {
+      resolve: vi.fn(), reject, timeout: 42, timeoutDelivery: "ambiguous",
+    }]]);
+    const event = await decodeServerEventMessage(JSON.stringify({
+      type: "request.error", requestId: "accepted-send",
+      message: "The follow-up was accepted but could not be saved.", delivery: "ambiguous",
+    }));
+    settlePendingConnectionRequest(event, pending, vi.fn());
+    expect(runtimeCommandDelivery(reject.mock.calls[0]?.[0])).toBe("ambiguous");
+  });
+
   it("keeps a first-send request failure command-scoped while malformed transport data becomes global", async () => {
     const pending = new Map();
     let commandError: Error | null = null;
@@ -125,6 +138,7 @@ describe("renderer error visibility boundary", () => {
     { type: "runtime.cursor", sync: {} },
     { type: "runtime.cursor", sync: { runtimeGeneration: "", latestSequence: 0 } },
     { type: "request.error", requestId: "known" },
+    { type: "request.error", requestId: "known", message: "failure", delivery: "sent" },
     { type: "request.result", requestId: "known", result: { kind: "message.accepted" } },
     {
       type: "request.result",

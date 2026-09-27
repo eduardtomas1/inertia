@@ -1,4 +1,5 @@
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
+import type { MessageQueueResult } from "../queued-messages";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -172,7 +173,7 @@ export type ServerEvent =
   | RuntimeSequencedFrame
   | { type: "runtime.sync.completed"; sync: RuntimeSyncCursor }
   | { type: "request.ok"; requestId: string }
-  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string }
+  | { type: "request.error"; requestId: string; message: string; diagnosticId?: string; delivery?: "ambiguous" }
   | {
       type: "request.result";
       requestId: string;
@@ -202,6 +203,7 @@ export type ServerEvent =
         | { kind: "conversation.context.source"; source: ConversationContextSourceTranscript }
         | { kind: "conversation.context.packet"; packet: ConversationContextPacket }
         | MessageSendAcceptance
+        | MessageQueueResult
         | ConversationCompactionResult
         | DuoPreparedResult
         | DuoPendingResult

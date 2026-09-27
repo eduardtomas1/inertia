@@ -41,6 +41,11 @@ offline launch contains no workspace data.
 - Collaborate adds supervised text prompts, answers to non-secret agent
   questions, and stopping the exact active run shown in the conversation.
 
+The transcript shows a recent window. Load earlier pages in the desktop app;
+the mobile client does not offer history paging. If one saved turn exceeds
+the display budget, its transcript is omitted on mobile while current run
+status, authorized stopping, and non-secret questions remain available.
+
 Neither level can approve actions, answer secret input, access files or
 attachments, open a terminal, mutate Git, change providers, create projects or
 conversations, enable Full Access, or execute arbitrary commands.

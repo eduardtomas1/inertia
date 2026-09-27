@@ -27,12 +27,14 @@ describe("Private Connect supervised runtime gateway", () => {
     const conversation = store.createConversation(project.id, "Allowed chat");
     const respondToInput = vi.fn(() => true);
     const stopRun = vi.fn(() => ({ stopped: true, alreadyStopped: false }));
+    const detail = vi.fn((id: string) => store.conversationDetail(id));
     const gateway = new PrivateConnectRuntimeGateway({
       shell: () => {
         const shell = store.shellSnapshot();
         return { ...shell, conversations: shell.conversations.map((item) => ({ ...item, pendingInput: true })) };
       },
-      detail: (id) => store.conversationDetail(id),
+      conversation: (id) => store.conversationShell(id),
+      detail,
       isConversationActive: () => false,
       preparePrompt: async () => undefined,
       queuePrompt: () => ({ turnId: "unused" }),
@@ -60,6 +62,7 @@ describe("Private Connect supervised runtime gateway", () => {
       .toMatchObject({ ok: false, code: "forbidden" });
     expect(respondToInput).not.toHaveBeenCalled();
     expect(stopRun).not.toHaveBeenCalled();
+    expect(detail).not.toHaveBeenCalled();
   });
 
   it("projects only granted conversations and never queues an ungranted prompt", async () => {
@@ -74,6 +77,7 @@ describe("Private Connect supervised runtime gateway", () => {
     let queued = 0;
     const gateway = new PrivateConnectRuntimeGateway({
       shell: () => store.shellSnapshot(),
+      conversation: (conversationId) => store.conversationShell(conversationId),
       detail: (conversationId) => store.conversationDetail(conversationId),
       isConversationActive: () => false,
       preparePrompt: async () => undefined,

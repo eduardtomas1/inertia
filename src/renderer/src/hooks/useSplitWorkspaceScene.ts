@@ -60,6 +60,7 @@ import {
   useStableController,
 } from "./useStableController";
 import { useWorkspaceTools } from "./useWorkspaceTools";
+import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
@@ -67,6 +68,7 @@ type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 
 const ignoreLatestContentVisibility = (): void => undefined;
+const unavailableQueue: QueueCommandRunner = async () => { throw new Error("Message queues are unavailable."); };
 
 export interface SplitWorkspaceSceneController {
   pane: SplitPaneDetails | null;
@@ -76,6 +78,7 @@ export interface SplitWorkspaceSceneController {
 interface SplitWorkspaceActions
   extends Pick<
     WorkspaceSceneActions,
+    | "runQueueCommand"
     | "importProject"
     | "createConversation"
     | "respondToApproval"
@@ -378,6 +381,7 @@ export function useSplitWorkspaceScene({
       }
     },
     run,
+    runQueueCommand: actions.runQueueCommand ?? unavailableQueue,
   });
   const model = useMemo(() => createWorkspaceSceneModel({
     view: "workspace",

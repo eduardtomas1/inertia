@@ -125,6 +125,7 @@ const DEFAULT_MODEL_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_RATE_LIMIT_TTL_MS = 60 * 1_000;
 const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
+const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi"];
 const AUTH_STATES: readonly ProviderAuthState[] = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"];
 
 // @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
@@ -320,7 +321,7 @@ export function providerMetadataScopeForSelection(
   return normalized;
 }
 
-export function validateProviderModels(value: unknown): ProviderModel[] {
+export function validateProviderModels(value: unknown, providerId?: ProviderId): ProviderModel[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   return value.flatMap((entry) => {
@@ -364,15 +365,19 @@ export function validateProviderModels(value: unknown): ProviderModel[] {
         })()
       : null;
     seen.add(id);
+    const sessionScoped = providerId !== undefined && SESSION_REASONING_PROVIDERS.includes(providerId);
+    const observed = model.reasoningObserved === true || model.isDefault === true;
+    const unobserved = sessionScoped && !observed;
     const validated: ProviderModel = {
       id,
       label,
       description,
       isDefault: model.isDefault === true,
       inputModalities: inputModalities.length > 0 ? inputModalities : ["text"],
-      reasoningOptions,
-      defaultReasoningEffort: cleanString(model.defaultReasoningEffort, 40) ?? "",
+      reasoningOptions: unobserved ? [] : reasoningOptions,
+      defaultReasoningEffort: unobserved ? "" : cleanString(model.defaultReasoningEffort, 40) ?? "",
       fastMode,
+      ...(sessionScoped && observed ? { reasoningObserved: true } : {}),
     };
     return [validated];
   }).slice(0, MAX_MODELS);
@@ -425,6 +430,21 @@ function mergeById<T extends { id: string }>(previous: readonly T[], next: reado
   const merged = new Map(previous.map((item) => [item.id, item]));
   for (const item of next) merged.set(item.id, item);
   return [...merged.values()];
+}
+
+function inheritUnobservedReasoning(previous: readonly ProviderModel[], next: ProviderModel[]): ProviderModel[] {
+  if (!next.some(({ reasoningObserved }) => reasoningObserved)) return next;
+  const known = new Map(previous.map((model) => [model.id, model]));
+  return next.map((model) => {
+    const prior = known.get(model.id);
+    if (model.reasoningObserved || !prior?.reasoningObserved) return model;
+    return {
+      ...model,
+      reasoningOptions: prior.reasoningOptions,
+      defaultReasoningEffort: prior.defaultReasoningEffort,
+      reasoningObserved: true,
+    };
+  });
 }
 
 function safePersistenceLoad(persistence: ProviderMetadataPersistence | undefined): readonly PersistedProviderMetadata[] {
@@ -622,7 +642,10 @@ export class ProviderMetadataCache {
     const scope = this.requireScope(scopeInput);
     const entry = this.entry(scope);
     const attemptedAt = this.now();
-    const models = validateProviderModels(metadata.models);
+    const models = inheritUnobservedReasoning(
+      entry.models.values,
+      validateProviderModels(metadata.models, scope.providerId),
+    );
     const rateLimits = validateProviderRateLimits(metadata.rateLimits);
     let learned = false;
     if (models.length > 0 && AVAILABLE_FIELDS[scope.providerId].includes("models")) {
@@ -772,7 +795,7 @@ export class ProviderMetadataCache {
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
 
     for (const field of fields) {
-      const values = field === "models" ? validateProviderModels(result.models) : validateProviderRateLimits(result.rateLimits);
+      const values = field === "models" ? validateProviderModels(result.models, scope.providerId) : validateProviderRateLimits(result.rateLimits);
       if (
         values.length === 0
         && field === "rateLimits"
@@ -802,7 +825,7 @@ export class ProviderMetadataCache {
   private hydrate(cached: PersistedProviderMetadata): void {
     const scope = normalizeCurrentProviderMetadataScope(cached.scope);
     if (!scope) return;
-    const models = validateProviderModels(cached.models);
+    const models = validateProviderModels(cached.models, scope.providerId);
     const rateLimits = validateProviderRateLimits(cached.rateLimits);
     const entry = blankProvider(scope);
     entry.models = {

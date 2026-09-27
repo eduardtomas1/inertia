@@ -17,7 +17,7 @@ import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-pos
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
-import { createLegacyCliAgentHarnessForTests } from "../helpers/providers/legacy-cli-harness";
+import { createProcessLifecycleHarnessForTests } from "../helpers/providers/process-lifecycle-harness";
 import {
   providerAuthLaunchEnvironment,
   providerAuthLoginArgs,
@@ -1250,79 +1250,18 @@ setInterval(() => {}, 1000);
     ]);
   });
 
-  it("normalizes streamed session output from the legacy CLI provider adapters", async () => {
-    type LegacyCliProviderId = "claude" | "cursor" | "opencode";
-    const fixtures: Array<{
-      providerId: LegacyCliProviderId;
-      lines: unknown[];
-      expectedText: string;
-      sessionId: string;
-    }> = [
-      {
-        providerId: "claude",
-        sessionId: "33333333-3333-4333-8333-333333333333",
-        expectedText: "Claude response",
-        lines: [
-          { type: "system", subtype: "init", session_id: "33333333-3333-4333-8333-333333333333" },
-          { type: "stream_event", event: { type: "content_block_delta", delta: { text: "Claude " } } },
-          { type: "stream_event", event: { type: "content_block_delta", delta: { text: "response" } } },
-          { type: "assistant", message: { content: [{ type: "text", text: "Claude response" }] } },
-          { type: "result", is_error: false },
-        ],
-      },
-      {
-        providerId: "cursor",
-        sessionId: "44444444-4444-4444-8444-444444444444",
-        expectedText: "Cursor response",
-        lines: [
-          { type: "system", subtype: "init", session_id: "44444444-4444-4444-8444-444444444444" },
-          { type: "assistant", message: { content: [{ type: "text", text: "Cursor response" }] } },
-          { type: "result", is_error: false },
-        ],
-      },
-      {
-        providerId: "opencode",
-        sessionId: "55555555-5555-4555-8555-555555555555",
-        expectedText: "OpenCode response",
-        lines: [
-          { type: "step_start", part: { sessionID: "55555555-5555-4555-8555-555555555555" } },
-          { type: "text", part: { text: "OpenCode response" } },
-          { type: "step_finish", part: { reason: "stop" } },
-        ],
-      },
-    ];
-
-    for (const fixture of fixtures) {
-      const root = temporaryRoot();
-      const { command, program } = nodeProgram(root, `fake-${fixture.providerId}`, `${fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n")}
-setInterval(() => {}, 1000);
-`);
-      const manager = ProviderManager.createForTests(
-        { commands: { [fixture.providerId]: command } },
-        new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests(fixture.providerId, { prefixArgs: [program] })]),
-      );
-      try {
-        const result = await manager.run(nativeProviderRunInput({ providerId: fixture.providerId, harnessId: `${fixture.providerId}-cli`, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
-        expect(result).toMatchObject({ status: "completed", text: fixture.expectedText, sessionId: fixture.sessionId, cleanupConfirmed: true });
-        expect(manager.isRunning(`${fixture.providerId}-conversation`)).toBe(false);
-      } finally {
-        await manager.disposeAll();
-      }
-    }
-  });
-
-  it("arms complete-tree cleanup before an ordinary CLI terminal result", async () => {
+  it("arms complete-tree cleanup before an ordinary fixture terminal result", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "successful-codex-cli", `
-console.log(JSON.stringify({ type: "turn.started", thread_id: "cli-session" }));
-console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "CLI response" } }));
-console.log(JSON.stringify({ type: "turn.completed" }));
+console.log(JSON.stringify({ session: "cli-session" }));
+console.log(JSON.stringify({ text: "CLI response" }));
+console.log(JSON.stringify({ complete: true }));
 `);
     const terminateProcessTree = vi.fn(async () => true);
     const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createLegacyCliAgentHarnessForTests("codex", {
+        createProcessLifecycleHarnessForTests("codex", {
           prefixArgs: [program],
           terminateProcessTree,
         }),
@@ -1350,7 +1289,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   it("acknowledges provider start only after async backend resolution reaches the harness", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "acknowledged-codex-cli", `
-console.log(JSON.stringify({ type: "turn.completed" }));
+console.log(JSON.stringify({ complete: true }));
 setInterval(() => {}, 1000);
 `);
     let releaseBackend!: (environment: NodeJS.ProcessEnv) => void;
@@ -1365,7 +1304,7 @@ setInterval(() => {}, 1000);
         }),
       },
       new AgentHarnessRegistry([
-        createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] }),
+        createProcessLifecycleHarnessForTests("codex", { prefixArgs: [program] }),
       ]),
     );
     let acknowledgeStart!: () => void;
@@ -1410,7 +1349,7 @@ setInterval(() => {}, 1000);
           throw new Error("credential resolution rejected");
         },
       },
-      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("codex")]),
+      new AgentHarnessRegistry([createProcessLifecycleHarnessForTests("codex")]),
     );
 
     await expect(manager.run(nativeProviderRunInput({
@@ -1430,7 +1369,7 @@ setInterval(() => {}, 1000);
   it("maps unconfirmed CLI cancellation cleanup to one failed terminal result", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "stalled-codex-cli", `
-console.log(JSON.stringify({ type: "turn.started", thread_id: "cli-session" }));
+console.log(JSON.stringify({ session: "cli-session" }));
 setInterval(() => {}, 1000);
 `);
     const terminateProcessTree = vi.fn(async (child, _force: boolean) => {
@@ -1440,7 +1379,7 @@ setInterval(() => {}, 1000);
     const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createLegacyCliAgentHarnessForTests("codex", {
+        createProcessLifecycleHarnessForTests("codex", {
           prefixArgs: [program],
           terminateProcessTree,
         }),
@@ -1485,42 +1424,6 @@ setInterval(() => {}, 1000);
     );
   });
 
-  it("requests real partial messages from Claude without duplicating the final assistant event", async () => {
-    const root = temporaryRoot();
-    const capturePath = join(root, "claude-invocation.json");
-    const { command, program } = nodeProgram(root, "fake-claude", `
-const fs = require("node:fs");
-fs.writeFileSync(process.env.INERTIA_TEST_CAPTURE_PATH, JSON.stringify(process.argv.slice(2)));
-console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "Partial " } } }));
-console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { text: "reply" } } }));
-console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Partial reply" }] } }));
-console.log(JSON.stringify({ type: "result", is_error: false }));
-setInterval(() => {}, 1000);
-`);
-    const manager = ProviderManager.createForTests(
-      {
-        commands: { claude: command },
-        resolveBackendLaunchOptions: (_input, environment) => ({
-          environment: {
-            ...environment,
-            INERTIA_TEST_CAPTURE_PATH: capturePath,
-          },
-        }),
-      },
-      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("claude", { prefixArgs: [program] })]),
-    );
-
-    try {
-      const result = await manager.run(nativeProviderRunInput({ providerId: "claude", harnessId: "claude-cli", conversationId: "claude-partial", cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
-
-      expect(result).toMatchObject({ status: "completed", text: "Partial reply", cleanupConfirmed: true });
-      expect(manager.isRunning("claude-partial")).toBe(false);
-      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("--include-partial-messages");
-    } finally {
-      await manager.disposeAll();
-    }
-  });
-
   it("classifies authentication failures from provider stderr", async () => {
     const root = temporaryRoot();
     const { command, program } = nodeProgram(root, "failing-codex", `
@@ -1529,7 +1432,7 @@ process.exit(1);
 `);
     const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
-      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] })]),
+      new AgentHarnessRegistry([createProcessLifecycleHarnessForTests("codex", { prefixArgs: [program] })]),
     );
 
     const result = await manager.run(nativeProviderRunInput({ providerId: "codex", harnessId: "codex-cli", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" }));
@@ -1550,7 +1453,7 @@ process.exit(1);
     const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] }),
+        createProcessLifecycleHarnessForTests("codex", { prefixArgs: [program] }),
       ]),
     );
 

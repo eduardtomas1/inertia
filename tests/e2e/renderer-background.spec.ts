@@ -7,6 +7,7 @@ import { providerNativeMetadataScope } from "../../src/server/provider/metadata"
 import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
 import { seedBackgroundHistoryProfile } from "../helpers/renderer-background-history";
+import { loadSeededConversationTurns } from "./support/conversation-history";
 
 declare global {
   interface Window {
@@ -214,6 +215,7 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });
     await expect(page.getByRole("heading", { name: "Background history fixture", level: 1 })).toBeVisible();
     if (turns === 128) {
+      await loadSeededConversationTurns(page, turns);
       await expect(page.getByRole("feed", { name: `${turns} conversation turns` })).toBeVisible();
       await expect.poll(() => page.locator(".response-virtual-item").count()).toBeLessThan(24);
     } else {

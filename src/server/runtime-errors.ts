@@ -1,5 +1,6 @@
 import { CheckpointError } from "./checkpoints";
 import { RecordNotFoundError } from "./database";
+import { ConversationHistoryTooLargeError } from "./persistence/errors";
 import { GitError } from "./git";
 import { ConversationWorktreeRemovalError } from "./persistence/conversation-worktree-repository";
 import { ProviderRuntimeError } from "./providers";
@@ -16,10 +17,13 @@ import {
   AttachmentResolutionError,
 } from "./runtime/attachments/attachment-errors";
 
+export const MESSAGE_ADMISSION_UNAVAILABLE = "message-admission-unavailable";
+
 export class RuntimeRequestError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly delivery?: "ambiguous",
   ) {
     super(message);
   }
@@ -32,6 +36,7 @@ export function publicRuntimeError(error: unknown): string {
   if (
     error instanceof RuntimeRequestError
     || error instanceof RecordNotFoundError
+    || error instanceof ConversationHistoryTooLargeError
     || error instanceof ConversationWorktreeRemovalError
     || error instanceof TerminalError
     || error instanceof GitError

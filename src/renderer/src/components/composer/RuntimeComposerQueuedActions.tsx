@@ -1,0 +1,90 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
+import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
+import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
+
+const pendingLoads = new WeakMap<QueueCommandRunner, Map<string, Promise<MessageQueueResult>>>();
+function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<MessageQueueResult> {
+  let loads = pendingLoads.get(run);
+  if (!loads) { loads = new Map(); pendingLoads.set(run, loads); }
+  const prior = loads.get(conversationId);
+  if (prior) return prior;
+  const operation = run({ type: "message.queue.get", payload: { conversationId } })
+    .finally(() => { if (loads.get(conversationId) === operation) loads.delete(conversationId); });
+  loads.set(conversationId, operation);
+  return operation;
+}
+
+export function RuntimeComposerQueuedActions({ conversationId, onCommand, running, canSend, latestTurnId, latestTurnStatus, queueHost }: {
+  conversationId: string; onCommand: QueueCommandRunner; running: boolean; canSend: boolean;
+  latestTurnId: string | null; latestTurnStatus: string | null; queueHost: HTMLElement | null;
+}): React.JSX.Element | null {
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  const queueSignature = useRef("[]");
+  const updateQueue = useCallback((entries: QueuedMessage[]): void => {
+    const signature = JSON.stringify(entries);
+    if (queueSignature.current === signature) return;
+    queueSignature.current = signature;
+    setQueue(entries);
+  }, []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const latestError = useRef(error);
+  latestError.current = error;
+  const owner = useRef(conversationId);
+  const revision = useRef(0);
+  owner.current = conversationId;
+  useEffect(() => {
+    let current = true;
+    const refresh = (): void => {
+      if (document.visibilityState === "hidden") return;
+      const requestedRevision = revision.current;
+      void loadQueue(onCommand, conversationId).then((result) => {
+        if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
+          updateQueue(result.entries);
+          if (latestError.current !== null) setError(null);
+        }
+      }, () => undefined);
+    };
+    updateQueue([]); setError(null); setBusy(false);
+    refresh();
+    const changed = (event: Event): void => {
+      if ((event as CustomEvent<unknown>).detail === conversationId) {
+        revision.current += 1;
+        pendingLoads.get(onCommand)?.delete(conversationId);
+        refresh();
+      }
+    };
+    window.addEventListener(RUNTIME_QUEUE_CHANGED, changed);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 10_000);
+    return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
+  }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
+  const first = queue[0];
+  if (!first) return null;
+  const dispatching = first.state === "dispatching";
+  const mutate = async (type: "message.queue.send" | "message.queue.remove"): Promise<void> => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      const result = await onCommand({ type, payload: { conversationId, id: first.id } });
+      if (owner.current === conversationId) { revision.current += 1; updateQueue(result.entries); }
+      window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
+    } catch (failure) {
+      if (owner.current === conversationId) setError(failure instanceof Error ? failure.message : "The queue could not be updated.");
+    } finally { if (owner.current === conversationId) setBusy(false); }
+  };
+  const element = <div className="composer-queue" role="list" aria-label="Queued messages">
+    <div className={`composer-queue-item${first.attachments.length ? " has-media" : ""}`} role="listitem">
+      <CornerDownRight size={15} aria-hidden="true" />
+      <span className="composer-queue-copy" title={first.content}>{first.content}</span>
+      {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={13} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
+      <small className="composer-queue-count" title={first.error ?? undefined}>{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
+      <button type="button" className="composer-queue-send" aria-label="Send queued message now" disabled={busy || dispatching || running || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>
+      <button type="button" className="composer-queue-remove" aria-label="Remove queued message" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></button>
+    </div>
+    {(error ?? first.error) && <span role="status">{error ?? first.error}</span>}
+  </div>;
+  return queueHost ? createPortal(element, queueHost) : element;
+}

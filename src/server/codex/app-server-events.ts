@@ -568,6 +568,7 @@ export class CodexAppServerEvents {
   handleNotification(method: string, params: JsonObject): void {
     if (this.host.isSettled()) return;
     this.host.setLastProtocolMethod(method);
+    if (method === "account/gatewayOAuth/changed") return;
     if (method === "account/rateLimits/updated") {
       const limits = parseCodexRateLimits({
         rateLimits: params.rateLimits,

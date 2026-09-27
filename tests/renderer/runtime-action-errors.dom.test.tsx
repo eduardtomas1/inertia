@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
+import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 
 const command: CommandWithoutId = {
   type: "git.branch.switch",
@@ -27,4 +28,22 @@ it.each([true, false])("retains busy cleanup and propagates failure with global 
   const clear = setBusyAction.mock.lastCall![0] as (current: string | null) => string | null;
   expect(clear(command.type)).toBeNull();
   expect(clear("other operation")).toBe("other operation");
+});
+
+it.each([
+  ["ambiguous", true],
+  ["rejected", false],
+] as const)("reports %s message delivery without inviting a blind retry", async (delivery, unconfirmed) => {
+  const error = new RuntimeCommandError("The follow-up was accepted as its turn ended.", delivery);
+  const setActionError = vi.fn();
+  const { result } = renderHook(() => useAppRuntimeActions({
+    sendCommand: vi.fn().mockRejectedValue(error), refreshDetail: vi.fn(), setActionError, setBusyAction: vi.fn(),
+  }));
+  await act(async () => {
+    await expect(result.current.sendMessageToConversation("33333333-3333-4333-8333-333333333333", "Follow up", []))
+      .rejects.toBe(error);
+  });
+  const reported = String(setActionError.mock.lastCall?.[0]);
+  expect(reported.startsWith("Delivery could not be confirmed.")).toBe(unconfirmed);
+  expect(reported).toContain(error.message);
 });

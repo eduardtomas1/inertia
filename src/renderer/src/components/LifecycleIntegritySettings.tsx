@@ -12,6 +12,29 @@ import type {
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 
+const CAPABILITY_LABELS: Readonly<Record<string, string>> = {
+  images: "Images",
+  reasoning: "Reasoning",
+  "structured-input": "Questions",
+  "follow-up-steer": "Follow-ups during a turn",
+  "session-resume": "Resume chats",
+  compaction: "Compact context",
+  "subagent-create": "Subagents",
+  "subagent-stop": "Stop a subagent",
+  "host-tool-bridge": "Manage Inertia chats",
+  "performance-modes": "Response speed",
+  "usage-tokens": "Token usage",
+  "rate-limits": "Account limits",
+};
+
+const CAPABILITY_STATES = {
+  available: "Ready",
+  "installation-unverified": "Verify installation",
+  "configuration-required": "Needs setup",
+  "negotiation-required": "Checked when a chat starts",
+  unsupported: "Not supported by this connection",
+} as const;
+
 type LifecycleIntegritySettingsProps =
   | {
     surface: "provider-capability";
@@ -69,6 +92,22 @@ export function LifecycleIntegritySettings(
               ? `${contract.currentlyAvailableCount} of ${contract.declaredCapabilityCount} declared capabilities are available now.`
               : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
           </small>
+          {contract.capabilities && (
+            <details className="provider-settings-capability-details">
+              <summary>Feature availability</summary>
+              <ul aria-label={`${props.provider.label} feature availability`}>
+                {contract.capabilities.filter(({ id }) => CAPABILITY_LABELS[id]).map(({ id, state }) => (
+                  <li key={id}>
+                    <span>{CAPABILITY_LABELS[id]}</span>
+                    <span className={state === "available" ? "is-ready" : undefined}>
+                      {CAPABILITY_STATES[state]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p>Availability can also depend on the model and settings of each chat.</p>
+            </details>
+          )}
         </div>
       </div>
     );

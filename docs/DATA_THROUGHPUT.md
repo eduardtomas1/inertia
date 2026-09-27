@@ -11,12 +11,17 @@ warmed before measurement. SQLite used the application's WAL and
 `synchronous = NORMAL` policy with automatic checkpoints disabled so write
 amplification remained visible.
 
-| Case | Mode | Wall | CPU | WAL writes | Peak RSS growth |
+| Case | Mode | Wall | CPU | WAL writes | RSS growth |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 512 × 512-byte streamed deltas | cumulative full-row copy | 87.3 ms | 87.1 ms | 69.62 MiB | 1.52 MiB |
 | 512 × 512-byte streamed deltas | append chunks + terminal compaction | 10.2 ms | 10.2 ms | 7.19 MiB | 0.41 MiB |
 | 8 × 32-page PDFs | eight concurrent extractions | 190.6 ms | 290.7 ms | — | 38.67 MiB |
 | 8 × 32-page PDFs | two concurrent, 12 MiB shared input budget | 167.0 ms | 185.7 ms | — | 17.56 MiB |
+
+The RSS column was recorded with an earlier timer-based sampler. That sampler
+cannot run during synchronous SQLite work, so the two streamed-delta rows are
+not true peaks. The benchmark now reports the signed RSS change from before to
+after each case (`rssDeltaMiB`).
 
 For this run, chunk persistence reduced visible WAL amplification by 89.7% and
 stream wall time by 88.3%. Bounded PDF scheduling reduced peak RSS growth by

@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
-import { createLegacyCliAgentHarnessForTests } from "../helpers/providers/legacy-cli-harness";
+import { createProcessLifecycleHarnessForTests } from "../helpers/providers/process-lifecycle-harness";
 import {
   ProviderNdjsonDecoder,
   ProviderRunEventBudget,
@@ -636,17 +636,11 @@ async function providerHarnessLifecycleMeasurement(root: string): Promise<Measur
   const program = writeNodeSubcommand(root, "benchmark-claude-fixture.cjs", `
 const sessionId = "33333333-3333-4333-8333-333333333333";
 const send = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
-send({ type: "system", subtype: "init", session_id: sessionId });
+send({ session: sessionId });
 for (let index = 0; index < 200; index += 1) {
-  send({
-    type: "stream_event",
-    event: {
-      type: "content_block_delta",
-      delta: { text: "chunk-" + index + "|" },
-    },
-  });
+  send({ text: "chunk-" + index + "|" });
 }
-send({ type: "result", is_error: false });
+send({ complete: true });
 setInterval(() => undefined, 1_000);
 `);
   const expectedText = Array.from(
@@ -665,7 +659,7 @@ setInterval(() => undefined, 1_000);
     const manager = ProviderManager.createForTests(
       { commands: { claude: executable } },
       new AgentHarnessRegistry([
-        createLegacyCliAgentHarnessForTests("claude", { prefixArgs: [program] }),
+        createProcessLifecycleHarnessForTests("claude", { prefixArgs: [program] }),
       ]),
     );
     const startedAt = performance.now();

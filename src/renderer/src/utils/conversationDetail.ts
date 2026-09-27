@@ -6,6 +6,7 @@ import type {
   ConversationShell,
 } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
+import { mergeConversationHistory } from "./conversationHistory";
 
 export function mergeConversationShell(
   detail: ConversationDetail,
@@ -70,7 +71,9 @@ export function resolveConversationDetail(
       : { conversationId: expectedConversationId, state: "loading" };
   }
   if (result.state === "ready" && shell?.id === expectedConversationId) {
-    return { ...result, detail: mergeConversationShell(result.detail, shell) };
+    const detail = current?.state === "ready" && current.detail.history && result.detail.history
+      ? mergeConversationHistory(current.detail, result.detail, "refresh") : result.detail;
+    return { ...result, detail: mergeConversationShell(detail, shell) };
   }
   return result;
 }

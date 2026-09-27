@@ -137,6 +137,11 @@ export class TurnRunStateCoordinator {
     this.projectLive(active, runState.state);
   }
 
+  retryTerminalPersistence(active: ActiveTurn): boolean {
+    if (!active.runState.isTerminal() || active.providerRunStarted) return false;
+    return this.options.settlement.retryTerminalPersistence(active);
+  }
+
   private projectLive(active: ActiveTurn, state: AgentRunState): void {
     if (
       state === "queued" || state === "waiting-for-approval"

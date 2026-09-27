@@ -18,13 +18,31 @@ function compactHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+const QUOTED_PATH_ESCAPES: Record<string, number> = {
+  a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, "\"": 34, "\\": 92,
+};
+
+function unquotedPath(quoted: string): string {
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (const [, octal, escape, text] of quoted.slice(1, -1).matchAll(/\\(?:([0-3][0-7]{2})|(.))|([^\\]+)/gsu)) {
+    if (text !== undefined) bytes.push(...encoder.encode(text));
+    else if (octal !== undefined) bytes.push(Number.parseInt(octal, 8));
+    else if (escape !== undefined) {
+      const known = QUOTED_PATH_ESCAPES[escape];
+      if (known === undefined) bytes.push(...encoder.encode(escape));
+      else bytes.push(known);
+    }
+  }
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(Uint8Array.from(bytes));
+}
+
 function cleanPath(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "/dev/null") return trimmed;
-  let decoded = trimmed;
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    try { decoded = JSON.parse(trimmed) as string; } catch { decoded = trimmed.slice(1, -1); }
-  }
+  const decoded = trimmed.startsWith('"') && trimmed.endsWith('"')
+    ? unquotedPath(trimmed)
+    : trimmed;
   return decoded.replace(/^[ab]\//u, "");
 }
 
@@ -52,6 +70,8 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
   let hunk: DiffHunk | null = null;
   let oldCursor = 0;
   let newCursor = 0;
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
   for (const rawLine of lines) {
     const headerPaths = diffHeaderPaths(rawLine);
@@ -64,15 +84,18 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
       };
       files.push(file);
       hunk = null;
+      oldRemaining = 0;
+      newRemaining = 0;
       continue;
     }
 
     if (!file) continue;
-    if (rawLine.startsWith("--- ")) {
+    const inHunkBody = oldRemaining > 0 || newRemaining > 0;
+    if (!inHunkBody && rawLine.startsWith("--- ")) {
       file.oldPath = cleanPath(rawLine.slice(4));
       continue;
     }
-    if (rawLine.startsWith("+++ ")) {
+    if (!inHunkBody && rawLine.startsWith("+++ ")) {
       file.newPath = cleanPath(rawLine.slice(4));
       file.path = file.newPath === "/dev/null" ? file.oldPath : file.newPath;
       continue;
@@ -98,6 +121,8 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
       file.hunks.push(hunk);
       oldCursor = oldStart;
       newCursor = newStart;
+      oldRemaining = oldCount;
+      newRemaining = newCount;
       continue;
     }
 
@@ -120,9 +145,9 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
       const previous = hunk.lines.at(-2);
       if (previous) previous.noFinalNewline = true;
     }
-    if (kind === "context") { oldCursor += 1; newCursor += 1; }
-    if (kind === "addition") newCursor += 1;
-    if (kind === "deletion") oldCursor += 1;
+    if (kind === "context") { oldCursor += 1; newCursor += 1; oldRemaining -= 1; newRemaining -= 1; }
+    if (kind === "addition") { newCursor += 1; newRemaining -= 1; }
+    if (kind === "deletion") { oldCursor += 1; oldRemaining -= 1; }
   }
 
   return { fingerprint, files };

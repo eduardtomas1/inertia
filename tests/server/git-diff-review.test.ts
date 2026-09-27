@@ -500,6 +500,40 @@ describe("safe selected diff reversal", () => {
     expect(readFileSync(lockPath, "utf8")).toBe("foreign lock owner\n");
   });
 
+  it("restores a deleted line whose content starts with two dashes", async () => {
+    const root = repository("select 1;\n-- keep this comment\nselect 2;\n");
+    writeFileSync(join(root, "example.txt"), "select 1;\nselect 2;\n");
+    const selection = await selectionFor(root, (line) => line.kind === "deletion" && line.content === "-- keep this comment");
+
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("select 1;\n-- keep this comment\nselect 2;\n");
+  });
+
+  it("restores a deletion at its own position after an added line that starts with two pluses", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\n++ example.txt\nbeta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "deletion" && line.content === "gamma");
+
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("alpha\n++ example.txt\nbeta\ngamma\n");
+  });
+
+  it("finds a changed non-ASCII file in the parsed diff", async () => {
+    const root = repository();
+    writeFileSync(join(root, "café.txt"), "alpha\nbeta\n");
+    git(root, "add", "café.txt");
+    git(root, "commit", "-m", "unicode");
+    writeFileSync(join(root, "café.txt"), "alpha\nbeta\ngamma\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "gamma");
+
+    expect(selection.filePath).toBe("café.txt");
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "café.txt"), "utf8")).toBe("alpha\nbeta\n");
+  });
+
   it.skipIf(process.platform === "win32")("inspects a reversal without running a repository filesystem monitor", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");

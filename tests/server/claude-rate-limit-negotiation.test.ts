@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 import { ClaudeMessageProjector } from "../../src/server/provider/claude-message-projector";
+import { ClaudeUsageLedger } from "../../src/server/provider/claude-usage";
 
 const rateLimitEvent = {
   type: "rate_limit_event",
@@ -31,6 +32,7 @@ function projector(usesNativeAnthropic: boolean): { calls: string[]; projector: 
       emitter,
       text: {} as never,
       usesNativeAnthropic,
+      usage: new ClaudeUsageLedger(false),
       contextUsage: () => null,
       acceptContextUsage: () => undefined,
       refreshContextUsage: () => undefined,

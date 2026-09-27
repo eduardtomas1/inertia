@@ -4,7 +4,7 @@ import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
 import { CappedProviderBuffer } from "./io";
-import { parseClaudeUsage } from "./claude-usage";
+import { parseClaudeUsage, type ClaudeUsageLedger } from "./claude-usage";
 import {
   boundedClaudeEventText as bounded,
   boundedClaudeIdentifier as boundedIdentifier,
@@ -45,6 +45,7 @@ interface ClaudeMessageProjectorOptions {
   emitter: AgentHarnessEmitter;
   text: CappedProviderBuffer;
   usesNativeAnthropic: boolean;
+  usage: ClaudeUsageLedger;
   selectedModelId?: string | null;
   contextWindowOverride?: number | null;
   contextUsage: () => unknown;
@@ -148,6 +149,7 @@ export class ClaudeMessageProjector {
         return;
       case "conversation_reset":
         this.resetConversationCorrelation();
+        this.options.usage.reset();
         // A reset invalidates any text accumulated before the new
         // conversation. The neutral text channel is append-only, so the
         // harness must use the terminal result as its authoritative snapshot.
@@ -456,11 +458,11 @@ export class ClaudeMessageProjector {
   private observeResult(message: Extract<SDKMessage, { type: "result" }>): void {
     this.closeProviderStatus();
     this.closeThinkingProgress();
-    const usage = parseClaudeUsage(message, {
+    const usage = this.options.usage.observe(parseClaudeUsage(message, {
       selectedModelId: this.options.selectedModelId,
       contextWindowOverride: this.options.contextWindowOverride,
       contextUsage: this.options.contextUsage(),
-    });
+    }));
     if (usage && !isClaudeQueuedCompletionAck(message)) this.options.emitter.rich({ type: "usage", usage });
     for (const denial of message.permission_denials ?? []) {
       this.observePermissionDenial({

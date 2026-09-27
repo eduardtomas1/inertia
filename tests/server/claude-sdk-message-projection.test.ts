@@ -16,6 +16,7 @@ import {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
   MAX_CLAUDE_STREAM_CORRELATION_CHARS,
 } from "../../src/server/provider/claude-message-projector";
+import { ClaudeUsageLedger } from "../../src/server/provider/claude-usage";
 import { CappedProviderBuffer } from "../../src/server/provider/io";
 import {
   CLAUDE_PROTOCOL_SESSION_ID,
@@ -90,6 +91,7 @@ function unitProjector(events?: AgentHarnessEvent[]): ClaudeMessageProjector {
     ),
     text: new CappedProviderBuffer(8 * 1024 * 1024),
     usesNativeAnthropic: false,
+    usage: new ClaudeUsageLedger(false),
     contextUsage: () => undefined,
     acceptContextUsage: () => undefined,
     refreshContextUsage: () => undefined,

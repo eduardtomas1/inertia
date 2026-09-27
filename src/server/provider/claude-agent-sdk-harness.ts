@@ -66,7 +66,7 @@ import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import { CLAUDE_STARTUP_FAILURE_RESULTS, claudeStartupFailure } from "./claude-startup-failure";
 import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
 import {
-  readClaudeContextUsage,
+  ClaudeUsageLedger, readClaudeContextUsage,
 } from "./claude-usage";
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
@@ -431,6 +431,7 @@ function startClaudeRun(
     emitter,
     text,
     usesNativeAnthropic,
+    usage: new ClaudeUsageLedger(Boolean(options.input.sessionId)),
     selectedModelId: options.input.modelSelection.modelId,
     contextWindowOverride:
       options.input.modelSelection.contextWindowOverride,

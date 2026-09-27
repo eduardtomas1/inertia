@@ -138,7 +138,7 @@ function contextWindowFromModelUsage(
  * Converts one Claude Agent SDK result into Inertia's truthful point-in-time
  * usage contract.
  *
- * The aggregate result usage is provider-defined run processing. Active
+ * Model totals are session-cumulative; main-loop usage is run-local. Active
  * context comes only from getContextUsage(), the last reported API iteration,
  * or a single-turn result. Aggregate multi-turn billing totals never stand in
  * for live context occupancy.
@@ -214,7 +214,9 @@ export function parseClaudeUsage(
   return {
     usedTokens: validUsedTokens,
     totalProcessedTokens,
-    totalProcessedScope: totalProcessedTokens === null ? null : "run",
+    totalProcessedScope: totalProcessedTokens === null
+      ? null
+      : modelTotals === null ? "run" : "session",
     maxTokens,
     inputTokens,
     cachedInputTokens,
@@ -223,6 +225,62 @@ export function parseClaudeUsage(
     reasoningOutputTokens,
     compactsAutomatically,
   };
+}
+
+type ClaudeProcessedUsage = Pick<
+  ClaudeUsageSnapshot,
+  | "totalProcessedTokens"
+  | "totalProcessedScope"
+  | "inputTokens"
+  | "cachedInputTokens"
+  | "cacheWriteInputTokens"
+  | "outputTokens"
+  | "reasoningOutputTokens"
+>;
+
+const unknownProcessedUsage: ClaudeProcessedUsage = {
+  totalProcessedTokens: null,
+  totalProcessedScope: null,
+  inputTokens: null,
+  cachedInputTokens: null,
+  cacheWriteInputTokens: null,
+  outputTokens: null,
+  reasoningOutputTokens: null,
+};
+
+export class ClaudeUsageLedger {
+  private verified: ClaudeProcessedUsage | null = null;
+  private discardedFreshSegment = false;
+
+  constructor(private readonly resumesSession: boolean) {}
+
+  reset(): void {
+    this.verified = null;
+    this.discardedFreshSegment ||= !this.resumesSession;
+  }
+
+  observe(snapshot: ClaudeUsageSnapshot | null): ClaudeUsageSnapshot | null {
+    if (!snapshot) return null;
+    if (
+      snapshot.totalProcessedScope === "session"
+      && (this.verified?.totalProcessedTokens ?? -1)
+        <= (snapshot.totalProcessedTokens ?? -1)
+    ) {
+      this.verified = {
+        totalProcessedTokens: snapshot.totalProcessedTokens,
+        totalProcessedScope: snapshot.totalProcessedScope,
+        inputTokens: snapshot.inputTokens,
+        cachedInputTokens: snapshot.cachedInputTokens,
+        cacheWriteInputTokens: snapshot.cacheWriteInputTokens,
+        outputTokens: snapshot.outputTokens,
+        reasoningOutputTokens: snapshot.reasoningOutputTokens,
+      };
+    }
+    if (this.discardedFreshSegment) {
+      return { ...snapshot, ...unknownProcessedUsage };
+    }
+    return this.verified ? { ...snapshot, ...this.verified } : snapshot;
+  }
 }
 
 /**

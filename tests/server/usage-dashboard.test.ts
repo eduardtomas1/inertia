@@ -12,6 +12,7 @@ import type {
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { usageDashboardSchema } from "../../src/shared/contracts/usage-dashboard-schema";
 import { RuntimeStore } from "../../src/server/database";
+import { parseClaudeUsage } from "../../src/server/provider/claude-usage";
 import {
   projectUsageDashboard,
   type UsageDashboardRange,
@@ -832,5 +833,148 @@ describe("usage dashboard repository", () => {
     });
     expect(JSON.stringify(dashboard)).not.toContain("private");
     expect(JSON.stringify(dashboard)).not.toContain(conversation.id);
+  });
+});
+
+function claudeResult(
+  capturedAt: string,
+  cumulative: number,
+  mainLoop = 300,
+): AgentTurnUsageSnapshot {
+  return usage(capturedAt, parseClaudeUsage({
+    num_turns: 2,
+    usage: { input_tokens: mainLoop, output_tokens: 20 },
+    modelUsage: {
+      "claude-sonnet": {
+        inputTokens: cumulative * 0.9 - 1_000,
+        outputTokens: cumulative * 0.1,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        contextWindow: 200_000,
+      },
+      "claude-haiku": {
+        inputTokens: 1_000,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        contextWindow: 200_000,
+      },
+    },
+  }, { selectedModelId: "claude-sonnet" })!);
+}
+
+function claudeTurn(input: {
+  id: string;
+  completedAt: string;
+  before: string | null;
+  after?: string;
+  start?: AgentTurnUsageSnapshot | null;
+  completion: AgentTurnUsageSnapshot;
+}): AgentTurn {
+  return turn({
+    id: input.id,
+    providerId: "claude",
+    model: "claude-sonnet",
+    completedAt: input.completedAt,
+    providerSessionBefore: input.before,
+    providerSessionAfter: input.after ?? input.before ?? "claude-session",
+    startUsage: input.start ?? null,
+    completionUsage: input.completion,
+  });
+}
+
+describe("Claude cumulative usage in the dashboard", () => {
+  it("counts a fresh run and a resumed run once across the session", () => {
+    const first = claudeResult("2026-06-20T10:00:00.000Z", 10_000);
+    const dashboard = projectUsageDashboard([
+      claudeTurn({
+        id: "claude-fresh",
+        completedAt: "2026-06-20T10:00:00.000Z",
+        before: null,
+        after: "claude-session",
+        completion: first,
+      }),
+      claudeTurn({
+        id: "claude-resumed",
+        completedAt: "2026-06-20T11:00:00.000Z",
+        before: "claude-session",
+        start: first,
+        completion: claudeResult("2026-06-20T11:00:00.000Z", 15_000),
+      }),
+    ], range);
+
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: 15_000, measuredRequests: 2, totalRequests: 2, coverage: "complete",
+    });
+    expect(dashboard.tokens.input.value).toBe(13_500);
+    expect(dashboard.tokens.output.value).toBe(1_500);
+  });
+
+  it("does not add main-loop usage to subagent-inclusive session totals", () => {
+    const dashboard = projectUsageDashboard([
+      claudeTurn({
+        id: "claude-subagents",
+        completedAt: "2026-06-20T10:00:00.000Z",
+        before: "claude-session",
+        start: claudeResult("2026-06-20T09:00:00.000Z", 4_000, 3_000),
+        completion: claudeResult("2026-06-20T10:00:00.000Z", 9_000, 3_000),
+      }),
+    ], range);
+
+    expect(dashboard.totals.processedTokens.value).toBe(5_000);
+    expect(dashboard.tokens.input.value).toBe(4_500);
+  });
+
+  it("keeps a resumed run unknown without a comparable session baseline", () => {
+    const dashboard = projectUsageDashboard([
+      claudeTurn({
+        id: "claude-no-baseline",
+        completedAt: "2026-06-20T10:00:00.000Z",
+        before: "claude-session",
+        completion: claudeResult("2026-06-20T10:00:00.000Z", 15_000),
+      }),
+      claudeTurn({
+        id: "claude-legacy-baseline",
+        completedAt: "2026-06-20T11:00:00.000Z",
+        before: "claude-session",
+        start: usage("2026-06-20T10:00:00.000Z", {
+          totalProcessedTokens: 15_000,
+          totalProcessedScope: "run",
+          inputTokens: 13_500,
+        }),
+        completion: claudeResult("2026-06-20T11:00:00.000Z", 20_000),
+      }),
+    ], range);
+
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: null, measuredRequests: 0, totalRequests: 2, coverage: "unavailable",
+    });
+    expect(dashboard.tokens.input.value).toBeNull();
+  });
+
+  it("starts a new segment after a provider session reset", () => {
+    const afterReset = claudeResult("2026-06-20T10:00:00.000Z", 2_000);
+    const dashboard = projectUsageDashboard([
+      claudeTurn({
+        id: "claude-reset",
+        completedAt: "2026-06-20T10:00:00.000Z",
+        before: "claude-session",
+        after: "claude-replacement",
+        start: claudeResult("2026-06-20T09:00:00.000Z", 12_000),
+        completion: afterReset,
+      }),
+      claudeTurn({
+        id: "claude-after-reset",
+        completedAt: "2026-06-20T11:00:00.000Z",
+        before: "claude-replacement",
+        start: afterReset,
+        completion: claudeResult("2026-06-20T11:00:00.000Z", 3_500),
+      }),
+    ], range);
+
+    expect(dashboard.totals.processedTokens).toEqual({
+      value: 1_500, measuredRequests: 1, totalRequests: 2, coverage: "partial",
+    });
+    expect(dashboard.tokens.output.value).toBe(150);
   });
 });

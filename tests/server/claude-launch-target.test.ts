@@ -6,6 +6,7 @@ import {
   resolveClaudeLaunchTarget,
   type ClaudeLaunchFileSystem,
 } from "../../src/server/provider/claude-launch-target";
+import { detectProvider } from "../../src/server/providers";
 
 const NPM = "C:\\Users\\Calm Dev\\AppData\\Roaming\\npm";
 const PACKAGE = `${NPM}\\node_modules\\@anthropic-ai\\claude-code`;
@@ -175,6 +176,58 @@ describe("Claude Windows launch target", () => {
     expect(resolveClaudeLaunchTarget(executable, {}, { platform, fileSystem: fakeFileSystem({}) })).toEqual({
       ok: true,
       target: { command: executable, scriptPrefix: [] },
+    });
+  });
+});
+
+describe("Claude Windows shim discovery", () => {
+  const shim = `${NPM}\\claude.cmd`;
+  const detect = (signedIn: boolean, fileSystem: ClaudeLaunchFileSystem) => detectProvider(
+    "claude",
+    { command: shim, cwd: process.cwd() },
+    {
+      executableCandidates: async () => [shim],
+      probeProcess: async (_executable, args) => ({
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+        exitCode: args[0] === "--version" || signedIn ? 0 : 1,
+        output: args[0] === "--version"
+          ? "2.1.0 (Claude Code)"
+          : JSON.stringify({ loggedIn: signedIn }),
+      }),
+      claudeLaunchTarget: { platform: "win32", fileSystem },
+    },
+  );
+  const npmLayout = (): ClaudeLaunchFileSystem => fakeFileSystem({
+    [MANIFEST]: manifest({ claude: "cli.js" }),
+    [ENTRY]: "entry",
+    [`${NPM}\\node.exe`]: "node",
+  });
+
+  it("keeps sign-in available for any shim while signed out", async () => {
+    await expect(detect(false, fakeFileSystem({}))).resolves.toMatchObject({
+      installState: "installed",
+      authState: "unauthenticated",
+      canRun: false,
+      statusMessage: "Sign in required",
+    });
+  });
+
+  it("runs a signed-in npm shim whose package entry resolves", async () => {
+    await expect(detect(true, npmLayout())).resolves.toMatchObject({
+      authState: "authenticated",
+      canRun: true,
+      statusMessage: "Connected",
+    });
+  });
+
+  it("reports a signed-in shim it cannot launch as not runnable with the reason", async () => {
+    await expect(detect(true, fakeFileSystem({}))).resolves.toMatchObject({
+      installState: "installed",
+      authState: "authenticated",
+      canRun: false,
+      statusMessage: expect.stringContaining("cannot launch safely"),
     });
   });
 });

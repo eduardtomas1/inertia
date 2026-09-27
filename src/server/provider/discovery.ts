@@ -34,7 +34,10 @@ import {
 } from "./contracts";
 import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
-import { resolveClaudeLaunchTarget } from "./claude-launch-target";
+import {
+  resolveClaudeLaunchTarget,
+  type ClaudeLaunchTargetOptions,
+} from "./claude-launch-target";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
 import {
@@ -128,6 +131,7 @@ interface ProviderDiscoveryDependencies {
   probeProcess?: ProviderProbeProcess;
   terminateProcessTree?: ProcessTreeTerminator;
   scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
+  claudeLaunchTarget?: ClaudeLaunchTargetOptions;
 }
 
 async function probeProcess(
@@ -740,26 +744,6 @@ export async function detectProvider(
     };
   }
 
-  if (providerId === "claude") {
-    const launch = resolveClaudeLaunchTarget(
-      selected.executable,
-      providerChildEnvironment(providerId, discoveredEnvironment.env),
-    );
-    if (!launch.ok) {
-      return {
-        provider,
-        available: true,
-        executable: selected.executable,
-        ...(selected.version ? { version: selected.version } : {}),
-        installState: "installed",
-        authState: "unknown",
-        canRun: false,
-        cleanupConfirmed: true,
-        statusMessage: launch.reason,
-      };
-    }
-  }
-
   const providerAuthArgs = providerAuthStatusArgs(providerId);
   if (providerAuthArgs === null) {
     return {
@@ -812,9 +796,17 @@ export async function detectProvider(
   const appServerReady = selected.appServerReady;
   const cleanupConfirmed = authProbe.cleanupConfirmed === true
     && versionCleanupConfirmed;
-  const canRun = (authenticated || runtimeNegotiatesAuthentication)
+  const admissible = (authenticated || runtimeNegotiatesAuthentication)
     && appServerReady
     && cleanupConfirmed;
+  const claudeLaunch = admissible && providerId === "claude"
+    ? resolveClaudeLaunchTarget(
+        selected.executable,
+        providerChildEnvironment(providerId, discoveredEnvironment.env),
+        dependencies.claudeLaunchTarget,
+      )
+    : null;
+  const canRun = admissible && claudeLaunch?.ok !== false;
   return {
     provider,
     available: true,
@@ -826,7 +818,9 @@ export async function detectProvider(
     protocolVerified: cleanupConfirmed,
     cleanupConfirmed,
     ...(authTimedOut ? { probeTimedOut: true } : {}),
-    statusMessage: !versionCleanupConfirmed
+    statusMessage: claudeLaunch && !claudeLaunch.ok
+      ? claudeLaunch.reason
+      : !versionCleanupConfirmed
       ? `${provider.name} probe cleanup could not be confirmed stopped`
       : authProbe.cleanupConfirmed !== true
       ? `${provider.name} connection probe timed out, and its process tree could not be confirmed stopped`

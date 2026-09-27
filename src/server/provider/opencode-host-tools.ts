@@ -13,6 +13,13 @@ import { withOpenCodeRequestDeadline } from "./opencode-owned-server";
 
 const MCP_DISCONNECT_TIMEOUT_MS = 2_000;
 
+export class OpenCodeHostToolDisconnectError extends Error {
+  constructor() {
+    super("OpenCode Inertia chat tools could not be disconnected.");
+    this.name = "OpenCodeHostToolDisconnectError";
+  }
+}
+
 type Initializer = <T>(
   label: string,
   operation: (signal: AbortSignal) => Promise<T>,
@@ -96,7 +103,7 @@ export function createOpenCodeHostTools(input: {
     cleanup: (client) => {
       cleanupPromise ??= (async () => {
         runtime.settle();
-        let failure: Error | undefined;
+        let disconnected = true;
         if (client && installed) {
           try {
             await withOpenCodeRequestDeadline(
@@ -108,16 +115,16 @@ export function createOpenCodeHostTools(input: {
               }, { signal, throwOnError: true }),
             );
           } catch {
-            failure = new Error("OpenCode Inertia chat tools could not be disconnected.");
+            disconnected = false;
           }
           installed = false;
         }
         try {
           await session.close();
         } catch {
-          failure ??= new Error("OpenCode Inertia chat tools could not be cleaned up.");
+          throw new Error("OpenCode Inertia chat tools could not be cleaned up.");
         }
-        if (failure) throw failure;
+        if (!disconnected) throw new OpenCodeHostToolDisconnectError();
       })();
       return cleanupPromise;
     },

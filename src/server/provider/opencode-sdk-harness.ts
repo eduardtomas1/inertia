@@ -65,6 +65,7 @@ import {
 } from "./opencode-event-projection";
 import {
   createOpenCodeHostTools,
+  OpenCodeHostToolDisconnectError,
   openCodePermissions,
 } from "./opencode-host-tools";
 import {
@@ -793,32 +794,34 @@ function startOpenCodeRun(
     try {
       await hostTools?.cleanup(client);
     } catch (error) {
-      cleanupConfirmed = false;
-      const rawCleanupError = redactDiagnostics(safeError(
-        error,
-        "OpenCode Inertia chat tools could not be cleaned up.",
-      ));
-      const cleanupError = sanitizeProviderFailureSummary(
-        rawCleanupError,
-        "OpenCode Inertia chat tools could not be cleaned up.",
-        { workspaceRoot: options.input.cwd },
-      );
-      const cleanupDetail = sanitizeProviderActivityDetail(
-        rawCleanupError,
-        { workspaceRoot: options.input.cwd, maxChars: 16 * 1024 },
-      );
-      outcome = {
-        ...outcome,
-        status: "failed",
-        error: cleanupError,
-        failure: {
-          reason: "provider-error",
-          message: cleanupError,
-          phase: "cleanup",
-          terminalEvent: "host-tools/cleanup",
-          ...(cleanupDetail ? { technicalDetail: cleanupDetail } : {}),
-        },
-      };
+      if (!child || !(error instanceof OpenCodeHostToolDisconnectError)) {
+        cleanupConfirmed = false;
+        const rawCleanupError = redactDiagnostics(safeError(
+          error,
+          "OpenCode Inertia chat tools could not be cleaned up.",
+        ));
+        const cleanupError = sanitizeProviderFailureSummary(
+          rawCleanupError,
+          "OpenCode Inertia chat tools could not be cleaned up.",
+          { workspaceRoot: options.input.cwd },
+        );
+        const cleanupDetail = sanitizeProviderActivityDetail(
+          rawCleanupError,
+          { workspaceRoot: options.input.cwd, maxChars: 16 * 1024 },
+        );
+        outcome = {
+          ...outcome,
+          status: "failed",
+          error: cleanupError,
+          failure: {
+            reason: "provider-error",
+            message: cleanupError,
+            phase: "cleanup",
+            terminalEvent: "host-tools/cleanup",
+            ...(cleanupDetail ? { technicalDetail: cleanupDetail } : {}),
+          },
+        };
+      }
     }
     eventAbort.abort();
     rejectPending();

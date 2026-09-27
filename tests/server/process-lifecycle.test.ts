@@ -440,7 +440,7 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
-  it("bounds graceful, forced and close phases of a Windows termination by one wait", async () => {
+  it("shares one Windows termination budget across graceful and forced taskkill and the root close", async () => {
     vi.useFakeTimers();
     try {
       const child = fakeChild();
@@ -470,6 +470,8 @@ describe("provider process-tree termination", () => {
       await vi.advanceTimersByTimeAsync(60);
       expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      await vi.advanceTimersByTimeAsync(99);
+      expect(result).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1);
       expect(result).toBe(false);
     } finally {

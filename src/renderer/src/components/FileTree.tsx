@@ -23,6 +23,7 @@ export type FileTreeProps = {
   loadingDirectories: ReadonlySet<string>;
   directoryErrors: ReadonlyMap<string, string>;
   itemRefs: RefObject<Map<string, HTMLButtonElement>>;
+  treeRef: RefObject<HTMLDivElement | null>;
   onActivate: (row: WorkspaceTreeRow) => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>, row: WorkspaceTreeRow) => void;
 };
@@ -39,6 +40,7 @@ export const FileTree = memo(function FileTree({
   loadingDirectories,
   directoryErrors,
   itemRefs,
+  treeRef,
   onActivate,
   onKeyDown,
 }: FileTreeProps): React.JSX.Element {
@@ -154,7 +156,7 @@ export const FileTree = memo(function FileTree({
   });
   return (
     <>
-      <div role="tree" aria-label={label} aria-busy={busy}>
+      <div role="tree" aria-label={label} aria-busy={busy} ref={treeRef}>
         {items}
       </div>
       <div className="visually-hidden">

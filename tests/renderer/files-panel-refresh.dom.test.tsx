@@ -562,9 +562,8 @@ describe("FilesPanel root refresh", () => {
           onLoadEntries={vi.fn()}
         />,
       );
-      const treeContainer = screen.getByRole("tree", { name: "Files" })
-        .closest(".file-entry-list");
-      expect(observe).toHaveBeenCalledWith(treeContainer);
+      const tree = screen.getByRole("tree", { name: "Files" });
+      expect(observe).toHaveBeenCalledWith(tree);
       scrollIntoView.mockClear();
 
       act(() => notifyResize?.());

@@ -872,7 +872,6 @@ export function FilesPanel({
         <div
           className={`${FILE_ENTRY_CLASS}-list`}
           hidden={!fileExplorerOpen}
-          ref={fileListRef}
         >
           {git && <p className="file-git-status" role="status">{gitIndex.notice}</p>}
           {showTreeLoading ? (
@@ -903,6 +902,7 @@ export function FilesPanel({
             loadingDirectories={loadingDirectories}
             directoryErrors={directoryErrors}
             itemRefs={itemRefs}
+            treeRef={fileListRef}
             onActivate={treeActions.activate}
             onKeyDown={treeActions.keyDown}
           />

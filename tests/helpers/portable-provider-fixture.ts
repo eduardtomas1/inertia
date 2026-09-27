@@ -51,6 +51,20 @@ export function readStableFixtureCapture<T>(capturePath: string): T {
   throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
 }
 
+export function fixtureCaptureWriterSource(capturePath: string): string {
+  return `((value) => {
+  const nextPath = ${JSON.stringify(`${capturePath}.next`)};
+  fs.writeFileSync(nextPath, JSON.stringify(value));
+  try {
+    fs.renameSync(nextPath, ${JSON.stringify(capturePath)});
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    fs.copyFileSync(nextPath, ${JSON.stringify(capturePath)});
+    fs.unlinkSync(nextPath);
+  }
+})`;
+}
+
 /**
  * Create a portable executable for CLIs whose protocol is selected by a flag
  * (for example `agy --output-format stream-json`) instead of a Node-compatible subcommand.

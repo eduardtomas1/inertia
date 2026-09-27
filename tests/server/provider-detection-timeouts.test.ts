@@ -133,7 +133,9 @@ if ((hangs[stage] ?? 0) !== 0) {
 
       await runtime.refresh("codex");
 
-      const checking = runtime.published[0]!;
+      expect(fake.calls().filter((call) => call === stage)).toHaveLength(1);
+      const checking = runtime.codex();
+      expect(runtime.published).toHaveLength(1);
       expect(checking).toMatchObject({
         authState: "checking",
         canRun: false,
@@ -145,6 +147,7 @@ if ((hangs[stage] ?? 0) !== 0) {
         badge: "Checking",
         action: null,
       });
+      await waitFor("the background retry to reach ready", () => runtime.codex().canRun, 10_000);
       expect(runtime.published.map(route).map((state) => state.ready ? "ready" : state.badge))
         .not.toContain("Sign in");
       expect(runtime.codex()).toMatchObject({
@@ -154,7 +157,7 @@ if ((hangs[stage] ?? 0) !== 0) {
       });
       expect(route(runtime.codex())).toEqual({ ready: true });
       expect(fake.calls().filter((call) => call === stage)).toHaveLength(2);
-      expect(runtime.requestedTimeouts).toEqual([4_000, 8_000]);
+      expect(runtime.requestedTimeouts).toEqual([4_000, 4_000]);
     }, 30_000);
   }
 
@@ -163,9 +166,11 @@ if ((hangs[stage] ?? 0) !== 0) {
     const runtime = harness(fake);
 
     await runtime.refresh("codex");
+    expect(fake.calls().filter((call) => call === "login")).toHaveLength(1);
+    await waitFor("the bounded retries to finish", () => runtime.codex().authState === "error", 20_000);
 
     expect(fake.calls().filter((call) => call === "login")).toHaveLength(4);
-    expect(runtime.requestedTimeouts).toEqual([4_000, 8_000, 10_000, 10_000]);
+    expect(runtime.requestedTimeouts).toEqual([4_000, 4_000, 4_000, 4_000]);
     expect(runtime.codex()).toMatchObject({
       installState: "installed",
       authState: "error",
@@ -187,6 +192,8 @@ if ((hangs[stage] ?? 0) !== 0) {
     const runtime = harness(fake);
 
     await runtime.refresh("codex");
+    expect(fake.calls()).toEqual(["version"]);
+    await waitFor("the bounded retries to finish", () => runtime.codex().installState === "unresponsive", 20_000);
 
     expect(fake.calls()).toEqual(["version", "version", "version", "version"]);
     expect(runtime.codex()).toMatchObject({
@@ -213,6 +220,7 @@ if ((hangs[stage] ?? 0) !== 0) {
     const runtime = harness(fake);
 
     await runtime.refresh("codex");
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     expect(fake.calls()).toEqual(["version", "app-server", "login"]);
     expect(runtime.requestedTimeouts).toEqual([4_000]);
@@ -269,16 +277,11 @@ if ((hangs[stage] ?? 0) !== 0) {
     const fake = fakeCodex({ login: 1 });
     const runtime = harness(fake, [60_000]);
 
-    const refreshing = runtime.refresh("codex");
-    await waitFor("the timed-out sign-in check to publish", () => (
-      runtime.published.length > 0
-    ), 10_000);
+    await runtime.refresh("codex");
     const callsBeforeShutdown = fake.calls();
-    const startedAt = Date.now();
     runtime.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
-    await expect(refreshing).resolves.toBeUndefined();
-    expect(Date.now() - startedAt).toBeLessThan(5_000);
     expect(fake.calls()).toEqual(callsBeforeShutdown);
     expect(runtime.requestedTimeouts).toEqual([4_000]);
     expect(runtime.published).toHaveLength(1);

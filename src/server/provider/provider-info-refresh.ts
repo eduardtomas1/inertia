@@ -7,7 +7,6 @@ import type { ProviderInstallationVerificationAuthority } from
   "./installation-lease";
 
 const DETECTION_TIMEOUT_MS = 4_000;
-const MAX_DETECTION_TIMEOUT_MS = 10_000;
 const DETECTION_RETRY_DELAYS_MS = [1_000, 3_000, 9_000];
 
 export interface ProviderInfoRefreshDependencies {
@@ -32,10 +31,6 @@ export type RefreshProviderInfo = (
   forceMetadata?: boolean,
   verificationAuthority?: ProviderInstallationVerificationAuthority,
 ) => Promise<void>;
-
-function detectionTimeoutMs(attempt: number): number {
-  return Math.min(DETECTION_TIMEOUT_MS * 2 ** attempt, MAX_DETECTION_TIMEOUT_MS);
-}
 
 async function pause(delayMs: number, signal: AbortSignal): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
@@ -69,13 +64,21 @@ export function createProviderInfoRefresh(
 ): RefreshProviderInfo {
   const incidents = dependencies.reportIncident ? new ProviderReadinessIncidents(dependencies.reportIncident) : null;
   const owners = new Map<ProviderInfo["id"], symbol>();
-  const claim = (providerId?: ProviderInfo["id"]): symbol => {
+  const pendingRetries = new Map<ProviderInfo["id"], AbortController>();
+  const retryAttempts = new Map<ProviderInfo["id"], Promise<void>>();
+  const claim = (
+    providerId?: ProviderInfo["id"],
+  ): { owner: symbol; providerIds: ProviderInfo["id"][] } => {
     const owner = Symbol("provider-info-refresh");
     const providerIds = providerId
       ? [providerId]
       : dependencies.providerInfo().map(({ id }) => id);
-    for (const id of providerIds) owners.set(id, owner);
-    return owner;
+    for (const id of providerIds) {
+      owners.set(id, owner);
+      pendingRetries.get(id)?.abort();
+      pendingRetries.delete(id);
+    }
+    return { owner, providerIds };
   };
   const replaceOwned = (
     owner: symbol,
@@ -167,37 +170,70 @@ export function createProviderInfoRefresh(
       dependencies.providers.cachedMetadata(detection.provider.id),
       dependencies.providers.providerCapabilityContract(detection.provider.id),
     );
-    const settle = async (initial: ProviderDetection): Promise<void> => {
-      const id = initial.provider.id;
-      let detection = initial;
-      let attempt = 0;
-      while (retrying(detection, attempt)) {
-        const elapsed = await pause(
-          retryDelaysMs[attempt]!,
-          dependencies.lifetimeSignal,
-        );
-        if (!elapsed || owners.get(id) !== owner || dependencies.isClosed()) return;
-        attempt += 1;
-        detection = await dependencies.providers.detect(id, {
-          cwd: dependencies.defaultWorkspacePath,
-          timeoutMs: detectionTimeoutMs(attempt),
-          refreshEnvironment: false,
-          signal: dependencies.lifetimeSignal,
-        });
-        if (!replaceOwned(owner, [detectedSnapshot(detection, attempt)])) return;
-        if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
-      }
+    const publish = (snapshot: ProviderInfo): void => {
+      if (dependencies.isClosed()) return;
+      if (replaceOwned(owner, [snapshot])) dependencies.broadcastSnapshot();
+    };
+    const settle = async (detection: ProviderDetection): Promise<void> => {
       if (!detection.canRun) return;
       const enriched = await enrichedSnapshot(detection);
       if (replaceOwned(owner, [enriched]) && !dependencies.isClosed()) {
         dependencies.broadcastSnapshot();
       }
     };
+    const retry = async (
+      previous: ProviderDetection,
+      attempt: number,
+    ): Promise<void> => {
+      const id = previous.provider.id;
+      const detection = await dependencies.providers.detect(id, {
+        cwd: dependencies.defaultWorkspacePath,
+        timeoutMs: DETECTION_TIMEOUT_MS,
+        refreshEnvironment: false,
+        signal: dependencies.lifetimeSignal,
+      });
+      if (owners.get(id) !== owner) return;
+      publish(detectedSnapshot(detection, attempt));
+      if (retrying(detection, attempt)) schedule(detection, attempt);
+      else await settle(detection);
+    };
+    const schedule = (previous: ProviderDetection, attempt: number): void => {
+      const id = previous.provider.id;
+      const cancellation = new AbortController();
+      pendingRetries.set(id, cancellation);
+      void pause(
+        retryDelaysMs[attempt]!,
+        AbortSignal.any([cancellation.signal, dependencies.lifetimeSignal]),
+      ).then(async (elapsed) => {
+        if (pendingRetries.get(id) === cancellation) pendingRetries.delete(id);
+        if (!elapsed || owners.get(id) !== owner || dependencies.isClosed()) return;
+        const running = dependencies.track(async () => {
+          dependencies.onActivityChange(1);
+          try {
+            await retry(previous, attempt + 1);
+          } finally {
+            dependencies.onActivityChange(-1);
+          }
+        });
+        const settled = running.then(() => undefined, () => {
+          if (owners.get(id) === owner) {
+            publish(detectedSnapshot(previous, retryDelaysMs.length));
+          }
+        });
+        retryAttempts.set(id, settled);
+        await settled;
+        if (retryAttempts.get(id) === settled) retryAttempts.delete(id);
+      });
+    };
+    const settleOrSchedule = async (detection: ProviderDetection): Promise<void> => {
+      if (!retrying(detection, 0)) await settle(detection);
+      else if (owners.get(detection.provider.id) === owner) schedule(detection, 0);
+    };
 
     if (providerId) {
       const detection = await dependencies.providers.detect(providerId, {
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: detectionTimeoutMs(0),
+        timeoutMs: DETECTION_TIMEOUT_MS,
         refreshEnvironment,
         signal: dependencies.lifetimeSignal,
         ...(verificationAuthority
@@ -206,11 +242,11 @@ export function createProviderInfoRefresh(
       });
       if (!replaceOwned(owner, [detectedSnapshot(detection, 0)])) return;
       if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
-      await settle(detection);
+      await settleOrSchedule(detection);
     } else {
       const detections = await dependencies.providers.detectAll({
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: detectionTimeoutMs(0),
+        timeoutMs: DETECTION_TIMEOUT_MS,
         refreshEnvironment,
         signal: dependencies.lifetimeSignal,
       });
@@ -224,17 +260,18 @@ export function createProviderInfoRefresh(
       // metadata must not hide this completed read from Settings/composers.
       // Keep joining every read so refresh activity and shutdown retain
       // their original lifetime, and recheck ownership before publication.
-      await Promise.all(detections.map(settle));
+      await Promise.all(detections.map(settleOrSchedule));
     }
   };
 
   return async (...args) => {
     // Claim synchronously at invocation so an older broad refresh can still
     // publish untouched providers without overwriting a newer targeted result.
-    const owner = claim(args[0]);
+    const { owner, providerIds } = claim(args[0]);
     await dependencies.track(async () => {
       dependencies.onActivityChange(1);
       try {
+        await Promise.all(providerIds.flatMap((id) => retryAttempts.get(id) ?? []));
         await dependencies.beforeRefresh?.(dependencies.lifetimeSignal);
         if (dependencies.isClosed()) return;
         await refreshCore(owner, ...args);

@@ -13,6 +13,7 @@ import { createProviderInfoRefresh } from
   "../../src/server/provider/provider-info-refresh";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
+import { RuntimeUpdatePreparationGate } from "../../src/server/runtime-update-preparation";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -219,66 +220,198 @@ describe("provider info refresh ownership", () => {
     });
   });
 
-  it("retries only a timed-out provider after a broad refresh and yields to a newer refresh", async () => {
+  describe("background detection retries", () => {
     const empty = {
       models: [],
       rateLimits: [],
       metadataState: initialProviderSnapshots()[0]!.metadataState,
     };
-    const timedOut: ProviderDetection = {
-      ...detection("codex", "1", "error", false),
+    const timedOut = (version = "1"): ProviderDetection => ({
+      ...detection("codex", version, "error", false),
       probeTimedOut: true,
       statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
-    };
-    const setup = (retryDelaysMs: readonly number[]) => {
+    });
+
+    function setup(options: {
+      retryDelaysMs: readonly number[];
+      detect: (call: number) => Promise<ProviderDetection>;
+      gate?: RuntimeUpdatePreparationGate;
+      activity?: { count: number };
+    }) {
       let providerInfo = initialProviderSnapshots();
+      const lifetime = new AbortController();
+      let closed = false;
+      let calls = 0;
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const detect = vi.fn(async () => {
+        calls += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          return await options.detect(calls);
+        } finally {
+          inFlight -= 1;
+        }
+      });
       const providers = {
         detectAll: vi.fn(async () => [
-          timedOut,
+          await detect(),
           detection("claude", "1", "authenticated", true),
         ]),
-        detect: vi.fn(async () => detection("codex", "2", "authenticated", true)),
+        detect,
         cachedMetadata: vi.fn(() => empty),
         metadata: vi.fn(async () => empty),
         providerCapabilityContract: vi.fn(() => undefined),
       } as unknown as ProviderManager;
-      const published: ProviderInfo[][] = [];
       const refresh = createProviderInfoRefresh({
         enabled: true, providers, defaultWorkspacePath: "/workspace",
-        lifetimeSignal: new AbortController().signal,
+        lifetimeSignal: lifetime.signal,
         providerInfo: () => providerInfo,
         replaceProviderInfo: (value) => { providerInfo = value; },
-        broadcastSnapshot: () => { published.push(structuredClone(providerInfo)); },
-        isClosed: () => false, track: async (operation) => await operation(),
-        onActivityChange: vi.fn(),
-        detectionRetryDelaysMs: retryDelaysMs,
+        broadcastSnapshot: vi.fn(),
+        isClosed: () => closed,
+        track: options.gate
+          ? async (operation) => await options.gate!.track(operation)
+          : async (operation) => await operation(),
+        onActivityChange: (delta) => {
+          if (options.activity) options.activity.count += delta;
+        },
+        detectionRetryDelaysMs: options.retryDelaysMs,
       });
-      return { refresh, providers, published, codex: () => providerInfo.find(({ id }) => id === "codex") };
-    };
+      return {
+        refresh,
+        detect,
+        maxInFlight: () => maxInFlight,
+        codex: () => providerInfo.find(({ id }) => id === "codex")!,
+        close: () => {
+          closed = true;
+          lifetime.abort(new Error("The runtime is shutting down."));
+        },
+      };
+    }
 
-    const broad = setup([1]);
-    await broad.refresh();
-    expect(broad.published[0]?.find(({ id }) => id === "codex")).toMatchObject({
-      installState: "installed",
-      authState: "checking",
-      canRun: false,
-      statusMessage: "Codex is slow to respond; checking again",
+    it("resolves after the first timed-out attempt and retries in the background until ready", async () => {
+      const runtime = setup({
+        retryDelaysMs: [20, 20, 20],
+        detect: async (call) => call < 3 ? timedOut() : detection("codex", "2", "authenticated", true),
+      });
+
+      await runtime.refresh();
+
+      expect(runtime.detect).toHaveBeenCalledOnce();
+      expect(runtime.codex()).toMatchObject({
+        installState: "installed",
+        authState: "checking",
+        canRun: false,
+        statusMessage: "Codex is slow to respond; checking again",
+      });
+      await vi.waitFor(() => {
+        expect(runtime.codex()).toMatchObject({ version: "2", authState: "authenticated", canRun: true });
+      });
+      expect(runtime.detect).toHaveBeenCalledTimes(3);
+      for (const [providerId, options] of runtime.detect.mock.calls.slice(1) as unknown as Array<[string, { timeoutMs: number; refreshEnvironment: boolean }]>) {
+        expect(providerId).toBe("codex");
+        expect(options).toMatchObject({ timeoutMs: 4_000, refreshEnvironment: false });
+      }
     });
-    expect(broad.providers.detect).toHaveBeenCalledOnce();
-    expect(broad.providers.detect).toHaveBeenCalledWith("codex", expect.objectContaining({
-      timeoutMs: 8_000,
-      refreshEnvironment: false,
-    }));
-    expect(broad.codex()).toMatchObject({ version: "2", authState: "authenticated", canRun: true });
 
-    const superseded = setup([50]);
-    const startup = superseded.refresh();
-    await superseded.refresh("codex");
-    await startup;
-    expect(superseded.providers.detect).toHaveBeenCalledOnce();
-    expect(superseded.providers.detect).toHaveBeenCalledWith("codex", expect.objectContaining({
-      timeoutMs: 4_000,
-    }));
-    expect(superseded.codex()).toMatchObject({ version: "2", canRun: true });
+    it("ends bounded background retries with an honest connection issue", async () => {
+      const runtime = setup({ retryDelaysMs: [5, 5, 5], detect: async () => timedOut() });
+
+      await runtime.refresh("codex");
+
+      await vi.waitFor(() => {
+        expect(runtime.codex().authState).toBe("error");
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(runtime.detect).toHaveBeenCalledTimes(4);
+      expect(runtime.codex()).toMatchObject({
+        installState: "installed",
+        canRun: false,
+        statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+      });
+    });
+
+    it("cancels a pending background retry when the runtime shuts down", async () => {
+      const runtime = setup({ retryDelaysMs: [30], detect: async () => timedOut() });
+
+      await runtime.refresh("codex");
+      runtime.close();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(runtime.detect).toHaveBeenCalledOnce();
+      expect(runtime.codex().authState).toBe("checking");
+    });
+
+    it("lets a newer refresh supersede a pending retry", async () => {
+      const runtime = setup({
+        retryDelaysMs: [40],
+        detect: async (call) => call === 1 ? timedOut() : detection("codex", "2", "authenticated", true),
+      });
+
+      await runtime.refresh("codex");
+      await runtime.refresh("codex");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(runtime.detect).toHaveBeenCalledTimes(2);
+      expect(runtime.codex()).toMatchObject({ version: "2", canRun: true });
+    });
+
+    it("waits for an in-flight retry before a newer refresh probes the same provider", async () => {
+      const retryProbe = deferred<ProviderDetection>();
+      const retryStarted = deferred<void>();
+      const runtime = setup({
+        retryDelaysMs: [5, 5],
+        detect: async (call) => {
+          if (call === 1) return timedOut();
+          if (call === 2) {
+            retryStarted.resolve();
+            return await retryProbe.promise;
+          }
+          return detection("codex", "3", "authenticated", true);
+        },
+      });
+
+      await runtime.refresh("codex");
+      await retryStarted.promise;
+      const newer = runtime.refresh("codex");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(runtime.detect).toHaveBeenCalledTimes(2);
+      retryProbe.resolve(timedOut("2"));
+      await newer;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      expect(runtime.maxInFlight()).toBe(1);
+      expect(runtime.detect).toHaveBeenCalledTimes(3);
+      expect(runtime.codex()).toMatchObject({ version: "3", canRun: true });
+    });
+
+    it("does not hold update preparation while a retry is pending", async () => {
+      const activity = { count: 0 };
+      const gate = new RuntimeUpdatePreparationGate({
+        isClosed: () => false, activeRuntimeCommands: () => 0, databaseRecoveryActive: () => false,
+        agentWorkActive: () => false, terminalActivity: () => false, providerMaintenanceActive: () => false,
+        providerRefreshActive: () => activity.count > 0, artifactReconciliationActive: () => false,
+        holdTerminalAdmission: () => {}, releaseTerminalAdmission: () => {}, drainAdditionalOperations: async () => {},
+      });
+      const runtime = setup({ retryDelaysMs: [30], detect: async () => timedOut(), gate, activity });
+
+      await runtime.refresh("codex");
+      const startedAt = Date.now();
+      await expect(gate.prepare("update")).resolves.toEqual({ ready: true });
+      expect(Date.now() - startedAt).toBeLessThan(20);
+      await vi.waitFor(() => {
+        expect(runtime.codex().authState).toBe("error");
+      });
+
+      expect(runtime.detect).toHaveBeenCalledOnce();
+      expect(runtime.codex()).toMatchObject({
+        installState: "installed",
+        canRun: false,
+        statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+      });
+      expect(gate.release("update")).toBe(true);
+    });
   });
 });

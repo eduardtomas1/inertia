@@ -716,6 +716,138 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(screen.getByText("1 selected lines")).toBeInTheDocument();
   });
 
+  describe("while a same-file refresh revalidates the retained diff", () => {
+    const callbacks = () => ({
+      onAsk: vi.fn(async () => undefined),
+      onRequestRevision: vi.fn(async () => undefined),
+      onRevert: vi.fn(async () => undefined),
+      onSetReviewState: vi.fn(async () => undefined),
+      onCreateNote: vi.fn(async () => undefined),
+      onUpdateNote: vi.fn(async () => undefined),
+      onDeleteNote: vi.fn(async () => undefined),
+      onAddTextToPrompt: vi.fn(),
+      onAddToPrompt: vi.fn(),
+    });
+    const editedPatch = patchFor("README.md").replace("+after", "+after edited");
+    const loaded = (patch: string) => ({
+      repositoryPath: ".",
+      patch,
+      truncated: false,
+      files: [changedFile("README.md")],
+    });
+
+    async function draftThenRefresh(settle: "pending" | "same" | "changed" | "failed") {
+      const handlers = callbacks();
+      const props = {
+        projectName: "Inertia",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        conversationId: "22222222-2222-4222-8222-222222222222",
+        summary: null,
+        onRefresh: vi.fn(),
+        onOpenWorkspaceFile: vi.fn(),
+        ...handlers,
+      };
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<WorkspaceChangesPanel
+          {...props}
+          snapshot={snapshot}
+          onLoadRepositoryDiff={vi.fn(async () => loaded(patchFor("README.md")))}
+        />);
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+      fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+        target: { value: "Held question" },
+      });
+      let resolveLoad!: (patch: string) => void;
+      let rejectLoad!: (error: Error) => void;
+      view.rerender(<WorkspaceChangesPanel
+        {...props}
+        snapshot={structuredClone(snapshot)}
+        onLoadRepositoryDiff={vi.fn(() => new Promise<ReturnType<typeof loaded>>((resolve, reject) => {
+          resolveLoad = (patch) => resolve(loaded(patch));
+          rejectLoad = reject;
+        }))}
+      />);
+      const pending = {
+        region: screen.getByRole("region", { name: "Diff content for README.md" }),
+        draft: screen.getByPlaceholderText("What would you like to know?"),
+      };
+      if (settle === "same") await act(async () => resolveLoad(patchFor("README.md")));
+      if (settle === "changed") await act(async () => resolveLoad(editedPatch));
+      if (settle === "failed") await act(async () => rejectLoad(new Error("Git inspection timed out.")));
+      return { handlers, pending };
+    }
+
+    function expectReadOnly(handlers: ReturnType<typeof callbacks>): void {
+      const popover = document.querySelector<HTMLElement>(".diff-selection-popover")!;
+      for (const name of ["Ask about", "Request revision", "Revert", "Note", "Add to prompt"]) {
+        const button = within(popover).queryByRole("button", { name });
+        if (button) expect(button).toBeDisabled();
+      }
+      expect(within(popover).getByRole("button", { name: "Ask agent" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeDisabled();
+      for (const note of screen.getAllByRole("button", { name: "Note" })) {
+        expect(note).toBeDisabled();
+      }
+      const line = screen.getByRole("button", { name: "− before" });
+      expect(line).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(line);
+      fireEvent.keyDown(screen.getByRole("button", { name: "+ after" }), { key: "Enter", shiftKey: true });
+      fireEvent.submit(popover.querySelector("form")!);
+      for (const button of within(popover).getAllByRole("button")) {
+        if (button.getAttribute("aria-label") !== "Clear selection") fireEvent.click(button);
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Mark file reviewed" }));
+      expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+      for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+    }
+
+    it("keeps the draft visible but blocks every review action while the reload is pending", async () => {
+      const { handlers, pending } = await draftThenRefresh("pending");
+      expect(pending.region).toBeInTheDocument();
+      expect(pending.draft).toHaveValue("Held question");
+      expectReadOnly(handlers);
+      expect(screen.getByText("Refreshing this diff. Review actions resume when it is current."))
+        .toHaveAttribute("role", "status");
+    });
+
+    it("re-enables the same selection and draft when the reload returns the same diff", async () => {
+      const { handlers } = await draftThenRefresh("same");
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+      expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+      expect(screen.queryByText(/Review actions resume/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+      await waitFor(() => expect(handlers.onAsk).toHaveBeenCalledOnce());
+    });
+
+    it("keeps only the draft text when the reload returns different lines", async () => {
+      await draftThenRefresh("changed");
+      expect(await screen.findByRole("button", { name: "+ after edited" })).toBeEnabled();
+      expect(screen.queryByPlaceholderText("What would you like to know?")).not.toBeInTheDocument();
+      expect(document.querySelector(".diff-selection-popover")).toBeNull();
+      expect(screen.getByText("The diff changed while it refreshed. Select lines again to continue your draft."))
+        .toHaveAttribute("role", "status");
+
+      fireEvent.click(screen.getByRole("button", { name: "+ after edited" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+    });
+
+    it("stays read-only with the retained diff and shows the error when the reload fails", async () => {
+      const { handlers } = await draftThenRefresh("failed");
+      expect(screen.getByRole("alert")).toHaveTextContent("Diff could not be refreshed. Git inspection timed out.");
+      expect(screen.getByRole("region", { name: "Diff content for README.md" })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+      expect(screen.getByText("This diff could not be refreshed. Review actions stay paused until it is current."))
+        .toHaveAttribute("role", "status");
+      expectReadOnly(handlers);
+    });
+  });
+
   it("drops the retained diff and review draft when the workspace owner changes behind the same paths", async () => {
     const onAsk = vi.fn(async () => undefined);
     const props = {

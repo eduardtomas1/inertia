@@ -428,7 +428,6 @@ export function WorkspaceChangesPanel({
       .then((nextDiff) => {
         if (cancelled) return;
         if (nextDiff.repositoryPath !== activeRepositoryPath) {
-          setDiff(null);
           setDiffError("The repository changed while its diff was loading. Refresh and try again.");
           return;
         }
@@ -440,7 +439,6 @@ export function WorkspaceChangesPanel({
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setDiff(null);
         setDiffError(error instanceof Error ? error.message : "This repository diff could not be loaded.");
       })
       .finally(() => {
@@ -854,7 +852,7 @@ export function WorkspaceChangesPanel({
       )}
       {diffError && (
         <div className="panel-notice workspace-repository-notice is-error" role="alert">
-          <AlertTriangle size={14} /><span><strong>Diff unavailable.</strong> {diffError}</span>
+          <AlertTriangle size={14} /><span><strong>{diff ? "Diff could not be refreshed." : "Diff unavailable."}</strong> {diffError}</span>
         </div>
       )}
     </>
@@ -891,6 +889,8 @@ export function WorkspaceChangesPanel({
       diff={diff}
       selectedPath={effectiveSelection?.filePath ?? null}
       repositoryPath={activeRepositoryPath ?? "."}
+      reviewScope={JSON.stringify([projectId ?? null, conversationId ?? null, activeRepositoryPath ?? "."])}
+      diffStale={diffError !== null}
       summary={nestedRepository ? null : summary}
       selectionAnswer={selectionAnswer}
       reviewStates={activeReviewStates}

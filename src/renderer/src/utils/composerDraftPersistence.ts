@@ -22,19 +22,24 @@ function notifyComposerDraftPersistence(
   }
 }
 
+function storeComposerDraft(conversationId: string, draft: string): boolean {
+  try {
+    const key = `inertia:draft:${conversationId}`;
+    if (draft) window.localStorage.setItem(key, draft);
+    else window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Persists one composer draft and notifies this renderer's optional mirror. */
 export function persistComposerDraft(
   conversationId: string,
   draft: string,
 ): void {
   draftHandoffs.delete(conversationId);
-  try {
-    const key = `inertia:draft:${conversationId}`;
-    if (draft) window.localStorage.setItem(key, draft);
-    else window.localStorage.removeItem(key);
-  } catch {
-    // In-memory editing and the detached main-process mirror remain available.
-  }
+  storeComposerDraft(conversationId, draft);
   notifyComposerDraftPersistence({ conversationId, draft });
 }
 
@@ -59,9 +64,12 @@ export function clearPersistedComposerDraft(
 export function handOffComposerDraft(
   conversationId: string,
   draft: string,
-): void {
-  persistComposerDraft(conversationId, draft);
-  draftHandoffs.set(conversationId, draft);
+): boolean {
+  const stored = storeComposerDraft(conversationId, draft);
+  if (stored) draftHandoffs.delete(conversationId);
+  else draftHandoffs.set(conversationId, draft);
+  notifyComposerDraftPersistence({ conversationId, draft });
+  return stored;
 }
 
 export function readComposerDraft(conversationId: string): string {
@@ -72,6 +80,12 @@ export function readComposerDraft(conversationId: string): string {
   } catch {
     return "";
   }
+}
+
+export function takeComposerDraft(conversationId: string): string {
+  const draft = readComposerDraft(conversationId);
+  draftHandoffs.delete(conversationId);
+  return draft;
 }
 
 export function onComposerDraftPersisted(

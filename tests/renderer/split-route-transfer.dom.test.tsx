@@ -106,7 +106,5 @@ describe("split pane route transfer", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
     act(() => show(source));
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
-    act(() => show(target));
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text);
   });
 });

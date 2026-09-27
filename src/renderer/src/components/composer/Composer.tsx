@@ -52,7 +52,7 @@ import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
-import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
+import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft, takeComposerDraft } from "../../utils/composerDraftPersistence";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -129,6 +129,7 @@ export const Composer = memo(function Composer({
     conversation.id,
   );
   const draftValueRef = useRef(message);
+  const loadedDraftConversationRef = useRef<string | null>(null);
   const pendingDraftRef = useRef<{
     conversationId: string;
     value: string;
@@ -328,7 +329,10 @@ export const Composer = memo(function Composer({
     }
     submittingRef.current = false;
     setSubmitting(false);
-    const nextDraft = readComposerDraft(conversation.id);
+    const nextDraft = loadedDraftConversationRef.current === conversation.id
+      ? draftValueRef.current
+      : takeComposerDraft(conversation.id);
+    loadedDraftConversationRef.current = conversation.id;
     draftValueRef.current = nextDraft;
     setMessage(nextDraft);
     for (const attachment of attachmentsRef.current) {

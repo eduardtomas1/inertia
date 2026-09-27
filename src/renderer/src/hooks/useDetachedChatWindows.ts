@@ -5,6 +5,7 @@ import type {
   DetachedChatWindowSummary,
 } from "@shared/desktop";
 import { DETACHED_CHAT_WINDOW_LIMIT } from "@shared/desktop";
+import { handOffComposerDraft } from "../utils/composerDraftPersistence";
 
 export interface DetachedChatWindowsController {
   ready: boolean;
@@ -56,16 +57,7 @@ export function useDetachedChatWindows(): DetachedChatWindowsController {
     const storeDraft = (handoff: {
       conversationId: string;
       draft: string;
-    }): boolean => {
-      try {
-        const key = `inertia:draft:${handoff.conversationId}`;
-        if (handoff.draft) window.localStorage.setItem(key, handoff.draft);
-        else window.localStorage.removeItem(key);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    }): boolean => handOffComposerDraft(handoff.conversationId, handoff.draft);
     const accept = (handoff: Awaited<ReturnType<
       typeof window.inertia.getPendingDetachedChatDrafts
     >>[number]): void => {

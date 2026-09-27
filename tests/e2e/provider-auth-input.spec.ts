@@ -19,6 +19,8 @@ interface WireEvent {
   method?: string;
 }
 
+const CANONICAL_ENTER = process.platform === "win32" ? "\r\n" : "\n";
+
 const CODES: Readonly<Record<ProviderKey, string>> = {
   claude: "synthetic-claude-code#fixture-state",
   codex: "synthetic-codex-callback-code",
@@ -411,9 +413,20 @@ async function pasteFromClipboard(text: string): Promise<void> {
   await app.page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
 }
 
-async function cancelWithInterrupt(dialog: Locator, pid: number): Promise<void> {
+async function cancelWithInterrupt(
+  dialog: Locator,
+  pid: number,
+  batchShimAsksToTerminate = false,
+): Promise<void> {
   await expectTerminalFocused(dialog);
   await app.page.keyboard.press("Control+C");
+  if (batchShimAsksToTerminate) {
+    await expect(dialog).toContainText("Terminate batch job (Y/N)?");
+    await expect.poll(() => executableProcessExists(pid)).toBe(false);
+    await expectTerminalFocused(dialog);
+    await app.page.keyboard.type("Y");
+    await app.page.keyboard.press("Enter");
+  }
   await expect(dialog.getByText("The provider ended the connection flow before it completed.").last()).toBeVisible();
   await expect.poll(() => executableProcessExists(pid)).toBe(false);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -557,7 +570,7 @@ test("Codex sign-in keeps terminal input live while its browser callback complet
   await expectTerminalFocused(dialog);
   await app.page.keyboard.type("typed-probe");
   await app.page.keyboard.press("Enter");
-  await expect.poll(() => stdinFor(rejected)).toBe("typed-probe\n");
+  await expect.poll(() => stdinFor(rejected)).toBe(`typed-probe${CANONICAL_ENTER}`);
   expect(await codexBrowserCallback("wrong-callback-code")).toBe(400);
   await expectRejected(dialog, rejected, "Error logging in: token exchange failed");
 
@@ -567,7 +580,7 @@ test("Codex sign-in keeps terminal input live while its browser callback complet
   await returnFromBrowser(dialog);
   await pasteFromClipboard("pasted-probe");
   await app.page.keyboard.press("Enter");
-  await expect.poll(() => stdinFor(accepted)).toBe("pasted-probe\n");
+  await expect.poll(() => stdinFor(accepted)).toBe(`pasted-probe${CANONICAL_ENTER}`);
   expect(await codexBrowserCallback(CODES.codex)).toBe(200);
   await expectCompleted(dialog, "Codex", "Connected");
   await expect.poll(() => executableProcessExists(accepted)).toBe(false);
@@ -584,7 +597,7 @@ for (const scenario of [
 
     let dialog = await openConnect(scenario.label, "Connect");
     await expect(dialog).toContainText(scenario.prompt);
-    await cancelWithInterrupt(dialog, await nextLoginPid(scenario.provider));
+    await cancelWithInterrupt(dialog, await nextLoginPid(scenario.provider), process.platform === "win32");
 
     dialog = await openConnect(scenario.label, "Connect");
     await expect(dialog).toContainText(scenario.prompt);
@@ -596,7 +609,7 @@ for (const scenario of [
     await expectTerminalFocused(dialog);
     await app.page.keyboard.type("typed-probe");
     await app.page.keyboard.press("Enter");
-    await expect.poll(() => stdinFor(rejected)).toBe("typed-probe\n");
+    await expect.poll(() => stdinFor(rejected)).toBe(`typed-probe${CANONICAL_ENTER}`);
     await approveInBrowser(scenario.provider, "denied");
     await expectRejected(dialog, rejected, scenario.denied);
 
@@ -606,7 +619,7 @@ for (const scenario of [
     await returnFromBrowser(dialog);
     await pasteFromClipboard("pasted-probe");
     await app.page.keyboard.press("Enter");
-    await expect.poll(() => stdinFor(accepted)).toBe("pasted-probe\n");
+    await expect.poll(() => stdinFor(accepted)).toBe(`pasted-probe${CANONICAL_ENTER}`);
     await approveInBrowser(scenario.provider, CODES[scenario.provider]);
     await expectCompleted(dialog, scenario.label, scenario.status);
     await expect.poll(() => executableProcessExists(accepted)).toBe(false);

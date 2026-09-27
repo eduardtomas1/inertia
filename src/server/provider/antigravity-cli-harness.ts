@@ -145,7 +145,7 @@ function startAntigravityRun(
   const outputDrainGraceMs = harnessOptions.outputDrainGraceMs ?? OUTPUT_DRAIN_GRACE_MS;
   const terminationConfirmMs = harnessOptions.terminationConfirmMs ?? TERMINATION_CONFIRM_MS;
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
-  const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+  let resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const tools = new Map<string, boolean>();
   let sessionId = antigravitySessionId(input.sessionId);
   let result: AntigravityResult | undefined;
@@ -154,6 +154,7 @@ function startAntigravityRun(
   let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   let outputClosed = false;
   let sawText = false;
+  let skippedFrame = false;
   let stderrTail = "";
   let declinedNotices = 0;
   let cancelRequested = false;
@@ -210,9 +211,16 @@ function startAntigravityRun(
     } else {
       if (!adoptSession(event.result.conversationId)) return;
       result = event.result;
-      if (event.result.status === "SUCCESS" && !sawText && event.result.response) {
-        resultText.append(event.result.response);
-        emitter.text(event.result.response);
+      const response = event.result.status === "SUCCESS" ? event.result.response : "";
+      if (response && sawText && skippedFrame) {
+        resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+        resultText.append(response);
+        emitter.textSnapshot(`antigravity:${input.runId}:response`, response);
+        skippedFrame = false;
+      } else if (response && !sawText) {
+        resultText.append(response);
+        emitter.text(response);
+        skippedFrame = false;
       }
       if (event.result.usage) emitter.rich({ type: "usage", usage: event.result.usage });
       resultTimer = setTimeout(
@@ -254,6 +262,7 @@ function startAntigravityRun(
     },
     () => {
       if (admit(MAX_LINE_BYTES)) {
+        skippedFrame = true;
         emitter.activity("system", "info", "Antigravity sent an oversized line that Inertia skipped");
       }
     },
@@ -334,7 +343,7 @@ function startAntigravityRun(
       ...providerRunTerminal(input, status, runFailure),
       sessionId,
       text: resultText.toString(),
-      textTruncated: resultText.truncated,
+      textTruncated: resultText.truncated || skippedFrame,
       exitCode: exit?.code ?? child.exitCode,
       signal: exit?.signal ?? child.signalCode,
       ...(runFailure ? { error: runFailure.message, failure: runFailure } : {}),

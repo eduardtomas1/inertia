@@ -394,18 +394,25 @@ process.exit(0);
     const sessions: ProviderSessionEvent[] = [];
     const activities: ProviderActivityEvent[] = [];
     const usage: ProviderUsageEvent[] = [];
+    const text: string[] = [];
+    const snapshots: string[] = [];
     const result = await managerFor(command).run(antigravityInput(root), {
       onSession: (event) => sessions.push(event),
       onActivity: (event) => activities.push(event),
       onUsage: (event) => usage.push(event),
+      onText: (event) => text.push(event.text),
+      onTextSnapshot: (event) => snapshots.push(event.text),
     });
 
     expect(result).toMatchObject({
       status: "completed",
       text: "Hello world",
+      textTruncated: false,
       sessionId: CONVERSATION,
       cleanupConfirmed: true,
     });
+    expect(text).toEqual(["Hello ", "world"]);
+    expect(snapshots).toEqual([]);
     expect(sessions.map((event) => event.sessionId)).toEqual([CONVERSATION]);
     expect(activities.filter((event) => event.kind === "tool").map((event) => [
       event.phase,
@@ -591,6 +598,52 @@ process.exit(0);
 `);
     await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
       status: "failed", failure: { terminalEvent: "result:error" }, cleanupConfirmed: true,
+    });
+  });
+
+  it.each([
+    { response: "First. Second.", text: "First. Second.", snapshots: ["First. Second."], textTruncated: false },
+    { response: "", text: "First. ", snapshots: [], textTruncated: true },
+  ])("reconciles skipped oversized output with the final response $response", async (expected) => {
+    const root = fixtureRoot("antigravity oversized frame");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "First. " } });
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "Second." + " ".repeat(1100000) } });
+emit({ event: "result", result: { status: "SUCCESS", response: ${JSON.stringify(expected.response)}, error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    const text: string[] = [];
+    const snapshots: string[] = [];
+    const notices: string[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onText: (event) => text.push(event.text),
+      onTextSnapshot: (event) => snapshots.push(event.text),
+      onActivity: (event) => { if (event.kind === "system") notices.push(event.label); },
+    });
+    expect(result).toMatchObject({
+      status: "completed",
+      text: expected.text,
+      textTruncated: expected.textTruncated,
+      cleanupConfirmed: true,
+    });
+    expect(text).toEqual(["First. "]);
+    expect(snapshots).toEqual(expected.snapshots);
+    expect(notices).toEqual(["Antigravity sent an oversized line that Inertia skipped"]);
+  });
+
+  it("fails safely when the terminal result is oversized", async () => {
+    const root = fixtureRoot("antigravity oversized result");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 0, state: "ACTIVE", text_delta: "First. " } });
+emit({ event: "result", result: { status: "SUCCESS", response: "First. " + "x".repeat(1100000), error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+      status: "failed",
+      text: "First. ",
+      textTruncated: true,
+      failure: { reason: "process-exit" },
+      cleanupConfirmed: true,
     });
   });
 

@@ -54,6 +54,10 @@ import {
   withOpenCodeRequestDeadline,
 } from "./opencode-owned-server";
 import {
+  boundedOpenCodeEventFetch,
+  OPENCODE_OVERSIZED_EVENT_MESSAGE,
+} from "./opencode-event-stream";
+import {
   createOpenCodeEventState,
   openCodeCanonicalResult,
   settleOpenCodePromptOutput,
@@ -104,6 +108,7 @@ export {
   type OpenCodeSdkMetadataOptions,
 } from "./opencode-sdk-metadata";
 const MAX_EVENT_BYTES = 1024 * 1024;
+const MAX_EVENT_FRAME_BYTES = 2 * MAX_EVENT_BYTES;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
@@ -288,6 +293,20 @@ function startOpenCodeRun(
     eventAbort.abort();
     interruptRun(new Error(message));
   };
+  const failRuntime = (message: string, terminalEvent: string): void => {
+    if (cancelRequested || terminalError) return;
+    terminalError = message;
+    failureState.terminal = openCodeRuntimeFailure(
+      message,
+      message,
+      terminalEvent,
+      child,
+      options.input.cwd,
+      redactDiagnostics(serverDiagnostic(serverOutput)),
+    );
+    eventAbort.abort();
+    interruptRun(new Error(message));
+  };
   const armEventInactivityDeadline = (): void => {
     if (cancelRequested || terminalError) return;
     if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
@@ -417,6 +436,10 @@ function startOpenCodeRun(
       );
       child = started.child;
       terminateOwnedRun = started.terminate;
+      child.once("exit", () => failRuntime(
+        "The OpenCode server exited before the session completed.",
+        "process/exit",
+      ));
       if (cancelRequested) throw new Error("OpenCode startup was cancelled.");
       if (terminalError) throw new Error(terminalError);
       client = createOwnedOpenCodeClient(started.url, options.input.cwd, credentials);
@@ -549,7 +572,16 @@ function startOpenCodeRun(
         throw new Error("The active OpenCode model does not advertise image input support.");
       }
       usageState.maxTokens = finite(effectiveModel?.limit.context);
-      const subscribed = await client.event.subscribe({ directory: options.input.cwd }, { signal: eventAbort.signal, throwOnError: true });
+      const subscribed = await client.event.subscribe({ directory: options.input.cwd }, {
+        signal: eventAbort.signal,
+        throwOnError: true,
+        sseMaxRetryAttempts: 1,
+        fetch: boundedOpenCodeEventFetch(MAX_EVENT_FRAME_BYTES, () => failRuntime(
+          OPENCODE_OVERSIZED_EVENT_MESSAGE,
+          "event/oversized",
+        )),
+      });
+      if (cancelRequested) throw new Error("OpenCode run was cancelled before the prompt was sent.");
       armEventInactivityDeadline();
       const compacting = options.input.operation?.kind === "compact";
       if (compacting) {

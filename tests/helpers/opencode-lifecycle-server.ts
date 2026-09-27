@@ -41,6 +41,10 @@ type LifecycleScenario =
   | "descendant-cancel"
   | "slow"
   | "endless"
+  | "server-exit"
+  | "event-stream-drop"
+  | "unterminated-event"
+  | "slow-cancel-ack"
   | "no-image";
 export function lifecycleServerSource(
   root: string,
@@ -91,6 +95,7 @@ const server = http.createServer((req, res) => {
       return openEvents();
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
+      if (scenario === "slow-cancel-ack") fs.writeFileSync(${JSON.stringify(capturePath)} + ".prompt", "");
       if (scenario === "v2-local-interaction-race") {
         json(res, undefined, 204);
         setTimeout(() => {
@@ -367,6 +372,9 @@ const server = http.createServer((req, res) => {
       if (scenario === "slow") setTimeout(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "too-late", sessionID, role: "assistant" } } });
       }, 10_000);
+      if (scenario === "server-exit") setTimeout(() => process.exit(3), 20);
+      if (scenario === "event-stream-drop") setTimeout(() => events?.destroy(), 20);
+      if (scenario === "unterminated-event") setTimeout(() => events?.write("data: " + "x".repeat(3 * 1024 * 1024)), 20);
       if (scenario === "endless") setInterval(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "heartbeat", sessionID, role: "assistant" } } });
       }, 50);
@@ -485,6 +493,7 @@ const server = http.createServer((req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/abort") {
       if (scenario === "stuck-cancel") return;
+      if (scenario === "slow-cancel-ack") return setTimeout(() => json(res, true), 300);
       json(res, true);
       if (scenario === "cancel") return;
       return setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 10);

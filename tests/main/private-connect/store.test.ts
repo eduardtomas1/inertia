@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -124,6 +128,21 @@ describe("Private Connect encrypted store", () => {
     await expect(aboveLimit.save(value())).rejects.toThrow("store is too large");
     await expect(aboveLimit.load()).rejects.toThrow("store is invalid");
     expect(write).toHaveBeenCalledOnce();
+  });
+
+  it("promotes a complete interrupted first-write stage and discards a torn one", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-private-connect-store-"));
+    try {
+      const path = join(directory, "private-connect.vault");
+      const stage = (token: string) => join(directory, `.private-connect-vault-00000000-0000-4000-8000-00000000000${token}.stage`);
+      await writeFile(stage("1"), "\0\0\0\0", { mode: 0o600 });
+      expect(await new PrivateConnectStore(path, encryption()).load()).toBeNull();
+
+      await writeFile(stage("2"), Buffer.from(JSON.stringify(value())).toString("base64"), { mode: 0o600 });
+      expect(await new PrivateConnectStore(path, encryption()).load()).toEqual(value());
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("rejects aggregate grant state before replacing the durable store", async () => {

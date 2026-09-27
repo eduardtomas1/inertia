@@ -242,6 +242,7 @@ export class PrivateConnectStore {
   ) {
     this.persistence = persistence ?? new FileCredentialVaultPersistence(filePath, {
       temporaryPrefix: ".private-connect-vault-",
+      validateStage: (value) => /^[A-Za-z0-9+/]+={0,2}$/u.test(value),
     });
   }
 

@@ -568,6 +568,7 @@ function startClaudeRun(
         const next = await nextClaudeMessage(
           messageIterator,
           terminalDrainDeadline === null ? null : terminalDrainDeadline - performance.now(),
+          abortController.signal,
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
         // One legitimately large update is shortened for Inertia's view

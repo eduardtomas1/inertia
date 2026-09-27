@@ -342,7 +342,7 @@ function startCursorRun(
         todoSessions.reset(sessionId);
       }
       handleCursorProviderEvent(() => {
-        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions);
+        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
@@ -634,6 +634,7 @@ function startCursorRun(
       promptInFlight = false;
     }));
     if (providerEventError) throw providerEventError;
+    finishOutputStreams();
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter);
     const compactionFailure = options.input.operation?.kind === "compact"
       && compactions.completionEvidence() !== "completed"
@@ -660,6 +661,7 @@ function startCursorRun(
     requestProcessTermination(true);
     return outcome;
   }).catch((error: unknown) => {
+    secretRedactor.discardStreams();
     requestProcessTermination(true);
     if (cancelRequested) return finish("cancelled");
     const redactHostMcp = (value: string): string => redactHostMcpPayload(value);
@@ -730,8 +732,19 @@ function startCursorRun(
     };
   }
 
+  function finishOutputStreams(): void {
+    const assistant = secretRedactor.finishAssistant();
+    if (assistant) {
+      resultText.append(assistant);
+      emitter.text(assistant);
+    }
+    const reasoning = secretRedactor.finishReasoning();
+    if (reasoning) emitter.rich({ type: "reasoning-summary", text: reasoning });
+  }
+
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
+    secretRedactor.discardStreams();
     cancelRequested = true;
     promptPreparationAbort.abort();
     hostToolRuntime?.settle();
@@ -860,6 +873,7 @@ function handleCursorUpdate(
     }
   >,
   compactions: AcpCompactionProjection,
+  secretRedactor: AcpSecretRedactor,
 ): void {
   const update = notification.update;
   switch (update.sessionUpdate) {
@@ -868,17 +882,17 @@ function handleCursorUpdate(
       return;
     case "agent_message_chunk":
       if (update.content.type === "text") {
-        const value = bounded(update.content.text);
-        resultText.append(value);
-        emitter.text(value);
+        const value = secretRedactor.assistantChunk(bounded(update.content.text));
+        if (value) {
+          resultText.append(value);
+          emitter.text(value);
+        }
       }
       return;
     case "agent_thought_chunk":
       if (update.content.type === "text") {
-        emitter.rich({
-          type: "reasoning-summary",
-          text: bounded(update.content.text),
-        });
+        const value = secretRedactor.reasoningChunk(bounded(update.content.text));
+        if (value) emitter.rich({ type: "reasoning-summary", text: value });
       }
       return;
     case "tool_call": {

@@ -48,7 +48,7 @@ describe("Claude raw stdout boundary", () => {
     const failed = once(guard, "error");
     for (let index = 0; index < 16; index += 1) {
       guard.write("ignored\n");
-      vi.setSystemTime(Date.now() + 60_000);
+      vi.advanceTimersByTime(60_000);
     }
     guard.write("ignored\n");
     expect((await failed)[0]).toMatchObject({ message: expect.stringContaining("bounded event budget") });

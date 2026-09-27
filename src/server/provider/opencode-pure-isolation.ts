@@ -136,7 +136,7 @@ async function waitForSentinel(
       throw error;
     }
   };
-  const deadline = Date.now() + observationMs;
+  const deadline = performance.now() + observationMs;
   do {
     if (signal?.aborted) {
       throw new Error("OpenCode isolation proof was cancelled.");
@@ -148,7 +148,7 @@ async function waitForSentinel(
       throw new OpenCodePureIsolationIncompatibleError("OpenCode --pure executed an external project plugin.");
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
-  } while (Date.now() < deadline);
+  } while (performance.now() < deadline);
   const exists = await sentinelExists();
   if (shouldExist && !exists) {
     throw new OpenCodePureIsolationIncompatibleError("OpenCode did not discover the isolation-proof project plugin.");

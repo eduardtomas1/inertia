@@ -6,6 +6,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,9 @@ const proofFixture = vi.hoisted(() => ({
   healthVersion: "1.18.26",
   neverResolveVersionHealth: false,
   pureLoadsPlugin: false,
+  pureLoadsPluginAfterMs: null as number | null,
+  pureWallClockStepMs: 0,
+  restoreWallClock: (): void => undefined,
   startupTimesOut: false,
   starts: [] as Array<{ executable: string; pure: boolean; root: string }>,
   terminateCalls: 0,
@@ -80,6 +84,22 @@ vi.mock("../../src/server/provider/opencode-owned-server", async (importOriginal
       if (pure ? proofFixture.pureLoadsPlugin : !proofFixture.controlSkipsPlugin) {
         writeFileSync(JSON.parse(encodedSentinel) as string, "executed", "utf8");
       }
+      const delayedPluginMs = proofFixture.pureLoadsPluginAfterMs;
+      if (pure && delayedPluginMs !== null) {
+        setTimeout(() => {
+          void writeFile(JSON.parse(encodedSentinel) as string, "executed", "utf8")
+            .catch(() => undefined);
+        }, delayedPluginMs);
+      }
+      if (pure && proofFixture.pureWallClockStepMs !== 0) {
+        const wallClockNow = Date.now.bind(Date);
+        let steps = 0;
+        const wallClock = vi.spyOn(Date, "now").mockImplementation(() => {
+          steps += 1;
+          return wallClockNow() + steps * proofFixture.pureWallClockStepMs;
+        });
+        proofFixture.restoreWallClock = () => wallClock.mockRestore();
+      }
       return {
         child: { exitCode: null, signalCode: null },
         terminate: async () => {
@@ -113,6 +133,10 @@ describe("selected OpenCode semantic isolation", () => {
     proofFixture.healthVersion = "1.18.26";
     proofFixture.neverResolveVersionHealth = false;
     proofFixture.pureLoadsPlugin = false;
+    proofFixture.pureLoadsPluginAfterMs = null;
+    proofFixture.pureWallClockStepMs = 0;
+    proofFixture.restoreWallClock();
+    proofFixture.restoreWallClock = () => undefined;
     proofFixture.startupTimesOut = false;
     proofFixture.starts.length = 0;
     proofFixture.terminateCalls = 0;
@@ -349,4 +373,32 @@ describe("selected OpenCode semantic isolation", () => {
     )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
     expect(proofFixture.starts).toHaveLength(0);
   });
+
+  it("keeps the full plugin observation window when the wall clock jumps forward", async () => {
+    const executable = selectedExecutable();
+    proofFixture.pureLoadsPluginAfterMs = 150;
+    proofFixture.pureWallClockStepMs = 3_600_000;
+    await expect(probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 400 },
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
+    expect(proofFixture.terminateCalls).toBe(2);
+  });
+
+  it("ends the plugin observation window when the wall clock jumps backward", async () => {
+    const executable = selectedExecutable();
+    proofFixture.pureWallClockStepMs = -3_600_000;
+    const startedAt = performance.now();
+    await expect(probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 200 },
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
+    expect(performance.now() - startedAt).toBeLessThan(3_000);
+  }, 10_000);
 });

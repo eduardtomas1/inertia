@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ProviderNdjsonDecoder,
@@ -68,6 +68,43 @@ describe("provider run event budget", () => {
     now = 1_500;
     budget.observe("d");
     budget.observe("e");
+  });
+
+  it("measures default refill on a monotonic clock across wall-clock jumps", () => {
+    let wall = 1_800_000_000_000;
+    let monotonic = 10_000;
+    const wallClock = vi.spyOn(Date, "now").mockImplementation(() => wall);
+    const monotonicClock = vi.spyOn(performance, "now").mockImplementation(() => monotonic);
+    try {
+      const budget = new ProviderRunEventBudget(
+        "Provider",
+        16,
+        2,
+        8,
+        { windowMs: 1_000, maxRunEvents: 5 },
+      );
+      budget.observe("a");
+      budget.observe("b");
+
+      wall += 86_400_000;
+      expect(() => budget.observe("c")).toThrow(/bounded event rate/u);
+
+      wall -= 172_800_000;
+      monotonic += 500;
+      budget.observe("c");
+      expect(() => budget.observe("d")).toThrow(/bounded event rate/u);
+
+      monotonic += 1_000;
+      budget.observe("d");
+      budget.observe("e");
+      monotonic += 1_000;
+      expect(() => budget.observe("f")).toThrow(
+        "Provider exceeded the bounded event budget for this run.",
+      );
+    } finally {
+      wallClock.mockRestore();
+      monotonicClock.mockRestore();
+    }
   });
 
   it("retains cumulative event and byte ceilings across refill windows", () => {

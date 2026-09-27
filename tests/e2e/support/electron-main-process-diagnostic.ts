@@ -11,6 +11,7 @@ const MAX_HELPER_IDENTITY_BYTES = 1024;
 const MAX_HELPER_ROWS = 64;
 const GPU_RECOVERY_EXIT_RESERVE_MS = 2_000;
 const GPU_RECOVERY_PROBE_RESERVE_MS = 2_000;
+const GPU_STALL_NANOSLEEP_SHARE = 0.8;
 const HELPER_ROLE = /(?:^|\s)--type=([a-z0-9_.-]{1,64})(?=\s|$)/u;
 const UTILITY_ROLE = /(?:^|\s)--utility-sub-type=([a-zA-Z0-9_.-]{1,96})(?=\s|$)/u;
 
@@ -69,6 +70,29 @@ export function electronHelperProcesses(
   return helpers;
 }
 
+export function mainThreadNanosleepShare(sample: string): number | null {
+  const lines = sample.split(/\r?\n/u);
+  const start = lines.findIndex((line) =>
+    /^ {4}\d+ Thread_\S+.*\bcom\.apple\.main-thread\b/u.test(line));
+  if (start < 0) return null;
+  const total = Number(/^ {4}(\d+)/u.exec(lines[start]!)![1]);
+  if (!Number.isSafeInteger(total) || total <= 0) return null;
+  let sleeping = 0;
+  let countedDepth = Number.POSITIVE_INFINITY;
+  for (const line of lines.slice(start + 1)) {
+    const frame = /^( {4}[+!:| ]*)(\d+) +(.*)$/u.exec(line);
+    if (!frame || !frame[1]!.includes("+")) break;
+    const depth = frame[1]!.length;
+    if (depth > countedDepth) continue;
+    countedDepth = Number.POSITIVE_INFINITY;
+    if (/^nanosleep\s+\(in libsystem_c\.dylib\)/u.test(frame[3]!)) {
+      sleeping += Number(frame[2]);
+      countedDepth = depth;
+    }
+  }
+  return Math.min(1, sleeping / total);
+}
+
 export function createElectronMainProcessDiagnostic(
   main: ChildProcess,
   dependencies: {
@@ -94,6 +118,7 @@ export function createElectronMainProcessDiagnostic(
   let helpersCaptured = false;
   let helperEvidencePending = false;
   const helperEvidenceWaiters = new Set<() => void>();
+  const validatedHelperSamples = new Map<ElectronMainProcessSample, string>();
   let stopped = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   const ownsLiveMain = (): boolean => !stopped
@@ -247,6 +272,7 @@ export function createElectronMainProcessDiagnostic(
           } else {
             record.status = status;
             record.output = output;
+            if (status === "completed") validatedHelperSamples.set(record, before);
           }
           done();
         });
@@ -310,6 +336,17 @@ export function createElectronMainProcessDiagnostic(
         gpus.length === 0 ? "no-gpu-helper" : "ambiguous-gpu-helper");
     });
   };
+  const gpuStallEvidence = (gpu: ElectronHelperProcess, identity: string): string | null => {
+    if (gpu.stat.startsWith("T")) return "stopped";
+    for (const [sample, sampledIdentity] of validatedHelperSamples) {
+      if (sample.pid !== gpu.pid || sampledIdentity !== identity) continue;
+      const share = mainThreadNanosleepShare(sample.output);
+      if (share !== null && share >= GPU_STALL_NANOSLEEP_SHARE) {
+        return `main-thread-nanosleep=${Math.round(share * 100)}%`;
+      }
+    }
+    return null;
+  };
   const terminateStalledGpuHelper = (
     deadlineAt: number,
     stillStalled: () => boolean,
@@ -340,6 +377,9 @@ export function createElectronMainProcessDiagnostic(
               if (after !== before) return finish("discarded-helper-identity-changed");
               if (!ownsLiveMain()) return finish("main-process-exited");
               if (!stillStalled()) return finish("window-destroy-returned");
+              const stall = gpuStallEvidence(confirmed, before);
+              if (stall === null) return finish("gpu-stall-unconfirmed");
+              record.output += ` stall=${stall}`;
               try {
                 signalProcess(gpu.pid, "SIGKILL");
               } catch (error) {

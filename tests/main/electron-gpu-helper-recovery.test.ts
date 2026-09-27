@@ -4,7 +4,8 @@ import type { ChildProcess, spawn } from "node:child_process";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createElectronMainProcessDiagnostic, type ElectronMainProcessDiagnostic } from
+import { createElectronMainProcessDiagnostic, mainThreadNanosleepShare,
+  type ElectronMainProcessDiagnostic } from
   "../e2e/support/electron-main-process-diagnostic";
 import { closeElectronFixtureBounded, ElectronFixtureCloseError, GPU_HELPER_RECOVERY_GRACE_MS,
   quitElectronAppBounded } from "../e2e/support/electron-app-lifecycle";
@@ -19,6 +20,42 @@ const TABLE = [
   `778 ${MAIN_PID} S /tmp/Electron Helper (Renderer) --type=renderer`,
   "779 778 S /tmp/Electron Helper (GPU) --type=gpu-process",
 ].join("\n");
+const RUNNING_TABLE = TABLE.replace(`${GPU_PID} ${MAIN_PID} T `, `${GPU_PID} ${MAIN_PID} S `);
+const STOPPED_ROW = `${GPU_PID} ${MAIN_PID} T gpu-process stall=stopped`;
+const mainThread = (frames: string[]): string => [
+  "Sampling process 777 for 1 second with 10 milliseconds of run time between samples",
+  "Call graph:",
+  "    109 Thread_203090   DispatchQueue_1: com.apple.main-thread  (serial)",
+  "    + 109 start  (in dyld) + 6076  [0x19d056b98]",
+  "    +   109 ElectronMain  (in Electron Framework) + 388  [0x112f62f80]",
+  "    +     109 CFRunLoopRunSpecific  (in CoreFoundation) + 572  [0x19d4e0858]",
+  ...frames,
+  "    109 Thread_203102",
+  "    + 109 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x19d3f2b74]",
+  "    +   109 nanosleep  (in libsystem_c.dylib) + 220  [0x19d2956f4]",
+  "",
+  "Total number in stack (recursive counted multiple, when >=5):",
+  "        109       nanosleep  (in libsystem_c.dylib) + 220  [0x19d2956f4]",
+].join("\n");
+const BACKPRESSURE_SAMPLE = mainThread([
+  "    +       109 node::PrincipalRealm::async_hooks_callback_trampoline() const  (in Electron Framework) + 40592  [0x1121cd5f8]",
+  "    +         107 nanosleep  (in libsystem_c.dylib) + 220  [0x19d2956f4]",
+  "    +         ! 106 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x19d3b91c8]",
+  "    +         ! 1 __semwait_signal  (in libsystem_kernel.dylib) + 28  [0x19d3b91dc]",
+  "    +         !   1 nanosleep  (in libsystem_c.dylib) + 52  [0x19d3b74c8]",
+  "    +         2 nanosleep  (in libsystem_c.dylib) + 116  [0x19d29568c]",
+  "    +           2 clock_get_time  (in libsystem_kernel.dylib) + 116  [0x19d3bb348]",
+]);
+const IDLE_SAMPLE = mainThread([
+  "    +       109 __CFRunLoopRun  (in CoreFoundation) + 840  [0x19d4e1228]",
+  "    +         109 __CFRunLoopServiceMachPort  (in CoreFoundation) + 160  [0x19d4e2c3c]",
+  "    +           109 mach_msg  (in libsystem_kernel.dylib) + 24  [0x19d3b5fa8]",
+  "    +             109 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x19d3b5c34]",
+]);
+const PARTLY_SLEEPING_SAMPLE = mainThread([
+  "    +       60 nanosleep  (in libsystem_c.dylib) + 220  [0x19d2956f4]",
+  "    +       49 mach_msg  (in libsystem_kernel.dylib) + 24  [0x19d3b5fa8]",
+]);
 
 function child(pid: number): ChildProcess {
   const instance = Object.assign(new EventEmitter(), {
@@ -81,7 +118,7 @@ describe("stalled window-destroy GPU helper recovery", () => {
     expect(f.main.kill).not.toHaveBeenCalled();
     expect(f.diagnostic.samples).toEqual([{
       pid: MAIN_PID, reason: "gpu-helper-recovery", status: "terminated",
-      output: `${GPU_PID} ${MAIN_PID} T gpu-process`, truncated: false,
+      output: STOPPED_ROW, truncated: false,
     }]);
     expect(JSON.stringify(f.diagnostic.samples)).not.toContain("secret");
     f.diagnostic.stop();
@@ -157,24 +194,91 @@ describe("stalled window-destroy GPU helper recovery", () => {
     expect(f.diagnostic.samples[0]!.status).toBe("helper-table-skipped-insufficient-existing-budget");
   });
 
-  it("lets an in-flight GPU helper sample finish before signalling", async () => {
+  it.each([
+    ["a stopped helper with modifier flags", "T<"],
+    ["a stopped foreground helper", "T+"],
+  ])("signals %s", async (_label, stat) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const stopped = TABLE.replace(`${GPU_PID} ${MAIN_PID} T `, `${GPU_PID} ${MAIN_PID} ${stat} `);
+    const recovery = f.diagnostic.terminateStalledGpuHelper(Date.now() + 10_000, () => true);
+    [stopped, STARTED, stopped, STARTED].forEach((output, index) => f.reply(index, output));
+    await expect(recovery).resolves.toBe(true);
+    expect(f.signalProcess).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
+    expect(f.diagnostic.samples[0]!.output).toBe(`${GPU_PID} ${MAIN_PID} ${stat} gpu-process stall=stopped`);
+    f.diagnostic.stop();
+  });
+
+  it.each(["S", "S<", "R+", "U", "I"])("never signals a running %s helper without a sample", async (stat) => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const running = TABLE.replace(`${GPU_PID} ${MAIN_PID} T `, `${GPU_PID} ${MAIN_PID} ${stat} `);
+    const recovery = f.diagnostic.terminateStalledGpuHelper(Date.now() + 10_000, () => true);
+    [running, STARTED, running, STARTED].forEach((output, index) => f.reply(index, output));
+    await expect(recovery).resolves.toBe(false);
+    expect(f.signalProcess).not.toHaveBeenCalled();
+    expect(f.diagnostic.samples[0]).toMatchObject({
+      status: "gpu-stall-unconfirmed", output: `${GPU_PID} ${MAIN_PID} ${stat} gpu-process`,
+    });
+    f.diagnostic.stop();
+  });
+
+  async function recoverAfterHelperSample(sample: string, recoveryIdentity = STARTED) {
     vi.useFakeTimers();
     const f = fixture();
     f.diagnostic.watchQuit(Date.now() + 12_000);
     await vi.advanceTimersByTimeAsync(1_000);
-    f.reply(1, TABLE);
+    f.reply(1, RUNNING_TABLE);
     f.reply(2, STARTED);
     expect(f.diagnostic.samples[2]).toMatchObject({ reason: "gpu-helper-still-pending", status: "sampling" });
     const recovery = f.diagnostic.terminateStalledGpuHelper(Date.now() + 11_000, () => true);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(f.spawnTool).toHaveBeenCalledTimes(4);
-    f.reply(3, "gpu helper stack");
+    f.reply(3, sample);
     f.reply(4, STARTED);
-    expect(f.diagnostic.samples[2]).toMatchObject({ status: "completed", output: "gpu helper stack" });
-    [TABLE, STARTED, TABLE, STARTED].forEach((output, index) => f.reply(5 + index, output));
-    await expect(recovery).resolves.toBe(true);
-    expect(f.signalProcess).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
+    expect(f.diagnostic.samples[2]).toMatchObject({ status: "completed", output: sample });
+    [RUNNING_TABLE, recoveryIdentity, RUNNING_TABLE, recoveryIdentity]
+      .forEach((output, index) => f.reply(5 + index, output));
+    const terminated = await recovery;
     f.diagnostic.stop();
+    return { f, terminated };
+  }
+
+  it("waits for the helper sample and signals a helper whose main thread sleeps in Metal backpressure", async () => {
+    const { f, terminated } = await recoverAfterHelperSample(BACKPRESSURE_SAMPLE);
+    expect(terminated).toBe(true);
+    expect(f.signalProcess).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
+    expect(f.diagnostic.samples[3]).toMatchObject({
+      reason: "gpu-helper-recovery", status: "terminated",
+      output: `${GPU_PID} ${MAIN_PID} S gpu-process stall=main-thread-nanosleep=100%`,
+    });
+  });
+
+  it.each([
+    ["an idle run loop waiting in mach_msg", IDLE_SAMPLE],
+    ["a main thread below the nanosleep threshold", PARTLY_SLEEPING_SAMPLE],
+    ["an unparseable sample", "gpu helper stack"],
+  ])("never signals a running helper whose sample shows %s", async (_label, sample) => {
+    const { f, terminated } = await recoverAfterHelperSample(sample);
+    expect(terminated).toBe(false);
+    expect(f.signalProcess).not.toHaveBeenCalled();
+    expect(f.diagnostic.samples[3]).toMatchObject({ status: "gpu-stall-unconfirmed" });
+  });
+
+  it("never applies a sleeping sample to a different process that reused the helper PID", async () => {
+    const { f, terminated } = await recoverAfterHelperSample(
+      BACKPRESSURE_SAMPLE, `${MAIN_PID} Sat Sep 26 20:00:09 2026`);
+    expect(terminated).toBe(false);
+    expect(f.signalProcess).not.toHaveBeenCalled();
+    expect(f.diagnostic.samples[3]).toMatchObject({ status: "gpu-stall-unconfirmed" });
+  });
+
+  it("measures only the main-thread section of a sample", () => {
+    expect(mainThreadNanosleepShare(BACKPRESSURE_SAMPLE)).toBe(1);
+    expect(mainThreadNanosleepShare(IDLE_SAMPLE)).toBe(0);
+    expect(mainThreadNanosleepShare(PARTLY_SLEEPING_SAMPLE)).toBeCloseTo(60 / 109);
+    expect(mainThreadNanosleepShare("    109 Thread_1\n    + 109 nanosleep  (in libsystem_c.dylib)")).toBeNull();
+    expect(mainThreadNanosleepShare("")).toBeNull();
   });
 
   it("stops waiting for a stuck helper sample four seconds before the deadline", async () => {
@@ -189,6 +293,7 @@ describe("stalled window-destroy GPU helper recovery", () => {
     expect(f.spawnTool).toHaveBeenCalledTimes(4);
     await vi.advanceTimersByTimeAsync(1);
     expect(f.commands()[4]).toBe(table);
+    expect(f.diagnostic.samples[2]).toMatchObject({ reason: "gpu-helper-still-pending", status: "sampling" });
     [TABLE, STARTED, TABLE, STARTED].forEach((output, index) => f.reply(4 + index, output));
     await expect(recovery).resolves.toBe(true);
     f.diagnostic.stop();
@@ -199,7 +304,7 @@ function stubDiagnostic(terminate: ElectronMainProcessDiagnostic["terminateStall
   return {
     capture: vi.fn(), watchQuit: vi.fn(() => () => undefined), stop: vi.fn(),
     samples: [{ pid: MAIN_PID, reason: "gpu-helper-recovery", status: "terminated",
-      output: `${GPU_PID} ${MAIN_PID} T gpu-process`, truncated: false }],
+      output: STOPPED_ROW, truncated: false }],
     terminateStalledGpuHelper: vi.fn(terminate),
   } satisfies ElectronMainProcessDiagnostic;
 }
@@ -349,7 +454,7 @@ describe("prepared close with a stalled window destroy", () => {
       expect(write).toHaveBeenCalledWith(expect.stringContaining("[Inertia E2E] Privileged cleanup completed"));
     } finally { write.mockRestore(); }
     expect(annotations).toEqual([{ type: "electron-gpu-helper-terminated",
-      description: expect.stringContaining(`GPU helper (${GPU_PID} ${MAIN_PID} T gpu-process)`) }]);
+      description: expect.stringContaining(`GPU helper (${STOPPED_ROW})`) }]);
     expect(attach).toHaveBeenCalledWith("electron-process-lifecycle", {
       contentType: "application/json", body: Buffer.from(JSON.stringify(recovery.processEvidence, null, 2)),
     });

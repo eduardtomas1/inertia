@@ -7,6 +7,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { waitForTranscriptSettled } from "./support/stable-sample";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 interface ReaderAnchor {
@@ -63,7 +64,7 @@ async function moveIntoHistory(pane: Locator): Promise<ReaderAnchor> {
   await page.mouse.wheel(0, -distance);
   await expect(pane.getByRole("button", { name: "Jump to latest" }))
     .toBeVisible();
-  await page.waitForTimeout(250);
+  await waitForTranscriptSettled(transcript);
   const anchor = await pane.evaluate((root) => {
     const viewport = root.querySelector<HTMLElement>(".message-scroll")
       ?.getBoundingClientRect();

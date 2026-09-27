@@ -243,6 +243,7 @@ describe("Electron E2E application lifecycle", () => {
       outcome: "graceful",
       requestResult: { status: "fulfilled", value: "quit-requested" },
       transportSettled: true,
+      gpuHelperTerminated: false,
     });
     expect(close).toHaveBeenCalledOnce();
     expect(process.kill).not.toHaveBeenCalled();

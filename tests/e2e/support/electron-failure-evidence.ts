@@ -1,5 +1,6 @@
 import type { TestInfo } from "@playwright/test";
-import { ElectronFixtureCloseError, settleOperationBounded } from "./electron-app-lifecycle";
+import { ElectronFixtureCloseError, settleOperationBounded,
+  type ElectronGpuHelperRecovery } from "./electron-app-lifecycle";
 import { captureBoundedFailureDiagnostic } from "../../helpers/bounded-failure-diagnostic";
 import { readImageSendRuntimeRecords } from "./image-send-failure-diagnostics";
 
@@ -60,6 +61,25 @@ export async function attachElectronFixtureCloseFailure(
     await attachElectronFailureEvidence(readTestInfo, "electron-main-process-samples",
       JSON.stringify(error.mainProcessSamples, null, 2), "application/json", deadlineAt - Date.now());
   }
+}
+
+export async function attachElectronGpuHelperRecovery(
+  readTestInfo: () => Pick<TestInfo, "attach" | "annotations">,
+  recovery: ElectronGpuHelperRecovery,
+): Promise<void> {
+  const helper = recovery.mainProcessSamples
+    .find((sample) => sample.reason === "gpu-helper-recovery")?.output || "unknown";
+  const description = "Privileged cleanup completed and BrowserWindow.destroy stalled past "
+    + `the grace period; the fixture terminated only the GPU helper (${helper}) and the app then exited cleanly.`;
+  process.stderr.write(`[Inertia E2E] ${description}\n`);
+  try {
+    readTestInfo().annotations.push({ type: "electron-gpu-helper-terminated", description });
+  } catch { return; }
+  const deadlineAt = Date.now() + 250;
+  await attachElectronFailureEvidence(readTestInfo, "electron-process-lifecycle",
+    JSON.stringify(recovery.processEvidence, null, 2), "application/json", deadlineAt - Date.now());
+  await attachElectronFailureEvidence(readTestInfo, "electron-main-process-samples",
+    JSON.stringify(recovery.mainProcessSamples, null, 2), "application/json", deadlineAt - Date.now());
 }
 
 export async function closeElectronAfterTest(

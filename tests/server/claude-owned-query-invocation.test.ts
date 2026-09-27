@@ -22,7 +22,11 @@ function spawnFor(
   command: string,
   args: string[],
 ) {
-  const spawnProcess = vi.fn(() => fakeChild());
+  const spawnProcess = vi.fn((
+    _command: string,
+    _args: readonly string[],
+    _options: { windowsVerbatimArguments?: boolean },
+  ) => fakeChild());
   const owned = createClaudeOwnedQueryProcess("Claude invocation fixture", {
     spawnProcess: spawnProcess as unknown as typeof spawn,
     platform,

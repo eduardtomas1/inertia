@@ -6,6 +6,10 @@ import { providerSnapshot } from "../runtime-snapshots";
 import type { ProviderInstallationVerificationAuthority } from
   "./installation-lease";
 
+const DETECTION_TIMEOUT_MS = 4_000;
+const MAX_DETECTION_TIMEOUT_MS = 10_000;
+const DETECTION_RETRY_DELAYS_MS = [1_000, 3_000, 9_000];
+
 export interface ProviderInfoRefreshDependencies {
   reportIncident?: (observation: IncidentObservation) => unknown;
   enabled: boolean;
@@ -19,6 +23,7 @@ export interface ProviderInfoRefreshDependencies {
   track(operation: () => Promise<void>): Promise<void>;
   beforeRefresh?(signal: AbortSignal): Promise<void>;
   onActivityChange(delta: 1 | -1): void;
+  detectionRetryDelaysMs?: readonly number[];
 }
 
 export type RefreshProviderInfo = (
@@ -27,6 +32,28 @@ export type RefreshProviderInfo = (
   forceMetadata?: boolean,
   verificationAuthority?: ProviderInstallationVerificationAuthority,
 ) => Promise<void>;
+
+function detectionTimeoutMs(attempt: number): number {
+  return Math.min(DETECTION_TIMEOUT_MS * 2 ** attempt, MAX_DETECTION_TIMEOUT_MS);
+}
+
+async function pause(delayMs: number, signal: AbortSignal): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const settle = (elapsed: boolean): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve(elapsed);
+    };
+    const abort = (): void => settle(false);
+    const timer = setTimeout(() => settle(true), delayMs);
+    timer.unref();
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
 
 function retainMaintenance(
   current: ProviderInfo | undefined,
@@ -115,55 +142,89 @@ export function createProviderInfoRefresh(
       );
     };
 
+    const retryDelaysMs = dependencies.detectionRetryDelaysMs
+      ?? DETECTION_RETRY_DELAYS_MS;
+    const retrying = (detection: ProviderDetection, attempt: number): boolean => (
+      !verificationAuthority
+      && detection.probeTimedOut === true
+      && attempt < retryDelaysMs.length
+    );
+    const detectedSnapshot = (
+      detection: ProviderDetection,
+      attempt: number,
+    ): ProviderInfo => providerSnapshot(
+      retrying(detection, attempt)
+        ? {
+            ...detection,
+            installState: detection.installState === "installed"
+              ? "installed"
+              : "checking",
+            authState: "checking",
+            canRun: false,
+            statusMessage: `${detection.provider.name} is slow to respond; checking again`,
+          }
+        : detection,
+      dependencies.providers.cachedMetadata(detection.provider.id),
+      dependencies.providers.providerCapabilityContract(detection.provider.id),
+    );
+    const settle = async (initial: ProviderDetection): Promise<void> => {
+      const id = initial.provider.id;
+      let detection = initial;
+      let attempt = 0;
+      while (retrying(detection, attempt)) {
+        const elapsed = await pause(
+          retryDelaysMs[attempt]!,
+          dependencies.lifetimeSignal,
+        );
+        if (!elapsed || owners.get(id) !== owner || dependencies.isClosed()) return;
+        attempt += 1;
+        detection = await dependencies.providers.detect(id, {
+          cwd: dependencies.defaultWorkspacePath,
+          timeoutMs: detectionTimeoutMs(attempt),
+          refreshEnvironment: false,
+          signal: dependencies.lifetimeSignal,
+        });
+        if (!replaceOwned(owner, [detectedSnapshot(detection, attempt)])) return;
+        if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
+      }
+      if (!detection.canRun) return;
+      const enriched = await enrichedSnapshot(detection);
+      if (replaceOwned(owner, [enriched]) && !dependencies.isClosed()) {
+        dependencies.broadcastSnapshot();
+      }
+    };
+
     if (providerId) {
       const detection = await dependencies.providers.detect(providerId, {
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: 4_000,
+        timeoutMs: detectionTimeoutMs(0),
         refreshEnvironment,
         signal: dependencies.lifetimeSignal,
         ...(verificationAuthority
           ? { installationVerificationAuthority: verificationAuthority }
           : {}),
       });
-      const detected = providerSnapshot(
-        detection,
-        dependencies.providers.cachedMetadata(detection.provider.id),
-        dependencies.providers.providerCapabilityContract(detection.provider.id),
-      );
-      if (!replaceOwned(owner, [detected])) return;
+      if (!replaceOwned(owner, [detectedSnapshot(detection, 0)])) return;
       if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
-      if (!detection.canRun) return;
-      const next = await enrichedSnapshot(detection);
-      if (!replaceOwned(owner, [next])) return;
-      if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
+      await settle(detection);
     } else {
       const detections = await dependencies.providers.detectAll({
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: 4_000,
+        timeoutMs: detectionTimeoutMs(0),
         refreshEnvironment,
         signal: dependencies.lifetimeSignal,
       });
       const detected = detections.map((detection) => (
-        providerSnapshot(
-          detection,
-          dependencies.providers.cachedMetadata(detection.provider.id),
-          dependencies.providers.providerCapabilityContract(detection.provider.id),
-        )
+        detectedSnapshot(detection, 0)
       ));
       if (replaceOwned(owner, detected) && !dependencies.isClosed()) {
         dependencies.broadcastSnapshot();
       }
-      await Promise.all(detections.map(async (detection) => {
-        if (!detection.canRun) return;
-        const enriched = await enrichedSnapshot(detection);
-        // Each provider owns its catalog. A different provider's pending
-        // metadata must not hide this completed read from Settings/composers.
-        // Keep joining every read so refresh activity and shutdown retain
-        // their original lifetime, and recheck ownership before publication.
-        if (replaceOwned(owner, [enriched]) && !dependencies.isClosed()) {
-          dependencies.broadcastSnapshot();
-        }
-      }));
+      // Each provider owns its catalog. A different provider's pending
+      // metadata must not hide this completed read from Settings/composers.
+      // Keep joining every read so refresh activity and shutdown retain
+      // their original lifetime, and recheck ownership before publication.
+      await Promise.all(detections.map(settle));
     }
   };
 

@@ -344,6 +344,41 @@ describe("composer route readiness", () => {
     });
   });
 
+  it("reports an unresponsive CLI or sign-in check without asking to sign in", () => {
+    expect(composerRouteReadiness({
+      provider: provider({
+        canRun: false,
+        available: false,
+        executable: null,
+        installState: "unresponsive",
+        authState: "unknown",
+        statusMessage: "Codex did not respond in time; refresh to try again",
+      }),
+      profile: undefined,
+      selection: providerNativeModelSelection({ providerId: "codex" }),
+    })).toEqual({
+      ready: false,
+      transient: false,
+      badge: "Unavailable",
+      title: "Codex harness is not responding",
+      detail: "Codex did not respond in time; refresh to try again",
+      action: "refresh",
+    });
+    expect(composerRouteReadiness({
+      provider: provider({
+        canRun: false,
+        authState: "error",
+        statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+      }),
+      profile: undefined,
+      selection: providerNativeModelSelection({ providerId: "codex" }),
+    })).toMatchObject({
+      ready: false,
+      badge: "Connection issue",
+      action: "refresh",
+    });
+  });
+
   it("keeps Kimi probe failure optional while naming a missing Kimi key", () => {
     const kimi = profile({
       id: "builtin:kimi-code",

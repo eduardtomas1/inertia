@@ -218,4 +218,67 @@ describe("provider info refresh ownership", () => {
       models: [recoveredModel], metadataState: { models: { freshness: "fresh", refreshing: false } },
     });
   });
+
+  it("retries only a timed-out provider after a broad refresh and yields to a newer refresh", async () => {
+    const empty = {
+      models: [],
+      rateLimits: [],
+      metadataState: initialProviderSnapshots()[0]!.metadataState,
+    };
+    const timedOut: ProviderDetection = {
+      ...detection("codex", "1", "error", false),
+      probeTimedOut: true,
+      statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
+    };
+    const setup = (retryDelaysMs: readonly number[]) => {
+      let providerInfo = initialProviderSnapshots();
+      const providers = {
+        detectAll: vi.fn(async () => [
+          timedOut,
+          detection("claude", "1", "authenticated", true),
+        ]),
+        detect: vi.fn(async () => detection("codex", "2", "authenticated", true)),
+        cachedMetadata: vi.fn(() => empty),
+        metadata: vi.fn(async () => empty),
+        providerCapabilityContract: vi.fn(() => undefined),
+      } as unknown as ProviderManager;
+      const published: ProviderInfo[][] = [];
+      const refresh = createProviderInfoRefresh({
+        enabled: true, providers, defaultWorkspacePath: "/workspace",
+        lifetimeSignal: new AbortController().signal,
+        providerInfo: () => providerInfo,
+        replaceProviderInfo: (value) => { providerInfo = value; },
+        broadcastSnapshot: () => { published.push(structuredClone(providerInfo)); },
+        isClosed: () => false, track: async (operation) => await operation(),
+        onActivityChange: vi.fn(),
+        detectionRetryDelaysMs: retryDelaysMs,
+      });
+      return { refresh, providers, published, codex: () => providerInfo.find(({ id }) => id === "codex") };
+    };
+
+    const broad = setup([1]);
+    await broad.refresh();
+    expect(broad.published[0]?.find(({ id }) => id === "codex")).toMatchObject({
+      installState: "installed",
+      authState: "checking",
+      canRun: false,
+      statusMessage: "Codex is slow to respond; checking again",
+    });
+    expect(broad.providers.detect).toHaveBeenCalledOnce();
+    expect(broad.providers.detect).toHaveBeenCalledWith("codex", expect.objectContaining({
+      timeoutMs: 8_000,
+      refreshEnvironment: false,
+    }));
+    expect(broad.codex()).toMatchObject({ version: "2", authState: "authenticated", canRun: true });
+
+    const superseded = setup([50]);
+    const startup = superseded.refresh();
+    await superseded.refresh("codex");
+    await startup;
+    expect(superseded.providers.detect).toHaveBeenCalledOnce();
+    expect(superseded.providers.detect).toHaveBeenCalledWith("codex", expect.objectContaining({
+      timeoutMs: 4_000,
+    }));
+    expect(superseded.codex()).toMatchObject({ version: "2", canRun: true });
+  });
 });

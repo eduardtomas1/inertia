@@ -34,7 +34,7 @@ export const PROVIDER_IDS = [
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderInteractionMode = "build" | "plan";
 export type ProviderAccessMode = "full" | "supervised" | "auto-edit";
-export type ProviderInstallState = "checking" | "installed" | "not-installed" | "error";
+export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 
 export interface ProviderInfo {
@@ -55,6 +55,7 @@ export interface ProviderDetection {
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
   cleanupConfirmed: boolean;
+  probeTimedOut?: boolean;
   statusMessage?: string;
 }
 

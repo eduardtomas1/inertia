@@ -13,6 +13,7 @@ export class ProviderReadinessIncidents {
       if (provider.installState === "checking" || provider.authState === "checking") continue;
       const previous = this.episodes.get(provider.id);
       const code: DiagnosticCode | null = provider.installState === "error" ? "provider.start-failed"
+        : provider.installState === "unresponsive" ? "provider.connection-failed"
         : provider.installState !== "installed" || provider.canRun ? null
           : provider.authState === "unauthenticated" ? "provider.auth-failed"
             : "provider.connection-failed";

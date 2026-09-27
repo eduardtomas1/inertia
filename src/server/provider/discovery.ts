@@ -551,6 +551,10 @@ export async function detectProvider(
       acpReady,
       appServerReady,
       serveReady,
+      timedOut: probe.timedOut
+        || acpProbe?.timedOut === true
+        || serveProbe?.timedOut === true,
+      appServerTimedOut: appServerProbe?.timedOut === true,
       cleanupConfirmed: probe.cleanupConfirmed === true
         && (acpProbe === undefined || acpProbe.cleanupConfirmed === true)
         && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true)
@@ -577,10 +581,27 @@ export async function detectProvider(
   const selected = providerId === "codex"
     ? working.find(({ appServerReady }) => appServerReady) ?? working[0]
     : working[0];
+  const unresponsive = (
+    responded?: { executable: string; version?: string | undefined },
+  ): ProviderDetection => ({
+    provider,
+    available: responded !== undefined,
+    ...(responded ? { executable: responded.executable } : {}),
+    ...(responded?.version ? { version: responded.version } : {}),
+    installState: "unresponsive",
+    authState: "unknown",
+    canRun: false,
+    cleanupConfirmed: true,
+    probeTimedOut: true,
+    statusMessage: `${provider.name} did not respond in time; refresh to try again`,
+  });
   if (!selected) {
     const cleanupUnconfirmed = versionProbes.some(
       ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
+    if (!cleanupUnconfirmed && versionProbes.some(({ timedOut }) => timedOut)) {
+      return unresponsive();
+    }
     const providerWithoutAcp =
       (providerId === "cursor" || providerId === "kimi") &&
       versionProbes.some(
@@ -623,6 +644,14 @@ export async function detectProvider(
   const versionProbeCleanupConfirmed = versionProbes.every(
     (probe) => probe.cleanupConfirmed,
   );
+  if (
+    providerId === "codex"
+    && versionProbeCleanupConfirmed
+    && !selected.appServerReady
+    && selected.appServerTimedOut
+  ) {
+    return unresponsive(selected);
+  }
   const openCodeIsolation = providerId === "opencode"
     ? options.signal
       ? await runOpenCodeIsolationProbe(
@@ -737,7 +766,12 @@ export async function detectProvider(
     authProbe.cleanupConfirmed === true
       && versionCleanupConfirmed,
   );
-  const authState = authStateFromProbe(providerId, authProbe);
+  const authTimedOut = authProbe.timedOut
+    && authProbe.cleanupConfirmed === true
+    && providerId !== "kimi";
+  const authState = authTimedOut
+    ? "error"
+    : authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   // `kimi provider list --json` enumerates configured API providers, but a
   // valid managed OAuth login need not appear there. Kimi ACP owns the
@@ -763,12 +797,15 @@ export async function detectProvider(
     canRun,
     protocolVerified: cleanupConfirmed,
     cleanupConfirmed,
+    ...(authTimedOut ? { probeTimedOut: true } : {}),
     statusMessage: !versionCleanupConfirmed
       ? `${provider.name} probe cleanup could not be confirmed stopped`
       : authProbe.cleanupConfirmed !== true
       ? `${provider.name} connection probe timed out, and its process tree could not be confirmed stopped`
       : providerId === "codex" && !appServerReady
       ? "Codex App Server is unsupported; update the selected CLI"
+      : authTimedOut
+      ? `${provider.name} did not answer the sign-in check in time; refresh to try again`
       : runtimeNegotiatesAuthentication
       ? "Installed; Kimi ACP will verify sign-in when a session starts"
       : statusMessage("installed", authState),

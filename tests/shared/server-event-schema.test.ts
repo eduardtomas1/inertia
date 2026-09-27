@@ -1532,6 +1532,9 @@ describe("server event remaining discriminant and identity boundary", () => {
   };
   it("accepts representative canonical snapshot and live projections", () => {
     expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot() })).toBeTruthy();
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot({ providers: [{
+      ...provider, available: false, installState: "unresponsive", authState: "unknown", canRun: false,
+    }] }) })).toBeTruthy();
     expect(parseServerEvent({ type: "agent.approval.requested", request: approval })).toBeTruthy();
     expect(parseServerEvent({ type: "agent.input.requested", request: input })).toBeTruthy();
     expect(parseServerEvent(event({ kind: "agent.workflow", workflow }))).toBeTruthy();

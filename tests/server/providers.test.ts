@@ -632,8 +632,9 @@ setInterval(() => {}, 1000);
     fireDeadline?.();
     await expect(detection).resolves.toMatchObject({
       available: false,
-      installState: "error",
+      installState: "unresponsive",
       canRun: false,
+      probeTimedOut: true,
     });
     if (readinessError) throw readinessError;
 

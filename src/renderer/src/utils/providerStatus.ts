@@ -13,6 +13,7 @@ function verifiesSignInOnRun(provider: ProviderInfo): boolean {
 export function providerStateLabel(provider: ProviderInfo): string {
   if (provider.installState === "checking" || provider.authState === "checking") return "Checking";
   if (provider.installState === "not-installed") return "Not installed";
+  if (provider.installState === "unresponsive") return "Not responding";
   if (provider.installState === "error") return "Detection failed";
   if (verifiesSignInOnRun(provider) && provider.authState === "unknown" && !provider.canRun) return "Update required";
   if ((provider.authState === "authenticated" || provider.authState === "configured") && !provider.canRun) return "Update required";
@@ -28,6 +29,7 @@ export function providerStateDetail(provider: ProviderInfo): string {
   if (provider.statusMessage) return provider.version ? `${provider.statusMessage} · ${provider.version}` : provider.statusMessage;
   if (provider.installState === "checking" || provider.authState === "checking") return "Checking the local CLI and account…";
   if (provider.installState === "not-installed") return `${provider.label.replace(/ CLI$/u, "")} CLI was not found on this device.`;
+  if (provider.installState === "unresponsive") return `${provider.label} did not respond in time.`;
   if (provider.installState === "error") return `${provider.label} could not be checked.`;
   if (provider.authState === "authenticated") return provider.version ? `Connected · ${provider.version}` : "Connected and ready to work.";
   if (provider.authState === "configured") return provider.version ? `Configured · ${provider.version}` : "Configured and ready to work.";
@@ -50,6 +52,7 @@ export function providerSetupAction(provider: ProviderInfo): ProviderSetupAction
     && provider.authState === "unknown"
   ) return "connect";
   if ((provider.authState === "authenticated" || provider.authState === "configured") && !provider.canRun) return "refresh";
+  if (provider.authState === "error") return "refresh";
   if (!provider.canRun) return "connect";
   return "refresh";
 }

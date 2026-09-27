@@ -151,7 +151,7 @@ describe("provider discovery completion during cancellation", () => {
     if (cause === "abort") {
       await expect(result).resolves.toMatchObject({ message: "Provider discovery was cancelled." });
     } else {
-      await expect(result).resolves.toMatchObject({ canRun: false, cleanupConfirmed: true, authState: "unknown" });
+      await expect(result).resolves.toMatchObject({ canRun: false, cleanupConfirmed: true, authState: "error", probeTimedOut: true });
     }
     expect(terminate).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);

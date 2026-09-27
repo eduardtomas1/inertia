@@ -380,7 +380,7 @@ export function WorkspaceChangesPanel({
     setCommitDiff(null);
     setCommitDiffLoading(false);
     setCommitDiffError(null);
-  }, [activeRepositoryActionRevision, activeRepositoryPath]);
+  }, [activeRepositoryActionRevision, activeRepositoryPath, conversationId, projectId]);
 
   useEffect(() => {
     if (!changesRequest || !snapshot) return;
@@ -926,7 +926,7 @@ export function WorkspaceChangesPanel({
       diff={diff}
       selectedPath={effectiveSelection?.filePath ?? null}
       repositoryPath={activeRepositoryPath ?? "."}
-      reviewScope={JSON.stringify([projectId ?? null, conversationId ?? null, activeRepositoryPath ?? "."])}
+      reviewScope={diffIdentity ?? ""}
       reviewLock={reviewLock}
       summary={nestedRepository ? null : summary}
       selectionAnswer={selectionAnswer}

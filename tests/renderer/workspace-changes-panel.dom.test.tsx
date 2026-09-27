@@ -973,6 +973,173 @@ describe("WorkspaceChangesPanel repository scope", () => {
     });
   });
 
+  describe("scope-bound review controls", () => {
+    const projectA = "11111111-1111-4111-8111-111111111111";
+    const projectB = "44444444-4444-4444-8444-444444444444";
+    const chatA = "22222222-2222-4222-8222-222222222222";
+    const chatB = "33333333-3333-4333-8333-333333333333";
+    const scoped = structuredClone(snapshot);
+    scoped.repositories[0]!.files = [changedFile("README.md"), changedFile("docs/guide.md")];
+    scoped.repositories[0]!.authorityRef = "55555555-5555-4555-8555-555555555555";
+    const fileNote = {
+      id: "note-file",
+      conversationId: chatA,
+      repositoryPath: ".",
+      path: "README.md",
+      hunkId: null,
+      lineIds: [],
+      targetFingerprint: "a".repeat(64),
+      body: "Check the heading",
+      stale: false,
+      createdAt: "2026-09-27T12:00:00.000Z",
+      updatedAt: "2026-09-27T12:00:00.000Z",
+    };
+
+    async function renderScoped(overrides: Partial<React.ComponentProps<typeof WorkspaceChangesPanel>> = {}) {
+      const handlers = {
+        onAsk: vi.fn(async () => undefined),
+        onRequestRevision: vi.fn(async () => undefined),
+        onRevert: vi.fn(async () => undefined),
+        onSetReviewState: vi.fn(async () => undefined),
+        onCreateNote: vi.fn(async () => undefined),
+        onUpdateNote: vi.fn(async () => undefined),
+        onDeleteNote: vi.fn(async () => undefined),
+        onAddTextToPrompt: vi.fn(),
+        onAddToPrompt: vi.fn(),
+      };
+      const run = vi.fn(async (): Promise<ServerEvent> => ({ type: "request.ok", requestId: crypto.randomUUID() }));
+      const base: React.ComponentProps<typeof WorkspaceChangesPanel> = {
+        projectName: "Inertia",
+        projectId: projectA,
+        conversationId: chatA,
+        summary: null,
+        notes: [fileNote],
+        run,
+        onRefresh: vi.fn(),
+        onOpenWorkspaceFile: vi.fn(),
+        onLoadRepositoryDiff: vi.fn(async (repositoryPath: string, filePath?: string, commitReview?: boolean) => ({
+          repositoryPath,
+          patch: filePath ? patchFor(filePath) : scoped.repositories[0]!.files.map(({ path }) => patchFor(path)).join("\n"),
+          truncated: false,
+          files: filePath ? [changedFile(filePath)] : scoped.repositories[0]!.files,
+          ...(commitReview ? { commitReview: reviewReceipt } : {}),
+        })),
+        snapshot: scoped,
+        ...handlers,
+        ...overrides,
+      };
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<WorkspaceChangesPanel {...base} />);
+      });
+      await screen.findByRole("region", { name: "Diff content for README.md" });
+      const update = async (change: Partial<React.ComponentProps<typeof WorkspaceChangesPanel>>) => {
+        await act(async () => {
+          view.rerender(<WorkspaceChangesPanel {...base} {...change} />);
+        });
+      };
+      return { handlers, run, update };
+    }
+
+    const switches: Array<[string, (update: (change: Partial<React.ComponentProps<typeof WorkspaceChangesPanel>>) => Promise<void>) => Promise<void>]> = [
+      ["file", async () => {
+        const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
+        await act(async () => {
+          fireEvent.click(navigator.querySelectorAll(".workspace-repository-file")[1]!);
+        });
+      }],
+      ["repository", async () => {
+        await act(async () => {
+          fireEvent.change(screen.getByRole("combobox", { name: "Repository scope" }), {
+            target: { value: "modules/alpha" },
+          });
+        });
+      }],
+      ["project", async (update) => update({ projectId: projectB })],
+      ["conversation", async (update) => update({ conversationId: chatB })],
+    ];
+    const controls: Array<[string, () => Promise<void>]> = [
+      ["new note dialog", async () => {
+        fireEvent.click(within(document.querySelector<HTMLElement>(".diff-file-review-heading")!)
+          .getByRole("button", { name: "Note" }));
+        const dialog = await screen.findByRole("dialog", { name: "Add note for README.md" });
+        fireEvent.change(within(dialog).getByRole("textbox", { name: "Review note" }), {
+          target: { value: "Note for the first scope" },
+        });
+      }],
+      ["edit note dialog", async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Edit file note: Check the heading" }));
+        const dialog = await screen.findByRole("dialog", { name: "Edit review note" });
+        fireEvent.change(within(dialog).getByRole("textbox", { name: "Review note" }), {
+          target: { value: "Edited in the first scope" },
+        });
+      }],
+      ["selection popover draft", async () => {
+        fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+        fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+        fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+          target: { value: "Question for the first scope" },
+        });
+      }],
+    ];
+
+    for (const [control, open] of controls) {
+      for (const [scope, change] of switches) {
+        it(`closes the ${control} when the ${scope} changes`, async () => {
+          const { handlers, update } = await renderScoped();
+          await open();
+          await change(update);
+
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+          expect(document.querySelector(".diff-selection-popover")).toBeNull();
+          expect(screen.queryByDisplayValue(/first scope/u)).not.toBeInTheDocument();
+          for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+        });
+      }
+    }
+
+    it.each(["project", "conversation"] as const)("closes the commit review when the %s changes", async (scope) => {
+      const { run, update } = await renderScoped();
+      fireEvent.click(within(screen.getByLabelText("Actions for Inertia")).getByRole("button", { name: "Commit" }));
+      expect(await screen.findByRole("dialog", { name: "Commit changes" })).toBeInTheDocument();
+
+      await update(scope === "project" ? { projectId: projectB } : { conversationId: chatB });
+
+      expect(screen.queryByRole("dialog", { name: "Commit changes" })).not.toBeInTheDocument();
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("keeps a question that finishes after a scope switch out of the new scope", async () => {
+      let settleQuestion!: (error?: Error) => void;
+      const onAsk = vi.fn(() => new Promise<void>((resolve, reject) => {
+        settleQuestion = (error) => error ? reject(error) : resolve();
+      }));
+      const { update } = await renderScoped({ onAsk });
+      fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+      fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+        target: { value: "Question in chat A" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+      expect(onAsk).toHaveBeenCalledOnce();
+
+      await update({ conversationId: chatB, onAsk });
+      fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+      fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+        target: { value: "Draft in chat B" },
+      });
+      expect(screen.getByRole("button", { name: "Ask agent" })).toBeEnabled();
+
+      await act(async () => settleQuestion(new Error("The chat A question failed.")));
+
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Draft in chat B");
+      expect(screen.getByText("1 selected lines")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Ask agent" })).toBeEnabled();
+      expect(screen.queryByText("The chat A question failed.")).not.toBeInTheDocument();
+    });
+  });
+
   it("drops the retained diff and review draft when the workspace owner changes behind the same paths", async () => {
     const onAsk = vi.fn(async () => undefined);
     const props = {

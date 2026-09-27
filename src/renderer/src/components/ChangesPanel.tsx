@@ -20,6 +20,7 @@ import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 import type { RetainedDiffLock } from "../utils/retainedDiffLock";
+import { scopedReviewDispatch } from "../utils/scopedReviewDispatch";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -232,6 +233,19 @@ export function ChangesPanel({
   const reviewLocked = reviewLockReason !== null;
   const reviewLockedRef = useRef(reviewLocked);
   reviewLockedRef.current = reviewLocked;
+  const scope = reviewScope ?? JSON.stringify([selectedPath]);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const dispatch = scopedReviewDispatch({
+    onAsk,
+    onRequestRevision,
+    onRevert,
+    onSetReviewState,
+    onCreateNote,
+    onUpdateNote,
+    onDeleteNote,
+    onAddToPrompt,
+  }, scope, () => scopeRef.current);
   const selectedFile = selectedPath
     ? structured.files.find((file) => file.path === selectedPath) ?? null
     : structured.files[0] ?? null;
@@ -274,13 +288,16 @@ export function ChangesPanel({
   };
 
   useEffect(() => {
+    setNoteDraft(null);
     setSelection(null);
     setReviewAction(null);
     setComment("");
+    setSubmitting(false);
     setSelectionError(null);
     setActiveHunkId(null);
     setStoppingAsk(false);
-  }, [reviewScope, selectedPath]);
+    restoreQuestionFocusRef.current = false;
+  }, [scope]);
 
   useEffect(() => {
     setSelection(null);
@@ -313,6 +330,7 @@ export function ChangesPanel({
     setSelectionError(null);
     setStoppingAsk(true);
     void onCancelAsk().catch((error) => {
+      if (scopeRef.current !== scope) return;
       restoreQuestionFocusRef.current = false;
       setSelectionError(error instanceof Error ? error.message : "The review question could not be stopped.");
       setStoppingAsk(false);
@@ -358,10 +376,10 @@ export function ChangesPanel({
     setSubmitting(true);
     setSelectionError(null);
     try {
-      if (reviewAction === "ask") await onAsk(selected, comment);
-      if (reviewAction === "revise") await onRequestRevision(selected, comment);
-      if (reviewAction === "revert") await onRevert(selected, comment);
-      if (reviewAction === "note") await onCreateNote({
+      if (reviewAction === "ask") await dispatch.onAsk(selected, comment);
+      if (reviewAction === "revise") await dispatch.onRequestRevision(selected, comment);
+      if (reviewAction === "revert") await dispatch.onRevert(selected, comment);
+      if (reviewAction === "note") await dispatch.onCreateNote({
         repositoryPath,
         path: file.path,
         hunkId: hunk.id,
@@ -369,6 +387,7 @@ export function ChangesPanel({
         targetFingerprint: selectedLineFingerprint(file, hunk, selected.lineIds),
         body: comment,
       });
+      if (scopeRef.current !== scope) return;
       const current = draftRef.current;
       if (
         current.selection === submitted.selection
@@ -376,16 +395,17 @@ export function ChangesPanel({
         && current.comment === submitted.comment
       ) clearSelection();
     } catch (error) {
+      if (scopeRef.current !== scope) return;
       setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);
     } finally {
-      setSubmitting(false);
+      if (scopeRef.current === scope) setSubmitting(false);
     }
   };
   const addSelectionToPrompt = (file: DiffFile, hunk: DiffHunk, selected: DiffSelection) => {
     if (reviewLocked) return;
     try {
       const reference = buildDiffContext(file, hunk, selected.lineIds, { purpose: "prompt" }).text;
-      onAddToPrompt({ ...selected, reference });
+      dispatch.onAddToPrompt({ ...selected, reference });
       clearSelection();
     } catch (error) {
       setSelectionError(error instanceof Error ? error.message : "This selection cannot be added safely.");
@@ -395,7 +415,7 @@ export function ChangesPanel({
     if (reviewLocked) return;
     const currentReviewed = hunk ? hunkReviewed(file, hunk) : fileReviewed(file);
     try {
-      await onSetReviewState({
+      await dispatch.onSetReviewState({
         repositoryPath,
         scope: hunk ? "hunk" : "file",
         path: file.path,
@@ -404,6 +424,7 @@ export function ChangesPanel({
         reviewed: !currentReviewed,
       });
     } catch (error) {
+      if (scopeRef.current !== scope) return;
       setSelectionError(error instanceof Error ? error.message : "The review mark could not be saved.");
     }
   };
@@ -414,7 +435,7 @@ export function ChangesPanel({
       body: "",
       save: async (body) => {
         if (reviewLockedRef.current) throw new Error("The diff is refreshing.");
-        await onCreateNote({
+        await dispatch.onCreateNote({
           repositoryPath,
           path: file.path,
           hunkId: hunk?.id ?? null,
@@ -429,7 +450,7 @@ export function ChangesPanel({
     setNoteDraft({
       title: "Edit review note",
       body: note.body,
-      save: async (body) => { if (body !== note.body) await onUpdateNote(note.id, body); },
+      save: async (body) => { if (body !== note.body) await dispatch.onUpdateNote(note.id, body); },
     });
   };
   const notePromptText = (note: DiffReviewNote) => [
@@ -439,7 +460,7 @@ export function ChangesPanel({
   const requestNoteRevision = async (note: DiffReviewNote, file: DiffFile, hunk: DiffHunk) => {
     if (reviewLocked) return;
     const lineIds = note.lineIds.length > 0 ? note.lineIds : hunk.lines.filter((line) => line.kind !== "meta").map((line) => line.id);
-    await onRequestRevision({
+    await dispatch.onRequestRevision({
       fingerprint: structured.fingerprint,
       file,
       hunk,
@@ -567,7 +588,7 @@ export function ChangesPanel({
                     <span><StickyNote size={12} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                     <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId !== null && note.stale && !selectedFile.hunks.some((hunk) => hunk.id === note.hunkId)).map((note) => (
@@ -575,7 +596,7 @@ export function ChangesPanel({
                     <span><StickyNote size={12} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
                     <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                     <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                   </div>
                 ))}
                 <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
@@ -611,7 +632,7 @@ export function ChangesPanel({
                         <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
                         {agentRevision && <button type="button" disabled={note.stale || reviewLocked} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
                         <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => { if (window.confirm("Delete this local review note?")) void onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
+                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => { if (window.confirm("Delete this local review note?")) void dispatch.onDeleteNote(note.id); }}><Trash2 size={12} /></IconButton>
                       </div>
                     ))}
                     {hunk.lines.map((line, index) => <div key={line.id}>

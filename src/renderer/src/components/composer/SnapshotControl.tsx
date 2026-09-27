@@ -28,7 +28,7 @@ export function SnapshotControl({ conversationId }: { conversationId: string }):
     return restore;
   }, [open]);
   if (!open) return null;
-  return createPortal(<div className="snapshot-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setError(null); }}>
+  return createPortal(<div className="snapshot-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setError(null); }}>
     <section className="snapshot-dialog" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); setError(null); }
       else trapModalFocus(event, event.currentTarget);

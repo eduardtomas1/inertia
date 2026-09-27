@@ -155,7 +155,17 @@ function closePreview(
   });
 }
 
-const bridge: DesktopBridge = Object.freeze({
+type MainWindowBridge = Omit<
+  DesktopBridge,
+  | "setDetachedChatAlwaysOnTop"
+  | "retargetDetachedChat"
+  | "dockDetachedChat"
+  | "closeDetachedChat"
+  | "persistDetachedChatDraft"
+  | "mirrorDetachedChatDraft"
+>;
+
+const bridge: MainWindowBridge = Object.freeze({
   getWindowContext: () =>
     ipcRenderer.invoke(DETACHED_CHAT_IPC.getWindowContext) as ReturnType<
       DesktopBridge["getWindowContext"]
@@ -224,31 +234,6 @@ const bridge: DesktopBridge = Object.freeze({
       DETACHED_CHAT_IPC.draftMirrored,
       handler,
     );
-  },
-  setDetachedChatAlwaysOnTop: (alwaysOnTop: boolean) =>
-    ipcRenderer.invoke(
-      DETACHED_CHAT_IPC.setAlwaysOnTop,
-      alwaysOnTop,
-    ) as ReturnType<DesktopBridge["setDetachedChatAlwaysOnTop"]>,
-  retargetDetachedChat: (
-    request: Parameters<DesktopBridge["retargetDetachedChat"]>[0],
-  ) =>
-    ipcRenderer.invoke(DETACHED_CHAT_IPC.retarget, request) as ReturnType<
-      DesktopBridge["retargetDetachedChat"]
-    >,
-  dockDetachedChat: (draft: string) =>
-    ipcRenderer.invoke(DETACHED_CHAT_IPC.dock, draft) as ReturnType<
-      DesktopBridge["dockDetachedChat"]
-    >,
-  closeDetachedChat: (draft: string) =>
-    ipcRenderer.invoke(DETACHED_CHAT_IPC.close, draft) as ReturnType<
-      DesktopBridge["closeDetachedChat"]
-    >,
-  persistDetachedChatDraft: (draft: string) => {
-    return ipcRenderer.sendSync(DETACHED_CHAT_IPC.persistDraft, draft) === true;
-  },
-  mirrorDetachedChatDraft: (draft: string) => {
-    return ipcRenderer.sendSync(DETACHED_CHAT_IPC.mirrorDraft, draft) === true;
   },
   getRuntimeConnection: () =>
     ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnectionResult>,

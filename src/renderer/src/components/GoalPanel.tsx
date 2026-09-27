@@ -47,6 +47,11 @@ import {
   parseGoalTokenBudget,
 } from "../utils/goalBudget";
 import {
+  goalStatusLabel,
+  nextGoalActions,
+  type GoalActionIcon,
+} from "../utils/goalActions";
+import {
   goalExecutionStatus,
   type GoalExecutionStatus,
 } from "../utils/goalExecution";
@@ -79,12 +84,6 @@ export interface GoalPanelProps {
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
 }
 
-function goalStatusLabel(status: AgentGoalStatus): string {
-  if (status === "usageLimited") return "Usage limited";
-  if (status === "budgetLimited") return "Budget limited";
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
 function sourceLabel(source: AgentGoalSource): string {
   return source === "codex-native" ? "Codex native" : "Inertia local";
 }
@@ -102,51 +101,12 @@ function goalProgress(goal: AgentGoal): number | null {
   )));
 }
 
-function nextGoalActions(
-  goal: AgentGoal,
-  executionStatus: GoalExecutionStatus,
-): Array<{
-  label: string;
-  status: AgentGoalStatus;
-  icon: React.JSX.Element;
-}> {
-  if (goal.status === "budgetLimited") return [];
-  if (
-    goal.status === "active"
-    && goal.source === "codex-native"
-    && executionStatus === "idle"
-  ) {
-    return [{
-      label: "Resume goal",
-      status: "active",
-      icon: <Play size={11} aria-hidden="true" />,
-    }];
-  }
-  if (goal.status === "active") {
-    return [
-      {
-        label: "Pause",
-        status: "paused",
-        icon: <CirclePause size={12} aria-hidden="true" />,
-      },
-      {
-        label: "Block",
-        status: "blocked",
-        icon: <Square size={10} aria-hidden="true" />,
-      },
-      {
-        label: "Complete",
-        status: "complete",
-        icon: <Check size={12} aria-hidden="true" />,
-      },
-    ];
-  }
-  return [{
-    label: goal.status === "complete" ? "Reopen goal" : "Mark active",
-    status: "active",
-    icon: <Play size={11} aria-hidden="true" />,
-  }];
-}
+const actionIcons: Record<GoalActionIcon, React.JSX.Element> = {
+  play: <Play size={11} aria-hidden="true" />,
+  pause: <CirclePause size={12} aria-hidden="true" />,
+  block: <Square size={10} aria-hidden="true" />,
+  complete: <Check size={12} aria-hidden="true" />,
+};
 
 function GoalCard({
   goal,
@@ -338,7 +298,7 @@ function GoalCard({
                 void updateGoalStatus(action.status);
               }}
             >
-              {action.icon}
+              {actionIcons[action.icon]}
               {action.label}
             </button>
           ))}

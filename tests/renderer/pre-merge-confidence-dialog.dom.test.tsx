@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import PreMergeConfidenceDialog from "../../src/renderer/src/components/PreMergeConfidenceDialog";
@@ -188,6 +188,43 @@ describe("PreMergeConfidenceDialog", () => {
     expect(screen.queryByRole("heading", { name: "Exact-head green" }))
       .not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("GitHub revalidation failed.");
+  });
+
+  it("keeps keyboard focus inside the dialog while a focused refresh is running", async () => {
+    let finishRefresh!: (event: ServerEvent) => void;
+    const run = vi.fn()
+      .mockResolvedValueOnce(result(confidence()))
+      .mockImplementationOnce(() => new Promise<ServerEvent>((resolve) => {
+        finishRefresh = resolve;
+      }));
+    const onClose = vi.fn();
+    render(<PreMergeConfidenceDialog
+      open
+      projectId="11111111-1111-4111-8111-111111111111"
+      repositoryPath="."
+      authorityRef="33333333-3333-4333-8333-333333333333"
+      run={run}
+      onClose={onClose}
+    />);
+    const dialog = await screen.findByRole("dialog", { name: "Exact-head green" });
+    const refresh = within(dialog).getByRole("button", {
+      name: "Refresh pre-merge evidence",
+    });
+    refresh.focus();
+
+    fireEvent.click(refresh);
+
+    expect(refresh).toBeDisabled();
+    const close = within(dialog).getByRole("button", { name: "Close pre-merge confidence" });
+    expect(close).toHaveFocus();
+
+    await act(async () => { finishRefresh(result(confidence())); });
+    await waitFor(() => expect(refresh).toHaveFocus());
+
+    refresh.focus();
+    fireEvent.click(refresh);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("keeps an unresolved Codex thread and skipped platform unmistakably blocking", async () => {

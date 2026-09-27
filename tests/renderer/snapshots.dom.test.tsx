@@ -26,6 +26,7 @@ it("shows only capture failures in the composer and restores focus on close or u
   expect(screen.getByRole("alert")).toHaveTextContent("The capture could not be attached.");
   expect(nativePreviewSuspended()).toBe(true);
   expect(screen.getByRole("button", { name: "Close Snapshots" })).toHaveFocus();
+  expect(screen.getByRole("dialog", { name: "Snapshots" }).parentElement).toHaveAttribute("role", "presentation");
   fireEvent.keyDown(screen.getByRole("dialog", { name: "Snapshots" }), { key: "Escape" });
   expect(nativePreviewSuspended()).toBe(false);
   expect(trigger).toHaveFocus();

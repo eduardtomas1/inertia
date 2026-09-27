@@ -612,6 +612,36 @@ describe("ChatGoalControl", () => {
     expect(dismissSecondary).not.toHaveBeenCalled();
   });
 
+  it("leaves an Escape already handled by an open dialog to that dialog", () => {
+    const onDismiss = vi.fn();
+    const closeDialog = vi.fn();
+    render(
+      <>
+        <ChatGoalControl
+          {...props(workflow(nativeCapability))}
+          {...openProps(onDismiss)}
+        />
+        <section
+          role="dialog"
+          aria-label="Open dialog"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            closeDialog();
+          }}
+        />
+      </>,
+    );
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Open dialog" }), {
+      key: "Escape",
+    });
+
+    expect(closeDialog).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
   it("stays integrated while the user interacts elsewhere in the chat", () => {
     const onDismiss = vi.fn();
     render(

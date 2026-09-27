@@ -172,6 +172,90 @@ describe("provider run refusals before admission", () => {
     await expect(later).resolves.toMatchObject({ status: "cancelled" });
   });
 
+  it.each([
+    ["first then second", ["first", "second"]],
+    ["second then first", ["second", "first"]],
+  ] as const)("settles every owner refused by validation while no run is active (%s)", async (_order, stopOrder) => {
+    const { manager } = pendingManager();
+    for (const owner of ["first", "second"]) {
+      expect(() => manager.run(input({ runId: `run-${owner}`, turnId: `turn-${owner}`, prompt: " " })))
+        .toThrow("A prompt is required.");
+    }
+
+    for (const owner of stopOrder) {
+      await expect(manager.stopOwned(
+        "refusal-conversation",
+        { runId: `run-${owner}`, turnId: `turn-${owner}` },
+      )).resolves.toBe("settled");
+    }
+    for (const owner of stopOrder) {
+      await expect(manager.stopOwned(
+        "refusal-conversation",
+        { runId: `run-${owner}`, turnId: `turn-${owner}` },
+      )).resolves.toBe("missing");
+    }
+  });
+
+  it("settles owners refused before and during an active run without disturbing it", async () => {
+    const { manager, cancelCalls } = pendingManager();
+    const early = { runId: "run-early", turnId: "turn-early" };
+    const concurrent = { runId: "run-concurrent", turnId: "turn-concurrent" };
+    expect(() => manager.run(input({ ...early, prompt: " " }))).toThrow("A prompt is required.");
+    const live = manager.run(input());
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(() => manager.run(input(concurrent))).toThrow("already has an active provider run");
+
+    await expect(manager.stopOwned("refusal-conversation", concurrent)).resolves.toBe("settled");
+    await expect(manager.stopOwned("refusal-conversation", early)).resolves.toBe("settled");
+
+    expect(cancelCalls).toEqual([]);
+    expect(manager.ownsRun("refusal-conversation", { runId: "run-live", turnId: "turn-live" })).toBe(true);
+    expect(manager.cancel("refusal-conversation")).toBe(true);
+    await expect(live).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("settles a refused owner that stops after the refusing run has ended", async () => {
+    const { manager } = pendingManager();
+    const live = manager.run(input());
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    const refused = { runId: "run-late", turnId: "turn-late" };
+    expect(() => manager.run(input(refused))).toThrow("already has an active provider run");
+
+    await expect(manager.stopOwned(
+      "refusal-conversation",
+      { runId: "run-live", turnId: "turn-live" },
+    )).resolves.toBe("settled");
+    await expect(live).resolves.toMatchObject({ status: "cancelled" });
+    expect(manager.isRunning("refusal-conversation")).toBe(false);
+
+    await expect(manager.stopOwned("refusal-conversation", refused)).resolves.toBe("settled");
+    await expect(manager.stopOwned("refusal-conversation", refused)).resolves.toBe("missing");
+  });
+
+  it("stops recording past the bound with no active run and never disturbs a later live run", async () => {
+    const { manager, cancelCalls } = pendingManager();
+    const owners = Array.from({ length: 65 }, (_, index) => ({
+      runId: `run-invalid-${index}`,
+      turnId: `turn-invalid-${index}`,
+    }));
+    for (const owner of owners) {
+      expect(() => manager.run(input({ ...owner, prompt: " " }))).toThrow("A prompt is required.");
+    }
+    const live = manager.run(input());
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    const stops = [];
+    for (const owner of owners) {
+      stops.push(await manager.stopOwned("refusal-conversation", owner));
+    }
+
+    expect(stops.slice(0, 64)).toEqual(Array.from({ length: 64 }, () => "settled"));
+    expect(stops[64]).toBe("identity-mismatch");
+    expect(cancelCalls).toEqual([]);
+    expect(manager.cancel("refusal-conversation")).toBe(true);
+    await expect(live).resolves.toMatchObject({ status: "cancelled" });
+  });
+
   it("keeps the fail-closed mismatch for an unrecognized owner of the active run", async () => {
     const { manager, cancelCalls } = pendingManager();
     const live = manager.run(input());

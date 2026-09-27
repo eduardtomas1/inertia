@@ -63,8 +63,6 @@ interface ActiveRun {
   settled: boolean;
   detach: () => boolean;
   quarantine: (reason: string) => void;
-  refusedOwners: Set<string>;
-  refusedOwnerOverflow: boolean;
   hardKillTimer?: NodeJS.Timeout;
 }
 
@@ -107,7 +105,7 @@ export interface ProviderRunCoordinatorOptions {
 const MAX_OWNED_STOP_GRACE_MS = 30_000;
 const FORCE_DETACH_GRACE_MS = 250;
 const MAX_CLEANUP_RECEIPTS = 256;
-const MAX_REFUSED_OWNERS_PER_RUN = 64;
+const MAX_REFUSED_OWNERS_PER_CONVERSATION = 64;
 
 function runOwnerKey(identity: { runId: string; turnId: string }): string {
   return JSON.stringify([identity.runId, identity.turnId]);
@@ -175,6 +173,8 @@ export class ProviderRunCoordinator {
    * lifecycle owner asks stopOwned() for the same barrier.
    */
   private readonly cleanupReceipts = new Map<string, ProviderRunIdentity>();
+  private readonly refusalReceipts = new Map<string, Set<string>>();
+  private readonly refusalOverflow = new Set<string>();
 
   constructor(private readonly options: ProviderRunCoordinatorOptions) {}
 
@@ -225,14 +225,14 @@ export class ProviderRunCoordinator {
         || input.model !== input.modelSelection.modelId
       )
     ) {
-      this.rememberCleanupReceipt(expectedIdentity);
+      this.rememberRefusal(expectedIdentity);
       throw new ProviderRuntimeError(
         "invalid_input",
         "The custom backend run does not match the exact probed model identity.",
       );
     }
     if (input.toolRestriction === "none" && (input.harnessId !== "claude-agent-sdk" || callbacks.hostTools || input.skills?.length || input.sessionId || input.access !== "supervised")) {
-      this.rememberCleanupReceipt(expectedIdentity);
+      this.rememberRefusal(expectedIdentity);
       throw new ProviderRuntimeError("invalid_input", "This provider cannot enforce a report chat without tools.");
     }
     const providerId = input.providerId;
@@ -273,7 +273,7 @@ export class ProviderRunCoordinator {
       // refusal precedes installation admission, launch preparation, and the
       // harness invocation, so the exact owner has no process to clean up.
       // Keep arbitrary exceptions and all post-start failures fail-closed.
-      this.rememberCleanupReceipt(expectedIdentity);
+      this.rememberRefusal(expectedIdentity);
       throw new ProviderRuntimeError(
         "invalid_input",
         this.options.evidenceUncertain?.(providerId)
@@ -423,7 +423,7 @@ export class ProviderRunCoordinator {
       // so this exact turn owns no provider process requiring cleanup. Keep
       // unexpected authority failures fail-closed as before.
       if (error instanceof ProviderInstallationAdmissionError) {
-        this.rememberCleanupReceipt(expectedIdentity);
+        this.rememberRefusal(expectedIdentity);
       }
       throw error;
     }
@@ -608,11 +608,10 @@ export class ProviderRunCoordinator {
         compatibilityEmitter.close();
         active.installationUse.quarantine(reason);
       },
-      refusedOwners: new Set(),
-      refusedOwnerOverflow: false,
     };
     this.activeRuns.set(conversationId, active);
     this.cleanupReceipts.delete(conversationId);
+    this.consumeRefusal(conversationId, active);
 
     let launched: Promise<ProviderRunResult>;
     try {
@@ -885,15 +884,16 @@ export class ProviderRunCoordinator {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
       const receipt = this.cleanupReceipts.get(conversationId);
-      return receipt
+      return (receipt
         && receipt.runId === identity.runId
-        && receipt.turnId === identity.turnId
+        && receipt.turnId === identity.turnId)
+        || this.consumeRefusal(conversationId, identity)
         ? "settled"
         : "missing";
     }
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
-      if (active.refusedOwners.delete(runOwnerKey(identity))) return "settled";
-      if (active.refusedOwnerOverflow) return "identity-mismatch";
+      if (this.consumeRefusal(conversationId, identity)) return "settled";
+      if (this.refusalOverflow.has(conversationId)) return "identity-mismatch";
       active.quarantine("provider-run-stop-owner-mismatch");
       this.cancelStartedHarness(active);
       return "identity-mismatch";
@@ -935,16 +935,24 @@ export class ProviderRunCoordinator {
 
   private rememberRefusal(identity: ProviderRunIdentity): void {
     const active = this.activeRuns.get(identity.conversationId);
-    if (!active) {
-      this.rememberCleanupReceipt(identity);
+    if (active?.runId === identity.runId && active.turnId === identity.turnId) return;
+    const owners = this.refusalReceipts.get(identity.conversationId) ?? new Set<string>();
+    if (owners.size >= MAX_REFUSED_OWNERS_PER_CONVERSATION) {
+      this.refusalOverflow.add(identity.conversationId);
       return;
     }
-    if (active.runId === identity.runId && active.turnId === identity.turnId) return;
-    if (active.refusedOwners.size >= MAX_REFUSED_OWNERS_PER_RUN) {
-      active.refusedOwnerOverflow = true;
-      return;
-    }
-    active.refusedOwners.add(runOwnerKey(identity));
+    owners.add(runOwnerKey(identity));
+    this.refusalReceipts.set(identity.conversationId, owners);
+  }
+
+  private consumeRefusal(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    const owners = this.refusalReceipts.get(conversationId);
+    if (!owners?.delete(runOwnerKey(identity))) return false;
+    if (owners.size === 0) this.refusalReceipts.delete(conversationId);
+    return true;
   }
 
   async disposeAll(): Promise<boolean> {

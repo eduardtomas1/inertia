@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -253,7 +253,7 @@ export function ModelBackendsSettings({
     return () => { disposed = true; };
   }, [draft, onLoadDetail, selectedProfileId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (deleteConfirm) {
       deleteCancelRef.current?.focus();
       return;

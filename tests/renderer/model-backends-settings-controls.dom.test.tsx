@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -183,7 +183,6 @@ describe("model backend settings controls", () => {
       .toBeInTheDocument();
 
     await user.click(cancel);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus();
   });
 });

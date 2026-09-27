@@ -719,6 +719,115 @@ describe("app update startup coordinator", () => {
     },
   );
 
+  it.each([
+    ["transitioned", "1.2.3"],
+    ["transitioned", "1.3.0"],
+    ["transitioned", "1.4.0"],
+    ["token-discarded", "1.2.3"],
+    ["token-discarded", "1.3.0"],
+    ["token-discarded", "1.4.0"],
+    ["retire-renamed", "1.2.3"],
+    ["retire-renamed", "1.3.0"],
+    ["retire-renamed", "1.4.0"],
+  ] as const)(
+    "finishes a prepared-receipt rollback interrupted after %s at %s startup",
+    async (interruption, version) => {
+      const fixture = await windowsFixture();
+      const completed = fixture.journal.transition(
+        appUpdateHandoffOwner(fixture.prepared),
+        "rollback-completed",
+      )!;
+      expect(completed.revision).toBe(2);
+      if (interruption !== "transitioned") {
+        expect(fixture.vault.discard(completed)).toBe(true);
+      }
+      if (interruption === "retire-renamed") {
+        const interrupted = new AppUpdateHandoffJournal(fixture.dataDirectory, {
+          testHooks: {
+            afterRename: (_source: string, target: string) => {
+              if (target.endsWith(".app-update-handoff.consume.tmp")) {
+                throw new Error("simulated rollback retirement crash");
+              }
+            },
+          },
+        });
+        expect(interrupted.retire(appUpdateHandoffOwner(completed))).toBe(false);
+        expect(await readdir(fixture.dataDirectory))
+          .toContain(".app-update-handoff.consume.tmp");
+      }
+      const order: string[] = [];
+      const application = applicationFixture(true, order);
+      const reportCandidateFailure = vi.fn();
+
+      await startApplicationWithUpdateHandoff(startupOptions(
+        fixture,
+        application.application,
+        {
+          version,
+          bootstrap: async () => { order.push("bootstrap"); },
+          reportCandidateFailure,
+        },
+      ));
+
+      expect(reportCandidateFailure).not.toHaveBeenCalled();
+      expect(order).toEqual(["lock", "ready", "bootstrap"]);
+      expect(fixture.journal.current()).toBeNull();
+      expect(fixture.vault.matches(fixture.prepared)).toBe(false);
+      expect((await readdir(fixture.dataDirectory)).filter((name) =>
+        name.startsWith(".app-update-"))).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["cleanup-confirmed", "1.3.0"],
+    ["cleanup-confirmed", "1.4.0"],
+    ["rollback-required", "1.3.0"],
+    ["rollback-required", "1.4.0"],
+  ] as const)(
+    "keeps a rollback reached from %s unresolved at %s startup",
+    async (history, version) => {
+      const fixture = await windowsFixture();
+      const cleaned = fixture.journal.transition(
+        appUpdateHandoffOwner(fixture.prepared),
+        "old-generation-cleanup-confirmed",
+      )!;
+      const predecessor = history === "rollback-required"
+        ? fixture.journal.transition(
+            appUpdateHandoffOwner(cleaned),
+            "rollback-required",
+          )!
+        : cleaned;
+      const completed = fixture.journal.transition(
+        appUpdateHandoffOwner(predecessor),
+        "rollback-completed",
+      )!;
+      expect(completed.revision).toBeGreaterThan(2);
+      const order: string[] = [];
+      const application = applicationFixture(true, order);
+      const reportCandidateFailure = vi.fn();
+
+      await startApplicationWithUpdateHandoff(startupOptions(
+        fixture,
+        application.application,
+        {
+          version,
+          bootstrap: async () => { order.push("bootstrap"); },
+          reportCandidateFailure,
+        },
+      ));
+
+      expect(reportCandidateFailure).toHaveBeenCalledWith(
+        "The restricted Windows update candidate was rejected.",
+        expect.objectContaining({
+          message: "The rolled-back Windows app update identity is invalid.",
+        }),
+      );
+      expect(order).toEqual(["lock", "exit"]);
+      expect(fixture.journal.current()).toEqual(completed);
+      expect(fixture.vault.matches(completed)).toBe(true);
+    },
+  );
+
   it.each(["1.3.0", "1.4.0"] as const)(
     "keeps an invoked native installer unresolved at %s startup",
     async (version) => {

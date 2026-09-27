@@ -59,6 +59,7 @@ describe("project removal selection", () => {
       const older = project("older");
       const recent = project("recent");
       const active = project("active");
+      store.updateProject(recent.id, { name: "recent renamed" });
       store.selectProject(active.id);
 
       store.removeProject(active.id);

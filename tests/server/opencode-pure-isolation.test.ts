@@ -13,9 +13,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const proofFixture = vi.hoisted(() => ({
   clientCreationFails: false,
   cleanupFails: false,
+  controlSkipsPlugin: false,
   healthVersion: "1.18.26",
   neverResolveVersionHealth: false,
   pureLoadsPlugin: false,
+  startupTimesOut: false,
   starts: [] as Array<{ executable: string; pure: boolean; root: string }>,
   terminateCalls: 0,
 }));
@@ -64,13 +66,18 @@ vi.mock("../../src/server/provider/opencode-owned-server", async (importOriginal
       pure: boolean,
     ) => {
       proofFixture.starts.push({ executable, pure, root });
+      if (proofFixture.startupTimesOut) {
+        throw new original.OpenCodeServerTimeoutError(
+          "Timed out waiting for the OpenCode server to start.",
+        );
+      }
       const plugin = readFileSync(
         join(root, ".opencode", "plugins", "inertia-isolation-proof.js"),
         "utf8",
       );
       const encodedSentinel = /writeFileSync\(("(?:[^"\\]|\\.)*")/u.exec(plugin)?.[1];
       if (!encodedSentinel) throw new Error("The proof fixture could not find its sentinel.");
-      if (!pure || proofFixture.pureLoadsPlugin) {
+      if (pure ? proofFixture.pureLoadsPlugin : !proofFixture.controlSkipsPlugin) {
         writeFileSync(JSON.parse(encodedSentinel) as string, "executed", "utf8");
       }
       return {
@@ -102,9 +109,11 @@ describe("selected OpenCode semantic isolation", () => {
   afterEach(() => {
     proofFixture.clientCreationFails = false;
     proofFixture.cleanupFails = false;
+    proofFixture.controlSkipsPlugin = false;
     proofFixture.healthVersion = "1.18.26";
     proofFixture.neverResolveVersionHealth = false;
     proofFixture.pureLoadsPlugin = false;
+    proofFixture.startupTimesOut = false;
     proofFixture.starts.length = 0;
     proofFixture.terminateCalls = 0;
     for (const root of roots.splice(0)) {
@@ -121,8 +130,8 @@ describe("selected OpenCode semantic isolation", () => {
       vi.fn(),
       { pluginObservationMs: 1 },
     );
-    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, verified: true });
-    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, verified: true });
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
     expect(proofFixture.starts.map(({ executable, pure }) => ({ executable, pure })))
       .toEqual([
         { executable, pure: false },
@@ -144,7 +153,7 @@ describe("selected OpenCode semantic isolation", () => {
     await expect(Promise.all(Array.from({ length: 12 }, prove))).resolves.toEqual(
       Array.from(
         { length: 12 },
-        () => ({ cleanupConfirmed: true, verified: true }),
+        () => ({ cleanupConfirmed: true, outcome: "verified" }),
       ),
     );
     expect(proofFixture.starts.map(({ executable, pure }) => ({ executable, pure })))
@@ -174,14 +183,14 @@ describe("selected OpenCode semantic isolation", () => {
     firstLifetime.abort();
     await expect(first).resolves.toEqual({
       cleanupConfirmed: true,
-      verified: false,
+      outcome: "cancelled",
     });
     expect(proofFixture.terminateCalls).toBe(1);
 
     secondLifetime.abort();
     await expect(second).resolves.toEqual({
       cleanupConfirmed: true,
-      verified: false,
+      outcome: "cancelled",
     });
     expect(proofFixture.terminateCalls).toBe(2);
   });
@@ -195,19 +204,19 @@ describe("selected OpenCode semantic isolation", () => {
       vi.fn(),
       { pluginObservationMs: 1 },
     );
-    await expect(prove("1.18.26")).resolves.toMatchObject({ verified: true });
+    await expect(prove("1.18.26")).resolves.toMatchObject({ outcome: "verified" });
     const changedTime = new Date(Date.now() + 60_000);
     utimesSync(executable, changedTime, changedTime);
-    await expect(prove("1.18.26")).resolves.toMatchObject({ verified: true });
+    await expect(prove("1.18.26")).resolves.toMatchObject({ outcome: "verified" });
     writeFileSync(executable, "changed selected executable identity", "utf8");
-    await expect(prove("1.18.26")).resolves.toMatchObject({ verified: true });
+    await expect(prove("1.18.26")).resolves.toMatchObject({ outcome: "verified" });
     const replacement = `${executable}.replacement`;
     writeFileSync(replacement, "replacement selected executable", "utf8");
     rmSync(executable);
     renameSync(replacement, executable);
-    await expect(prove("1.18.26")).resolves.toMatchObject({ verified: true });
+    await expect(prove("1.18.26")).resolves.toMatchObject({ outcome: "verified" });
     proofFixture.healthVersion = "1.18.27";
-    await expect(prove("1.18.27")).resolves.toMatchObject({ verified: true });
+    await expect(prove("1.18.27")).resolves.toMatchObject({ outcome: "verified" });
     expect(proofFixture.starts).toHaveLength(10);
   });
 
@@ -220,7 +229,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1 },
-    )).resolves.toEqual({ cleanupConfirmed: true, verified: false });
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
     proofFixture.pureLoadsPlugin = false;
     await expect(probeOpenCodePureIsolation(
       executable,
@@ -228,7 +237,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1 },
-    )).resolves.toEqual({ cleanupConfirmed: true, verified: true });
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
     expect(proofFixture.starts).toHaveLength(4);
   });
 
@@ -241,7 +250,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1 },
-    )).resolves.toEqual({ cleanupConfirmed: true, verified: false });
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
 
     proofFixture.healthVersion = "1.18.26";
     proofFixture.cleanupFails = true;
@@ -251,7 +260,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1 },
-    )).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    )).resolves.toEqual({ cleanupConfirmed: false, outcome: "operational-error" });
     const startsAfterCleanupFailure = proofFixture.starts.length;
     const terminationsAfterCleanupFailure = proofFixture.terminateCalls;
     await expect(probeOpenCodePureIsolation(
@@ -260,7 +269,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1 },
-    )).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    )).resolves.toEqual({ cleanupConfirmed: false, outcome: "operational-error" });
     expect(proofFixture.starts).toHaveLength(startsAfterCleanupFailure);
     expect(proofFixture.terminateCalls).toBe(terminationsAfterCleanupFailure);
   });
@@ -274,7 +283,7 @@ describe("selected OpenCode semantic isolation", () => {
       { env: process.env, pathEntries: [] },
       vi.fn(),
       { pluginObservationMs: 1, requestTimeoutMs: 5 },
-    )).resolves.toEqual({ cleanupConfirmed: true, verified: false });
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "timed-out" });
     expect(proofFixture.starts).toHaveLength(1);
     expect(proofFixture.terminateCalls).toBe(1);
   });
@@ -290,13 +299,54 @@ describe("selected OpenCode semantic isolation", () => {
       { pluginObservationMs: 1 },
     );
 
-    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, verified: false });
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "operational-error" });
     expect(proofFixture.starts).toHaveLength(1);
     expect(proofFixture.terminateCalls).toBe(1);
 
     proofFixture.cleanupFails = true;
-    await expect(prove()).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: false, outcome: "operational-error" });
     expect(proofFixture.starts).toHaveLength(2);
     expect(proofFixture.terminateCalls).toBe(2);
+  });
+
+  it("reports a control server that never loads the project plugin as incompatible", async () => {
+    const executable = selectedExecutable();
+    proofFixture.controlSkipsPlugin = true;
+    await expect(probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
+    expect(proofFixture.starts).toHaveLength(1);
+    expect(proofFixture.terminateCalls).toBe(1);
+  });
+
+  it("reports a server startup timeout as timed out and retries it later", async () => {
+    const executable = selectedExecutable();
+    const prove = async () => await probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    );
+    proofFixture.startupTimesOut = true;
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "timed-out" });
+    proofFixture.startupTimesOut = false;
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, outcome: "verified" });
+    expect(proofFixture.starts).toHaveLength(3);
+  });
+
+  it("reports an unusable version as incompatible without starting a server", async () => {
+    await expect(probeOpenCodePureIsolation(
+      selectedExecutable(),
+      undefined,
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    )).resolves.toEqual({ cleanupConfirmed: true, outcome: "incompatible" });
+    expect(proofFixture.starts).toHaveLength(0);
   });
 });

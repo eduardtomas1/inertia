@@ -25,6 +25,7 @@ import {
 import { CappedProviderBuffer } from "./io";
 import {
   OpenCodeServerCleanupUnconfirmedError,
+  OpenCodeServerTimeoutError,
   startOwnedOpenCodeServer,
   waitForOpenCodeHealth,
   withOpenCodeRequestDeadline,
@@ -38,9 +39,16 @@ const cleanupFailureCache = new Set<string>();
 const inFlightProofs = new Map<string, Promise<void>>();
 const lifetimeInFlightProofs = new WeakMap<AbortSignal, Map<string, Promise<void>>>();
 
+export type OpenCodePureIsolationOutcome =
+  | "verified"
+  | "incompatible"
+  | "timed-out"
+  | "cancelled"
+  | "operational-error";
+
 export interface OpenCodePureIsolationProof {
   readonly cleanupConfirmed: boolean;
-  readonly verified: boolean;
+  readonly outcome: OpenCodePureIsolationOutcome;
 }
 
 export interface OpenCodePureIsolationProbeOptions {
@@ -59,6 +67,8 @@ export type OpenCodePureIsolationProbe = (
   terminateProcessTree: ProcessTreeTerminator,
   options?: OpenCodePureIsolationProbeOptions,
 ) => Promise<OpenCodePureIsolationProof>;
+
+class OpenCodePureIsolationIncompatibleError extends Error {}
 
 class OpenCodePureIsolationCleanupError extends Error {
   constructor(cause: unknown) {
@@ -135,16 +145,16 @@ async function waitForSentinel(
     if (exists === shouldExist) {
       if (shouldExist) return;
     } else if (!shouldExist) {
-      throw new Error("OpenCode --pure executed an external project plugin.");
+      throw new OpenCodePureIsolationIncompatibleError("OpenCode --pure executed an external project plugin.");
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   const exists = await sentinelExists();
   if (shouldExist && !exists) {
-    throw new Error("OpenCode did not discover the isolation-proof project plugin.");
+    throw new OpenCodePureIsolationIncompatibleError("OpenCode did not discover the isolation-proof project plugin.");
   }
   if (!shouldExist && exists) {
-    throw new Error("OpenCode --pure executed an external project plugin.");
+    throw new OpenCodePureIsolationIncompatibleError("OpenCode --pure executed an external project plugin.");
   }
 }
 
@@ -195,7 +205,7 @@ async function exerciseServer(
       signal,
     );
     if (health.data?.version?.replace(/^v/u, "") !== expectedVersion.replace(/^v/u, "")) {
-      throw new Error("OpenCode isolation proof observed a different executable version.");
+      throw new OpenCodePureIsolationIncompatibleError("OpenCode isolation proof observed a different executable version.");
     }
     await withOpenCodeRequestDeadline(
       requestTimeoutMs,
@@ -310,7 +320,7 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     if (options?.signal?.aborted) {
       throw new Error("OpenCode isolation proof was cancelled.");
     }
-    if (!version) throw new Error("OpenCode did not report a usable version.");
+    if (!version) throw new OpenCodePureIsolationIncompatibleError("OpenCode did not report a usable version.");
     const observationMs = process.env.NODE_ENV === "test"
       && Number.isSafeInteger(options?.pluginObservationMs)
       && (options?.pluginObservationMs ?? 0) > 0
@@ -323,10 +333,10 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
       : PROOF_TIMEOUT_MS;
     identity = await executableIdentity(executable, version);
     if (cleanupFailureCache.has(identity)) {
-      return { cleanupConfirmed: false, verified: false };
+      return { cleanupConfirmed: false, outcome: "operational-error" };
     }
     if (proofCache.has(identity)) {
-      return { cleanupConfirmed: true, verified: true };
+      return { cleanupConfirmed: true, outcome: "verified" };
     }
     const proofKey = identity;
     const lifetimeSignal = options?.signal;
@@ -377,14 +387,20 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     if (options?.signal?.aborted) {
       throw new Error("OpenCode isolation proof was cancelled.");
     }
-    return { cleanupConfirmed: true, verified: true };
+    return { cleanupConfirmed: true, outcome: "verified" };
   } catch (error) {
     if (identity && error instanceof OpenCodePureIsolationCleanupError) {
       cleanupFailureCache.add(identity);
     }
+    if (error instanceof OpenCodePureIsolationCleanupError) {
+      return { cleanupConfirmed: false, outcome: "operational-error" };
+    }
     return {
-      cleanupConfirmed: !(error instanceof OpenCodePureIsolationCleanupError),
-      verified: false,
+      cleanupConfirmed: true,
+      outcome: options?.signal?.aborted ? "cancelled"
+        : error instanceof OpenCodePureIsolationIncompatibleError ? "incompatible"
+          : error instanceof OpenCodeServerTimeoutError ? "timed-out"
+            : "operational-error",
     };
   }
 };

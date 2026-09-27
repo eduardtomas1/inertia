@@ -18,6 +18,7 @@ import {
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
+import { providerProcessInvocation } from "./process";
 
 const MAX_CLAUDE_STDERR_TAIL_CHARS = 4 * 1024;
 
@@ -28,6 +29,8 @@ export interface ClaudeOwnedQueryDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
   /** Small deterministic wire budgets for synthetic transport tests. */
   transportLimits?: ClaudeTransportLimits;
+  /** Test seam for platform-specific executable invocation. */
+  platform?: NodeJS.Platform;
 }
 
 export interface ClaudeOwnedQueryProcess {
@@ -82,15 +85,22 @@ export function createClaudeOwnedQueryProcess(
         "Claude Agent SDK attempted to spawn more than one process for a single query.",
       );
     }
-    const invocation = runtimeOwnedProcessInvocation(
+    const invocation = providerProcessInvocation(
       spawnOptions.command,
       spawnOptions.args,
+      spawnOptions.env,
+      dependencies.platform,
     );
-    const ownedChild = spawnRuntimeOwnedProcess(() => spawnProcess(invocation.command, invocation.args, {
+    const ownedInvocation = runtimeOwnedProcessInvocation(
+      invocation.command,
+      invocation.args,
+    );
+    const ownedChild = spawnRuntimeOwnedProcess(() => spawnProcess(ownedInvocation.command, ownedInvocation.args, {
       cwd: spawnOptions.cwd,
       env: spawnOptions.env,
       detached: process.platform !== "win32",
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     }));

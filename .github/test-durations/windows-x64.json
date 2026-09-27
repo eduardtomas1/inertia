@@ -489,7 +489,6 @@
     "tests/server/isolated-review-commands.test.ts": 24,
     "tests/server/isolated-run-controller.test.ts": 404,
     "tests/server/kimi-acp-harness.test.ts": 39290,
-    "tests/server/kimi-claude-runtime-preset.test.ts": 20,
     "tests/server/native-kimi-provider-migration.test.ts": 1303,
     "tests/server/opencode-boundary.test.ts": 8346,
     "tests/server/opencode-descendant-completion.test.ts": 6002,

@@ -4,6 +4,7 @@ import type { AttachmentRegistry } from "./attachment-registry.js";
 import { attachmentImportDocumentFromEvent, type AttachmentImportDocument, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import { SnapshotError, SnapshotService } from "./snapshot-service.js";
 import type { SnapshotFailureDiagnostic } from "../shared/snapshots.js";
+import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import { privacySafeAttachmentImportError } from "./attachment-selection-import.js";
 import { clearSnapshotPreferences, readSnapshotPreferences, writeSnapshotPreferences, type SnapshotPreferences } from "./snapshot-preferences.js";
 
@@ -81,7 +82,7 @@ export function registerSnapshotIpc(options: {
       });
       if (!live() || !service.state().enabled) throw new Error("Snapshot destination closed.");
       owner.window.show(); owner.window.focus();
-      owner.window.webContents.send("inertia:snapshot-ready", { conversationId: owner.conversationId, selection: { batchId, attachments } });
+      owner.window.webContents.send(DESKTOP_IPC.snapshotReady, { conversationId: owner.conversationId, selection: { batchId, attachments } });
     } catch (error) {
       const cancelled = importerCancelled ?? (captureSignal as AbortSignal | null)?.aborted ?? false;
       let failure = error;
@@ -91,7 +92,7 @@ export function registerSnapshotIpc(options: {
       }
       if (!cancelled && current()) {
         owner.window.show(); owner.window.focus();
-        owner.window.webContents.send("inertia:snapshot-ready", {
+        owner.window.webContents.send(DESKTOP_IPC.snapshotReady, {
           conversationId: owner.conversationId, error: failure instanceof SnapshotError ? failure.message : privacySafeAttachmentImportError(failure).message,
         });
       }
@@ -125,7 +126,7 @@ export function registerSnapshotIpc(options: {
       if (generation === 0) captureEnabled = state.enabled;
     }
   }).catch(() => undefined);
-  ipcMain.handle("inertia:snapshot", async (event, ...args) => {
+  ipcMain.handle(DESKTOP_IPC.snapshot, async (event, ...args) => {
     const window = options.owner(event, args.length);
     const request = requestSchema.parse(args[0]);
     switch (request.type) {

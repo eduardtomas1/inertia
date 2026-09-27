@@ -1,3 +1,4 @@
+import { builtinModules } from "node:module";
 import {
   existsSync,
   readFileSync,
@@ -23,6 +24,8 @@ const RUNTIME_JAVASCRIPT_EXTENSIONS = new Set([
   ".cjs",
 ]);
 const TEST_CASE_PATTERN = /\.(?:test|spec)\.[cm]?tsx?$/u;
+const BUILD_CONFIG_PATTERN = /(?:^|\/)vite\.config\.[cm]?[jt]s$/u;
+const NODE_BUILTIN_SPECIFIERS = new Set(builtinModules);
 
 export const DEFAULT_ALLOWED_SOURCE_LAYERS = new Map([
   ["shared", new Set(["shared"])],
@@ -32,6 +35,14 @@ export const DEFAULT_ALLOWED_SOURCE_LAYERS = new Map([
   ["preload", new Set(["preload", "shared"])],
   ["renderer", new Set(["renderer", "shared"])],
 ]);
+export const DEFAULT_PLATFORM_NEUTRAL_LAYERS = new Set(["renderer", "shared"]);
+
+function isElectronOrNodeBuiltin(specifier) {
+  return specifier === "electron"
+    || specifier.startsWith("electron/")
+    || specifier.startsWith("node:")
+    || NODE_BUILTIN_SPECIFIERS.has(specifier);
+}
 
 function canonicalPath(path) {
   const absolute = resolve(path);
@@ -251,7 +262,7 @@ function resolveModule(
   if (!bases) return { kind: "external" };
   for (const base of bases) {
     const { asset, candidates } = moduleCandidates(base);
-    if (asset) return { kind: "asset" };
+    if (asset) return { kind: "asset", target: base.replace(/[?#].*$/su, "") };
     for (const candidate of candidates) {
       const target = sourceFileByCanonicalPath.get(canonicalPath(candidate));
       if (target) return { kind: "source", target };
@@ -519,6 +530,8 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
     return {
       files,
       edges: [],
+      assets: [],
+      externals: [],
       modules: new Map(),
       failures: [
         error instanceof Error
@@ -528,6 +541,8 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
     };
   }
   const edges = [];
+  const assets = [];
+  const externals = [];
   const modules = new Map();
   for (const file of files) {
     const contents = readFileSync(file, "utf8");
@@ -558,10 +573,18 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
         aliases,
         sourceFileByCanonicalPath,
       );
-      if (resolution.kind === "source") {
-        edges.push({
+      if (resolution.kind === "source" || resolution.kind === "asset") {
+        (resolution.kind === "source" ? edges : assets).push({
           from: file,
           to: resolution.target,
+          kind: dependency.kind,
+          typeOnly: dependency.typeOnly,
+          line: dependency.line,
+          specifier: dependency.specifier,
+        });
+      } else if (resolution.kind === "external") {
+        externals.push({
+          from: file,
           kind: dependency.kind,
           typeOnly: dependency.typeOnly,
           line: dependency.line,
@@ -576,7 +599,7 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
     }
   }
 
-  return { files, edges, modules, failures };
+  return { files, edges, assets, externals, modules, failures };
 }
 
 export function analyzeSourceArchitecture({
@@ -584,6 +607,8 @@ export function analyzeSourceArchitecture({
   sourceDirectory = "src",
   configPaths = ["tsconfig.node.json", "tsconfig.web.json"],
   allowedLayers = DEFAULT_ALLOWED_SOURCE_LAYERS,
+  platformNeutralLayers = DEFAULT_PLATFORM_NEUTRAL_LAYERS,
+  allowedAssetImports = [],
 }) {
   const absoluteWorkspaceRoot = resolve(workspaceRoot);
   const absoluteSourceDirectory = resolve(
@@ -591,9 +616,13 @@ export function analyzeSourceArchitecture({
     sourceDirectory,
   );
   const files = typescriptFiles(absoluteSourceDirectory);
-  const { edges, modules, failures } = analyzeModuleUsage({
+  const { edges, assets, externals, modules, failures } = analyzeModuleUsage({
     workspaceRoot: absoluteWorkspaceRoot, files, configPaths,
   });
+  const reviewedAssetImports = allowedAssetImports.map(({ from, directory }) => ({
+    from: resolve(absoluteWorkspaceRoot, from),
+    directory: resolve(absoluteWorkspaceRoot, directory),
+  }));
 
   for (const file of files) {
     const layer = sourceLayer(absoluteSourceDirectory, file);
@@ -604,7 +633,14 @@ export function analyzeSourceArchitecture({
       );
     }
   }
-  for (const edge of edges) {
+  const layeredAssets = assets.filter((asset) =>
+    isContained(absoluteSourceDirectory, asset.to)
+    && !reviewedAssetImports.some(({ from, directory }) =>
+      canonicalPath(from) === canonicalPath(asset.from)
+      && isContained(canonicalPath(directory), canonicalPath(asset.to))
+    )
+  );
+  for (const edge of [...edges, ...layeredAssets]) {
     const fromLayer = sourceLayer(absoluteSourceDirectory, edge.from);
     const toLayer = sourceLayer(absoluteSourceDirectory, edge.to);
     if (
@@ -615,6 +651,20 @@ export function analyzeSourceArchitecture({
         `${workspacePath(absoluteWorkspaceRoot, edge.from)}:${edge.line} crosses `
         + `source layers ${fromLayer} -> ${toLayer} via `
         + `${workspacePath(absoluteWorkspaceRoot, edge.to)}.`,
+      );
+    }
+  }
+  for (const external of externals) {
+    const layer = sourceLayer(absoluteSourceDirectory, external.from);
+    const path = workspacePath(absoluteWorkspaceRoot, external.from);
+    if (
+      platformNeutralLayers.has(layer)
+      && !BUILD_CONFIG_PATTERN.test(path)
+      && isElectronOrNodeBuiltin(external.specifier)
+    ) {
+      failures.push(
+        `${path}:${external.line} imports ${external.specifier} into the `
+        + `${layer} layer, which must not depend on Electron or Node built-ins.`,
       );
     }
   }

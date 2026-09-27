@@ -116,14 +116,20 @@ describe("architecture analyzer external specifiers", () => {
     ]);
   });
 
-  it("exempts only Vite build configuration inside the renderer layer", () => {
+  it("exempts only the reviewed Private Connect Vite build configuration", () => {
     const root = fixture({
       "src/renderer/private-connect/vite.config.ts": 'import { resolve } from "node:path";\nexport default { root: resolve(".") };\n',
       "src/renderer/private-connect/vite.helpers.ts": 'import { resolve } from "node:path";\nexport const root = resolve(".");\n',
+      "src/renderer/src/vite.config.ts": 'import { readFileSync } from "node:fs";\nexport default { read: readFileSync };\n',
+      "src/shared/vite.config.mts": 'import { app } from "electron";\nexport default { app };\n',
+      "src/shared/tools/vite.config.ts": 'import { readFileSync } from "fs";\nexport default { read: readFileSync };\n',
     });
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
       "src/renderer/private-connect/vite.helpers.ts:1 imports node:path into the renderer layer, which must not depend on Electron or Node built-ins.",
+      "src/renderer/src/vite.config.ts:1 imports node:fs into the renderer layer, which must not depend on Electron or Node built-ins.",
+      "src/shared/tools/vite.config.ts:1 imports fs into the shared layer, which must not depend on Electron or Node built-ins.",
+      "src/shared/vite.config.mts:1 imports electron into the shared layer, which must not depend on Electron or Node built-ins.",
     ]);
   });
 });

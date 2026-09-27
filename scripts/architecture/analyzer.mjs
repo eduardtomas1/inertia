@@ -24,7 +24,9 @@ const RUNTIME_JAVASCRIPT_EXTENSIONS = new Set([
   ".cjs",
 ]);
 const TEST_CASE_PATTERN = /\.(?:test|spec)\.[cm]?tsx?$/u;
-const BUILD_CONFIG_PATTERN = /(?:^|\/)vite\.config\.[cm]?[jt]s$/u;
+const PLATFORM_NEUTRAL_BUILD_CONFIGS = new Set([
+  "src/renderer/private-connect/vite.config.ts",
+]);
 const NODE_BUILTIN_SPECIFIERS = new Set(builtinModules);
 
 export const DEFAULT_ALLOWED_SOURCE_LAYERS = new Map([
@@ -659,7 +661,7 @@ export function analyzeSourceArchitecture({
     const path = workspacePath(absoluteWorkspaceRoot, external.from);
     if (
       platformNeutralLayers.has(layer)
-      && !BUILD_CONFIG_PATTERN.test(path)
+      && !PLATFORM_NEUTRAL_BUILD_CONFIGS.has(path)
       && isElectronOrNodeBuiltin(external.specifier)
     ) {
       failures.push(

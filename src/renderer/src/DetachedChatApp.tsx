@@ -16,18 +16,25 @@ import type {
   AgentApprovalDecision,
   AgentApprovalRequest,
   AgentInputRequest,
+  AgentSkillSummary,
   AppSettings,
+  ChatAttachment,
   CheckpointSummary,
+  ConversationContextPacketSummary,
+  ModelBackendProfileView,
+  ProjectAction,
   ProviderId,
   SubagentTrace,
+  TurnRequestContext,
+  UsageDisplayMode,
 } from "@shared/contracts";
-import { defaultSettings } from "@shared/contracts/app";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
 import { ConversationDetailState } from "./components/ConversationDetailState";
@@ -50,11 +57,8 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useStableController } from "./hooks/useStableController";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceMentions } from "./hooks/workspace-tools/useWorkspaceMentions";
-import {
-  canFollowUpSubagentTrace,
-  canStopSubagentTrace,
-} from "./utils/subagentDisclosure";
-import { requestComposerPrefill } from "./utils/composerPrefill";
+import { canStopSubagentTrace } from "./utils/subagentDisclosure";
+import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { onComposerDraftPersisted } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import {
@@ -62,10 +66,7 @@ import {
   goalExecutionStatus,
 } from "./utils/goalExecution";
 import { applyInterfaceScale } from "./utils/interfaceScale";
-import {
-  cachedColorTheme,
-  cachedThemePreference,
-} from "./utils/theme";
+import { cachedAppSettings } from "./utils/cachedSettings";
 import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 
@@ -86,6 +87,15 @@ interface DetachedChatBeforeUnloadEvent {
 
 const DRAFT_PERSISTENCE_FAILURE =
   "This window stayed open because its draft could not be preserved.";
+const NO_PROJECT_ACTIONS: ProjectAction[] = [];
+const NO_RESUME_OPTIONS: readonly ProviderTerminalResumeOption[] = [];
+const NO_SKILLS: AgentSkillSummary[] = [];
+const NO_BACKEND_PROFILES: ModelBackendProfileView[] = [];
+const NO_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
+const resolveProviderMaintenance = (): Promise<void> => Promise.resolve();
+const openProviderUpdateInstructions = (url: string): void => {
+  void window.inertia.openExternal(url).catch(() => undefined);
+};
 
 /** Keeps native close fail-closed around popup-only composer ownership. */
 export function preserveDetachedDraftBeforeUnload(
@@ -182,15 +192,7 @@ export default function DetachedChatApp({
     [sendCommand],
   );
   const settings = useMemo<AppSettings>(
-    () => connection.snapshot?.settings ?? {
-      ...defaultSettings,
-      theme: cachedThemePreference(window.localStorage)
-        ?? defaultSettings.theme,
-      colorTheme: cachedColorTheme(window.localStorage)
-        ?? defaultSettings.colorTheme,
-      lightColorTheme: cachedColorTheme(window.localStorage, "light") ?? defaultSettings.colorTheme,
-      darkColorTheme: cachedColorTheme(window.localStorage, "dark") ?? defaultSettings.colorTheme,
-    },
+    () => connection.snapshot?.settings ?? cachedAppSettings(),
     [connection.snapshot?.settings],
   );
   useTheme(settings.theme, settings.colorTheme, settings.lightColorTheme, settings.darkColorTheme);
@@ -381,6 +383,34 @@ export default function DetachedChatApp({
       payload: { providerId },
     }).catch(() => undefined);
   }, [runtimeActions]);
+  const sendMessageToConversation = runtimeActions.sendMessageToConversation;
+  const sendMessage = useCallback((
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ) => sendMessageToConversation(
+    conversationId,
+    content,
+    attachments,
+    context,
+    false,
+  ), [conversationId, sendMessageToConversation]);
+  const compactConversationById = runtimeActions.compactConversation;
+  const compactConversation = useCallback((instruction?: string) =>
+    compactConversationById(conversationId, instruction), [
+    compactConversationById,
+    conversationId,
+  ]);
+  const probeBackendProfile = backendProfiles.probeBackendProfile;
+  const probeConversationBackendProfile = useCallback(async (
+    profileId: string,
+    modelId: string,
+  ): Promise<void> => {
+    await probeBackendProfile(profileId, modelId);
+  }, [probeBackendProfile]);
+  const changeUsageDisplayMode = useCallback((mode: UsageDisplayMode): void => {
+    void updateSettings({ usageDisplayMode: mode }).catch(() => undefined);
+  }, [updateSettings]);
   const stopAgent = useCallback(async (): Promise<void> => {
     await runtimeActions.run("agent.stop", {
       type: "agent.stop",
@@ -398,6 +428,14 @@ export default function DetachedChatApp({
       },
     });
   }, [runtimeActions]);
+  const turns = projection.turns;
+  const stopVisibleSubagent = useCallback(async (
+    trace: SubagentTrace,
+  ): Promise<void> => {
+    if (canStopSubagentTrace(trace, turns)) {
+      await stopSubagent(trace);
+    }
+  }, [stopSubagent, turns]);
   const revertCheckpoint = useCallback((checkpoint: CheckpointSummary): void => {
     const confirmed = !settings.confirmDestructiveActions
       || window.confirm(
@@ -414,15 +452,8 @@ export default function DetachedChatApp({
     }).catch(() => undefined);
   }, [conversationId, runtimeActions, settings.confirmDestructiveActions]);
   const followUpSubagent = useCallback((trace: SubagentTrace): void => {
-    if (!conversation || !canFollowUpSubagentTrace(trace, projection.turns)) {
-      return;
-    }
-    const task = trace.description ?? trace.providerRole ?? "delegated task";
-    requestComposerPrefill({
-      conversationId,
-      text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
-    });
-  }, [conversation, conversationId, projection.turns]);
+    if (conversation) requestSubagentFollowUp(conversationId, trace, turns);
+  }, [conversation, conversationId, turns]);
   const openProjectFile = useCallback((path: string): void => {
     if (!project) return;
     void window.inertia.openProjectPath({
@@ -581,7 +612,7 @@ export default function DetachedChatApp({
             streaming={projection.streaming}
             terminalProjections={projection.terminalProjections}
             usage={projection.usage}
-            skills={workflowState?.skills ?? []}
+            skills={workflowState?.skills ?? NO_SKILLS}
             skillsCapability={workflowState?.skillsCapability ?? null}
             skillsLoading={workflow.loading}
             skillsError={workflow.error}
@@ -602,10 +633,10 @@ export default function DetachedChatApp({
             approvals={projection.pendingApprovals}
             inputRequests={projection.pendingInputs}
             providers={connection.snapshot.providers}
-            backendProfiles={connection.snapshot.backendProfiles ?? []}
+            backendProfiles={connection.snapshot.backendProfiles ?? NO_BACKEND_PROFILES}
             maintenanceStatus={null}
             maintenanceOperation={null}
-            actions={[]}
+            actions={NO_PROJECT_ACTIONS}
             mentionResults={mentions.mentionResults}
             showTimestamps={settings.showTimestamps}
             showThinking={settings.showThinking}
@@ -616,7 +647,7 @@ export default function DetachedChatApp({
             showChangedFileSummaries={settings.showChangedFileSummaries}
             autoScrollToFinalAnswer={settings.autoScrollToFinalAnswer}
             promptContext={null}
-            contextPackets={projection.detail?.contextPackets ?? []}
+            contextPackets={projection.detail?.contextPackets ?? NO_CONTEXT_PACKETS}
             previewContextUrl={null}
             providerIdentityLabels={settings.providerIdentityLabels}
             loading={false}
@@ -625,16 +656,8 @@ export default function DetachedChatApp({
             sending={runtimeActions.sendingConversationIds.has(conversationId)}
             onAddProject={dockInMain}
             onCreateConversation={dockInMain}
-            onSendMessage={(content, attachments, context) =>
-              runtimeActions.sendMessageToConversation(
-                conversationId,
-                content,
-                attachments,
-                context,
-                false,
-              )}
-            onCompactConversation={(instruction) =>
-              runtimeActions.compactConversation(conversationId, instruction)}
+            onSendMessage={sendMessage}
+            onCompactConversation={compactConversation}
             onListSkills={workflow.listSkills}
             onRespondToApproval={respondToApproval}
             onRespondToInput={respondToInput}
@@ -648,29 +671,18 @@ export default function DetachedChatApp({
             onRefreshProvider={refreshProvider}
             onOpenProviderSetup={dockInMain}
             onOpenBackendSetup={dockInMain}
-            onProbeBackendProfile={async (profileId, modelId) => {
-              await backendProfiles.probeBackendProfile(profileId, modelId);
-            }}
-            onRefreshProviderMaintenance={() => Promise.resolve()}
-            onUpdateProvider={() => Promise.resolve()}
-            onCancelProviderUpdate={() => Promise.resolve()}
-            onOpenProviderUpdateInstructions={(url) => {
-              void window.inertia.openExternal(url).catch(() => undefined);
-            }}
+            onProbeBackendProfile={probeConversationBackendProfile}
+            onRefreshProviderMaintenance={resolveProviderMaintenance}
+            onUpdateProvider={resolveProviderMaintenance}
+            onCancelProviderUpdate={resolveProviderMaintenance}
+            onOpenProviderUpdateInstructions={openProviderUpdateInstructions}
             onOpenResume={dockInMain}
-            resumeOptions={[]}
+            resumeOptions={NO_RESUME_OPTIONS}
             onResumeConversation={dockInMain}
-            onUsageDisplayModeChange={(mode) => {
-              void updateSettings({ usageDisplayMode: mode })
-                .catch(() => undefined);
-            }}
+            onUsageDisplayModeChange={changeUsageDisplayMode}
             onStop={stopAgent}
             onFollowUpSubagent={followUpSubagent}
-            onStopSubagent={async (trace) => {
-              if (canStopSubagentTrace(trace, projection.turns)) {
-                await stopSubagent(trace);
-              }
-            }}
+            onStopSubagent={stopVisibleSubagent}
             onRevertCheckpoint={revertCheckpoint}
             onOpenTurnDiff={dockInMain}
             onCompareTurnArtifacts={dockInMain}

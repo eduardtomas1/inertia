@@ -1,5 +1,4 @@
 import type {
-  Conversation,
   ConversationDetail,
   ConversationDetailResult,
   ConversationDetailViewState,
@@ -12,13 +11,9 @@ export function mergeConversationShell(
   detail: ConversationDetail,
   shell: ConversationShell,
 ): ConversationDetail {
-  const conversation = Object.fromEntries(
-    Object.entries(shell).filter(([field]) =>
-      field !== "latestTurn"
-      && field !== "pendingApproval"
-      && field !== "pendingInput"),
-  ) as unknown as Conversation;
-  const latestTurn = shell.latestTurn;
+  const { latestTurn, pendingApproval, pendingInput, ...conversation } = shell;
+  void pendingApproval;
+  void pendingInput;
   if (!latestTurn) return { ...detail, conversation };
   const turnIndex = detail.agentTurns.findIndex(
     ({ id }) => id === latestTurn.id,

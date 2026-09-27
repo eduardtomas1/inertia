@@ -34,8 +34,8 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { requestComposerPrefill } from "../utils/composerPrefill";
-import { canFollowUpSubagentTrace } from "../utils/subagentDisclosure";
+import { persistComposerDraft } from "../utils/composerDraftPersistence";
+import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
@@ -316,14 +316,10 @@ export function useSplitWorkspaceScene({
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }
-      onConversationCreated(event.result.conversationId);
       if (options?.prefillText) {
-        const conversationId = event.result.conversationId;
-        window.requestAnimationFrame(() => requestComposerPrefill({
-          conversationId,
-          text: options.prefillText!,
-        }));
+        persistComposerDraft(event.result.conversationId, options.prefillText);
       }
+      onConversationCreated(event.result.conversationId);
     },
     sendMessage: async (
       content: string,
@@ -359,15 +355,9 @@ export function useSplitWorkspaceScene({
       }
     },
     followUpSubagent: (trace: SubagentTrace) => {
-      if (!splitConversation || !canFollowUpSubagentTrace(
-        trace,
-        projection.turns,
-      )) return;
-      const task = trace.description ?? trace.providerRole ?? "delegated task";
-      requestComposerPrefill({
-        conversationId: splitConversation.id,
-        text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
-      });
+      if (splitConversation) {
+        requestSubagentFollowUp(splitConversation.id, trace, projection.turns);
+      }
     },
     ...turnActions,
     stopSubagent: async (trace: SubagentTrace) => {

@@ -42,6 +42,7 @@ import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
+import { createComposerRouteConversation } from "./composerRouteConversation";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
@@ -139,6 +140,8 @@ export const Composer = memo(function Composer({
   const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
+  const shownAttachmentsRef = useRef(attachments);
+  shownAttachmentsRef.current = attachments;
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
@@ -593,21 +596,31 @@ export const Composer = memo(function Composer({
       if (ownsSubmission) {
         activeSubmissionsRef.current.delete(submittedConversationId);
       }
-      const ownsCurrentComposer = ownsSubmission
-        && mountedRef.current
-        && conversationIdRef.current === submittedConversationId
+      const showsSubmittedConversation = mountedRef.current
+        && conversationIdRef.current === submittedConversationId;
+      const ownsCurrentComposer = ownsSubmission && showsSubmittedConversation;
       const editorUnchanged =
         (editorRevisionsRef.current.get(submittedConversationId) ?? 0)
           === submittedRevision
         && promptContextsRef.current.get(submittedConversationId)
           === (submittedPromptContext ?? null)
         && selectedPreviewUrlRef.current === submittedPreviewUrl;
-      if (ownsCurrentComposer && editorUnchanged) {
-        setMessage(submittedDraft);
-        attachmentsRef.current = submittedAttachments;
-        setAttachments(submittedAttachments);
-      } else {
-        for (const attachment of submittedAttachments) {
+      const restoresSubmission = ownsCurrentComposer && editorUnchanged;
+      const shownIds = new Set(shownAttachmentsRef.current.map(({ id }) => id));
+      const retained = !showsSubmittedConversation ? [] : restoresSubmission
+        ? submittedAttachments
+        : submittedAttachments.filter(({ id }) => shownIds.has(id));
+      const retainedIds = new Set(retained.map(({ id }) => id));
+      if (restoresSubmission) setMessage(submittedDraft);
+      if (retained.length > 0) {
+        attachmentsRef.current = [...retained, ...attachmentsRef.current];
+        setAttachments((current) => [
+          ...retained,
+          ...current.filter(({ id }) => !retainedIds.has(id)),
+        ]);
+      }
+      for (const attachment of submittedAttachments) {
+        if (!retainedIds.has(attachment.id)) {
           void releaseAttachmentRef.current(attachment.id);
         }
       }
@@ -1080,43 +1093,20 @@ export const Composer = memo(function Composer({
             routeCreationBlockedReason ?? routeCreationError
           }
           onDismissPendingRoute={dismissPendingRoute}
-          onCreateRouteConversation={() => {
-            if (!onCreateConversationForSelection || !pendingRoute) return;
-            setRouteCreationError(null);
-            setCreatingRouteConversation(true);
-            const sourceConversationId = conversation.id;
-            const sourceEditorRevision = editorRevisionsRef.current.get(
-              sourceConversationId,
-            ) ?? 0;
-            const prefillText = message.trim() ? message : undefined;
-            void onCreateConversationForSelection(
-              pendingRoute.selection,
-              prefillText || pendingRoute.configuration ? {
-                ...(prefillText ? { prefillText } : {}),
-                ...(pendingRoute.configuration ? { configuration: pendingRoute.configuration } : {}),
-              } : undefined,
-            ).then(
-              () => {
-                setPendingRoute(null);
-                if (
-                  prefillText
-                  && conversationIdRef.current === sourceConversationId
-                  && (editorRevisionsRef.current.get(sourceConversationId) ?? 0)
-                    === sourceEditorRevision
-                ) updateMessage("");
-              },
-              (error) => {
-                if (!mountedRef.current) return;
-                setRouteCreationError(
-                  error instanceof Error
-                    ? error.message
-                    : "The new chat could not be created.",
-                );
-              },
-            ).finally(() => {
-              if (mountedRef.current) setCreatingRouteConversation(false);
-            });
-          }}
+          onCreateRouteConversation={() => createComposerRouteConversation({
+            pendingRoute,
+            message,
+            conversationId: conversation.id,
+            onCreateConversationForSelection,
+            conversationIdRef,
+            mountedRef,
+            editorRevisionsRef,
+            textareaRef,
+            clearMessage: () => updateMessage(""),
+            setPendingRoute,
+            setRouteCreationError,
+            setCreatingRouteConversation,
+          })}
           textareaRef={textareaRef}
           message={message}
           onMessageChange={promptHistoryController.onMessageChange}

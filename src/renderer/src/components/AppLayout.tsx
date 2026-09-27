@@ -3,7 +3,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import type {
   AppSettings,
   Conversation,
@@ -232,7 +232,7 @@ export function activeConversationIsVisible(input: {
     && !input.mobileSidebarOpen;
 }
 
-export function AppLayout({
+export const AppLayout = memo(function AppLayout({
   platform,
   documentActive,
   documentVisible,
@@ -904,4 +904,4 @@ export function AppLayout({
       />
     </div>
   );
-}
+});

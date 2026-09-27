@@ -537,6 +537,10 @@ async function reconcileUnclaimedWindowsAppUpdate(
     );
     return;
   }
+  if (pending.phase === "prepared") {
+    completeWindowsUpdateRollback(journal, vault, pending);
+    return;
+  }
   if (options.version === pending.newVersion) {
     throw new Error(
       "The installed Windows update lacks completed candidate admission.",
@@ -544,10 +548,6 @@ async function reconcileUnclaimedWindowsAppUpdate(
   }
   if (options.version !== pending.oldVersion) {
     throw new Error("The pending Windows app update version is incompatible.");
-  }
-  if (pending.phase === "prepared") {
-    completeWindowsUpdateRollback(journal, vault, pending);
-    return;
   }
   if (pending.phase === "old-generation-cleanup-confirmed") {
     await completeAuthenticatedWindowsUpdateRollback(

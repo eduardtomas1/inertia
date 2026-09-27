@@ -694,24 +694,63 @@ describe("app update startup coordinator", () => {
     expect(fixture.vault.matches(fixture.journal.current()!)).toBe(true);
   });
 
-  it("rolls back a merely prepared native update before old-version startup", async () => {
-    const fixture = await windowsFixture();
-    const order: string[] = [];
-    const application = applicationFixture(true, order);
+  it.each(["1.2.3", "1.3.0", "1.4.0"] as const)(
+    "rolls back a merely prepared native update before %s startup",
+    async (version) => {
+      const fixture = await windowsFixture();
+      const order: string[] = [];
+      const application = applicationFixture(true, order);
+      const reportCandidateFailure = vi.fn();
 
-    await startApplicationWithUpdateHandoff(startupOptions(
-      fixture,
-      application.application,
-      {
-        version: "1.2.3",
-        bootstrap: async () => { order.push("bootstrap"); },
-      },
-    ));
+      await startApplicationWithUpdateHandoff(startupOptions(
+        fixture,
+        application.application,
+        {
+          version,
+          bootstrap: async () => { order.push("bootstrap"); },
+          reportCandidateFailure,
+        },
+      ));
 
-    expect(order).toEqual(["lock", "ready", "bootstrap"]);
-    expect(fixture.journal.current()).toBeNull();
-    expect(fixture.vault.matches(fixture.prepared)).toBe(false);
-  });
+      expect(reportCandidateFailure).not.toHaveBeenCalled();
+      expect(order).toEqual(["lock", "ready", "bootstrap"]);
+      expect(fixture.journal.current()).toBeNull();
+      expect(fixture.vault.matches(fixture.prepared)).toBe(false);
+    },
+  );
+
+  it.each(["1.3.0", "1.4.0"] as const)(
+    "keeps an invoked native installer unresolved at %s startup",
+    async (version) => {
+      const fixture = await windowsFixture();
+      const cleaned = fixture.journal.transition(
+        appUpdateHandoffOwner(fixture.prepared),
+        "old-generation-cleanup-confirmed",
+      )!;
+      const uncertain = fixture.journal.transition(
+        appUpdateHandoffOwner(cleaned),
+        "rollback-required",
+      )!;
+      const order: string[] = [];
+      const application = applicationFixture(true, order);
+      const reportCandidateFailure = vi.fn();
+
+      await startApplicationWithUpdateHandoff(startupOptions(
+        fixture,
+        application.application,
+        {
+          version,
+          bootstrap: async () => { order.push("bootstrap"); },
+          reportCandidateFailure,
+        },
+      ));
+
+      expect(reportCandidateFailure).toHaveBeenCalledOnce();
+      expect(order).toEqual(["lock", "exit"]);
+      expect(fixture.journal.current()).toEqual(uncertain);
+      expect(fixture.vault.matches(uncertain)).toBe(true);
+    },
+  );
 
   it.each(["cleanup", "rollback"] as const)(
     "recovers the exact old executable from an authenticated clean failure at %s",
@@ -1204,6 +1243,28 @@ describe.skipIf(process.platform === "win32")(
       )).toThrow("rollback authority changed");
       expect(fixture.journal.current()).toEqual(launched);
       await fixture.transaction.rollback();
+    });
+
+    it("recovers a staged candidate after the wall clock stepped back", async () => {
+      const fixture = await linuxFixture();
+      const launched = fixture.journal.transition(
+        appUpdateHandoffOwner(fixture.prepared),
+        "candidate-launched",
+        new Date(Date.parse(fixture.prepared.createdAt) + 30_000).toISOString(),
+      )!;
+      expect(launched.phase).toBe("candidate-launched");
+
+      const order: string[] = [];
+      const application = applicationFixture(true, order);
+      await startApplicationWithUpdateHandoff(linuxStartupOptions(
+        fixture,
+        application.application,
+        { bootstrap: async () => { order.push("bootstrap"); } },
+      ));
+
+      expect(order).toEqual(["lock", "ready", "bootstrap"]);
+      expect(fixture.journal.current()).toBeNull();
+      await expect(readFile(fixture.activePath, "utf8")).resolves.toBe("old");
     });
 
     it("recovers a commit completed before ownership-transfer publication", async () => {

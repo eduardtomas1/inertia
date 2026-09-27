@@ -103,7 +103,10 @@ export class AppUpdateInstallCoordinator {
   /** Returns true only for the updater-generated quit after complete cleanup. */
   allowBeforeQuit(): boolean {
     if (this.mode === "update-handoff") return true;
-    if (this.mode === "update-outcome-uncertain") {
+    if (
+      this.mode === "update-outcome-uncertain"
+      && !this.squirrelOwnsNativeOutcome()
+    ) {
       this.reportUnconfirmedShutdown();
       return false;
     }
@@ -243,7 +246,13 @@ export class AppUpdateInstallCoordinator {
 
       installInvocationStarted = true;
       const installResult = await service.quitAndInstall(() => {
-        if (this.mode === "update-preparing") this.mode = "update-handoff";
+        if (
+          this.mode === "update-preparing"
+          || (
+            this.mode === "update-outcome-uncertain"
+            && this.squirrelOwnsNativeOutcome()
+          )
+        ) this.mode = "update-handoff";
       });
       if (this.currentMode() === "normal-cleanup") return service.current();
       if (installResult === "native-outcome-uncertain") {
@@ -293,6 +302,10 @@ export class AppUpdateInstallCoordinator {
 
   private currentMode(): InstallMode {
     return this.mode;
+  }
+
+  private squirrelOwnsNativeOutcome(): boolean {
+    return (this.options.platform ?? process.platform) === "darwin";
   }
 
   private failClosed(cleanupConfirmed: boolean): AppUpdateStatus {

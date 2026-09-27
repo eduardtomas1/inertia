@@ -502,16 +502,19 @@ describe("application update install coordination", () => {
     expect(coordinator.allowBeforeQuit()).toBe(false);
   });
 
-  it("keeps the old generation resident when native installer outcome is uncertain", async () => {
+  it.each(["linux", "win32"] as const)("keeps the %s old generation resident when native installer outcome is uncertain", async (platform) => {
     const events: string[] = [];
     const update = service(events);
-    update.quitAndInstall.mockImplementationOnce(async () => {
+    let lateHandoff!: () => void;
+    update.quitAndInstall.mockImplementationOnce(async (onHandoff) => {
       events.push("install");
+      lateHandoff = onHandoff;
       return "native-outcome-uncertain";
     });
     const finishNormalShutdown = vi.fn();
     const onUnconfirmedShutdown = vi.fn(() => events.push("outcome-unconfirmed"));
     const coordinator = new AppUpdateInstallCoordinator({
+      platform,
       service: update,
       runtime: () => ({
         prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
@@ -534,8 +537,81 @@ describe("application update install coordination", () => {
     ]);
     expect(finishNormalShutdown).not.toHaveBeenCalled();
     expect(coordinator.allowBeforeQuit()).toBe(false);
+    lateHandoff();
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await Promise.resolve();
     expect(finishNormalShutdown).not.toHaveBeenCalled();
-    expect(onUnconfirmedShutdown).toHaveBeenCalledTimes(2);
+    expect(onUnconfirmedShutdown).toHaveBeenCalledTimes(3);
+  });
+
+  it("lets macOS quit normally after an uncertain Squirrel outcome", async () => {
+    const events: string[] = [];
+    const update = service(events);
+    update.quitAndInstall.mockImplementationOnce(async () => {
+      events.push("install");
+      return "native-outcome-uncertain";
+    });
+    const cleanup = vi.fn(async () => { events.push("cleanup"); return true; });
+    const finishNormalShutdown = vi.fn(() => events.push("normal-exit"));
+    const onUnconfirmedShutdown = vi.fn(() => events.push("outcome-unconfirmed"));
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "darwin",
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup,
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(events).toEqual([
+      "begin",
+      "cleanup",
+      "install",
+      "failed",
+      "outcome-unconfirmed",
+      "cleanup",
+      "normal-exit",
+    ]);
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    expect(finishNormalShutdown).toHaveBeenCalledOnce();
+  });
+
+  it("honours a late macOS Squirrel handoff after an uncertain outcome", async () => {
+    const events: string[] = [];
+    const update = service(events);
+    let lateHandoff!: () => void;
+    update.quitAndInstall.mockImplementationOnce(async (onHandoff) => {
+      events.push("install");
+      lateHandoff = onHandoff;
+      return "native-outcome-uncertain";
+    });
+    const finishNormalShutdown = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "darwin",
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup: vi.fn(async () => true),
+      finishNormalShutdown,
+      onUnconfirmedShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    lateHandoff();
+    expect(coordinator.allowBeforeQuit()).toBe(true);
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
   });
 
   it("treats a thrown native install request as ambiguous after cleanup", async () => {
@@ -550,6 +626,7 @@ describe("application update install coordination", () => {
     const onUnconfirmedShutdown = vi.fn();
     const reportError = vi.fn();
     const coordinator = new AppUpdateInstallCoordinator({
+      platform: "win32",
       service: update,
       runtime: () => ({
         prepareForUpdate: vi.fn(async () => ({ ready: true as const })),

@@ -140,13 +140,17 @@ async function sha256File(path: string, expectedSize: number): Promise<string | 
 }
 
 async function boundedText(response: Response): Promise<string> {
-  if (!response.ok || !response.body) throw new Error("Rollback checksum unavailable.");
+  if (!response.ok || !response.body) {
+    await response.body?.cancel();
+    throw new Error("Rollback checksum unavailable.");
+  }
   const declaredHeader = response.headers.get("content-length");
   const declared = Number(declaredHeader);
   if (
     declaredHeader !== null
     && (!Number.isFinite(declared) || declared < 0 || declared > MAX_CHECKSUM_BYTES)
   ) {
+    await response.body.cancel();
     throw new Error("Rollback checksum is oversized.");
   }
   const reader = response.body.getReader();
@@ -337,13 +341,17 @@ export class CanaryRollbackManager {
         `${baseUrl}/${name}`,
         "Rollback package download timed out.",
         async (response) => {
-          if (!response.ok || !response.body) throw new Error("Rollback package unavailable.");
+          if (!response.ok || !response.body) {
+            await response.body?.cancel();
+            throw new Error("Rollback package unavailable.");
+          }
           const declaredHeader = response.headers.get("content-length");
           const declared = Number(declaredHeader);
           if (
             declaredHeader !== null
             && (!Number.isFinite(declared) || declared <= 0 || declared > MAX_PACKAGE_BYTES)
           ) {
+            await response.body.cancel();
             throw new Error("Rollback package has an invalid size.");
           }
           const handle = await open(temporaryPath, "wx", 0o600);

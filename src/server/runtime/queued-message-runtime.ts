@@ -11,6 +11,8 @@ import {
   awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
 } from "./commands/message-send-preparation";
 
+const ADMISSION_RETRY_MS = 1_000;
+
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
@@ -22,6 +24,7 @@ export function createQueuedMessageRuntime(
   const running = new Map<string, Promise<void>>();
   const enqueueing = new Map<string, Promise<void>>();
   const again = new Set<string>();
+  const deferred = new Set<string>();
   const manualRetries = new Map<string, string>();
   const result = (conversationId: string, id?: string): MessageQueueResult => ({
     kind: "message.queue", conversationId, entries: store.queuedMessages.list(conversationId),
@@ -73,25 +76,39 @@ export function createQueuedMessageRuntime(
         payload: { conversationId, content: first.content, attachments: [], activate: false },
       });
     } catch (error) {
-      if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
+      if (options.signal.aborted || turns.isClosing()) store.queuedMessages.release(conversationId, first.id);
+      else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
       else store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
     } finally {
       changed(conversationId);
     }
   }
 
+  const retryAfterAdmission = (conversationId: string): void => {
+    if (options.signal.aborted || deferred.has(conversationId)) return;
+    deferred.add(conversationId);
+    setTimeout(() => {
+      deferred.delete(conversationId);
+      void schedule(conversationId).catch(() => undefined);
+    }, ADMISSION_RETRY_MS).unref();
+  };
+
   function schedule(conversationId: string): Promise<void> {
     if (options.signal.aborted || !dependencies.enableProviders) return Promise.resolve();
     again.add(conversationId);
     const previous = running.get(conversationId);
     if (previous) return previous;
+    if (deferred.has(conversationId)) return Promise.resolve();
+    let admitted = false;
     const task = options.track(async () => {
+      admitted = true;
       while (again.delete(conversationId) && !options.signal.aborted) {
         await dispatch(conversationId).catch(() => undefined);
       }
     }).finally(() => {
       running.delete(conversationId);
-      if (again.has(conversationId)) void schedule(conversationId).catch(() => undefined);
+      if (!admitted) retryAfterAdmission(conversationId);
+      else if (again.has(conversationId)) void schedule(conversationId).catch(() => undefined);
     });
     running.set(conversationId, task);
     return task;

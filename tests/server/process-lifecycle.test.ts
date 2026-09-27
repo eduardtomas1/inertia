@@ -405,6 +405,119 @@ describe("provider process-tree termination", () => {
     await expect(termination).resolves.toBe(false);
   });
 
+  it("escalates a refused graceful Windows taskkill to a forced tree kill before touching the root", async () => {
+    const child = fakeChild();
+    const graceful = fakeTaskkill();
+    const forced = fakeTaskkill();
+    const spawnProcess = vi.fn()
+      .mockReturnValueOnce(graceful)
+      .mockReturnValueOnce(forced);
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      false,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 100,
+      },
+    );
+
+    graceful.emit("close", 128);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawnProcess).toHaveBeenNthCalledWith(
+      2,
+      "taskkill.exe",
+      ["/pid", "4242", "/t", "/f"],
+      expect.objectContaining({ shell: false }),
+    );
+    expect(child.kill).not.toHaveBeenCalled();
+
+    forced.emit("close", 0);
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(true);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not escalate a refused graceful Windows taskkill after the root has exited", async () => {
+    const child = fakeChild();
+    const graceful = fakeTaskkill();
+    const spawnProcess = vi.fn(() => graceful);
+    child.stdio[1] = { closed: false };
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      false,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 25,
+      },
+    );
+
+    child.exitCode = 0;
+    graceful.emit("close", 128);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawnProcess).toHaveBeenCalledOnce();
+
+    child.stdio[1] = { closed: true };
+    child.emit("close", 0);
+    await expect(termination).resolves.toBe(false);
+  });
+
+  it.each([
+    { label: "confirms", forcedExitCode: 0, confirmed: true },
+    { label: "rejects", forcedExitCode: 1, confirmed: false },
+  ])("$label a graceful-then-forced Windows owned termination by its forced tree kill", async ({
+    forcedExitCode,
+    confirmed,
+  }) => {
+    const child = fakeChild();
+    child.kill = vi.fn(() => {
+      queueMicrotask(() => {
+        child.exitCode = 1;
+        child.emit("close", 1);
+      });
+      return true;
+    });
+    const spawnProcess = vi.fn((_command: string, args: string[]) => {
+      const taskkill = fakeTaskkill();
+      const forced = args.includes("/f");
+      queueMicrotask(() => {
+        taskkill.emit("close", forced ? forcedExitCode : 128);
+        if (forced && forcedExitCode === 0) {
+          child.exitCode = 1;
+          child.emit("close", 1);
+        }
+      });
+      return taskkill;
+    });
+    const terminate = createOwnedProcessTreeTermination(
+      child as never,
+      "Provider update process tree",
+      (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 25,
+      }),
+    );
+
+    const termination = terminate(false);
+    if (confirmed) await expect(termination).resolves.toBeUndefined();
+    else {
+      await expect(termination).rejects.toMatchObject({
+        code: "process-tree-termination-unconfirmed",
+      });
+    }
+    expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+      ["/pid", "4242", "/t"],
+      ["/pid", "4242", "/t", "/f"],
+    ]);
+    expect(child.kill).toHaveBeenCalledTimes(confirmed ? 0 : 1);
+  });
+
   it("keeps the Windows tree unconfirmed when taskkill times out", async () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();

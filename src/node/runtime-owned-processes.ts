@@ -47,6 +47,7 @@ import {
   signalExactDarwinGuardianStop as signalExactDarwinGuardianStopWith,
 } from "./runtime-owned-process-darwin-stop.js";
 import type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
+import { retireFailedRuntimeOwnedSpawn } from "./runtime-owned-process-spawn-failure.js";
 import {
   taintRuntimeOwnedProcessRegistry,
   type RuntimeOwnedProcessRegistryOptions,
@@ -847,6 +848,10 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     releaseConfirmation: null,
     settleReleaseConfirmation: null,
   };
+  if (child.pid === undefined) {
+    retireFailedRuntimeOwnedSpawn(registry, claim, child);
+    return child;
+  }
   if (registry.platform === "linux") {
     registry.claims.set(child, claim);
     child.once("close", (code, signal) => {
@@ -877,20 +882,6 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     });
     const admission = admitDarwinGuardian(registry, claim, child, spawnedAfterMs);
     trackAdmission(registry, claim, admission);
-    return child;
-  }
-  if (registry.platform === "win32" && child.pid === undefined) {
-    let spawnFailed = false;
-    registry.claims.set(child, claim);
-    child.once("error", () => {
-      if (child.pid === undefined) spawnFailed = true;
-    });
-    child.once("close", () => {
-      if (!spawnFailed || child.pid !== undefined) return;
-      try { releaseActiveClaim(registry, claim); } catch {
-        // Preserve the pending intent when its durable retirement fails.
-      }
-    });
     return child;
   }
   try {

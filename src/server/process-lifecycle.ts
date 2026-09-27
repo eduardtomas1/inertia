@@ -172,13 +172,15 @@ export function createOwnedProcessTreeTermination(
   };
 }
 
-function killDirectChild(child: ChildProcess, force: boolean): void {
+function killDirectChild(child: ChildProcess, force: boolean): boolean {
   try {
-    child.kill(force ? "SIGKILL" : "SIGTERM");
+    return child.kill(force ? "SIGKILL" : "SIGTERM");
   } catch {
-    // The child may already have exited.
+    return false;
   }
 }
+
+const unconfirmedWindowsTrees = new WeakSet<ChildProcess>();
 
 function inheritedWindowsSystemRoot(
   environment: NodeJS.ProcessEnv = process.env,
@@ -662,16 +664,25 @@ export async function terminateProcessTreeAndWait(
   if (platform === "win32") {
     // Never target a reused Windows PID after Node has already observed the
     // complete owned child close.
-    if (directChildResourcesAreClosed(child)) return true;
+    if (directChildResourcesAreClosed(child)) {
+      return !unconfirmedWindowsTrees.has(child);
+    }
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const startedAt = performance.now();
-    const treeTerminated = await terminateWindowsProcessTree(
-      pid,
-      force,
-      spawnProcess,
-      windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
-      waitMs,
-      "child",
+    const taskkill = (forced: boolean): Promise<boolean> =>
+      terminateWindowsProcessTree(
+        pid,
+        forced,
+        spawnProcess,
+        windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
+        waitMs,
+        "child",
+      );
+    const treeTerminated = await taskkill(force) || (
+      !force
+      && child.exitCode === null
+      && child.signalCode === null
+      && await taskkill(true)
     );
     if (treeTerminated) {
       // taskkill confirms that it issued termination for the owned tree, but
@@ -686,7 +697,7 @@ export async function terminateProcessTreeAndWait(
         elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
       return closed;
     }
-    killDirectChild(child, force);
+    if (killDirectChild(child, force)) unconfirmedWindowsTrees.add(child);
     // Direct-child fallback cannot prove that taskkill's unobserved
     // descendants stopped, even if the child releases its handles.
     await confirmWindowsChildResourcesClosed(

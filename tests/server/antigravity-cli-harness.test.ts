@@ -23,6 +23,7 @@ import type {
   ProviderStatusEvent,
   ProviderUsageEvent,
 } from "../../src/server/provider/contracts";
+import { MAX_PROVIDER_ACTIVITY_DETAIL_CHARS } from "../../src/server/provider/activity-detail";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -244,6 +245,33 @@ describe("Antigravity stream parsing", () => {
       event: "step_update",
       step_update: { step_index: 4, state: "DONE", tool_name: "run_command" },
     }))).toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
+  });
+
+  it("maps a tool that reports an error to failed activity with its detail", () => {
+    const step = (fields: Record<string, unknown>) => parseAntigravityLine(JSON.stringify({
+      event: "step_update",
+      step_update: { step_index: 4, step_type: "tool", tool_name: "run_command", ...fields },
+    }));
+    expect(step({
+      state: "DONE",
+      tool_info: { name: "run_command", parameters: { CommandLine: "false" }, output: "" },
+    })).toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
+    expect(step({
+      state: "DONE",
+      tool_info: { name: "run_command", error: { type: "CommandFailed", message: "exit status 1" } },
+    })).toEqual([{
+      kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "CommandFailed: exit status 1",
+    }]);
+    expect(step({ state: "DONE", tool_info: { error: { message: "denied" } } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "denied" }]);
+    expect(step({ state: "DONE", tool_info: { error: "timed out" } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "failed", detail: "timed out" }]);
+    for (const error of [null, {}, 7, "", { type: 3, message: [] }]) {
+      expect(step({ state: "DONE", tool_info: { error } }))
+        .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "completed" }]);
+    }
+    expect(step({ state: "ACTIVE", tool_info: { name: "run_command" } }))
+      .toEqual([{ kind: "tool", id: "4", label: "run_command", phase: "started" }]);
   });
 
   it("reads the documented result envelope and ignores unknown events", () => {
@@ -524,6 +552,46 @@ hang();
     });
     expect(result.sessionId).toBeUndefined();
     expect(sessions).toEqual([]);
+  });
+
+  it("records a failed tool once with bounded, scrubbed detail and lets the result decide the turn", async () => {
+    const root = fixtureRoot("antigravity failed tool");
+    const { command } = fakeAgy(root, `
+const failed = { event: "step_update", step_update: { step_index: 3, state: "DONE", step_type: "tool", tool_name: "run_command",
+  tool_info: { name: "run_command", error: { type: "CommandFailed", message: "api_key=sk-abcdefghijklmnopqrstuvwxyz0123 in " + ${JSON.stringify(root)} + " " + "x".repeat(100000) } } } };
+emit({ event: "step_update", step_update: { step_index: 3, state: "ACTIVE", step_type: "tool", tool_name: "run_command" } });
+emit(failed);
+emit(failed);
+emit({ event: "step_update", step_update: { step_index: 3, state: "DONE", step_type: "tool", tool_name: "run_command" } });
+emit({ event: "step_update", step_update: { step_index: 4, state: "DONE", text_delta: "Recovered" } });
+emit({ event: "result", result: { status: "SUCCESS", response: "Recovered", error: "" } });
+process.stdout.write("", () => process.exit(0));
+`);
+    const activities: ProviderActivityEvent[] = [];
+    const result = await managerFor(command).run(antigravityInput(root), {
+      onActivity: (event) => activities.push(event),
+    });
+    expect(result).toMatchObject({ status: "completed", text: "Recovered", cleanupConfirmed: true });
+    const tools = activities.filter((event) => event.kind === "tool");
+    expect(tools.map((event) => event.phase)).toEqual(["started", "failed"]);
+    expect(new Set(tools.map((event) => event.activityId)).size).toBe(1);
+    const detail = tools[1]!.detail ?? "";
+    expect(detail).toMatch(/^CommandFailed: .*\[redacted\] in <workspace> x/u);
+    expect(detail).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123");
+    expect(detail).not.toContain(root);
+    expect(detail.length).toBeLessThanOrEqual(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS);
+  });
+
+  it("fails closed when Antigravity reports a tool failure and then a failed result", async () => {
+    const root = fixtureRoot("antigravity failed tool failed turn");
+    const { command } = fakeAgy(root, `
+emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "run_command", tool_info: { error: { message: "exit status 1" } } } });
+emit({ event: "result", result: { status: "ERROR", response: "", error: "Model quota is exhausted." } });
+process.exit(0);
+`);
+    await expect(managerFor(command).run(antigravityInput(root))).resolves.toMatchObject({
+      status: "failed", failure: { terminalEvent: "result:error" }, cleanupConfirmed: true,
+    });
   });
 
   it("fails fast into the Connect prompt when Antigravity reports missing sign-in", async () => {

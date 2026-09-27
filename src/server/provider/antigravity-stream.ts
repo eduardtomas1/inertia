@@ -36,7 +36,7 @@ export interface AntigravityResult {
 export type AntigravityStreamEvent =
   | { kind: "session"; conversationId: string }
   | { kind: "text"; text: string }
-  | { kind: "tool"; id: string; label: string; phase: ProviderActivityPhase }
+  | { kind: "tool"; id: string; label: string; phase: ProviderActivityPhase; detail?: string }
   | { kind: "result"; result: AntigravityResult };
 
 export type AntigravityFailureKind =
@@ -74,6 +74,15 @@ function tokenCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function toolError(toolInfo: unknown): string | null {
+  if (!isObject(toolInfo)) return null;
+  const { error } = toolInfo;
+  if (!isObject(error)) return nonEmptyText(error);
+  const parts = [nonEmptyText(error.type), nonEmptyText(error.message)]
+    .filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(": ") : null;
 }
 
 export function antigravitySessionId(
@@ -170,11 +179,13 @@ export function parseAntigravityLine(
   const toolName = nonEmptyText(payload.tool_name);
   if (toolName) {
     const stepIndex = tokenCount(payload.step_index);
+    const error = toolError(payload.tool_info);
     events.push({
       kind: "tool",
       id: stepIndex === null ? toolName : String(stepIndex),
       label: toolName.slice(0, MAX_LABEL_CHARS),
-      phase: payload.state === "DONE" ? "completed" : "started",
+      phase: error ? "failed" : payload.state === "DONE" ? "completed" : "started",
+      ...(error ? { detail: error } : {}),
     });
     return events;
   }

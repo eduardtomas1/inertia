@@ -146,7 +146,7 @@ function startAntigravityRun(
   const terminationConfirmMs = harnessOptions.terminationConfirmMs ?? TERMINATION_CONFIRM_MS;
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
-  const tools = new Set<string>();
+  const tools = new Map<string, boolean>();
   let sessionId = antigravitySessionId(input.sessionId);
   let result: AntigravityResult | undefined;
   let failure: ProviderRunFailure | undefined;
@@ -199,10 +199,13 @@ function startAntigravityRun(
       resultText.append(event.text);
       emitter.text(event.text);
     } else if (event.kind === "tool") {
-      if (!tools.has(event.id) && tools.size >= MAX_TRACKED_TOOLS) return;
-      tools.add(event.id);
+      const finished = tools.get(event.id);
+      if (finished === undefined && tools.size >= MAX_TRACKED_TOOLS) return;
+      if (finished && event.phase !== "started") return;
+      tools.set(event.id, event.phase !== "started");
       emitter.activity("tool", event.phase, event.label, {
         activityId: `antigravity:${input.runId}:${event.id}`,
+        ...(event.detail ? { detail: event.detail } : {}),
       });
     } else {
       if (!adoptSession(event.result.conversationId)) return;

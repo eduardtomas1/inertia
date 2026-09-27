@@ -141,6 +141,13 @@ export interface ProviderSteerInput {
   imagePaths: readonly string[];
 }
 
+export class ProviderSteerDeliveryUnknownError extends Error {
+  constructor() {
+    super("The provider did not confirm whether it admitted the follow-up.");
+    this.name = "ProviderSteerDeliveryUnknownError";
+  }
+}
+
 export type ProviderRunStatus =
   | "starting"
   | "running"

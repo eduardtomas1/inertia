@@ -91,6 +91,7 @@ function classifiedMessageSendError(
   error: unknown,
   stage: MessageSendStage,
 ): RuntimeRequestError {
+  if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") return error;
   const code = `message-send/${stage}/unexpected`;
   if (stage === "turn-publication") {
     return new RuntimeRequestError(`The turn was admitted but could not start cleanly. Refresh this chat before retrying. [${code}]`, code, "ambiguous");

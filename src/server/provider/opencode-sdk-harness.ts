@@ -21,6 +21,7 @@ import {
 } from "./agent-harness";
 import {
   providerRunTerminal,
+  ProviderSteerDeliveryUnknownError,
   type ProviderRunFailure,
   type ProviderRunResult,
 } from "./contracts";
@@ -83,6 +84,7 @@ import {
   imageMime,
   isOpenCodeIdleEvent,
   objectValue,
+  openCodeRequestRefused,
   openCodeRuntimeFailure,
   resolveOpenCodeAgent,
   resolveOpenCodeModel,
@@ -983,9 +985,14 @@ function startOpenCodeRun(
               ownership.rejectFollowUp(id);
             }
             return accepted;
-          } catch {
-            ownership.rejectFollowUp(id);
-            return false;
+          } catch (error) {
+            if (openCodeRequestRefused(error)) {
+              ownership.rejectFollowUp(id);
+              return false;
+            }
+            hasAdmittedV2Work = true;
+            ownership.rejectPromptAdmission(id);
+            throw new ProviderSteerDeliveryUnknownError();
           } finally {
             activeV2Operations -= 1;
           }

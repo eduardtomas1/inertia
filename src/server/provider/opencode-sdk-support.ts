@@ -145,6 +145,11 @@ export function bounded(value: string): string {
   return value.slice(0, MAX_EVENT_TEXT_CHARS);
 }
 
+export function openCodeRequestRefused(error: unknown): boolean {
+  const status = error instanceof Error ? objectValue(error.cause)?.status : undefined;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
 export function objectValue(
   value: unknown,
 ): Record<string, unknown> | undefined {

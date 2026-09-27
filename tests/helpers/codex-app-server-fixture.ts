@@ -629,6 +629,18 @@ if (message.id === "input-rpc") {
 }
 if (message.method === "turn/steer") {
   const scenario = process.env.INERTIA_APP_SERVER_SCENARIO;
+  if (scenario === "steer-receipt-lost") return;
+  if (scenario === "steer-receipt-refused") {
+    send({ id: message.id, error: { code: -32600, message: "expected turn mismatch" } });
+    return;
+  }
+  if (scenario === "steer-receipt-late") {
+    setTimeout(() => sendBatch([
+      { id: message.id, result: { turnId } },
+      { method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } },
+    ]), 1_500);
+    return;
+  }
   const receipt = scenario === "steer-receipt-missing" ? {}
     : scenario === "steer-receipt-foreign" ? { turnId: "foreign-turn" }
     : scenario === "steer-receipt-wrong-type" ? { turnId: 1 }

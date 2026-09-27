@@ -2,7 +2,7 @@ import { snapshotPromptContext } from "../../../shared/snapshots";
 import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
 import type { ChatAttachment, ChatMessage } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
-import type { ProviderSteerInput } from "../../provider/contracts";
+import { ProviderSteerDeliveryUnknownError, type ProviderSteerInput } from "../../provider/contracts";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ActiveTurn,
@@ -95,11 +95,18 @@ export class TurnFollowUpCoordinator {
     if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
       throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
     }
-    const accepted = await this.options.providers.steer(
-      lease.conversationId,
-      { content: [followUp, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
-      { runId: active.turn.runId, turnId: active.turn.id },
-    );
+    let accepted: boolean;
+    try {
+      accepted = await this.options.providers.steer(
+        lease.conversationId,
+        { content: [followUp, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
+        { runId: active.turn.runId, turnId: active.turn.id },
+      );
+    } catch (error) {
+      if (!(error instanceof ProviderSteerDeliveryUnknownError)) throw error;
+      onProviderAcknowledged?.();
+      throw new RuntimeRequestError("The provider did not confirm whether it received this follow-up. Check this chat before retrying.", undefined, "ambiguous");
+    }
     if (!accepted) return null;
     onProviderAcknowledged?.();
     const ownerAfterSteer = this.options.activeForConversation(

@@ -40,7 +40,7 @@ export function CopyAnswerButton({
       <button
         type="button"
         className="turn-action"
-        title={copied ? "Answer copied" : error ?? ariaLabel}
+        title={copied ? "Answer copied" : ariaLabel}
         aria-label={copied ? copiedAriaLabel : ariaLabel}
         onClick={() => void copy(content)}
       >
@@ -54,7 +54,7 @@ export function CopyAnswerButton({
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Answer copied." : ""}
       </span>
-      <span className="visually-hidden" role="alert">{error}</span>
+      {error && <span className="visually-hidden" role="alert">{error}</span>}
     </>
   );
 }

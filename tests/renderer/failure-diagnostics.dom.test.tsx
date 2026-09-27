@@ -294,6 +294,36 @@ describe("turn failure diagnostics", () => {
     expect(screen.queryByRole("button", { name: "Diagnostics copied" })).toBeNull();
   });
 
+  it.each([
+    ["Copy diagnostics", failedTurn()],
+    ["Copy final answer", {
+      ...failedTurn(),
+      status: "completed" as const,
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: "final-answer",
+    }],
+  ])("mounts a timeline alert for %s only while its copy failure is shown", async (name, turn) => {
+    const copyText = vi.fn(async () => false);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText } as unknown as typeof window.inertia,
+    });
+    renderFailure(turn);
+
+    const copy = await screen.findByRole("button", { name });
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert"))
+      .toHaveTextContent("Couldn't copy. Try again or select the text manually.");
+
+    copyText.mockResolvedValue(true);
+    fireEvent.click(copy);
+    await waitFor(() => expect(copy).toHaveTextContent("Copied"));
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
   it("defensively bounds legacy detail and copied output", () => {
     const detail = Array.from(
       { length: 200 },

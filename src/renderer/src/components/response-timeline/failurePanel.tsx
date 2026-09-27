@@ -93,7 +93,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
             type="button"
             className="turn-failure-action"
             aria-label={copied ? "Diagnostics copied" : "Copy diagnostics"}
-            title={copied ? "Diagnostics copied" : copyError ?? "Copy scrubbed diagnostics"}
+            title={copied ? "Diagnostics copied" : "Copy scrubbed diagnostics"}
             onClick={() => void copy(presentation.copyText)}
           >
             {copied
@@ -148,7 +148,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Diagnostics copied." : ""}
       </span>
-      <span className="visually-hidden" role="alert">{copyError}</span>
+      {copyError && <span className="visually-hidden" role="alert">{copyError}</span>}
     </section>
   );
 });

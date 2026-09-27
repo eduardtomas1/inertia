@@ -17,11 +17,13 @@ import {
 import { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
 import { clearPendingInteractionsForTurn } from "../pending-interaction-registry";
-import type {
-  ProviderEvent,
-  ProviderRunFailure,
-  ProviderRunResult,
-  ProviderSteerInput,
+import {
+  isProviderRunRefusal,
+  isUnreceiptedProviderRunRefusal,
+  type ProviderEvent,
+  type ProviderRunFailure,
+  type ProviderRunResult,
+  type ProviderSteerInput,
 } from "../../provider/contracts";
 import type {
   ActiveTurn,
@@ -886,7 +888,17 @@ export class TurnController {
         .catch(() => undefined);
     } catch (error) {
       acknowledge(false);
-      requestProviderCancellation(this.providers, active.conversation.id);
+      const owner = {
+        conversationId: active.conversation.id,
+        runId: active.turn.runId,
+        turnId: active.turn.id,
+      };
+      if (isUnreceiptedProviderRunRefusal(error, owner)) {
+        active.providerRunStarted = false;
+        this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
+      } else if (!isProviderRunRefusal(error, owner)) {
+        requestProviderCancellation(this.providers, active.conversation.id);
+      }
       this.settle(active, "failed", "turn-start-failed", publicTurnError(error));
       return { accepted: false, started };
     }

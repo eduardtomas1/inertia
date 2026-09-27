@@ -154,6 +154,49 @@ describe("provider admission cleanup proof", () => {
     }
   });
 
+  it("releases a turn whose refusal the coordinator could not record without asking for a stop", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const value = fixture();
+    value.capabilityAdmissible.mockReturnValue(true);
+    for (let index = 0; index < 64; index += 1) {
+      expect(() => value.coordinator.run({
+        ...value.input,
+        conversationId: runtime.conversationId,
+        runId: `filler-run-${index}`,
+        turnId: `filler-turn-${index}`,
+        prompt: " ",
+      })).toThrow("A prompt is required.");
+    }
+    vi.spyOn(runtime.provider, "run").mockImplementation((input, callbacks) =>
+      value.coordinator.run({ ...input, performanceModeTransition: "to-fast" }, callbacks));
+    vi.spyOn(runtime.provider, "cancel").mockImplementation(() =>
+      value.coordinator.cancel(runtime.conversationId));
+    vi.spyOn(runtime.provider, "isRunning").mockImplementation((id) =>
+      value.coordinator.isRunning(id));
+    const stopOwned = vi.spyOn(runtime.provider, "stopOwned").mockImplementation((id, owner) =>
+      value.coordinator.stopOwned(id, owner));
+
+    try {
+      const first = runtime.controller.queue({
+        conversationId: runtime.conversationId,
+        content: "Refuse this malformed continuation after the receipt store is full.",
+      });
+      expect(runtime.controller.start(first.turn.id)).toBe(false);
+      await flushTurnControllerTestPromises();
+
+      expect(stopOwned).not.toHaveBeenCalled();
+      expect(value.start).not.toHaveBeenCalled();
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: "failed",
+        terminalReason: "turn-start-failed",
+      });
+      expect(runtime.store.providerRunOwnership.forConversation(runtime.conversationId)).toEqual([]);
+      expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("confirms only the exact refused conversation, run, and turn", async () => {
     const { coordinator, input, start, acquireInstallationUse } = fixture();
     expect(() => coordinator.run(input)).toThrow("does not attest");

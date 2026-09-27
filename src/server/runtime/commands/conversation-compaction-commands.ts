@@ -20,6 +20,7 @@ import {
 import type { RuntimeStore } from "../../database";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
+import { isUnreceiptedProviderRunRefusal } from "../../provider/contracts";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { IsolatedRunController } from "../reviews/isolated-run-controller";
@@ -292,7 +293,14 @@ export function createConversationCompactionCommandHandler(
           },
         });
       } catch (error) {
-        if (!await confirmCleanup()) {
+        if (
+          !isUnreceiptedProviderRunRefusal(error, {
+            conversationId: conversation.id,
+            runId: compactionRunId,
+            turnId: compactionTurnId,
+          })
+          && !await confirmCleanup()
+        ) {
           releaseAuthority = false;
           throw new RuntimeRequestError(
             "Provider process cleanup could not be confirmed. This chat and checkout remain locked until the local runtime restarts safely.",

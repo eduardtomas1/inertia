@@ -1,5 +1,14 @@
 import { expect, type Page } from "@playwright/test";
 
+export async function readFromTranscriptStart(page: Page): Promise<void> {
+  const transcript = page.getByLabel("Thread transcript", { exact: true });
+  const latest = page.getByRole("button", { name: "Jump to latest", exact: true });
+  await expect(async () => {
+    await transcript.press("Home");
+    await expect(latest).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+}
+
 export async function loadSeededConversationTurns(page: Page, expectedCount: number): Promise<void> {
   const transcript = page.getByLabel("Thread transcript", { exact: true });
   const loadedCount = () => transcript.evaluate((element) => {
@@ -13,6 +22,7 @@ export async function loadSeededConversationTurns(page: Page, expectedCount: num
   let loadedPages = 0;
   for (; loadedPages < 10 && await loadedCount() < expectedCount; loadedPages++) {
     const before = await loadedCount();
+    if (loadedPages === 0) await readFromTranscriptStart(page);
     await earlier.scrollIntoViewIfNeeded();
     await earlier.click();
     await expect.poll(loadedCount).toBeGreaterThan(before);

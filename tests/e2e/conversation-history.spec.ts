@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { readFromTranscriptStart } from "./support/conversation-history";
 
 let app: AppFixture;
 const turns: string[] = [];
@@ -34,7 +35,7 @@ test("loads older pages without moving the reading position or losing the oldest
   const { page } = app;
   const transcript = page.getByLabel("Thread transcript", { exact: true });
   await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
-  await transcript.press("Home");
+  await readFromTranscriptStart(page);
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
   await earlier.scrollIntoViewIfNeeded();
   const anchor = page.locator(`[data-turn-id="${turns[45]}"]`).first();

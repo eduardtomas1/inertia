@@ -243,6 +243,65 @@ describe("durable runtime message queue", () => {
     } finally { await f.close(); }
   });
 
+  it.each([
+    ["failed", "an unavailable admission", () => Promise.resolve(null)],
+    ["cancelled", "an admission timeout", () => Promise.reject(new MessageSendPreparationTimeoutError("Preparing this message took too long. No turn was started."))],
+  ] as const)("retries an explicit send once more after a %s turn and %s", async (status, _name, failure) => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id); f.provider.resolve({ status }); await f.drain();
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockImplementationOnce(failure);
+      await f.command("message.queue.send", id);
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(admission).toHaveBeenCalledTimes(2);
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("retries an explicit send only once after a failed turn and leaves it queued for another request", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id); f.provider.resolve({ status: "failed" }); await f.drain();
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      await f.command("message.queue.send", id);
+      await vi.waitFor(() => expect(admission).toHaveBeenCalledTimes(2));
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+      expect(f.provider.runCount).toBe(1);
+      await f.command("message.queue.send", id);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("does not carry an explicit send retry to a different queued message", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id); f.provider.resolve({ status: "failed" }); await f.drain();
+      const first = randomUUID(); await f.command("message.queue.enqueue", first);
+      const second = randomUUID(); await f.command("message.queue.enqueue", second); await f.drain();
+      const cleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementation(async (ids, deadline) => {
+        if (deadline === undefined) f.store.queuedMessages.cancel(f.conversationId, first);
+        return cleanup(ids, deadline);
+      });
+      vi.spyOn(f.controller, "acquireTurnAdmission").mockResolvedValueOnce(null);
+      await f.command("message.queue.send", first);
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, first)?.state).toBe("cancelled"));
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, second)?.state).toBe("waiting");
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
   it("consumes a wake-up that arrives after the dispatch loop finishes but before it is released", async () => {
     const f = await fixture();
     try {

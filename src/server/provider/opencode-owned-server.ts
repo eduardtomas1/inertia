@@ -16,7 +16,6 @@ import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
 
 const START_TIMEOUT_MS = 10_000;
-const EXITED_SERVER_CLOSE_WAIT_MS = 5_000;
 const MAX_ERROR_CHARS = 1024 * 1024;
 
 export class OpenCodeServerCleanupUnconfirmedError extends Error {
@@ -72,7 +71,6 @@ export async function startOwnedOpenCodeServer(
   terminationSubject: string,
   signal?: AbortSignal,
   pure = true,
-  platform: NodeJS.Platform = process.platform,
 ): Promise<{
   child: ChildProcessWithoutNullStreams;
   terminate: OwnedProcessTreeTermination;
@@ -81,7 +79,7 @@ export async function startOwnedOpenCodeServer(
   const invocation = openCodeServerProcessInvocation(
     executable,
     environment,
-    platform,
+    process.platform,
     pure,
   );
   const ownedInvocation = runtimeOwnedProcessInvocation(
@@ -97,25 +95,14 @@ export async function startOwnedOpenCodeServer(
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   }));
-  const terminateTree = createOwnedProcessTreeTermination(
+  const terminate = createOwnedProcessTreeTermination(
     child,
     terminationSubject,
     terminateOwnedProcessTree,
   );
-  const childClosed = new Promise<void>((resolve) => {
-    child.once("close", () => resolve());
-  });
-  const terminate: OwnedProcessTreeTermination = platform === "win32"
-    ? async (force) => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          await closeWithin(childClosed, EXITED_SERVER_CLOSE_WAIT_MS);
-        }
-        await terminateTree(force);
-      }
-    : terminateTree;
   // Arm ownership while Node still has a live process/stdio capability. A
   // later close-only cleanup must not signal a recycled POSIX PID or PGID.
-  child.once(platform === "win32" ? "close" : "exit", () => {
+  child.once("exit", () => {
     void terminate(true).catch(() => undefined);
   });
   child.stdin.end();
@@ -254,21 +241,6 @@ export async function withOpenCodeRequestDeadline<T>(
   } finally {
     if (timer) clearTimeout(timer);
     parentSignal?.removeEventListener("abort", cancel);
-  }
-}
-
-async function closeWithin(closed: Promise<void>, waitMs: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      closed,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, waitMs);
-        timer.unref();
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 

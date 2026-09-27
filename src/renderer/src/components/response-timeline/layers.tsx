@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
@@ -337,25 +337,17 @@ export function AgentExecutionLayer({
 
 export interface FinalAnswerPresentation {
   content: string;
-  phase: "streaming" | "settling" | "persisted";
-  markdownStreaming: boolean;
-  showCaret: boolean;
-  terminalAnswer: ChatMessage | null;
+  terminalAnswer: ChatMessage;
 }
 
 export function resolveFinalAnswerPresentation(
   turn: Pick<ResponseTurn, "isActive" | "terminalAssistantMessage">,
-  _liveContent: string,
-  _retainedLiveContent: string,
 ): FinalAnswerPresentation | null {
   if (turn.isActive) return null;
   const terminalAnswer = turn.terminalAssistantMessage;
   if (!terminalAnswer?.content) return null;
   return {
     content: terminalAnswer.content,
-    phase: "persisted",
-    markdownStreaming: false,
-    showCaret: false,
     terminalAnswer,
   };
 }
@@ -363,24 +355,13 @@ export function resolveFinalAnswerPresentation(
 export function FinalAnswerDocument({
   turn,
   props,
-  liveContent,
 }: {
   turn: ResponseTurn;
   props: ResponseTimelineProps;
-  liveContent: string;
 }): React.JSX.Element | null {
-  const retainedLiveContent = useRef(liveContent);
-  if (turn.isActive && liveContent) retainedLiveContent.current = liveContent;
-  const presentation = resolveFinalAnswerPresentation(
-    turn,
-    liveContent,
-    retainedLiveContent.current,
-  );
+  const presentation = resolveFinalAnswerPresentation(turn);
   useLayoutEffect(() => {
-    if (
-      presentation?.phase === "persisted"
-      && presentation.content.includes("STREAM_PROVIDER_COMPLETE_")
-    ) {
+    if (presentation?.content.includes("STREAM_PROVIDER_COMPLETE_")) {
       const sampleNumber = presentation.content.match(
         /STREAM_PROVIDER_COMPLETE_(\d+)_/u,
       )?.[1];
@@ -388,19 +369,15 @@ export function FinalAnswerDocument({
         markTestStreamingStage(`final-markdown-commit:${sampleNumber}`);
       }
     }
-  }, [presentation?.content, presentation?.phase]);
+  }, [presentation?.content]);
   if (!presentation) return null;
-  const isStreaming = presentation.phase === "streaming";
 
   return (
     <article
-      className={clsx(
-        "message is-assistant turn-final-answer-document",
-        isStreaming ? "is-streaming" : "is-final-answer",
-      )}
-      aria-label={isStreaming ? "Streaming assistant answer" : "Final assistant answer"}
-      data-answer-phase={presentation.phase}
-      data-terminal-answer-id={presentation.terminalAnswer?.id}
+      className="message is-assistant turn-final-answer-document is-final-answer"
+      aria-label="Final assistant answer"
+      data-answer-phase="persisted"
+      data-terminal-answer-id={presentation.terminalAnswer.id}
       data-turn-jump-target="final"
       data-turn-layer="final-answer"
       tabIndex={-1}
@@ -413,7 +390,6 @@ export function FinalAnswerDocument({
         <span data-final-answer-identity="historical-model-selection">
           {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
         </span>
-        {presentation.showCaret && <span className="live-label">Live</span>}
       </header>
       <ResponseMarkdown
         content={presentation.content}
@@ -421,7 +397,6 @@ export function FinalAnswerDocument({
         projectId={props.projectId}
         conversationId={props.conversationId}
         defaultCodeWrap={props.defaultCodeWrap}
-        streaming={presentation.markdownStreaming}
         onOpenProjectFile={props.onOpenTurnFile}
       />
     </article>
@@ -441,11 +416,13 @@ export function SupportingLedgerLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
+  const consolidatesSettledWork = !turn.isActive
+    && shouldConsolidateSettledWorkIntoRunDetails(turn);
+  const settledWorkStream = useMemo(
+    () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
+    [consolidatesSettledWork, turn],
+  );
   if (turn.isActive) return null;
-  const consolidatesSettledWork = shouldConsolidateSettledWorkIntoRunDetails(turn);
-  const settledWorkStream = consolidatesSettledWork
-    ? buildTurnExecutionStream(turn)
-    : [];
   const includesReasoning = consolidatesSettledWork
     && props.showThinking
     && Boolean(turn.reasoning?.content);

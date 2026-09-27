@@ -12,7 +12,7 @@ import type {
   ChatMessage,
 } from "@shared/contracts";
 import { formatClockTime } from "../../lib/format";
-import { writeClipboardText } from "../../utils/clipboard";
+import { useCopiedState } from "../../hooks/useCopiedState";
 import {
   formatElapsed,
   turnExecutionElapsedMs,
@@ -26,21 +26,6 @@ import { shouldShowChangedFilesSummary } from "./changedFiles";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
 
-function useCopyAction(): [boolean, (content: string) => Promise<void>] {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-  }, []);
-  const copy = async (content: string): Promise<void> => {
-    if (!await writeClipboardText(content)) return;
-    setCopied(true);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setCopied(false), 1_500);
-  };
-  return [copied, copy];
-}
-
 export function CopyAnswerButton({
   content,
   ariaLabel = "Copy answer",
@@ -48,14 +33,14 @@ export function CopyAnswerButton({
   content: string;
   ariaLabel?: string;
 }): React.JSX.Element {
-  const [copied, copy] = useCopyAction();
+  const { copied, error, copy } = useCopiedState();
   const copiedAriaLabel = `${ariaLabel.replace(/^Copy\s+/u, "")} copied`;
   return (
     <>
       <button
         type="button"
         className="turn-action"
-        title={copied ? "Answer copied" : ariaLabel}
+        title={copied ? "Answer copied" : error ?? ariaLabel}
         aria-label={copied ? copiedAriaLabel : ariaLabel}
         onClick={() => void copy(content)}
       >
@@ -64,11 +49,12 @@ export function CopyAnswerButton({
           iconState={copied ? "copied" : "copy"}
           size={12}
         />
-        <span>{copied ? "Copied" : "Copy"}</span>
+        <span>{copied ? "Copied" : error ? "Copy failed" : "Copy"}</span>
       </button>
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Answer copied." : ""}
       </span>
+      <span className="visually-hidden" role="alert">{error}</span>
     </>
   );
 }

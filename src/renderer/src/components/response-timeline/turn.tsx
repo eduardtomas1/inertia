@@ -145,7 +145,6 @@ function TurnTimelineComponent({
           <FinalAnswerDocument
             turn={turn}
             props={props}
-            liveContent={liveContent}
           />
 
           <SupportingLedgerLayer

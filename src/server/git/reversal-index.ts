@@ -26,7 +26,7 @@ import {
   sameCommitLockIdentity,
 } from "./commit-transaction";
 import { literalPathspecs } from "./paths";
-import { runGit } from "./runner";
+import { runGit, runGitInspection } from "./runner";
 import { GitError } from "./types";
 
 /** Restore only our index entry, while holding Git's native writer lock. */
@@ -75,14 +75,14 @@ export async function restoreReversalIndexEntry(
     const stage = join(scratch, "index");
     await writeFile(stage, original, { flag: "wx", mode: 0o600 });
     const environment = { GIT_INDEX_FILE: stage };
-    const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", ...literalPathspecs([path])], {
+    const listed = await runGitInspection(root, ["ls-files", "--stage", "-z", "--", ...literalPathspecs([path])], {
       environment, maxOutputBytes: 4_352,
       failureMessage: "Unable to verify the staged reversal entry.",
     });
     if (listed.stdout.toString("utf8") !== `${expected.mode} ${expected.oid} 0\t${path}\0`) {
       throw new GitError("conflict", "Newer staged changes were preserved; the reversal needs recovery.");
     }
-    await runGit(root, ["update-index", "--cacheinfo", restored.mode, restored.oid, path], {
+    await runGit(root, ["-c", "core.fsmonitor=false", "update-index", "--cacheinfo", restored.mode, restored.oid, path], {
       environment, maxOutputBytes: 256,
       failureMessage: "Unable to restore the staged reversal entry.",
     });

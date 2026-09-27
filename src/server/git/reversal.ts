@@ -26,6 +26,7 @@ import {
 } from "./paths";
 import {
   runGit,
+  runGitInspection,
 } from "./runner";
 import {
   getRepositoryStatus,
@@ -99,7 +100,7 @@ async function completeLayerPatch(root: string, layer: "index" | "worktree", pat
     ...(path ? literalPathspecs([path]) : []),
   ];
   try {
-    const result = await runGit(root, args, {
+    const result = await runGitInspection(root, args, {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: `Unable to inspect the ${layer === "index" ? "Git index" : "working tree"}.`,
     });
@@ -127,7 +128,7 @@ async function captureRepositoryState(
     ),
     completeLayerPatch(root, "index"),
     completeLayerPatch(root, "worktree"),
-    runGit(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
+    runGitInspection(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: "Unable to validate the repository state.",
     }),

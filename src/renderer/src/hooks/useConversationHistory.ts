@@ -68,9 +68,10 @@ export function useConversationHistory({ conversationId, online, detailState, se
     const before = state.detail.history?.older;
     if (before) void load({ before }, "older");
   }, [conversationId, load]);
+  const ready = detailState?.state === "ready" && detailState.conversationId === conversationId;
   useEffect(() => {
-    if (online && conversationId && interruptedOlder.current === conversationId) loadOlder();
-  }, [conversationId, loadOlder, online]);
+    if (online && ready && conversationId && interruptedOlder.current === conversationId) loadOlder();
+  }, [conversationId, loadOlder, online, ready]);
   useEffect(() => {
     const focusMessage = () => {
       if (!conversationId) return;

@@ -2288,4 +2288,38 @@ describe("useConversationProjection pending interactions", () => {
       secondaryApproval,
     ]);
   });
+
+  it("retries an interrupted older page after a second reconnect rebuilds a failed chat detail", async () => {
+    const source = createEventSource();
+    const older = { at: "2026-07-28T12:00:00.000Z", id: "older-message", kind: "message" as const };
+    const detailLoads: Extract<CommandWithoutId, { type: "conversation.detail.load" }>["payload"][] = [];
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type !== "conversation.detail.load") return Promise.resolve({ type: "request.ok", requestId: crypto.randomUUID() });
+      detailLoads.push(command.payload);
+      if (command.payload.history) return new Promise<ServerEvent>(() => undefined);
+      return Promise.resolve({ type: "request.result", requestId: crypto.randomUUID(), result: detailLoads.filter(({ history }) => !history).length === 2
+        ? { kind: "conversation.detail", conversationId: primaryId, state: "failed", message: "Temporarily unavailable." }
+        : { kind: "conversation.detail", conversationId: primaryId, state: "ready", detail: { conversation: conversation(primaryId),
+          agentTurns: [], turnGitArtifacts: [], messages: [], activities: [], subagents: [], reasonings: [], usage: [], plans: [],
+          goals: [], checkpoints: [], reviewSummaries: [], reviewStates: [], reviewNotes: [], history: { older } } } });
+    });
+    const hook = renderHook(({ status }: { status: "online" | "offline" }) => useConversationProjection({ snapshot, status, request,
+      subscribe: source.subscribe, enabled: true, autoOpenPlan: false, onOpenPlan: vi.fn(), onTerminal: vi.fn() }),
+    { initialProps: { status: "online" as "online" | "offline" } });
+    const olderLoads = () => detailLoads.filter(({ history }) => history).length;
+    const reconnect = () => {
+      hook.rerender({ status: "offline" });
+      source.emit({ type: "server.welcome", protocolVersion: 1, snapshot, sync: { runtimeGeneration: "reconnected", latestSequence: 1 } });
+      hook.rerender({ status: "online" });
+    };
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+    act(() => hook.result.current.history.loadOlder());
+    reconnect();
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("failed"));
+    expect(olderLoads()).toBe(2);
+    reconnect();
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+    await waitFor(() => expect(olderLoads()).toBe(3));
+    expect(detailLoads.at(-1)).toEqual({ conversationId: primaryId, history: { before: older } });
+  });
 });

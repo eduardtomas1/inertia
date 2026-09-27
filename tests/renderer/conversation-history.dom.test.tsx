@@ -191,6 +191,50 @@ describe("history loads interrupted by the connection", () => {
     expect(hook.result.current.history.loading).toBe(false);
   });
 
+  it("retries an interrupted older page once after the reconnected chat's detail becomes ready again", async () => {
+    const dropped = deferred();
+    const retried = deferred();
+    const request = vi.fn().mockImplementationOnce(() => dropped.promise).mockImplementationOnce(() => retried.promise);
+    const hook = renderHook(({ conversationId, online }) => {
+      const [state, setState] = useState<ConversationDetailViewState | null>({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") });
+      return { state, setState, history: useConversationHistory({ conversationId, online, detailState: state, setDetailState: setState, request }) };
+    }, { initialProps: { conversationId: "chat", online: true } });
+    act(() => hook.result.current.history.loadOlder());
+    hook.rerender({ conversationId: "chat", online: false });
+    act(() => hook.result.current.setState({ conversationId: "chat", state: "loading" }));
+    hook.rerender({ conversationId: "chat", online: true });
+    const loadOlder = hook.result.current.history.loadOlder;
+    expect(request).toHaveBeenCalledOnce();
+    act(() => hook.result.current.setState({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") }));
+    expect(hook.result.current.history.loadOlder).toBe(loadOlder);
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[0]).toMatchObject({ payload: { conversationId: "chat", history: { before: cursor } } });
+    act(() => hook.result.current.setState({ conversationId: "chat", state: "loading" }));
+    act(() => hook.result.current.setState({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") }));
+    await act(async () => retried.resolve(ready("old")));
+    await act(async () => dropped.resolve(ready("stale")));
+    expect(loadedMessageIds(hook.result.current.state)).toEqual(["message-old", "message-recent"]);
+    act(() => hook.result.current.setState({ conversationId: "chat", state: "loading" }));
+    act(() => hook.result.current.setState({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") }));
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry an interrupted page when another chat's detail becomes ready", () => {
+    const request = vi.fn(() => deferred().promise);
+    const hook = renderHook(({ conversationId, online }) => {
+      const [state, setState] = useState<ConversationDetailViewState | null>({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") });
+      return { setState, history: useConversationHistory({ conversationId, online, detailState: state, setDetailState: setState, request }) };
+    }, { initialProps: { conversationId: "chat", online: true } });
+    act(() => hook.result.current.history.loadOlder());
+    hook.rerender({ conversationId: "chat", online: false });
+    act(() => hook.result.current.setState(null));
+    hook.rerender({ conversationId: "other", online: true });
+    act(() => hook.result.current.setState({ kind: "conversation.detail", conversationId: "other", state: "ready", detail: { ...detail("other"), conversation: { id: "other" } } as ConversationDetail }));
+    hook.rerender({ conversationId: "chat", online: true });
+    act(() => hook.result.current.setState({ kind: "conversation.detail", conversationId: "chat", state: "ready", detail: detail("recent") }));
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   it("reports whether history can be requested and ignores older loads while offline", () => {
     const request = vi.fn().mockResolvedValue(ready("old"));
     const hook = connectedHistory(request);

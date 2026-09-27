@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -143,6 +143,72 @@ describe("Private Connect encrypted store", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  describe("interrupted stage recovery", () => {
+    const encoded = (state: PersistedPrivateConnect) => Buffer.from(JSON.stringify(state)).toString("base64");
+    const padded = () => {
+      const state = value();
+      while (!encoded(state).endsWith("=")) state.audit.push({
+        id: `11111111-1111-4111-8111-${String(state.audit.length).padStart(12, "0")}`,
+        type: "prompt.accepted", deviceId: "22222222-2222-4222-8222-222222222222",
+        detail: "Content-free audit event.", createdAt: "2030-01-01T00:00:00.000Z",
+      });
+      return state;
+    };
+    const torn: ReadonlyArray<readonly [string, () => string]> = [
+      ["a one-character stage", () => "A"],
+      ["a stage missing its padding", () => encoded(padded()).replace(/=+$/u, "")],
+      ["a canonical-length truncated stage", () => {
+        const complete = encoded(value());
+        return complete.slice(0, complete.length - (complete.length % 4 || 4) - 4);
+      }],
+    ];
+    async function withDirectory(run: (directory: string, path: string, stage: (suffix: string) => string) => Promise<void>) {
+      const directory = await mkdtemp(join(tmpdir(), "inertia-private-connect-store-"));
+      try {
+        await run(directory, join(directory, "private-connect.vault"), (suffix) =>
+          join(directory, `.private-connect-vault-00000000-0000-4000-8000-000000000001.${suffix}`));
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+
+    it.each(torn)("discards %s on first write instead of promoting it", async (_label, content) => {
+      await withDirectory(async (directory, path, stage) => {
+        await writeFile(stage("stage"), content(), { mode: 0o600 });
+        expect(await new PrivateConnectStore(path, encryption()).load()).toBeNull();
+        expect(await readdir(directory)).toEqual([]);
+      });
+    });
+
+    it.each(torn)("keeps the previous store when a replacement left %s beside its backup", async (_label, content) => {
+      await withDirectory(async (_directory, path, stage) => {
+        const previous = value();
+        previous.enabled = true;
+        await writeFile(stage("stage"), content(), { mode: 0o600 });
+        await writeFile(stage("backup"), encoded(previous), { mode: 0o600 });
+        expect(await new PrivateConnectStore(path, encryption()).load()).toEqual(previous);
+      });
+    });
+
+    it("keeps an existing store and discards a torn stage beside it", async () => {
+      await withDirectory(async (directory, path, stage) => {
+        const previous = value();
+        previous.enabled = true;
+        await writeFile(path, encoded(previous), { mode: 0o600 });
+        await writeFile(stage("stage"), "A", { mode: 0o600 });
+        expect(await new PrivateConnectStore(path, encryption()).load()).toEqual(previous);
+        expect(await readdir(directory)).toEqual(["private-connect.vault"]);
+      });
+    });
+
+    it("promotes a complete stage", async () => {
+      await withDirectory(async (_directory, path, stage) => {
+        await writeFile(stage("stage"), encoded(padded()), { mode: 0o600 });
+        expect(await new PrivateConnectStore(path, encryption()).load()).toEqual(padded());
+      });
+    });
   });
 
   it("rejects aggregate grant state before replacing the durable store", async () => {

@@ -848,6 +848,131 @@ describe("WorkspaceChangesPanel repository scope", () => {
     });
   });
 
+  describe("retained diff lock inputs from the workspace status refresh", () => {
+    async function validatedDraft() {
+      const handlers = {
+        onAsk: vi.fn(async () => undefined),
+        onRequestRevision: vi.fn(async () => undefined),
+        onRevert: vi.fn(async () => undefined),
+        onSetReviewState: vi.fn(async () => undefined),
+        onCreateNote: vi.fn(async () => undefined),
+        onUpdateNote: vi.fn(async () => undefined),
+        onDeleteNote: vi.fn(async () => undefined),
+        onAddTextToPrompt: vi.fn(),
+        onAddToPrompt: vi.fn(),
+      };
+      const onRefresh = vi.fn();
+      const base = {
+        projectName: "Inertia",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        conversationId: "22222222-2222-4222-8222-222222222222",
+        summary: null,
+        onRefresh,
+        onOpenWorkspaceFile: vi.fn(),
+        onLoadRepositoryDiff: vi.fn(async (repositoryPath: string, filePath?: string) => ({
+          repositoryPath,
+          patch: patchFor(filePath ?? "README.md"),
+          truncated: false,
+          files: [changedFile(filePath ?? "README.md")],
+        })),
+        snapshot,
+        ...handlers,
+      };
+      let view!: ReturnType<typeof render>;
+      await act(async () => {
+        view = render(<WorkspaceChangesPanel {...base} />);
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "+ after" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask about" }));
+      fireEvent.change(screen.getByPlaceholderText("What would you like to know?"), {
+        target: { value: "Held question" },
+      });
+      const update = async (change: Partial<React.ComponentProps<typeof WorkspaceChangesPanel>>) => {
+        await act(async () => {
+          view.rerender(<WorkspaceChangesPanel {...base} {...change} />);
+        });
+      };
+      return { handlers, onRefresh, update };
+    }
+
+    function expectLocked(handlers: Record<string, ReturnType<typeof vi.fn>>, message: string): void {
+      expect(screen.getByText(message)).toHaveAttribute("role", "status");
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Ask agent" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mark file reviewed" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "− before" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+      fireEvent.submit(document.querySelector(".diff-selection-popover form")!);
+      fireEvent.click(screen.getByRole("button", { name: "Add to prompt" }));
+      fireEvent.click(screen.getByRole("button", { name: "− before" }));
+      for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+    }
+
+    function expectUnlocked(): void {
+      expect(screen.queryByText(/Review actions (resume|stay paused)|may be out of date/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Ask agent" })).toBeEnabled();
+      expect(screen.getByPlaceholderText("What would you like to know?")).toHaveValue("Held question");
+    }
+
+    it("unlocks only after a diff load validates the current snapshot", async () => {
+      await validatedDraft();
+      expectUnlocked();
+    });
+
+    it("locks while a status refresh is pending or hung", async () => {
+      const { handlers, update } = await validatedDraft();
+      await update({ loading: true });
+      expectLocked(handlers, "Refreshing this diff. Review actions resume when it is current.");
+    });
+
+    it("stays locked after an authoritative status refresh fails, until a later refresh revalidates the diff", async () => {
+      const { handlers, onRefresh, update } = await validatedDraft();
+      await update({ loading: true });
+      await update({ loading: false, statusError: "Git inspection timed out." });
+
+      expect(screen.getByRole("button", { name: "Add to prompt" })).toBeDisabled();
+      expectLocked(handlers, "This diff could not be refreshed. Review actions stay paused until it is current.");
+      expect(screen.getByRole("alert")).toHaveTextContent("Git status could not be refreshed. Git inspection timed out.");
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(onRefresh).toHaveBeenCalledOnce();
+
+      await update({ loading: true, statusError: null });
+      expectLocked(handlers, "Refreshing this diff. Review actions resume when it is current.");
+      await update({ loading: false, statusError: null, snapshot: structuredClone(snapshot) });
+      expectUnlocked();
+      fireEvent.click(screen.getByRole("button", { name: "Ask agent" }));
+      await waitFor(() => expect(handlers.onAsk).toHaveBeenCalledOnce());
+    });
+
+    it("stays locked when a failed refresh clears without delivering a new snapshot", async () => {
+      const { handlers, update } = await validatedDraft();
+      await update({ statusError: "Git inspection timed out." });
+      await update({ statusError: null });
+      expectLocked(handlers, "This diff may be out of date. Refresh changes to resume review actions.");
+      await update({ snapshot: structuredClone(snapshot) });
+      expectUnlocked();
+    });
+
+    it("locks on an invalidation that has not refreshed yet and unlocks after the refreshed diff validates", async () => {
+      const { handlers, update } = await validatedDraft();
+      await update({ statusStale: true });
+      expectLocked(handlers, "This diff may be out of date. Refresh changes to resume review actions.");
+      await update({ statusStale: false, snapshot: structuredClone(snapshot) });
+      expectUnlocked();
+    });
+
+    it("removes the retained diff and its actions when the repository is no longer ready", async () => {
+      const { handlers, update } = await validatedDraft();
+      const unavailable = structuredClone(snapshot);
+      unavailable.repositories[0] = { ...unavailable.repositories[0]!, state: "error", error: "Permission denied." };
+      await update({ snapshot: unavailable });
+      expect(screen.queryByRole("region", { name: "Diff content for README.md" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add to prompt" })).not.toBeInTheDocument();
+      for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
   it("drops the retained diff and review draft when the workspace owner changes behind the same paths", async () => {
     const onAsk = vi.fn(async () => undefined);
     const props = {

@@ -880,6 +880,8 @@ export function createWorkspaceSceneModel({
         onChangesRequestHandled: workspaceTools.clearWorkspaceChangesRequest,
         snapshot: workspaceTools.workspaceGitStatus,
         loading: workspaceTools.toolsLoading,
+        statusError: workspaceTools.gitError,
+        statusStale: workspaceTools.workspaceGitStale,
         summary: workspaceTools.reviewSummary,
         summaryFingerprint: workspaceTools.structuredDiff.fingerprint,
         selectionAnswer: workspaceTools.selectionReviewAnswer,

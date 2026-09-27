@@ -19,6 +19,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
+import type { RetainedDiffLock } from "../utils/retainedDiffLock";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -54,7 +55,7 @@ export type ChangesPanelProps = {
   capabilities?: { persistentReview?: boolean; agentRevision?: boolean; selectiveRevert?: boolean };
   repositoryPath?: string;
   reviewScope?: string;
-  diffStale?: boolean;
+  reviewLock?: RetainedDiffLock;
   onSelectFile: (path: string) => void;
   onOpenFile?: (path: string) => void;
   onRefresh?: () => void;
@@ -120,6 +121,12 @@ function actionLabel(action: ReviewAction): string {
   return "Revert selected lines";
 }
 
+const reviewLockMessages = {
+  refreshing: "Refreshing this diff. Review actions resume when it is current.",
+  failed: "This diff could not be refreshed. Review actions stay paused until it is current.",
+  stale: "This diff may be out of date. Refresh changes to resume review actions.",
+};
+
 function hunkNoteKind(note: DiffReviewNote): string {
   return note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "hunk note";
 }
@@ -174,7 +181,7 @@ export function ChangesPanel({
   capabilities,
   repositoryPath = ".",
   reviewScope,
-  diffStale = false,
+  reviewLock,
   onSelectFile,
   onOpenFile,
   onRefresh,
@@ -219,7 +226,10 @@ export function ChangesPanel({
     error: diffParsingError,
   } = useParsedUnifiedDiff(diff?.patch ?? "", diff);
   const diffBusy = loading || diffParsing;
-  const reviewLocked = diffBusy || diffStale;
+  const reviewLockReason = diffParsing
+    ? "refreshing"
+    : reviewLock === undefined ? loading ? "refreshing" : null : reviewLock;
+  const reviewLocked = reviewLockReason !== null;
   const reviewLockedRef = useRef(reviewLocked);
   reviewLockedRef.current = reviewLocked;
   const selectedFile = selectedPath
@@ -569,7 +579,7 @@ export function ChangesPanel({
                   </div>
                 ))}
                 <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
-                {reviewLocked && <p className="panel-notice diff-review-paused" role="status">{diffStale ? "This diff could not be refreshed. Review actions stay paused until it is current." : "Refreshing this diff. Review actions resume when it is current."}</p>}
+                {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
                 {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
                 {selectedFile.hunks.map((hunk) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);

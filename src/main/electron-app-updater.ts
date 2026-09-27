@@ -111,6 +111,7 @@ export type WindowsUpdateSupervisorLauncher = (
 ) => Promise<WindowsUpdateSupervisorAdmission>;
 
 const ANONYMOUS_STAGING_ID = "inertia-anonymous";
+const MACOS_STAGING_TIMEOUT_MS = 10 * 60_000;
 const LINUX_CANDIDATE_HANDOFF_LIFETIME_MS = 60_000;
 // Native install and reboot are durable, cross-process steps. Keep their
 // receipt bounded by the journal's maximum while avoiding a spawn-like 60s
@@ -876,6 +877,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       let invocationStarted = false;
       let nativeListenerInstalled = false;
       let errorListenerInstalled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
       const removeNativeListener = (): void => {
         if (!nativeListenerInstalled) return;
         nativeListenerInstalled = false;
@@ -891,6 +893,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       const finish = (result: AppUpdaterInstallResult): void => {
         if (settled) return;
         settled = true;
+        if (timeout) clearTimeout(timeout);
         if (this.releaseNativeHandoff === failUncertain) {
           this.releaseNativeHandoff = null;
         }
@@ -936,6 +939,8 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       if (settled) return;
       this.releaseNativeHandoff?.();
       this.releaseNativeHandoff = failUncertain;
+      timeout = setTimeout(failUncertain, MACOS_STAGING_TIMEOUT_MS);
+      timeout.unref?.();
       try {
         invocationStarted = true;
         this.updater.quitAndInstall(false, true);

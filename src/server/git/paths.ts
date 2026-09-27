@@ -361,6 +361,10 @@ export async function validateBranch(
   return name;
 }
 
+export function literalPathspecs(paths: readonly string[]): string[] {
+  return paths.map((path) => `:(literal)${path}`);
+}
+
 export async function validatedPaths(
   root: string,
   paths: readonly string[],

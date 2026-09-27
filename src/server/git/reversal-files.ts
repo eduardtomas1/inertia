@@ -9,6 +9,7 @@ import {
   type RuntimeSecureFileBroker,
   type SecureFileRootCapability,
 } from "../secure-files";
+import { literalPathspecs } from "./paths";
 import { runGit } from "./runner";
 import { GitError } from "./types";
 import { reversalFileLocation, type ReversalWorkspaceScope } from "./reversal-scope";
@@ -39,7 +40,7 @@ export async function readIndexEntry(
   root: string,
   path: string,
 ): Promise<IndexEntry> {
-  const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", path], {
+  const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", ...literalPathspecs([path])], {
     maxOutputBytes: MAX_PATH_LENGTH + 256,
     failureMessage: "Unable to inspect the selected file in the Git index.",
   });

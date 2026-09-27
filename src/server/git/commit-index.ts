@@ -98,6 +98,7 @@ export async function prepareReconciledIndex(
     });
   }
   await runGit(root, tempIndexArguments([
+    "--literal-pathspecs",
     "reset",
     selectedTree,
     "--pathspec-from-file=-",

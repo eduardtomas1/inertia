@@ -25,6 +25,7 @@ import {
   reservationBytes,
   sameCommitLockIdentity,
 } from "./commit-transaction";
+import { literalPathspecs } from "./paths";
 import { runGit } from "./runner";
 import { GitError } from "./types";
 
@@ -74,7 +75,7 @@ export async function restoreReversalIndexEntry(
     const stage = join(scratch, "index");
     await writeFile(stage, original, { flag: "wx", mode: 0o600 });
     const environment = { GIT_INDEX_FILE: stage };
-    const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", path], {
+    const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", ...literalPathspecs([path])], {
       environment, maxOutputBytes: 4_352,
       failureMessage: "Unable to verify the staged reversal entry.",
     });

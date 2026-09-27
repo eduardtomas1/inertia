@@ -20,6 +20,7 @@ import {
   type GitUnifiedDiff,
 } from "./types";
 import {
+  literalPathspecs,
   repositoryRoot,
   validatedPaths,
 } from "./paths";
@@ -95,7 +96,7 @@ async function completeLayerPatch(root: string, layer: "index" | "worktree", pat
     ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
     ...(layer === "index" ? ["--cached", "HEAD"] : []),
     "--",
-    ...(path ? [path] : []),
+    ...(path ? literalPathspecs([path]) : []),
   ];
   try {
     const result = await runGit(root, args, {

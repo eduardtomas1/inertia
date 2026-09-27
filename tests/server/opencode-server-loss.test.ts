@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
+import { windowsCleanupFailures } from "../../src/server/windows-cleanup-diagnostics";
 import {
   loopbackPortIsOpen,
   portableFixtureRoot,
@@ -52,8 +53,15 @@ describe("OpenCode owned-server loss", { concurrent: false }, () => {
     roots.push(root);
 
     const result = await manager.run(input);
+    const evidence = JSON.stringify({
+      error: result.error,
+      failure: result.failure,
+      exitCode: result.exitCode,
+      signal: result.signal,
+      windowsCleanupFailures: windowsCleanupFailures(),
+    });
 
-    expect(result).toMatchObject({
+    expect(result, evidence).toMatchObject({
       status: "failed",
       failure: { phase: "runtime" },
       cleanupConfirmed: true,

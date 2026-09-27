@@ -109,7 +109,7 @@ function renderDialog(options: {
   const copyText = vi.fn(options.copyText ?? (async () => true));
   Object.defineProperty(window, "inertia", {
     configurable: true,
-    value: { copyText, openExternal },
+    value: { copyText, openExternal, getPlatform: () => "darwin" },
   });
   const sendCommand = vi.fn(options.sendCommand ?? (async (sent: ClientCommand) => created(sent)));
   const onClose = vi.fn();

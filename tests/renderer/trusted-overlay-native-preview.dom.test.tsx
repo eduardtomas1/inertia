@@ -28,6 +28,7 @@ vi.mock("@xterm/xterm", () => ({
     readonly options: Record<string, unknown> = {};
 
     loadAddon(): void {}
+    attachCustomKeyEventHandler(): void {}
     open(): void {}
     onData(): { dispose: () => void } {
       return { dispose: () => undefined };

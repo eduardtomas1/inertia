@@ -181,6 +181,10 @@ export function ProviderAuthDialog({
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    const pastesWithControl = window.inertia?.getPlatform() !== "darwin";
+    terminal.attachCustomKeyEventHandler((event) => !(pastesWithControl
+      && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+      && event.code === "KeyV"));
     terminal.open(mount);
     fit.fit();
     terminalRef.current = terminal;
@@ -276,7 +280,31 @@ export function ProviderAuthDialog({
     if (!providerId) return;
     const restoreFocus = captureModalFocus(false);
     const dialog = dialogRef.current;
-    requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("button")?.focus());
+    requestAnimationFrame(() => {
+      if (!dialog?.contains(document.activeElement)) dialog?.querySelector<HTMLElement>("button")?.focus();
+    });
+    let lastFocused: HTMLElement | null = null;
+    let refocusTimer: number | undefined;
+    const refocus = (): void => {
+      refocusTimer = undefined;
+      if (!dialog?.isConnected || dialog.contains(document.activeElement)) return;
+      const target = lastFocused?.isConnected && dialog.contains(lastFocused)
+        ? lastFocused
+        : dialog.querySelector<HTMLElement>("button");
+      target?.focus();
+    };
+    const onFocusIn = (event: FocusEvent): void => {
+      if (dialog && event.target instanceof HTMLElement && dialog.contains(event.target)) {
+        lastFocused = event.target;
+      } else {
+        refocus();
+      }
+    };
+    const onFocusOut = (event: FocusEvent): void => {
+      if (event.relatedTarget === null && refocusTimer === undefined) {
+        refocusTimer = window.setTimeout(refocus, 0);
+      }
+    };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.stopImmediatePropagation();
@@ -287,8 +315,13 @@ export function ProviderAuthDialog({
       if (dialog) trapModalFocus(event, dialog);
     };
     document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("focusout", onFocusOut, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("focusout", onFocusOut, true);
+      if (refocusTimer !== undefined) window.clearTimeout(refocusTimer);
       restoreFocus();
     };
   }, [closeDialog, providerId]);

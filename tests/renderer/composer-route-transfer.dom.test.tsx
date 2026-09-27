@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
   clearPersistedComposerDraft,
-  handOffComposerDraft,
   persistComposerDraft,
   readComposerDraft,
 } from "../../src/renderer/src/utils/composerDraftPersistence";
@@ -27,9 +26,14 @@ vi.mock("../../src/renderer/src/utils/modelRouteTransition", async (importOrigin
   };
 });
 
+const storageSpies: { mockRestore: () => void }[] = [];
+
 afterEach(() => {
+  for (const spy of storageSpies.splice(0)) spy.mockRestore();
   window.localStorage.clear();
 });
+
+type RouteOptions = { prefillText?: string; onCreated?: (conversationId: string) => void };
 
 async function confirmNewChat(): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
@@ -51,9 +55,10 @@ describe("composer route transfer", () => {
     };
     const onCreateConversationForSelection = vi.fn(async (
       _selection: unknown,
-      options?: { prefillText?: string },
+      options?: RouteOptions,
     ): Promise<void> => {
       if (options?.prefillText) persistComposerDraft(target.id, options.prefillText);
+      options?.onCreated?.(target.id);
       if (switchFirst) act(showTarget);
     });
     view = render(<Composer {...composerProps(source, { providers: [routedProvider], onCreateConversationForSelection })} />);
@@ -61,33 +66,77 @@ describe("composer route transfer", () => {
 
     await confirmNewChat();
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]![1]).toEqual({ prefillText: text });
+    expect(onCreateConversationForSelection.mock.calls[0]![1]).toMatchObject({ prefillText: text });
     await act(async () => { await Promise.resolve(); });
     if (!switchFirst) act(showTarget);
 
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
     expect(window.localStorage.getItem(`inertia:draft:${source.id}`)).toBeNull();
     expect(window.localStorage.getItem(`inertia:draft:${target.id}`)).toBe(text);
+    if (switchFirst) {
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+    }
   });
 
-  it("releases an in-memory handoff once the composer accepts or replaces it", () => {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new DOMException("Storage is full.", "QuotaExceededError");
+  it("does not steal focus when another chat was selected before the new chat settles", async () => {
+    const source = conversation("route-focus-source");
+    const target = conversation("route-focus-target");
+    const other = conversation("route-focus-other");
+    window.localStorage.setItem(`inertia:draft:${other.id}`, "Other chat draft");
+    let settle!: () => void;
+    const onCreateConversationForSelection = vi.fn((
+      _selection: unknown,
+      options?: RouteOptions,
+    ) => new Promise<void>((resolve) => {
+      settle = () => {
+        if (options?.prefillText) persistComposerDraft(target.id, options.prefillText);
+        options?.onCreated?.(target.id);
+        resolve();
+      };
+    }));
+    const props = { providers: [routedProvider], onCreateConversationForSelection };
+    const view = render(
+      <>
+        <button type="button">Elsewhere</button>
+        <Composer {...composerProps(source, props)} />
+      </>,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Carry this over" } });
+    await confirmNewChat();
+    await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
+
+    view.rerender(
+      <>
+        <button type="button">Elsewhere</button>
+        <Composer {...composerProps(other, props)} />
+      </>,
+    );
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+    await act(async () => settle());
+    await act(async () => {
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
     });
-    try {
-      handOffComposerDraft("handoff-sent", "Handed-off text");
-      handOffComposerDraft("handoff-kept", "Handed-off text");
-      expect(readComposerDraft("handoff-sent")).toBe("Handed-off text");
 
-      clearPersistedComposerDraft("handoff-sent", "Handed-off text");
-      clearPersistedComposerDraft("handoff-kept", "A different draft");
-      expect(readComposerDraft("handoff-sent")).toBe("");
-      expect(readComposerDraft("handoff-kept")).toBe("Handed-off text");
+    expect(elsewhere).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Other chat draft");
+    expect(window.localStorage.getItem(`inertia:draft:${other.id}`)).toBe("Other chat draft");
+    expect(readComposerDraft(target.id)).toBe("Carry this over");
+  });
 
-      persistComposerDraft("handoff-kept", "");
-      expect(readComposerDraft("handoff-kept")).toBe("");
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("clears an unstored draft only when the cleared draft matches it", () => {
+    storageSpies.push(vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is full.", "QuotaExceededError");
+    }));
+    persistComposerDraft("unstored-sent", "Handed-off text");
+    persistComposerDraft("unstored-kept", "Handed-off text");
+
+    clearPersistedComposerDraft("unstored-sent", "Handed-off text");
+    clearPersistedComposerDraft("unstored-kept", "A different draft");
+    expect(readComposerDraft("unstored-sent")).toBe("");
+    expect(readComposerDraft("unstored-kept")).toBe("Handed-off text");
+
+    persistComposerDraft("unstored-kept", "");
+    expect(readComposerDraft("unstored-kept")).toBe("");
   });
 });

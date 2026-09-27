@@ -42,7 +42,7 @@ import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
-import { createComposerRouteConversation } from "./composerRouteConversation";
+import { useComposerRouteConversation } from "./composerRouteConversation";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
@@ -52,7 +52,7 @@ import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { harnessImageInputUnavailableReason } from "../../../../shared/provider";
-import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft, takeComposerDraft } from "../../utils/composerDraftPersistence";
+import { clearPersistedComposerDraft, persistComposerDraft, readComposerDraft } from "../../utils/composerDraftPersistence";
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -129,7 +129,6 @@ export const Composer = memo(function Composer({
     conversation.id,
   );
   const draftValueRef = useRef(message);
-  const loadedDraftConversationRef = useRef<string | null>(null);
   const pendingDraftRef = useRef<{
     conversationId: string;
     value: string;
@@ -178,6 +177,7 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
+  const createRouteConversation = useComposerRouteConversation();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
@@ -329,10 +329,7 @@ export const Composer = memo(function Composer({
     }
     submittingRef.current = false;
     setSubmitting(false);
-    const nextDraft = loadedDraftConversationRef.current === conversation.id
-      ? draftValueRef.current
-      : takeComposerDraft(conversation.id);
-    loadedDraftConversationRef.current = conversation.id;
+    const nextDraft = readComposerDraft(conversation.id);
     draftValueRef.current = nextDraft;
     setMessage(nextDraft);
     for (const attachment of attachmentsRef.current) {
@@ -1095,7 +1092,7 @@ export const Composer = memo(function Composer({
             routeCreationBlockedReason ?? routeCreationError
           }
           onDismissPendingRoute={dismissPendingRoute}
-          onCreateRouteConversation={() => createComposerRouteConversation({
+          onCreateRouteConversation={() => createRouteConversation({
             pendingRoute,
             message,
             conversationId: conversation.id,

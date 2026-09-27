@@ -92,7 +92,7 @@ export interface ComposerProps {
   ) => Promise<void>;
   onCreateConversationForSelection?: (
     selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode">; onCreated?: (conversationId: string) => void },
   ) => Promise<void>;
   onChooseAttachments: (
     mode?: AttachmentPickerMode,

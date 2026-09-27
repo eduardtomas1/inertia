@@ -67,7 +67,7 @@ import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
-import { handOffComposerDraft } from "./utils/composerDraftPersistence";
+import { persistComposerDraft } from "./utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
@@ -687,7 +687,7 @@ export default function App(): React.JSX.Element {
   });
   const createConversationForSelection = async (
     selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
+    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode">; onCreated?: (conversationId: string) => void },
   ): Promise<void> => {
     if (draftConversation.chooseModel(selection, options?.configuration)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
@@ -710,8 +710,9 @@ export default function App(): React.JSX.Element {
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
     if (options?.prefillText) {
-      handOffComposerDraft(event.result.conversationId, options.prefillText);
+      persistComposerDraft(event.result.conversationId, options.prefillText);
     }
+    options?.onCreated?.(event.result.conversationId);
     if (
       selectionGeneration !== conversationSelectionGenerationRef.current
     ) return;

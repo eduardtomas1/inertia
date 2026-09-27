@@ -185,4 +185,17 @@ describe("detached chat window", () => {
       storage.mockRestore();
     }
   });
+
+  it("opens with the carried draft when this window's storage rejects writes", async () => {
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is full.", "QuotaExceededError");
+    });
+    try {
+      render(<DetachedChatApp initialWindowContext={{ ...context, draft: "Carried into the window" }} />);
+      expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue("Carried into the window");
+    } finally {
+      storage.mockRestore();
+    }
+  });
 });

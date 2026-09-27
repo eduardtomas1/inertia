@@ -34,7 +34,7 @@ import {
   withRequestId,
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
-import { handOffComposerDraft } from "../utils/composerDraftPersistence";
+import { persistComposerDraft } from "../utils/composerDraftPersistence";
 import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
@@ -297,7 +297,7 @@ export function useSplitWorkspaceScene({
     ...actions,
     createConversationForSelection: async (
       selection: ModelSelection,
-      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
+      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode">; onCreated?: (conversationId: string) => void },
     ) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
@@ -317,8 +317,9 @@ export function useSplitWorkspaceScene({
         throw new Error("The new split chat could not be identified.");
       }
       if (options?.prefillText) {
-        handOffComposerDraft(event.result.conversationId, options.prefillText);
+        persistComposerDraft(event.result.conversationId, options.prefillText);
       }
+      options?.onCreated?.(event.result.conversationId);
       onConversationCreated(event.result.conversationId);
     },
     sendMessage: async (

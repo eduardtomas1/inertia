@@ -46,8 +46,10 @@ const source = conversation("split-transfer-source");
 const target = conversation("split-transfer-target");
 const project = { id: source.projectId, name: "Project" } as Project;
 
+const storageSpies: { mockRestore: () => void }[] = [];
+
 afterEach(() => {
-  vi.restoreAllMocks();
+  for (const spy of storageSpies.splice(0)) spy.mockRestore();
   window.localStorage.clear();
 });
 
@@ -92,9 +94,9 @@ describe("split pane route transfer", () => {
     } as unknown as Parameters<typeof useSplitWorkspaceScene>[0]));
     view = render(<></>);
     act(() => show(source));
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    storageSpies.push(vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new DOMException("Storage is full.", "QuotaExceededError");
-    });
+    }));
     expect(() => window.localStorage.setItem("probe", "value")).toThrow();
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: text } });
 
@@ -104,7 +106,10 @@ describe("split pane route transfer", () => {
 
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.create" })));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
     act(() => show(source));
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    act(() => show(target));
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text);
   });
 });

@@ -183,9 +183,11 @@ beforeEach(() => {
   });
 });
 
+const storageSpies: { mockRestore: () => void }[] = [];
+
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  for (const spy of storageSpies.splice(0)) spy.mockRestore();
   Reflect.deleteProperty(window, "inertia");
   window.localStorage.clear();
 });
@@ -196,9 +198,9 @@ describe("main window route transfer", () => {
     render(<App />);
     const text = "Carry this request into the new chat";
     const input = await screen.findByRole("textbox", { name: "Message" }, { timeout: 5_000 });
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    storageSpies.push(vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new DOMException("Storage is full.", "QuotaExceededError");
-    });
+    }));
     expect(() => window.localStorage.setItem("probe", "value")).toThrow();
     fireEvent.change(input, { target: { value: text } });
 
@@ -210,7 +212,11 @@ describe("main window route transfer", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
     expect(screen.getAllByRole("textbox", { name: "Message" })).toHaveLength(1);
 
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+
     act(() => publish({ ...snapshot, activeConversationId: sourceId }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(""));
+    act(() => publish({ ...snapshot, activeConversationId: targetId }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
   });
 });

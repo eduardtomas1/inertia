@@ -279,12 +279,11 @@ export function forgetPersistedMaterializedDraftConversation(
     movePromptStash(window.localStorage, stored.draftConversationId, conversationId);
     window.dispatchEvent(new Event(PROMPT_STASH_CHANGED_EVENT));
     forgetPersistedDraftConversation(stored.draftConversationId);
-    window.localStorage.removeItem(
-      `inertia:draft:${stored.draftConversationId}`,
-    );
+    persistComposerDraft(stored.draftConversationId, "");
     window.localStorage.removeItem(MATERIALIZED_STORAGE_KEY);
   } catch {
     // Reconciliation can retry after the next authoritative snapshot.
   }
 }
 import { movePromptStash, PROMPT_STASH_CHANGED_EVENT } from "./promptStash";
+import { persistComposerDraft } from "./composerDraftPersistence";

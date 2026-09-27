@@ -59,7 +59,7 @@ import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceMentions } from "./hooks/workspace-tools/useWorkspaceMentions";
 import { canStopSubagentTrace } from "./utils/subagentDisclosure";
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
-import { onComposerDraftPersisted } from "./utils/composerDraftPersistence";
+import { onComposerDraftPersisted, persistComposerDraft } from "./utils/composerDraftPersistence";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import {
   goalControlsBusy,
@@ -156,16 +156,10 @@ export default function DetachedChatApp({
   initialWindowContext,
 }: DetachedChatAppProps): React.JSX.Element {
   const [windowContext, setWindowContext] = useState(() => {
-    try {
-      const key = `inertia:draft:${initialWindowContext.conversationId}`;
-      if (initialWindowContext.draft) {
-        window.localStorage.setItem(key, initialWindowContext.draft);
-      } else {
-        window.localStorage.removeItem(key);
-      }
-    } catch {
-      // The privileged draft handoff still protects explicit close and dock.
-    }
+    persistComposerDraft(
+      initialWindowContext.conversationId,
+      initialWindowContext.draft,
+    );
     return initialWindowContext;
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);

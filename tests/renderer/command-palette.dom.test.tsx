@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
+import { CommandPalette, type CommandPaletteView } from "../../src/renderer/src/components/CommandPalette";
 import type { Conversation, Project } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
@@ -121,7 +121,93 @@ function FocusHarness(): React.JSX.Element {
   );
 }
 
+const studio: Project = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
+
+function ProjectChoiceHarness({ initialView, onClose }: {
+  initialView: CommandPaletteView;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open palette</button>
+      {open && (
+        <CommandPalette
+          open
+          initialView={initialView}
+          currentProjectId={project.id}
+          projects={[project, studio]}
+          conversations={[conversation]}
+          newThreadShortcut="⌘N"
+          onClose={() => { onClose(); setOpen(false); }}
+          onSelectProject={noOp}
+          onSelectConversation={noOp}
+          onNewThread={noOp}
+          onNewThreadIn={noOp}
+          onAddProject={noOp}
+          onOpenSettings={noOp}
+        />
+      )}
+    </>
+  );
+}
+
+type PaletteUser = ReturnType<typeof userEvent.setup>;
+
+const projectChoiceControls: [string, (user: PaletteUser) => Promise<HTMLElement>][] = [
+  ["search input", async () => screen.getByRole("combobox", { name: "Search projects for the new chat" })],
+  ["Close button", async (user) => {
+    await user.tab();
+    return screen.getByRole("button", { name: "Close search" });
+  }],
+  ["project option", async (user) => {
+    await user.tab({ shift: true });
+    return screen.getByRole("option", { name: /Studio/u });
+  }],
+];
+
 describe("CommandPalette behavior", () => {
+  it.each(projectChoiceControls)("closes the New chat project choice with Escape from the %s", async (_name, reach) => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ProjectChoiceHarness initialView="new-chat" onClose={onClose} />);
+    const trigger = screen.getByRole("button", { name: "Open palette" });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+
+    const control = await reach(user);
+    expect(control).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it.each(projectChoiceControls)("steps back from the project choice to search with Escape from the %s", async (_name, reach) => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ProjectChoiceHarness initialView="search" onClose={onClose} />);
+    await user.click(screen.getByRole("button", { name: "Open palette" }));
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new chat in");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+
+    const control = await reach(user);
+    expect(control).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    const search = screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows the active platform shortcut for a remapped new-chat action", () => {
     render(palette(true, noOp, "Ctrl+Y"));
 

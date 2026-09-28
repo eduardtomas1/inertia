@@ -18,13 +18,25 @@ function compactHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+const QUOTED_PATH_ESCAPES: Record<string, string> = {
+  a: "\x07", b: "\b", t: "\t", n: "\n", v: "\v", f: "\f", r: "\r",
+};
+
+function unquotedPath(quoted: string): string {
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (const [, octal, escape = "", text] of quoted.slice(1, -1).matchAll(/\\(?:([0-3][0-7]{2})|(.))|([^\\]+)/gsu)) {
+    bytes.push(...(octal ? [Number.parseInt(octal, 8)] : encoder.encode(text ?? QUOTED_PATH_ESCAPES[escape] ?? escape)));
+  }
+  return new TextDecoder().decode(Uint8Array.from(bytes));
+}
+
 function cleanPath(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "/dev/null") return trimmed;
-  let decoded = trimmed;
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    try { decoded = JSON.parse(trimmed) as string; } catch { decoded = trimmed.slice(1, -1); }
-  }
+  const decoded = trimmed.startsWith('"') && trimmed.endsWith('"')
+    ? unquotedPath(trimmed)
+    : trimmed;
   return decoded.replace(/^[ab]\//u, "");
 }
 
@@ -68,11 +80,15 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
     }
 
     if (!file) continue;
-    if (rawLine.startsWith("--- ")) {
+    const inHunkBody = hunk !== null && (
+      oldCursor < hunk.oldStart + hunk.oldCount
+      || newCursor < hunk.newStart + hunk.newCount
+    );
+    if (!inHunkBody && rawLine.startsWith("--- ")) {
       file.oldPath = cleanPath(rawLine.slice(4));
       continue;
     }
-    if (rawLine.startsWith("+++ ")) {
+    if (!inHunkBody && rawLine.startsWith("+++ ")) {
       file.newPath = cleanPath(rawLine.slice(4));
       file.path = file.newPath === "/dev/null" ? file.oldPath : file.newPath;
       continue;

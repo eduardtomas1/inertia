@@ -9,6 +9,7 @@ import {
 } from "./constants";
 import {
   canonicalDirectoryPath,
+  literalPathspecs,
   repositoryRoot,
   type GitPathInspectionOptions,
   validatedPaths,
@@ -321,7 +322,9 @@ export async function compareGitSnapshots(
         signal: options.signal,
       })
     : [];
-  const pathArgs = paths.length > 0 ? ["--", ...paths] : ["--"];
+  const pathArgs = paths.length > 0
+    ? ["--", ...literalPathspecs(paths)]
+    : ["--"];
   const maxBytes = boundedInteger(
     options.maxBytes,
     MAX_DIFF_BYTES,

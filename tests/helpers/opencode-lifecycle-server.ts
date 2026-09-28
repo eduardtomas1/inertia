@@ -1,3 +1,5 @@
+import { fixtureCaptureWriterSource } from "./portable-provider-fixture";
+
 export const COMPACTION_REQUEST_TIMESTAMP = 4242;
 
 type LifecycleScenario =
@@ -66,7 +68,7 @@ let markEventsReady;
 const eventsReady = new Promise((resolve) => { markEventsReady = resolve; });
 let followUpReceiptSent = false;
 let followUpPromptID;
-const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
+const save = () => ${fixtureCaptureWriterSource(capturePath)}({ port, captured });
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
 const model = { id: "model-a", providerID: "fake", api: { id: "fake", url: "http://fake", npm: "fake" }, name: "Model A", capabilities: { temperature: true, reasoning: true, attachment: true, toolcall: true, input: { text: true, audio: false, image: scenario !== "no-image", video: false, pdf: false }, output: { text: true, audio: false, image: false, video: false, pdf: false }, interleaved: true }, cost: { input: 0, output: 0, cache: { read: 0, write: 0 } }, limit: { context: 200000, output: 32000 }, status: "active", options: {}, headers: {}, release_date: "2026-01-01" };

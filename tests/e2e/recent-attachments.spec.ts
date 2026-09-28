@@ -102,7 +102,9 @@ test("recent attachments show real thumbnails, open retained previews and handle
 });
 
 test("new attachments update the same gallery after reload and a missing retained file", async ({ browserName: _browserName }, testInfo) => {
+  expect(app, "the first check must create the retained attachment profile").toBeDefined();
   const page = app.page;
+  await selectWorkspaceTool(await ensureWorkspaceTools(page), "Attachments");
   // Continue the same mounted gallery; do not reload or recreate the profile.
   // The dedicated surface immediately includes newly sent attachments.
   // Distinct icon sizes keep the imports distinct.

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  DiffHunk,
   DiffLine,
   DiffReversalPlan,
   DiffReversalValidation,
@@ -20,11 +21,13 @@ import {
   type GitUnifiedDiff,
 } from "./types";
 import {
+  literalPathspecs,
   repositoryRoot,
   validatedPaths,
 } from "./paths";
 import {
   runGit,
+  runGitInspection,
 } from "./runner";
 import {
   getRepositoryStatus,
@@ -63,6 +66,8 @@ interface ReversalState {
   index: IndexEntry;
   selectedWorktreeLines: DiffLine[];
   selectedIndexLines: DiffLine[];
+  worktreeAnchors: Map<string, string>;
+  indexAnchors: Map<string, string>;
 }
 
 async function completeRepositoryDiff(
@@ -95,10 +100,10 @@ async function completeLayerPatch(root: string, layer: "index" | "worktree", pat
     ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
     ...(layer === "index" ? ["--cached", "HEAD"] : []),
     "--",
-    ...(path ? [path] : []),
+    ...(path ? literalPathspecs([path]) : []),
   ];
   try {
-    const result = await runGit(root, args, {
+    const result = await runGitInspection(root, args, {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: `Unable to inspect the ${layer === "index" ? "Git index" : "working tree"}.`,
     });
@@ -126,7 +131,7 @@ async function captureRepositoryState(
     ),
     completeLayerPatch(root, "index"),
     completeLayerPatch(root, "worktree"),
-    runGit(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
+    runGitInspection(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], {
       maxOutputBytes: MAX_DIFF_BYTES,
       failureMessage: "Unable to validate the repository state.",
     }),
@@ -204,9 +209,22 @@ function deletedLineEnding(
   return adjacentLineEnding(current, insertionIndex);
 }
 
-function reversalText(
+function deletionAnchors(hunks: readonly DiffHunk[]): Map<string, string> {
+  const anchors = new Map<string, string>();
+  for (const hunk of hunks) {
+    let previous: string | undefined;
+    for (const line of hunk.lines) {
+      if (line.kind === "deletion" && previous !== undefined) anchors.set(line.id, previous);
+      if (line.kind === "context" || line.kind === "addition") previous = line.content;
+    }
+  }
+  return anchors;
+}
+
+export function reversalText(
   source: Buffer,
   selected: readonly DiffLine[],
+  anchors: ReadonlyMap<string, string>,
   originalSource: Buffer = source,
 ): Buffer {
   const text = textBuffer(source);
@@ -234,6 +252,10 @@ function reversalText(
       }
       fileLines.splice(index, 1);
     } else if (line.kind === "deletion") {
+      const anchor = anchors.get(line.id);
+      if (anchor !== undefined && fileLines[line.newInsertionIndex - 1]?.content !== anchor) {
+        throw new GitError("conflict", "The selected lines no longer match the file or Git layer. Refresh the diff and try again.");
+      }
       const index = Math.max(0, Math.min(line.newInsertionIndex, fileLines.length));
       const ending = deletedLineEnding(
         originalLines,
@@ -406,10 +428,12 @@ async function buildReversalState(
     const staged = stagedByFullId.get(line.id);
     return staged ? [staged] : [];
   });
+  const worktreeAnchors = deletionAnchors(file.hunks);
+  const indexAnchors = deletionAnchors(stagedFile?.hunks ?? []);
   // Validate both transformations before exposing the plan.
-  reversalText(worktreeContent, selectedWorktreeLines, headContent);
+  reversalText(worktreeContent, selectedWorktreeLines, worktreeAnchors, headContent);
   if (selectedIndexLines.length > 0) {
-    reversalText(index.content, selectedIndexLines, headContent);
+    reversalText(index.content, selectedIndexLines, indexAnchors, headContent);
   }
 
   const stateAfter = await repositoryStateFingerprint(
@@ -442,6 +466,8 @@ async function buildReversalState(
     index,
     selectedWorktreeLines,
     selectedIndexLines,
+    worktreeAnchors,
+    indexAnchors,
     plan: {
       filePath: file.path,
       hunkId: hunk.id,
@@ -575,12 +601,14 @@ async function revertDiffSelectionLocked(
   const nextWorktree = reversalText(
     state.worktreeContent,
     state.selectedWorktreeLines,
+    state.worktreeAnchors,
     state.headContent,
   );
   const nextIndex = state.selectedIndexLines.length > 0
     ? reversalText(
         state.index.content,
         state.selectedIndexLines,
+        state.indexAnchors,
         state.headContent,
       )
     : state.index.content;

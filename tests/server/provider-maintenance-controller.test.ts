@@ -108,6 +108,33 @@ function waitForTerminal(
 }
 
 describe("ProviderMaintenanceController", () => {
+  it("retains the installation restriction when a release check fails and recovers on forced refresh", async () => {
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(new Response(JSON.stringify({ version: "2.0.0" })));
+    const latest = new ProviderLatestVersionCache({ fetch });
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: latest,
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "npm", "@openai/codex"),
+        update: null,
+        updateAvailability: "instructions-only",
+        message: "This Codex installation is not writable by your account. See Instructions.",
+      }),
+    });
+    const [failed] = await controller.refresh(["codex"]);
+    expect(failed).toMatchObject({ versionStatus: "unknown", freshness: "unavailable" });
+    expect(failed?.message).toContain("temporarily unavailable");
+    expect(failed?.message).toContain("not writable");
+    const [recovered] = await controller.refresh(["codex"], true);
+    expect(recovered).toMatchObject({ versionStatus: "update-available", updateAvailability: "instructions-only" });
+    expect(recovered?.message).toContain("not writable");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects an update outside the active capability attestation", async () => {
     const runAction = vi.fn(async () => success());
     const controller = new ProviderMaintenanceController({

@@ -451,12 +451,12 @@ export class ProviderMaintenanceController {
       updateAvailability: capabilities.updateAvailability,
       updateLabel: capabilities.update?.label ?? null,
       instructionsUrl: capabilities.instructionsUrl,
-      message: statusMessage(
+      message: [statusMessage(
         resolvedVersionStatus,
         latest.version,
         latest.freshness === "stale",
         latest.error,
-      ),
+      ), capabilities.message].filter(Boolean).join(" ") || null,
     };
     this.statuses.set(providerId, status);
     this.options.onStatus?.(status);

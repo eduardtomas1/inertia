@@ -7,6 +7,8 @@ import { createAppFixture } from "./support/app-fixture";
 import { GPU_HELPER_RECOVERY_GRACE_MS } from "./support/electron-app-lifecycle";
 import { electronHelperProcesses } from "./support/electron-main-process-diagnostic";
 import { electronProcessEvidence } from "./support/electron-process-evidence";
+import { renderedFrame, waitForRenderedFrame } from "./support/rendered-frame";
+import { rightPanelToggle } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 const psOptions = { env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout: 2_000 };
@@ -75,4 +77,40 @@ test("finishes a prepared close by terminating only a stopped GPU helper while w
   expect(samples.filter((sample) => sample.reason === "gpu-helper-recovery")).toEqual([
     expect.objectContaining({ status: "terminated", output: expect.stringMatching(helperRow) }),
   ]);
+});
+
+test("resumes rendered frames before an action by terminating only a stopped GPU helper", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-frame-recovery", initialState: "conversation" });
+  try {
+    const mainPid = app.electronApp.process().pid!;
+    const gpuCompositing = await app.electronApp.evaluate(({ app: electronApp }) =>
+      String((electronApp.getGPUFeatureStatus() as unknown as Record<string, unknown>).gpu_compositing));
+    const gpuPid = await directGpuHelper(mainPid);
+    const gpuStart = await processStart(gpuPid);
+    expect(gpuStart).not.toBeNull();
+    process.kill(gpuPid, "SIGSTOP");
+    try {
+      if (await renderedFrame(app.page)) {
+        test.skip(true, "The renderer kept producing frames while the GPU helper was stopped "
+          + `(gpu_compositing=${gpuCompositing}), so this host cannot reproduce the stall.`);
+        return;
+      }
+      await waitForRenderedFrame(app);
+    } finally {
+      if (await processStart(gpuPid) === gpuStart) process.kill(gpuPid, "SIGKILL");
+    }
+    const annotation = test.info().annotations
+      .find((entry) => entry.type === "electron-gpu-helper-stall-recovered");
+    expect(annotation?.description)
+      .toMatch(new RegExp(`${gpuPid} ${mainPid} T\\S* gpu-process stall=stopped`, "u"));
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(await directGpuHelper(mainPid)).not.toBe(gpuPid);
+    const toggle = rightPanelToggle(app.page);
+    const pressed = await toggle.getAttribute("aria-pressed");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    await app.close();
+  }
 });

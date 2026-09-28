@@ -856,7 +856,11 @@ describe("Windows runtime Job Object containment", () => {
     });
   });
 
-  it("reports the last bounded helper startup stage on timeout", async () => {
+  async function prepareScriptedBroker(): Promise<{
+    guardRequestIds: string[];
+    stdout: PassThrough;
+    wasKilled: () => boolean;
+  }> {
     await disposeWindowsRuntimeJobExecutableLock();
     const stdin = new PassThrough();
     const stdout = new PassThrough();
@@ -898,6 +902,11 @@ describe("Windows runtime Job Object containment", () => {
     });
     queueMicrotask(() => stdout.write("LOCKED\n"));
     await preparation;
+    return { guardRequestIds, stdout, wasKilled: () => killed };
+  }
+
+  it("reports the last bounded helper startup stage on timeout", async () => {
+    const { guardRequestIds, stdout, wasKilled } = await prepareScriptedBroker();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       const failure = armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
@@ -922,7 +931,32 @@ describe("Windows runtime Job Object containment", () => {
         + "The native helper did not report readiness within 100ms after Guard started. "
         + "INERTIA_JOB_STAGE stage=native-guard-start",
       ));
-      expect(killed).toBe(false);
+      expect(wasKilled()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a broker result received after the operation deadline", async () => {
+    const { guardRequestIds, stdout, wasKilled } = await prepareScriptedBroker();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const outcome = armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+        platform: "win32",
+        assembly: stubAssembly,
+        runtimeCreationTimeBits,
+        timeoutMs: 100,
+      }).then(() => null, (error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(95);
+      expect(guardRequestIds).toHaveLength(1);
+      vi.setSystemTime(Date.now() + 10);
+      stdout.write(["RESULT", guardRequestIds[0], "READY", "", ""].join(" ") + "\n");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("operation deadline elapsed");
+      expect(wasKilled()).toBe(true);
     } finally {
       vi.useRealTimers();
     }

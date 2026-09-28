@@ -91,6 +91,7 @@ async function installerSmokeModule() {
       options: {
         label: string;
         posixProcessGroupHandoff?: { ownerToken: string; path: string };
+        signal?: AbortSignal;
         timeoutMs: number;
       },
     ) => Promise<string>;
@@ -754,6 +755,8 @@ test("terminates a token-bound detached process group handed off by the root", a
   const handoffToken = "9de5486e-67f0-4d62-9f18-ea9220f23d44";
   let detachedPid = 0;
   let grandchildPid = 0;
+  const cancellation = new AbortController();
+  let outcome: Promise<unknown> = Promise.resolve(null);
   try {
     const middleScript = [
       'const { spawn } = require("node:child_process");',
@@ -774,24 +777,33 @@ test("terminates a token-bound detached process group handed off by the root", a
       'publish({ state: "owned", processGroupId: middle.pid });',
       "setInterval(() => {}, 1000);",
     ].join("");
-    await expect(runBounded(
+    outcome = runBounded(
       process.execPath,
       ["-e", rootScript, handoffFile, handoffToken, pidFile],
       {
-        label: "Detached handoff timeout fixture",
+        label: "Detached handoff fixture",
         posixProcessGroupHandoff: { ownerToken: handoffToken, path: handoffFile },
-        timeoutMs: 750,
+        signal: cancellation.signal,
+        timeoutMs: 30_000,
       },
-    )).rejects.toThrow("complete process tree was terminated");
-    const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
-      detached: number;
-      grandchild: number;
-    };
+    ).then(() => null, (error: unknown) => error);
+    const pids = await vi.waitFor(async () => {
+      const handoff = JSON.parse(await readFile(handoffFile, "utf8")) as { state: string };
+      expect(handoff.state).toBe("owned");
+      return JSON.parse(await readFile(pidFile, "utf8")) as {
+        detached: number;
+        grandchild: number;
+      };
+    }, { timeout: 10_000, interval: 10 });
     detachedPid = pids.detached;
     grandchildPid = pids.grandchild;
+    cancellation.abort();
+    expect(String(await outcome)).toContain("complete process tree was terminated");
     expect(executableProcessExists(detachedPid)).toBe(false);
     expect(executableProcessExists(grandchildPid)).toBe(false);
   } finally {
+    cancellation.abort();
+    await outcome;
     if (detachedPid > 0) {
       try {
         process.kill(-detachedPid, "SIGKILL");

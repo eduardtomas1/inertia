@@ -832,7 +832,7 @@ export const Composer = memo(function Composer({
   ), [conversation.modelSelection, modelRoutes]);
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
     const transition = resolveModelRouteTransition({
-      projectId: conversation.projectId,
+      projectId: conversation.projectId, providerId: conversation.providerId,
       selection: conversation.modelSelection,
       continuationIdentity: conversation.continuationIdentity,
       latestTurn: latestTurnSummary

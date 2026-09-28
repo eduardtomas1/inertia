@@ -3,6 +3,7 @@ import type {
   ContinuationIdentity,
   HarnessBackendCompatibility,
   ModelSelection,
+  ProviderId,
 } from "@shared/contracts";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
@@ -20,6 +21,7 @@ type TransitionCompatibility = Pick<
 export interface ModelRouteTransitionContext {
   /** The selected project is carried across a required new-conversation path. */
   projectId: string;
+  providerId: ProviderId;
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity | null;
   latestTurn: {
@@ -74,7 +76,7 @@ export function resolveModelRouteTransition(
   const decision = resolveContinuationDecision({
     previousProviderId: providerIdForHarness(
       context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
-    ) ?? undefined,
+    ) ?? context.providerId,
     hasMessages: context.hasVisibleHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,

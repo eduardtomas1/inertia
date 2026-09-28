@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   modelSelectionSchema,
   providerNativeBackendProfile,
+  providerIdForHarness,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentityForSelection,
@@ -53,6 +54,7 @@ function context(
 ): ModelRouteTransitionContext {
   return {
     projectId,
+    providerId: providerIdForHarness(selection.harnessId) ?? "codex",
     selection,
     continuationIdentity: candidate.continuationIdentity,
     latestTurn: {
@@ -306,6 +308,29 @@ describe("model route transition policy", () => {
         kind: "update-current-conversation",
         reasonCode: "first-turn",
       } : {
+        kind: "create-new-conversation",
+        continuationAction: "new-conversation-required",
+        reason: expect.stringContaining("Start a new chat to use a different provider."),
+      });
+    },
+  );
+
+  it.each(["session", "turn", "history"] as const)(
+    "uses the persisted provider for an unknown historical harness with %s evidence",
+    (evidence) => {
+      const native = providerNativeModelSelection({ providerId: "codex" });
+      const selection = { ...native, harnessId: "historical:retired-codex" };
+      const identity = { ...nativeCandidate(native).continuationIdentity, harnessId: selection.harnessId };
+      const transition = resolveModelRouteTransition({
+        projectId,
+        providerId: "codex",
+        selection,
+        continuationIdentity: evidence === "session" ? identity : null,
+        latestTurn: evidence === "turn" ? { selection, continuationIdentity: identity } : null,
+        hasProviderSession: evidence === "session",
+        hasVisibleHistory: evidence === "history",
+      }, nativeCandidate(providerNativeModelSelection({ providerId: "claude" })));
+      expect(transition).toMatchObject({
         kind: "create-new-conversation",
         continuationAction: "new-conversation-required",
         reason: expect.stringContaining("Start a new chat to use a different provider."),

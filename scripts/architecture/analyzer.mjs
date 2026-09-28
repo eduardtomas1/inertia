@@ -233,7 +233,7 @@ function moduleCandidates(basePath) {
     && !TYPESCRIPT_EXTENSIONS.has(extension)
     && !RUNTIME_JAVASCRIPT_EXTENSIONS.has(extension)
   ) {
-    return { asset: true, candidates: [] };
+    return { asset: true, candidates: [basePath.replace(/[?#].*$/su, "")] };
   }
   const base = RUNTIME_JAVASCRIPT_EXTENSIONS.has(extension)
     ? basePath.slice(0, -extension.length)
@@ -271,15 +271,20 @@ function resolveModule(
     ? [resolve(dirname(fromFile), specifier)]
     : aliasCandidates(specifier, aliases);
   if (!bases) return { kind: "external" };
+  let missingAsset = null;
   for (const base of bases) {
     const { asset, candidates } = moduleCandidates(base);
-    if (asset) return { kind: "asset", target: base.replace(/[?#].*$/su, "") };
     for (const candidate of candidates) {
-      const target = sourceFileByCanonicalPath.get(canonicalPath(candidate));
-      if (target) return { kind: "source", target };
+      const target = asset
+        ? existsSync(candidate) && candidate
+        : sourceFileByCanonicalPath.get(canonicalPath(candidate));
+      if (target) return { kind: asset ? "asset" : "source", target };
     }
+    if (asset) missingAsset ??= candidates[0];
   }
-  return { kind: "unresolved" };
+  return missingAsset
+    ? { kind: "asset", target: missingAsset }
+    : { kind: "unresolved" };
 }
 
 function importIsTypeOnly(node) {

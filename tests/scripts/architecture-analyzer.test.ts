@@ -8,7 +8,10 @@ import { analyzeSourceArchitecture } from "../../scripts/architecture/analyzer.m
 
 const roots: string[] = [];
 
-function fixture(files: Readonly<Record<string, string>>): string {
+function fixture(
+  files: Readonly<Record<string, string>>,
+  extraPaths: Readonly<Record<string, readonly string[]>> = {},
+): string {
   const root = mkdtempSync(join(tmpdir(), "inertia-architecture-analyzer-"));
   roots.push(root);
   const config = JSON.stringify({
@@ -16,6 +19,7 @@ function fixture(files: Readonly<Record<string, string>>): string {
       paths: {
         "@/*": ["./src/renderer/src/*"],
         "@shared/*": ["./src/shared/*"],
+        ...extraPaths,
       },
     },
   });
@@ -97,6 +101,49 @@ describe("architecture analyzer asset imports", () => {
     }).failures).toEqual([
       "src/main/other.ts:1 crosses source layers main -> renderer via src/renderer/src/assets/mascot/idle.png.",
       "src/main/sprites.ts:2 crosses source layers main -> renderer via src/renderer/src/assets/icons/app.png.",
+    ]);
+  });
+});
+
+describe("architecture analyzer aliased asset fallbacks", () => {
+  const art = { "@art/*": ["./src/renderer/src/art/*", "./src/shared/art/*"] };
+  const icon = 'import logo from "@art/logo.png";\nexport const icon = logo;\n';
+
+  it("uses a later alias target when only it contains the asset", () => {
+    const root = fixture({ "src/shared/art/logo.png": "png", "src/shared/icon.ts": icon }, art);
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([]);
+  });
+
+  it("uses the first alias target that contains the asset", () => {
+    const root = fixture({
+      "src/renderer/src/art/logo.png": "png",
+      "src/shared/art/logo.png": "png",
+      "src/shared/icon.ts": icon,
+    }, art);
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/icon.ts:1 crosses source layers shared -> renderer via src/renderer/src/art/logo.png.",
+    ]);
+  });
+
+  it("fails when no alias target contains the asset", () => {
+    const root = fixture({ "src/shared/icon.ts": icon }, art);
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/icon.ts:1 cannot resolve local asset @art/logo.png.",
+    ]);
+  });
+
+  it("classifies a symbolic-linked fallback target by its real layer", () => {
+    const root = fixture({
+      "src/renderer/src/assets/logo.png": "png",
+      "src/shared/icon.ts": icon,
+    }, { "@art/*": ["./src/shared/missing/*", "./src/shared/art/*"] });
+    linkDirectory(join(root, "src/renderer/src/assets"), join(root, "src/shared/art"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/icon.ts:1 crosses source layers shared -> renderer via src/renderer/src/assets/logo.png.",
     ]);
   });
 });

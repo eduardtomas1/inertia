@@ -16,6 +16,7 @@ export interface PosixProcessTreeDependencies {
 export interface PosixProcessTreeKillResult {
   descendants: number[];
   snapshotConfirmed: boolean;
+  scanStabilized: boolean;
 }
 
 export function posixDescendantPids(
@@ -65,7 +66,7 @@ export function forceKillPosixProcessTreeWithStatus(
   dependencies: Partial<PosixProcessTreeDependencies> = {},
 ): PosixProcessTreeKillResult {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 1) {
-    return { descendants: [], snapshotConfirmed: true };
+    return { descendants: [], snapshotConfirmed: true, scanStabilized: true };
   }
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
@@ -85,6 +86,7 @@ export function forceKillPosixProcessTreeWithStatus(
   const frozen = new Set<number>();
   let killOrder: number[] = [];
   let snapshotConfirmed = false;
+  let scanStabilized = false;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
     const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
@@ -117,6 +119,7 @@ export function forceKillPosixProcessTreeWithStatus(
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
     if (newlyDiscovered.length === 0) {
+      scanStabilized = true;
       snapshotConfirmed = rootFreezeConfirmed
         && liveProcessState(rootPid, processTable);
       break;
@@ -140,15 +143,5 @@ export function forceKillPosixProcessTreeWithStatus(
     try { kill(-rootPid, "SIGKILL"); } catch { /* The group may already be gone. */ }
   }
   try { kill(rootPid, "SIGKILL"); } catch { /* Already gone. */ }
-  return { descendants: targets, snapshotConfirmed };
-}
-
-export function forceKillPosixProcessTree(
-  rootPid: number,
-  dependencies: Partial<PosixProcessTreeDependencies> = {},
-): number[] {
-  return forceKillPosixProcessTreeWithStatus(
-    rootPid,
-    dependencies,
-  ).descendants;
+  return { descendants: targets, snapshotConfirmed, scanStabilized };
 }

@@ -7,10 +7,7 @@ import { win32 } from "node:path";
 import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
-import {
-  forceKillPosixProcessTree,
-  forceKillPosixProcessTreeWithStatus,
-} from "../node/posix-process-tree";
+import { forceKillPosixProcessTreeWithStatus } from "../node/posix-process-tree";
 import {
   linuxProcessCanExecute,
   linuxProcessGroupCanExecute,
@@ -327,10 +324,9 @@ async function confirmWindowsChildResourcesClosed(
   // Windows can report ChildProcess `close` just before the executable image
   // becomes deletable. Give the kernel one short, bounded quiescence window
   // before callers release temporary executables or other owned resources.
-  const settleMs = Math.min(WINDOWS_RESOURCE_SETTLE_MS, deadlineAt - Date.now());
-  if (settleMs <= 0) return false;
+  if (deadlineAt - Date.now() < WINDOWS_RESOURCE_SETTLE_MS) return false;
   await new Promise<void>((resolve) => {
-    setTimeout(resolve, settleMs);
+    setTimeout(resolve, WINDOWS_RESOURCE_SETTLE_MS);
   });
   return true;
 }
@@ -791,12 +787,14 @@ export async function terminateProcessTreeAndWait(
   }
 
   if (force) {
-    const descendants = forceKillPosixProcessTree(pid, {
+    const killed = forceKillPosixProcessTreeWithStatus(pid, {
       kill: killProcess,
       spawnProcessSync,
       rootProcessGroup: true,
       deadlineAt,
     });
+    if (!killed.scanStabilized) return false;
+    const { descendants } = killed;
     const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(

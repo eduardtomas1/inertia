@@ -533,7 +533,7 @@ describe("provider process-tree termination", () => {
       }
     });
 
-    it("shortens the resource settle to the time left when the close is observed late", async () => {
+    it("reports unconfirmed instead of shortening the resource settle when the close is observed late", async () => {
       vi.useFakeTimers();
       try {
         const startedAt = Date.now();
@@ -545,11 +545,9 @@ describe("provider process-tree termination", () => {
         await vi.advanceTimersByTimeAsync(189);
         closeChild(child);
         vi.setSystemTime(startedAt + 260);
-        await vi.advanceTimersByTimeAsync(39);
-        expect(outcome.value).toBeUndefined();
-        await vi.advanceTimersByTimeAsync(1);
-        expect(outcome.value).toBe(true);
-        expect(Date.now() - startedAt).toBe(WINDOWS_SEQUENCE_MS);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
       } finally {
         vi.useRealTimers();
       }
@@ -820,6 +818,116 @@ describe("provider process-tree termination", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("POSIX descendant snapshot confirmation", () => {
+    const posixTermination = (
+      spawnProcessSync: ReturnType<typeof vi.fn>,
+      closeOnKill: "sync" | "async" = "async",
+    ) => {
+      const child = fakeChild();
+      const exited = new Set<number>();
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0) {
+          if (exited.has(Math.abs(target))) throw noSuchProcess("gone");
+          return true as const;
+        }
+        if (signal === "SIGKILL") {
+          exited.add(Math.abs(target));
+          if (Math.abs(target) === 4_242 && child.exitCode === null) {
+            child.exitCode = 1;
+            if (closeOnKill === "sync") child.emit("close", 1);
+            else queueMicrotask(() => child.emit("close", 1));
+          }
+        }
+        return true as const;
+      });
+      const terminate = createOwnedProcessTreeTermination(
+        child as never,
+        "Provider process tree",
+        (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          waitMs: 1_000,
+        }),
+      );
+      return { child, exited, terminate };
+    };
+
+    it.each([
+      {
+        label: "a process listing that keeps timing out",
+        closeOnKill: "async" as const,
+        listing: () => {
+          vi.setSystemTime(Date.now() + 20);
+          return { status: null, stdout: "" };
+        },
+      },
+      {
+        label: "descendants that keep appearing until the scan stops",
+        closeOnKill: "async" as const,
+        listing: (() => {
+          let next = 5_000;
+          return () => {
+            vi.setSystemTime(Date.now() + 10);
+            const rows = ["4242 1 S"];
+            for (let pid = 5_000; pid <= next; pid += 1) rows.push(`${pid} 4242 S`);
+            next += 1;
+            return { status: 0, stdout: `${rows.join("\n")}\n` };
+          };
+        })(),
+      },
+      {
+        label: "a scan cut short by the deadline after the known tree already exited",
+        closeOnKill: "sync" as const,
+        listing: () => {
+          vi.setSystemTime(Date.now() + 1_001);
+          return { status: 0, stdout: "4242 1 S\n5000 4242 S\n" };
+        },
+      },
+    ])("keeps ownership unconfirmed for $label", async ({ listing, closeOnKill }) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const { child, exited, terminate } = posixTermination(vi.fn(listing), closeOnKill);
+        const outcome = terminate(true).then(() => "confirmed", (error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await expect(outcome).resolves.toMatchObject({
+          code: "process-tree-termination-unconfirmed",
+        });
+        expect(exited.has(4_242)).toBe(true);
+        expect(child.exitCode).toBe(1);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(2_001);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a tree whose descendant snapshot stabilises just before the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        let listings = 0;
+        const spawnProcessSync = vi.fn(() => {
+          listings += 1;
+          vi.setSystemTime(Date.now() + 499);
+          return {
+            status: 0,
+            stdout: listings === 1 ? "4242 1 S\n5000 4242 S\n" : "4242 1 T\n5000 4242 T\n",
+          };
+        });
+        const { terminate } = posixTermination(spawnProcessSync);
+        let confirmed = false;
+        void terminate(true).then(() => { confirmed = true; });
+        await vi.advanceTimersByTimeAsync(2);
+        expect(listings).toBe(2);
+        expect(confirmed).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(1_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("awaits POSIX process-group disappearance", async () => {

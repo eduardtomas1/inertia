@@ -516,6 +516,7 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("guards turn lifecycle order, write-once boundaries, and terminal metadata", async () => {
     const { store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;
+    store.updateConversation(conversation.id, { providerId: "claude" });
     const userMessage = store.createMessage(conversation.id, "Exercise lifecycle guards.");
     const requestedAt = userMessage.createdAt;
     const at = (offsetMs: number): string =>
@@ -831,6 +832,7 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("recovers only the explicitly interrupted turn instead of rewriting older turn records", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;
+    store.updateConversation(conversation.id, { providerId: "claude" });
     const oldUser = store.createMessage(conversation.id, "Older work");
     const oldTurn = store.createAgentTurn({
       id: "turn-before-interruption",
@@ -1252,21 +1254,6 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
-  it("clears a provider session explicitly or when a conversation switches providers", async () => {
-    const { store } = await createStore();
-    const project = store.snapshot().projects[0];
-    const conversation = store.createConversation(project.id, "Provider switch", { providerId: "codex" });
-
-    store.updateConversation(conversation.id, { providerSessionId: "codex-session" });
-    expect(store.updateConversation(conversation.id, { model: "gpt-test" }).providerSessionId).toBe("codex-session");
-    expect(store.updateConversation(conversation.id, { providerSessionId: null })).toMatchObject({
-      providerSessionId: null,
-      continuationIdentity: null,
-    });
-    store.updateConversation(conversation.id, { providerSessionId: "replacement-session" });
-    expect(store.updateConversation(conversation.id, { providerId: "claude" }).providerSessionId).toBeNull();
-    store.close();
-  });
 
   it("persists only provider-supported model flexibility in continuation identities", async () => {
     const { databasePath, workspacePath, store } = await createStore();

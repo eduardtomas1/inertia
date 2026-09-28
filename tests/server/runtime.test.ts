@@ -1240,25 +1240,26 @@ process.exit(child.status ?? 1);
       requestId: crossHarnessRequestId,
       payload: { conversationId, providerId: "claude" },
     });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-        event.type === "request.ok"
-        && event.requestId === crossHarnessRequestId,
+    const rejected = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+        event.type === "request.error" && event.requestId === crossHarnessRequestId,
     );
-    const switched = await loadConversationDetail(
+    expect(rejected.message).toContain("Start a new chat to use a different provider.");
+    const unchanged = await loadConversationDetail(
       client.socket,
       client.events,
       conversationId!,
     );
-    expect(switched.conversation).toMatchObject({
+    expect(unchanged.conversation).toMatchObject({
       id: conversationId,
-      providerId: "claude",
-      providerSessionId: null,
+      providerId: "codex",
+      providerSessionId: persistedDetail.conversation.providerSessionId,
     });
-    expect(switched.messages).toEqual(expect.arrayContaining([
+    expect(unchanged.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: "user", content: "Exercise one command activity." }),
       expect.objectContaining({ role: "assistant", content: "Activity lifecycle complete." }),
     ]));
+    expect(unchanged.agentTurns).toEqual(persistedDetail.agentTurns);
   });
 
   it("invalidates reviewed targets and notes immediately after committing their change", async () => {

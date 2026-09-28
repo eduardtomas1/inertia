@@ -246,12 +246,6 @@ describe("model route transition policy", () => {
 
   it.each([
     [
-      "harness",
-      { harnessId: "claude-agent-sdk" },
-      "harness-changed",
-      "agent harness changed",
-    ],
-    [
       "backend-profile",
       { backendProfileId: "custom:other-gateway" },
       "backend-profile-changed",
@@ -293,6 +287,29 @@ describe("model route transition policy", () => {
         continuationAction: "start-session",
       });
       expect(transition.reason).toContain(truthfulReason);
+    },
+  );
+
+  it.each(["session", "turn", "restored-history", "unused-draft"] as const)(
+    "requires a new chat for another provider unless this is an unused draft: %s",
+    (evidence) => {
+      const selection = providerNativeModelSelection({ providerId: "codex" });
+      const current = nativeCandidate(selection);
+      const next = nativeCandidate(providerNativeModelSelection({ providerId: "claude" }));
+      const transition = resolveModelRouteTransition(context(selection, current, {
+        continuationIdentity: null,
+        latestTurn: evidence === "turn" ? { selection, continuationIdentity: current.continuationIdentity } : null,
+        hasProviderSession: evidence === "session",
+        hasVisibleHistory: evidence === "restored-history",
+      }), next);
+      expect(transition).toMatchObject(evidence === "unused-draft" ? {
+        kind: "update-current-conversation",
+        reasonCode: "first-turn",
+      } : {
+        kind: "create-new-conversation",
+        continuationAction: "new-conversation-required",
+        reason: expect.stringContaining("Start a new chat to use a different provider."),
+      });
     },
   );
 

@@ -1,3 +1,4 @@
+import { providerIdForHarness } from "../../../shared/model-routing";
 import type {
   ContinuationIdentity,
   HarnessBackendCompatibility,
@@ -27,6 +28,7 @@ export interface ModelRouteTransitionContext {
   } | null;
   /** Only session presence is accepted; session identifiers never enter this policy. */
   hasProviderSession: boolean;
+  hasVisibleHistory?: boolean;
 }
 
 export interface ModelRouteTransitionCandidate {
@@ -70,6 +72,10 @@ export function resolveModelRouteTransition(
   const previousModelId = context.latestTurn?.selection.modelId
     ?? (previousIdentity ? context.selection.modelId : null);
   const decision = resolveContinuationDecision({
+    previousProviderId: providerIdForHarness(
+      context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
+    ) ?? undefined,
+    hasMessages: context.hasVisibleHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,
     previousModelId,

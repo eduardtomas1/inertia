@@ -1,3 +1,6 @@
+import { providerIdForHarness } from "./model-routing";
+import type { ProviderId } from "./provider";
+
 import type {
   ContinuationIdentity,
   HarnessBackendCompatibility,
@@ -71,7 +74,12 @@ export interface ContinuationDecision {
   reason: string;
 }
 
+export const CHAT_PROVIDER_CHANGE_MESSAGE =
+  "Start a new chat to use a different provider. This chat keeps its original provider and history.";
+
 export interface ContinuationDecisionInput {
+  previousProviderId?: ProviderId;
+  hasMessages?: boolean;
   previousIdentity: ContinuationIdentity | null;
   nextIdentity: ContinuationIdentity;
   previousModelId: string | null;
@@ -194,30 +202,51 @@ function freshSessionReason(
   }
 }
 
+function startSessionDecision(
+  changeKind: ContinuationChangeKind,
+  established = false,
+  previousIdentity?: ContinuationIdentity,
+  nextIdentity?: ContinuationIdentity,
+): ContinuationDecision {
+  return {
+    action: "start-session",
+    changeKind,
+    ...(established && changeKind !== "none"
+      ? freshSessionReason(changeKind, previousIdentity, nextIdentity)
+      : {
+          reasonCode: "first-turn" as const,
+          reason: "The first turn starts a new provider session.",
+        }),
+  };
+}
+
 /**
  * Decides whether provider-owned hidden state may be reused. The caller must
- * run this before persisting a new turn so an identity mismatch can never
- * silently become a fresh provider session inside an existing conversation.
+ * run this before persisting a new turn. Provider changes require a new chat;
+ * same-provider session recovery keeps its existing continuation policy.
  */
 export function resolveContinuationDecision(
   input: ContinuationDecisionInput,
 ): ContinuationDecision {
-  const establishedConversation = input.hasTurns || input.hasProviderSession;
-  if (!input.previousIdentity) {
-    if (!establishedConversation) {
-      return {
-        action: "start-session",
-        changeKind: "none",
-        reasonCode: "first-turn",
-        reason: "The first turn starts a new provider session.",
-      };
-    }
-    const unavailable = freshSessionReason("missing-identity");
+  const establishedConversation = input.hasTurns || input.hasProviderSession
+    || input.hasMessages === true;
+  const previousProviderId = input.previousProviderId
+    ?? (input.previousIdentity ? providerIdForHarness(input.previousIdentity.harnessId) : null);
+  const nextProviderId = providerIdForHarness(input.nextIdentity.harnessId);
+  if (establishedConversation && previousProviderId && nextProviderId
+    && previousProviderId !== nextProviderId) {
     return {
-      action: "start-session",
-      changeKind: "missing-identity",
-      ...unavailable,
+      action: "new-conversation-required",
+      changeKind: "harness",
+      reasonCode: "harness-changed",
+      reason: CHAT_PROVIDER_CHANGE_MESSAGE,
     };
+  }
+  if (!input.previousIdentity) {
+    return startSessionDecision(
+      establishedConversation ? "missing-identity" : "none",
+      establishedConversation,
+    );
   }
   if (
     establishedConversation
@@ -233,12 +262,7 @@ export function resolveContinuationDecision(
       )
     )
   ) {
-    const unavailable = freshSessionReason("missing-identity");
-    return {
-      action: "start-session",
-      changeKind: "missing-identity",
-      ...unavailable,
-    };
+    return startSessionDecision("missing-identity", true);
   }
 
   const boundaryChange = identityChangeKind(
@@ -246,24 +270,12 @@ export function resolveContinuationDecision(
     input.nextIdentity,
   );
   if (boundaryChange !== "none") {
-    if (!establishedConversation) {
-      return {
-        action: "start-session",
-        changeKind: boundaryChange,
-        reasonCode: "first-turn",
-        reason: "The first turn starts a new provider session.",
-      };
-    }
-    const changed = freshSessionReason(
+    return startSessionDecision(
       boundaryChange,
+      establishedConversation,
       input.previousIdentity,
       input.nextIdentity,
     );
-    return {
-      action: "start-session",
-      changeKind: boundaryChange,
-      ...changed,
-    };
   }
 
   const modelChanged = input.previousModelId !== null
@@ -279,40 +291,14 @@ export function resolveContinuationDecision(
       || !input.allowsModelSwitchWithinSession
     )
   ) {
-    if (!establishedConversation) {
-      return {
-        action: "start-session",
-        changeKind: "model",
-        reasonCode: "first-turn",
-        reason: "The first turn starts a new provider session.",
-      };
-    }
-    const changed = freshSessionReason("model");
-    return {
-      action: "start-session",
-      changeKind: "model",
-      ...changed,
-    };
+    return startSessionDecision("model", establishedConversation);
   }
 
   if (
     performanceModeChanged
     && !input.allowsPerformanceModeSwitchWithinSession
   ) {
-    if (!establishedConversation) {
-      return {
-        action: "start-session",
-        changeKind: "performance-mode",
-        reasonCode: "first-turn",
-        reason: "The first turn starts a new provider session.",
-      };
-    }
-    const changed = freshSessionReason("performance-mode");
-    return {
-      action: "start-session",
-      changeKind: "performance-mode",
-      ...changed,
-    };
+    return startSessionDecision("performance-mode", establishedConversation);
   }
 
   if (input.hasProviderSession) {

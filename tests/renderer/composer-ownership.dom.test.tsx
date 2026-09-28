@@ -816,24 +816,19 @@ describe("composer detachment ownership", () => {
       }],
       metadataState: { models: catalogState, rateLimits: catalogState },
     };
-    const claudeProvider: ProviderInfo = {
-      ...codexProvider,
-      id: "claude",
-      label: "Claude",
-      models: [{
-        ...codexProvider.models[0]!,
-        id: "claude-route",
-        label: "Claude Route",
-        description: "Destination route",
-      }],
-    };
+    codexProvider.models.push({
+      ...codexProvider.models[0]!,
+      id: "codex-next",
+      label: "Codex Next",
+      isDefault: false,
+    });
     let finishUpdate!: () => void;
     const update = new Promise<void>((resolve) => {
       finishUpdate = resolve;
     });
     const onUpdateConversation = vi.fn(() => update);
     render(<Composer {...composerProps(current, {
-      providers: [codexProvider, claudeProvider],
+      providers: [codexProvider],
       onUpdateConversation,
       latestTurnSummary: {
         id: "turn-source",
@@ -855,8 +850,8 @@ describe("composer detachment ownership", () => {
     })} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(await screen.findByRole("button", { name: "Claude, 2 models" }));
-    const destination = screen.getByTitle("Claude Route").closest("button");
+    fireEvent.click(await screen.findByRole("button", { name: "Codex, 3 models" }));
+    const destination = screen.getByTitle("Codex Next").closest("button");
     if (!destination) throw new Error("Expected the destination model route.");
     fireEvent.click(destination);
     await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());

@@ -846,7 +846,7 @@ export const Composer = memo(function Composer({
               continuationIdentity: latestTurn.continuationIdentity,
             }
         : null,
-      hasProviderSession: Boolean(conversation.providerSessionId),
+      hasProviderSession: Boolean(conversation.providerSessionId), hasVisibleHistory,
     }, route);
     if (transition.kind === "create-new-conversation") {
       if (!onCreateConversationForSelection) {

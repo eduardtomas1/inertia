@@ -419,10 +419,10 @@ interface PosixTreeTerminationEvidence {
 
 function posixTreeEnumeration(
   killed: PosixProcessTreeKillResult,
-  rootExitObservedBeforeStop: boolean,
+  rootGoneAccepted: boolean,
 ): PosixTreeEnumeration {
-  if (rootExitObservedBeforeStop) return "root-gone";
-  return killed.snapshotConfirmed ? "root-authorized" : "incomplete";
+  if (killed.snapshotConfirmed) return "root-authorized";
+  return rootGoneAccepted ? "root-gone" : "incomplete";
 }
 
 function posixTreeTerminationConfirmed(
@@ -830,7 +830,10 @@ export async function terminateProcessTreeAndWait(
       rootProcessGroup: true,
       deadlineAt,
     });
-    const enumeration = posixTreeEnumeration(killed, rootExitObservedBeforeStop);
+    const enumeration = posixTreeEnumeration(
+      killed,
+      rootExitObservedBeforeStop || killed.scanStabilized,
+    );
     const { descendants } = killed;
     const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([

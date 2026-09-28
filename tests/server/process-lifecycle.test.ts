@@ -837,8 +837,10 @@ describe("provider process-tree termination", () => {
       { label: "a frozen live root whose known descendant survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "survives", groupExits: true, closeArrives: true, confirmed: false },
       { label: "a frozen live root whose group survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
       { label: "a frozen live root whose close never arrives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: false, confirmed: false },
-      { label: "a root that exits before the stop without Node observing it", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: false },
-      { label: "a zombie root that Node has not reaped", force: true, rootExitObserved: false, rootAtStop: "zombie", descendant: "none", groupExits: true, closeArrives: true, confirmed: false },
+      { label: "a root that exits before the stop and whose exit Node observes in time", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a root that exits before the stop and whose exit Node never observes", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: false, confirmed: false },
+      { label: "a root that exits before the stop and leaves a group member running", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a zombie root that Node reaps in time", force: true, rootExitObserved: false, rootAtStop: "zombie", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
       { label: "a normal exit Node observed before cleanup", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
       { label: "a normal exit that left a group member running", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
       { label: "a graceful stop whose root and group exit", force: false, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
@@ -939,10 +941,13 @@ describe("provider process-tree termination", () => {
       }
     });
 
-    it("keeps ownership unconfirmed when a cancellation's forced retry meets a root that vanished unobserved", async () => {
+    it.each([
+      { closeArrives: true, confirmed: "confirmed" },
+      { closeArrives: false, confirmed: "unconfirmed" },
+    ])("reports $confirmed for a cancellation whose forced call meets a vanished root (close arrives: $closeArrives)", async ({ closeArrives, confirmed }) => {
       vi.useFakeTimers();
       try {
-        const row = rows.find(({ label }) => label.startsWith("a root that exits before the stop"))!;
+        const row = { ...rows.find(({ label }) => label.startsWith("a root that exits before the stop and whose exit Node observes"))!, closeArrives };
         const { child, killProcess, spawnProcessSync } = tree(row);
         const outcome = createOwnedProcessTreeTermination(
           child as never,
@@ -955,11 +960,11 @@ describe("provider process-tree termination", () => {
             processGroupCanExecute: () => null,
             waitMs: 100,
           }),
-        )(true).then(() => "confirmed", (error: unknown) => error);
+        )(true).then(() => "confirmed", (error: unknown) =>
+          (error as { code?: string }).code === "process-tree-termination-unconfirmed"
+            ? "unconfirmed" : error);
         await vi.advanceTimersByTimeAsync(101);
-        await expect(outcome).resolves.toMatchObject({
-          code: "process-tree-termination-unconfirmed",
-        });
+        await expect(outcome).resolves.toBe(confirmed);
       } finally {
         vi.useRealTimers();
       }

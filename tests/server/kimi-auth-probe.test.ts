@@ -122,11 +122,11 @@ describe("Kimi initialize-only authentication discovery", () => {
       const failure = await probeKimiAuthentication(app.command, app.root, app.environment)
         .then(() => undefined, (error: unknown) => error);
       expect(failure).toBeInstanceOf(Error);
-      // Windows can observe ACP EOF before ChildProcess.close. If taskkill then
-      // finds the root already gone, strict cleanup must report uncertainty;
-      // the known fixture PID being dead is not proof about an untracked tree.
+      // ACP EOF can be observed before ChildProcess exit and close. If cleanup
+      // then finds the root already gone, strict cleanup must report
+      // uncertainty; the known fixture PID being dead is not proof about an
+      // untracked tree.
       if (failure instanceof ProcessTreeTerminationError) {
-        expect(process.platform).toBe("win32");
         expect(failure.code).toBe("process-tree-termination-unconfirmed");
         expect(failure.message).toBe("Kimi authentication discovery process tree could not be confirmed stopped.");
       } else {

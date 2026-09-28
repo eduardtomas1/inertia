@@ -7,7 +7,10 @@ import { win32 } from "node:path";
 import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
-import { forceKillPosixProcessTreeWithStatus } from "../node/posix-process-tree";
+import {
+  forceKillPosixProcessTreeWithStatus,
+  type PosixProcessTreeKillResult,
+} from "../node/posix-process-tree";
 import {
   linuxProcessCanExecute,
   linuxProcessGroupCanExecute,
@@ -405,6 +408,32 @@ function waitForPosixProcessesExit(
   });
 }
 
+type PosixTreeEnumeration = "root-authorized" | "root-gone" | "incomplete";
+
+interface PosixTreeTerminationEvidence {
+  readonly enumeration: PosixTreeEnumeration;
+  readonly groupExited: boolean;
+  readonly descendantsExited: boolean;
+  readonly rootExited: boolean;
+}
+
+function posixTreeEnumeration(
+  killed: PosixProcessTreeKillResult,
+  rootExitObservedBeforeStop: boolean,
+): PosixTreeEnumeration {
+  if (rootExitObservedBeforeStop) return "root-gone";
+  return killed.snapshotConfirmed ? "root-authorized" : "incomplete";
+}
+
+function posixTreeTerminationConfirmed(
+  evidence: PosixTreeTerminationEvidence,
+): boolean {
+  return evidence.enumeration !== "incomplete"
+    && evidence.groupExited
+    && evidence.descendantsExited
+    && evidence.rootExited;
+}
+
 function nativePosixProcessObserver(
   platform: NodeJS.Platform,
   dependencies: AwaitableProcessLifecycleDependencies,
@@ -563,7 +592,7 @@ export function createOwnedPidProcessTreeTermination(
   );
   let started = false;
   let treeTerminationConfirmed = false;
-  let snapshotConfirmed = false;
+  let enumeration: PosixTreeEnumeration = "incomplete";
   let descendants: readonly number[] = [];
 
   return async () => {
@@ -618,10 +647,10 @@ export function createOwnedPidProcessTreeTermination(
         rootProcessGroup: true,
         deadlineAt,
       });
-      snapshotConfirmed = killed.snapshotConfirmed;
+      enumeration = posixTreeEnumeration(killed, false);
       descendants = killed.descendants;
     }
-    if (!snapshotConfirmed) return false;
+    if (enumeration === "incomplete") return false;
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
     if (exitWaitMs <= 0) return false;
     const [groupExited, descendantsExited, rootExited] = await Promise.all([
@@ -639,7 +668,9 @@ export function createOwnedPidProcessTreeTermination(
       ),
       waitForRootExit(exitWaitMs),
     ]);
-    return groupExited && descendantsExited && rootExited;
+    return posixTreeTerminationConfirmed({
+      enumeration, groupExited, descendantsExited, rootExited,
+    });
   };
 }
 
@@ -751,16 +782,20 @@ export async function terminateProcessTreeAndWait(
     // A no-signal existence probe can still prove that the owned group is
     // already gone for an untracked child. Never signal a group after this
     // point: an extant numeric PGID may have been recycled.
+    let groupExited: boolean;
     try {
       killProcess(-pid, 0);
-      const canExecute = processGroupCanExecute?.(pid);
-      return canExecute === false;
+      groupExited = processGroupCanExecute?.(pid) === false;
     } catch (error) {
       // `ESRCH` is the only proof that the group no longer exists. `EPERM`
       // still means an extant group, and unexpected probe failures must remain
       // unconfirmed rather than releasing ownership unsafely.
-      return (error as NodeJS.ErrnoException).code === "ESRCH";
+      groupExited = (error as NodeJS.ErrnoException).code === "ESRCH";
     }
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: true,
+    });
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
   const deadlineAt = Date.now() + waitMs;
@@ -787,13 +822,15 @@ export async function terminateProcessTreeAndWait(
   }
 
   if (force) {
+    const rootExitObservedBeforeStop = child.exitCode !== null
+      || child.signalCode !== null;
     const killed = forceKillPosixProcessTreeWithStatus(pid, {
       kill: killProcess,
       spawnProcessSync,
       rootProcessGroup: true,
       deadlineAt,
     });
-    if (!killed.scanStabilized) return false;
+    const enumeration = posixTreeEnumeration(killed, rootExitObservedBeforeStop);
     const { descendants } = killed;
     const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
@@ -811,7 +848,9 @@ export async function terminateProcessTreeAndWait(
       ),
       waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return groupExited && descendantsExited && childClosed;
+    return posixTreeTerminationConfirmed({
+      enumeration, groupExited, descendantsExited, rootExited: childClosed,
+    });
   }
   try {
     killProcess(-pid, "SIGTERM");
@@ -825,12 +864,18 @@ export async function terminateProcessTreeAndWait(
       ),
       waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return groupExited && childClosed;
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: childClosed,
+    });
   } catch (error) {
     killDirectChild(child, false);
-    const groupAbsent = (error as NodeJS.ErrnoException).code === "ESRCH"
+    const groupExited = (error as NodeJS.ErrnoException).code === "ESRCH"
       || processGroupCanExecute?.(pid) === false;
     const childClosed = await waitForObservedDirectChildClose(remainingMs());
-    return groupAbsent && childClosed;
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: childClosed,
+    });
   }
 }

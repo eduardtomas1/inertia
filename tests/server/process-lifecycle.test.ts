@@ -1,4 +1,5 @@
 // @inertia-test-suite portable
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
@@ -820,6 +821,151 @@ describe("provider process-tree termination", () => {
     }
   });
 
+  describe("POSIX tree termination truth table", () => {
+    interface Row {
+      label: string;
+      force: boolean;
+      rootExitObserved: boolean;
+      rootAtStop: "alive" | "gone" | "zombie";
+      descendant: "none" | "exits" | "survives";
+      groupExits: boolean;
+      closeArrives: boolean;
+      confirmed: boolean;
+    }
+    const rows: Row[] = [
+      { label: "a frozen live root whose whole tree exits", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "exits", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a frozen live root whose known descendant survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "survives", groupExits: true, closeArrives: true, confirmed: false },
+      { label: "a frozen live root whose group survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a frozen live root whose close never arrives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: false, confirmed: false },
+      { label: "a root that exits before the stop without Node observing it", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: false },
+      { label: "a zombie root that Node has not reaped", force: true, rootExitObserved: false, rootAtStop: "zombie", descendant: "none", groupExits: true, closeArrives: true, confirmed: false },
+      { label: "a normal exit Node observed before cleanup", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a normal exit that left a group member running", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a graceful stop whose root and group exit", force: false, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a graceful stop whose group survives", force: false, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a graceful stop after a normal exit", force: false, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+    ];
+
+    const tree = (row: Row) => {
+      const child = fakeChild();
+      if (row.rootExitObserved) {
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+      }
+      const exited = new Set<number>();
+      if (row.rootAtStop !== "alive") exited.add(4_242);
+      if (row.rootExitObserved && row.groupExits) exited.add(-4_242);
+      let closing = false;
+      const close = (): void => {
+        if (!row.closeArrives || closing) return;
+        closing = true;
+        child.exitCode ??= 1;
+        child.stdio[1] = { closed: true };
+        queueMicrotask(() => child.emit("close", child.exitCode));
+      };
+      if (row.rootExitObserved) setTimeout(close, 5);
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (exited.has(target)) throw noSuchProcess("gone");
+        if (signal === "SIGKILL" || signal === "SIGTERM") {
+          if (target === -4_242 && row.groupExits) exited.add(-4_242);
+          if (target === 4_242 && row.rootAtStop === "alive") exited.add(4_242);
+          if (target === 5_000 && row.descendant === "exits") exited.add(5_000);
+          if (target === -4_242 || target === 4_242) close();
+        }
+        return true as const;
+      });
+      const rootLine = row.rootAtStop === "alive" ? "4242 1 S"
+        : row.rootAtStop === "zombie" ? "4242 1 Z" : "";
+      const descendantLine = row.descendant === "none" || row.rootAtStop !== "alive"
+        ? "" : "5000 4242 S";
+      const listing = [rootLine, descendantLine].filter(Boolean).join("\n");
+      return {
+        child,
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: `${listing}\n` })),
+      };
+    };
+
+    it.each(rows)("reports $confirmed for $label", async (row) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, row.force, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 100,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(row.confirmed ? 20 : 101);
+        expect(result).toBe(row.confirmed);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(101);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a normal exit through the owned termination without escalating or waiting out the budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const row = rows.find(({ label }) => label === "a graceful stop after a normal exit")!;
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        const terminateProcessTree = vi.fn((ownedChild: ChildProcess, force: boolean) =>
+          terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "linux",
+            killProcess: killProcess as never,
+            spawnProcessSync: spawnProcessSync as never,
+            processCanExecute: () => null,
+            processGroupCanExecute: () => null,
+            waitMs: 100,
+          }));
+        let settled = false;
+        void createOwnedProcessTreeTermination(
+          child as never,
+          "Provider process tree",
+          terminateProcessTree,
+        )(false).then(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(5);
+        expect(settled).toBe(true);
+        expect(terminateProcessTree).toHaveBeenCalledOnce();
+        expect(spawnProcessSync).not.toHaveBeenCalled();
+        expect(Date.now() - startedAt).toBe(5);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps ownership unconfirmed when a cancellation's forced retry meets a root that vanished unobserved", async () => {
+      vi.useFakeTimers();
+      try {
+        const row = rows.find(({ label }) => label.startsWith("a root that exits before the stop"))!;
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        const outcome = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "linux",
+            killProcess: killProcess as never,
+            spawnProcessSync: spawnProcessSync as never,
+            processCanExecute: () => null,
+            processGroupCanExecute: () => null,
+            waitMs: 100,
+          }),
+        )(true).then(() => "confirmed", (error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(101);
+        await expect(outcome).resolves.toMatchObject({
+          code: "process-tree-termination-unconfirmed",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("POSIX descendant snapshot confirmation", () => {
     const posixTermination = (
       spawnProcessSync: ReturnType<typeof vi.fn>,
@@ -956,7 +1102,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "",
+          stdout: "4242 1 S\n",
         })) as never,
         waitMs: 100,
       },
@@ -1188,7 +1334,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "linux",
         killProcess,
-        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "" })) as never,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
         waitMs: 100,
       },
     ).then((confirmed) => {

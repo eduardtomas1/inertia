@@ -59,6 +59,16 @@ export function validateCompletionSound(extension: CompletionSoundExtension, byt
   }
 }
 
+const STAGING_SUFFIX = ".staging";
+
+const managedEntry = (name: string): boolean =>
+  COMPLETION_SOUND_FILE_PATTERN.test(name.endsWith(STAGING_SUFFIX) ? name.slice(0, -STAGING_SUFFIX.length) : name);
+
+async function usableStore(directory: string): Promise<boolean> {
+  const entry = await lstat(directory).catch(() => null);
+  return entry?.isDirectory() === true;
+}
+
 async function readBounded(path: string): Promise<Buffer> {
   const named = await lstat(path, { bigint: true });
   if (named.isSymbolicLink() || !named.isFile()) throw new CompletionSoundError("Choose a regular audio file, not a link or folder.");
@@ -100,22 +110,23 @@ export async function importCompletionSound(
     throw new CompletionSoundError(`You can keep up to ${COMPLETION_SOUND_LIBRARY_MAX} sounds. Remove one to import another.`);
   }
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const staging = join(directory, `${file}.staging`);
+  if (!await usableStore(directory)) throw new CompletionSoundError("The sound library folder could not be used.");
+  const staging = join(directory, `${file}${STAGING_SUFFIX}`);
   await rm(staging, { force: true });
   await writeFile(staging, bytes, { mode: 0o600, flag: "wx" });
   await rename(staging, join(directory, file));
   let seen = 0;
   for await (const entry of await opendir(directory)) {
     if (++seen > 256) break;
-    if (entry.name !== file && !(keep as readonly string[]).includes(entry.name)) {
-      await rm(join(directory, entry.name), { recursive: true, force: true }).catch(() => undefined);
+    if (entry.isFile() && managedEntry(entry.name) && entry.name !== file && !(keep as readonly string[]).includes(entry.name)) {
+      await rm(join(directory, entry.name), { force: true }).catch(() => undefined);
     }
   }
   return { file, name: completionSoundName(basename(source, extname(source))) };
 }
 
 export async function readCompletionSound(directory: string, file: string): Promise<Uint8Array | null> {
-  if (!COMPLETION_SOUND_FILE_PATTERN.test(file)) return null;
+  if (!COMPLETION_SOUND_FILE_PATTERN.test(file) || !await usableStore(directory)) return null;
   try {
     const bytes = await readBounded(join(directory, file));
     validateCompletionSound(completionSoundExtension(file), bytes);
@@ -143,7 +154,7 @@ export function registerCompletionSoundIpc(options: {
     }
     if (action === "remove") {
       if (!isCompletionSoundFile(args[1])) throw new Error("Invalid completion sound");
-      await rm(join(options.directory, args[1]), { force: true });
+      if (await usableStore(options.directory)) await rm(join(options.directory, args[1]), { force: true });
       return;
     }
     if (action !== "import") throw new Error("Invalid completion sound action");

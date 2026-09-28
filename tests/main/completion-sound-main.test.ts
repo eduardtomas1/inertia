@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -106,6 +106,36 @@ describe("completion sound files", () => {
     await expect(importCompletionSound(join(source, "huge.wav"), store)).rejects.toThrow(/larger than 1 MB/u);
     await expect(importCompletionSound(join(source, "missing.wav"), store)).rejects.toThrow(/could not be read/u);
     expect(await readdir(store)).toEqual([]);
+  });
+
+  it("refuses a sound library folder that is a link and leaves its target untouched", async () => {
+    const source = await directory();
+    const elsewhere = await directory();
+    const parent = await directory();
+    const store = join(parent, "completion-sounds");
+    await writeFile(join(source, "ding.wav"), wav());
+    await writeFile(join(elsewhere, "keep.txt"), "not a sound");
+    await writeFile(join(elsewhere, "0123456789abcdef.wav"), wav());
+    await symlink(elsewhere, store, "junction");
+
+    await expect(importCompletionSound(join(source, "ding.wav"), store)).rejects.toThrow(CompletionSoundError);
+    expect(await readCompletionSound(store, "0123456789abcdef.wav")).toBeNull();
+    expect((await readdir(elsewhere)).sort()).toEqual(["0123456789abcdef.wav", "keep.txt"]);
+  });
+
+  it("prunes only the sound files it manages", async () => {
+    const source = await directory();
+    const store = await directory();
+    await writeFile(join(source, "ding.wav"), wav());
+    await writeFile(join(store, "notes.txt"), "keep me");
+    await mkdir(join(store, "nested"));
+    await writeFile(join(store, "nested", "0123456789abcdef.wav"), wav());
+    await writeFile(join(store, "fedcba9876543210.wav"), wav(48));
+    await writeFile(join(store, "fedcba9876543210.mp3.staging"), "partial");
+
+    const imported = await importCompletionSound(join(source, "ding.wav"), store);
+    expect((await readdir(store)).sort()).toEqual([imported.file, "nested", "notes.txt"].sort());
+    expect(await readdir(join(store, "nested"))).toEqual(["0123456789abcdef.wav"]);
   });
 
   it("reads only stored file names", async () => {

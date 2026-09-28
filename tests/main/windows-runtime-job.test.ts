@@ -858,21 +858,74 @@ describe("Windows runtime Job Object containment", () => {
 
   it("reports the last bounded helper startup stage on timeout", async () => {
     await disposeWindowsRuntimeJobExecutableLock();
-    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
-      spawnLockBroker: () => verifiedExecutableBrokerChild({
-        guardStatus: "TIMEOUT",
-        guardStderr: "INERTIA_JOB_STAGE stage=native-guard-start\n",
-      }),
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const guardRequestIds: string[] = [];
+    let live = true;
+    let killed = false;
+    const exit = (): void => {
+      if (!live) return;
+      live = false;
+      setImmediate(() => {
+        Object.assign(broker, { exitCode: 0 });
+        broker.emit("exit", 0, null);
+        broker.emit("close", 0, null);
+      });
+    };
+    const broker = Object.assign(new EventEmitter(), {
+      stdin,
+      stdout,
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill(signal?: NodeJS.Signals | number) {
+        if (signal === 0) return live;
+        killed = true;
+        exit();
+        return true;
+      },
+    }) as unknown as ChildProcessWithoutNullStreams;
+    stdin.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.startsWith("GUARD ")) guardRequestIds.push(line.split(" ")[1]!);
+        if (line !== "SHUTDOWN") continue;
+        stdout.write("BYE\n");
+        exit();
+      }
     });
-    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
-      platform: "win32",
-      assembly: stubAssembly,
-      runtimeCreationTimeBits,
-      timeoutMs: 100,
-    })).rejects.toThrow(
-      "The native helper did not report readiness within 100ms after Guard started. "
-      + "INERTIA_JOB_STAGE stage=native-guard-start",
-    );
+    const preparation = prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    queueMicrotask(() => stdout.write("LOCKED\n"));
+    await preparation;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const failure = armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+        platform: "win32",
+        assembly: stubAssembly,
+        runtimeCreationTimeBits,
+        timeoutMs: 100,
+      }).then(() => null, (error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(95);
+      expect(guardRequestIds).toHaveLength(1);
+      stdout.write([
+        "RESULT",
+        guardRequestIds[0],
+        "TIMEOUT",
+        "",
+        Buffer.from("INERTIA_JOB_STAGE stage=native-guard-start\n").toString("base64"),
+      ].join(" ") + "\n");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(5);
+      expect(await failure).toEqual(new Error(
+        "The Windows runtime Job Object could not be armed. "
+        + "The native helper did not report readiness within 100ms after Guard started. "
+        + "INERTIA_JOB_STAGE stage=native-guard-start",
+      ));
+      expect(killed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails closed when the native helper exits before readiness", async () => {

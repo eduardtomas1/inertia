@@ -767,7 +767,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
         }
         child.stdin.write(command);
         const prefix = `RESULT ${requestId} `;
-        while (Date.now() < operationDeadlineAt) {
+        while (true) {
           if (!isHeld()) {
             throw new Error("The verified Windows runtime executable lock was lost.");
           }
@@ -798,6 +798,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
             }
             return result;
           }
+          if (Date.now() >= operationDeadlineAt) break;
           await new Promise<void>((resolve) => setTimeout(resolve, 10));
         }
         held = false;

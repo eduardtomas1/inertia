@@ -60,7 +60,7 @@ describe("completion sound files", () => {
     const source = await directory();
     const store = await directory();
     const first = join(source, "Soft ding.WAV");
-    const second = join(source, `bell${String.fromCharCode(7)}.mp3`);
+    const second = join(source, `bell${String.fromCharCode(0x200b)}.mp3`);
     const orphan = join(source, "orphan.wav");
     await writeFile(first, wav());
     await writeFile(second, Buffer.from("ID3\u0004\u0000rest"));

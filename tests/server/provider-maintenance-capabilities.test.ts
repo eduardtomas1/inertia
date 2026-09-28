@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderEnvironment } from "../../src/server/environment";
@@ -11,6 +14,13 @@ const environment: ProviderEnvironment = {
   env: { PATH: "/tools" },
   pathEntries: ["/tools"],
 };
+
+function writableNpmInstallation(executable: string) {
+  return {
+    access: async () => undefined,
+    realpath: async (path: string) => path.endsWith("/bin/codex") ? executable : path,
+  };
+}
 
 function target(
   input: Partial<ProviderMaintenanceTarget> = {},
@@ -46,20 +56,21 @@ describe("provider maintenance capabilities", () => {
     expect(resolveExecutable).not.toHaveBeenCalled();
   });
 
-  it("uses npm only when Codex has proven npm-global provenance", async () => {
+  it.each(["linux", "darwin"] as const)("uses npm only when Codex has proven npm-global provenance on %s", async (platform) => {
     const resolveExecutable = vi.fn(async (command: string) => (
       command === "/usr/local/bin/npm"
         ? ["/usr/local/lib/node_modules/npm/bin/npm-cli.js"]
-        : []
+        : command === "/usr/local/bin/node" ? [command] : []
     ));
     const capabilities = await resolveProviderMaintenanceCapabilities(
       target({
         executable: "/usr/local/lib/node_modules/@openai/codex/bin/codex",
       }),
       {
+        ...writableNpmInstallation("/usr/local/lib/node_modules/@openai/codex/bin/codex"),
         environment: async () => environment,
         executableCandidates: resolveExecutable,
-        platform: "linux",
+        platform,
       },
     );
 
@@ -67,8 +78,8 @@ describe("provider maintenance capabilities", () => {
       installMethod: "npm-global",
       updateAvailability: "available",
       update: {
-        executable: "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-        args: ["install", "-g", "@openai/codex@latest"],
+        executable: "/usr/local/bin/node",
+        args: ["/usr/local/lib/node_modules/npm/bin/npm-cli.js", "install", "-g", "--prefix", "/usr/local", "@openai/codex@latest"],
         environmentPathPrefix: "/usr/local/bin",
         lockKey: "package-manager:npm-global",
       },
@@ -79,7 +90,7 @@ describe("provider maintenance capabilities", () => {
     );
   });
 
-  it("uses npm from the detected NVM version instead of an earlier system npm", async () => {
+  it.each(["linux", "darwin"] as const)("uses npm from the detected NVM version instead of an earlier system npm on %s", async (platform) => {
     const nvmRoot = "/home/user/.nvm/versions/node/v22.19.0";
     const desktopEnvironment: ProviderEnvironment = {
       env: { PATH: `/usr/bin:${nvmRoot}/bin` },
@@ -89,6 +100,7 @@ describe("provider maintenance capabilities", () => {
       if (command === `${nvmRoot}/bin/npm`) {
         return [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`];
       }
+      if (command === `${nvmRoot}/bin/node`) return [command];
       return command === "npm" ? ["/usr/share/nodejs/npm/bin/npm-cli.js"] : [];
     });
     const capabilities = await resolveProviderMaintenanceCapabilities(
@@ -96,17 +108,19 @@ describe("provider maintenance capabilities", () => {
         executable: `${nvmRoot}/lib/node_modules/@openai/codex/bin/codex.js`,
       }),
       {
+        ...writableNpmInstallation(`${nvmRoot}/lib/node_modules/@openai/codex/bin/codex.js`),
         environment: async () => desktopEnvironment,
         executableCandidates: resolveExecutable,
-        platform: "linux",
+        platform,
       },
     );
 
     expect(capabilities.update).toMatchObject({
-      executable: `${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`,
+      executable: `${nvmRoot}/bin/node`,
+      args: [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", nvmRoot, "@openai/codex@latest"],
       environmentPathPrefix: `${nvmRoot}/bin`,
     });
-    expect(resolveExecutable).toHaveBeenCalledTimes(1);
+    expect(resolveExecutable).toHaveBeenCalledTimes(2);
     expect(resolveExecutable).not.toHaveBeenCalledWith(
       "npm",
       expect.anything(),
@@ -119,6 +133,7 @@ describe("provider maintenance capabilities", () => {
         executable: "/home/user/.nvm/versions/node/v22/lib/node_modules/@openai/codex/bin/codex.js",
       }),
       {
+        ...writableNpmInstallation("/home/user/.nvm/versions/node/v22/lib/node_modules/@openai/codex/bin/codex.js"),
         environment: async () => environment,
         executableCandidates: async () => [],
         platform: "linux",
@@ -130,6 +145,116 @@ describe("provider maintenance capabilities", () => {
       updateAvailability: "instructions-only",
       update: null,
     });
+  });
+
+  it.each(["/home/user/.local", "/home/user/.npm-global", "/usr/local"])(
+    "binds a writable %s prefix to distro npm and its own Node with a minimal GUI PATH",
+    async (prefix) => {
+      const executable = `${prefix}/lib/node_modules/@openai/codex/bin/codex.js`;
+      const resolveExecutable = vi.fn(async (command: string) => {
+        if (command === "npm") return ["/usr/share/nodejs/npm/bin/npm-cli.js"];
+        return command === "/usr/bin/node" ? [command] : [];
+      });
+      const capabilities = await resolveProviderMaintenanceCapabilities(target({ executable }), {
+        ...writableNpmInstallation(executable),
+        environment: async () => ({ env: { PATH: "/usr/bin:/bin", NPM_CONFIG_PREFIX: "/unrelated" }, pathEntries: ["/usr/bin", "/bin"] }),
+        executableCandidates: resolveExecutable,
+        platform: "linux",
+      });
+      expect(capabilities.update).toMatchObject({
+        executable: "/usr/bin/node",
+        args: ["/usr/share/nodejs/npm/bin/npm-cli.js", "install", "-g", "--prefix", prefix, "@openai/codex@latest"],
+        environmentPathPrefix: "/usr/bin",
+      });
+      expect(resolveExecutable.mock.calls.map(([command]) => command))
+        .toEqual([`${prefix}/bin/npm`, "npm", "/usr/bin/node"]);
+    },
+  );
+
+  it("explains a non-writable system prefix without offering an updater", async () => {
+    const executable = "/usr/local/lib/node_modules/@openai/codex/bin/codex.js";
+    const resolveExecutable = vi.fn(async () => ["/usr/bin/npm"]);
+    const capabilities = await resolveProviderMaintenanceCapabilities(target({ executable }), {
+      ...writableNpmInstallation(executable),
+      access: async () => { throw new Error("EACCES"); },
+      environment: async () => environment,
+      executableCandidates: resolveExecutable,
+      platform: "linux",
+    });
+    expect(capabilities).toMatchObject({
+      update: null,
+      updateAvailability: "instructions-only",
+      message: expect.stringContaining("not writable"),
+    });
+    expect(resolveExecutable).not.toHaveBeenCalled();
+  });
+
+  it("allows a writable npm tree beneath root-owned macOS prefix parents", async () => {
+    const executable = "/usr/local/lib/node_modules/@openai/codex/bin/codex.js";
+    const capabilities = await resolveProviderMaintenanceCapabilities(target({ executable }), {
+      ...writableNpmInstallation(executable),
+      access: async (path) => {
+        if (path === "/usr/local" || path === "/usr/local/lib") throw new Error("EACCES");
+      },
+      environment: async () => environment,
+      executableCandidates: async (command) => command === "/usr/local/bin/npm"
+        ? ["/usr/local/lib/node_modules/npm/bin/npm-cli.js"]
+        : command === "/usr/local/bin/node" ? [command] : [],
+      platform: "darwin",
+    });
+    expect(capabilities.update).toMatchObject({ executable: "/usr/local/bin/node" });
+  });
+
+  it.each(["/usr/share/nodejs/npm/bin/npm-cli.js", "/home/user/.asdf/shims/npm"])(
+    "does not borrow an unrelated Node from PATH for %s",
+    async (manager) => {
+      const executable = "/home/user/.local/lib/node_modules/@openai/codex/bin/codex.js";
+      const capabilities = await resolveProviderMaintenanceCapabilities(target({ executable }), {
+        ...writableNpmInstallation(executable),
+        environment: async () => environment,
+        executableCandidates: async (command) => command === "npm" ? [manager] : command === "node" ? ["/unrelated/node"] : [],
+        platform: "linux",
+      });
+      expect(capabilities).toMatchObject({ update: null, message: expect.stringContaining("pair npm") });
+    },
+  );
+
+  it.each([
+    "/home/user/.asdf/shims/codex",
+    "/home/user/.local/share/mise/shims/codex",
+    "/home/user/.volta/bin/codex",
+    "/usr/bin/codex",
+  ])("keeps an externally managed executable at %s manual", async (executable) => {
+    expect(await resolveProviderMaintenanceCapabilities(target({ executable })))
+      .toMatchObject({ update: null, message: expect.stringContaining("original installer") });
+  });
+
+  it.skipIf(process.platform === "win32")("verifies the discovered symlink and rejects redirected directories or native vendor targets", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-npm-prefix-")));
+    const executable = join(root, "lib/node_modules/@openai/codex/bin/codex.js");
+    await mkdir(join(root, "lib/node_modules/@openai/codex/bin"), { recursive: true });
+    await mkdir(join(root, "bin"));
+    await writeFile(executable, "fixture", { mode: 0o755 });
+    await symlink(executable, join(root, "bin/codex"));
+    const dependencies = {
+      environment: async () => environment,
+      executableCandidates: async (command: string) => command === "npm" ? ["/usr/share/nodejs/npm/bin/npm-cli.js"] : command === "/usr/bin/node" ? [command] : [],
+      platform: "linux" as const,
+    };
+    try {
+      expect((await resolveProviderMaintenanceCapabilities(target({ executable }), dependencies)).update)
+        .toMatchObject({ executable: "/usr/bin/node" });
+      const nativeTarget = join(root, "lib/node_modules/@openai/codex/vendor/codex");
+      expect((await resolveProviderMaintenanceCapabilities(target({ executable: nativeTarget }), dependencies)).update).toBeNull();
+      await rm(join(root, "bin"), { recursive: true });
+      await mkdir(join(root, "outside"));
+      await symlink(executable, join(root, "outside/codex"));
+      await symlink(join(root, "outside"), join(root, "bin"));
+      expect(await resolveProviderMaintenanceCapabilities(target({ executable }), dependencies))
+        .toMatchObject({ update: null, message: expect.stringContaining("could not verify") });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("does not derive an updater from relative npm package paths", async () => {

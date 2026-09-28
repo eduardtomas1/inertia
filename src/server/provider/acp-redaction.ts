@@ -22,7 +22,6 @@ export class AcpSecretRedactor {
   private readonly assistant: BoundarySecretRedactor;
   private readonly reasoning: BoundarySecretRedactor;
   private readonly stderr: BoundarySecretRedactor;
-  private streamsStarted = false;
 
   constructor(environment: NodeJS.ProcessEnv) {
     this.secrets = acpEnvironmentSecretValues(environment);
@@ -32,9 +31,6 @@ export class AcpSecretRedactor {
   }
 
   addSecrets(values: readonly string[]): void {
-    if (this.streamsStarted) {
-      throw new Error("ACP credentials changed after output streaming began.");
-    }
     const merged = normalizedSecrets([...this.secrets, ...values]);
     this.secrets.splice(0, this.secrets.length, ...merged);
     this.assistant.invalidate();
@@ -47,12 +43,10 @@ export class AcpSecretRedactor {
   }
 
   assistantChunk(value: string): string {
-    this.streamsStarted = true;
     return this.assistant.push(value);
   }
 
   reasoningChunk(value: string): string {
-    this.streamsStarted = true;
     return this.reasoning.push(value);
   }
 

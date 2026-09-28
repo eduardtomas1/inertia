@@ -52,7 +52,6 @@ import {
   type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
-import { redactHostToolPayload } from "./host-tool-redaction";
 import {
   BoundedKimiJsonLineTransform,
   kimiErrorDetail,
@@ -232,12 +231,7 @@ function startKimiRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
-  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(hostMcpConnection
-    ? redactHostToolPayload(value, [
-        hostMcpConnection.bearerToken,
-        hostMcpConnection.url,
-      ])
-    : value);
+  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(value);
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let sessionReady = false;
@@ -466,6 +460,9 @@ function startKimiRun(
         );
       }
       hostMcpConnection = await hostMcpSession?.start();
+      if (hostMcpConnection) {
+        secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
+      }
       const hostMcpServers = hostMcpConnection
         ? acpHostMcpServers(
             hostMcpConnection,

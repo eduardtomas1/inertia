@@ -1,4 +1,4 @@
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { lazy, Suspense, useState, useSyncExternalStore } from "react";
 import type { AppShortcutAction } from "@shared/keybindings";
 
 import { closeHelpGuide, helpGuideIsOpen, subscribeHelpGuide } from "../utils/helpGuide";
@@ -23,10 +23,13 @@ export function HelpGuideHost({
   onLeave: () => void;
 }): React.JSX.Element {
   const open = useSyncExternalStore(subscribeHelpGuide, helpGuideIsOpen);
+  const [session, setSession] = useState({ open, id: 0 });
+  if (session.open !== open) setSession({ open, id: open ? session.id + 1 : session.id });
   return (
     <DialogPresence open={open}>
       <Suspense fallback={null}>
         <HelpGuide
+          key={session.id}
           shortcutLabel={shortcutLabel}
           onClose={closeHelpGuide}
           onCommand={(command) => {

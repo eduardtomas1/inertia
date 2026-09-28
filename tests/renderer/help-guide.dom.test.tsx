@@ -137,6 +137,27 @@ describe("Help", () => {
     }
   });
 
+  it("starts fresh when reopened during the closing animation", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    const { opener } = renderWithSidebarButton();
+    const dialog = await openFrom(opener);
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Keyboard" }));
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(opener).toHaveFocus();
+
+    const reopened = await openFrom(opener);
+    const first = within(reopened).getByRole("tab", { name: "Getting started" });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(opener).toHaveFocus();
+    await waitFor(() => expect(document.querySelector(".help-guide")).toBeNull());
+  });
+
   it("returns focus to the opener from Close and Done", async () => {
     const { opener } = renderWithSidebarButton();
     let dialog = await openFrom(opener);

@@ -7,8 +7,10 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shut
 import { privilegedShutdownEnvelopeMs } from
   "../../src/main/privileged-shutdown-deadline";
 import {
+  CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS,
   closeElectronAppBounded,
   closeElectronFixtureBounded,
+  FIXTURE_PREPARED_EXIT_TIMEOUT_MS,
   fixtureElectronGracefulTimeoutMs,
   fixtureRuntimeExitTimeoutMs,
   formatElectronConsoleError,
@@ -470,6 +472,64 @@ describe("Electron E2E application lifecycle", () => {
     expect(requestRuntimeQuit).toHaveBeenCalledOnce();
     expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
     expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("lets a prepared quit outlast Chromium's bounded network-service exit wait on a slow runner", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn((signal: NodeJS.Signals) => {
+          process.signalCode = signal;
+          queueMicrotask(() => process.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const nativeExitAfterQuitMs = CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS + 2_500;
+      const closing = closeElectronFixtureBounded({
+        platform: "darwin",
+        current: {
+          process: () => process,
+          close: async () => undefined,
+        } as unknown as ElectronApplication,
+        prepareRuntimeQuit: async () => ({
+          phase: "privileged-cleanup-complete",
+          runtimePid: null,
+          cleanupConfirmed: true,
+          errorMessage: null,
+        }),
+        requestRuntimeQuit: async () => {
+          setTimeout(() => {
+            process.exitCode = 0;
+            process.emit("exit", 0, null);
+          }, nativeExitAfterQuitMs);
+          return null;
+        },
+        waitForRuntimeExit: vi.fn(async () => undefined),
+        closeServer: vi.fn(async () => undefined),
+        removeDirectory: vi.fn(async () => undefined),
+        rpcTimeoutMs: 50,
+        preparedExitTimeoutMs: FIXTURE_PREPARED_EXIT_TIMEOUT_MS,
+        serverTimeoutMs: 50,
+        removeTimeoutMs: 50,
+        createMainProcessDiagnostic: () => ({
+          capture: () => undefined,
+          watchQuit: () => () => undefined,
+          terminateStalledGpuHelper: async () => false,
+          stop: () => undefined,
+          samples: [],
+        }),
+      });
+      const settled = closing.then(() => "closed", (error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(nativeExitAfterQuitMs + 1_000);
+
+      await expect(settled).resolves.toBe("closed");
+      expect(process.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("force-cleans when privileged cleanup cannot confirm every owner stopped", async () => {

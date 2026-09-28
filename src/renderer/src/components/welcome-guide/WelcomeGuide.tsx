@@ -9,11 +9,17 @@ import {
 import { ArrowRight, Check, FolderPlus } from "lucide-react";
 import type { ProviderId, ProviderInfo } from "@shared/contracts";
 
-import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import type { WelcomeShortcut } from "../../utils/welcomeGuide";
 import { WelcomeDemo } from "./WelcomeDemos";
+import {
+  GuideDemo,
+  GuideDialog,
+  GuideTopicTabs,
+  order,
+  useGuideModal,
+  useGuideTopic,
+} from "./GuideParts";
 import {
   clampWelcomeStep,
   PROVIDER_READINESS_LABELS,
@@ -27,9 +33,7 @@ import {
 } from "./welcomeGuideModel";
 import "./WelcomeGuide.css";
 
-function order(index: number): CSSProperties {
-  return { "--i": index } as CSSProperties;
-}
+export { HelpGuide } from "./HelpGuide";
 
 function TourStep({
   titleId,
@@ -38,70 +42,22 @@ function TourStep({
   titleId: string | undefined;
   shortcuts: readonly WelcomeShortcut[];
 }): React.JSX.Element {
-  const [topic, setTopic] = useState<WelcomeTopicId>("split");
-  const [leaving, setLeaving] = useState<WelcomeTopicId | null>(null);
+  const { topic, leaving, choose } = useGuideTopic<WelcomeTopicId>("split");
   const current = WELCOME_TOPICS.find((item) => item.id === topic)!;
   const stages = leaving === null ? [topic] : [leaving, topic];
-  const choose = (next: WelcomeTopicId): void => {
-    if (next === topic) return;
-    const previous = topic;
-    setLeaving(previous);
-    setTopic(next);
-    window.setTimeout(() => setLeaving((value) => (value === previous ? null : value)), 160);
-  };
-  const moveTopic = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    event.preventDefault();
-    const index = WELCOME_TOPICS.findIndex((item) => item.id === topic);
-    const offset = event.key === "ArrowDown" ? 1 : -1;
-    const next = WELCOME_TOPICS[(index + offset + WELCOME_TOPICS.length) % WELCOME_TOPICS.length]!;
-    choose(next.id);
-    document.getElementById(`welcome-topic-${next.id}`)?.focus();
-  };
   return (
     <>
       <h2 id={titleId} className="welcome-guide-title">How it works</h2>
-      <div className="welcome-guide-tour">
-        <div
-          className="welcome-guide-topics"
-          role="tablist"
-          aria-label="Topics"
-          aria-orientation="vertical"
-          onKeyDown={moveTopic}
-        >
-          {WELCOME_TOPICS.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              id={`welcome-topic-${item.id}`}
-              aria-selected={item.id === topic}
-              aria-controls="welcome-topic-panel"
-              tabIndex={item.id === topic ? 0 : -1}
-              style={order(index)}
-              onClick={() => choose(item.id)}
-            >
-              {item.title}
-            </button>
-          ))}
+      <GuideTopicTabs idPrefix="welcome-topic" topics={WELCOME_TOPICS} topic={topic} onChoose={choose}>
+        <GuideDemo
+          stages={stages.map((id) => ({ key: id, demo: id, leaving: id !== topic }))}
+          shortcuts={shortcuts}
+        />
+        <div className="welcome-guide-topic-copy">
+          <h3>{current.title}</h3>
+          <p>{topicDetail(current.detail, shortcuts)}</p>
         </div>
-        <div
-          className="welcome-guide-topic"
-          role="tabpanel"
-          id="welcome-topic-panel"
-          aria-labelledby={`welcome-topic-${topic}`}
-        >
-          <div className="welcome-demo" aria-hidden="true">
-            {stages.map((id) => (
-              <WelcomeDemo key={id} demo={id} shortcuts={shortcuts} leaving={id !== topic} />
-            ))}
-          </div>
-          <div className="welcome-guide-topic-copy">
-            <h3>{current.title}</h3>
-            <p>{topicDetail(current.detail, shortcuts)}</p>
-          </div>
-        </div>
-      </div>
+      </GuideTopicTabs>
     </>
   );
 }
@@ -130,8 +86,7 @@ export function WelcomeGuide({
     providerReadiness(provider),
   ]);
   const readyCount = readiness.filter(([, state]) => state === "ready").length;
-  useNativePreviewSuspension(true);
-  useLayoutEffect(() => captureModalFocus(), []);
+  useGuideModal();
   useLayoutEffect(() => {
     primary.current?.focus({ preventScroll: true });
   }, [step]);
@@ -151,12 +106,6 @@ export function WelcomeGuide({
   };
   const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
     const target = event.target as HTMLElement;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
     if (
       (event.key === "ArrowRight" || event.key === "ArrowLeft")
       && !target.closest("[role='tablist']")
@@ -168,9 +117,7 @@ export function WelcomeGuide({
     if (event.key === "Enter" && target === event.currentTarget) {
       event.preventDefault();
       advance();
-      return;
     }
-    trapModalFocus(event, event.currentTarget);
   };
   const renderStep = (stepIndex: number, headingId: string | undefined): React.JSX.Element => (
     <>
@@ -251,68 +198,64 @@ export function WelcomeGuide({
   );
 
   return (
-    <div className="dialog-backdrop welcome-guide-backdrop">
-      <section
-        className="welcome-guide"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Welcome guide"
-        aria-describedby={titleId}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-      >
-        <header className="welcome-guide-header">
-          <span className="welcome-guide-count">
-            Step {step + 1} of {WELCOME_STEPS.length}
-          </span>
-          <button type="button" className="welcome-guide-skip" onClick={onClose}>
-            Skip
-          </button>
-        </header>
-        <div className="welcome-guide-body">
-          {(leavingStep === null ? [step] : [leavingStep, step]).map((index) => {
-            const leaving = index !== step;
-            return (
-              <div
-                key={index}
-                className={`welcome-guide-step${leaving ? " is-leaving" : ""}`}
-                data-step={WELCOME_STEPS[index]!.id}
-                style={{ "--welcome-direction": direction } as CSSProperties}
-                aria-hidden={leaving || undefined}
-                inert={leaving}
-              >
-                {renderStep(index, leaving ? undefined : titleId)}
-              </div>
-            );
-          })}
-        </div>
-        <footer className="welcome-guide-footer">
-          <span
-            className="welcome-guide-dots"
-            role="progressbar"
-            aria-label="Guide progress"
-            aria-valuemin={1}
-            aria-valuemax={WELCOME_STEPS.length}
-            aria-valuenow={step + 1}
-            aria-valuetext={`Step ${step + 1} of ${WELCOME_STEPS.length}: ${WELCOME_STEPS[step]!.title}`}
-          >
-            {WELCOME_STEPS.map((item, index) => (
-              <i key={item.id} data-state={index === step ? "current" : index < step ? "done" : "next"} />
-            ))}
-          </span>
-          <span className="welcome-guide-actions">
-            {step > 0 && (
-              <button type="button" className="welcome-guide-back" onClick={() => go(-1)}>
-                Back
-              </button>
-            )}
-            <button ref={primary} type="button" className="welcome-guide-primary" onClick={advance}>
-              {WELCOME_STEPS[step]!.primary}
-              <ArrowRight size={15} aria-hidden="true" />
+    <GuideDialog
+      className="welcome-guide"
+      label="Welcome guide"
+      describedBy={titleId}
+      onClose={onClose}
+      onKeyDown={onKeyDown}
+    >
+      <header className="welcome-guide-header">
+        <span className="welcome-guide-count">
+          Step {step + 1} of {WELCOME_STEPS.length}
+        </span>
+        <button type="button" className="welcome-guide-skip" onClick={onClose}>
+          Skip
+        </button>
+      </header>
+      <div className="welcome-guide-body">
+        {(leavingStep === null ? [step] : [leavingStep, step]).map((index) => {
+          const leaving = index !== step;
+          return (
+            <div
+              key={index}
+              className={`welcome-guide-step${leaving ? " is-leaving" : ""}`}
+              data-step={WELCOME_STEPS[index]!.id}
+              style={{ "--welcome-direction": direction } as CSSProperties}
+              aria-hidden={leaving || undefined}
+              inert={leaving}
+            >
+              {renderStep(index, leaving ? undefined : titleId)}
+            </div>
+          );
+        })}
+      </div>
+      <footer className="welcome-guide-footer">
+        <span
+          className="welcome-guide-dots"
+          role="progressbar"
+          aria-label="Guide progress"
+          aria-valuemin={1}
+          aria-valuemax={WELCOME_STEPS.length}
+          aria-valuenow={step + 1}
+          aria-valuetext={`Step ${step + 1} of ${WELCOME_STEPS.length}: ${WELCOME_STEPS[step]!.title}`}
+        >
+          {WELCOME_STEPS.map((item, index) => (
+            <i key={item.id} data-state={index === step ? "current" : index < step ? "done" : "next"} />
+          ))}
+        </span>
+        <span className="welcome-guide-actions">
+          {step > 0 && (
+            <button type="button" className="welcome-guide-back" onClick={() => go(-1)}>
+              Back
             </button>
-          </span>
-        </footer>
-      </section>
-    </div>
+          )}
+          <button ref={primary} type="button" className="welcome-guide-primary" onClick={advance}>
+            {WELCOME_STEPS[step]!.primary}
+            <ArrowRight size={15} aria-hidden="true" />
+          </button>
+        </span>
+      </footer>
+    </GuideDialog>
   );
 }

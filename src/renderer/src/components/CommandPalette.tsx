@@ -1,4 +1,4 @@
-import { FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { CircleHelp, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -6,6 +6,7 @@ import { MESSAGE_SEARCH_QUERY_MAX, messageSearchPattern, type MessageSearchHit }
 import { useMessageSearch, type MessageSearchCommand } from "../hooks/useMessageSearch";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
+import { openHelpGuide } from "../utils/helpGuide";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
 
@@ -96,6 +97,7 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
         : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
+      { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },
     ];
     const projectItems: PaletteItem[] = projects.map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));

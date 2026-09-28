@@ -257,6 +257,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     "Daily work",
     "Usage",
     "Settings",
+    "Help",
   ]);
   const navigationPath = testInfo.outputPath("usage-dashboard-navigation.png");
   await page.locator(".sidebar-footer").screenshot({

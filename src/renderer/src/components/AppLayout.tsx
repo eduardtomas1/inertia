@@ -42,6 +42,9 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
+import { HelpGuideHost } from "./HelpGuideHost";
+import type { SettingsSection } from "./settingsSections";
+import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
 import {
@@ -107,6 +110,7 @@ interface AppLayoutActions {
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
+  openSettingsSection: (section: SettingsSection) => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -901,6 +905,18 @@ export function AppLayout({
         ]}
         onOpenProviderSetup={actions.openProviderSetup}
         onAddProject={() => void actions.importProject()}
+      />
+      <HelpGuideHost
+        shortcutLabel={(action) => formatAppShortcutLabel(platform, settings.keybindings[action])}
+        commands={{
+          "add-project": () => void actions.importProject(),
+          search: () => setPaletteOpen(true),
+          usage: () => setView("usage"),
+          "daily-work": () => setDailyWorkOpen(true),
+          "welcome-guide": openWelcomeGuide,
+        }}
+        onOpenSettings={actions.openSettingsSection}
+        onLeave={() => setSidebarOpen(false)}
       />
     </div>
   );

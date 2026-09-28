@@ -1,0 +1,125 @@
+.welcome-guide.help-guide {
+  height: min(620px, calc(100vh - 32px));
+}
+
+.help-guide .welcome-guide-step {
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.help-guide .welcome-guide-tour {
+  flex: 1;
+  min-height: 0;
+}
+
+.help-guide .welcome-guide-topics {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.help-guide .welcome-guide-topics button {
+  padding-block: 7px;
+}
+
+.help-guide .welcome-guide-topic {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 4px 18px 2px;
+  border-radius: 8px;
+  outline: none;
+}
+
+.help-guide .welcome-guide-topic:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.help-guide .welcome-demo {
+  height: 150px;
+  flex-shrink: 0;
+}
+
+.help-guide-entries {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-guide-entries li {
+  display: grid;
+  align-items: baseline;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  animation: welcome-rise 300ms var(--motion-ease-out) both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+.help-guide-entries strong {
+  font-size: 12.5px;
+}
+
+.help-guide-entries kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.help-guide .help-guide-entries p {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
+.help-guide-jumps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.help-guide-jumps button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.help-guide-jumps button:hover {
+  background: var(--surface);
+}
+
+@media (max-width: 680px) {
+  .help-guide .welcome-guide-tour {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .help-guide-entries li {
+    animation: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .help-guide-entries li,
+  .help-guide-jumps button {
+    border-color: CanvasText;
+  }
+}

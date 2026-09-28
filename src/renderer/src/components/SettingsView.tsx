@@ -1,7 +1,6 @@
 import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   ArchiveRestore,
   Bot,
   ChevronDown,
@@ -12,12 +11,9 @@ import {
   FolderOpen,
   GitCompareArrows,
   Keyboard,
-  Laptop,
   PanelLeft,
   RefreshCw,
   RotateCcw,
-  ServerCog,
-  Scan,
   ShieldCheck,
   Sun,
   TerminalSquare,
@@ -73,6 +69,7 @@ import {
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
+import { SETTINGS_SECTIONS, type SettingsSection } from "./settingsSections";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { ThemeLibrary } from "./ThemeLibrary";
 import { WorkingIndicatorSettings } from "./working-indicator/WorkingIndicatorSettings";
@@ -82,7 +79,7 @@ import "./SettingsView.css";
 export type SettingsViewProps = {
   onReportCommand?: IssueReportSettingsProps["request"];
   target?: {
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    section: SettingsSection;
     projectId?: string;
     profileId?: string;
     selection?: import("../utils/diagnosticNavigation").DiagnosticSelection;
@@ -137,35 +134,6 @@ export type SettingsViewProps = {
   onSetBackendDefault: (projectId: string | null, selection: ModelSelection) => Promise<void>;
   onClearBackendDefault: (projectId: string | null) => Promise<void>;
 };
-
-type SettingsSection =
-  | "support"
-  | "general"
-  | "snapshots"
-  | "projects"
-  | "providers"
-  | "backends"
-  | "connections"
-  | "discord"
-  | "diagnostics"
-  | "source"
-  | "keybindings"
-  | "archive";
-
-const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> = [
-  { id: "general", label: "General", icon: PanelLeft },
-  { id: "snapshots", label: "Snapshots", icon: Scan },
-  { id: "projects", label: "Projects", icon: FolderOpen },
-  { id: "providers", label: "Providers", icon: Bot },
-  { id: "backends", label: "Model backends", icon: ServerCog },
-  { id: "connections", label: "Connections & devices", icon: Laptop },
-  { id: "discord", label: "Discord", icon: Bot },
-  { id: "diagnostics", label: "Diagnostics", icon: Activity },
-  { id: "source", label: "Source control", icon: GitCompareArrows },
-  { id: "keybindings", label: "Keybindings", icon: Keyboard },
-  { id: "support", label: "Report an issue", icon: Bot },
-  { id: "archive", label: "Archive & data", icon: ArchiveRestore },
-];
 
 const shortcuts: Array<[AppShortcutAction, string]> = [
   ["search", "Search everything"],
@@ -548,7 +516,7 @@ export function SettingsView({
     >
       <aside className="settings-navigation" aria-label="Settings sections">
         <nav>
-          {sections.map((item) => {
+          {SETTINGS_SECTIONS.map((item) => {
             const Icon = item.icon;
             return <button type="button" className={clsx(section === item.id && "is-active")} aria-current={section === item.id ? "page" : undefined} onFocus={() => prefetchSettingsSection(item.id)} onPointerDown={() => prefetchSettingsSection(item.id)} onPointerEnter={() => prefetchSettingsSection(item.id)} onClick={() => setSection(item.id)} key={item.id}><Icon size={15} /><span>{item.label}</span>{item.id === "archive" && archived.length > 0 && <small>{archived.length}</small>}</button>;
           })}
@@ -563,7 +531,7 @@ export function SettingsView({
         section === "support" && "is-issue-report",
       )}>
         <h2 className="visually-hidden">
-          {sections.find((item) => item.id === section)?.label ?? "Settings"}
+          {SETTINGS_SECTIONS.find((item) => item.id === section)?.label ?? "Settings"}
         </h2>
         {section === "projects" && (ProjectSettings
           ? <ProjectSettings key={target?.section === "projects" ? target.projectId ?? "all" : "all"}

@@ -3,6 +3,7 @@ import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
+import type { SettingsSection } from "./components/settingsSections";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
   type AgentApprovalDecision,
@@ -112,7 +113,7 @@ export default function App(): React.JSX.Element {
   );
   const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    section: SettingsSection;
     projectId?: string;
     profileId?: string;
     selection?: DiagnosticSelection;
@@ -780,6 +781,10 @@ export default function App(): React.JSX.Element {
     setSettingsTarget({ section: "projects", projectId });
     navigateToView("settings");
   }, [navigateToView]);
+  const openSettingsSection = useCallback((section: SettingsSection) => {
+    setSettingsTarget({ section });
+    navigateToView("settings");
+  }, [navigateToView]);
 
   useEffect(() => {
     if (view !== "settings" && settingsTarget) setSettingsTarget(null);
@@ -1073,6 +1078,7 @@ export default function App(): React.JSX.Element {
         openProviderSetup,
         openBackendSetup,
         openProjectSettings,
+        openSettingsSection,
         createConversation,
         updateSettings,
         openProjectPath,

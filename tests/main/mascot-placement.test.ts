@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mascotBounds, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState } from "../../src/main/mascot-placement";
 import { emptyMascotStatus, parseMascotChats, parseMascotPreferences, parseMascotStatus, type MascotStatus } from "../../src/shared/mascot";
-import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
+import { parseRuntimeWorkerCommand, parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
 const primary = { workArea: { x: 0, y: 24, width: 1440, height: 876 } };
 const secondary = { workArea: { x: -1920, y: -200, width: 1920, height: 1080 } };
@@ -61,11 +61,20 @@ describe("mascot placement and contracts", () => {
       { ...emptyMascotStatus(), conversationId: "chat" }, { ...emptyMascotStatus(), activeCount: Infinity },
       { ...emptyMascotStatus(), text: "secret" }, { ...emptyMascotStatus(), phase: "running" }]) {
       expect(parseMascotStatus(value)).toBeNull();
-      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value, chats: [] })).toBeNull();
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value, chats: [], focus: null })).toBeNull();
     }
-    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus() })).toBeNull();
-    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] }))
-      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] });
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: 7 })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: "chat" }))
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: "chat" });
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat" }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: "chat" });
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: null });
+    for (const conversationId of ["", "a\u0000b", "x".repeat(201), 3, undefined]) {
+      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId })).toBeNull();
+    }
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, extra: true })).toBeNull();
   });
 
   it("bounds chat context, plan steps, timestamps, and the chat list", () => {
@@ -83,6 +92,6 @@ describe("mascot placement and contracts", () => {
     expect(parseMascotChats([chat("a"), chat("a")])).toBeNull();
     expect(parseMascotChats([emptyMascotStatus()])).toBeNull();
     expect(parseMascotChats(Array.from({ length: 9 }, (_, index) => chat(`chat-${index}`)))).toBeNull();
-    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: chat("a"), chats: [chat("a"), chat("a")] })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: chat("a"), chats: [chat("a"), chat("a")], focus: null })).toBeNull();
   });
 });

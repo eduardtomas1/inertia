@@ -93,10 +93,11 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   const main = new BrowserWindow({});
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
+  const focusChat = vi.fn();
   const unregister = vi.fn();
   const mascot = new MascotMain({
     mainWindow: () => main, rendererUrl: "inertia://bundle/index.html", userDataDirectory: directory,
-    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat,
+    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat, focusChat,
     spriteOrigin: "inertia://bundle/",
   });
   mascot.attach();
@@ -107,7 +108,7 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
-  return { mascot, main, invoke, openChat, unregister, directory, gesture };
+  return { mascot, main, invoke, openChat, focusChat, unregister, directory, gesture };
 }
 
 describe("mascot chat selection", () => {
@@ -116,15 +117,16 @@ describe("mascot chat selection", () => {
     activeCount: 1, chatTitle: `Chat ${id}`,
   });
 
-  it("pins a listed chat, opens that chat, and falls back when it leaves the list", async () => {
+  it("pins a listed chat, opens that chat, and keeps the pin until the runtime confirms the chat is gone", async () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
     const urgent = chat("urgent", "waiting-for-input");
     const quiet = chat("quiet", "running");
-    app.mascot.observe(urgent, [urgent, quiet]);
+    app.mascot.observe(urgent, [urgent, quiet], null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null, chats: [urgent, quiet] });
     await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
+    expect(app.focusChat).toHaveBeenLastCalledWith("quiet");
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
     expect(overlay.webContents.send).toHaveBeenLastCalledWith(MASCOT_IPC.changed, expect.objectContaining({ pinned: "quiet" }));
     await app.invoke(MASCOT_IPC.action, ["open-chat", app.mascot.snapshot().status], overlay);
@@ -133,15 +135,22 @@ describe("mascot chat selection", () => {
     await expect(app.invoke(MASCOT_IPC.action, ["pin", "missing"], overlay)).rejects.toThrow("changed");
     await expect(app.invoke(MASCOT_IPC.action, ["pin", 7], overlay)).rejects.toThrow("Invalid");
     await expect(app.invoke(MASCOT_IPC.action, ["pin"], overlay)).rejects.toThrow("untrusted");
+    app.mascot.observe(urgent, [urgent], null);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
     app.mascot.runtimePhase("stopped");
     expect(app.mascot.snapshot()).toMatchObject({ status: { phase: "unavailable" }, pinned: null });
-    app.mascot.observe(urgent, [urgent, quiet]);
+    app.focusChat.mockClear();
+    app.mascot.runtimePhase("ready");
+    expect(app.focusChat).toHaveBeenCalledWith("quiet");
+    app.mascot.observe(urgent, [urgent, quiet], "quiet");
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
-    app.mascot.observe(urgent, [urgent]);
-    app.mascot.observe(urgent, [urgent, quiet]);
+    app.mascot.observe(urgent, [urgent], "quiet");
+    expect(app.focusChat).toHaveBeenLastCalledWith(null);
+    app.mascot.observe(urgent, [urgent, quiet], null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
     await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
     await app.invoke(MASCOT_IPC.action, ["pin", null], overlay);
+    expect(app.focusChat).toHaveBeenLastCalledWith(null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
   });
 });

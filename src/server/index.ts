@@ -421,7 +421,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
     }));
-    mascotStatus.replace(conversations);
+    mascotStatus.replace(conversations, snapshot.projects);
     const runs = snapshot.runs.map((run) => ({
       ...run,
       canStop: canStopWorkspaceRun(run),
@@ -1021,7 +1021,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         signal,
       ),
     startPostReadyWork,
-    websocketUrl,
+    websocketUrl, focusMascotChat: (conversationId) => mascotStatus.focus(conversationId),
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),

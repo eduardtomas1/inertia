@@ -113,6 +113,10 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   return candidate as unknown as MascotStatus;
 }
 
+export function isMascotFocus(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && value.length > 0 && value.length <= 200 && !/[\x00-\x1f\x7f]/u.test(value));
+}
+
 export function parseMascotChats(value: unknown): MascotStatus[] | null {
   if (!Array.isArray(value) || value.length > MASCOT_CHAT_LIMIT) return null;
   const chats: MascotStatus[] = [];

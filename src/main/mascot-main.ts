@@ -25,6 +25,7 @@ interface MascotMainOptions {
   registerProtocol(session: Session): void;
   registerHealthRenderer(contents: WebContents): () => void;
   openChat(conversationId: string): Promise<void>;
+  focusChat(conversationId: string | null): void;
   spriteOrigin: string;
 }
 const SPRITE_ACTIONS: readonly unknown[] = ["import", "apply", "reset", "export-template"] satisfies MascotSpriteAction[];
@@ -71,10 +72,10 @@ export class MascotMain {
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(status: MascotStatus, chats: MascotStatus[] = []): void {
+  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null): void {
     this.feed = { status, chats };
-    if (status.phase !== "unavailable" && !this.pin()) this.pinned = null;
-    this.broadcast();
+    if (this.pinned && focus === this.pinned && !this.pin()) this.choose(null);
+    else this.broadcast();
   }
 
   private pin(): string | null {
@@ -91,11 +92,13 @@ export class MascotMain {
       throw new Error("The mascot chat has changed. Try again.");
     }
     this.pinned = conversationId;
+    this.options.focusChat(conversationId);
     this.broadcast();
   }
 
   runtimePhase(phase: string): void {
-    if (phase !== "ready") this.observe(emptyMascotStatus("unavailable"));
+    if (phase === "ready") this.options.focusChat(this.pinned);
+    else this.observe(emptyMascotStatus("unavailable"));
   }
 
   attach(): void {

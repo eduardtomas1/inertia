@@ -821,7 +821,7 @@ async function createMainWindow(): Promise<void> {
       if (detachedChatMain?.focusForNotification(conversationId)) return;
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
     },
-    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`,
+    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`, focusChat: (conversationId) => runtimeSupervisor?.focusMascotChat(conversationId),
   });
   mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
@@ -1124,7 +1124,7 @@ async function bootstrap(): Promise<void> {
         serviceName: "Inertia Runtime",
       },
     ),
-    onMascotStatus: (status, chats) => mascotMain?.observe(status, chats),
+    onMascotStatus: (status, chats, focus) => mascotMain?.observe(status, chats, focus),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

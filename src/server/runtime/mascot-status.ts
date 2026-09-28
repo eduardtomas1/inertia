@@ -1,5 +1,5 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
-import type { ConversationShell } from "../../shared/contracts/app";
+import type { ConversationShell, Project } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotStatus } from "../../shared/mascot";
 
@@ -56,18 +56,26 @@ interface Candidate {
 /** Event-driven previews, scoped to the authoritative turn; never retains a transcript. */
 export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
+  private projects = new Map<string, string | null>();
+  private focused: string | null = null;
   private last = "";
   constructor(
-    private readonly publish?: (status: MascotStatus, chats: MascotStatus[]) => void,
+    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
   ) {}
 
-  replace(conversations: readonly ConversationShell[]): void {
+  replace(conversations: readonly ConversationShell[], projects: readonly Pick<Project, "id" | "name">[] = []): void {
     if (!this.publish) return;
+    this.projects = new Map(projects.map(({ id, name }) => [id, name]));
     const ids = new Set(conversations.map(({ id }) => id));
     for (const id of this.conversations.keys()) if (!ids.has(id)) this.conversations.delete(id);
     for (const conversation of conversations) this.store(conversation);
+    this.emit();
+  }
+
+  focus(conversationId: string | null): void {
+    this.focused = conversationId;
     this.emit();
   }
 
@@ -151,7 +159,9 @@ export class MascotStatusPublisher {
   }
 
   private store(conversation: ConversationShell): void {
-    const next = candidate(conversation, this.projectName?.(conversation.projectId) ?? null);
+    const { projectId } = conversation;
+    if (!this.projects.has(projectId)) this.projects.set(projectId, this.projectName?.(projectId) ?? null);
+    const next = candidate(conversation, this.projects.get(projectId) ?? null);
     if (!next) { this.conversations.delete(conversation.id); return; }
     const { status, seen } = next;
     const previous = this.conversations.get(conversation.id);
@@ -181,11 +191,14 @@ export class MascotStatusPublisher {
     };
     const selected = ranked[0] && !ranked[0].seen ? ranked[0] : undefined;
     const status = selected ? display(selected) : emptyMascotStatus();
-    const chats = ranked.slice(0, MASCOT_CHAT_LIMIT).map(display);
-    const serialized = JSON.stringify([status, chats]);
+    const listed = ranked.slice(0, MASCOT_CHAT_LIMIT);
+    const focused = this.focused === null ? undefined : this.conversations.get(this.focused);
+    if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
+    const chats = listed.map(display);
+    const serialized = JSON.stringify([status, chats, this.focused]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats);
+    this.publish?.(status, chats, this.focused);
   }
 }
 

@@ -32,7 +32,7 @@ describe("authoritative mascot status", () => {
       since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z",
       activeCount: terminal ? 0 : 1,
     };
-    expect(publish).toHaveBeenLastCalledWith(status, [status]);
+    expect(publish).toHaveBeenLastCalledWith(status, [status], null);
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
@@ -54,11 +54,11 @@ describe("authoritative mascot status", () => {
     const publish = vi.fn();
     const publisher = new MascotStatusPublisher(publish);
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })]);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null);
     publisher.update(conversation("cancelled", "cancelled"));
     expect(publish.mock.lastCall?.[0].phase).toBe("cancelled");
     publisher.replace([]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), []);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null);
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
@@ -88,11 +88,11 @@ describe("authoritative mascot status", () => {
 describe("mascot chat list", () => {
   it("ranks switchable chats, keeps seen results available, and adds project context", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish, undefined, (id) => id === "project" ? "Inertia" : null);
+    const publisher = new MascotStatusPublisher(publish);
     const seen = { ...conversation("seen", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const live = conversation("live", "running");
     live.latestTurn = { ...live.latestTurn!, startedAt: "2026-09-06T09:30:00+00:00" };
-    publisher.replace([seen, live, conversation("question", "waiting-for-input"), { ...conversation("archived", "running"), archivedAt: "2026-09-06T11:00:00.000Z" }]);
+    publisher.replace([seen, live, conversation("question", "waiting-for-input"), { ...conversation("archived", "running"), archivedAt: "2026-09-06T11:00:00.000Z" }], [{ id: "project", name: "Inertia" }]);
     const [status, chats] = publish.mock.lastCall!;
     expect(status).toMatchObject({ conversationId: "question", projectName: "Inertia", activeCount: 2 });
     expect(chats.map(({ conversationId }: { conversationId: string }) => conversationId)).toEqual(["question", "live", "seen"]);
@@ -101,6 +101,38 @@ describe("mascot chat list", () => {
     for (const chat of chats) expect(parseMascotStatus(chat)).toEqual(chat);
     publisher.replace(Array.from({ length: 12 }, (_, index) => conversation(`chat-${index}`, "running")));
     expect(publish.mock.lastCall?.[1]).toHaveLength(MASCOT_CHAT_LIMIT);
+  });
+
+  it("keeps a focused chat listed beyond the cap and echoes the focus", () => {
+    const publish = vi.fn();
+    const publisher = new MascotStatusPublisher(publish);
+    const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
+    const busy = Array.from({ length: 10 }, (_, index) => conversation(`busy-${index}`, "running"));
+    publisher.replace([pinned, ...busy]);
+    expect(publish.mock.lastCall?.[1].map(({ conversationId }: { conversationId: string }) => conversationId)).not.toContain("pinned");
+    publisher.focus("pinned");
+    const [, chats, focus] = publish.mock.lastCall!;
+    expect(focus).toBe("pinned");
+    expect(chats).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(chats.at(-1)).toMatchObject({ conversationId: "pinned", phase: "completed" });
+    publisher.replace(busy);
+    expect(publish.mock.lastCall?.[1].map(({ conversationId }: { conversationId: string }) => conversationId)).not.toContain("pinned");
+    expect(publish.mock.lastCall?.[2]).toBe("pinned");
+    publisher.focus(null);
+    expect(publish.mock.lastCall?.[2]).toBeNull();
+  });
+
+  it("reads project names from the snapshot and caches lookups for unknown projects", () => {
+    const publish = vi.fn();
+    const lookup = vi.fn((id: string) => id === "new" ? "Fresh project" : null);
+    const publisher = new MascotStatusPublisher(publish, undefined, lookup);
+    publisher.replace([conversation("a", "running"), conversation("b", "running")], [{ id: "project", name: "Inertia" }]);
+    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName)).toEqual(["Inertia", "Inertia"]);
+    expect(lookup).not.toHaveBeenCalled();
+    publisher.update({ ...conversation("c", "running"), projectId: "new" });
+    publisher.update({ ...conversation("d", "running"), projectId: "new" });
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(publish.mock.lastCall?.[1]).toContainEqual(expect.objectContaining({ conversationId: "d", projectName: "Fresh project" }));
   });
 
   it("keeps plan steps with their turn and clears them when the turn ends", () => {

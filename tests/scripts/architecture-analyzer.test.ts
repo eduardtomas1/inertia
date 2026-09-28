@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -27,6 +27,16 @@ function fixture(files: Readonly<Record<string, string>>): string {
     writeFileSync(path, contents);
   }
   return root;
+}
+
+function linkDirectory(target: string, path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
+}
+
+function linkFile(target: string, path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path, "file");
 }
 
 afterEach(() => {
@@ -91,6 +101,99 @@ describe("architecture analyzer asset imports", () => {
   });
 });
 
+describe("architecture analyzer symbolic links", () => {
+  it.skipIf(process.platform === "win32")("classifies a symbolic-linked asset by the layer of its real target", () => {
+    const root = fixture({
+      "src/renderer/src/assets/art.png": "png",
+      "src/shared/icon.ts": 'import art from "./art.png";\nexport const icon = art;\n',
+    });
+    linkFile(join(root, "src/renderer/src/assets/art.png"), join(root, "src/shared/art.png"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/icon.ts:1 crosses source layers shared -> renderer via src/renderer/src/assets/art.png.",
+    ]);
+  });
+
+  it("classifies assets and modules below a symbolic-linked directory by their real layer", () => {
+    const root = fixture({
+      "src/renderer/src/assets/art.png": "png",
+      "src/renderer/src/ui/view.ts": 'import { useState } from "react";\nexport const view = useState;\n',
+      "src/main/sprites.ts": 'import art from "./assets/art.png?inline";\nexport const sprites = [art];\n',
+      "src/shared/consumer.ts": 'import { view } from "./ui/view";\nexport const consumer = view;\n',
+    });
+    linkDirectory(join(root, "src/renderer/src/assets"), join(root, "src/main/assets"));
+    linkDirectory(join(root, "src/renderer/src/ui"), join(root, "src/shared/ui"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/main/sprites.ts:1 crosses source layers main -> renderer via src/renderer/src/assets/art.png.",
+      "src/shared/consumer.ts:1 crosses source layers shared -> renderer via src/renderer/src/ui/view.ts.",
+    ]);
+  });
+
+  it("rejects source files and assets that resolve outside the repository", () => {
+    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "art.png"), "png");
+    writeFileSync(join(outside, "code.ts"), "export const code = true;\n");
+    const root = fixture({
+      "src/shared/icon.ts": 'import art from "./external/art.png";\nexport const icon = art;\n',
+    });
+    linkDirectory(outside, join(root, "src/shared/external"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/external/code.ts resolves outside the repository.",
+      "src/shared/icon.ts:1 imports asset ./external/art.png, which resolves outside the repository.",
+    ]);
+  });
+
+  it("rejects source files linked from elsewhere in the repository and missing assets", () => {
+    const root = fixture({
+      "tests/helpers/fixture.ts": "export const fixture = true;\n",
+      "src/shared/icon.ts": 'import art from "./missing.png";\nexport const icon = art;\n',
+    });
+    linkDirectory(join(root, "tests/helpers"), join(root, "src/shared/helpers"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/helpers/fixture.ts resolves to tests/helpers/fixture.ts outside src.",
+      "src/shared/icon.ts:1 cannot resolve local asset ./missing.png.",
+    ]);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps symbolic-linked TypeScript files unresolved", () => {
+    const root = fixture({
+      "src/renderer/src/view.ts": "export const view = true;\n",
+      "src/shared/consumer.ts": 'import { view } from "./view";\nexport const consumer = view;\n',
+    });
+    linkFile(join(root, "src/renderer/src/view.ts"), join(root, "src/shared/view.ts"));
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/shared/consumer.ts:1 cannot resolve local module ./view.",
+    ]);
+  });
+
+  it("applies the reviewed asset exception to real paths", () => {
+    const root = fixture({
+      "src/renderer/src/assets/mascot/idle.png": "png",
+      "src/renderer/src/assets/icons/app.png": "png",
+      "src/main/mascot-sprites.ts": [
+        'import idle from "./mascot/idle.png?inline";',
+        'import app from "../renderer/src/assets/mascot/icons/app.png?inline";',
+        "export const sprites = [idle, app];",
+        "",
+      ].join("\n"),
+    });
+    linkDirectory(join(root, "src/renderer/src/assets/mascot"), join(root, "src/main/mascot"));
+    linkDirectory(join(root, "src/renderer/src/assets/icons"), join(root, "src/renderer/src/assets/mascot/icons"));
+
+    expect(analyzeSourceArchitecture({
+      workspaceRoot: root,
+      allowedAssetImports: [{ from: "src/main/mascot-sprites.ts", directory: "src/renderer/src/assets/mascot" }],
+    }).failures).toEqual([
+      "src/main/mascot-sprites.ts:2 crosses source layers main -> renderer via src/renderer/src/assets/icons/app.png.",
+    ]);
+  });
+});
+
 describe("architecture analyzer external specifiers", () => {
   it("keeps Electron and Node built-ins out of renderer and shared code", () => {
     const root = fixture({
@@ -113,6 +216,27 @@ describe("architecture analyzer external specifiers", () => {
       "src/renderer/src/renderer-subpath.ts:1 imports electron/renderer into the renderer layer, which must not depend on Electron or Node built-ins.",
       "src/shared/hash.ts:1 imports crypto into the shared layer, which must not depend on Electron or Node built-ins.",
       "src/shared/stream.ts:1 imports fs/promises into the shared layer, which must not depend on Electron or Node built-ins.",
+    ]);
+  });
+
+  it("rejects inline import type queries of Electron, Node built-ins and forbidden layers", () => {
+    const root = fixture({
+      "src/renderer/src/handle.ts": 'export type Handle = import("electron").IpcRenderer;\n',
+      "src/renderer/src/view.tsx": 'export type Stats = import("node:fs").Stats;\n',
+      "src/shared/buffer.ts": 'export type Bytes = import("buffer").Buffer;\n',
+      "src/shared/app.ts": 'export type App = import("electron/main").App;\n',
+      "src/shared/worker.ts": 'export type Worker = import("../server/worker").Worker;\n',
+      "src/server/worker.ts": "export interface Worker { id: string }\n",
+      "src/main/app.ts": 'export type App = import("electron").App;\n',
+      "src/renderer/private-connect/vite.config.ts": 'export type Paths = import("node:path").PlatformPath;\nexport default {};\n',
+    });
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      "src/renderer/src/handle.ts:1 imports electron into the renderer layer, which must not depend on Electron or Node built-ins.",
+      "src/renderer/src/view.tsx:1 imports node:fs into the renderer layer, which must not depend on Electron or Node built-ins.",
+      "src/shared/app.ts:1 imports electron/main into the shared layer, which must not depend on Electron or Node built-ins.",
+      "src/shared/buffer.ts:1 imports buffer into the shared layer, which must not depend on Electron or Node built-ins.",
+      "src/shared/worker.ts:1 crosses source layers shared -> server via src/server/worker.ts.",
     ]);
   });
 

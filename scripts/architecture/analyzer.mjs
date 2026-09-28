@@ -3,6 +3,7 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   statSync,
 } from "node:fs";
 import {
@@ -51,6 +52,14 @@ function canonicalPath(path) {
   return process.platform === "win32"
     ? absolute.toLocaleLowerCase("en-US")
     : absolute;
+}
+
+function physicalPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
 }
 
 function workspacePath(workspaceRoot, file) {
@@ -618,50 +627,106 @@ export function analyzeSourceArchitecture({
     sourceDirectory,
   );
   const files = typescriptFiles(absoluteSourceDirectory);
-  const { edges, assets, externals, modules, failures } = analyzeModuleUsage({
-    workspaceRoot: absoluteWorkspaceRoot, files, configPaths,
+  const {
+    edges: referencedEdges, assets, externals, modules, failures,
+  } = analyzeModuleUsage({
+    workspaceRoot: absoluteWorkspaceRoot,
+    files,
+    configPaths,
+    includeTypeQueries: true,
   });
+  const edges = referencedEdges.filter((edge) => edge.kind !== "type-query");
+  const physicalWorkspaceRoot = physicalPath(absoluteWorkspaceRoot)
+    ?? absoluteWorkspaceRoot;
+  const physicalSourceDirectory = physicalPath(absoluteSourceDirectory)
+    ?? absoluteSourceDirectory;
+  const physicalFiles = new Map(files.map((file) => [file, physicalPath(file)]));
+  const physicalLayer = (path) => (
+    path && isContained(physicalSourceDirectory, path)
+      ? sourceLayer(physicalSourceDirectory, path)
+      : null
+  );
+  const physicalDisplay = (path) => workspacePath(physicalWorkspaceRoot, path);
   const reviewedAssetImports = allowedAssetImports.map(({ from, directory }) => ({
-    from: resolve(absoluteWorkspaceRoot, from),
-    directory: resolve(absoluteWorkspaceRoot, directory),
+    from: physicalPath(resolve(absoluteWorkspaceRoot, from)),
+    directory: physicalPath(resolve(absoluteWorkspaceRoot, directory)),
   }));
 
   for (const file of files) {
-    const layer = sourceLayer(absoluteSourceDirectory, file);
+    const physical = physicalFiles.get(file);
+    const path = workspacePath(absoluteWorkspaceRoot, file);
+    if (!physical || !isContained(physicalWorkspaceRoot, physical)) {
+      failures.push(`${path} resolves outside the repository.`);
+      continue;
+    }
+    if (!isContained(physicalSourceDirectory, physical)) {
+      failures.push(
+        `${path} resolves to ${physicalDisplay(physical)} outside `
+        + `${workspacePath(absoluteWorkspaceRoot, absoluteSourceDirectory)}.`,
+      );
+      continue;
+    }
+    const layer = physicalLayer(physical);
     if (!allowedLayers.has(layer)) {
       failures.push(
-        `${workspacePath(absoluteWorkspaceRoot, file)} belongs to unknown `
+        `${path} belongs to unknown `
         + `source layer ${layer || "(root)"}.`,
       );
     }
   }
-  const layeredAssets = assets.filter((asset) =>
-    isContained(absoluteSourceDirectory, asset.to)
-    && !reviewedAssetImports.some(({ from, directory }) =>
-      canonicalPath(from) === canonicalPath(asset.from)
-      && isContained(canonicalPath(directory), canonicalPath(asset.to))
-    )
-  );
-  for (const edge of [...edges, ...layeredAssets]) {
-    const fromLayer = sourceLayer(absoluteSourceDirectory, edge.from);
-    const toLayer = sourceLayer(absoluteSourceDirectory, edge.to);
+  const layeredEdges = referencedEdges.map((edge) => ({
+    ...edge,
+    to: physicalFiles.get(edge.to),
+  }));
+  for (const asset of assets) {
+    const physical = physicalPath(asset.to);
+    const importer = physicalFiles.get(asset.from);
+    const from = workspacePath(absoluteWorkspaceRoot, asset.from);
+    if (!physical) {
+      failures.push(
+        `${from}:${asset.line} cannot resolve local asset ${asset.specifier}.`,
+      );
+    } else if (!isContained(physicalWorkspaceRoot, physical)) {
+      failures.push(
+        `${from}:${asset.line} imports asset ${asset.specifier}, which `
+        + "resolves outside the repository.",
+      );
+    } else if (
+      isContained(physicalSourceDirectory, physical)
+      && !reviewedAssetImports.some(({ from: reviewed, directory }) =>
+        reviewed
+        && directory
+        && importer
+        && canonicalPath(reviewed) === canonicalPath(importer)
+        && isContained(canonicalPath(directory), canonicalPath(physical))
+      )
+    ) {
+      layeredEdges.push({ ...asset, to: physical });
+    }
+  }
+  for (const edge of layeredEdges) {
+    const fromLayer = physicalLayer(physicalFiles.get(edge.from));
+    const toLayer = physicalLayer(edge.to);
     if (
-      fromLayer !== toLayer
+      fromLayer !== null
+      && toLayer !== null
+      && fromLayer !== toLayer
       && !allowedLayers.get(fromLayer)?.has(toLayer)
     ) {
       failures.push(
         `${workspacePath(absoluteWorkspaceRoot, edge.from)}:${edge.line} crosses `
         + `source layers ${fromLayer} -> ${toLayer} via `
-        + `${workspacePath(absoluteWorkspaceRoot, edge.to)}.`,
+        + `${physicalDisplay(edge.to)}.`,
       );
     }
   }
   for (const external of externals) {
-    const layer = sourceLayer(absoluteSourceDirectory, external.from);
+    const physical = physicalFiles.get(external.from);
+    const layer = physicalLayer(physical);
     const path = workspacePath(absoluteWorkspaceRoot, external.from);
     if (
       platformNeutralLayers.has(layer)
-      && !PLATFORM_NEUTRAL_BUILD_CONFIGS.has(path)
+      && !PLATFORM_NEUTRAL_BUILD_CONFIGS.has(physicalDisplay(physical))
       && isElectronOrNodeBuiltin(external.specifier)
     ) {
       failures.push(

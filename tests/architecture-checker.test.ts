@@ -115,6 +115,7 @@ describe("architecture checker", () => {
 
   it("limits the reviewed main-to-renderer asset import to the mascot sprite stills", () => {
     const root = fixture({
+      "src/renderer/src/assets/mascot/idle.png": "png",
       "src/main/mascot-sprites.ts": [
         'import idle from "../renderer/src/assets/mascot/idle.png?inline";',
         "export const sprites = [idle];",

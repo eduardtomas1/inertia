@@ -4,7 +4,7 @@ import {
   MAX_DIFF_BYTES,
   MAX_DIFF_FILES,
 } from "./constants";
-import { repositoryRoot, validatedPaths } from "./paths";
+import { literalPathspecs, repositoryRoot, validatedPaths } from "./paths";
 import {
   boundedInteger,
   runGitInspection,
@@ -155,8 +155,8 @@ export async function getUnifiedDiff(
       deadlineAt: options.deadlineAt,
       signal: options.signal,
     }))
-      ? [...baseArgs, "HEAD", "--", ...tracked]
-      : [...baseArgs, "--cached", "--", ...tracked];
+      ? [...baseArgs, "HEAD", "--", ...literalPathspecs(tracked)]
+      : [...baseArgs, "--cached", "--", ...literalPathspecs(tracked)];
     const result = await runGitInspection(root, args, {
       deadlineAt: options.deadlineAt,
       signal: options.signal,

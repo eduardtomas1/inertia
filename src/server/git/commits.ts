@@ -19,6 +19,7 @@ import { FILE_OPEN_NO_FOLLOW } from
   "../../node/platform-file-open-flags";
 import { NETWORK_TIMEOUT_MS } from "./constants";
 import {
+  literalPathspecs,
   repositoryRoot,
   validatedPaths,
 } from "./paths";
@@ -480,7 +481,9 @@ export async function commitChanges(
       "Select at least one path to commit.",
     );
   }
-  const selected = paths ? await validatedPaths(root, paths) : null;
+  const selected = paths
+    ? literalPathspecs(await validatedPaths(root, paths))
+    : null;
   await runGit(root, ["add", "-A", "--", ...(selected ?? [])], {
     failureMessage: "Unable to stage the selected changes.",
   });

@@ -101,7 +101,7 @@ describe("mascot chat context and chooser", () => {
     fireEvent.click(picker);
     expect(picker).toHaveAttribute("aria-expanded", "true");
     const group = screen.getByRole("group", { name: "Show chat" });
-    expect([...group.querySelectorAll("button")].map((row) => row.textContent)).toEqual(["Most urgent chatAuto", "Chat qNeeds you", "Chat wWorking"]);
+    expect([...group.querySelectorAll("button")].map((row) => row.textContent)).toEqual(["Most urgent chatAuto", "Chat qInertiaNeeds you", "Chat wInertiaWorking"]);
     expect(within(group).getByRole("button", { name: /Most urgent/ })).toHaveAttribute("aria-pressed", "true");
     expect(document.activeElement).toBe(within(group).getByRole("button", { name: /Most urgent/ }));
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
@@ -122,6 +122,38 @@ describe("mascot chat context and chooser", () => {
     fireEvent.click(picker);
     fireEvent.click(screen.getByRole("button", { name: /Most urgent/ }));
     expect(app.action).toHaveBeenLastCalledWith("pin", null);
+  });
+
+  it("names every chat choice by title, project, and an age ordinal for exact twins", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const project = "A very long project name that keeps going well past the chooser width";
+    const chats = [
+      chat("newer", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:05:00.000Z" }),
+      chat("beta", "running", { chatTitle: "Fix login", projectName: "Beta" }),
+      chat("older", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:00:00.000Z" }),
+      chat("loose", "running", { chatTitle: "Fix login", projectName: null }),
+      chat("long", "completed", { chatTitle: "Ship", projectName: project.slice(0, 64) }),
+    ];
+    app.list(chats[0]!, chats);
+    fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
+    const rows = within(screen.getByRole("group", { name: "Show chat" })).getAllByRole("button").slice(1);
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Fix login (2), Alpha, Working",
+      "Fix login, Beta, Working",
+      "Fix login (1), Alpha, Working",
+      "Fix login, Working",
+      `Ship, ${project.slice(0, 64)}, Done`,
+    ]);
+    expect(rows.map((row) => row.querySelector(".mascot-option-project")!.textContent)).toEqual(["Alpha", "Beta", "Alpha", "", project.slice(0, 64)]);
+    expect(rows[0]!.querySelector(".mascot-option-title")).toHaveTextContent("Fix login (2)");
+    expect(rows[4]!.title).toBe(`Ship — ${project.slice(0, 64)} — Work complete`);
+    rows[0]!.focus();
+    fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[1]);
+    fireEvent.click(rows[2]!);
+    expect(app.action).toHaveBeenLastCalledWith("pin", "older");
   });
 });
 

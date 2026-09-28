@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mascotBounds, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState } from "../../src/main/mascot-placement";
+import { mascotChatChoices } from "../../src/shared/mascot-choices";
 import { emptyMascotStatus, parseMascotChats, parseMascotPreferences, parseMascotStatus, type MascotStatus } from "../../src/shared/mascot";
 import { parseRuntimeWorkerCommand, parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
@@ -93,5 +94,21 @@ describe("mascot placement and contracts", () => {
     expect(parseMascotChats([emptyMascotStatus()])).toBeNull();
     expect(parseMascotChats(Array.from({ length: 9 }, (_, index) => chat(`chat-${index}`)))).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: chat("a"), chats: [chat("a"), chat("a")], focus: null })).toBeNull();
+  });
+
+  it("gives every chat choice a distinct title and project, even when a title already carries an ordinal", () => {
+    const chat = (id: string, chatTitle: string | null, projectName: string | null, since: string | null = null): MascotStatus => ({
+      ...emptyMascotStatus(), phase: "running", conversationId: id, projectId: "project", runId: "run", turnId: "turn",
+      activeCount: 1, chatTitle, projectName, since,
+    });
+    const choices = mascotChatChoices([
+      chat("b", "Fix", "Alpha", "2026-09-06T10:00:00.000Z"), chat("a", "Fix", "Alpha", "2026-09-06T10:00:00.000Z"),
+      chat("c", "Fix (1)", "Alpha"), chat("d", null, null), chat("e", "", ""),
+    ]);
+    expect(choices).toEqual([
+      { title: "Fix (2)", project: "Alpha" }, { title: "Fix (1) (2)", project: "Alpha" }, { title: "Fix (1) (1)", project: "Alpha" },
+      { title: "Untitled chat (1)", project: null }, { title: "Untitled chat (2)", project: null },
+    ]);
+    expect(new Set(choices.map((choice) => JSON.stringify(choice))).size).toBe(choices.length);
   });
 });

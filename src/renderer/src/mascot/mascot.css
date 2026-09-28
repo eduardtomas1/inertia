@@ -73,6 +73,8 @@ body { user-select: none; }
 .mascot-option:hover { background: #ffffff0f; }
 .mascot-option[aria-pressed="true"] { background: #ffffff14; color: #f1f2e9; }
 .mascot-option-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mascot-option-project { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; color: #8d99a6; }
+.mascot-option-project:empty { display: none; }
 .mascot-option-state { flex: none; font-size: 10px; color: #8d99a6; }
 .mascot-option[data-tone="attention"] .mascot-option-state { color: #e4cb90; }
 .mascot-option[aria-pressed="true"] .mascot-option-state::after { content: "✓"; margin-left: 6px; color: #e4cb90; }

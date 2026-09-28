@@ -2,6 +2,7 @@ import {
   emptyMascotStatus, isLiveMascotPhase, MASCOT_LABELS,
   type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot, type MascotStatus,
 } from "../../../shared/mascot";
+import { mascotChatChoices } from "../../../shared/mascot-choices";
 import { mascotArtwork, readMascotAssets } from "./assets";
 import { mascotActionLabel, mascotElapsed, mascotFallback, mascotShortLabel, mascotTone } from "./copy";
 
@@ -53,7 +54,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
       row.type = "button";
       row.className = "mascot-option";
       row.dataset.key = key;
-      row.append(...["mascot-dot", "mascot-option-title", "mascot-option-state"].map((name) => {
+      row.append(...["mascot-dot", "mascot-option-title", "mascot-option-project", "mascot-option-state"].map((name) => {
         const part = document.createElement("span");
         part.className = name;
         return part;
@@ -65,15 +66,18 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     return row;
   };
   const renderChats = (chats: readonly MascotStatus[], pinned: string | null): void => {
-    const rows = [["", null] as const, ...chats.map((chat) => [chat.conversationId!, chat] as const)].map(([key, chat]) => {
+    const choices = mascotChatChoices(chats);
+    const rows = [["", null, null] as const, ...chats.map((chat, index) => [chat.conversationId!, chat, choices[index]!] as const)].map(([key, chat, choice]) => {
       const row = option(key);
-      const [dot, name, state] = row.children as unknown as [HTMLElement, HTMLElement, HTMLElement];
+      const [dot, name, project, state] = row.children as unknown as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
       row.setAttribute("aria-pressed", String(key ? key === pinned : !pinned));
       row.dataset.tone = chat ? mascotTone(chat.phase) : "auto";
       dot.dataset.tone = row.dataset.tone;
-      name.textContent = chat ? chat.chatTitle ?? "Untitled chat" : "Most urgent chat";
+      name.textContent = choice?.title ?? "Most urgent chat";
+      project.textContent = choice?.project ?? "";
       state.textContent = chat ? mascotShortLabel[chat.phase] : "Auto";
-      row.title = chat ? [chat.chatTitle, chat.projectName, MASCOT_LABELS[chat.phase]].filter(Boolean).join(" — ")
+      row.setAttribute("aria-label", [name.textContent, project.textContent, state.textContent].filter(Boolean).join(", "));
+      row.title = chat ? [choice!.title, choice!.project, MASCOT_LABELS[chat.phase]].filter(Boolean).join(" — ")
         : "Follow whichever chat needs you most";
       return row;
     });

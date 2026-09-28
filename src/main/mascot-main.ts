@@ -8,6 +8,7 @@ import {
   emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS,
   parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
+import { mascotChatChoices } from "../shared/mascot-choices.js";
 import type { MascotSpriteAction, MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
 import {
   mascotBounds, MASCOT_SIZE, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState,
@@ -474,14 +475,15 @@ export class MascotMain {
     const status = { ...this.status() };
     const pinned = this.pin();
     const follow = (conversationId: string | null) => () => { try { this.choose(conversationId); } catch { this.broadcast(); } };
+    const choices = mascotChatChoices(this.feed.chats);
     Menu.buildFromTemplate([
       { label: MASCOT_LABELS[status.phase], enabled: false },
       { label: "Open chat", enabled: Boolean(status.conversationId), click: () => { void this.action("open-chat", status).catch(() => undefined); } },
       { label: "Show chat", enabled: this.feed.chats.length > 0, submenu: [
         { label: "Most urgent chat", type: "radio", checked: !pinned, click: follow(null) },
         { type: "separator" },
-        ...this.feed.chats.map((chat) => ({
-          label: `${chat.chatTitle ?? "Untitled chat"} — ${MASCOT_LABELS[chat.phase]}`, type: "radio" as const,
+        ...this.feed.chats.map((chat, index) => ({
+          label: [choices[index]!.title, choices[index]!.project, MASCOT_LABELS[chat.phase]].filter(Boolean).join(" — "), type: "radio" as const,
           checked: chat.conversationId === pinned, click: follow(chat.conversationId),
         })),
       ] },

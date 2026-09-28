@@ -20,6 +20,7 @@ const harness = vi.hoisted(() => ({
   displays: [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }],
   cursor: { x: 1296, y: 820 },
   displayListeners: new Map<string, () => void>(),
+  menus: [] as unknown[][],
   openDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePaths: string[] }>>(async () => ({ canceled: true, filePaths: [] })),
   saveDialog: vi.fn<(...args: unknown[]) => Promise<{ canceled: boolean; filePath?: string }>>(async () => ({ canceled: true })),
 }));
@@ -63,7 +64,7 @@ vi.mock("electron", async () => {
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
     screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
       on: (event: string, listener: () => void) => harness.displayListeners.set(event, listener) },
-    Menu: { buildFromTemplate: () => ({ popup: vi.fn() }) },
+    Menu: { buildFromTemplate: (template: unknown[]) => { harness.menus.push(template); return { popup: vi.fn() }; } },
   };
 });
 
@@ -87,7 +88,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
   harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
-  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
+  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); harness.menus.length = 0; vi.unstubAllGlobals();
   harness.openDialog.mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
   harness.saveDialog.mockReset().mockResolvedValue({ canceled: true });
 });
@@ -196,6 +197,32 @@ describe("mascot chat selection", () => {
     expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "busy-00" } });
     expect(listed()).toHaveLength(MASCOT_CHAT_LIMIT);
     expect(app.focusChat).toHaveBeenLastCalledWith(null);
+  });
+
+  it("labels each native Show chat item with its project and an age ordinal for exact twins", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const named = (id: string, phase: MascotStatus["phase"], context: Partial<MascotStatus>): MascotStatus => ({ ...chat(id, phase), ...context });
+    const project = "P".repeat(64);
+    const chats = [
+      named("newer", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:05:00.000Z" }),
+      named("beta", "running", { chatTitle: "Fix login", projectName: "Beta" }),
+      named("older", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:00:00.000Z" }),
+      named("loose", "running", { chatTitle: "Fix login", projectName: null }),
+      named("long", "completed", { chatTitle: null, projectName: project }),
+    ];
+    app.mascot.observe(chats[0]!, chats, null);
+    overlay.webContents.emit("context-menu");
+    const menu = harness.menus.at(-1) as Array<{ label?: string; submenu?: Array<{ label?: string; type?: string }> }>;
+    const items = menu.find(({ label }) => label === "Show chat")!.submenu!.filter(({ type }) => type === "radio").slice(1);
+    expect(items.map(({ label }) => label)).toEqual([
+      "Fix login (2) — Alpha — Working",
+      "Fix login — Beta — Working",
+      "Fix login (1) — Alpha — Working",
+      "Fix login — Working",
+      `Untitled chat — ${project} — Work complete`,
+    ]);
   });
 });
 

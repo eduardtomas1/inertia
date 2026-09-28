@@ -80,14 +80,17 @@ describe("mascot placement and contracts", () => {
       expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts })).toBeNull();
     }
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 1, attention: 1 }, extra: 1 })).toBeNull();
-    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat" }))
-      .toEqual({ type: "runtime.mascot-focus", conversationId: "chat" });
-    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null }))
-      .toEqual({ type: "runtime.mascot-focus", conversationId: null });
-    for (const conversationId of ["", "a\u0000b", "x".repeat(201), 3, undefined]) {
-      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId })).toBeNull();
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat", request: 4 }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: "chat", request: 4 });
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, request: 0 }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: null, request: 0 });
+    for (const request of [-1, 1.5, 2_147_483_648, Number.NaN, "4", null, undefined]) {
+      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat", request })).toBeNull();
     }
-    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, extra: true })).toBeNull();
+    for (const conversationId of ["", "a\u0000b", "x".repeat(201), 3, undefined]) {
+      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId, request: 1 })).toBeNull();
+    }
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, request: 1, extra: true })).toBeNull();
   });
 
   it("accepts a consistent mascot feed and rejects each broken invariant as a whole", () => {
@@ -100,6 +103,7 @@ describe("mascot placement and contracts", () => {
     expect(parseRuntimeWorkerEvent(valid)).toEqual(valid);
     const { counts: _counts, ...older } = valid;
     expect(parseRuntimeWorkerEvent(older)).toEqual({ ...older, counts: null });
+    for (const request of [null, 0, 7, 2_147_483_647]) expect(parseRuntimeWorkerEvent({ ...valid, request })).toEqual({ ...valid, request });
     const idle = chats.map((entry) => ({ ...entry, activeCount: 0, phase: "completed" as const }));
     expect(parseRuntimeWorkerEvent({ ...valid, status: emptyMascotStatus(), chats: idle, counts: { chats: 3, attention: 0 } })).not.toBeNull();
     for (const broken of [
@@ -115,6 +119,7 @@ describe("mascot placement and contracts", () => {
       { status: { ...chats[0]!, turnId: "other-turn" } },
       { chats: [chats[0]!, { ...chats[1]!, activeCount: 3 }, chats[2]!] },
       { status: { ...chats[0]!, activeCount: 6 }, chats: chats.map((entry) => ({ ...entry, activeCount: 6 })) },
+      { request: -1 }, { request: 1.5 }, { request: 2_147_483_648 }, { request: "7" }, { request: undefined },
     ]) expect(parseRuntimeWorkerEvent({ ...valid, ...broken })).toBeNull();
   });
 

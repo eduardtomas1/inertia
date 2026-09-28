@@ -4,7 +4,7 @@ import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
-import { isMascotFocus, parseMascotFeed, type MascotCounts, type MascotStatus } from "../shared/mascot.js";
+import { isMascotFocus, isMascotRequest, parseMascotFeed, type MascotFeed } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
@@ -118,7 +118,7 @@ export type RuntimeWorkerCommand =
       request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>;
     }
   | { type: "runtime.private-connect-forget"; scope: RuntimePrivateConnectForgetScope }
-  | { type: "runtime.mascot-focus"; conversationId: string | null }
+  | { type: "runtime.mascot-focus"; conversationId: string | null; request: number }
   | {
       type: "runtime.database-recovery";
       operationId: string;
@@ -232,7 +232,7 @@ export type { RuntimeRestartReason } from "./runtime-owned-process-diagnostic.js
 
 export type RuntimeWorkerEvent =
   | { type: "runtime.incident"; incident: import("../shared/application-diagnostics.js").DiagnosticIncident }
-  | { type: "runtime.mascot-status"; status: MascotStatus; chats: MascotStatus[]; focus: string | null; counts: MascotCounts | null }
+  | ({ type: "runtime.mascot-status" } & MascotFeed)
   | {
       type: "runtime.ready";
       websocketUrl: string;
@@ -337,9 +337,10 @@ function runtimeTimestamp(value: unknown): value is string {
 export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.shutdown" && Object.keys(value).length === 1) return { type: "runtime.shutdown" };
-  if (value.type === "runtime.mascot-focus" && Object.keys(value).length === 2 && isMascotFocus(value.conversationId)) {
-    return { type: "runtime.mascot-focus", conversationId: value.conversationId };
-  }
+  if (
+    value.type === "runtime.mascot-focus" && Object.keys(value).length === 3
+    && isMascotFocus(value.conversationId) && isMascotRequest(value.request)
+  ) return { type: "runtime.mascot-focus", conversationId: value.conversationId, request: value.request };
   if (
     value.type === "runtime.stopped-acknowledged"
     && Object.keys(value).length === 1
@@ -694,7 +695,10 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     && UUID_PATTERN.test(value.id)
     && typeof value.recorded === "boolean"
   ) return { type: "runtime.system-suspend-result", id: value.id, recorded: value.recorded };
-  if (value.type === "runtime.mascot-status" && Object.keys(value).length === (Object.hasOwn(value, "counts") ? 5 : 4)) {
+  if (
+    value.type === "runtime.mascot-status"
+    && Object.keys(value).length === 4 + Number(Object.hasOwn(value, "counts")) + Number(Object.hasOwn(value, "request"))
+  ) {
     const feed = parseMascotFeed(value);
     return feed ? { type: "runtime.mascot-status", ...feed } : null;
   }

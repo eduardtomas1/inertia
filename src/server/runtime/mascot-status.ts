@@ -68,10 +68,11 @@ export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
   private projects = new Map<string, string | null>();
   private focused: string | null = null;
+  private request: number | null = null;
   private pending = false;
   private last = "";
   constructor(
-    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts) => void,
+    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts, request: number | null) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
     private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
@@ -86,8 +87,9 @@ export class MascotStatusPublisher {
     this.emit();
   }
 
-  focus(conversationId: string | null): void {
-    this.focused = conversationId;
+  focus(conversationId: string | null, request: number): void {
+    this.request = request;
+    this.focused = conversationId !== null && this.conversations.has(conversationId) ? conversationId : null;
     this.emit();
   }
 
@@ -221,12 +223,13 @@ export class MascotStatusPublisher {
     const status = selected ? display(selected) : emptyMascotStatus();
     if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
     const chats = listed.map(display);
-    const focus = focused ? this.focused : null;
+    if (!focused) this.focused = null;
+    const focus = this.focused;
     const counts = { chats: this.conversations.size, attention };
-    const serialized = JSON.stringify([status, chats, focus, counts]);
+    const serialized = JSON.stringify([status, chats, focus, counts, this.request]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats, focus, counts);
+    this.publish?.(status, chats, focus, counts, this.request);
   }
 }
 

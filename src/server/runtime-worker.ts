@@ -485,7 +485,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.mascot-focus") {
-    runtime?.focusMascotChat(command.conversationId);
+    runtime?.focusMascotChat(command.conversationId, command.request);
     return;
   }
   if (command.type === "runtime.private-connect-forget") {
@@ -645,7 +645,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   void observeRuntimeStartup(startRuntime({
-    onMascotStatus: (status, chats, focus, counts) => post({ type: "runtime.mascot-status", status, chats, focus, counts }),
+    onMascotStatus: (status, chats, focus, counts, request) => post({ type: "runtime.mascot-status", status, chats, focus, counts, request }),
     onIncident: (incident) => post({ type: "runtime.incident", incident }),
     ...command.options,
     onCleanupReceiptConsumed: (

@@ -5,7 +5,7 @@ import { keepBest, MascotStatusPublisher } from "../../src/server/runtime/mascot
 import { MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../src/shared/mascot";
 import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
-type Published = [MascotStatus, MascotStatus[], string | null, MascotCounts];
+type Published = [MascotStatus, MascotStatus[], string | null, MascotCounts, number | null];
 
 const TERMINAL: readonly AgentRunState[] = ["completed", "failed", "cancelled", "interrupted"];
 const TIMES = ["2026-09-06T09:00:00.000Z", "2026-09-06T10:00:00.000Z", "2026-09-06T11:00:00.000Z"];
@@ -68,8 +68,8 @@ function observed([status, chats, focus, counts]: Published) {
   };
 }
 
-function expectParsable([status, chats, focus, counts]: Published): void {
-  const event = { type: "runtime.mascot-status", status, chats, focus, counts };
+function expectParsable([status, chats, focus, counts, request]: Published): void {
+  const event = { type: "runtime.mascot-status", status, chats, focus, counts, request };
   expect(parseRuntimeWorkerEvent(event)).toEqual(event);
 }
 
@@ -116,12 +116,16 @@ describe("bounded mascot ranking", () => {
       }, next() < 0.1);
       for (let index = 0; index < 5 + Math.floor(next() * 40); index += 1) shells.set(`c${index}`, make(`c${index}`));
       let focus: string | null = null;
+      let request = 0;
+      const listable = (id: string | null): boolean => id !== null && shells.has(id) && !shells.get(id)!.archivedAt;
       publisher.replace([...shells.values()]);
       for (let step = 0; step < 12; step += 1) {
         const action = next();
         if (action < 0.3) {
-          focus = pick([null, "missing", ...shells.keys()]);
-          publisher.focus(focus);
+          const chosen = pick([null, "missing", ...shells.keys()]);
+          request += 1;
+          publisher.focus(chosen, request);
+          focus = listable(chosen) ? chosen : null;
         } else if (action < 0.8) {
           const id = pick([...shells.keys(), `c${shells.size + step}`]);
           shells.set(id, make(id));
@@ -131,8 +135,10 @@ describe("bounded mascot ranking", () => {
           shells.delete(id);
           publisher.replace([...shells.values()]);
         }
+        if (!listable(focus)) focus = null;
         const published = publish.mock.lastCall!;
         expectParsable(published);
+        expect(published[4]).toBe(request || null);
         expect(observed(published)).toEqual(reference(shells.values(), focus));
       }
     }
@@ -157,7 +163,7 @@ describe("bounded mascot ranking", () => {
     const entries = Array.from({ length: 30 }, (_, index) => shell(`burst-${index}`, "running", { requested: TIMES[0]!, updated: TIMES[0]!, viewed: null }));
     publisher.replace(entries);
     for (const entry of entries) publisher.update({ ...entry, title: `Renamed ${entry.id}` });
-    publisher.focus("burst-29");
+    publisher.focus("burst-29", 1);
     expect(publish).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(publish).toHaveBeenCalledOnce();

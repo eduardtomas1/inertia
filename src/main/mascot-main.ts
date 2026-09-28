@@ -18,6 +18,7 @@ import {
   writeMascotSpriteTemplate, type MascotSpriteFile, type MascotSpriteSet,
 } from "./mascot-sprites.js";
 import { hardenDesktopSession } from "./preview-broker.js";
+import { MascotPin } from "./mascot-pin.js";
 
 interface MascotMainOptions {
   mainWindow(): BrowserWindow | null;
@@ -26,7 +27,7 @@ interface MascotMainOptions {
   registerProtocol(session: Session): void;
   registerHealthRenderer(contents: WebContents): () => void;
   openChat(conversationId: string): Promise<void>;
-  focusChat(conversationId: string | null): void;
+  focusChat(conversationId: string | null, request: number): void;
   spriteOrigin: string;
 }
 const SPRITE_ACTIONS: readonly unknown[] = ["import", "apply", "reset", "export-template"] satisfies MascotSpriteAction[];
@@ -43,8 +44,7 @@ export class MascotMain {
   private feed: { status: MascotStatus; chats: MascotStatus[]; counts: MascotCounts | null } = {
     status: emptyMascotStatus("unavailable"), chats: [], counts: null,
   };
-  private pinned: string | null = null;
-  private pinConfirmed = false;
+  private readonly pinning: MascotPin;
   private window: BrowserWindow | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private drag: { offset: { x: number; y: number }; started: number; gesture: number } | null = null;
@@ -58,6 +58,7 @@ export class MascotMain {
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
 
   constructor(private readonly options: MascotMainOptions) {
+    this.pinning = new MascotPin((conversationId, request) => options.focusChat(conversationId, request), () => this.broadcast());
     this.statePath = join(options.userDataDirectory, "mascot-window-state.json");
     this.state = readMascotWindowState(this.statePath);
     this.rendererUrl = new URL("mascot.html", options.rendererUrl).href;
@@ -76,15 +77,18 @@ export class MascotMain {
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null, counts: MascotCounts | null = null): void {
+  observe(
+    status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null,
+    counts: MascotCounts | null = null, request?: number | null,
+  ): void {
     this.feed = { status, chats, counts };
-    if (this.pinned && focus === this.pinned) this.pinConfirmed = true;
-    if (this.pinned && this.pinConfirmed && focus !== this.pinned) this.choose(null);
-    else this.broadcast();
+    this.pinning.answer(focus, request);
+    this.broadcast();
   }
 
   private pin(): string | null {
-    return this.feed.chats.some(({ conversationId }) => conversationId === this.pinned) ? this.pinned : null;
+    const pinned = this.pinning.id;
+    return this.feed.chats.some(({ conversationId }) => conversationId === pinned) ? pinned : null;
   }
 
   private status(): MascotStatus {
@@ -96,18 +100,13 @@ export class MascotMain {
     if (conversationId !== null && !this.feed.chats.some((chat) => chat.conversationId === conversationId)) {
       throw new Error("The mascot chat has changed. Try again.");
     }
-    this.pinned = conversationId;
-    this.pinConfirmed = false;
-    this.options.focusChat(conversationId);
+    this.pinning.select(conversationId);
     this.broadcast();
   }
 
   runtimePhase(phase: string): void {
-    if (phase === "ready") this.options.focusChat(this.pinned);
-    else {
-      this.pinConfirmed = false;
-      this.observe(emptyMascotStatus("unavailable"));
-    }
+    this.pinning.runtime(phase === "ready");
+    if (phase !== "ready") this.observe(emptyMascotStatus("unavailable"), [], null, null, null);
   }
 
   attach(): void {

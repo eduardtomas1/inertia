@@ -123,6 +123,7 @@ export interface MascotFeed {
   chats: MascotStatus[];
   focus: string | null;
   counts: MascotCounts | null;
+  request?: number | null;
 }
 
 export function parseMascotFeed(value: Record<string, unknown>): MascotFeed | null {
@@ -137,7 +138,9 @@ export function parseMascotFeed(value: Record<string, unknown>): MascotFeed | nu
   if (status.conversationId !== null && identity.some((key) => chats[0]?.[key] !== status[key])) return null;
   const waiting = chats.filter(({ phase }) => phase === "waiting-for-input" || phase === "waiting-for-approval").length;
   if (counts && (counts.chats < chats.length || counts.attention < waiting || counts.chats < status.activeCount)) return null;
-  return { status, chats, focus, counts };
+  if (!Object.hasOwn(value, "request")) return { status, chats, focus, counts };
+  const { request } = value;
+  return request === null || isMascotRequest(request) ? { status, chats, focus, counts, request } : null;
 }
 
 export function parseMascotCounts(value: unknown): MascotCounts | null {
@@ -146,6 +149,10 @@ export function parseMascotCounts(value: unknown): MascotCounts | null {
   return Number.isSafeInteger(chats) && Number.isSafeInteger(attention) && (attention as number) >= 0
     && (attention as number) <= (chats as number) && (chats as number) <= 1_000_000
     ? { chats: chats as number, attention: attention as number } : null;
+}
+
+export function isMascotRequest(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 2_147_483_647;
 }
 
 export function isMascotFocus(value: unknown): value is string | null {

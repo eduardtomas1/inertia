@@ -1004,7 +1004,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ),
     startPostReadyWork,
     websocketUrl,
-    focusMascotChat: (conversationId) => mascotStatus.focus(conversationId),
+    focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),

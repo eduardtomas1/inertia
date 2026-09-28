@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mascotBounds, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState } from "../../src/main/mascot-placement";
-import { emptyMascotStatus, parseMascotPreferences, parseMascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, parseMascotChats, parseMascotPreferences, parseMascotStatus, type MascotStatus } from "../../src/shared/mascot";
 import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
 const primary = { workArea: { x: 0, y: 24, width: 1440, height: 876 } };
@@ -61,9 +61,28 @@ describe("mascot placement and contracts", () => {
       { ...emptyMascotStatus(), conversationId: "chat" }, { ...emptyMascotStatus(), activeCount: Infinity },
       { ...emptyMascotStatus(), text: "secret" }, { ...emptyMascotStatus(), phase: "running" }]) {
       expect(parseMascotStatus(value)).toBeNull();
-      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value })).toBeNull();
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value, chats: [] })).toBeNull();
     }
-    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus() }))
-      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus() });
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus() })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] }))
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] });
+  });
+
+  it("bounds chat context, plan steps, timestamps, and the chat list", () => {
+    const chat = (id: string, context: Partial<MascotStatus> = {}): MascotStatus => ({
+      ...emptyMascotStatus(), phase: "running", conversationId: id, projectId: "project", runId: "run", turnId: "turn", activeCount: 1,
+      projectName: "Inertia", steps: { completed: 1, total: 3 }, since: "2026-09-06T09:00:00.000Z", ...context,
+    });
+    expect(parseMascotStatus(chat("chat"))).toEqual(chat("chat"));
+    for (const context of [
+      { steps: { completed: 4, total: 3 } }, { steps: { completed: 0, total: 0 } }, { steps: { completed: 1, total: 3, label: "x" } },
+      { since: "yesterday" }, { since: "2026-09-06 09:00" }, { projectName: "x".repeat(65) }, { projectName: "\u202einertia" },
+    ] as Partial<MascotStatus>[]) expect(parseMascotStatus(chat("chat", context))).toBeNull();
+    expect(parseMascotStatus({ ...emptyMascotStatus(), steps: { completed: 0, total: 1 } })).toBeNull();
+    expect(parseMascotChats([chat("a"), chat("b")])).toHaveLength(2);
+    expect(parseMascotChats([chat("a"), chat("a")])).toBeNull();
+    expect(parseMascotChats([emptyMascotStatus()])).toBeNull();
+    expect(parseMascotChats(Array.from({ length: 9 }, (_, index) => chat(`chat-${index}`)))).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: chat("a"), chats: [chat("a"), chat("a")] })).toBeNull();
   });
 });

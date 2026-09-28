@@ -143,7 +143,7 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
-  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id));
+  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id), (id) => { try { return store.project(id).name; } catch { return null; } });
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {

@@ -1,7 +1,7 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
-import { emptyMascotStatus, type MascotBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { emptyMascotStatus, type MascotBridge, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
 
@@ -41,6 +41,10 @@ function fixture() {
       snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
     },
+    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null): void {
+      snapshot = { ...snapshot, status, chats, pinned };
+      act(() => receive(snapshot));
+    },
     update(phase: MascotSnapshot["status"]["phase"], motion = true, context: Partial<MascotSnapshot["status"]> = {}): void {
       snapshot = {
         ...snapshot,
@@ -51,6 +55,75 @@ function fixture() {
     },
   };
 }
+
+function chat(id: string, phase: MascotStatus["phase"], context: Partial<MascotStatus> = {}): MascotStatus {
+  return { ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 2, chatTitle: `Chat ${id}`, projectName: "Inertia", ...context };
+}
+
+describe("mascot chat context and chooser", () => {
+  it("shows project, elapsed time, and measured plan progress for the shown chat", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-06T10:12:30.000Z"), toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const app = fixture();
+    const view = renderMascot();
+    await act(async () => { await Promise.resolve(); });
+    const working = chat("a", "running", { since: "2026-09-06T10:00:00.000Z", steps: { completed: 3, total: 5 }, progress: "3 of 5 steps complete" });
+    app.list(working, [working]);
+    const text = (selector: string): string => view.container.querySelector(selector)!.textContent!;
+    expect(text(".mascot-time")).toBe("12m");
+    expect(text(".mascot-project")).toBe("Inertia");
+    expect(text(".mascot-detail")).toBe("3 of 5 steps");
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps")!.hidden).toBe(false);
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps i")!.style.getPropertyValue("--mascot-steps")).toBe("0.6");
+    expect(view.container.querySelector<HTMLButtonElement>(".mascot-picker")!.hidden).toBe(true);
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(text(".mascot-time")).toBe("13m");
+    const done = chat("b", "completed", { since: "2026-09-06T10:10:00.000Z", steps: { completed: 5, total: 5 } });
+    app.list(emptyMascotStatus(), [done]);
+    expect(view.container.querySelector<HTMLButtonElement>(".mascot-picker")!.hidden).toBe(false);
+    app.list(done, [done]);
+    expect(text(".mascot-time")).toBe("3m ago");
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps")!.hidden).toBe(true);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("lists chats, pins a choice, flags other chats that need attention, and returns to automatic", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const question = chat("q", "waiting-for-input");
+    const working = chat("w", "running");
+    app.list(question, [question, working]);
+    const picker = screen.getByRole("button", { name: /Show chat: most urgent\. 2 chats/ });
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(picker.dataset.attention).toBe("false");
+    fireEvent.click(picker);
+    expect(picker).toHaveAttribute("aria-expanded", "true");
+    const group = screen.getByRole("group", { name: "Show chat" });
+    expect([...group.querySelectorAll("button")].map((row) => row.textContent)).toEqual(["Most urgent chatAuto", "Chat qNeeds you", "Chat wWorking"]);
+    expect(within(group).getByRole("button", { name: /Most urgent/ })).toHaveAttribute("aria-pressed", "true");
+    expect(document.activeElement).toBe(within(group).getByRole("button", { name: /Most urgent/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toHaveTextContent("Chat w");
+    fireEvent.click(document.activeElement!);
+    expect(app.action).toHaveBeenLastCalledWith("pin", "w");
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(view.container.querySelector<HTMLElement>(".mascot-chooser")!.hidden).toBe(true);
+    app.list(working, [question, working], "w");
+    expect(picker).toHaveTextContent("Pinned");
+    expect(picker.dataset.attention).toBe("true");
+    expect(screen.getByRole("button", { name: /Chat w.*1 other chat needs you.*Open chat/ })).toBeEnabled();
+    fireEvent.click(picker);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(app.action).not.toHaveBeenCalledWith("hide");
+    fireEvent.click(picker);
+    fireEvent.click(screen.getByRole("button", { name: /Most urgent/ }));
+    expect(app.action).toHaveBeenLastCalledWith("pin", null);
+  });
+});
 
 describe("mascot rendering", () => {
   it("renders an applied custom sprite set and returns to the bundled artwork on reset", async () => {
@@ -79,7 +152,7 @@ describe("mascot rendering", () => {
     app.interaction(true);
     expect(pickup.getAttribute("src")).toBe(url("pickup.webp"));
     app.interaction(false);
-    expect(image.getAttribute("src")).toBe(url("thinking.png"));
+    expect(image.getAttribute("src")).toBe(url("thinking.webp"));
     app.update("idle");
     app.customize(undefined);
     expect(main.dataset.sprites).toBe("default");

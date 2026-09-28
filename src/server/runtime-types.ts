@@ -31,7 +31,7 @@ import type {
 } from "./runtime/agent-browser-broker-client.js";
 
 export interface RuntimeOptions {
-  onMascotStatus?: (status: import("../shared/mascot").MascotStatus) => void;
+  onMascotStatus?: (status: import("../shared/mascot").MascotStatus, chats: import("../shared/mascot").MascotStatus[]) => void;
   onIncident?: IncidentSink;
   dataDirectory: string;
   defaultWorkspacePath: string;

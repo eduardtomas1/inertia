@@ -641,7 +641,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   void observeRuntimeStartup(startRuntime({
-    onMascotStatus: (status) => post({ type: "runtime.mascot-status", status }),
+    onMascotStatus: (status, chats) => post({ type: "runtime.mascot-status", status, chats }),
     onIncident: (incident) => post({ type: "runtime.incident", incident }),
     ...command.options,
     onCleanupReceiptConsumed: (

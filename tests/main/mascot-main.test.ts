@@ -5,7 +5,7 @@ import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } f
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
-import { emptyMascotStatus, MASCOT_IPC, type MascotSnapshot } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_IPC, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import type { MascotSpriteImport, MascotSprites } from "../../src/shared/mascot-sprites";
 import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
@@ -109,6 +109,42 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
   return { mascot, main, invoke, openChat, unregister, directory, gesture };
 }
+
+describe("mascot chat selection", () => {
+  const chat = (id: string, phase: MascotStatus["phase"]): MascotStatus => ({
+    ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 1, chatTitle: `Chat ${id}`,
+  });
+
+  it("pins a listed chat, opens that chat, and falls back when it leaves the list", async () => {
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const urgent = chat("urgent", "waiting-for-input");
+    const quiet = chat("quiet", "running");
+    app.mascot.observe(urgent, [urgent, quiet]);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null, chats: [urgent, quiet] });
+    await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
+    expect(overlay.webContents.send).toHaveBeenLastCalledWith(MASCOT_IPC.changed, expect.objectContaining({ pinned: "quiet" }));
+    await app.invoke(MASCOT_IPC.action, ["open-chat", app.mascot.snapshot().status], overlay);
+    expect(app.openChat).toHaveBeenLastCalledWith("quiet");
+    await expect(app.invoke(MASCOT_IPC.action, ["open-chat", urgent], overlay)).rejects.toThrow("changed");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin", "missing"], overlay)).rejects.toThrow("changed");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin", 7], overlay)).rejects.toThrow("Invalid");
+    await expect(app.invoke(MASCOT_IPC.action, ["pin"], overlay)).rejects.toThrow("untrusted");
+    app.mascot.runtimePhase("stopped");
+    expect(app.mascot.snapshot()).toMatchObject({ status: { phase: "unavailable" }, pinned: null });
+    app.mascot.observe(urgent, [urgent, quiet]);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
+    app.mascot.observe(urgent, [urgent]);
+    app.mascot.observe(urgent, [urgent, quiet]);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
+    await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
+    await app.invoke(MASCOT_IPC.action, ["pin", null], overlay);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
+  });
+});
 
 describe("mascot window ownership", () => {
   it("allocates nothing while disabled, creates an isolated non-focusing overlay, and destroys it on disable", async () => {

@@ -19,10 +19,18 @@ export interface MascotStatus {
   turnId: string | null;
   activeCount: number;
   chatTitle: string | null;
+  projectName: string | null;
   /** Bounded plain-text preview from this turn's public activity or interaction. */
   message: string | null;
   progress: string | null;
+  steps: MascotSteps | null;
+  since: string | null;
 }
+export interface MascotSteps {
+  completed: number;
+  total: number;
+}
+export const MASCOT_CHAT_LIMIT = 8;
 export interface MascotPreferences {
   enabled: boolean;
   motion: boolean;
@@ -37,13 +45,15 @@ export interface MascotSnapshot {
   /** Renderer lifetime and monotonically increasing pointer gesture. */
   gesture?: MascotGesture;
   sprites?: MascotSprites;
+  chats?: readonly MascotStatus[];
+  pinned?: string | null;
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
-  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop";
+  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop" | "pin";
 
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
-  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop",
+  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin",
 ];
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
   idle: "Ready when you are",
@@ -64,13 +74,17 @@ export const MASCOT_LABELS: Record<MascotPhase, string> = {
 
 export function emptyMascotStatus(phase: "idle" | "unavailable" = "idle"): MascotStatus {
   return { phase, projectId: null, conversationId: null, runId: null, turnId: null, activeCount: 0,
-    chatTitle: null, message: null, progress: null };
+    chatTitle: null, projectName: null, message: null, progress: null, steps: null, since: null };
+}
+
+export function isLiveMascotPhase(phase: MascotPhase): boolean {
+  return !["idle", "unavailable", "completed", "failed", "cancelled", "interrupted"].includes(phase);
 }
 
 export function parseMascotStatus(value: unknown): MascotStatus | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
-  if (Object.keys(candidate).length !== 9
+  if (Object.keys(candidate).length !== 12
     || typeof candidate.phase !== "string"
     || !Object.hasOwn(MASCOT_LABELS, candidate.phase)
     || !Number.isSafeInteger(candidate.activeCount)
@@ -81,12 +95,35 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
     const id = candidate[key];
     if (empty ? id !== null : typeof id !== "string" || id.length < 1 || id.length > 200 || /[\x00-\x1f\x7f]/u.test(id)) return null;
   }
-  for (const [key, limit] of [["chatTitle", 96], ["message", 280], ["progress", 80]] as const) {
+  for (const [key, limit] of [["chatTitle", 96], ["projectName", 64], ["message", 280], ["progress", 80]] as const) {
     const text = candidate[key];
     if (text !== null && (empty || typeof text !== "string" || !text.length || text.length > limit
       || /[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/u.test(text))) return null;
   }
+  const { steps, since } = candidate;
+  if (steps !== null) {
+    if (empty || !steps || typeof steps !== "object" || Array.isArray(steps)) return null;
+    const { completed, total } = steps as Record<string, unknown>;
+    if (Object.keys(steps).length !== 2 || !Number.isSafeInteger(total) || !Number.isSafeInteger(completed)
+      || (total as number) < 1 || (total as number) > 1_000
+      || (completed as number) < 0 || (completed as number) > (total as number)) return null;
+  }
+  if (since !== null && (empty || typeof since !== "string" || since.length > 40
+    || !/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/u.test(since) || !Number.isFinite(Date.parse(since)))) return null;
   return candidate as unknown as MascotStatus;
+}
+
+export function parseMascotChats(value: unknown): MascotStatus[] | null {
+  if (!Array.isArray(value) || value.length > MASCOT_CHAT_LIMIT) return null;
+  const chats: MascotStatus[] = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    const status = parseMascotStatus(item);
+    if (!status?.conversationId || ids.has(status.conversationId)) return null;
+    ids.add(status.conversationId);
+    chats.push(status);
+  }
+  return chats;
 }
 
 export function parseMascotPreferences(value: unknown): MascotPreferences | null {
@@ -100,7 +137,7 @@ export function parseMascotPreferences(value: unknown): MascotPreferences | null
 export interface MascotBridge {
   snapshot(): Promise<MascotSnapshot>;
   onChanged(listener: (snapshot: MascotSnapshot) => void): () => void;
-  action(action: MascotAction, expected?: MascotStatus | MascotGesture): Promise<void>;
+  action(action: MascotAction, expected?: MascotStatus | MascotGesture | string | null): Promise<void>;
 }
 
 export interface MascotSettingsBridge extends MascotBridge {

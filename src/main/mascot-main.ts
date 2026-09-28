@@ -38,7 +38,8 @@ export class MascotMain {
   private pendingSprites: MascotSpriteSet | null = null;
   private readonly rendererUrl: string;
   private state;
-  private status = emptyMascotStatus("unavailable");
+  private feed: { status: MascotStatus; chats: MascotStatus[] } = { status: emptyMascotStatus("unavailable"), chats: [] };
+  private pinned: string | null = null;
   private window: BrowserWindow | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private drag: { offset: { x: number; y: number }; started: number; gesture: number } | null = null;
@@ -63,15 +64,33 @@ export class MascotMain {
     this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status }, dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
 
   sprite(id: string, name: string): MascotSpriteFile | null {
     const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(status: MascotStatus): void {
-    this.status = status;
+  observe(status: MascotStatus, chats: MascotStatus[] = []): void {
+    this.feed = { status, chats };
+    if (status.phase !== "unavailable" && !this.pin()) this.pinned = null;
+    this.broadcast();
+  }
+
+  private pin(): string | null {
+    return this.feed.chats.some(({ conversationId }) => conversationId === this.pinned) ? this.pinned : null;
+  }
+
+  private status(): MascotStatus {
+    const pinned = this.pin();
+    return this.feed.chats.find(({ conversationId }) => pinned && conversationId === pinned) ?? this.feed.status;
+  }
+
+  private choose(conversationId: string | null): void {
+    if (conversationId !== null && !this.feed.chats.some((chat) => chat.conversationId === conversationId)) {
+      throw new Error("The mascot chat has changed. Try again.");
+    }
+    this.pinned = conversationId;
     this.broadcast();
   }
 
@@ -107,8 +126,13 @@ export class MascotMain {
       });
       ipcMain.handle(MASCOT_IPC.action, async (event, ...args) => {
         const dragAction = args[0] === "pickup" || args[0] === "drop";
-        this.assertSender(event, args.length, args[0] === "open-chat" || dragAction ? 2 : 1);
+        this.assertSender(event, args.length, args[0] === "open-chat" || args[0] === "pin" || dragAction ? 2 : 1);
         if (!MASCOT_ACTIONS.includes(args[0] as MascotAction)) throw new Error("Invalid mascot action");
+        if (args[0] === "pin") {
+          if (args[1] !== null && typeof args[1] !== "string") throw new Error("Invalid mascot chat identity");
+          this.choose(args[1]);
+          return;
+        }
         if (dragAction) {
           if (event.sender !== this.window?.webContents) throw new Error("Rejected untrusted mascot drag");
           const gesture = args[1];
@@ -414,9 +438,10 @@ export class MascotMain {
   private async action(action: MascotAction, expectedStatus?: MascotStatus): Promise<void> {
     if (action === "open-chat") {
       if (!expectedStatus || ["projectId", "conversationId", "runId", "turnId"].some(
-        (key) => expectedStatus[key as keyof MascotStatus] !== this.status[key as keyof MascotStatus],
+        (key) => expectedStatus[key as keyof MascotStatus] !== this.status()[key as keyof MascotStatus],
       )) throw new Error("The mascot chat has changed. Try again.");
-      if (this.status.conversationId) await this.options.openChat(this.status.conversationId);
+      const { conversationId } = this.status();
+      if (conversationId) await this.options.openChat(conversationId);
       return;
     }
     if (action === "hide") this.state.preferences.enabled = false;
@@ -443,10 +468,20 @@ export class MascotMain {
 
   private menu(window: BrowserWindow): void {
     this.endDrag();
-    const status = { ...this.status };
+    const status = { ...this.status() };
+    const pinned = this.pin();
+    const follow = (conversationId: string | null) => () => { try { this.choose(conversationId); } catch { this.broadcast(); } };
     Menu.buildFromTemplate([
-      { label: MASCOT_LABELS[this.status.phase], enabled: false },
+      { label: MASCOT_LABELS[status.phase], enabled: false },
       { label: "Open chat", enabled: Boolean(status.conversationId), click: () => { void this.action("open-chat", status).catch(() => undefined); } },
+      { label: "Show chat", enabled: this.feed.chats.length > 0, submenu: [
+        { label: "Most urgent chat", type: "radio", checked: !pinned, click: follow(null) },
+        { type: "separator" },
+        ...this.feed.chats.map((chat) => ({
+          label: `${chat.chatTitle ?? "Untitled chat"} — ${MASCOT_LABELS[chat.phase]}`, type: "radio" as const,
+          checked: chat.conversationId === pinned, click: follow(chat.conversationId),
+        })),
+      ] },
       { label: this.state.preferences.motion ? "Pause animation" : "Resume animation", click: () => { void this.action(this.state.preferences.motion ? "pause" : "resume"); } },
       { label: "Hide mascot", click: () => { void this.action("hide"); } },
     ]).popup({ window });

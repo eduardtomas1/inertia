@@ -1,9 +1,9 @@
 import {
-  emptyMascotStatus, MASCOT_LABELS,
-  type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot,
+  emptyMascotStatus, isLiveMascotPhase, MASCOT_LABELS,
+  type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot, type MascotStatus,
 } from "../../../shared/mascot";
 import { mascotArtwork, readMascotAssets } from "./assets";
-import { mascotActionLabel, mascotFallback } from "./copy";
+import { mascotActionLabel, mascotElapsed, mascotFallback, mascotShortLabel, mascotTone } from "./copy";
 
 declare global { interface Window { mascot: MascotBridge } }
 
@@ -15,12 +15,22 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const image = select<HTMLImageElement>("img");
   const pickupImage = select<HTMLImageElement>(".mascot-pickup");
   const handle = select(".mascot-drag");
-  const button = select<HTMLButtonElement>("button");
+  const bubble = select(".mascot-status");
+  const button = select<HTMLButtonElement>(".mascot-open");
   const label = select(".mascot-label");
+  const time = select(".mascot-time");
   const detail = select(".mascot-detail");
-  const chat = select(".mascot-chat");
+  const project = select(".mascot-project");
+  const title = select(".mascot-title");
   const message = select(".mascot-message");
   const actionLabel = select(".mascot-action");
+  const steps = select(".mascot-steps");
+  const stepsFill = select(".mascot-steps i");
+  const picker = select<HTMLButtonElement>(".mascot-picker");
+  const pickerLabel = select(".mascot-picker-label");
+  const chooser = select(".mascot-chooser");
+  const list = select(".mascot-chats");
+  const options = new Map<string, HTMLButtonElement>();
   const media = matchMedia("(prefers-reduced-motion: reduce)");
   const listeners = new AbortController();
   const eventOptions = { signal: listeners.signal };
@@ -31,15 +41,59 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   let received = false;
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let clock: ReturnType<typeof setTimeout> | undefined;
   let pointer: number | null = null;
   let gesture: MascotGesture = [0, 0];
+  let choosing = false;
+
+  const option = (key: string): HTMLButtonElement => {
+    let row = options.get(key);
+    if (!row) {
+      row = document.createElement("button");
+      row.type = "button";
+      row.className = "mascot-option";
+      row.dataset.key = key;
+      row.append(...["mascot-dot", "mascot-option-title", "mascot-option-state"].map((name) => {
+        const part = document.createElement("span");
+        part.className = name;
+        return part;
+      }));
+      row.firstElementChild!.setAttribute("aria-hidden", "true");
+      row.addEventListener("click", () => choose(key || null), eventOptions);
+      options.set(key, row);
+    }
+    return row;
+  };
+  const renderChats = (chats: readonly MascotStatus[], pinned: string | null): void => {
+    const rows = [["", null] as const, ...chats.map((chat) => [chat.conversationId!, chat] as const)].map(([key, chat]) => {
+      const row = option(key);
+      const [dot, name, state] = row.children as unknown as [HTMLElement, HTMLElement, HTMLElement];
+      row.setAttribute("aria-pressed", String(key ? key === pinned : !pinned));
+      row.dataset.tone = chat ? mascotTone(chat.phase) : "auto";
+      dot.dataset.tone = row.dataset.tone;
+      name.textContent = chat ? chat.chatTitle ?? "Untitled chat" : "Most urgent chat";
+      state.textContent = chat ? mascotShortLabel[chat.phase] : "Auto";
+      row.title = chat ? [chat.chatTitle, chat.projectName, MASCOT_LABELS[chat.phase]].filter(Boolean).join(" — ")
+        : "Follow whichever chat needs you most";
+      return row;
+    });
+    for (const key of options.keys()) if (!rows.some((row) => row.dataset.key === key)) options.delete(key);
+    if (rows.some((row, index) => list.children[index] !== row) || list.children.length !== rows.length) {
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.key : undefined;
+      list.replaceChildren(...rows);
+      if (focused !== undefined) options.get(focused)?.focus({ preventScroll: true });
+    }
+  };
 
   const render = (): void => {
     const { status, preferences } = snapshot;
+    const chats = snapshot.chats ?? [];
+    const pinned = snapshot.pinned ?? null;
+    const live = isLiveMascotPhase(status.phase);
     const moving = preferences.enabled && preferences.motion && !document.hidden && !media.matches;
     const dragging = Boolean(snapshot.dragging);
     const animated = moving && !dragging
-      && !settled && (status.activeCount > 0 || status.phase === "completed");
+      && !settled && (live || status.phase === "completed");
     const artwork = snapshot.sprites?.files ?? mascotAssets;
     const src = artwork[mascotArtwork(status.phase)][animated ? "animation" : "poster"];
     if (image.getAttribute("src") !== src) image.setAttribute("src", src);
@@ -52,14 +106,40 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     main.dataset.placement = snapshot.placement ?? "manual";
     main.dataset.sprites = snapshot.sprites ? "custom" : "default";
     main.dataset.phase = status.phase;
+    main.dataset.tone = mascotTone(status.phase);
+    main.dataset.pinned = String(Boolean(pinned));
     label.textContent = MASCOT_LABELS[status.phase];
+    time.textContent = status.since ? mascotElapsed(status.since, Date.now(), live) : "";
     button.disabled = !status.conversationId;
-    chat.textContent = status.chatTitle ?? "Inertia";
+    project.textContent = status.projectName ?? "";
+    title.textContent = status.chatTitle ?? "Inertia";
     message.textContent = status.message ?? mascotFallback[status.phase];
     actionLabel.textContent = status.conversationId ? mascotActionLabel(status.phase) : "";
-    detail.textContent = status.progress ?? (status.activeCount > 1 ? `${status.activeCount} active chats` : "");
-    button.setAttribute("aria-label", [label.textContent, chat.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
-    button.title = `${chat.textContent}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
+    const others = chats.filter((chat) => chat.conversationId !== status.conversationId && mascotTone(chat.phase) === "attention").length;
+    const plan = mascotTone(status.phase) === "live" ? status.steps : null;
+    steps.hidden = !plan;
+    if (plan) stepsFill.style.setProperty("--mascot-steps", String(plan.completed / plan.total));
+    detail.textContent = plan ? `${plan.completed} of ${plan.total} steps`
+      : status.progress ?? (others ? `${others} other ${others === 1 ? "chat needs" : "chats need"} you`
+        : status.activeCount > 1 ? `${status.activeCount} active chats` : "");
+    button.setAttribute("aria-label", [label.textContent, time.textContent, title.textContent, project.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
+    button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
+    picker.hidden = !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
+    if (picker.hidden) choosing = false;
+    picker.dataset.attention = String(others > 0);
+    pickerLabel.textContent = pinned ? "Pinned" : "Auto";
+    picker.title = "Choose which chat the mascot shows";
+    picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${chats.length} ${chats.length === 1 ? "chat" : "chats"}${others ? `, ${others} ${others === 1 ? "needs" : "need"} you` : ""}`);
+    picker.setAttribute("aria-expanded", String(choosing));
+    bubble.dataset.view = choosing ? "chats" : "status";
+    button.hidden = choosing;
+    chooser.hidden = !choosing;
+    if (choosing) renderChats(chats, pinned);
+    clearTimeout(clock);
+    if (status.since && active && !document.hidden) {
+      const age = Date.now() - Date.parse(status.since);
+      clock = setTimeout(render, 60_250 - (((age % 60_000) + 60_000) % 60_000));
+    }
   };
   const update = (value: MascotSnapshot): void => {
     if (!active) return;
@@ -82,6 +162,18 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     void operation.catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
   };
   const open = (): void => perform("open-chat");
+  const toggle = (): void => {
+    choosing = !choosing;
+    render();
+    if (choosing) (options.get(snapshot.pinned ?? "") ?? options.get(""))?.focus({ preventScroll: true });
+  };
+  const choose = (conversationId: string | null): void => {
+    const focused = chooser.contains(document.activeElement);
+    choosing = false;
+    render();
+    if (focused) picker.focus({ preventScroll: true });
+    void bridge.action("pin", conversationId).catch(() => { if (active) label.textContent = "That chat changed. Try again"; });
+  };
   const focus = (): void => { main.dataset.keyboardFocus = "true"; main.focus(); };
   const releasePointer = (): void => {
     const previous = pointer;
@@ -111,6 +203,14 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const actions: Record<string, MascotAction> = {
       ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Escape: "hide",
     };
+    if (choosing && ["ArrowUp", "ArrowDown", "Escape"].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === "Escape") { toggle(); picker.focus({ preventScroll: true }); return; }
+      const rows = [...list.children] as HTMLElement[];
+      const index = rows.indexOf(document.activeElement as HTMLElement);
+      rows[(index + (event.key === "ArrowUp" ? rows.length - 1 : 1)) % rows.length]?.focus({ preventScroll: true });
+      return;
+    }
     const action = actions[event.key];
     if (action) { event.preventDefault(); perform(action); }
   };
@@ -119,6 +219,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     .catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
   main.addEventListener("keydown", key, eventOptions);
   button.addEventListener("click", open, eventOptions);
+  picker.addEventListener("click", toggle, eventOptions);
   handle.addEventListener("pointerdown", pickup, eventOptions);
   handle.addEventListener("lostpointercapture", pointerEnd, eventOptions);
   window.addEventListener("pointerup", pointerEnd, eventOptions);
@@ -136,6 +237,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     listeners.abort();
     drop();
     clearTimeout(timer);
+    clearTimeout(clock);
     unsubscribe();
   };
 }

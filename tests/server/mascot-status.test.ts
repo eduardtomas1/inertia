@@ -3,7 +3,7 @@ import type { AgentInputRequest, AgentApprovalRequest } from "../../src/shared/c
 import type { ConversationShell } from "../../src/shared/contracts/app";
 import { AGENT_RUN_STATES, agentTurnStatusForRunState, type AgentRunState } from "../../src/shared/run-state";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { emptyMascotStatus, parseMascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 
 function conversation(id: string, state: AgentRunState): ConversationShell {
   return {
@@ -25,11 +25,14 @@ describe("authoritative mascot status", () => {
     const publish = vi.fn();
     const publisher = new MascotStatusPublisher(publish);
     publisher.replace([conversation("chat", phase)]);
-    expect(publish).toHaveBeenLastCalledWith({
+    const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(phase);
+    const status = {
       phase, projectId: "project", conversationId: "chat", runId: "chat-run", turnId: "chat-turn",
-      chatTitle: "Improve the desktop mascot", message: null, progress: null,
-      activeCount: ["completed", "failed", "cancelled", "interrupted"].includes(phase) ? 0 : 1,
-    });
+      chatTitle: "Improve the desktop mascot", projectName: null, message: null, progress: null, steps: null,
+      since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z",
+      activeCount: terminal ? 0 : 1,
+    };
+    expect(publish).toHaveBeenLastCalledWith(status, [status]);
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
@@ -51,11 +54,11 @@ describe("authoritative mascot status", () => {
     const publish = vi.fn();
     const publisher = new MascotStatusPublisher(publish);
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus());
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })]);
     publisher.update(conversation("cancelled", "cancelled"));
     expect(publish.mock.lastCall?.[0].phase).toBe("cancelled");
     publisher.replace([]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus());
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), []);
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
@@ -79,6 +82,41 @@ describe("authoritative mascot status", () => {
     expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "a", activeCount: 2 });
     publisher.update(conversation("b", "waiting-for-input"));
     expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "b", phase: "waiting-for-input" });
+  });
+});
+
+describe("mascot chat list", () => {
+  it("ranks switchable chats, keeps seen results available, and adds project context", () => {
+    const publish = vi.fn();
+    const publisher = new MascotStatusPublisher(publish, undefined, (id) => id === "project" ? "Inertia" : null);
+    const seen = { ...conversation("seen", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
+    const live = conversation("live", "running");
+    live.latestTurn = { ...live.latestTurn!, startedAt: "2026-09-06T09:30:00+00:00" };
+    publisher.replace([seen, live, conversation("question", "waiting-for-input"), { ...conversation("archived", "running"), archivedAt: "2026-09-06T11:00:00.000Z" }]);
+    const [status, chats] = publish.mock.lastCall!;
+    expect(status).toMatchObject({ conversationId: "question", projectName: "Inertia", activeCount: 2 });
+    expect(chats.map(({ conversationId }: { conversationId: string }) => conversationId)).toEqual(["question", "live", "seen"]);
+    expect(chats[1]).toMatchObject({ since: "2026-09-06T09:30:00.000Z", activeCount: 2 });
+    expect(chats[2]).toMatchObject({ phase: "completed", since: "2026-09-06T10:00:00.000Z" });
+    for (const chat of chats) expect(parseMascotStatus(chat)).toEqual(chat);
+    publisher.replace(Array.from({ length: 12 }, (_, index) => conversation(`chat-${index}`, "running")));
+    expect(publish.mock.lastCall?.[1]).toHaveLength(MASCOT_CHAT_LIMIT);
+  });
+
+  it("keeps plan steps with their turn and clears them when the turn ends", () => {
+    const publish = vi.fn();
+    let shell = conversation("chat", "running");
+    const publisher = new MascotStatusPublisher(publish, () => shell);
+    publisher.replace([shell]);
+    publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
+      { step: "Sketch", status: "completed" }, { step: "Build", status: "inProgress" }, { step: "Ship", status: "pending" },
+    ] } });
+    expect(publish.mock.lastCall?.[0].steps).toEqual({ completed: 1, total: 3 });
+    publisher.replace([shell]);
+    expect(publish.mock.lastCall?.[1][0].steps).toEqual({ completed: 1, total: 3 });
+    shell = conversation("chat", "completed");
+    publisher.observe({ type: "agent.completed", ...owner, status: "completed", terminalReason: "completed", terminalAssistantMessage: null });
+    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "completed", steps: null, progress: null });
   });
 });
 
@@ -191,5 +229,6 @@ describe("mascot context", () => {
     expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "failed", message: "The provider connection was lost.", progress: null });
     publisher.update({ ...shell, lastViewedAt: "2026-09-06T13:00:00.000Z" });
     expect(publish.mock.lastCall?.[0]).toEqual(emptyMascotStatus());
+    expect(publish.mock.lastCall?.[1]).toEqual([expect.objectContaining({ phase: "failed", message: "The provider connection was lost." })]);
   });
 });

@@ -42,3 +42,34 @@ it("reports actual discovery, failed/skipped attempts and exact identity without
     expect(raw).not.toContain("attachments");
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 40_000);
+
+it("counts and prints GPU helper recoveries so a rise is visible in the job log", async () => {
+  const root = await mkdtemp(join(tmpdir(), "inertia-ci-playwright-recoveries-"));
+  try {
+    const testModule = pathToFileURL(resolve("node_modules/@playwright/test/index.mjs")).href;
+    const reporter = resolve("scripts/ci/playwright-timings.mjs");
+    await writeFile(join(root, "playwright.config.mjs"), `export default {
+      testDir: './specs', workers: 1, retries: 0, reporter: [[${JSON.stringify(reporter)}]],
+      projects: [{name: 'isolated'}]
+    };`);
+    await mkdir(join(root, "specs"));
+    await writeFile(join(root, "specs", "recovery.spec.mjs"), `import { test } from ${JSON.stringify(testModule)};
+      const note = (type) => test.info().annotations.push({ type, description: 'private helper row' });
+      test('two frame recoveries', () => {
+        note('electron-gpu-helper-stall-recovered');
+        note('electron-gpu-helper-stall-recovered');
+      });
+      test('close recovery', () => { note('electron-gpu-helper-terminated'); note('unrelated'); });
+      test('healthy', () => {});
+    `);
+    const result = spawnSync(process.execPath, [resolve("node_modules/@playwright/test/cli.js"), "test"], {
+      cwd: root, encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024, env: { ...process.env },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain("[Inertia E2E] GPU helper recoveries in isolated: 2 before actions, 1 at close.");
+    const raw = await readFile(join(root, "ci-test-timings/isolated-all.json"), "utf8");
+    expect(JSON.parse(raw).gpuHelperRecoveries).toEqual({ beforeAction: 2, atClose: 1 });
+    expect(raw).not.toContain("private");
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 40_000);

@@ -7,7 +7,6 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
-import { waitForRenderedFrame } from "./support/rendered-frame";
 
 const sourceAnswerGate = "multi-spawn-source-answer-ready";
 const judgeAnswerGate = "multi-spawn-judge-answer-ready";
@@ -161,7 +160,6 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await waitForRenderedFrame(app);
   await sidebar.getByRole("button", { name: "Launch two chats" }).click();
 
   const dialog = page.getByRole("dialog", {
@@ -179,12 +177,10 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .selectOption({ label: "Companion" });
   await dialog.getByRole("combobox", { name: "Chat 2 access" })
     .selectOption("full");
-  await waitForRenderedFrame(app);
   await dialog.getByRole("checkbox", { name: "Compare with a third model" })
     .check();
   const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
   await expect(judgeConfiguration).not.toHaveAttribute("open", "");
-  await waitForRenderedFrame(app);
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
   await dialog.getByRole("textbox", { name: "Comparison chat name" })
     .fill("Independent judge");
@@ -203,14 +199,11 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .toBeVisible();
   await expect(dialog.getByText(/It sends no source session/u))
     .not.toBeVisible();
-  await waitForRenderedFrame(app);
   await sharingDisclosure.click();
   await expect(dialog.getByText(/It sends no source session/u)).toBeVisible();
-  await waitForRenderedFrame(app);
   await sharingDisclosure.click();
   await expect(dialog.getByText("Judge can edit a source checkout", { exact: true }))
     .toBeVisible();
-  await waitForRenderedFrame(app);
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
   await expect(judgeConfiguration).not.toHaveAttribute("open", "");
 
@@ -225,7 +218,6 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     document.documentElement.style.colorScheme = "light";
   });
   const lightWide = testInfo.outputPath("multi-spawn-light-wide.png");
-  await waitForRenderedFrame(app);
   await page.screenshot({
     animations: "disabled",
     path: lightWide,
@@ -241,9 +233,7 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     document.documentElement.dataset.theme = "dark";
     document.documentElement.style.colorScheme = "dark";
   });
-  await waitForRenderedFrame(app);
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
-  await waitForRenderedFrame(app);
   await judgeConfiguration.scrollIntoViewIfNeeded();
   await expect(dialog.getByRole("button", { name: "Launch duo" }))
     .toBeVisible();
@@ -258,7 +248,6 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   expect(routeCardBounds[0].right).toBeLessThan(routeCardBounds[1].left);
   await app.expectNoViewportOverflow();
   const darkNarrow = testInfo.outputPath("multi-spawn-dark-narrow.png");
-  await waitForRenderedFrame(app);
   await page.screenshot({
     animations: "disabled",
     path: darkNarrow,
@@ -270,7 +259,6 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   });
 
   await app.resizeWindow(1320, 900);
-  await waitForRenderedFrame(app);
   await dialog.getByRole("button", { name: "Launch duo" }).click();
 
   const split = page.getByRole("main", {
@@ -325,7 +313,6 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   await app.expectNoViewportOverflow();
 
   const splitResult = testInfo.outputPath("multi-spawn-split-result.png");
-  await waitForRenderedFrame(app);
   await page.screenshot({
     animations: "disabled",
     path: splitResult,

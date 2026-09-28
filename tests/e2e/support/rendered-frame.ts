@@ -1,15 +1,18 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
+import { test, type ElectronApplication, type Page } from "@playwright/test";
 
 import { electronHelperProcesses, gpuMainThreadStall } from "./electron-main-process-diagnostic";
 
 const execFileAsync = promisify(execFile);
 const FRAME_TIMEOUT_MS = 1_000;
+const FRAME_RESUME_ATTEMPTS = 10;
 const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const SAMPLE_TIMEOUT_MS = 6_000;
 const MAX_TOOL_OUTPUT_BYTES = 4 * 1024 * 1024;
+
+export const GPU_HELPER_STALL_RECOVERED = "electron-gpu-helper-stall-recovered";
 
 interface GpuHelperRecovery {
   helper: string;
@@ -17,13 +20,18 @@ interface GpuHelperRecovery {
 }
 
 export async function renderedFrame(page: Page): Promise<boolean> {
-  return await page.evaluate((timeout) => new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeout);
-    requestAnimationFrame(() => {
-      clearTimeout(timer);
-      resolve(true);
-    });
-  }), FRAME_TIMEOUT_MS);
+  try {
+    return await page.evaluate((timeout) => new Promise<boolean>((resolve) => {
+      if (document.visibilityState === "hidden") return resolve(true);
+      const timer = setTimeout(() => resolve(false), timeout);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        clearTimeout(timer);
+        resolve(true);
+      }));
+    }), FRAME_TIMEOUT_MS);
+  } catch {
+    return true;
+  }
 }
 
 async function runTool(command: string, args: string[], timeout: number): Promise<string | null> {
@@ -67,19 +75,33 @@ async function terminateStalledGpuHelper(mainPid: number): Promise<GpuHelperReco
   return { helper: `${gpu.pid} ${gpu.ppid} ${gpu.stat} ${gpu.role} stall=${stall}`, sample };
 }
 
-export async function waitForRenderedFrame(
-  app: { readonly page: Page; readonly electronApp: ElectronApplication },
-): Promise<void> {
-  if (await renderedFrame(app.page) || process.platform !== "darwin") return;
-  const mainPid = app.electronApp.process().pid;
-  const recovery = mainPid ? await terminateStalledGpuHelper(mainPid) : null;
-  if (!recovery) return;
-  const description = `The renderer produced no animation frame within ${FRAME_TIMEOUT_MS} ms; `
+async function recordRecovery(recovery: GpuHelperRecovery): Promise<void> {
+  const description = `The renderer did not produce two consecutive animation frames within ${FRAME_TIMEOUT_MS} ms before an action; `
     + `the fixture terminated only the stalled GPU helper (${recovery.helper}) so Chromium relaunches it.`;
   process.stderr.write(`[Inertia E2E] ${description}\n`);
-  test.info().annotations.push({ type: "electron-gpu-helper-stall-recovered", description });
-  if (recovery.sample) {
-    await test.info().attach("gpu-helper-stall-sample", { body: recovery.sample, contentType: "text/plain" });
+  try {
+    test.info().annotations.push({ type: GPU_HELPER_STALL_RECOVERED, description });
+    if (recovery.sample) {
+      await test.info().attach("gpu-helper-stall-sample", { body: recovery.sample, contentType: "text/plain" });
+    }
+  } catch {
+    return;
   }
-  await expect.poll(() => renderedFrame(app.page)).toBe(true);
+}
+
+async function recoverRenderedFrames(page: Page, electronApp: ElectronApplication): Promise<void> {
+  if (await renderedFrame(page)) return;
+  const mainPid = electronApp.process().pid;
+  const recovery = mainPid ? await terminateStalledGpuHelper(mainPid) : null;
+  if (!recovery) return;
+  await recordRecovery(recovery);
+  for (let attempt = 0; attempt < FRAME_RESUME_ATTEMPTS; attempt += 1) {
+    if (await renderedFrame(page)) return;
+  }
+}
+
+export async function guardRenderedFrames(page: Page, electronApp: ElectronApplication): Promise<void> {
+  if (process.platform !== "darwin") return;
+  await page.addLocatorHandler(page.locator(":root"),
+    async () => await recoverRenderedFrames(page, electronApp), { noWaitAfter: true });
 }

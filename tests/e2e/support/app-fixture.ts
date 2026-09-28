@@ -29,6 +29,7 @@ import {
   readNativePreviewSnapshot,
   type NativePreviewTestSnapshot,
 } from "./native-preview-diagnostics";
+import { guardRenderedFrames } from "./rendered-frame";
 import { waitForViewportToMatchWindow } from "./stable-sample";
 
 const execFileAsync = promisify(execFile);
@@ -820,6 +821,7 @@ export async function createAppFixture(
     observeElectronProcess(electronApp, appendDiagnostic);
     page = await waitForWorkbenchPage(electronApp);
     observeElectronPage(page, rendererErrors, electronApp.process(), options.observePage);
+    await guardRenderedFrames(page, electronApp);
     if (options.windowDisplay === "primary") {
       await positionWorkbenchOnPrimary(electronApp, page);
     }
@@ -942,6 +944,7 @@ export async function createAppFixture(
       try {
         const nextPage = await waitForWorkbenchPage(nextApp);
         observeElectronPage(nextPage, rendererErrors, nextApp.process(), options.observePage);
+        await guardRenderedFrames(nextPage, nextApp);
         if (options.windowDisplay === "primary") {
           await positionWorkbenchOnPrimary(nextApp, nextPage);
         }

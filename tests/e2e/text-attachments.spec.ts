@@ -4,7 +4,6 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { waitForRenderedFrame } from "./support/rendered-frame";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const textProvider = `
@@ -57,7 +56,6 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
       return { canceled: false, filePaths: paths, bookmarks: [] };
     });
   }, files.slice(0, 2).map(({ name }) => join(app!.testDirectory, name)));
-  await waitForRenderedFrame(app);
   await app.page.getByRole("button", { name: "Attach images, documents, or spreadsheets" }).click();
   const attachments = app.page.getByRole("list", { name: "Attachments", exact: true });
   await expect(attachments.getByRole("button", { name: "Preview attachment notes.txt" })).toBeVisible();
@@ -87,14 +85,12 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
   }, [...files[3]!.bytes]);
   for (const file of files) {
     const trigger = attachments.getByRole("button", { name: `Preview attachment ${file.name}` });
-    await waitForRenderedFrame(app);
     await trigger.click();
     await expect(app.page.getByLabel(`Text preview of ${file.name}`)).toHaveText(file.text);
     await app.page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
   }
   await app.page.getByRole("textbox", { name: "Message" }).fill("Inspect all four text attachments.");
-  await waitForRenderedFrame(app);
   await app.page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(app.page.getByText("Attachment text received.", { exact: true })).toBeVisible();
   const input = JSON.parse(await readFile(join(app.workspaceDirectory, "received-text-input.json"), "utf8")) as { type: string; text?: string }[];
@@ -110,7 +106,6 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
   await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
   const gallery = app.page.getByRole("list", { name: "Chat attachments", exact: true });
   for (const file of files) {
-    await waitForRenderedFrame(app);
     await gallery.getByRole("button", { name: `Preview attachment ${file.name}` }).click();
     await expect(app.page.getByLabel(`Text preview of ${file.name}`)).toHaveText(file.text);
     await app.page.keyboard.press("Escape");

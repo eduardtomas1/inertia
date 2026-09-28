@@ -7,8 +7,8 @@ import { createAppFixture } from "./support/app-fixture";
 import { GPU_HELPER_RECOVERY_GRACE_MS } from "./support/electron-app-lifecycle";
 import { electronHelperProcesses } from "./support/electron-main-process-diagnostic";
 import { electronProcessEvidence } from "./support/electron-process-evidence";
-import { renderedFrame, waitForRenderedFrame } from "./support/rendered-frame";
-import { rightPanelToggle } from "./support/workspace-tools";
+import { GPU_HELPER_STALL_RECOVERED, renderedFrame } from "./support/rendered-frame";
+import { ensureWorkspaceTools, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
 const psOptions = { env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout: 2_000 };
@@ -79,38 +79,64 @@ test("finishes a prepared close by terminating only a stopped GPU helper while w
   ]);
 });
 
-test("resumes rendered frames before an action by terminating only a stopped GPU helper", async () => {
-  const app = await createAppFixture({ name: "gpu-helper-frame-recovery", initialState: "conversation" });
+function expectStallRecovered(gpuPid: number, mainPid: number): void {
+  const recoveries = test.info().annotations.filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED);
+  expect(recoveries).toHaveLength(1);
+  expect(recoveries[0]!.description)
+    .toMatch(new RegExp(`\\(${gpuPid} ${mainPid} T\\S* gpu-process stall=stopped\\)`, "u"));
+}
+
+test("recovers a GPU helper that stalls before the first action after launch", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-launch-frames", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
   try {
     const mainPid = app.electronApp.process().pid!;
-    const gpuCompositing = await app.electronApp.evaluate(({ app: electronApp }) =>
-      String((electronApp.getGPUFeatureStatus() as unknown as Record<string, unknown>).gpu_compositing));
-    const gpuPid = await directGpuHelper(mainPid);
-    const gpuStart = await processStart(gpuPid);
-    expect(gpuStart).not.toBeNull();
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
     process.kill(gpuPid, "SIGSTOP");
-    try {
-      if (await renderedFrame(app.page)) {
-        test.skip(true, "The renderer kept producing frames while the GPU helper was stopped "
-          + `(gpu_compositing=${gpuCompositing}), so this host cannot reproduce the stall.`);
-        return;
-      }
-      await waitForRenderedFrame(app);
-    } finally {
-      if (await processStart(gpuPid) === gpuStart) process.kill(gpuPid, "SIGKILL");
-    }
-    const annotation = test.info().annotations
-      .find((entry) => entry.type === "electron-gpu-helper-stall-recovered");
-    expect(annotation?.description)
-      .toMatch(new RegExp(`${gpuPid} ${mainPid} T\\S* gpu-process stall=stopped`, "u"));
-    expect(await processStart(gpuPid)).toBeNull();
-    expect(await directGpuHelper(mainPid)).not.toBe(gpuPid);
+    test.skip(await renderedFrame(app.page),
+      "The renderer kept producing frames while the GPU helper was stopped, so this host cannot reproduce the stall.");
     const toggle = rightPanelToggle(app.page);
     const pressed = await toggle.getAttribute("aria-pressed");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    expectStallRecovered(gpuPid, mainPid);
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(await directGpuHelper(mainPid)).not.toBe(gpuPid);
     expect(app.rendererErrors).toEqual([]);
   } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+test("recovers a GPU helper that stalls after restart before a workspace tool opens", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-restart-frames", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
+  try {
+    const previousMainPid = app.electronApp.process().pid!;
+    await app.restart();
+    const mainPid = app.electronApp.process().pid!;
+    expect(mainPid).not.toBe(previousMainPid);
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
+    process.kill(gpuPid, "SIGSTOP");
+    test.skip(await renderedFrame(app.page),
+      "The renderer kept producing frames while the GPU helper was stopped, so this host cannot reproduce the stall.");
+    await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
+    await expect(app.page.locator('.workspace-panel [data-workspace-tab="attachments"]'))
+      .toHaveAttribute("aria-selected", "true");
+    expectStallRecovered(gpuPid, mainPid);
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
     await app.close();
   }
 });

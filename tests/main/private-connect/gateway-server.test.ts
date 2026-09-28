@@ -113,6 +113,14 @@ describe("Private Connect loopback gateway", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("connection")).toBe("close");
   });
+  it("closes its loopback listener when stopped", async () => {
+    const { server, address } = await startServer();
+    await server.stop();
+    expect(server.address()).toBeNull();
+    const socket = connect({ host: "127.0.0.1", port: address.port });
+    const [error] = await once(socket, "error") as [NodeJS.ErrnoException];
+    expect(error.code).toBe("ECONNREFUSED");
+  });
   it("caps sockets per device and shares the request quota across its sockets", async () => {
     const gatewayHost = host();
     gatewayHost.consumeWebSocketTicket = (ticket) => ticket === "other"

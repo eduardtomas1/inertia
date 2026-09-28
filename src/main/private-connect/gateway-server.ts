@@ -160,7 +160,7 @@ export class PrivateConnectGatewayServer {
     this.socketSessions.clear();
     this.inFlightBySession.clear();
     this.websocketServer.close();
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    if (this.server.listening) await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.addressValue = null;
   }
 

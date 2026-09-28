@@ -1,7 +1,7 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
 import type { ConversationShell, Project } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
-import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotStatus } from "../../shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../shared/mascot";
 
 function timestamp(value: string | null | undefined): string | null {
   const time = value ? Date.parse(value) : Number.NaN;
@@ -60,7 +60,7 @@ export class MascotStatusPublisher {
   private focused: string | null = null;
   private last = "";
   constructor(
-    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, attention: number) => void,
+    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
   ) {}
@@ -199,10 +199,11 @@ export class MascotStatusPublisher {
     const focused = this.focused === null ? undefined : this.conversations.get(this.focused);
     if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
     const chats = listed.map(display);
-    const serialized = JSON.stringify([status, chats, this.focused, attention]);
+    const counts = { chats: this.conversations.size, attention };
+    const serialized = JSON.stringify([status, chats, this.focused, counts]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats, this.focused, attention);
+    this.publish?.(status, chats, this.focused, counts);
   }
 }
 

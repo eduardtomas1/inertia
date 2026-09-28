@@ -6,7 +6,7 @@ import {
 } from "electron";
 import {
   emptyMascotStatus, MASCOT_ACTIONS, MASCOT_IPC, MASCOT_LABELS,
-  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotSnapshot, type MascotStatus,
+  parseMascotPreferences, parseMascotStatus, type MascotAction, type MascotCounts, type MascotSnapshot, type MascotStatus,
 } from "../shared/mascot.js";
 import { mascotChatChoices } from "../shared/mascot-choices.js";
 import type { MascotSpriteAction, MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
@@ -40,8 +40,8 @@ export class MascotMain {
   private pendingSprites: MascotSpriteSet | null = null;
   private readonly rendererUrl: string;
   private state;
-  private feed: { status: MascotStatus; chats: MascotStatus[]; attention: number | null } = {
-    status: emptyMascotStatus("unavailable"), chats: [], attention: null,
+  private feed: { status: MascotStatus; chats: MascotStatus[]; counts: MascotCounts | null } = {
+    status: emptyMascotStatus("unavailable"), chats: [], counts: null,
   };
   private pinned: string | null = null;
   private window: BrowserWindow | null = null;
@@ -68,15 +68,15 @@ export class MascotMain {
     this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), ...(this.feed.attention === null ? {} : { attention: this.feed.attention }), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), ...(this.feed.counts ? { counts: { ...this.feed.counts } } : {}), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
 
   sprite(id: string, name: string): MascotSpriteFile | null {
     const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null, attention: number | null = null): void {
-    this.feed = { status, chats, attention };
+  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null, counts: MascotCounts | null = null): void {
+    this.feed = { status, chats, counts };
     if (this.pinned && focus === this.pinned && !this.pin()) this.choose(null);
     else this.broadcast();
   }

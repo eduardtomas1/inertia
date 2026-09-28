@@ -4,7 +4,7 @@ import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
-import { isMascotAttention, isMascotFocus, parseMascotChats, parseMascotStatus, type MascotStatus } from "../shared/mascot.js";
+import { isMascotFocus, parseMascotChats, parseMascotCounts, parseMascotStatus, type MascotCounts, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
@@ -232,7 +232,7 @@ export type { RuntimeRestartReason } from "./runtime-owned-process-diagnostic.js
 
 export type RuntimeWorkerEvent =
   | { type: "runtime.incident"; incident: import("../shared/application-diagnostics.js").DiagnosticIncident }
-  | { type: "runtime.mascot-status"; status: MascotStatus; chats: MascotStatus[]; focus: string | null; attention: number | null }
+  | { type: "runtime.mascot-status"; status: MascotStatus; chats: MascotStatus[]; focus: string | null; counts: MascotCounts | null }
   | {
       type: "runtime.ready";
       websocketUrl: string;
@@ -696,14 +696,14 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   ) return { type: "runtime.system-suspend-result", id: value.id, recorded: value.recorded };
   if (
     value.type === "runtime.mascot-status"
-    && Object.keys(value).length === (Object.hasOwn(value, "attention") ? 5 : 4)
+    && Object.keys(value).length === (Object.hasOwn(value, "counts") ? 5 : 4)
     && isMascotFocus(value.focus)
-    && (!Object.hasOwn(value, "attention") || isMascotAttention(value.attention))
   ) {
     const status = parseMascotStatus(value.status);
     const chats = parseMascotChats(value.chats);
-    const attention = isMascotAttention(value.attention) ? value.attention : null;
-    return status && chats ? { type: "runtime.mascot-status", status, chats, focus: value.focus, attention } : null;
+    const counts = Object.hasOwn(value, "counts") ? parseMascotCounts(value.counts) : null;
+    if (Object.hasOwn(value, "counts") && !counts) return null;
+    return status && chats ? { type: "runtime.mascot-status", status, chats, focus: value.focus, counts } : null;
   }
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;

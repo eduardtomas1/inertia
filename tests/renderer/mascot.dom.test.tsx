@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
-import { emptyMascotStatus, type MascotBridge, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, type MascotBridge, type MascotCounts, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
 
@@ -41,8 +41,8 @@ function fixture() {
       snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
     },
-    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null, attention?: number): void {
-      snapshot = { ...snapshot, status, chats, pinned, attention };
+    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null, counts?: MascotCounts): void {
+      snapshot = { ...snapshot, status, chats, pinned, counts };
       act(() => receive(snapshot));
     },
     update(phase: MascotSnapshot["status"]["phase"], motion = true, context: Partial<MascotSnapshot["status"]> = {}): void {
@@ -213,32 +213,47 @@ describe("mascot chat context and chooser", () => {
     expect(document.activeElement).toBe(picker);
   });
 
-  it("counts every chat that needs you, beyond the capped list and a pinned quiet chat", async () => {
+  it("states every count with its meaning and never announces more chats needing you than chats", async () => {
     const app = fixture();
     const view = renderMascot();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
     const detail = (): string => view.container.querySelector(".mascot-detail")!.textContent!;
-    const picker = (): HTMLElement => view.container.querySelector<HTMLElement>(".mascot-picker")!;
-    const waiting = Array.from({ length: 7 }, (_, index) => chat(`w${index}`, "waiting-for-input", { activeCount: 1 }));
-    const done = chat("done", "completed", { activeCount: 0 });
-    app.list(done, [...waiting, done], "done", 12);
-    expect(detail()).toBe("12 other chats need you");
-    expect(picker().getAttribute("aria-label")).toMatch(/pinned to Chat done\. 8 chats, 12 need you$/);
-    expect(picker().dataset.attention).toBe("true");
-    app.list(waiting[0]!, [...waiting, done], null, 12);
+    const picker = (): string => view.container.querySelector<HTMLElement>(".mascot-picker")!.getAttribute("aria-label")!;
+    const bubble = (): string => view.container.querySelector<HTMLElement>(".mascot-open")!.getAttribute("aria-label")!;
+    const announced = (): string => screen.getByRole("status").textContent!.replace(/\s+/gu, " ").trim();
+    const flagged = (): string => view.container.querySelector<HTMLElement>(".mascot-picker")!.dataset.attention!;
+    const waiting = Array.from({ length: 11 }, (_, index) => chat(`w${index}`, "waiting-for-input", { activeCount: 11, message: "Choose a scope" }));
+    const done = chat("done", "completed", { activeCount: 11, message: "Shipped the fix" });
+    const listed = [...waiting.slice(0, 7), done];
+    app.list(done, listed, "done", { chats: 12, attention: 11 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 12 chats, 11 need you");
     expect(detail()).toBe("11 other chats need you");
-    app.list(done, [...waiting, done], "done", 250);
+    expect(bubble()).toBe("Work complete. Chat done. Inertia. Shipped the fix. 11 other chats need you. View result ↗");
+    expect(announced()).toBe("Work complete InertiaChat done Shipped the fix");
+    expect(flagged()).toBe("true");
+    app.list(waiting[0]!, waiting.slice(0, 8), null, { chats: 12, attention: 11 });
+    expect(picker()).toBe("Show chat: most urgent. 12 chats, 11 need you");
+    expect(detail()).toBe("10 other chats need you");
+    app.list(waiting[0]!, waiting.slice(0, 8), null, { chats: 8, attention: 8 });
+    expect(picker()).toBe("Show chat: most urgent. 8 chats, 8 need you");
+    expect(detail()).toBe("7 other chats need you");
+    app.list(done, [waiting[0]!, done], "done", { chats: 2, attention: 1 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats, 1 needs you");
+    expect(detail()).toBe("1 other chat needs you");
+    app.list(done, listed, "done", { chats: 250, attention: 180 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 99+ chats, 99+ need you");
     expect(detail()).toBe("99+ other chats need you");
-    app.list(done, [waiting[0]!, done], "done", 1);
-    expect(detail()).toBe("1 other chat needs you");
-    app.list(done, [...waiting, done], "done");
+    app.list(done, listed, "done");
+    expect(picker()).toBe("Show chat: pinned to Chat done. 8+ chats, 7+ need you");
     expect(detail()).toBe("7+ other chats need you");
-    expect(picker().getAttribute("aria-label")).toMatch(/7\+ need you$/);
     app.list(done, [waiting[0]!, done], "done");
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats, 1 needs you");
     expect(detail()).toBe("1 other chat needs you");
-    app.list(done, [done], "done", 0);
+    const settled = { ...done, activeCount: 0 };
+    app.list(settled, [settled, chat("quiet", "completed", { activeCount: 0 })], "done", { chats: 2, attention: 0 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats");
     expect(detail()).toBe("");
-    expect(picker().dataset.attention).toBe("false");
+    expect(flagged()).toBe("false");
   });
 });
 

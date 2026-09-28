@@ -120,17 +120,17 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     title.textContent = status.chatTitle ?? "Inertia";
     message.textContent = status.message ?? mascotFallback[status.phase];
     actionLabel.textContent = status.conversationId ? mascotActionLabel(status.phase) : "";
-    const others = snapshot.attention === undefined
-      ? chats.filter((chat) => chat.conversationId !== status.conversationId && mascotTone(chat.phase) === "attention").length
-      : Math.max(0, snapshot.attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
-    const atLeast = snapshot.attention === undefined && chats.length >= MASCOT_CHAT_LIMIT;
-    const othersText = others > 99 ? "99+" : `${others}${atLeast ? "+" : ""}`;
-    const oneOther = others === 1 && !atLeast;
+    const exact = Boolean(snapshot.counts) || chats.length < MASCOT_CHAT_LIMIT;
+    const total = snapshot.counts?.chats ?? chats.length;
+    const attention = snapshot.counts?.attention ?? chats.filter((chat) => mascotTone(chat.phase) === "attention").length;
+    const others = Math.max(0, attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
+    const amount = (count: number): string => count > 99 ? "99+" : `${count}${exact ? "" : "+"}`;
+    const counted = (count: number, one: string, many: string): string => `${amount(count)} ${count === 1 && exact ? one : many}`;
     const plan = mascotTone(status.phase) === "live" ? status.steps : null;
     steps.hidden = !plan;
     if (plan) stepsFill.style.setProperty("--mascot-steps", String(plan.completed / plan.total));
     detail.textContent = plan ? `${plan.completed} of ${plan.total} steps`
-      : status.progress ?? (others ? `${othersText} other ${oneOther ? "chat needs" : "chats need"} you`
+      : status.progress ?? (others ? `${counted(others, "other chat needs", "other chats need")} you`
         : status.activeCount > 1 ? `${status.activeCount} active chats` : "");
     button.setAttribute("aria-label", [label.textContent, time.textContent, title.textContent, project.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
     button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
@@ -138,7 +138,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     picker.dataset.attention = String(others > 0);
     pickerLabel.textContent = pinned ? "Pinned" : "Auto";
     picker.title = "Choose which chat the mascot shows";
-    picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${chats.length} ${chats.length === 1 ? "chat" : "chats"}${others ? `, ${othersText} ${oneOther ? "needs" : "need"} you` : ""}`);
+    picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${counted(total, "chat", "chats")}${attention ? `, ${counted(attention, "needs", "need")} you` : ""}`);
     picker.setAttribute("aria-expanded", String(choosing));
     bubble.dataset.view = choosing ? "chats" : "status";
     button.hidden = choosing;

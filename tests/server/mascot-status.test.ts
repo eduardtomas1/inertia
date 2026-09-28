@@ -32,7 +32,7 @@ describe("authoritative mascot status", () => {
       since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z",
       activeCount: terminal ? 0 : 1,
     };
-    expect(publish).toHaveBeenLastCalledWith(status, [status], null, phase.startsWith("waiting-") ? 1 : 0);
+    expect(publish).toHaveBeenLastCalledWith(status, [status], null, { chats: 1, attention: phase.startsWith("waiting-") ? 1 : 0 });
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
@@ -54,11 +54,11 @@ describe("authoritative mascot status", () => {
     const publish = vi.fn();
     const publisher = new MascotStatusPublisher(publish);
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null, 0);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null, { chats: 1, attention: 0 });
     publisher.update(conversation("cancelled", "cancelled"));
     expect(publish.mock.lastCall?.[0].phase).toBe("cancelled");
     publisher.replace([]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null, 0);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null, { chats: 0, attention: 0 });
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
@@ -130,14 +130,14 @@ describe("mascot chat list", () => {
     const approvals = Array.from({ length: 5 }, (_, index) => conversation(`approval-${index}`, "waiting-for-approval"));
     publisher.replace([pinned, ...questions, ...approvals, conversation("busy", "running")]);
     publisher.focus("pinned");
-    const [status, chats, focus, attention] = publish.mock.lastCall!;
+    const [status, chats, focus, counts] = publish.mock.lastCall!;
     expect(chats).toHaveLength(MASCOT_CHAT_LIMIT);
     expect(chats.filter(({ phase }: { phase: string }) => phase.startsWith("waiting-"))).toHaveLength(MASCOT_CHAT_LIMIT - 1);
     expect(focus).toBe("pinned");
-    expect(attention).toBe(11);
+    expect(counts).toEqual({ chats: 13, attention: 11 });
     expect(status.activeCount).toBe(12);
     publisher.replace([pinned, conversation("busy", "running")]);
-    expect(publish.mock.lastCall?.[3]).toBe(0);
+    expect(publish.mock.lastCall?.[3]).toEqual({ chats: 2, attention: 0 });
   });
 
   it("reads project names from the snapshot and caches lookups for unknown projects", () => {

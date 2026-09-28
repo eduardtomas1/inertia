@@ -26,6 +26,10 @@ export interface MascotStatus {
   steps: MascotSteps | null;
   since: string | null;
 }
+export interface MascotCounts {
+  chats: number;
+  attention: number;
+}
 export interface MascotSteps {
   completed: number;
   total: number;
@@ -46,7 +50,7 @@ export interface MascotSnapshot {
   gesture?: MascotGesture;
   sprites?: MascotSprites;
   chats?: readonly MascotStatus[];
-  attention?: number;
+  counts?: MascotCounts;
   pinned?: string | null;
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
@@ -114,8 +118,12 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   return candidate as unknown as MascotStatus;
 }
 
-export function isMascotAttention(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
+export function parseMascotCounts(value: unknown): MascotCounts | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2) return null;
+  const { chats, attention } = value as Record<string, unknown>;
+  return Number.isSafeInteger(chats) && Number.isSafeInteger(attention) && (attention as number) >= 0
+    && (attention as number) <= (chats as number) && (chats as number) <= 1_000_000
+    ? { chats: chats as number, attention: attention as number } : null;
 }
 
 export function isMascotFocus(value: unknown): value is string | null {

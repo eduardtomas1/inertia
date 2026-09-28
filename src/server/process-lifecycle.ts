@@ -182,6 +182,16 @@ function killDirectChild(child: ChildProcess, force: boolean): boolean {
 
 const unconfirmedWindowsTrees = new WeakSet<ChildProcess>();
 
+interface WindowsTerminationSequence {
+  readonly deadlineAt: number;
+  forcedTerminated: boolean;
+}
+
+const windowsTerminationSequences = new WeakMap<
+  ChildProcess,
+  WindowsTerminationSequence
+>();
+
 function inheritedWindowsSystemRoot(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | null {
@@ -291,6 +301,7 @@ function observeDirectChildClose(
 
   return (waitMs) => {
     if (closed) return Promise.resolve(true);
+    if (waitMs <= 0) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const finish = (didClose: boolean): void => {
@@ -309,14 +320,17 @@ function observeDirectChildClose(
 
 async function confirmWindowsChildResourcesClosed(
   waitForObservedClose: (waitMs: number) => Promise<boolean>,
-  waitMs: number,
+  closeDeadlineAt: number,
+  deadlineAt: number,
 ): Promise<boolean> {
-  if (!await waitForObservedClose(waitMs)) return false;
+  if (!await waitForObservedClose(closeDeadlineAt - Date.now())) return false;
   // Windows can report ChildProcess `close` just before the executable image
   // becomes deletable. Give the kernel one short, bounded quiescence window
   // before callers release temporary executables or other owned resources.
+  const settleMs = Math.min(WINDOWS_RESOURCE_SETTLE_MS, deadlineAt - Date.now());
+  if (settleMs <= 0) return false;
   await new Promise<void>((resolve) => {
-    setTimeout(resolve, Math.min(waitMs, WINDOWS_RESOURCE_SETTLE_MS));
+    setTimeout(resolve, settleMs);
   });
   return true;
 }
@@ -669,34 +683,46 @@ export async function terminateProcessTreeAndWait(
     }
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const startedAt = performance.now();
-    const taskkillDeadlineAt = Date.now() + waitMs;
-    const closeDeadlineAt = taskkillDeadlineAt + waitMs;
-    const remainingMs = (deadlineAt: number): number =>
-      Math.max(0, deadlineAt - Date.now());
-    const taskkill = (forced: boolean): Promise<boolean> =>
-      terminateWindowsProcessTree(
+    const sequence = windowsTerminationSequences.get(child) ?? {
+      deadlineAt: Date.now() + 2 * waitMs + WINDOWS_RESOURCE_SETTLE_MS,
+      forcedTerminated: false,
+    };
+    windowsTerminationSequences.set(child, sequence);
+    const closeDeadlineAt = sequence.deadlineAt - WINDOWS_RESOURCE_SETTLE_MS;
+    const gracefulDeadlineAt = closeDeadlineAt - waitMs;
+    const taskkill = async (
+      forced: boolean,
+      phaseDeadlineAt: number,
+    ): Promise<boolean> => {
+      const remainingMs = Math.min(waitMs, phaseDeadlineAt - Date.now());
+      return remainingMs > 0 && await terminateWindowsProcessTree(
         pid,
         forced,
         spawnProcess,
         windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
-        remainingMs(taskkillDeadlineAt),
+        remainingMs,
         "child",
       );
-    const treeTerminated = await taskkill(force) || (
-      !force
-      && child.exitCode === null
-      && child.signalCode === null
-      && remainingMs(taskkillDeadlineAt) > 0
-      && await taskkill(true)
-    );
-    if (treeTerminated) {
+    };
+    let gracefulAccepted = false;
+    if (!sequence.forcedTerminated) {
+      if (force) {
+        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt);
+      } else if (await taskkill(false, gracefulDeadlineAt)) {
+        gracefulAccepted = true;
+      } else if (child.exitCode === null && child.signalCode === null) {
+        sequence.forcedTerminated = await taskkill(true, gracefulDeadlineAt);
+      }
+    }
+    if (sequence.forcedTerminated || gracefulAccepted) {
       // taskkill confirms that it issued termination for the owned tree, but
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
       const closed = await confirmWindowsChildResourcesClosed(
         waitForObservedDirectChildClose,
-        remainingMs(closeDeadlineAt),
+        sequence.forcedTerminated ? closeDeadlineAt : gracefulDeadlineAt,
+        sequence.deadlineAt,
       );
       if (!closed) recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
         elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
@@ -707,7 +733,8 @@ export async function terminateProcessTreeAndWait(
     // descendants stopped, even if the child releases its handles.
     await confirmWindowsChildResourcesClosed(
       waitForObservedDirectChildClose,
-      remainingMs(closeDeadlineAt),
+      closeDeadlineAt,
+      sequence.deadlineAt,
     );
     return false;
   }
@@ -740,6 +767,8 @@ export async function terminateProcessTreeAndWait(
     }
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
+  const deadlineAt = Date.now() + waitMs;
+  const remainingMs = (): number => deadlineAt - Date.now();
 
   const guardianStopBarrier = requestRuntimeOwnedGuardianStop(child);
   if (guardianStopBarrier) {
@@ -766,41 +795,44 @@ export async function terminateProcessTreeAndWait(
       kill: killProcess,
       spawnProcessSync,
       rootProcessGroup: true,
+      deadlineAt,
     });
+    const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(
         pid,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processGroupCanExecute,
       ),
       waitForPosixProcessesExit(
         descendants,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processCanExecute,
       ),
-      waitForObservedDirectChildClose(waitMs),
+      waitForObservedDirectChildClose(exitWaitMs),
     ]);
     return groupExited && descendantsExited && childClosed;
   }
   try {
     killProcess(-pid, "SIGTERM");
+    const exitWaitMs = remainingMs();
     const [groupExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(
         pid,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processGroupCanExecute,
       ),
-      waitForObservedDirectChildClose(waitMs),
+      waitForObservedDirectChildClose(exitWaitMs),
     ]);
     return groupExited && childClosed;
   } catch (error) {
     killDirectChild(child, false);
     const groupAbsent = (error as NodeJS.ErrnoException).code === "ESRCH"
       || processGroupCanExecute?.(pid) === false;
-    const childClosed = await waitForObservedDirectChildClose(waitMs);
+    const childClosed = await waitForObservedDirectChildClose(remainingMs());
     return groupAbsent && childClosed;
   }
 }

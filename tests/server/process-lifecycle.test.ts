@@ -39,6 +39,8 @@ function fakeTaskkill() {
   return taskkill;
 }
 
+const WINDOWS_SEQUENCE_MS = 2 * 100 + 100;
+
 function noSuchProcess(message: string): NodeJS.ErrnoException {
   const error = new Error(message) as NodeJS.ErrnoException;
   error.code = "ESRCH";
@@ -451,6 +453,7 @@ describe("provider process-tree termination", () => {
         .mockReturnValueOnce(graceful)
         .mockReturnValueOnce(forced);
       let result: boolean | undefined;
+      const startedAt = Date.now();
       void terminateProcessTreeAndWait(
         child as never,
         false,
@@ -474,9 +477,191 @@ describe("provider process-tree termination", () => {
       expect(result).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1);
       expect(result).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("Windows termination sequence deadline", () => {
+    const run = (
+      child: ReturnType<typeof fakeChild>,
+      spawnProcess: ReturnType<typeof vi.fn>,
+      force = true,
+    ) => {
+      const outcome: { value?: boolean } = {};
+      void terminateProcessTreeAndWait(child as never, force, {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 100,
+      }).then((value) => { outcome.value = value; });
+      return outcome;
+    };
+    const closeChild = (child: ReturnType<typeof fakeChild>): void => {
+      child.exitCode = 1;
+      child.emit("close", 1);
+    };
+
+    it.each([
+      { label: "1 ms before its close deadline", closeAt: 199, confirmed: true, settledAt: 299 },
+      { label: "at its close deadline", closeAt: 200, confirmed: false, settledAt: 200 },
+      { label: "1 ms before the sequence deadline", closeAt: 299, confirmed: false, settledAt: 200 },
+      { label: "after the sequence deadline", closeAt: 350, confirmed: false, settledAt: 200 },
+    ])("bounds a root that closes $label", async ({ closeAt, confirmed, settledAt }) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        let settledElapsedMs: number | undefined;
+        for (let elapsed = 10; elapsed < 400; elapsed += 1) {
+          if (elapsed === closeAt) closeChild(child);
+          await vi.advanceTimersByTimeAsync(1);
+          if (outcome.value !== undefined && settledElapsedMs === undefined) {
+            settledElapsedMs = Date.now() - startedAt;
+          }
+        }
+        expect(outcome.value).toBe(confirmed);
+        expect(settledElapsedMs).toBe(settledAt);
+        expect(settledElapsedMs).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shortens the resource settle to the time left when the close is observed late", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(189);
+        closeChild(child);
+        vi.setSystemTime(startedAt + 260);
+        await vi.advanceTimersByTimeAsync(39);
+        expect(outcome.value).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(outcome.value).toBe(true);
+        expect(Date.now() - startedAt).toBe(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports unconfirmed without settling when the close is observed after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(189);
+        closeChild(child);
+        vi.setSystemTime(startedAt + WINDOWS_SEQUENCE_MS);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBe(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("skips escalation once a graceful taskkill consumes the taskkill budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const graceful = fakeTaskkill();
+        const spawnProcess = vi.fn(() => graceful);
+        const outcome = run(child, spawnProcess, false);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(graceful.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(spawnProcess).toHaveBeenCalledOnce();
+        expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+        await vi.advanceTimersByTimeAsync(99);
+        expect(outcome.value).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives an ignored graceful request its grace period and the forced taskkill the rest of the sequence", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          setTimeout(() => {
+            taskkill.emit("close", 0);
+            if (forced) closeChild(child);
+          }, 10);
+          return taskkill;
+        });
+        const terminate = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider update process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "win32",
+            spawnProcess: spawnProcess as never,
+            windowsSystemRoot: null,
+            waitMs: 100,
+          }),
+        );
+        let resolvedAt: number | undefined;
+        void terminate(false).then(() => { resolvedAt = Date.now() - startedAt; });
+        await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS + 100);
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
+        expect(resolvedAt).toBe(210);
+        expect(resolvedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives the final forced call of an owned termination only the time left in the sequence", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const graceful = fakeTaskkill();
+        const spawnProcess = vi.fn(() => graceful);
+        const terminate = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider update process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "win32",
+            spawnProcess: spawnProcess as never,
+            windowsSystemRoot: null,
+            waitMs: 100,
+          }),
+        );
+        let rejectedAt: number | undefined;
+        void terminate(false).catch(() => { rejectedAt = Date.now() - startedAt; });
+        await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS + 100);
+        expect(rejectedAt).toBe(200);
+        expect(rejectedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+        expect(spawnProcess).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("does not escalate a refused graceful Windows taskkill after the root has exited", async () => {
@@ -602,6 +787,39 @@ describe("provider process-tree termination", () => {
     child.exitCode = 1;
     child.emit("close", 1);
     await expect(termination).resolves.toBe(false);
+  });
+
+  it("counts the POSIX tree snapshot against the same termination deadline as the exit waits", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const child = fakeChild();
+      const killProcess = vi.fn(() => true as const);
+      let result: boolean | undefined;
+      void terminateProcessTreeAndWait(
+        child as never,
+        true,
+        {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => {
+            vi.setSystemTime(Date.now() + 80);
+            return { status: 0, stdout: "4242 1 S\n" };
+          }) as never,
+          processCanExecute: () => true,
+          processGroupCanExecute: () => true,
+          waitMs: 100,
+        },
+      ).then((value) => { result = value; });
+
+      await vi.advanceTimersByTimeAsync(19);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toBe(false);
+      expect(Date.now() - startedAt).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("awaits POSIX process-group disappearance", async () => {

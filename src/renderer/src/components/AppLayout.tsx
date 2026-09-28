@@ -73,6 +73,9 @@ const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
+const CompletionSounds = lazy(async () => ({
+  default: (await import("../hooks/useCompletionSounds")).CompletionSounds,
+}));
 const Sidebar = lazy(async () => ({
   default: (await import("./Sidebar")).Sidebar,
 }));
@@ -554,6 +557,7 @@ export function AppLayout({
           enabled={settings.desktopNotifications}
           onActivate={notificationActions.activate}
         />
+        {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
       </Suspense>
       {(mobileNavigation || !sidebarCollapsed) && (
         <Suspense

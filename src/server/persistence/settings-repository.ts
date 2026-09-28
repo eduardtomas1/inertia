@@ -8,6 +8,7 @@ import type { StateRow } from "./rows";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorSettings } from "../../shared/working-indicator";
+import { parseCompletionSoundSettings } from "../../shared/completion-sound";
 
 type SettingsPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -26,7 +27,11 @@ export class SettingsRepository {
       ...current.workingIndicator,
       ...update.workingIndicator,
     });
-    const next = { ...current, ...update, workingIndicator };
+    const completionSound = parseCompletionSoundSettings({
+      ...current.completionSound,
+      ...update.completionSound,
+    });
+    const next = { ...current, ...update, workingIndicator, completionSound };
     // A legacy whole-family selection still updates both halves atomically.
     const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
     const darkColorTheme = update.darkColorTheme ?? update.colorTheme ?? current.darkColorTheme ?? current.colorTheme;
@@ -48,7 +53,8 @@ export class SettingsRepository {
         codex_binary_path = ?,
         discord_release_repository_url = ?,
         attachment_storage_gib = ?, auto_remove_old_attachments = ?,
-        working_indicator_json = ?
+        working_indicator_json = ?,
+        completion_sound_json = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -87,6 +93,7 @@ export class SettingsRepository {
       next.discordReleaseRepositoryUrl,
       next.attachmentStorageGiB, Number(next.autoRemoveOldAttachments),
       JSON.stringify(next.workingIndicator),
+      JSON.stringify(next.completionSound),
     );
   }
 

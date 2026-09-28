@@ -85,7 +85,7 @@ import {
   backendSecretReferenceForProfile,
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
-import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
+import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js"; import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
@@ -407,7 +407,7 @@ function registerIpcHandlers(): void {
       return result.canceled ? null : result.filePath ?? null;
     },
   });
-  ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
+  registerCompletionSoundIpc({ ipcMain, assertTrusted: assertTrustedIpc, window: () => mainWindow, dialog, directory: join(app.getPath("userData"), "completion-sounds"), defaultPath: () => app.getPath("music") }); ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
 

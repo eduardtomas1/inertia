@@ -667,6 +667,11 @@
       "version": 82,
       "name": "PersistAgentThreadTargetOwnership",
       "digest": "78fbf2f67e23be99135308fcf86113b0e0e244b384003b95a3e14f03af467849"
+    },
+    {
+      "version": 83,
+      "name": "PersistCompletionSound",
+      "digest": "00fbad4235b49b23aeb84643e241e240c970ecda15df4102a1c162c143416159"
     }
   ]
 }

@@ -59,9 +59,9 @@ describe("managed turn ownership migration", () => {
 
     const migrated = new Database(databasePath);
     try {
-      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(82);
+      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(83);
       expect(migrated.prepare("SELECT version FROM schema_migrations WHERE version >= 81 ORDER BY version").all())
-        .toEqual([{ version: 81 }, { version: 82 }]);
+        .toEqual([{ version: 81 }, { version: 82 }, { version: 83 }]);
       expect(migrated.prepare(
         "SELECT child_conversation_id, status, target_turn_id, target_run_id FROM agent_thread_operations",
       ).all()).toEqual([{

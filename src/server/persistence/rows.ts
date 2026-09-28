@@ -341,6 +341,7 @@ export interface StateRow {
   codex_binary_path: string;
   discord_release_repository_url: string;
   working_indicator_json?: string | null;
+  completion_sound_json?: string | null;
   attachment_storage_gib?: number;
   auto_remove_old_attachments?: number;
   active_project_id: string | null;

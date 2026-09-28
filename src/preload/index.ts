@@ -11,6 +11,7 @@ import type {
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
+import { COMPLETION_SOUND_IPC } from "../shared/completion-sound.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const IPC = {
@@ -359,6 +360,12 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
   onThreadNotificationActivated: (listener: (conversationId: string) => void) =>
     threadNotificationActivations.subscribe(listener),
+  importCompletionSound: (keep: readonly string[]) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "import", [...keep]) as ReturnType<DesktopBridge["importCompletionSound"]>,
+  readCompletionSound: (file: string) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "read", file) as ReturnType<DesktopBridge["readCompletionSound"]>,
+  removeCompletionSound: (file: string) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "remove", file) as Promise<void>,
   getAppHealth: () =>
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>

@@ -16,13 +16,15 @@ export function workspaceAttentionObstructed(input: {
   authProviderOpen: boolean;
   multiSpawnOpen: boolean;
   mobileSidebarOpen: boolean;
+  helpOpen: boolean;
 }): boolean {
   return input.paletteOpen
     || input.commitDialogOpen
     || input.dailyWorkOpen
     || input.authProviderOpen
     || input.multiSpawnOpen
-    || input.mobileSidebarOpen;
+    || input.mobileSidebarOpen
+    || input.helpOpen;
 }
 
 /**

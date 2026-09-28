@@ -28,6 +28,7 @@ import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
+import { useHelpGuideOpen } from "./hooks/useHelpGuideOpen";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
@@ -123,6 +124,7 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [dailyWorkOpen, setDailyWorkOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const helpOpen = useHelpGuideOpen();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
@@ -473,6 +475,7 @@ export default function App(): React.JSX.Element {
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
           mobileSidebarOpen: mobileNavigation && sidebarOpen,
+          helpOpen,
         }),
       },
     );
@@ -490,6 +493,7 @@ export default function App(): React.JSX.Element {
     commitDialogOpen,
     dailyWorkOpen,
     conversation?.id,
+    helpOpen,
     latestContentVisible,
     mobileNavigation, multiSpawn.open,
     paletteOpen,

@@ -43,6 +43,7 @@ import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
+import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
 import type { SettingsSection } from "./settingsSections";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
@@ -225,6 +226,7 @@ export function activeConversationIsVisible(input: {
   paletteOpen: boolean;
   providerAuthOpen: boolean;
   mobileSidebarOpen: boolean;
+  helpOpen?: boolean;
 }): boolean {
   return input.view === "workspace"
     && !input.commitDialogOpen
@@ -233,7 +235,8 @@ export function activeConversationIsVisible(input: {
     && !input.multiSpawnOpen
     && !input.paletteOpen
     && !input.providerAuthOpen
-    && !input.mobileSidebarOpen;
+    && !input.mobileSidebarOpen
+    && !input.helpOpen;
 }
 
 export function AppLayout({
@@ -453,6 +456,7 @@ export function AppLayout({
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
+  const helpOpen = useHelpGuideOpen();
   const activeConversationVisible = !conversationSuppressedInMain
     && activeConversationIsVisible({
     view,
@@ -463,6 +467,7 @@ export function AppLayout({
     paletteOpen,
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
+    helpOpen,
     });
 
   const splitActive = splitConversationIds.size > 0;

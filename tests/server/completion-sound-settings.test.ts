@@ -226,4 +226,36 @@ describe("completion sound contracts", () => {
       completionSound: { ...DEFAULT_COMPLETION_SOUND, sound: "kazoo" },
     }))).toThrow("Malformed server event");
   });
+
+  it("completes a legacy snapshot with the default sound settings when it is decoded", () => {
+    const { completionSound: _completionSound, ...legacy } = defaultSettings;
+    const snapshot = {
+      projects: [],
+      conversations: [],
+      runs: [],
+      providers: [],
+      settings: legacy,
+      activeProjectId: null,
+      activeConversationId: null,
+    };
+    const sync = { runtimeGeneration: "legacy-runtime", latestSequence: 1 };
+    const decoded = [
+      parseServerEvent({ type: "server.welcome", protocolVersion: 1, snapshot }),
+      parseServerEvent({ type: "snapshot.updated", snapshot }),
+      parseServerEvent({ type: "runtime.event", sync, scope: { kind: "shell" }, event: { type: "snapshot.updated", snapshot } }),
+    ].map((event) => {
+      const carried = event.type === "runtime.event" ? event.event : event;
+      if (carried.type !== "server.welcome" && carried.type !== "snapshot.updated") throw new Error(carried.type);
+      return carried.snapshot.settings;
+    });
+    for (const settings of decoded) {
+      expect(settings.completionSound).toEqual(DEFAULT_COMPLETION_SOUND);
+      expect(settings).toEqual({ ...legacy, completionSound: DEFAULT_COMPLETION_SOUND });
+    }
+    expect(decoded[0]!.completionSound).not.toBe(decoded[1]!.completionSound);
+    expect(snapshot.settings).not.toHaveProperty("completionSound");
+    const current = { ...snapshot, settings: { ...defaultSettings, completionSound: { ...DEFAULT_COMPLETION_SOUND, enabled: true, library: [] } } };
+    const kept = parseServerEvent({ type: "snapshot.updated", snapshot: current });
+    expect(kept.type === "snapshot.updated" && kept.snapshot.settings.completionSound).toEqual(current.settings.completionSound);
+  });
 });

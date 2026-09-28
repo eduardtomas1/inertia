@@ -77,8 +77,11 @@ test("loads older pages without moving the reading position or losing the oldest
   await earlier.click();
   await expect(page.getByRole("feed", { name: `${turns.length} conversation turns`, exact: true })).toBeAttached();
   await expect(page.getByRole("button", { name: /earlier messages/u })).toHaveCount(0);
-  await transcript.press("Home");
-  await expect(page.locator(`[data-turn-id="${turns[0]}"]`).first()).toBeInViewport();
+  const oldest = page.locator(`[data-turn-id="${turns[0]}"]`).first();
+  await expect(async () => {
+    await transcript.press("Home");
+    await expect(oldest).toBeInViewport({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   await app.expectNoViewportOverflow();
   expect(app.rendererErrors).toEqual([]);
 });

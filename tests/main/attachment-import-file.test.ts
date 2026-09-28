@@ -267,18 +267,36 @@ describe("private staged attachment validation", () => {
     );
     const sample = await open(path, "r");
     const fileHandlePrototype = Object.getPrototypeOf(sample) as {
-      read: typeof sample.read;
+      read(
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ): Promise<{ bytesRead: number; buffer: Buffer }>;
       readFile: typeof sample.readFile;
     };
     await sample.close();
-    const readSpy = vi.spyOn(fileHandlePrototype, "read");
+    const originalRead = fileHandlePrototype.read;
+    let grown = false;
+    const readSpy = vi.spyOn(fileHandlePrototype, "read")
+      .mockImplementation(async function (
+        this: typeof fileHandlePrototype,
+        buffer,
+        offset,
+        length,
+        position,
+      ) {
+        if (!grown && position === 0) {
+          grown = true;
+          await appendFile(path, Buffer.alloc(1024 * 1024));
+        }
+        return await originalRead.call(this, buffer, offset, length, position);
+      });
     const readFileSpy = vi.spyOn(fileHandlePrototype, "readFile");
     try {
       const validation = expect(
         validateAttachmentImportFile(operation),
       ).rejects.toMatchObject({ code: "unsafe" });
-      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
-      await appendFile(path, Buffer.alloc(1024 * 1024));
 
       await validation;
       expect(readFileSpy).not.toHaveBeenCalled();

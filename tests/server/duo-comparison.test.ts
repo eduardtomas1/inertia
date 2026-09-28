@@ -632,7 +632,7 @@ describe("Duo third-model comparison", () => {
       cleanupConfirmed: true,
       });
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() => expect(runtime.provider.inputs).toHaveLength(3));
 
     // A comparison stranded in "waiting" holds the source deletion lock with no
     // terminal state for the user to cancel, so the judge must have advanced.

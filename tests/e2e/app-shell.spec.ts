@@ -482,11 +482,13 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
 });
 
 test("opens a settled chat directly and does not redirect when Work filters hide it", async () => {
+  await resizeWindow(1440, 920);
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const database = new Database(databasePath);
   const active = database.prepare(
     "SELECT active_conversation_id FROM app_state WHERE id = 1",
   ).get() as { active_conversation_id: string };
+  expect(active.active_conversation_id, "the first scenario creates the active chat").toBeTruthy();
   const settledAt = new Date().toISOString();
   database.prepare(`
     UPDATE conversations
@@ -585,6 +587,7 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
       .toBeVisible();
   };
 
+  await resizeWindow(1440, 920);
   let count = await seedViewedConversationContext(
     page,
     testDirectory,

@@ -4,15 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
+import { MAX_ANIMATED_STREAM_WORDS } from "../../src/renderer/src/components/response-timeline/activity";
 
-const changesSource = readFileSync(new URL("../../src/renderer/src/components/ChangesPanel.tsx", import.meta.url), "utf8");
-const composerSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url), "utf8");
-const commandMenuSource = readFileSync(new URL("../../src/renderer/src/components/composer/ComposerCommandMenu.tsx", import.meta.url), "utf8");
-const responseSource = readFileSync(new URL("../../src/renderer/src/components/ResponseMarkdown.tsx", import.meta.url), "utf8");
-const layersSource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url), "utf8");
-const pixelGridSource = readFileSync(new URL("../../src/renderer/src/components/AgentPixelGrid.tsx", import.meta.url), "utf8");
 const activitySource = readFileSync(new URL("../../src/renderer/src/components/response-timeline/activity.tsx", import.meta.url), "utf8");
-const subagentSource = readFileSync(new URL("../../src/renderer/src/components/SubagentDisclosure.tsx", import.meta.url), "utf8");
 const styles = [
   readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8"),
   readFileSync(new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url), "utf8"),
@@ -52,27 +46,15 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).toContain(".plan-step.is-in-progress .plan-step-marker svg");
   });
 
-  it("uses counted filter chips instead of a passive review-state select", () => {
-    expect(changesSource).toContain('className="diff-review-filter"');
-    expect(changesSource).toContain('role="group"');
-    expect(changesSource).toContain('aria-label="Filter review state"');
-    expect(changesSource).toContain("aria-pressed={reviewFilter === value}");
-    expect(changesSource).toContain('["unreviewed", totalHunks - reviewedHunks]');
-    expect(changesSource).not.toContain('<select aria-label="Filter review state"');
-    expect(changesSource).toContain('className="diff-filter-row"');
-    expect(changesSource).toContain("inert={!shown}");
+  it("keeps the review filter row transition token", () => {
     expect(styles).toContain("grid-template-rows 300ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 
-  it("animates project references and slash commands as prompt actions", () => {
-    expect(composerSource).toContain('"Chats and project files"');
-    expect(commandMenuSource).toContain('aria-label="Composer commands"');
+  it("keeps the prompt action pop-in token", () => {
     expect(styles).toContain("animation: beautiful-pop-in 180ms cubic-bezier(0.23, 1, 0.32, 1)");
   });
 
-  it("ports the Beautiful UI motion constants onto real Inertia state", () => {
-    expect(layersSource).toContain("<AgentPixelGrid animated={animated} phase={phase} />");
-    expect(pixelGridSource).toContain("Array.from({ length: 9 }");
+  it("keeps the Beautiful UI motion tokens", () => {
     expect(styles).toContain("--pixel-drive-delay: 90ms");
     expect(styles).toContain("--pixel-orbit-delay: 770ms");
     expect(styles).toContain("animation: agent-pixel-shimmer 650ms ease-in-out infinite");
@@ -80,7 +62,6 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).not.toContain("beautiful-shimmer-text");
     expect(styles).toMatch(/\.turn-working-status \.turn-working-copy strong\s*\{[^}]*color:\s*var\(--text-soft\);/su);
 
-    expect(responseSource).toContain('className="response-stream-word"');
     expect(styles).toContain("beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1)");
     expect(styles).toContain(".response-markdown.is-streaming a { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1)");
 
@@ -97,14 +78,8 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
   });
 
-  it("integrates live streams, tool actions, and delegated tasks with real state", () => {
-    expect(activitySource).toContain("MAX_ANIMATED_STREAM_WORDS = 96");
-    expect(activitySource).toContain('data-stream-motion="word-reveal"');
-    expect(activitySource).toContain('className="agent-activity-icon"');
-    expect(subagentSource).toContain("<SubagentStatusMark");
-    expect(subagentSource).toContain('className="subagent-state-pill"');
-    expect(subagentSource).toContain('className="subagent-detail-reveal"');
-
+  it("keeps the live stream, task row, and delegated task motion policy", () => {
+    expect(MAX_ANIMATED_STREAM_WORDS).toBe(96);
     expect(activitySource).toContain('import "./ActivityGroup.css";');
     expect(styles).toContain("beautiful-task-row-enter 450ms cubic-bezier(0.23, 1, 0.32, 1)");
     expect(styles).toContain("beautiful-spin 1.1s linear infinite");

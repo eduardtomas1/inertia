@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { request as httpRequest } from "node:http";
 import WebSocket from "ws";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrivateConnectService, type PrivateConnectServiceOptions } from "../../../src/main/private-connect/service";
 import type { PrivateConnectTailscaleController } from "../../../src/main/private-connect/tailscale-controller";
@@ -201,6 +201,24 @@ describe("Private Connect service lifecycle", () => {
     expect(service.shutdownStep()).toBe("draining-mutations");
     await shutdown;
     expect(service.shutdownStep()).toBe("stopped");
+  });
+
+  it("finishes shutdown with a never-started gateway while the Node tick queue is not drained", async () => {
+    const service = await createService();
+    const deferredTicks: Array<() => void> = [];
+    const nextTick = vi.spyOn(process, "nextTick").mockImplementation(((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      deferredTicks.push(() => callback(...args));
+    }) as typeof process.nextTick);
+    try {
+      let settled = false;
+      void service.shutdown().then(() => { settled = true; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(service.shutdownStep()).toBe("stopped");
+      expect(settled).toBe(true);
+    } finally {
+      nextTick.mockRestore();
+      for (const run of deferredTicks) run();
+    }
   });
 
   it("holds update admission atomically and rolls it back when pairing is active", async () => {

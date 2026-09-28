@@ -9,6 +9,7 @@ import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 import { createAnchorInputDiagnostic, observeAnchorInput } from "./support/anchor-input-diagnostic";
+import { waitForTranscriptSettled } from "./support/stable-sample";
 
 const delayedAnswerGate = "inertia-anchor-answer-ready";
 
@@ -147,7 +148,7 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
     await expect(transcript.getByRole("feed", {
       name: "18 conversation turns",
     })).toBeVisible();
-    await page.waitForTimeout(250);
+    await waitForTranscriptSettled(transcript);
     await transcript.hover({ position: { x: 300, y: 240 } });
     await page.mouse.wheel(0, -4_000);
     await expect(page.getByRole("button", { name: "Jump to latest" }))

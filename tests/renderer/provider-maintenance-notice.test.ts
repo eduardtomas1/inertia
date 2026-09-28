@@ -106,12 +106,57 @@ describe("provider maintenance notice", () => {
     expect(failed).not.toContain("npm install");
   });
 
+  it("does not call an unapplied update current", () => {
+    const html = render(status(), operation({
+      status: "unchanged",
+      message: "Update completed, but the installed version still appears unchanged.",
+    }));
+    expect(html).toContain("Version unchanged");
+    expect(html).not.toContain("Already current");
+  });
+
   it("stays absent when the provider is current and no operation needs attention", () => {
     expect(render(status({
       latestVersion: "1.2.3",
       versionStatus: "current",
       updateAvailability: "unavailable",
     }))).toBe("");
+  });
+
+  it.each(["current", "unknown"] as const)("keeps %s status, reasons and refresh visible in Settings", (versionStatus) => {
+    const maintenanceStatus = status({
+      versionStatus,
+      latestVersion: null,
+      updateAvailability: "instructions-only",
+      message: "This Codex installation is not writable by your account. See Instructions.",
+    });
+    expect(render(maintenanceStatus)).toBe("");
+    const html = renderToStaticMarkup(createElement(ProviderMaintenanceNotice, {
+      providerLabel: "Codex",
+      status: maintenanceStatus,
+      operation: null,
+      showStatus: true,
+      dismissible: false,
+      ...actions,
+    }));
+    expect(html).toContain("not writable by your account");
+    expect(html).toContain(">Instructions</button>");
+    expect(html.match(/>Check<\/button>/gu)).toHaveLength(1);
+    expect(html).not.toContain(">Update</button>");
+  });
+
+  it("shows a release lookup failure with a single Check action in Settings", () => {
+    const html = renderToStaticMarkup(createElement(ProviderMaintenanceNotice, {
+      providerLabel: "Codex",
+      status: status({ versionStatus: "unknown", latestVersion: null, message: "Latest-version information is temporarily unavailable." }),
+      operation: null,
+      showStatus: true,
+      dismissible: false,
+      ...actions,
+    }));
+    expect(html).toContain("Latest-version information is temporarily unavailable.");
+    expect(html.match(/>Check<\/button>/gu)).toHaveLength(1);
+    expect(html).not.toContain(">Update</button>");
   });
 
   it("offers a provider-managed action when version discovery is unavailable", () => {

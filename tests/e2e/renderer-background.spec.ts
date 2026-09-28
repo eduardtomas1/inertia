@@ -8,6 +8,7 @@ import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
 import { seedBackgroundHistoryProfile } from "../helpers/renderer-background-history";
 import { loadSeededConversationTurns } from "./support/conversation-history";
+import { elapseObservationWindow } from "./support/stable-sample";
 
 declare global {
   interface Window {
@@ -88,7 +89,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
       name: animation instanceof CSSAnimation ? animation.animationName : "web-animation",
     })),
   }));
-  await page.waitForTimeout(5_000);
+  await elapseObservationWindow(page, 5_000);
   const processes = await processMetrics(page, electronApp);
   const elapsedMs = performance.now() - sampledAt;
   const heap = await session.send("Runtime.getHeapUsage");

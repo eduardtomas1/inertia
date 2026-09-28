@@ -148,7 +148,7 @@ export const Composer = memo(function Composer({
   });
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
-  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, latestTurn?.id ?? null, latestTurn?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
+  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, (latestTurnSummary ?? latestTurn)?.id ?? null, (latestTurnSummary ?? latestTurn)?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
   const submissionSequenceRef = useRef(0);
   const activeSubmissionsRef = useRef(new Map<string, number>());
   const editorRevisionSequenceRef = useRef(0);
@@ -704,7 +704,7 @@ export const Composer = memo(function Composer({
   const followUpState = composerFollowUpState({
     running,
     stopping,
-    harnessId: latestTurn?.harnessId ?? null,
+    harnessId: (latestTurnSummary ?? latestTurn)?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
       attachmentsAreImages

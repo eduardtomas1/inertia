@@ -29,6 +29,7 @@ import {
   readNativePreviewSnapshot,
   type NativePreviewTestSnapshot,
 } from "./native-preview-diagnostics";
+import { waitForViewportToMatchWindow } from "./stable-sample";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
@@ -880,9 +881,13 @@ export async function createAppFixture(
   };
   const resizeWindow = async (width: number, height: number): Promise<void> => {
     const nativeWindow = await currentApp().browserWindow(page);
-    try { await nativeWindow.evaluate((window, size) => window.setContentSize(size.width, size.height), { width, height }); }
-    finally { await nativeWindow.dispose(); }
-    await page.waitForTimeout(250);
+    try {
+      await nativeWindow.evaluate((window, size) => window.setContentSize(size.width, size.height), { width, height });
+      await waitForViewportToMatchWindow(page, () => nativeWindow.evaluate((window) => {
+        const [contentWidth = 0, contentHeight = 0] = window.getContentSize();
+        return { width: contentWidth, height: contentHeight, zoomFactor: window.webContents.getZoomFactor() };
+      }));
+    } finally { await nativeWindow.dispose(); }
   };
   const nativePreviewSnapshot = async (
     url: string,

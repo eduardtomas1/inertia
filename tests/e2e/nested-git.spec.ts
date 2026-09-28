@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../src/server/database";
+import { waitForViewportToMatchWindow } from "./support/stable-sample";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
@@ -56,7 +57,11 @@ async function resizeWindow(width: number, height: number): Promise<void> {
     ({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height),
     { width, height },
   );
-  await page.waitForTimeout(200);
+  await waitForViewportToMatchWindow(page, () => application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    const [contentWidth = 0, contentHeight = 0] = window?.getContentSize() ?? [];
+    return { width: contentWidth, height: contentHeight, zoomFactor: window?.webContents.getZoomFactor() ?? 1 };
+  }));
 }
 
 test.beforeAll(async () => {

@@ -376,31 +376,34 @@ describe("agent loading and trace DOM", () => {
       expect(folded).toHaveTextContent(/^Thought for 12s/u);
       expect(folded?.querySelector(".turn-thinking-elapsed")).toBeNull();
       expect(folded?.querySelector(".turn-thinking-line")).toBeNull();
-      const styles = readFileSync("src/renderer/src/styles.css", "utf8");
-      expect(styles).toMatch(
-        /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u,
-      );
-      expect(styles).toContain(
-        "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);",
-      );
-      expect(styles).toMatch(
-        /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,
-      );
-      expect(styles).toMatch(
-        /\.turn-thinking-line \{[^}]*min-height: 3em;[^}]*align-items: center;/u,
-      );
-      expect(styles).toMatch(
-        /\.turn-thinking-line > span \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/u,
-      );
-      expect(styles).toMatch(
-        /\.turn-thinking\[data-thinking-state="live"\]\[data-thinking-hold\] \.turn-thinking-pulse \{\s*animation-play-state: paused;/u,
-      );
       expect(screen.queryByText("Tracing ownership")).not.toBeInTheDocument();
       fireEvent.click(summary);
       expect(screen.getByText("Tracing ownership")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the live thinking strip stylesheet policy", () => {
+    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+    expect(styles).toMatch(
+      /\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u,
+    );
+    expect(styles).toContain(
+      "mask-image: linear-gradient(100deg, rgb(0 0 0 / 0.38) 34%, #000 50%, rgb(0 0 0 / 0.38) 66%);",
+    );
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[^@]*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u,
+    );
+    expect(styles).toMatch(
+      /\.turn-thinking-line \{[^}]*min-height: 3em;[^}]*align-items: center;/u,
+    );
+    expect(styles).toMatch(
+      /\.turn-thinking-line > span \{[^}]*overflow: hidden;[^}]*-webkit-line-clamp: 2;/u,
+    );
+    expect(styles).toMatch(
+      /\.turn-thinking\[data-thinking-state="live"\]\[data-thinking-hold\] \.turn-thinking-pulse \{\s*animation-play-state: paused;/u,
+    );
   });
 
   it("holds a mid-sentence fragment back until it finishes", () => {
@@ -615,16 +618,18 @@ describe("agent loading and trace DOM", () => {
       expect(settled.querySelector(".context-compaction-marker"))
         .toHaveTextContent("Compacted context·173K → 5.69K tokens");
       expect(screen.getAllByRole("separator")).toHaveLength(1);
-
-      const styles = readFileSync("src/renderer/src/styles.css", "utf8");
-      const sweep = '.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,';
-      expect(styles).toMatch(/\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u);
-      expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
-      expect(styles).toMatch(/@media \(forced-colors: active\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
-      expect(styles.split(sweep)).toHaveLength(4);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shares the thinking sweep stylesheet policy with live compaction", () => {
+    const styles = readFileSync("src/renderer/src/styles.css", "utf8");
+    const sweep = '.context-compaction-separator[data-compaction-state="live"] .context-compaction-marker,';
+    expect(styles).toMatch(/\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: turn-thinking-sweep 3400ms/u);
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+    expect(styles).toMatch(/@media \(forced-colors: active\) \{[^@]*\.context-compaction-marker,\s*\.turn-thinking\[data-thinking-state="live"\] \.turn-thinking-pulse \{[^}]*animation: none/u);
+    expect(styles.split(sweep)).toHaveLength(4);
   });
 
   it("keeps a settled turn's compaction visible outside its folded work", () => {

@@ -701,6 +701,62 @@ test("accepts an ESRCH kill race only after exact group absence", async () => {
   expect(posixProcessGroupKillIsConfirmed({ code: "EPERM" }, false)).toBe(false);
 });
 
+test("signals a group member again when it survives the first group kill", async () => {
+  if (process.platform === "win32") return;
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-group-survivor-test-"));
+  const pidFile = join(temporaryRoot, "descendant.pid");
+  const cancellation = new AbortController();
+  const originalKill = process.kill.bind(process);
+  let droppedGroupKills = 0;
+  const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (droppedGroupKills === 0 && pid < 0 && signal === "SIGKILL") {
+      droppedGroupKills += 1;
+      return true;
+    }
+    return originalKill(pid, signal);
+  });
+  let pids = { root: 0, descendant: 0 };
+  let outcome: Promise<unknown> = Promise.resolve(null);
+  try {
+    const script = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      "writeFileSync(process.argv[1], JSON.stringify({ root: process.pid, descendant: child.pid }));",
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    outcome = runBounded(process.execPath, ["-e", script, pidFile], {
+      label: "Group survivor fixture",
+      signal: cancellation.signal,
+      timeoutMs: 30_000,
+    }).then(() => null, (error: unknown) => error);
+    pids = await vi.waitFor(async () =>
+      JSON.parse(await readFile(pidFile, "utf8")) as typeof pids,
+    { timeout: 10_000, interval: 10 });
+    const abortedAt = Date.now();
+    cancellation.abort();
+    expect(String(await outcome)).toContain("was aborted; its complete process tree was terminated");
+    expect(Date.now() - abortedAt).toBeLessThan(5_000);
+    expect(droppedGroupKills).toBe(1);
+    expect(executableProcessExists(pids.root)).toBe(false);
+    expect(executableProcessExists(pids.descendant)).toBe(false);
+  } finally {
+    kill.mockRestore();
+    cancellation.abort();
+    await outcome;
+    for (const pid of [pids.root, pids.descendant]) {
+      if (pid <= 0 || !executableProcessExists(pid)) continue;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test("rejects and terminates an owned grandchild left after the root exits", async () => {
   if (process.platform === "win32") return;
   const { runBounded } = await installerSmokeModule();

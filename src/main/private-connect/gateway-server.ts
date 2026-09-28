@@ -83,6 +83,7 @@ export class PrivateConnectGatewayServer {
   private readonly now: () => Date;
   private addressValue: { port: number; host: string } | null = null;
   private stopped = false;
+  private listenRequested = false;
   private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
   private readonly admissions = new Map<string, number[]>();
   private readonly inFlightBySession = new Map<string, number>();
@@ -128,10 +129,17 @@ export class PrivateConnectGatewayServer {
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => {
         this.server.off("listening", onListening);
+        this.server.off("close", onClose);
         reject(error);
+      };
+      const onClose = (): void => {
+        this.server.off("listening", onListening);
+        this.server.off("error", onError);
+        reject(new Error("The Private Connect gateway stopped before it started."));
       };
       const onListening = (): void => {
         this.server.off("error", onError);
+        this.server.off("close", onClose);
         const address = this.server.address();
         if (!address || typeof address === "string") {
           reject(new Error("The Private Connect gateway did not receive a TCP address."));
@@ -142,6 +150,8 @@ export class PrivateConnectGatewayServer {
       };
       this.server.once("error", onError);
       this.server.once("listening", onListening);
+      this.server.once("close", onClose);
+      this.listenRequested = true;
       this.server.listen({ host: "127.0.0.1", port: 0 });
     });
     if (!this.addressValue) throw new Error("The Private Connect gateway did not start.");
@@ -160,7 +170,7 @@ export class PrivateConnectGatewayServer {
     this.socketSessions.clear();
     this.inFlightBySession.clear();
     this.websocketServer.close();
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    if (this.listenRequested) await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.addressValue = null;
   }
 

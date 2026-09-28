@@ -1112,17 +1112,21 @@ export class AppUpdateHandoffJournal {
         : null;
     }
     if (nextPhase === current.phase) return current;
+    const recordedAt = rollbackPhase(nextPhase)
+      && Date.parse(transitionedAt) < Date.parse(current.transitionedAt)
+      ? current.transitionedAt
+      : transitionedAt;
     if (
       !appUpdateHandoffCanTransition(current.platform, current.phase, nextPhase)
-      || Date.parse(transitionedAt) < Date.parse(current.transitionedAt)
+      || Date.parse(recordedAt) < Date.parse(current.transitionedAt)
       || (!rollbackPhase(nextPhase)
-        && Date.parse(transitionedAt) > Date.parse(current.deadlineAt))
+        && Date.parse(recordedAt) > Date.parse(current.deadlineAt))
     ) return null;
     const proposal = createSnapshot(
       preparationFrom(current),
       nextPhase,
       current.revision + 1,
-      transitionedAt,
+      recordedAt,
       current.checksum,
     );
     if (!this.publishProposal(proposal)) return null;

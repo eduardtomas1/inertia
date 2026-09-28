@@ -91,6 +91,7 @@ async function installerSmokeModule() {
       options: {
         label: string;
         posixProcessGroupHandoff?: { ownerToken: string; path: string };
+        signal?: AbortSignal;
         timeoutMs: number;
       },
     ) => Promise<string>;
@@ -700,6 +701,62 @@ test("accepts an ESRCH kill race only after exact group absence", async () => {
   expect(posixProcessGroupKillIsConfirmed({ code: "EPERM" }, false)).toBe(false);
 });
 
+test("signals a group member again when it survives the first group kill", async () => {
+  if (process.platform === "win32") return;
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-group-survivor-test-"));
+  const pidFile = join(temporaryRoot, "descendant.pid");
+  const cancellation = new AbortController();
+  const originalKill = process.kill.bind(process);
+  let droppedGroupKills = 0;
+  const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (droppedGroupKills === 0 && pid < 0 && signal === "SIGKILL") {
+      droppedGroupKills += 1;
+      return true;
+    }
+    return originalKill(pid, signal);
+  });
+  let pids = { root: 0, descendant: 0 };
+  let outcome: Promise<unknown> = Promise.resolve(null);
+  try {
+    const script = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      "writeFileSync(process.argv[1], JSON.stringify({ root: process.pid, descendant: child.pid }));",
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    outcome = runBounded(process.execPath, ["-e", script, pidFile], {
+      label: "Group survivor fixture",
+      signal: cancellation.signal,
+      timeoutMs: 30_000,
+    }).then(() => null, (error: unknown) => error);
+    pids = await vi.waitFor(async () =>
+      JSON.parse(await readFile(pidFile, "utf8")) as typeof pids,
+    { timeout: 10_000, interval: 10 });
+    const abortedAt = Date.now();
+    cancellation.abort();
+    expect(String(await outcome)).toContain("was aborted; its complete process tree was terminated");
+    expect(Date.now() - abortedAt).toBeLessThan(5_000);
+    expect(droppedGroupKills).toBe(1);
+    expect(executableProcessExists(pids.root)).toBe(false);
+    expect(executableProcessExists(pids.descendant)).toBe(false);
+  } finally {
+    kill.mockRestore();
+    cancellation.abort();
+    await outcome;
+    for (const pid of [pids.root, pids.descendant]) {
+      if (pid <= 0 || !executableProcessExists(pid)) continue;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test("rejects and terminates an owned grandchild left after the root exits", async () => {
   if (process.platform === "win32") return;
   const { runBounded } = await installerSmokeModule();
@@ -754,6 +811,8 @@ test("terminates a token-bound detached process group handed off by the root", a
   const handoffToken = "9de5486e-67f0-4d62-9f18-ea9220f23d44";
   let detachedPid = 0;
   let grandchildPid = 0;
+  const cancellation = new AbortController();
+  let outcome: Promise<unknown> = Promise.resolve(null);
   try {
     const middleScript = [
       'const { spawn } = require("node:child_process");',
@@ -774,24 +833,33 @@ test("terminates a token-bound detached process group handed off by the root", a
       'publish({ state: "owned", processGroupId: middle.pid });',
       "setInterval(() => {}, 1000);",
     ].join("");
-    await expect(runBounded(
+    outcome = runBounded(
       process.execPath,
       ["-e", rootScript, handoffFile, handoffToken, pidFile],
       {
-        label: "Detached handoff timeout fixture",
+        label: "Detached handoff fixture",
         posixProcessGroupHandoff: { ownerToken: handoffToken, path: handoffFile },
-        timeoutMs: 750,
+        signal: cancellation.signal,
+        timeoutMs: 30_000,
       },
-    )).rejects.toThrow("complete process tree was terminated");
-    const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
-      detached: number;
-      grandchild: number;
-    };
+    ).then(() => null, (error: unknown) => error);
+    const pids = await vi.waitFor(async () => {
+      const handoff = JSON.parse(await readFile(handoffFile, "utf8")) as { state: string };
+      expect(handoff.state).toBe("owned");
+      return JSON.parse(await readFile(pidFile, "utf8")) as {
+        detached: number;
+        grandchild: number;
+      };
+    }, { timeout: 10_000, interval: 10 });
     detachedPid = pids.detached;
     grandchildPid = pids.grandchild;
+    cancellation.abort();
+    expect(String(await outcome)).toContain("complete process tree was terminated");
     expect(executableProcessExists(detachedPid)).toBe(false);
     expect(executableProcessExists(grandchildPid)).toBe(false);
   } finally {
+    cancellation.abort();
+    await outcome;
     if (detachedPid > 0) {
       try {
         process.kill(-detachedPid, "SIGKILL");

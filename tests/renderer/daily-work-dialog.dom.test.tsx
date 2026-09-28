@@ -159,7 +159,7 @@ describe("DailyWorkDialog", () => {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     });
 
-    const totals = within(dialog).getByRole("region", { name: "Daily work totals" });
+    const totals = await within(dialog).findByRole("region", { name: "Daily work totals" });
     expect(totals).toHaveTextContent("2.4K");
     expect(totals).toHaveTextContent("1.5h");
     expect(totals).toHaveTextContent("2");
@@ -249,7 +249,7 @@ describe("DailyWorkDialog", () => {
     await waitFor(() => expect(view.request).toHaveBeenCalledTimes(2));
     expect(view.request.mock.calls[1]?.[0]).toEqual(dailyWorkCommand(previousDay));
     expect(input).toHaveValue(dailyWorkCommand(previousDay).payload.date);
-    expect(screen.getByRole("region", { name: "Daily work totals" }))
+    expect(await screen.findByRole("region", { name: "Daily work totals" }))
       .toBeVisible();
     expect(screen.getByText("Created this day")).toBeVisible();
 

@@ -428,4 +428,22 @@ describe("app update checks", () => {
     await expect(service.check()).resolves.toMatchObject({ state: "unavailable" });
     expect(cancelled).toBe(true);
   });
+
+  it.each([
+    ["an oversized declared length", { status: 200, headers: { "Content-Length": String(65 * 1_024) } }],
+    ["a failed status", { status: 503 }],
+  ] as const)("cancels the unread body of %s", async (_label, init) => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(1_024)); },
+      cancel,
+    });
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(async () => new Response(body, init)),
+    });
+
+    await expect(service.check()).resolves.toMatchObject({ state: "unavailable" });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
 });

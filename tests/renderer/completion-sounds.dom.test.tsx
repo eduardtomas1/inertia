@@ -243,6 +243,54 @@ describe("completion sound settings", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, sound: "chime", library: [] } });
   });
 
+  it("deletes a removed sound's file only after the removal is saved", async () => {
+    const removeCompletionSound = vi.fn(async () => undefined);
+    const { onUpdate } = renderSettings({ ...enabled, sound: ding.file, library: [ding, rain] }, {
+      importCompletionSound: vi.fn(),
+      removeCompletionSound,
+    });
+    let save!: () => void;
+    onUpdate.mockImplementationOnce(() => new Promise<undefined>((resolve) => { save = () => resolve(undefined); }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remove Ding" })); });
+    expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, sound: "chime", library: [rain] } });
+    expect(removeCompletionSound).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Import sound…" })).toBeDisabled();
+    await act(async () => { save(); });
+    expect(removeCompletionSound).toHaveBeenCalledExactlyOnceWith(ding.file);
+    expect(screen.getByRole("button", { name: "Import sound…" })).toBeEnabled();
+  });
+
+  it("keeps the file and its reference when the removal cannot be saved", async () => {
+    const removeCompletionSound = vi.fn(async () => undefined);
+    const { onUpdate } = renderSettings({ ...enabled, sound: ding.file, library: [ding, rain] }, {
+      importCompletionSound: vi.fn(),
+      removeCompletionSound,
+    });
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remove Ding" })); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be saved");
+    expect(removeCompletionSound).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Name for Ding" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Ding/u })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Import sound…" })).toBeEnabled();
+  });
+
+  it("leaves an import whose save failed out of the library so the next import prunes it", async () => {
+    const removeCompletionSound = vi.fn(async () => undefined);
+    const importCompletionSound = vi.fn()
+      .mockResolvedValueOnce({ status: "imported", sound: rain })
+      .mockResolvedValueOnce({ status: "cancelled" });
+    const { onUpdate } = renderSettings({ ...enabled, library: [ding] }, { importCompletionSound, removeCompletionSound });
+    onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
+    fireEvent.click(screen.getByRole("button", { name: "Import sound…" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be saved");
+    expect(screen.queryByRole("textbox", { name: "Name for Rain" })).not.toBeInTheDocument();
+    expect(removeCompletionSound).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Import sound…" }));
+    await waitFor(() => expect(importCompletionSound).toHaveBeenCalledTimes(2));
+    expect(importCompletionSound).toHaveBeenLastCalledWith([ding.file]);
+  });
+
   it("stops importing at eight sounds", () => {
     const library = Array.from({ length: 8 }, (_, index) => ({ file: `${index.toString(16).padStart(16, "0")}.wav` as const, name: `Clip ${index}` }));
     renderSettings({ ...enabled, library }, { importCompletionSound: vi.fn() });

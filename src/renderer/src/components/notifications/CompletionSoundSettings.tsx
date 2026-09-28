@@ -86,6 +86,7 @@ export function CompletionSoundSettings({
   const saved = useMemo(() => parseCompletionSoundSettings(JSON.parse(serialized)), [serialized]);
   const [pending, setPending] = useState<SoundSettings | null>(null);
   const [importing, setImporting] = useState(false);
+  const [removing, setRemoving] = useState(0);
   const [named, setNamed] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null);
   const latest = useRef<SoundSettings>(saved);
@@ -98,14 +99,15 @@ export function CompletionSoundSettings({
     if (pending && sameSettings(pending, saved)) setPending(null);
   }, [pending, saved]);
 
-  const commit = (patch: Partial<SoundSettings>): void => {
+  const commit = (patch: Partial<SoundSettings>): Promise<boolean> => {
     const next = { ...latest.current, ...patch };
-    if (sameSettings(next, latest.current)) return;
+    if (sameSettings(next, latest.current)) return Promise.resolve(true);
     latest.current = next;
     setPending(next);
-    void Promise.resolve(onUpdate({ completionSound: next })).catch(() => {
+    return Promise.resolve(onUpdate({ completionSound: next })).then(() => true, () => {
       setPending((current) => (current === next ? null : current));
       setNotice({ tone: "error", text: "The sound setting could not be saved. Try again." });
+      return false;
     });
   };
 
@@ -115,18 +117,18 @@ export function CompletionSoundSettings({
 
   const choices: CompletionSoundChoice[] = [...BUILT_IN_COMPLETION_SOUNDS, ...value.library.map(({ file }) => file)];
   const sounds = useRovingRadios(choices, value.sound, (sound) => {
-    commit({ sound });
+    void commit({ sound });
     preview(sound);
   });
   const thresholds = useRovingRadios(
     LONG_RUN_THRESHOLDS.map(String),
     String(value.longRunSeconds),
-    (seconds) => commit({ longRunSeconds: Number(seconds) }),
+    (seconds) => void commit({ longRunSeconds: Number(seconds) }),
   );
 
   const importSound = async (): Promise<void> => {
     const bridge = window.inertia;
-    if (!bridge?.importCompletionSound || importing) return;
+    if (!bridge?.importCompletionSound || importing || removing) return;
     setImporting(true);
     setNotice(null);
     try {
@@ -138,7 +140,7 @@ export function CompletionSoundSettings({
       }
       const existing = latest.current.library.find(({ file }) => file === result.sound.file);
       if (existing) {
-        commit({ sound: existing.file });
+        void commit({ sound: existing.file });
         preview(existing.file);
         setNotice({ tone: "info", text: `That clip is already in your sounds as “${existing.name}”.` });
         return;
@@ -152,7 +154,7 @@ export function CompletionSoundSettings({
         return;
       }
       const library = [...latest.current.library, result.sound];
-      commit({ sound: result.sound.file, library });
+      void commit({ sound: result.sound.file, library });
       preview(result.sound.file, library);
       setNamed(result.sound.file);
       if (decoded.duration > COMPLETION_SOUND_MAX_PLAY_SECONDS + 0.05) {
@@ -166,15 +168,19 @@ export function CompletionSoundSettings({
   };
 
   const rename = (file: string, name: string): void => {
-    commit({ library: latest.current.library.map((sound) => (sound.file === file ? { ...sound, name } : sound)) });
+    void commit({ library: latest.current.library.map((sound) => (sound.file === file ? { ...sound, name } : sound)) });
   };
 
-  const removeSound = (sound: CustomCompletionSound): void => {
+  const removeSound = async (sound: CustomCompletionSound): Promise<void> => {
     setNotice(null);
-    forgetCustomCompletionSound(sound.file);
+    setRemoving((count) => count + 1);
     const library = latest.current.library.filter(({ file }) => file !== sound.file);
-    commit({ library, sound: latest.current.sound === sound.file ? "chime" : latest.current.sound });
-    void window.inertia?.removeCompletionSound?.(sound.file).catch(() => undefined);
+    const saved = await commit({ library, sound: latest.current.sound === sound.file ? "chime" : latest.current.sound });
+    if (saved) {
+      forgetCustomCompletionSound(sound.file);
+      await window.inertia?.removeCompletionSound?.(sound.file).catch(() => undefined);
+    }
+    setRemoving((count) => count - 1);
   };
 
   return (
@@ -185,7 +191,7 @@ export function CompletionSoundSettings({
           <small>Play a short sound when an agent finishes or stops with an error. Desktop notifications are unchanged.</small>
         </span>
         <Switch label="Sound when a task ends" checked={value.enabled} disabled={disabled} onChange={(enabled) => {
-          commit({ enabled });
+          void commit({ enabled });
           if (enabled) preview(latest.current.sound);
         }} />
       </div>
@@ -214,7 +220,7 @@ export function CompletionSoundSettings({
             <div className="completion-sound-library">
               <div className="completion-sound-heading">
                 <span id="completion-sound-library-label">Your sounds</span>
-                <button type="button" className="completion-sound-button" disabled={disabled || importing || full} onClick={() => void importSound()}>
+                <button type="button" className="completion-sound-button" disabled={disabled || importing || removing > 0 || full} onClick={() => void importSound()}>
                   <Upload size={12} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
                 </button>
               </div>
@@ -225,7 +231,7 @@ export function CompletionSoundSettings({
                       <SoundName sound={sound} disabled={disabled} focusRequest={named === sound.file}
                         onRename={(name) => rename(sound.file, name)} />
                       <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={13} /></IconButton>
-                      <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing} onClick={() => removeSound(sound)}><Trash2 size={13} /></IconButton>
+                      <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing} onClick={() => void removeSound(sound)}><Trash2 size={13} /></IconButton>
                     </li>
                   ))}
                 </ul>
@@ -243,7 +249,7 @@ export function CompletionSoundSettings({
               <strong>Only after long tasks</strong>
               <small>Stay quiet for quick questions and play the sound only when a task runs longer than you choose.</small>
             </span>
-            <Switch label="Only after long tasks" checked={value.longRunsOnly} disabled={disabled} onChange={(longRunsOnly) => commit({ longRunsOnly })} />
+            <Switch label="Only after long tasks" checked={value.longRunsOnly} disabled={disabled} onChange={(longRunsOnly) => void commit({ longRunsOnly })} />
           </div>
           {value.longRunsOnly && (
             <div className="response-density-setting completion-sound-threshold">

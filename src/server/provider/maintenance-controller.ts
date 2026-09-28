@@ -103,6 +103,7 @@ interface ActiveProviderMaintenanceOperation {
   installationIdentity: ProviderInstallationIdentity;
   installationLease: ProviderInstallationMaintenanceLease | null;
   verificationAuthority: ProviderInstallationVerificationAuthority | null;
+  verifiedIdentity: ProviderInstallationIdentity | null;
   journalQuarantined: boolean;
   journalRetired: boolean;
 }
@@ -353,6 +354,7 @@ export class ProviderMaintenanceController {
         installationIdentity,
         installationLease: null,
         verificationAuthority: null,
+        verifiedIdentity: null,
         journalQuarantined: false,
         journalRetired: false,
       };
@@ -654,8 +656,7 @@ export class ProviderMaintenanceController {
             active.installationIdentity,
           );
           if (!active.journalRetired) {
-            this.quarantinedProviders.add(active.operation.providerId);
-            active.journalQuarantined = true;
+            this.quarantineInstallation(active, "maintenance-journal-abandonment-unconfirmed");
           }
         }
       } catch {
@@ -844,28 +845,40 @@ export class ProviderMaintenanceController {
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
     }
-    const completed = lease.complete({
-      cleanupConfirmed: true,
-      stateDurable: true,
-      observedIdentity,
-    });
-    active.installationLease = null;
+    active.verifiedIdentity = observedIdentity;
+    let completed = false;
+    try {
+      completed = lease.complete({
+        cleanupConfirmed: true,
+        stateDurable: true,
+        observedIdentity,
+      });
+    } catch {
+      completed = false;
+    }
     if (!completed) {
-      this.quarantinedProviders.add(active.operation.providerId);
+      this.quarantineInstallation(
+        active,
+        "maintenance-completion-unconfirmed",
+        observedIdentity,
+      );
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
     }
-    active.journalRetired = this.options.maintenanceJournal.retireVerified(
-      active.operation.id,
-      observedIdentity,
-    );
-    if (!active.journalRetired) {
-      this.quarantinedProviders.add(active.operation.providerId);
-      active.journalQuarantined = true;
-      this.installationLeases.quarantineObservation(
+    active.installationLease = null;
+    try {
+      active.journalRetired = this.options.maintenanceJournal.retireVerified(
+        active.operation.id,
         observedIdentity,
-        { kind: "startup-recovery", operationId: active.operation.id },
+      );
+    } catch {
+      active.journalRetired = false;
+    }
+    if (!active.journalRetired) {
+      this.quarantineInstallation(
+        active,
         "maintenance-journal-retirement-unconfirmed",
+        observedIdentity,
       );
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
@@ -880,8 +893,23 @@ export class ProviderMaintenanceController {
   ): void {
     this.quarantinedProviders.add(active.operation.providerId);
     active.journalQuarantined = true;
-    active.installationLease?.quarantine(reason, observedIdentity);
+    const lease = active.installationLease;
     active.installationLease = null;
+    if (lease?.quarantine(reason, observedIdentity)) return;
+    const scopes = new Set<string>();
+    for (const identity of [
+      active.installationIdentity,
+      active.verifiedIdentity,
+      observedIdentity,
+    ]) {
+      if (!identity || scopes.has(identity.scopeId)) continue;
+      scopes.add(identity.scopeId);
+      this.installationLeases.quarantineObservation(
+        identity,
+        { kind: "startup-recovery", operationId: active.operation.id },
+        reason,
+      );
+    }
   }
 
   private async invalidateUncertainInstallationEvidence(

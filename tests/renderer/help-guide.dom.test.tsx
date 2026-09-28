@@ -24,6 +24,7 @@ function hostProps() {
     },
     onOpenSettings: vi.fn(),
     onLeave: vi.fn(),
+    onLoadError: vi.fn(),
   };
 }
 

@@ -917,6 +917,7 @@ export function AppLayout({
         }}
         onOpenSettings={actions.openSettingsSection}
         onLeave={() => setSidebarOpen(false)}
+        onLoadError={setActionError}
       />
     </div>
   );

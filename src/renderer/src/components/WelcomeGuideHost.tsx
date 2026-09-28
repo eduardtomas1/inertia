@@ -11,7 +11,8 @@ import {
   welcomeGuideIsOpen,
   type WelcomeShortcut,
 } from "../utils/welcomeGuide";
-import { DialogPresence } from "./DialogPresence";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { DialogPresence, useDialogPresence } from "./DialogPresence";
 import { loadWelcomeGuide } from "./lazySurfaceLoaders";
 
 const WelcomeGuide = lazy(async () => ({
@@ -35,6 +36,7 @@ export function WelcomeGuideHost({
 }): React.JSX.Element {
   const open = useSyncExternalStore(subscribeWelcomeGuide, welcomeGuideIsOpen);
   const projectCount = snapshot ? snapshot.projects.length : null;
+  useNativePreviewSuspension(useDialogPresence(open));
 
   useEffect(() => {
     const gate = welcomeGuideGate({

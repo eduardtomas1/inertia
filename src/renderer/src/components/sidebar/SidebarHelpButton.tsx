@@ -1,12 +1,12 @@
-import { useSyncExternalStore } from "react";
 import { CircleHelp } from "lucide-react";
 import clsx from "clsx";
 
-import { helpGuideIsOpen, openHelpGuide, subscribeHelpGuide } from "../../utils/helpGuide";
+import { useHelpGuideOpen } from "../../hooks/useHelpGuideOpen";
+import { openHelpGuide } from "../../utils/helpGuide";
 import { loadWelcomeGuide } from "../lazySurfaceLoaders";
 
 export function SidebarHelpButton(): React.JSX.Element {
-  const open = useSyncExternalStore(subscribeHelpGuide, helpGuideIsOpen);
+  const open = useHelpGuideOpen();
   return (
     <button
       type="button"

@@ -5,6 +5,10 @@ import { AGENT_RUN_STATES, agentTurnStatusForRunState, type AgentRunState } from
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 
+function immediatePublisher(...args: Partial<ConstructorParameters<typeof MascotStatusPublisher>>): MascotStatusPublisher {
+  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task());
+}
+
 function conversation(id: string, state: AgentRunState): ConversationShell {
   return {
     id, projectId: "project", title: "Improve the desktop mascot", status: "idle",
@@ -23,7 +27,7 @@ function conversation(id: string, state: AgentRunState): ConversationShell {
 describe("authoritative mascot status", () => {
   it.each(AGENT_RUN_STATES)("preserves exact %s state and full turn identity", (phase) => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([conversation("chat", phase)]);
     const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(phase);
     const status = {
@@ -38,7 +42,7 @@ describe("authoritative mascot status", () => {
 
   it("prioritizes actionable requests over live work and unseen outcomes", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([
       conversation("complete", "completed"), conversation("failure", "failed"),
       conversation("working", "running"), conversation("approval", "waiting-for-approval"),
@@ -52,7 +56,7 @@ describe("authoritative mascot status", () => {
 
   it("does not replay seen results, invent completion for cancellation, or retain deleted chats", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
     expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null, { chats: 1, attention: 0 });
     publisher.update(conversation("cancelled", "cancelled"));
@@ -63,7 +67,7 @@ describe("authoritative mascot status", () => {
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     const chat = conversation("chat", "running");
     publisher.replace([chat]);
     publisher.update({ ...chat, latestTurn: { ...chat.latestTurn!, updatedAt: "2026-09-06T12:00:00.000Z" } });
@@ -73,7 +77,7 @@ describe("authoritative mascot status", () => {
 
   it("does not switch live chat ownership when ordinary activity updates its timestamp", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     const first = conversation("a", "running");
     const second = conversation("b", "running");
     publisher.replace([first, second]);
@@ -88,7 +92,7 @@ describe("authoritative mascot status", () => {
 describe("mascot chat list", () => {
   it("ranks switchable chats, keeps seen results available, and adds project context", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     const seen = { ...conversation("seen", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const live = conversation("live", "running");
     live.latestTurn = { ...live.latestTurn!, startedAt: "2026-09-06T09:30:00+00:00" };
@@ -103,9 +107,9 @@ describe("mascot chat list", () => {
     expect(publish.mock.lastCall?.[1]).toHaveLength(MASCOT_CHAT_LIMIT);
   });
 
-  it("keeps a focused chat listed beyond the cap and echoes the focus", () => {
+  it("keeps a focused chat listed beyond the cap and confirms the focus only while it is listed", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const busy = Array.from({ length: 10 }, (_, index) => conversation(`busy-${index}`, "running"));
     publisher.replace([pinned, ...busy]);
@@ -117,14 +121,14 @@ describe("mascot chat list", () => {
     expect(chats.at(-1)).toMatchObject({ conversationId: "pinned", phase: "completed" });
     publisher.replace(busy);
     expect(publish.mock.lastCall?.[1].map(({ conversationId }: { conversationId: string }) => conversationId)).not.toContain("pinned");
-    expect(publish.mock.lastCall?.[2]).toBe("pinned");
-    publisher.focus(null);
+    expect(publish.mock.lastCall?.[2]).toBeNull();
+    publisher.focus("missing");
     expect(publish.mock.lastCall?.[2]).toBeNull();
   });
 
   it("publishes the true number of chats that need you beside the capped list", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const questions = Array.from({ length: 6 }, (_, index) => conversation(`question-${index}`, "waiting-for-input"));
     const approvals = Array.from({ length: 5 }, (_, index) => conversation(`approval-${index}`, "waiting-for-approval"));
@@ -143,7 +147,7 @@ describe("mascot chat list", () => {
   it("reads project names from the snapshot and caches lookups for unknown projects", () => {
     const publish = vi.fn();
     const lookup = vi.fn((id: string) => id === "new" ? "Fresh project" : null);
-    const publisher = new MascotStatusPublisher(publish, undefined, lookup);
+    const publisher = immediatePublisher(publish, undefined, lookup);
     publisher.replace([conversation("a", "running"), conversation("b", "running")], [{ id: "project", name: "Inertia" }]);
     expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName)).toEqual(["Inertia", "Inertia"]);
     expect(lookup).not.toHaveBeenCalled();
@@ -156,7 +160,7 @@ describe("mascot chat list", () => {
   it("names many snapshot chats without a project query per chat and follows renames and removals", () => {
     const publish = vi.fn();
     const lookup = vi.fn((id: string) => `Stored ${id}`);
-    const publisher = new MascotStatusPublisher(publish, undefined, lookup);
+    const publisher = immediatePublisher(publish, undefined, lookup);
     const chats = Array.from({ length: 60 }, (_, index) => ({
       ...conversation(`chat-${String(index).padStart(2, "0")}`, "running"), projectId: `project-${index % 3}`,
     }));
@@ -181,7 +185,7 @@ describe("mascot chat list", () => {
   it("keeps plan steps with their turn and clears them when the turn ends", () => {
     const publish = vi.fn();
     let shell = conversation("chat", "running");
-    const publisher = new MascotStatusPublisher(publish, () => shell);
+    const publisher = immediatePublisher(publish, () => shell);
     publisher.replace([shell]);
     publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
       { step: "Sketch", status: "completed" }, { step: "Build", status: "inProgress" }, { step: "Ship", status: "pending" },
@@ -206,7 +210,7 @@ function input(id = "question"): AgentInputRequest {
 describe("mascot context", () => {
   it("shows public commentary, activity, and measured plan progress without retaining reasoning or command output", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([conversation("chat", "running")]);
     publisher.observe({ type: "agent.commentary.persisted", message: {
       id: "message", conversationId: "chat", turnId: "chat-turn", role: "assistant", attachments: [],
@@ -231,7 +235,7 @@ describe("mascot context", () => {
   it("keeps questions actionable through background updates and clears only the resolved request", () => {
     const publish = vi.fn();
     let shell = conversation("chat", "running");
-    const publisher = new MascotStatusPublisher(publish, () => shell);
+    const publisher = immediatePublisher(publish, () => shell);
     publisher.replace([shell]);
     shell = conversation("chat", "waiting-for-input");
     publisher.observe({ type: "agent.input.requested", request: input() });
@@ -252,7 +256,7 @@ describe("mascot context", () => {
 
   it("shows approval purpose, suppresses secret question content, and counts multiple questions", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([conversation("chat", "waiting-for-approval")]);
     const request: AgentApprovalRequest = { ...owner, id: "approve", providerId: "codex", kind: "command",
       title: "Run the test suite", reason: "Verify the mascot changes", detail: "PRIVATE DETAIL", command: "PRIVATE COMMAND",
@@ -270,7 +274,7 @@ describe("mascot context", () => {
 
   it("rejects stale turn/run context, clears old previews on a new turn, and bounds plain text", () => {
     const publish = vi.fn();
-    const publisher = new MascotStatusPublisher(publish);
+    const publisher = immediatePublisher(publish);
     publisher.replace([conversation("chat", "waiting-for-input")]);
     const request = input();
     request.questions[0]!.question = "\u202e**" + "A".repeat(10_000);
@@ -289,7 +293,7 @@ describe("mascot context", () => {
   it("previews only the exact final result and replaces old activity with failure details", () => {
     const publish = vi.fn();
     let shell = conversation("chat", "running");
-    const publisher = new MascotStatusPublisher(publish, () => shell);
+    const publisher = immediatePublisher(publish, () => shell);
     publisher.replace([shell]);
     shell = conversation("chat", "completed");
     const completed = { type: "agent.completed" as const, ...owner, status: "completed" as const, terminalReason: "completed",

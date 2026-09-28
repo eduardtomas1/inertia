@@ -44,6 +44,7 @@ export class MascotMain {
     status: emptyMascotStatus("unavailable"), chats: [], counts: null,
   };
   private pinned: string | null = null;
+  private pinConfirmed = false;
   private window: BrowserWindow | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private drag: { offset: { x: number; y: number }; started: number; gesture: number } | null = null;
@@ -77,7 +78,8 @@ export class MascotMain {
 
   observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null, counts: MascotCounts | null = null): void {
     this.feed = { status, chats, counts };
-    if (this.pinned && focus === this.pinned && !this.pin()) this.choose(null);
+    if (this.pinned && focus === this.pinned) this.pinConfirmed = true;
+    if (this.pinned && this.pinConfirmed && focus !== this.pinned) this.choose(null);
     else this.broadcast();
   }
 
@@ -95,13 +97,17 @@ export class MascotMain {
       throw new Error("The mascot chat has changed. Try again.");
     }
     this.pinned = conversationId;
+    this.pinConfirmed = false;
     this.options.focusChat(conversationId);
     this.broadcast();
   }
 
   runtimePhase(phase: string): void {
     if (phase === "ready") this.options.focusChat(this.pinned);
-    else this.observe(emptyMascotStatus("unavailable"));
+    else {
+      this.pinConfirmed = false;
+      this.observe(emptyMascotStatus("unavailable"));
+    }
   }
 
   attach(): void {

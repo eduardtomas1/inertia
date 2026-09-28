@@ -53,16 +53,28 @@ interface Candidate {
   requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null }>;
 }
 
+const settledRequests: Candidate["requests"] = new Map();
+
+export function keepBest<T>(best: T[], entry: T, limit: number, compare: (left: T, right: T) => number): void {
+  if (best.length === limit && compare(entry, best[limit - 1]!) > 0) return;
+  let index = best.length;
+  while (index > 0 && compare(entry, best[index - 1]!) < 0) index -= 1;
+  best.splice(index, 0, entry);
+  if (best.length > limit) best.pop();
+}
+
 /** Event-driven previews, scoped to the authoritative turn; never retains a transcript. */
 export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
   private projects = new Map<string, string | null>();
   private focused: string | null = null;
+  private pending = false;
   private last = "";
   constructor(
     private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
+    private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
   ) {}
 
   replace(conversations: readonly ConversationShell[], projects: readonly Pick<Project, "id" | "name">[] = []): void {
@@ -174,18 +186,30 @@ export class MascotStatusPublisher {
       // Activity updates must not bounce between live chats.
       at: status.activeCount ? conversation.latestTurn!.requestedAt : conversation.latestTurn!.updatedAt,
       activityAt: keep ? previous.activityAt : "",
-      requests: sameTurn && status.activeCount ? previous.requests : new Map(),
+      requests: !status.activeCount ? settledRequests : sameTurn && previous.status.activeCount ? previous.requests : new Map(),
     });
   }
 
   private emit(): void {
+    if (!this.publish || this.pending) return;
+    this.pending = true;
+    this.schedule(() => {
+      this.pending = false;
+      this.flush();
+    });
+  }
+
+  private flush(): void {
     let activeCount = 0;
     let attention = 0;
-    for (const next of this.conversations.values()) {
-      activeCount += next.status.activeCount;
-      if (priority(next.status) === 4) attention += 1;
+    let focused: Candidate | undefined;
+    const listed: Candidate[] = [];
+    for (const entry of this.conversations.values()) {
+      activeCount += entry.status.activeCount;
+      if (priority(entry.status) === 4) attention += 1;
+      if (entry.status.conversationId === this.focused) focused = entry;
+      keepBest(listed, entry, MASCOT_CHAT_LIMIT, rank);
     }
-    const ranked = [...this.conversations.values()].sort(rank);
     const display = (entry: Candidate): MascotStatus => {
       const request = [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase);
       return { ...entry.status, activeCount,
@@ -193,17 +217,16 @@ export class MascotStatusPublisher {
           : entry.status.phase.startsWith("waiting-") ? { message: null, progress: null } : {}),
       };
     };
-    const selected = ranked[0] && !ranked[0].seen ? ranked[0] : undefined;
+    const selected = listed[0] && !listed[0].seen ? listed[0] : undefined;
     const status = selected ? display(selected) : emptyMascotStatus();
-    const listed = ranked.slice(0, MASCOT_CHAT_LIMIT);
-    const focused = this.focused === null ? undefined : this.conversations.get(this.focused);
     if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
     const chats = listed.map(display);
+    const focus = focused ? this.focused : null;
     const counts = { chats: this.conversations.size, attention };
-    const serialized = JSON.stringify([status, chats, this.focused, counts]);
+    const serialized = JSON.stringify([status, chats, focus, counts]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats, this.focused, counts);
+    this.publish?.(status, chats, focus, counts);
   }
 }
 

@@ -4,7 +4,7 @@ import { parseWindowsTerminalAuthority } from "./windows-terminal-authority";
 import { snapshotSourceSchema } from "../shared/snapshots";
 import { parseDiagnosticIncident } from "../shared/application-diagnostics.js";
 import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
-import { isMascotFocus, parseMascotChats, parseMascotCounts, parseMascotStatus, type MascotCounts, type MascotStatus } from "../shared/mascot.js";
+import { isMascotFocus, parseMascotFeed, type MascotCounts, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
@@ -694,16 +694,9 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     && UUID_PATTERN.test(value.id)
     && typeof value.recorded === "boolean"
   ) return { type: "runtime.system-suspend-result", id: value.id, recorded: value.recorded };
-  if (
-    value.type === "runtime.mascot-status"
-    && Object.keys(value).length === (Object.hasOwn(value, "counts") ? 5 : 4)
-    && isMascotFocus(value.focus)
-  ) {
-    const status = parseMascotStatus(value.status);
-    const chats = parseMascotChats(value.chats);
-    const counts = Object.hasOwn(value, "counts") ? parseMascotCounts(value.counts) : null;
-    if (Object.hasOwn(value, "counts") && !counts) return null;
-    return status && chats ? { type: "runtime.mascot-status", status, chats, focus: value.focus, counts } : null;
+  if (value.type === "runtime.mascot-status" && Object.keys(value).length === (Object.hasOwn(value, "counts") ? 5 : 4)) {
+    const feed = parseMascotFeed(value);
+    return feed ? { type: "runtime.mascot-status", ...feed } : null;
   }
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;

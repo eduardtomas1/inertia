@@ -13,6 +13,10 @@ import type { MascotSpriteImport, MascotSprites } from "../../src/shared/mascot-
 import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
 
+function immediatePublisher(...args: Partial<ConstructorParameters<typeof MascotStatusPublisher>>): MascotStatusPublisher {
+  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task());
+}
+
 const harness = vi.hoisted(() => ({
   options: [] as BrowserWindowConstructorOptions[],
   windows: [] as unknown[],
@@ -149,9 +153,16 @@ describe("mascot chat selection", () => {
     app.focusChat.mockClear();
     app.mascot.runtimePhase("ready");
     expect(app.focusChat).toHaveBeenCalledWith("quiet");
+    app.mascot.observe(urgent, [urgent, quiet], null);
+    expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
     app.mascot.observe(urgent, [urgent, quiet], "quiet");
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
-    app.mascot.observe(urgent, [urgent], "quiet");
+    app.focusChat.mockClear();
+    app.mascot.runtimePhase("restarting");
+    app.mascot.observe(urgent, [urgent], null);
+    expect(app.focusChat).not.toHaveBeenCalled();
+    app.mascot.observe(urgent, [urgent, quiet], "quiet");
+    app.mascot.observe(urgent, [urgent], null);
     expect(app.focusChat).toHaveBeenLastCalledWith(null);
     app.mascot.observe(urgent, [urgent, quiet], null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
@@ -163,7 +174,7 @@ describe("mascot chat selection", () => {
 
   it("keeps a runtime-ranked pin below the list cap and clears it only when the chat is archived or deleted", async () => {
     const app = await fixture();
-    const publisher = new MascotStatusPublisher((status, chats, focus, counts) => app.mascot.observe(status, chats, focus, counts));
+    const publisher = immediatePublisher((status, chats, focus, counts) => app.mascot.observe(status, chats, focus, counts));
     app.focusChat.mockImplementation((conversationId: string | null) => publisher.focus(conversationId));
     const shell = (id: string, state: AgentRunState, extra: Partial<ConversationShell> = {}): ConversationShell => ({
       id, projectId: "project", title: `Chat ${id}`, status: "idle", archivedAt: null, lastViewedAt: "2026-09-06T11:00:00.000Z",

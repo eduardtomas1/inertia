@@ -118,6 +118,28 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   return candidate as unknown as MascotStatus;
 }
 
+export interface MascotFeed {
+  status: MascotStatus;
+  chats: MascotStatus[];
+  focus: string | null;
+  counts: MascotCounts | null;
+}
+
+export function parseMascotFeed(value: Record<string, unknown>): MascotFeed | null {
+  const status = parseMascotStatus(value.status);
+  const chats = parseMascotChats(value.chats);
+  const counts = Object.hasOwn(value, "counts") ? parseMascotCounts(value.counts) : null;
+  const { focus } = value;
+  if (!status || !chats || (Object.hasOwn(value, "counts") && !counts) || !isMascotFocus(focus)) return null;
+  if (focus !== null && !chats.some(({ conversationId }) => conversationId === focus)) return null;
+  if (chats.some(({ activeCount }) => activeCount !== status.activeCount)) return null;
+  const identity = ["projectId", "conversationId", "runId", "turnId", "phase"] as const;
+  if (status.conversationId !== null && identity.some((key) => chats[0]?.[key] !== status[key])) return null;
+  const waiting = chats.filter(({ phase }) => phase === "waiting-for-input" || phase === "waiting-for-approval").length;
+  if (counts && (counts.chats < chats.length || counts.attention < waiting || counts.chats < status.activeCount)) return null;
+  return { status, chats, focus, counts };
+}
+
 export function parseMascotCounts(value: unknown): MascotCounts | null {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2) return null;
   const { chats, attention } = value as Record<string, unknown>;

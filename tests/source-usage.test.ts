@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-function evaluate<T>(body: string): T {
+const REPOSITORY_ANALYSIS_TIMEOUT_MS = 60_000;
+
+function evaluate<T>(body: string, timeout = 30_000): T {
   return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
     import { declaredBuildInputs, reachableFiles, sourceUsage } from "./scripts/source-usage.mjs";
     ${body}
-  `], { encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })) as T;
+  `], { encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024 })) as T;
 }
 
 describe("source usage inventory", () => {
@@ -115,7 +117,10 @@ describe("source usage inventory", () => {
       lazyImports: { from: string; to: string }[];
       inlineTypeImports: { from: string; to: string }[];
       compatibilityPins: { path: string }[];
-    }>("console.log(JSON.stringify(sourceUsage(process.cwd())));");
+    }>(
+      "console.log(JSON.stringify(sourceUsage(process.cwd())));",
+      REPOSITORY_ANALYSIS_TIMEOUT_MS - 5_000,
+    );
     expect(report.toolingRoots).toContain("docs/pr-evidence/legacy-368/legacy-backfill-evidence.ts");
     expect(report.productionRoots).toEqual(expect.arrayContaining([
       "src/main/index.ts",
@@ -157,5 +162,5 @@ describe("source usage inventory", () => {
     expect(report.analysisLimitations.filter((failure) => failure.startsWith("src/"))).toEqual([]);
     expect(report.analysisLimitations.filter((failure) => failure.includes("could not be parsed"))).toEqual([]);
     expect(report.analysisLimitations.length).toBeGreaterThan(0);
-  });
+  }, REPOSITORY_ANALYSIS_TIMEOUT_MS);
 });

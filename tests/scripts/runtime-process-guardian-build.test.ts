@@ -1078,7 +1078,7 @@ describe("runtime guardian build ownership", () => {
     utimesSync(lock.ownerPath, aged, aged);
     const stop = startGuardianBuildLockHeartbeat(lock, { intervalMs: 5 });
     try {
-      await delay(25);
+      await expect.poll(() => statSync(lock.ownerPath).mtimeMs).toBeGreaterThan(aged.getTime());
       expect(statSync(lock.lockPath).mtimeMs).toBeGreaterThan(
         Date.now() - 1_000,
       );

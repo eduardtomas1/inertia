@@ -8,6 +8,7 @@ import {
   capturePageWebSockets,
   publishCapturedWebSocketEvent,
 } from "./support/browser-websocket-fixture";
+import { elapseObservationWindow, waitForStableSample } from "./support/stable-sample";
 import { createWorkingIndicatorFixture } from "./support/working-indicator-fixture";
 
 let app!: AppFixture;
@@ -171,9 +172,8 @@ test("follows the phase in Automatic and keeps the sidebar row in step with the 
   const first = await canvasSignature(workingRowOrb());
   await expect.poll(() => canvasSignature(workingRowOrb())).not.toBe(first);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.waitForTimeout(300);
-  const still = await canvasSignature(workingRowOrb());
-  await page.waitForTimeout(400);
+  const still = await waitForStableSample(() => canvasSignature(workingRowOrb()));
+  await elapseObservationWindow(page, 400);
   expect(await canvasSignature(workingRowOrb())).toBe(still);
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect.poll(() => canvasSignature(workingRowOrb())).not.toBe(still);

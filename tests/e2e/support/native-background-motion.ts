@@ -11,6 +11,7 @@ import { build } from "esbuild";
 import { forceKillPosixProcessTreeWithStatus } from "../../../src/node/posix-process-tree";
 import { settleOperationBounded } from "./electron-app-lifecycle";
 import { forceStopWindowsElectronLauncher } from "./electron-windows-process";
+import { elapseObservationWindow } from "./stable-sample";
 import type { NativeMotionCounters } from "../../fixtures/renderer-background/native-motion";
 
 const require = createRequire(import.meta.url);
@@ -103,7 +104,7 @@ setTimeout(() => app.exit(90), 45_000).unref();
     const hidden = await snapshot();
     expect(hidden.visibility).toBe("hidden");
     expect(hidden.animations.every(({ state }) => state === "paused" || state === "finished")).toBe(true);
-    await page.waitForTimeout(5_000);
+    await elapseObservationWindow(page, 5_000);
     expect(await snapshot()).toEqual(hidden);
     child.stdin!.write("show\n");
     await expect(page.locator("html")).toHaveAttribute("data-document-visible", "true");

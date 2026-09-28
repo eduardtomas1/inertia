@@ -789,9 +789,11 @@ test("keeps cross-project drafts, tools and live terminals independently scoped"
 });
 
 test("keeps split browser actions, evidence and attachment previews scoped", async ({ browserName: _browserName }, testInfo) => {
+  expect(scopedPanes, "the scoped-tools checkpoint must open the split first").toBeDefined();
   scopedBrowsers = await verifyScopedBrowsers(testInfo, scopedPanes);
 });
 
 test("preserves the same drafts, shells and browsers after pane promotion and narrowing", async ({ browserName: _browserName }, testInfo) => {
+  expect(scopedBrowsers, "the scoped-browsers checkpoint must open both browsers first").toBeDefined();
   await verifyPromotion(testInfo, scopedBrowsers);
 });

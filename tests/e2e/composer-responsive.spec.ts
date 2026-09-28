@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { expectComposerEndsAtDock, expectComposerReadinessContained, verifyMobileNavigationControls } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { waitForStableSample } from "./support/stable-sample";
 import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from "./support/runtime-connection-evidence";
 import {
   createComposerResponsiveHelpers,
@@ -443,10 +444,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         "Keep controls aligned.",
       ].join("\n"),
     );
-    await page.waitForTimeout(200);
-    const grownTextareaHeight = await textbox.evaluate(
+    const grownTextareaHeight = await waitForStableSample(() => textbox.evaluate(
       (element) => element.getBoundingClientRect().height,
-    );
+    ), { accept: (height) => height > initialTextareaHeight });
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
     expect(grownTextareaHeight).toBeLessThanOrEqual(176);
     await textbox.fill("");

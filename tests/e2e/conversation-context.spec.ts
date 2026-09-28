@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { ensureWorkspaceTools, closeWorkspaceTools } from "./support/workspace-tools";
+import { waitForStableSample } from "./support/stable-sample";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
 import {
   createAppFixture,
@@ -290,10 +291,13 @@ test("references a whole chat from the composer and preserves its provenance", a
   });
   await capture("conversation-context-preview-1280x820");
 
+  const pixelRatioAt100 = await page.evaluate(() => window.devicePixelRatio);
   await electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.25);
   });
-  await page.waitForTimeout(200);
+  await expect.poll(() => page.evaluate(() => window.devicePixelRatio))
+    .toBeCloseTo(pixelRatioAt100 * 1.25, 5);
+  await waitForStableSample(() => preview.boundingBox());
   await expect(preview).toBeInViewport();
   const boundsAt125 = await preview.boundingBox();
   const viewportAt125 = await page.evaluate(() => ({

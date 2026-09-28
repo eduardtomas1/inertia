@@ -11,6 +11,7 @@ import {
 } from "./support/app-fixture";
 import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
 import { loadSeededConversationTurns } from "./support/conversation-history";
+import { elapseObservationWindow, waitForTranscriptSettled } from "./support/stable-sample";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -341,7 +342,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await scrollToMiddle();
     await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
     await expect.poll(() => virtualWindow.locator(".response-virtual-item").count()).toBeLessThan(24);
-    await page.waitForTimeout(500);
+    await waitForTranscriptSettled(transcript);
     const expansionProbe = async (summarySelector: string): Promise<{
       anchorId: string;
       sourceId: string;
@@ -366,14 +367,14 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     }, summarySelector);
     const expectExpansionAnchored = async (summarySelector: string): Promise<void> => {
       await scrollToMiddle();
-      await page.waitForTimeout(250);
+      await waitForTranscriptSettled(transcript);
       let probe = await expansionProbe(summarySelector);
       expect(probe).not.toBeNull();
       if (!probe) return;
       let details = page.locator(`[data-turn-id="${probe.sourceId}"]`).locator(summarySelector).locator("..");
       if (await details.getAttribute("open") !== null) {
         await details.locator("summary").click();
-        await page.waitForTimeout(250);
+        await waitForTranscriptSettled(transcript);
         probe = await expansionProbe(summarySelector);
         expect(probe).not.toBeNull();
         if (!probe) return;
@@ -393,7 +394,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
       expectedExpandedContent?: string,
     ): Promise<void> => {
       await scrollToMiddle();
-      await page.waitForTimeout(250);
+      await waitForTranscriptSettled(transcript);
       const probe = await expansionProbe(selector);
       expect(probe).not.toBeNull();
       if (!probe) return;
@@ -437,7 +438,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect(page.locator('[data-turn-jump-target="artifact"]:focus')).toHaveCount(1);
 
     await scrollToMiddle();
-    await page.waitForTimeout(250);
+    await waitForTranscriptSettled(transcript);
     const captureReaderAnchor = () => page.evaluate(() => {
       const viewport = document.querySelector<HTMLElement>(".message-scroll")?.getBoundingClientRect();
       if (!viewport) return null;
@@ -536,7 +537,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
 
       const scenarioTranscript = page.getByLabel("Thread transcript");
       await scrollToMiddle();
-      await page.waitForTimeout(350);
+      await waitForTranscriptSettled(scenarioTranscript);
       await expect.poll(() => scenarioTranscript.locator(".response-virtual-item").count()).toBeLessThan(24);
       await expect.poll(() => page.evaluate(() => {
         const transcriptElement = document.querySelector<HTMLElement>(".message-scroll");
@@ -594,7 +595,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
         expect(geometry.rowsInsideTranscript).toBe(true);
         expect(geometry.rowsDoNotOverlap).toBe(true);
         expect(geometry.minimapClearOfText).toBe(true);
-        await page.waitForTimeout(160);
+        await elapseObservationWindow(page, 160);
         const stableGeometry = await page.evaluate(() => {
           const transcriptElement = document.querySelector<HTMLElement>(".message-scroll");
           const firstRow = [...document.querySelectorAll<HTMLElement>(".response-virtual-item")]

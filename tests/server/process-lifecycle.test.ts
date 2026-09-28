@@ -419,9 +419,10 @@ describe("provider process-tree termination", () => {
       },
     );
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    expect(taskkill.kill).toHaveBeenCalledWith("SIGKILL");
-    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    await vi.waitFor(() => {
+      expect(taskkill.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    });
 
     child.exitCode = 1;
     child.emit("close", 1);

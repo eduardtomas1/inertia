@@ -135,6 +135,31 @@ describe("mascot chat list", () => {
     expect(publish.mock.lastCall?.[1]).toContainEqual(expect.objectContaining({ conversationId: "d", projectName: "Fresh project" }));
   });
 
+  it("names many snapshot chats without a project query per chat and follows renames and removals", () => {
+    const publish = vi.fn();
+    const lookup = vi.fn((id: string) => `Stored ${id}`);
+    const publisher = new MascotStatusPublisher(publish, undefined, lookup);
+    const chats = Array.from({ length: 60 }, (_, index) => ({
+      ...conversation(`chat-${String(index).padStart(2, "0")}`, "running"), projectId: `project-${index % 3}`,
+    }));
+    const projects = [{ id: "project-0", name: "Alpha" }, { id: "project-1", name: "Beta" }, { id: "project-2", name: "Gamma" }];
+    publisher.replace(chats, projects);
+    publisher.replace(chats.map((chat) => ({ ...chat, title: `${chat.title} again` })), projects);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName))
+      .toEqual(["Alpha", "Beta", "Gamma", "Alpha", "Beta", "Gamma", "Alpha", "Beta"]);
+    publisher.replace(chats, [{ id: "project-0", name: "Renamed" }, ...projects.slice(1)]);
+    expect(publish.mock.lastCall?.[1][0]).toMatchObject({ conversationId: "chat-00", projectName: "Renamed" });
+    publisher.replace(chats.filter(({ projectId }) => projectId !== "project-0"), projects.slice(1));
+    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName)).not.toContain("Renamed");
+    publisher.replace(chats.slice(0, 2), []);
+    expect(lookup.mock.calls).toEqual([["project-0"], ["project-1"]]);
+    publisher.update({ ...chats[0]!, title: "Updated" });
+    publisher.replace(chats.slice(0, 2), [{ id: "project-0", name: "Alpha again" }, { id: "project-1", name: "Beta" }]);
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(publish.mock.lastCall?.[1][0]).toMatchObject({ conversationId: "chat-00", projectName: "Alpha again" });
+  });
+
   it("keeps plan steps with their turn and clears them when the turn ends", () => {
     const publish = vi.fn();
     let shell = conversation("chat", "running");

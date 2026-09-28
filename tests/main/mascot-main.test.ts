@@ -5,7 +5,10 @@ import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } f
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
-import { emptyMascotStatus, MASCOT_IPC, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_IPC, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
+import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
+import type { ConversationShell } from "../../src/shared/contracts/app";
+import { agentTurnStatusForRunState, type AgentRunState } from "../../src/shared/run-state";
 import type { MascotSpriteImport, MascotSprites } from "../../src/shared/mascot-sprites";
 import { writeMascotSpriteTemplate } from "../../src/main/mascot-sprites";
 import { readMascotWindowState } from "../../src/main/mascot-placement";
@@ -152,6 +155,47 @@ describe("mascot chat selection", () => {
     await app.invoke(MASCOT_IPC.action, ["pin", null], overlay);
     expect(app.focusChat).toHaveBeenLastCalledWith(null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null });
+  });
+
+  it("keeps a runtime-ranked pin below the list cap and clears it only when the chat is archived or deleted", async () => {
+    const app = await fixture();
+    const publisher = new MascotStatusPublisher((status, chats, focus) => app.mascot.observe(status, chats, focus));
+    app.focusChat.mockImplementation((conversationId: string | null) => publisher.focus(conversationId));
+    const shell = (id: string, state: AgentRunState, extra: Partial<ConversationShell> = {}): ConversationShell => ({
+      id, projectId: "project", title: `Chat ${id}`, status: "idle", archivedAt: null, lastViewedAt: "2026-09-06T11:00:00.000Z",
+      latestTurn: {
+        id: `${id}-turn`, runId: `${id}-run`, status: agentTurnStatusForRunState(state), runState: { state, revision: 1 },
+        completedAt: "2026-09-06T10:00:00.000Z", requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:00:00.000Z",
+      },
+      ...extra,
+    }) as ConversationShell;
+    const listed = () => app.mascot.snapshot().chats!.map(({ conversationId }) => conversationId);
+    const pinned = shell("pinned", "completed");
+    const busy = Array.from({ length: 2 * MASCOT_CHAT_LIMIT }, (_, index) => shell(`busy-${String(index).padStart(2, "0")}`, "running"));
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    await app.invoke(MASCOT_IPC.action, ["pin", "pinned"]);
+    expect(app.focusChat).toHaveBeenLastCalledWith("pinned");
+    publisher.replace([pinned, ...busy], [{ id: "project", name: "Inertia" }]);
+    expect(listed()).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(listed()).toContain("pinned");
+    expect(listed().filter((id) => id !== "pinned")).toEqual(busy.slice(0, MASCOT_CHAT_LIMIT - 1).map(({ id }) => id));
+    expect(app.mascot.snapshot()).toMatchObject({
+      pinned: "pinned",
+      status: { conversationId: "pinned", phase: "completed", projectName: "Inertia", turnId: "pinned-turn" },
+    });
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    expect(listed()).toEqual(["busy-00", "busy-01", "pinned"]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: "pinned", status: { conversationId: "pinned" } });
+    publisher.replace([{ ...pinned, archivedAt: "2026-09-06T12:00:00.000Z" }, ...busy], [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "busy-00" } });
+    expect(app.focusChat).toHaveBeenLastCalledWith(null);
+    publisher.replace([pinned, ...busy.slice(0, 2)], [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null });
+    await app.invoke(MASCOT_IPC.action, ["pin", "pinned"]);
+    publisher.replace(busy, [{ id: "project", name: "Inertia" }]);
+    expect(app.mascot.snapshot()).toMatchObject({ pinned: null, status: { conversationId: "busy-00" } });
+    expect(listed()).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(app.focusChat).toHaveBeenLastCalledWith(null);
   });
 });
 

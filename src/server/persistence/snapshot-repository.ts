@@ -48,6 +48,7 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
+import { CONVERSATION_HAS_HISTORY_SQL } from "./conversation-provider-policy";
 import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from "../../shared/conversation-history";
 import {
   conversationStoredBytes,
@@ -66,6 +67,7 @@ import {
   REASONING_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
 
+type ConversationShellRow = ConversationRow & { has_history: number };
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
@@ -163,9 +165,10 @@ export class SnapshotRepository {
       projects: (this.context.database.prepare(
         "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
       ).all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.context.database.prepare(
-        "SELECT * FROM conversations ORDER BY updated_at DESC, id ASC",
-      ).all() as ConversationRow[]).map((row) =>
+      conversations: (this.context.database.prepare(`
+        SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
+        FROM conversations ORDER BY updated_at DESC, id ASC
+      `).all() as ConversationShellRow[]).map((row) =>
         conversationShellFromRow(row, latestTurns.get(row.id) ?? null)),
       runs: (this.context.database.prepare(
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
@@ -179,9 +182,10 @@ export class SnapshotRepository {
   }
 
   conversationShell(conversationId: string): ConversationShell | null {
-    const row = this.context.database.prepare(
-      "SELECT * FROM conversations WHERE id = ?",
-    ).get(conversationId) as ConversationRow | undefined;
+    const row = this.context.database.prepare(`
+      SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
+      FROM conversations WHERE id = ?
+    `).get(conversationId) as ConversationShellRow | undefined;
     if (!row) return null;
     const latestTurn = this.context.database.prepare(`
       SELECT * FROM agent_turns

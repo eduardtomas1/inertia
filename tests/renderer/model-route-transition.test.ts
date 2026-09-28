@@ -62,6 +62,7 @@ function context(
       continuationIdentity: candidate.continuationIdentity,
     },
     hasProviderSession: true,
+    hasHistory: true,
     ...update,
   };
 }
@@ -302,7 +303,7 @@ describe("model route transition policy", () => {
         continuationIdentity: null,
         latestTurn: evidence === "turn" ? { selection, continuationIdentity: current.continuationIdentity } : null,
         hasProviderSession: evidence === "session",
-        hasVisibleHistory: evidence === "restored-history",
+        hasHistory: evidence === "restored-history",
       }), next);
       expect(transition).toMatchObject(evidence === "unused-draft" ? {
         kind: "update-current-conversation",
@@ -328,7 +329,7 @@ describe("model route transition policy", () => {
         continuationIdentity: evidence === "session" ? identity : null,
         latestTurn: evidence === "turn" ? { selection, continuationIdentity: identity } : null,
         hasProviderSession: evidence === "session",
-        hasVisibleHistory: evidence === "history",
+        hasHistory: evidence === "history",
       }, nativeCandidate(providerNativeModelSelection({ providerId: "claude" })));
       expect(transition).toMatchObject({
         kind: "create-new-conversation",
@@ -417,6 +418,7 @@ describe("model route transition policy", () => {
       continuationIdentity: null,
       latestTurn: null,
       hasProviderSession: false,
+      hasHistory: false,
     }, nextCandidate)).toMatchObject({
       kind: "update-current-conversation",
       reasonCode: "first-turn",

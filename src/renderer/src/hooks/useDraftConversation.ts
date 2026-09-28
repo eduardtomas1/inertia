@@ -762,9 +762,15 @@ export function useDraftConversation({
       : null,
     [draftConversation, materializedConversationId],
   );
+  const conversation = useMemo(
+    () => draftConversation && !materializedConversationId
+      ? { ...draftConversation, hasHistory: false }
+      : draftConversation ?? null,
+    [draftConversation, materializedConversationId],
+  );
 
   return {
-    conversation: draft?.conversation ?? null,
+    conversation,
     workspaceConversation,
     layoutConversationId: draft?.materialized?.conversationId ?? draft?.conversation.id ?? null,
     requiresWorkspaceMaterialization: Boolean(

@@ -273,13 +273,14 @@ describe("RuntimeStore conversation lifecycle", () => {
     const { store } = await createStore();
     const first = store.snapshot().conversations[0]!;
     const second = store.createConversation(first.projectId, "Second chat");
-    const shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
     const messageCount = 100;
     const payload = "x".repeat(4_096);
+    let shellSizeBefore = 0;
 
     for (let index = 0; index < messageCount; index += 1) {
       store.createMessage(first.id, `first:${index}:${payload}`);
       store.createMessage(second.id, `second:${index}:${payload}`);
+      if (index === 0) shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
     }
 
     const shell = store.shellSnapshot();
@@ -288,6 +289,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(shell).not.toHaveProperty("messages");
     expect(shell.conversations).toHaveLength(2);
     expect(shell.conversations.every(({ latestTurn }) => latestTurn === null)).toBe(true);
+    expect(shell.conversations.every(({ hasHistory }) => hasHistory === true)).toBe(true);
 
     const firstDetail = store.conversationDetail(first.id);
     expect(firstDetail?.conversation.id).toBe(first.id);

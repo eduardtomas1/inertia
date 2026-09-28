@@ -1,11 +1,13 @@
 import { providerIdForHarness } from "../../../shared/model-routing";
 import type {
   ContinuationIdentity,
+  Conversation,
   HarnessBackendCompatibility,
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
 import {
+  conversationHasHistory,
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
@@ -30,7 +32,7 @@ export interface ModelRouteTransitionContext {
   } | null;
   /** Only session presence is accepted; session identifiers never enter this policy. */
   hasProviderSession: boolean;
-  hasVisibleHistory?: boolean;
+  hasHistory: boolean;
 }
 
 export interface ModelRouteTransitionCandidate {
@@ -61,6 +63,23 @@ export type ModelRouteTransition =
       continuationAction: "new-conversation-required";
     });
 
+export function modelRouteTransitionContext(
+  conversation: Conversation,
+  latestTurn: { modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
+): ModelRouteTransitionContext {
+  return {
+    projectId: conversation.projectId,
+    providerId: conversation.providerId,
+    selection: conversation.modelSelection,
+    continuationIdentity: conversation.continuationIdentity,
+    latestTurn: latestTurn
+      ? { selection: latestTurn.modelSelection, continuationIdentity: latestTurn.continuationIdentity }
+      : null,
+    hasProviderSession: Boolean(conversation.providerSessionId),
+    hasHistory: conversationHasHistory(conversation),
+  };
+}
+
 /**
  * Plans a chooser route change without accepting or returning a provider
  * session identifier. The shared continuation policy remains authoritative.
@@ -77,7 +96,7 @@ export function resolveModelRouteTransition(
     previousProviderId: providerIdForHarness(
       context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
     ) ?? context.providerId,
-    hasMessages: context.hasVisibleHistory,
+    hasHistory: context.hasHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,
     previousModelId,

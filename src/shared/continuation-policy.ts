@@ -77,9 +77,13 @@ export interface ContinuationDecision {
 export const CHAT_PROVIDER_CHANGE_MESSAGE =
   "Start a new chat to use a different provider. This chat keeps its original provider and history.";
 
+export function conversationHasHistory(conversation: { hasHistory?: boolean }): boolean {
+  return conversation.hasHistory !== false;
+}
+
 export interface ContinuationDecisionInput {
   previousProviderId?: ProviderId;
-  hasMessages?: boolean;
+  hasHistory?: boolean;
   previousIdentity: ContinuationIdentity | null;
   nextIdentity: ContinuationIdentity;
   previousModelId: string | null;
@@ -229,7 +233,7 @@ export function resolveContinuationDecision(
   input: ContinuationDecisionInput,
 ): ContinuationDecision {
   const establishedConversation = input.hasTurns || input.hasProviderSession
-    || input.hasMessages === true;
+    || input.hasHistory === true;
   const previousProviderId = input.previousProviderId
     ?? (input.previousIdentity ? providerIdForHarness(input.previousIdentity.harnessId) : null);
   const nextProviderId = providerIdForHarness(input.nextIdentity.harnessId);

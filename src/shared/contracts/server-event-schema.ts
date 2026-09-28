@@ -213,7 +213,8 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "settledAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
-    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key));
+    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key))
+    && optionalBooleanField(value, "hasHistory");
 }
 
 function conversationShell(value: unknown): boolean {

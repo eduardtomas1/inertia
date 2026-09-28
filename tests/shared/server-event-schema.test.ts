@@ -5,6 +5,7 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
+import { conversationHasHistory } from "../../src/shared/continuation-policy";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 const selection = providerNativeModelSelection({
@@ -969,6 +970,19 @@ describe("server event conversation discriminant boundary", () => {
       type: "request.result",
       result: { kind: "conversation.detail", state: "ready" },
     });
+  });
+  it("decodes shells from before history was published as established history", () => {
+    const decoded = parseServerEvent(snapshotEvent(conversationShell));
+    if (decoded.type !== "conversation.shell.updated") throw new Error("Expected a shell event.");
+    expect(decoded.conversation).not.toHaveProperty("hasHistory");
+    expect(conversationHasHistory(decoded.conversation)).toBe(true);
+    for (const hasHistory of [true, false]) {
+      const published = parseServerEvent(snapshotEvent({ ...conversationShell, hasHistory }));
+      if (published.type !== "conversation.shell.updated") throw new Error("Expected a shell event.");
+      expect(conversationHasHistory(published.conversation)).toBe(hasHistory);
+    }
+    expect(() => parseServerEvent(snapshotEvent({ ...conversationShell, hasHistory: "no" })))
+      .toThrow("Malformed server event");
   });
   it("accepts only finite continuation reason codes in shell and turn projections", () => {
     expect(parseServerEvent(snapshotEvent({

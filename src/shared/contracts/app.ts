@@ -264,6 +264,7 @@ export interface Conversation {
   pinnedAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */
   snoozedUntil?: string | null;
+  hasHistory?: boolean;
   createdAt: string;
   updatedAt: string;
 }

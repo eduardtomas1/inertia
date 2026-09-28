@@ -344,7 +344,7 @@ function conversationTurnSummary(
 }
 
 export function conversationShellFromRow(
-  row: ConversationRow,
+  row: ConversationRow & { has_history: number },
   latestTurn: AgentTurn | null,
 ): ConversationShell {
   const conversation = conversationFromRow(row);
@@ -371,6 +371,7 @@ export function conversationShellFromRow(
     markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
+    hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     latestTurn: conversationTurnSummary(latestTurn),

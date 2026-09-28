@@ -8,7 +8,14 @@ import { RuntimeStore } from "../../src/server/database";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { resolveTurnRequest, type PrepareTurnRequestDependencies } from "../../src/server/runtime/turns/turn-request-preparation";
-import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
+import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../src/renderer/src/utils/modelRouteTransition";
+import {
+  continuationIdentityForSelection,
+  modelSelectionSchema,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
+  resolveHarnessBackendCompatibility,
+} from "../../src/shared/model-routing";
 import type { ProviderId } from "../../src/shared/contracts";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
@@ -174,6 +181,46 @@ describe("chat provider isolation", () => {
     store.archiveConversation(conversation.id, true);
     expect(store.conversation(conversation.id).archivedAt).not.toBeNull();
     expect([store.agentTurn(first.turn.id), store.agentTurn(second.turn.id)]).toEqual(before);
+  });
+
+  it.each([
+    ["an unused draft", false],
+    ["a system-only history", true],
+    ["a user message", true],
+    ["a provider session", true],
+    ["a continuation identity", true],
+    ["a turn", true],
+  ] as const)("publishes the durable history fact the chooser and server share for %s", (evidence, established) => {
+    const { store, conversation, turnInput, databasePath } = fixture();
+    const codexSelection = providerNativeModelSelection({ providerId: "codex" });
+    if (evidence === "a system-only history") store.createMessage(conversation.id, "Context marker", "system");
+    if (evidence === "a user message") store.createMessage(conversation.id, "Restored history");
+    if (evidence === "a provider session") store.updateConversation(conversation.id, { providerSessionId: "codex-session" });
+    if (evidence === "a turn") store.beginAgentTurn(turnInput("codex"));
+    if (evidence === "a continuation identity") {
+      const database = new Database(databasePath);
+      database.prepare("UPDATE conversations SET continuation_identity_json = ? WHERE id = ?")
+        .run(JSON.stringify(continuationIdentityForSelection(codexSelection)), conversation.id);
+      database.close();
+    }
+    const shell = store.conversationShell(conversation.id)!;
+    expect(shell.hasHistory).toBe(established);
+    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.hasHistory).toBe(established);
+    let serverRejects = false;
+    try {
+      store.assertConversationProvider(conversation.id, "claude", true);
+    } catch (error) {
+      expect((error as Error).message).toContain(guidance);
+      serverRejects = true;
+    }
+    const claudeSelection = providerNativeModelSelection({ providerId: "claude" });
+    const transition = resolveModelRouteTransition(modelRouteTransitionContext(shell, shell.latestTurn), {
+      selection: claudeSelection,
+      continuationIdentity: continuationIdentityForSelection(claudeSelection),
+      compatibility: resolveHarnessBackendCompatibility("claude-agent-sdk", providerNativeBackendProfile("claude")),
+    });
+    expect(serverRejects).toBe(established);
+    expect(transition.kind === "create-new-conversation").toBe(established);
   });
 
   it("keeps the in-flight configuration guard for same-provider updates", async () => {

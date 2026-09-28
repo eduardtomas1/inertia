@@ -267,6 +267,9 @@ describe("CommandPalette behavior", () => {
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(onNewThreadIn).toHaveBeenCalledTimes(1);
+    screen.getByRole("button", { name: "Close search" }).focus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 
   it("reaches the new chat project choice from search and steps back to it", async () => {
@@ -286,8 +289,10 @@ describe("CommandPalette behavior", () => {
     expect(search).toHaveValue("");
     expect(screen.getByText("Back")).toBeInTheDocument();
 
+    screen.getByRole("button", { name: "Close search" }).focus();
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" })).toHaveFocus();
     expect(onClose).not.toHaveBeenCalled();
 
     await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new chat in");

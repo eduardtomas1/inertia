@@ -195,6 +195,10 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         aria-label={choosingProject ? "New chat in project" : "Search Inertia"}
         onKeyDown={(event) => {
           trapModalFocus(event, event.currentTarget);
+          if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          if (choosingProject && initialView === "search") changeView("search");
+          else closePalette();
         }}
       >
         <div className="palette-search">
@@ -206,11 +210,6 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
             onChange={(event) => { opening.current?.abort(); setOpenError(false); setQuery(event.target.value); setActiveId(null); }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
-              if (event.key === "Escape") {
-                event.preventDefault();
-                if (choosingProject && initialView === "search") changeView("search");
-                else closePalette();
-              }
               if (event.key === "Backspace" && choosingProject && initialView === "search" && !event.currentTarget.value) { event.preventDefault(); changeView("search"); }
               if (event.key === "ArrowDown") { event.preventDefault(); setActiveId(items[(activeIndex + 1) % items.length]?.id ?? null); }
               if (event.key === "ArrowUp") { event.preventDefault(); setActiveId(items[(activeIndex - 1 + items.length) % items.length]?.id ?? null); }

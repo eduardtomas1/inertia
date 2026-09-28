@@ -118,43 +118,6 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   return candidate as unknown as MascotStatus;
 }
 
-export interface MascotFeed {
-  status: MascotStatus;
-  chats: MascotStatus[];
-  focus: string | null;
-  counts: MascotCounts | null;
-  request?: number | null;
-}
-
-export function parseMascotFeed(value: Record<string, unknown>): MascotFeed | null {
-  const status = parseMascotStatus(value.status);
-  const chats = parseMascotChats(value.chats);
-  const counts = Object.hasOwn(value, "counts") ? parseMascotCounts(value.counts) : null;
-  const { focus } = value;
-  if (!status || !chats || (Object.hasOwn(value, "counts") && !counts) || !isMascotFocus(focus)) return null;
-  if (focus !== null && !chats.some(({ conversationId }) => conversationId === focus)) return null;
-  if (chats.some(({ activeCount }) => activeCount !== status.activeCount)) return null;
-  const identity = ["projectId", "conversationId", "runId", "turnId", "phase"] as const;
-  if (status.conversationId !== null && identity.some((key) => chats[0]?.[key] !== status[key])) return null;
-  const waiting = chats.filter(({ phase }) => phase === "waiting-for-input" || phase === "waiting-for-approval").length;
-  if (counts && (counts.chats < chats.length || counts.attention < waiting || counts.chats < status.activeCount)) return null;
-  if (!Object.hasOwn(value, "request")) return { status, chats, focus, counts };
-  const { request } = value;
-  return request === null || isMascotRequest(request) ? { status, chats, focus, counts, request } : null;
-}
-
-export function parseMascotCounts(value: unknown): MascotCounts | null {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2) return null;
-  const { chats, attention } = value as Record<string, unknown>;
-  return Number.isSafeInteger(chats) && Number.isSafeInteger(attention) && (attention as number) >= 0
-    && (attention as number) <= (chats as number) && (chats as number) <= 1_000_000
-    ? { chats: chats as number, attention: attention as number } : null;
-}
-
-export function isMascotRequest(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 2_147_483_647;
-}
-
 export function isMascotFocus(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && value.length > 0 && value.length <= 200 && !/[\x00-\x1f\x7f]/u.test(value));
 }

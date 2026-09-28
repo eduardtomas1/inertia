@@ -4,6 +4,7 @@ import { AGENT_RUN_STATES, agentTurnStatusForRunState, type AgentRunState } from
 import { keepBest, MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
 import { MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../src/shared/mascot";
 import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
+import { mascotFeedViolation } from "../../src/shared/mascot-feed";
 
 type Published = [MascotStatus, MascotStatus[], string | null, MascotCounts, number | null];
 
@@ -70,6 +71,7 @@ function observed([status, chats, focus, counts]: Published) {
 
 function expectParsable([status, chats, focus, counts, request]: Published): void {
   const event = { type: "runtime.mascot-status", status, chats, focus, counts, request };
+  expect(mascotFeedViolation({ status, chats, focus, counts, request })).toBeNull();
   expect(parseRuntimeWorkerEvent(event)).toEqual(event);
 }
 
@@ -141,6 +143,31 @@ describe("bounded mascot ranking", () => {
         expect(published[4]).toBe(request || null);
         expect(observed(published)).toEqual(reference(shells.values(), focus));
       }
+    }
+  });
+
+  it("emits only feeds the boundary accepts for empty, settled, urgent, oversized and pinned edge cases", () => {
+    const at: { requested: string; updated: string; viewed: string | null } = { requested: TIMES[0]!, updated: TIMES[1]!, viewed: null };
+    const seen = { ...at, viewed: TIMES[2]! };
+    const many = (prefix: string, state: AgentRunState, count: number, times = at): ConversationShell[] =>
+      Array.from({ length: count }, (_, index) => shell(`${prefix}-${String(index).padStart(2, "0")}`, state, times));
+    const cases: Array<[string, ConversationShell[], string | null]> = [
+      ["none", [], null],
+      ["all settled and seen", [...many("done", "completed", 5, seen), ...many("failed", "failed", 5, seen)], null],
+      ["all settled and unseen", [...many("done", "completed", 4), ...many("stopped", "interrupted", 7)], null],
+      ["all need you", [...many("input", "waiting-for-input", 7), ...many("approval", "waiting-for-approval", 7)], null],
+      ["more than the cap", [...many("run", "running", 12), ...many("done", "completed", 12, seen)], null],
+      ["pinned settled chat", [...many("input", "waiting-for-input", 12), shell("pinned", "completed", seen)], "pinned"],
+      ["pinned chat that needs you", [...many("run", "running", 12), shell("pinned", "waiting-for-approval", at)], "pinned"],
+      ["archived pin", [...many("run", "running", 3), shell("pinned", "completed", seen, true)], "pinned"],
+    ];
+    for (const [, shells, pinned] of cases) {
+      const publish = vi.fn<(...args: Published) => void>();
+      const publisher = new MascotStatusPublisher(publish, undefined, undefined, (task) => task());
+      publisher.replace(shells);
+      if (pinned) publisher.focus(pinned, 1);
+      for (const published of publish.mock.calls) expectParsable(published);
+      expect(observed(publish.mock.lastCall!)).toEqual(reference(shells, pinned && shells.some(({ id, archivedAt }) => id === pinned && !archivedAt) ? pinned : null));
     }
   });
 

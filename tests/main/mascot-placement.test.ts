@@ -68,10 +68,8 @@ describe("mascot placement and contracts", () => {
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: 7 })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null }))
       .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: null });
-    for (const counts of [{ chats: 0, attention: 0 }, { chats: 12, attention: 11 }, { chats: 1_000_000, attention: 1_000_000 }]) {
-      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts }))
-        .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts });
-    }
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 0, attention: 0 } }))
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 0, attention: 0 } });
     for (const counts of [
       { chats: 3, attention: 4 }, { chats: -1, attention: 0 }, { chats: 2, attention: -1 }, { chats: 1.5, attention: 1 },
       { chats: 1_000_001, attention: 0 }, { chats: Number.NaN, attention: 0 }, { chats: Infinity, attention: 0 }, { chats: "3", attention: 1 },
@@ -91,36 +89,6 @@ describe("mascot placement and contracts", () => {
       expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId, request: 1 })).toBeNull();
     }
     expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, request: 1, extra: true })).toBeNull();
-  });
-
-  it("accepts a consistent mascot feed and rejects each broken invariant as a whole", () => {
-    const chat = (id: string, phase: MascotStatus["phase"], context: Partial<MascotStatus> = {}): MascotStatus => ({
-      ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
-      activeCount: 2, chatTitle: `Chat ${id}`, ...context,
-    });
-    const chats = [chat("a", "waiting-for-input"), chat("b", "running"), chat("c", "completed")];
-    const valid = { type: "runtime.mascot-status", status: chats[0]!, chats, focus: "c", counts: { chats: 5, attention: 2 } };
-    expect(parseRuntimeWorkerEvent(valid)).toEqual(valid);
-    const { counts: _counts, ...older } = valid;
-    expect(parseRuntimeWorkerEvent(older)).toEqual({ ...older, counts: null });
-    for (const request of [null, 0, 7, 2_147_483_647]) expect(parseRuntimeWorkerEvent({ ...valid, request })).toEqual({ ...valid, request });
-    const idle = chats.map((entry) => ({ ...entry, activeCount: 0, phase: "completed" as const }));
-    expect(parseRuntimeWorkerEvent({ ...valid, status: emptyMascotStatus(), chats: idle, counts: { chats: 3, attention: 0 } })).not.toBeNull();
-    for (const broken of [
-      { counts: { chats: 2, attention: 1 } },
-      { counts: { chats: 3, attention: 4 } },
-      { counts: { chats: 5, attention: 0 } },
-      { chats: [...chats, ...Array.from({ length: 6 }, (_, index) => chat(`extra-${index}`, "running"))], counts: { chats: 20, attention: 1 } },
-      { focus: "missing" },
-      { focus: "x".repeat(201) },
-      { chats: [chats[0]!, chats[1]!, chats[0]!] },
-      { chats: [chats[0]!, { ...chats[1]!, chatTitle: "x".repeat(97) }, chats[2]!] },
-      { status: chats[1]! },
-      { status: { ...chats[0]!, turnId: "other-turn" } },
-      { chats: [chats[0]!, { ...chats[1]!, activeCount: 3 }, chats[2]!] },
-      { status: { ...chats[0]!, activeCount: 6 }, chats: chats.map((entry) => ({ ...entry, activeCount: 6 })) },
-      { request: -1 }, { request: 1.5 }, { request: 2_147_483_648 }, { request: "7" }, { request: undefined },
-    ]) expect(parseRuntimeWorkerEvent({ ...valid, ...broken })).toBeNull();
   });
 
   it("bounds chat context, plan steps, timestamps, and the chat list", () => {

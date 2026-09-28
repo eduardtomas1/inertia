@@ -121,6 +121,18 @@ describe("Private Connect loopback gateway", () => {
     const [error] = await once(socket, "error") as [NodeJS.ErrnoException];
     expect(error.code).toBe("ECONNREFUSED");
   });
+  it("closes a listener that was still binding when stopped", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const server = new PrivateConnectGatewayServer({ host: host(), staticRoot: root });
+    servers.push(server);
+    const started = server.start();
+    const startFailure = expect(started).rejects.toThrow("The Private Connect gateway stopped before it started.");
+    await server.stop();
+    await startFailure;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.address()).toBeNull();
+  });
   it("caps sockets per device and shares the request quota across its sockets", async () => {
     const gatewayHost = host();
     gatewayHost.consumeWebSocketTicket = (ticket) => ticket === "other"

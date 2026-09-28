@@ -67,7 +67,15 @@ describe("mascot placement and contracts", () => {
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: 7 })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: "chat" }))
-      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: "chat" });
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: "chat", attention: null });
+    for (const attention of [0, 12, 1_000_000]) {
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, attention }))
+        .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, attention });
+    }
+    for (const attention of [-1, 1.5, 1_000_001, Number.NaN, Infinity, "3", null, undefined]) {
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, attention })).toBeNull();
+    }
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, attention: 1, extra: 1 })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat" }))
       .toEqual({ type: "runtime.mascot-focus", conversationId: "chat" });
     expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null }))

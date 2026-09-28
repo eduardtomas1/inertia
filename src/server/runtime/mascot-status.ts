@@ -60,7 +60,7 @@ export class MascotStatusPublisher {
   private focused: string | null = null;
   private last = "";
   constructor(
-    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null) => void,
+    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, attention: number) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
   ) {}
@@ -180,7 +180,11 @@ export class MascotStatusPublisher {
 
   private emit(): void {
     let activeCount = 0;
-    for (const next of this.conversations.values()) activeCount += next.status.activeCount;
+    let attention = 0;
+    for (const next of this.conversations.values()) {
+      activeCount += next.status.activeCount;
+      if (priority(next.status) === 4) attention += 1;
+    }
     const ranked = [...this.conversations.values()].sort(rank);
     const display = (entry: Candidate): MascotStatus => {
       const request = [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase);
@@ -195,10 +199,10 @@ export class MascotStatusPublisher {
     const focused = this.focused === null ? undefined : this.conversations.get(this.focused);
     if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
     const chats = listed.map(display);
-    const serialized = JSON.stringify([status, chats, this.focused]);
+    const serialized = JSON.stringify([status, chats, this.focused, attention]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats, this.focused);
+    this.publish?.(status, chats, this.focused, attention);
   }
 }
 

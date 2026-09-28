@@ -657,7 +657,7 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
-    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status, event.chats, event.focus); return; }
+    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status, event.chats, event.focus, event.attention); return; }
     if (event.type === "runtime.credential-request") {
       this.credentials.handle(record, event); return;
     }

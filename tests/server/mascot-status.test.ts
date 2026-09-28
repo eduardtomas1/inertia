@@ -32,7 +32,7 @@ describe("authoritative mascot status", () => {
       since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z",
       activeCount: terminal ? 0 : 1,
     };
-    expect(publish).toHaveBeenLastCalledWith(status, [status], null);
+    expect(publish).toHaveBeenLastCalledWith(status, [status], null, phase.startsWith("waiting-") ? 1 : 0);
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
@@ -54,11 +54,11 @@ describe("authoritative mascot status", () => {
     const publish = vi.fn();
     const publisher = new MascotStatusPublisher(publish);
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null, 0);
     publisher.update(conversation("cancelled", "cancelled"));
     expect(publish.mock.lastCall?.[0].phase).toBe("cancelled");
     publisher.replace([]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null);
+    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null, 0);
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
@@ -120,6 +120,24 @@ describe("mascot chat list", () => {
     expect(publish.mock.lastCall?.[2]).toBe("pinned");
     publisher.focus(null);
     expect(publish.mock.lastCall?.[2]).toBeNull();
+  });
+
+  it("publishes the true number of chats that need you beside the capped list", () => {
+    const publish = vi.fn();
+    const publisher = new MascotStatusPublisher(publish);
+    const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
+    const questions = Array.from({ length: 6 }, (_, index) => conversation(`question-${index}`, "waiting-for-input"));
+    const approvals = Array.from({ length: 5 }, (_, index) => conversation(`approval-${index}`, "waiting-for-approval"));
+    publisher.replace([pinned, ...questions, ...approvals, conversation("busy", "running")]);
+    publisher.focus("pinned");
+    const [status, chats, focus, attention] = publish.mock.lastCall!;
+    expect(chats).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(chats.filter(({ phase }: { phase: string }) => phase.startsWith("waiting-"))).toHaveLength(MASCOT_CHAT_LIMIT - 1);
+    expect(focus).toBe("pinned");
+    expect(attention).toBe(11);
+    expect(status.activeCount).toBe(12);
+    publisher.replace([pinned, conversation("busy", "running")]);
+    expect(publish.mock.lastCall?.[3]).toBe(0);
   });
 
   it("reads project names from the snapshot and caches lookups for unknown projects", () => {

@@ -1124,7 +1124,7 @@ async function bootstrap(): Promise<void> {
         serviceName: "Inertia Runtime",
       },
     ),
-    onMascotStatus: (status, chats, focus) => mascotMain?.observe(status, chats, focus),
+    onMascotStatus: (status, chats, focus, attention) => mascotMain?.observe(status, chats, focus, attention),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

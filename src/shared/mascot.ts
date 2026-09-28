@@ -46,6 +46,7 @@ export interface MascotSnapshot {
   gesture?: MascotGesture;
   sprites?: MascotSprites;
   chats?: readonly MascotStatus[];
+  attention?: number;
   pinned?: string | null;
 }
 export type MascotGesture = readonly [rendererEpoch: number, sequence: number];
@@ -111,6 +112,10 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   if (since !== null && (empty || typeof since !== "string" || since.length > 40
     || !/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/u.test(since) || !Number.isFinite(Date.parse(since)))) return null;
   return candidate as unknown as MascotStatus;
+}
+
+export function isMascotAttention(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
 }
 
 export function isMascotFocus(value: unknown): value is string | null {

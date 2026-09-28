@@ -41,8 +41,8 @@ function fixture() {
       snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
     },
-    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null): void {
-      snapshot = { ...snapshot, status, chats, pinned };
+    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null, attention?: number): void {
+      snapshot = { ...snapshot, status, chats, pinned, attention };
       act(() => receive(snapshot));
     },
     update(phase: MascotSnapshot["status"]["phase"], motion = true, context: Partial<MascotSnapshot["status"]> = {}): void {
@@ -154,6 +154,91 @@ describe("mascot chat context and chooser", () => {
     expect(document.activeElement).toBe(rows[1]);
     fireEvent.click(rows[2]!);
     expect(app.action).toHaveBeenLastCalledWith("pin", "older");
+  });
+
+  it("keeps keyboard focus on a chooser row through every live list update", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => chat(id, "running"));
+    app.list(a!, [a!, b!, c!, d!]);
+    const picker = screen.getByRole("button", { name: /Show chat/ });
+    fireEvent.click(picker);
+    const group = screen.getByRole("group", { name: "Show chat" });
+    const row = (key: string): HTMLElement => group.querySelector<HTMLElement>(`[data-key="${key}"]`)!;
+    const arrowsStillWork = (): void => {
+      const start = document.activeElement;
+      expect(group.contains(start)).toBe(true);
+      fireEvent.keyDown(start!, { key: "ArrowDown" });
+      expect(group.contains(document.activeElement)).toBe(true);
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(start);
+      expect(app.action).not.toHaveBeenCalledWith("down");
+    };
+    row("c").focus();
+    app.list(a!, [c!, a!, b!, d!]);
+    expect(document.activeElement).toBe(row("c"));
+    arrowsStillWork();
+    app.list(a!, [{ ...c!, phase: "completed", chatTitle: "Renamed chat" }, a!, b!, d!]);
+    expect(document.activeElement).toBe(row("c"));
+    expect(row("c")).toHaveAccessibleName(/Renamed chat/);
+    arrowsStillWork();
+    row("a").focus();
+    app.list(c!, [c!, b!, d!]);
+    expect(document.activeElement).toBe(row("b"));
+    arrowsStillWork();
+    const ranked = ["e", "f", "g", "h", "i"].map((id) => chat(id, "running"));
+    app.list(c!, [c!, b!, d!, ...ranked]);
+    row("i").focus();
+    const urgent = chat("urgent", "waiting-for-input");
+    app.list(urgent, [urgent, c!, b!, d!, ...ranked.slice(0, 4)]);
+    expect(document.activeElement).toBe(row("h"));
+    arrowsStillWork();
+    app.list(emptyMascotStatus(), []);
+    expect(picker).toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(row(""));
+    arrowsStillWork();
+    app.list(a!, [a!, b!]);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    app.list(b!, [b!, a!]);
+    expect(document.activeElement).toBe(outside);
+    picker.focus();
+    app.list(a!, [a!]);
+    expect(document.activeElement).toBe(picker);
+    fireEvent.click(picker);
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    app.list(a!, [a!, b!]);
+    expect(document.activeElement).toBe(picker);
+  });
+
+  it("counts every chat that needs you, beyond the capped list and a pinned quiet chat", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const detail = (): string => view.container.querySelector(".mascot-detail")!.textContent!;
+    const picker = (): HTMLElement => view.container.querySelector<HTMLElement>(".mascot-picker")!;
+    const waiting = Array.from({ length: 7 }, (_, index) => chat(`w${index}`, "waiting-for-input", { activeCount: 1 }));
+    const done = chat("done", "completed", { activeCount: 0 });
+    app.list(done, [...waiting, done], "done", 12);
+    expect(detail()).toBe("12 other chats need you");
+    expect(picker().getAttribute("aria-label")).toMatch(/pinned to Chat done\. 8 chats, 12 need you$/);
+    expect(picker().dataset.attention).toBe("true");
+    app.list(waiting[0]!, [...waiting, done], null, 12);
+    expect(detail()).toBe("11 other chats need you");
+    app.list(done, [...waiting, done], "done", 250);
+    expect(detail()).toBe("99+ other chats need you");
+    app.list(done, [waiting[0]!, done], "done", 1);
+    expect(detail()).toBe("1 other chat needs you");
+    app.list(done, [...waiting, done], "done");
+    expect(detail()).toBe("7+ other chats need you");
+    expect(picker().getAttribute("aria-label")).toMatch(/7\+ need you$/);
+    app.list(done, [waiting[0]!, done], "done");
+    expect(detail()).toBe("1 other chat needs you");
+    app.list(done, [done], "done", 0);
+    expect(detail()).toBe("");
+    expect(picker().dataset.attention).toBe("false");
   });
 });
 

@@ -40,7 +40,9 @@ export class MascotMain {
   private pendingSprites: MascotSpriteSet | null = null;
   private readonly rendererUrl: string;
   private state;
-  private feed: { status: MascotStatus; chats: MascotStatus[] } = { status: emptyMascotStatus("unavailable"), chats: [] };
+  private feed: { status: MascotStatus; chats: MascotStatus[]; attention: number | null } = {
+    status: emptyMascotStatus("unavailable"), chats: [], attention: null,
+  };
   private pinned: string | null = null;
   private window: BrowserWindow | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,15 +68,15 @@ export class MascotMain {
     this.spriteQueue = this.spritesLoaded;
   }
 
-  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
+  snapshot(): MascotSnapshot { return { preferences: { ...this.state.preferences }, status: { ...this.status() }, chats: this.feed.chats.map((chat) => ({ ...chat })), ...(this.feed.attention === null ? {} : { attention: this.feed.attention }), pinned: this.pin(), dragging: Boolean(this.drag), gesture: [this.epoch, this.drag?.gesture ?? this.lastGesture], ...(!this.canPosition ? { placement: "system" as const } : {}), ...(this.sprites ? { sprites: mascotSprites(this.sprites, this.options.spriteOrigin) } : {}) }; }
 
   sprite(id: string, name: string): MascotSpriteFile | null {
     const set = [this.sprites, this.pendingSprites].find((candidate) => candidate?.id === id);
     return set?.files.find((file) => file.name === name) ?? null;
   }
 
-  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null): void {
-    this.feed = { status, chats };
+  observe(status: MascotStatus, chats: MascotStatus[] = [], focus: string | null = null, attention: number | null = null): void {
+    this.feed = { status, chats, attention };
     if (this.pinned && focus === this.pinned && !this.pin()) this.choose(null);
     else this.broadcast();
   }

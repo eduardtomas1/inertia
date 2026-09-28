@@ -129,6 +129,9 @@ describe("mascot chat selection", () => {
     const quiet = chat("quiet", "running");
     app.mascot.observe(urgent, [urgent, quiet], null);
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "urgent" }, pinned: null, chats: [urgent, quiet] });
+    expect(app.mascot.snapshot()).not.toHaveProperty("attention");
+    app.mascot.observe(urgent, [urgent, quiet], null, 14);
+    expect(app.mascot.snapshot()).toMatchObject({ attention: 14 });
     await app.invoke(MASCOT_IPC.action, ["pin", "quiet"], overlay);
     expect(app.focusChat).toHaveBeenLastCalledWith("quiet");
     expect(app.mascot.snapshot()).toMatchObject({ status: { conversationId: "quiet" }, pinned: "quiet" });
@@ -160,7 +163,7 @@ describe("mascot chat selection", () => {
 
   it("keeps a runtime-ranked pin below the list cap and clears it only when the chat is archived or deleted", async () => {
     const app = await fixture();
-    const publisher = new MascotStatusPublisher((status, chats, focus) => app.mascot.observe(status, chats, focus));
+    const publisher = new MascotStatusPublisher((status, chats, focus, attention) => app.mascot.observe(status, chats, focus, attention));
     app.focusChat.mockImplementation((conversationId: string | null) => publisher.focus(conversationId));
     const shell = (id: string, state: AgentRunState, extra: Partial<ConversationShell> = {}): ConversationShell => ({
       id, projectId: "project", title: `Chat ${id}`, status: "idle", archivedAt: null, lastViewedAt: "2026-09-06T11:00:00.000Z",

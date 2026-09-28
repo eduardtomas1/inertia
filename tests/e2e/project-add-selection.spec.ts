@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -17,6 +17,15 @@ function activeChatProject(testDirectory: string): string | null {
     `).get() as { name: string } | undefined;
     return row?.name ?? null;
   } finally { database.close(); }
+}
+
+async function startNewChatInScopedProject(page: Page, sidebar: Locator, projectName: string): Promise<void> {
+  await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "New chat in project" });
+  await expect(picker.getByRole("option").first()).toContainText(projectName);
+  await expect(picker.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+  await picker.getByRole("combobox", { name: "Search projects for the new chat" }).press("Enter");
+  await expect(picker).toHaveCount(0);
 }
 
 test("selects a newly added project as the sidebar scope and active workspace", async ({ browserName: _browserName }, testInfo) => {
@@ -50,7 +59,7 @@ test("selects a newly added project as the sidebar scope and active workspace", 
     await testInfo.attach("after-add-project", { path: afterScreenshot, contentType: "image/png" });
     await expect(filter).toHaveText("Launchpad");
     await expect(sidebar.getByRole("list", { name: "Work" }).getByRole("button", { name: /Inertia/u })).toHaveCount(0);
-    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await startNewChatInScopedProject(page, sidebar, "Launchpad");
     await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Launchpad");
 
     const toggleNavigation = page.getByRole("button", { name: "Toggle project navigation" });
@@ -67,7 +76,7 @@ test("selects a newly added project as the sidebar scope and active workspace", 
     await expect(page.getByRole("heading", { name: "What should we build in Orbit?" })).toBeVisible();
     await toggleNavigation.click();
     await expect(filter).toHaveText("Orbit");
-    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await startNewChatInScopedProject(page, sidebar, "Orbit");
     await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Orbit");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
@@ -104,7 +113,7 @@ test("keeps the chosen project scope after a cancelled or failed import", async 
     await dialog.getByRole("button", { name: "Close add project" }).click();
     await expect(page.locator(".add-project-dialog")).toHaveCount(0);
     await expect(filter).toHaveText("Companion");
-    await sidebar.getByRole("button", { name: "New chat", exact: true }).click();
+    await startNewChatInScopedProject(page, sidebar, "Companion");
     await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Companion");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
@@ -170,6 +179,67 @@ test("keeps the search placeholder and typed text clear of the focus frame", asy
     const inset = testInfo.outputPath("add-project-search-inset.png");
     await dialog.screenshot({ path: inset });
     await testInfo.attach("add-project-search-inset", { path: inset, contentType: "image/png" });
+    expect(app.rendererErrors).toEqual([]);
+  } finally { await app.close(); }
+});
+
+test("starts a new chat in the project chosen from the New chat palette", async ({ browserName: _browserName }, testInfo) => {
+  const app = await createAppFixture({ name: "new-chat-project-palette", initialState: "conversation", seedSecondProject: true });
+  try {
+    await app.resizeWindow(1200, 800);
+    const page = app.page;
+    const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+    const newChat = sidebar.getByRole("button", { name: "New chat", exact: true });
+    const picker = page.getByRole("dialog", { name: "New chat in project" });
+    const search = picker.getByRole("combobox", { name: "Search projects for the new chat" });
+    const capture = async (name: string): Promise<void> => {
+      await page.waitForTimeout(250);
+      const path = testInfo.outputPath(`${name}.png`);
+      await page.screenshot({ path, animations: "disabled" });
+      await testInfo.attach(name, { path, contentType: "image/png" });
+    };
+
+    for (const theme of ["Dark", "Light"] as const) {
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("button", { name: "General", exact: true }).click();
+      await page.getByRole("radio", { name: theme, exact: true }).click();
+      await page.getByRole("button", { name: "Workspace", exact: true }).click();
+      await expect(newChat).toHaveAttribute("aria-haspopup", "dialog");
+
+      await newChat.click();
+      await expect(search).toBeFocused();
+      await expect(picker.getByRole("option")).toHaveCount(2);
+      await expect(picker.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+      const bounds = await picker.boundingBox();
+      expect(bounds).toBeTruthy();
+      expect(Math.abs(bounds!.x + bounds!.width / 2 - 600)).toBeLessThanOrEqual(2);
+      await capture(`new-chat-palette-${theme.toLowerCase()}`);
+
+      await search.fill("comp");
+      await expect(picker.getByRole("option")).toHaveCount(1);
+      await capture(`new-chat-palette-filtered-${theme.toLowerCase()}`);
+      await search.press("Escape");
+      await expect(picker).toHaveCount(0);
+      await expect(newChat).toBeFocused();
+    }
+
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+    const palette = page.getByRole("dialog", { name: "Search Inertia" });
+    await palette.getByRole("combobox").fill("new chat in");
+    await expect(palette.getByText("Searching messages…")).toHaveCount(0);
+    await capture("new-chat-palette-action-light");
+    await palette.getByRole("combobox").press("Enter");
+    await expect(search).toBeFocused();
+    await search.press("Escape");
+    await expect(palette).toBeVisible();
+    await palette.getByRole("combobox").press("Escape");
+    await expect(palette).toHaveCount(0);
+
+    await newChat.click();
+    await search.fill("comp");
+    await search.press("Enter");
+    await expect(picker).toHaveCount(0);
+    await expect.poll(() => activeChatProject(app.testDirectory)).toBe("Companion");
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });

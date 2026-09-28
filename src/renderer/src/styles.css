@@ -8942,6 +8942,7 @@ button.header-breadcrumb-project:hover {
 .palette-group button strong { font-size: var(--ui-font-secondary); font-weight: 610; }
 .palette-group button small { color: var(--text-muted); font-size: var(--ui-font-micro); }
 .palette-group button kbd { color: var(--text-muted); font-family: inherit; font-size: 7.5px; }
+.palette-group button .palette-item-chevron { flex-shrink: 0; color: var(--text-muted); }
 .palette-message-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 3px; color: var(--text-soft); font-size: var(--ui-font-secondary); line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
 .palette-group mark { color: var(--text); background: var(--accent-soft); font-weight: 650; border-radius: 2px; }
 .palette-search-status { padding: 10px 12px; color: var(--text-muted); font-size: var(--ui-font-secondary); line-height: 1.5; }

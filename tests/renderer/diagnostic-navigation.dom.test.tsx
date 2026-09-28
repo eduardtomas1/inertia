@@ -55,11 +55,11 @@ function setup({ palette = false, detached = false, online = true, available = t
       <output aria-label="Current view">{view}</output><output aria-label="Settings section">{section}</output>
       {sidebarOpen && <aside aria-label="Sidebar" />}
       <button onClick={() => projectNavigation.navigateToView("settings")}>Later settings navigation</button>
-      <AppNavigationOverlays snapshot={snapshot} paletteOpen={paletteOpen} setPaletteOpen={setPaletteOpen}
+      <AppNavigationOverlays snapshot={snapshot} paletteOpen={paletteOpen} paletteView="search" currentProjectId={null} setPaletteOpen={setPaletteOpen}
         newThreadShortcut="⌘N" setWorkspaceView={() => projectNavigation.navigateToView("workspace")}
         selectConversation={navigation.selectConversation}
         selectMessage={(hit, signal) => navigation.selectMessage(hit, () => setView("workspace"), signal)}
-        sendCommand={select} selectProject={vi.fn()} createConversation={vi.fn()}
+        sendCommand={select} selectProject={vi.fn()} createConversation={vi.fn()} createConversationIn={vi.fn()}
         importProject={async () => undefined} openSettings={vi.fn()} />
     </>;
   }

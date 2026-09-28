@@ -42,7 +42,7 @@ const noop = vi.fn();
 function sidebarProps(state: AppSnapshot, scope: string | null, onProjectScopeChange: (id: string | null) => void, onUpdateProjectAppearance = vi.fn()): SidebarProps {
   return { snapshot: state, connectionStatus: "online", view: "workspace", open: true, busy: false, layoutWidth: 276, onClose: noop, onViewChange: noop,
     onOpenHome: noop, onImportProject: noop, projectScopeId: scope, onProjectScopeChange, onSelectConversation: noop, splitConversationIds: new Set(),
-    onOpenConversationInSplit: noop, onCloseConversationSplit: noop, onCreateConversation: noop, onOpenMultiSpawn: noop, onOpenDailyWork: noop,
+    onOpenConversationInSplit: noop, onCloseConversationSplit: noop, onCreateConversation: noop, onChooseNewChatProject: noop, onOpenMultiSpawn: noop, onOpenDailyWork: noop,
     dailyWorkOpen: false, onRenameConversation: noop, onPinConversation: noop, onSnoozeConversation: noop, onArchiveConversation: noop,
     onSettleConversation: noop, onRestoreConversation: noop, onDeleteConversation: noop, onAcknowledgeRun: noop, onDismissRun: noop, onOpenProject: noop,
     onRenameProject: noop, onSetProjectGrouping: noop, onSetProjectGitRepositoryLimit: noop, onRemoveProject: noop, onUpdateProjectAppearance };

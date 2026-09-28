@@ -144,6 +144,7 @@ function SidebarView({
   onOpenConversationInWindow,
   onCloseConversationSplit,
   onCreateConversation,
+  onChooseNewChatProject,
   onOpenMultiSpawn,
   onOpenDailyWork,
   dailyWorkOpen,
@@ -921,7 +922,8 @@ function SidebarView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
             {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
           </div>
-          <IconButton label="New chat" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={() => {
+          <IconButton label="New chat" aria-haspopup={(snapshot?.projects.length ?? 0) > 1 ? "dialog" : undefined} disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={(event) => {
+            if ((snapshot?.projects.length ?? 0) > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
             if (target) onCreateConversation(target);
           }}><SquarePen size={17} /></IconButton>

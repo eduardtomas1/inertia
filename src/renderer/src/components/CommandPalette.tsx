@@ -1,4 +1,4 @@
-import { FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -9,8 +9,12 @@ import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
 
+export type CommandPaletteView = "search" | "new-chat";
+
 type CommandPaletteProps = {
   open: boolean;
+  initialView?: CommandPaletteView;
+  currentProjectId: string | null;
   projects: Project[];
   conversations: Conversation[];
   newThreadShortcut: string;
@@ -20,6 +24,7 @@ type CommandPaletteProps = {
   sendCommand?: MessageSearchCommand;
   onSelectMessage?: (hit: MessageSearchHit, signal?: AbortSignal) => Promise<boolean>;
   onNewThread: () => void;
+  onNewThreadIn: (project: Project) => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
 };
@@ -33,6 +38,7 @@ type PaletteItem = {
   shortcut?: string;
   match?: MessageSearchHit;
   run?: () => void;
+  view?: CommandPaletteView;
 };
 
 function score(label: string, detail: string | undefined, query: string): number {
@@ -45,13 +51,13 @@ function score(label: string, detail: string | undefined, query: string): number
 
 const groupOrder = ["Actions", "Projects", "Threads", "Messages"] as const;
 
-function filterItems(items: PaletteItem[], query: string): PaletteItem[] {
+function filterItems(items: PaletteItem[], query: string, limit = true): PaletteItem[] {
   const needle = query.trim().toLocaleLowerCase();
   return items
     .map((item) => ({ item, rank: score(item.label, item.detail, needle) }))
     .filter(({ rank }) => rank > 0)
     .sort((left, right) => right.rank - left.rank)
-    .slice(0, needle ? 18 : 14)
+    .slice(0, limit ? needle ? 18 : 14 : undefined)
     .map(({ item }) => item)
     .sort((left, right) => groupOrder.indexOf(left.group) - groupOrder.indexOf(right.group));
 }
@@ -68,14 +74,16 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onAddProject, onOpenSettings }: CommandPaletteProps): React.JSX.Element | null {
+  const [view, setView] = useState(initialView);
+  const choosingProject = view === "new-chat";
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [openError, setOpenError] = useState(false);
   const opening = useRef<AbortController | null>(null);
   const restorePriorFocus = useRef(true);
   const searchRef = useRef<HTMLInputElement>(null);
-  const search = useMessageSearch(open, query, sendCommand);
+  const search = useMessageSearch(open && !choosingProject, query, sendCommand);
   useNativePreviewSuspension(open);
 
   useLayoutEffect(() => {
@@ -93,6 +101,9 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
     const actions: PaletteItem[] = [
       ...(projects.length > 0
         ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: newThreadShortcut, run: onNewThread }]
+        : []),
+      ...(projects.length > 1
+        ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={15} />, view: "new-chat" as const }]
         : []),
       { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
       { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, providers, and defaults", icon: <Settings size={15} />, run: onOpenSettings },
@@ -113,7 +124,16 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
         icon: <MessageSquare size={15} />, match: hit }];
     });
   }, [search.result, conversations, projects, onSelectMessage]);
-  const items = useMemo(() => [...filterItems(allItems, query), ...messageItems], [allItems, query, messageItems]);
+  const projectChoices = useMemo<PaletteItem[]>(() => {
+    const current = projects.find(({ id }) => id === currentProjectId);
+    return (current ? [current, ...projects.filter((project) => project !== current)] : projects).map((project) => ({
+      id: `new-thread-in:${project.id}`, group: "Projects", label: project.name, detail: project.path,
+      icon: <ProjectIcon project={project} size={15} />, shortcut: project === current ? "Current" : undefined,
+      run: () => onNewThreadIn(project),
+    }));
+  }, [currentProjectId, onNewThreadIn, projects]);
+  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : filterItems(allItems, value);
+  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...filterItems(allItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query]);
   const activeIndex = Math.max(0, items.findIndex(({ id }) => id === activeId));
   const activeItemId = items[activeIndex]?.id;
   useEffect(() => {
@@ -130,8 +150,17 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
     setActiveId(null);
     onClose();
   };
+  const changeView = (next: CommandPaletteView) => {
+    opening.current?.abort();
+    setOpenError(false);
+    setQuery("");
+    setActiveId(null);
+    setView(next);
+    searchRef.current?.focus();
+  };
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
+    if (item.view) { changeView(item.view); return; }
     if (item.match && onSelectMessage) {
       opening.current?.abort();
       const controller = new AbortController();
@@ -163,13 +192,13 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
         className="command-palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Search Inertia"
+        aria-label={choosingProject ? "New chat in project" : "Search Inertia"}
         onKeyDown={(event) => {
           trapModalFocus(event, event.currentTarget);
         }}
       >
         <div className="palette-search">
-          <Search size={17} />
+          {choosingProject ? <SquarePen size={17} aria-hidden="true" /> : <Search size={17} />}
           <input
             ref={searchRef}
             value={query}
@@ -177,18 +206,23 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
             onChange={(event) => { opening.current?.abort(); setOpenError(false); setQuery(event.target.value); setActiveId(null); }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
-              if (event.key === "Escape") { event.preventDefault(); closePalette(); }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                if (choosingProject && initialView === "search") changeView("search");
+                else closePalette();
+              }
+              if (event.key === "Backspace" && choosingProject && initialView === "search" && !event.currentTarget.value) { event.preventDefault(); changeView("search"); }
               if (event.key === "ArrowDown") { event.preventDefault(); setActiveId(items[(activeIndex + 1) % items.length]?.id ?? null); }
               if (event.key === "ArrowUp") { event.preventDefault(); setActiveId(items[(activeIndex - 1 + items.length) % items.length]?.id ?? null); }
               if (event.key === "Enter") {
                 event.preventDefault();
                 const currentQuery = event.currentTarget.value;
-                const currentItems = currentQuery === query ? items : filterItems(allItems, currentQuery);
+                const currentItems = currentQuery === query ? items : filterView(currentQuery);
                 run(currentItems[currentQuery === query ? activeIndex : 0]);
               }
             }}
-            placeholder="Search commands, projects, chats, and messages…"
-            aria-label="Search commands, projects, chats, and messages"
+            placeholder={choosingProject ? "Start a new chat in…" : "Search commands, projects, chats, and messages…"}
+            aria-label={choosingProject ? "Search projects for the new chat" : "Search commands, projects, chats, and messages"}
             aria-controls="palette-results"
             aria-activedescendant={items[activeIndex] ? `palette-${items[activeIndex].id}` : undefined}
             role="combobox"
@@ -198,13 +232,13 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
           <IconButton label="Close search" onClick={closePalette}><X size={15} /></IconButton>
         </div>
         <div className="palette-results">
-          <div id="palette-results" role="listbox" aria-label="Search results">
+          <div id="palette-results" role="listbox" aria-label={choosingProject ? "Projects" : "Search results"}>
           {groups.map(({ group, items: groupItems }) => (
             <div className="palette-group" role="group" aria-label={group} key={group}>
               <span>{group}</span>
               {groupItems.map(({ item, index }) => (
                 <button type="button" tabIndex={-1} id={`palette-${item.id}`} role="option" aria-selected={activeIndex === index} className={activeIndex === index ? "is-active" : undefined} key={item.id} onPointerMove={() => setActiveId(item.id)} onClick={() => run(item)}>
-                  {item.icon}<span><strong><Highlight text={item.label} query={query} /></strong>{item.detail && <small>{item.detail}</small>}{item.match && <span className="palette-message-snippet"><Highlight text={item.match.snippet} query={query} /></span>}</span>{item.shortcut && <kbd>{item.shortcut}</kbd>}
+                  {item.icon}<span><strong><Highlight text={item.label} query={query} /></strong>{item.detail && <small>{item.detail}</small>}{item.match && <span className="palette-message-snippet"><Highlight text={item.match.snippet} query={query} /></span>}</span>{item.shortcut && <kbd>{item.shortcut}</kbd>}{item.view && <ChevronRight size={14} aria-hidden="true" className="palette-item-chevron" />}
                 </button>
               ))}
             </div>
@@ -215,9 +249,11 @@ export function CommandPalette({ open, projects, conversations, newThreadShortcu
           {search.error && <div className="palette-search-status" role="status">{search.error} <button type="button" onClick={() => { search.retry(); searchRef.current?.focus(); }}>Retry</button></div>}
           {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
           {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
-          {items.length === 0 && !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={18} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>}
+          {items.length === 0 && (choosingProject
+            ? <div className="palette-empty"><Search size={18} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>
+            : !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={18} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>)}
         </div>
-        <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></footer>
+        <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> {choosingProject ? "Start chat" : "Open"}</span><span><kbd>Esc</kbd> {choosingProject && initialView === "search" ? "Back" : "Close"}</span></footer>
       </section>
     </div>
   );

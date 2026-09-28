@@ -92,7 +92,7 @@ function operationLabel(operation: ProviderMaintenanceOperation): string {
     case "succeeded": return operation.afterVersion
       ? `Updated to ${operation.afterVersion}`
       : "Update completed";
-    case "unchanged": return "Already current";
+    case "unchanged": return "Version unchanged";
     case "failed": return "Update failed";
     case "cancelled": return "Update cancelled";
   }
@@ -105,6 +105,7 @@ export interface ProviderMaintenanceNoticeProps {
   disabled?: boolean;
   dismissible?: boolean;
   showManagedUpdateAction?: boolean;
+  showStatus?: boolean;
   onRefresh: () => Promise<void>;
   onUpdate: () => Promise<void>;
   onCancel: (operationId: string) => Promise<void>;
@@ -118,6 +119,7 @@ export function ProviderMaintenanceNotice({
   disabled = false,
   dismissible = true,
   showManagedUpdateAction = false,
+  showStatus = false,
   onRefresh,
   onUpdate,
   onCancel,
@@ -152,7 +154,7 @@ export function ProviderMaintenanceNotice({
   const displayOperation = operationDismissed && updateAvailable
     ? null
     : operation;
-  const visible = shouldShowProviderMaintenanceNotice({
+  const visible = (showStatus && status?.versionStatus !== "not-installed") || shouldShowProviderMaintenanceNotice({
     operation,
     updateAvailable,
     updateDismissed,
@@ -207,11 +209,12 @@ export function ProviderMaintenanceNotice({
       ? `${providerLabel} update available`
       : `${providerLabel} maintenance`;
   const detail = requestError
-    ?? displayOperation?.message
-    ?? (managedActionAvailable ? status.message : null)
+    ?? (displayOperation && !showStatus ? displayOperation.message : null)
     ?? [
+      displayOperation?.message,
       status.installedVersion ? `Installed ${status.installedVersion}` : null,
       status.latestVersion ? `Latest ${status.latestVersion}` : null,
+      status.message,
     ].filter(Boolean).join(" · ");
 
   return (
@@ -257,7 +260,7 @@ export function ProviderMaintenanceNotice({
             <Download size={11} aria-hidden="true" />
             {managedActionAvailable ? "Check & update" : "Update"}
           </button>
-        ) : updateAvailable
+        ) : (updateAvailable || showStatus)
           && status.updateAvailability === "instructions-only" ? (
             <button
               type="button"
@@ -267,7 +270,7 @@ export function ProviderMaintenanceNotice({
               <ExternalLink size={11} aria-hidden="true" />
               Instructions
             </button>
-          ) : !displayOperation ? (
+          ) : !displayOperation && !showStatus ? (
             <button
               type="button"
               disabled={disabled}
@@ -277,6 +280,16 @@ export function ProviderMaintenanceNotice({
               Check
             </button>
           ) : null}
+        {showStatus && !activeOperation && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void run(onRefresh)}
+          >
+            <RefreshCw size={11} aria-hidden="true" />
+            Check
+          </button>
+        )}
         {dismissible && !activeOperation && (
           <IconButton label={`Dismiss ${providerLabel} update notice`} onClick={dismiss}>
             <X size={12} />

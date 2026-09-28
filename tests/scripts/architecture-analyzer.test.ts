@@ -1,12 +1,24 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { analyzeSourceArchitecture } from "../../scripts/architecture/analyzer.mjs";
+const reads = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const readFileSync = ((...args: Parameters<typeof actual.readFileSync>) => {
+    reads.push(String(args[0]));
+    return actual.readFileSync(...args);
+  }) as typeof actual.readFileSync;
+  return { ...actual, default: { ...actual, readFileSync }, readFileSync };
+});
+
+import { analyzeSourceArchitecture, MAX_ANALYZED_FILE_BYTES } from "../../scripts/architecture/analyzer.mjs";
 
 const roots: string[] = [];
+const LINK = "is a symbolic link or reparse point; analysed source trees must not contain links.";
 
 function fixture(
   files: Readonly<Record<string, string>>,
@@ -44,6 +56,7 @@ function linkFile(target: string, path: string): void {
 }
 
 afterEach(() => {
+  reads.length = 0;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -135,7 +148,7 @@ describe("architecture analyzer aliased asset fallbacks", () => {
     ]);
   });
 
-  it("classifies a symbolic-linked fallback target by its real layer", () => {
+  it("rejects a fallback target reached through a directory link", () => {
     const root = fixture({
       "src/renderer/src/assets/logo.png": "png",
       "src/shared/icon.ts": icon,
@@ -143,25 +156,52 @@ describe("architecture analyzer aliased asset fallbacks", () => {
     linkDirectory(join(root, "src/renderer/src/assets"), join(root, "src/shared/art"));
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/shared/icon.ts:1 crosses source layers shared -> renderer via src/renderer/src/assets/logo.png.",
+      `src/shared/art ${LINK}`,
+      "src/shared/icon.ts:1 imports asset @art/logo.png through a symbolic link or reparse point.",
     ]);
   });
 });
 
-describe("architecture analyzer symbolic links", () => {
-  it.skipIf(process.platform === "win32")("classifies a symbolic-linked asset by the layer of its real target", () => {
+describe("architecture analyzer link-free source policy", () => {
+  it("reports a directory link to outside the repository without reading anything behind it", () => {
+    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "art.png"), "png");
+    writeFileSync(join(outside, "code.ts"), "export const code = true;\n");
+    writeFileSync(join(outside, "huge.ts"), "x".repeat(MAX_ANALYZED_FILE_BYTES * 2));
     const root = fixture({
-      "src/renderer/src/assets/art.png": "png",
-      "src/shared/icon.ts": 'import art from "./art.png";\nexport const icon = art;\n',
+      "src/shared/icon.ts": [
+        'import art from "./external/art.png";',
+        'import { code } from "./external/code";',
+        "export const icon = [art, code];",
+        "",
+      ].join("\n"),
     });
-    linkFile(join(root, "src/renderer/src/assets/art.png"), join(root, "src/shared/art.png"));
+    linkDirectory(outside, join(root, "src/shared/external"));
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/shared/icon.ts:1 crosses source layers shared -> renderer via src/renderer/src/assets/art.png.",
+      `src/shared/external ${LINK}`,
+      "src/shared/icon.ts:1 imports asset ./external/art.png through a symbolic link or reparse point.",
+      "src/shared/icon.ts:2 cannot resolve local module ./external/code.",
+    ]);
+    expect(reads).toContain(join(root, "src/shared/icon.ts"));
+    expect(reads.filter((path) => path.includes("external") || path.startsWith(outside))).toEqual([]);
+  });
+
+  it("rejects assets that lie outside the repository", () => {
+    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "art.png"), "png");
+    const root = fixture({ "src/shared/icon.ts": "" });
+    const specifier = relative(join(root, "src/shared"), join(outside, "art.png")).replaceAll("\\", "/");
+    writeFileSync(join(root, "src/shared/icon.ts"), `import art from "${specifier}";\nexport const icon = art;\n`);
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      `src/shared/icon.ts:1 imports asset ${specifier}, which lies outside the repository.`,
     ]);
   });
 
-  it("classifies assets and modules below a symbolic-linked directory by their real layer", () => {
+  it("reports directory links into another layer and never resolves through them", () => {
     const root = fixture({
       "src/renderer/src/assets/art.png": "png",
       "src/renderer/src/ui/view.ts": 'import { useState } from "react";\nexport const view = useState;\n',
@@ -172,28 +212,32 @@ describe("architecture analyzer symbolic links", () => {
     linkDirectory(join(root, "src/renderer/src/ui"), join(root, "src/shared/ui"));
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/main/sprites.ts:1 crosses source layers main -> renderer via src/renderer/src/assets/art.png.",
-      "src/shared/consumer.ts:1 crosses source layers shared -> renderer via src/renderer/src/ui/view.ts.",
+      `src/main/assets ${LINK}`,
+      "src/main/sprites.ts:1 imports asset ./assets/art.png?inline through a symbolic link or reparse point.",
+      "src/shared/consumer.ts:1 cannot resolve local module ./ui/view.",
+      `src/shared/ui ${LINK}`,
     ]);
   });
 
-  it("rejects source files and assets that resolve outside the repository", () => {
-    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
-    roots.push(outside);
-    writeFileSync(join(outside, "art.png"), "png");
-    writeFileSync(join(outside, "code.ts"), "export const code = true;\n");
+  it.skipIf(process.platform === "win32")("reports file links and never resolves through them", () => {
     const root = fixture({
-      "src/shared/icon.ts": 'import art from "./external/art.png";\nexport const icon = art;\n',
+      "src/renderer/src/assets/art.png": "png",
+      "src/renderer/src/view.ts": "export const view = true;\n",
+      "src/shared/icon.ts": 'import art from "./art.png";\nexport const icon = art;\n',
+      "src/shared/consumer.ts": 'import { view } from "./view";\nexport const consumer = view;\n',
     });
-    linkDirectory(outside, join(root, "src/shared/external"));
+    linkFile(join(root, "src/renderer/src/assets/art.png"), join(root, "src/shared/art.png"));
+    linkFile(join(root, "src/renderer/src/view.ts"), join(root, "src/shared/view.ts"));
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/shared/external/code.ts resolves outside the repository.",
-      "src/shared/icon.ts:1 imports asset ./external/art.png, which resolves outside the repository.",
+      `src/shared/art.png ${LINK}`,
+      "src/shared/consumer.ts:1 cannot resolve local module ./view.",
+      "src/shared/icon.ts:1 imports asset ./art.png through a symbolic link or reparse point.",
+      `src/shared/view.ts ${LINK}`,
     ]);
   });
 
-  it("rejects source files linked from elsewhere in the repository and missing assets", () => {
+  it("reports links to elsewhere in the repository and missing assets", () => {
     const root = fixture({
       "tests/helpers/fixture.ts": "export const fixture = true;\n",
       "src/shared/icon.ts": 'import art from "./missing.png";\nexport const icon = art;\n',
@@ -201,43 +245,44 @@ describe("architecture analyzer symbolic links", () => {
     linkDirectory(join(root, "tests/helpers"), join(root, "src/shared/helpers"));
 
     expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/shared/helpers/fixture.ts resolves to tests/helpers/fixture.ts outside src.",
+      `src/shared/helpers ${LINK}`,
       "src/shared/icon.ts:1 cannot resolve local asset ./missing.png.",
     ]);
+    expect(reads.filter((path) => path.includes("helpers"))).toEqual([]);
   });
 
-  it.skipIf(process.platform === "win32")("keeps symbolic-linked TypeScript files unresolved", () => {
-    const root = fixture({
-      "src/renderer/src/view.ts": "export const view = true;\n",
-      "src/shared/consumer.ts": 'import { view } from "./view";\nexport const consumer = view;\n',
-    });
-    linkFile(join(root, "src/renderer/src/view.ts"), join(root, "src/shared/view.ts"));
-
-    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
-      "src/shared/consumer.ts:1 cannot resolve local module ./view.",
-    ]);
-  });
-
-  it("applies the reviewed asset exception to real paths", () => {
+  it("does not extend the reviewed asset exception to imports through links", () => {
     const root = fixture({
       "src/renderer/src/assets/mascot/idle.png": "png",
-      "src/renderer/src/assets/icons/app.png": "png",
       "src/main/mascot-sprites.ts": [
         'import idle from "./mascot/idle.png?inline";',
-        'import app from "../renderer/src/assets/mascot/icons/app.png?inline";',
-        "export const sprites = [idle, app];",
+        'import direct from "../renderer/src/assets/mascot/idle.png?inline";',
+        "export const sprites = [idle, direct];",
         "",
       ].join("\n"),
     });
     linkDirectory(join(root, "src/renderer/src/assets/mascot"), join(root, "src/main/mascot"));
-    linkDirectory(join(root, "src/renderer/src/assets/icons"), join(root, "src/renderer/src/assets/mascot/icons"));
 
     expect(analyzeSourceArchitecture({
       workspaceRoot: root,
       allowedAssetImports: [{ from: "src/main/mascot-sprites.ts", directory: "src/renderer/src/assets/mascot" }],
     }).failures).toEqual([
-      "src/main/mascot-sprites.ts:2 crosses source layers main -> renderer via src/renderer/src/assets/icons/app.png.",
+      `src/main/mascot ${LINK}`,
+      "src/main/mascot-sprites.ts:1 imports asset ./mascot/idle.png?inline through a symbolic link or reparse point.",
     ]);
+  });
+
+  it("reports an oversized source file without reading it", () => {
+    const root = fixture({
+      "src/shared/huge.ts": "x".repeat(MAX_ANALYZED_FILE_BYTES + 1),
+      "src/shared/small.ts": "export const small = true;\n",
+    });
+
+    expect(analyzeSourceArchitecture({ workspaceRoot: root }).failures).toEqual([
+      `src/shared/huge.ts exceeds the ${MAX_ANALYZED_FILE_BYTES} byte analysis bound; it was not read.`,
+    ]);
+    expect(reads).toContain(join(root, "src/shared/small.ts"));
+    expect(reads).not.toContain(join(root, "src/shared/huge.ts"));
   });
 });
 

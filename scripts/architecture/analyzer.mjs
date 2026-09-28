@@ -1,10 +1,10 @@
 import { builtinModules } from "node:module";
 import {
   existsSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   realpathSync,
-  statSync,
 } from "node:fs";
 import {
   dirname,
@@ -29,6 +29,7 @@ const PLATFORM_NEUTRAL_BUILD_CONFIGS = new Set([
   "src/renderer/private-connect/vite.config.ts",
 ]);
 const NODE_BUILTIN_SPECIFIERS = new Set(builtinModules);
+export const MAX_ANALYZED_FILE_BYTES = 1024 * 1024;
 
 export const DEFAULT_ALLOWED_SOURCE_LAYERS = new Map([
   ["shared", new Set(["shared"])],
@@ -54,14 +55,6 @@ function canonicalPath(path) {
     : absolute;
 }
 
-function physicalPath(path) {
-  try {
-    return realpathSync(path);
-  } catch {
-    return null;
-  }
-}
-
 function workspacePath(workspaceRoot, file) {
   return relative(workspaceRoot, file).replaceAll("\\", "/");
 }
@@ -73,6 +66,62 @@ function isContained(directory, file) {
       child !== ".."
       && !child.startsWith(`..${sep}`)
     );
+}
+
+function physicalRoot(root) {
+  try {
+    return realpathSync.native(root);
+  } catch {
+    return null;
+  }
+}
+
+function reachedWithoutLinks(root, physicalRootPath, path) {
+  if (!physicalRootPath || !isContained(root, path)) return false;
+  try {
+    return canonicalPath(realpathSync.native(path))
+      === canonicalPath(join(physicalRootPath, relative(root, path)));
+  } catch {
+    return false;
+  }
+}
+
+export function linkFailure(workspaceRoot, path) {
+  return `${workspacePath(workspaceRoot, path)} is a symbolic link or reparse `
+    + "point; analysed source trees must not contain links.";
+}
+
+function readAnalyzedFile(workspaceRoot, physicalWorkspaceRoot, file) {
+  const path = workspacePath(workspaceRoot, file);
+  let metadata;
+  try {
+    metadata = lstatSync(file);
+  } catch {
+    return { failure: `${path} cannot be read.` };
+  }
+  if (!metadata.isFile()) {
+    return { failure: `${path} is not a regular file; it was not read.` };
+  }
+  if (!isContained(workspaceRoot, file)) {
+    return { failure: `${path} lies outside the repository; it was not read.` };
+  }
+  if (!reachedWithoutLinks(workspaceRoot, physicalWorkspaceRoot, file)) {
+    return {
+      failure: `${path} is reached through a symbolic link or reparse point; `
+        + "it was not read.",
+    };
+  }
+  if (metadata.size > MAX_ANALYZED_FILE_BYTES) {
+    return {
+      failure: `${path} exceeds the ${MAX_ANALYZED_FILE_BYTES} byte analysis `
+        + "bound; it was not read.",
+    };
+  }
+  try {
+    return { contents: readFileSync(file, "utf8") };
+  } catch {
+    return { failure: `${path} cannot be read.` };
+  }
 }
 
 function normalizedFacadeName(name) {
@@ -123,30 +172,61 @@ function parseConfig(contents) {
   }));
 }
 
-export function typescriptFiles(directory) {
-  if (!existsSync(directory) || !statSync(directory).isDirectory()) return [];
-  return readdirSync(directory, {
-    recursive: true,
-    withFileTypes: true,
-  })
-    .filter(
-      (entry) => entry.isFile()
-        && TYPESCRIPT_EXTENSIONS.has(extname(entry.name)),
-    )
-    .map((entry) => resolve(entry.parentPath, entry.name))
-    .sort();
+export function sourceTree(directory) {
+  const root = resolve(directory);
+  const tree = { files: [], links: [] };
+  let metadata;
+  try {
+    metadata = lstatSync(root);
+  } catch {
+    return tree;
+  }
+  if (metadata.isSymbolicLink()) {
+    tree.links.push(root);
+    return tree;
+  }
+  if (!metadata.isDirectory()) return tree;
+  const physical = physicalRoot(root);
+  const visit = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = resolve(current, entry.name);
+      if (
+        entry.isSymbolicLink()
+        || !reachedWithoutLinks(root, physical, path)
+      ) {
+        tree.links.push(path);
+      } else if (entry.isDirectory()) {
+        visit(path);
+      } else if (
+        entry.isFile()
+        && TYPESCRIPT_EXTENSIONS.has(extname(entry.name))
+      ) {
+        tree.files.push(path);
+      }
+    }
+  };
+  visit(root);
+  tree.files.sort();
+  tree.links.sort();
+  return tree;
 }
 
-function compilerPathAliases(workspaceRoot, configPaths) {
+function compilerPathAliases(workspaceRoot, physicalWorkspaceRoot, configPaths) {
   const aliases = new Map();
   for (const configPath of configPaths) {
     const absoluteConfigPath = resolve(workspaceRoot, configPath);
     if (!existsSync(absoluteConfigPath)) {
       throw new Error(`${configPath} is missing.`);
     }
+    const read = readAnalyzedFile(
+      workspaceRoot,
+      physicalWorkspaceRoot,
+      absoluteConfigPath,
+    );
+    if (read.failure) throw new Error(read.failure);
     let config;
     try {
-      config = parseConfig(readFileSync(absoluteConfigPath, "utf8"));
+      config = parseConfig(read.contents);
     } catch {
       throw new Error(`${configPath} is not valid JSON or JSONC.`);
     }
@@ -278,12 +358,16 @@ function resolveModule(
       const target = asset
         ? existsSync(candidate) && candidate
         : sourceFileByCanonicalPath.get(canonicalPath(candidate));
-      if (target) return { kind: asset ? "asset" : "source", target };
+      if (target) {
+        return asset
+          ? { kind: "asset", target, exists: true }
+          : { kind: "source", target };
+      }
     }
     if (asset) missingAsset ??= candidates[0];
   }
   return missingAsset
-    ? { kind: "asset", target: missingAsset }
+    ? { kind: "asset", target: missingAsset, exists: false }
     : { kind: "unresolved" };
 }
 
@@ -535,18 +619,24 @@ function pairedFacadeDirectory(file) {
 
 export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeTypeQueries = false }) {
   const absoluteWorkspaceRoot = resolve(workspaceRoot);
+  const physicalWorkspaceRoot = physicalRoot(absoluteWorkspaceRoot);
   const sourceFileByCanonicalPath = new Map(
     files.map((file) => [canonicalPath(file), file]),
   );
   const failures = [];
   let aliases;
   try {
-    aliases = compilerPathAliases(absoluteWorkspaceRoot, configPaths);
+    aliases = compilerPathAliases(
+      absoluteWorkspaceRoot,
+      physicalWorkspaceRoot,
+      configPaths,
+    );
   } catch (error) {
     return {
       files,
       edges: [],
       assets: [],
+      missingAssets: [],
       externals: [],
       modules: new Map(),
       failures: [
@@ -558,13 +648,18 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
   }
   const edges = [];
   const assets = [];
+  const missingAssets = [];
   const externals = [];
   const modules = new Map();
   for (const file of files) {
-    const contents = readFileSync(file, "utf8");
+    const read = readAnalyzedFile(absoluteWorkspaceRoot, physicalWorkspaceRoot, file);
+    if (read.failure) {
+      failures.push(read.failure);
+      continue;
+    }
     let syntax;
     try {
-      syntax = moduleSyntax(file, contents, includeTypeQueries);
+      syntax = moduleSyntax(file, read.contents, includeTypeQueries);
     } catch (error) {
       failures.push(
         `${workspacePath(absoluteWorkspaceRoot, file)} could not be parsed: ${
@@ -589,15 +684,41 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
         aliases,
         sourceFileByCanonicalPath,
       );
-      if (resolution.kind === "source" || resolution.kind === "asset") {
-        (resolution.kind === "source" ? edges : assets).push({
-          from: file,
-          to: resolution.target,
-          kind: dependency.kind,
-          typeOnly: dependency.typeOnly,
-          line: dependency.line,
-          specifier: dependency.specifier,
-        });
+      const reference = {
+        from: file,
+        to: resolution.target,
+        kind: dependency.kind,
+        typeOnly: dependency.typeOnly,
+        line: dependency.line,
+        specifier: dependency.specifier,
+      };
+      const location = `${workspacePath(absoluteWorkspaceRoot, file)}:${dependency.line}`;
+      if (resolution.kind === "source") {
+        edges.push(reference);
+      } else if (resolution.kind === "asset" && !resolution.exists) {
+        missingAssets.push(reference);
+      } else if (
+        resolution.kind === "asset"
+        && !isContained(absoluteWorkspaceRoot, resolution.target)
+      ) {
+        failures.push(
+          `${location} imports asset ${dependency.specifier}, which lies `
+          + "outside the repository.",
+        );
+      } else if (
+        resolution.kind === "asset"
+        && !reachedWithoutLinks(
+          absoluteWorkspaceRoot,
+          physicalWorkspaceRoot,
+          resolution.target,
+        )
+      ) {
+        failures.push(
+          `${location} imports asset ${dependency.specifier} through a `
+          + "symbolic link or reparse point.",
+        );
+      } else if (resolution.kind === "asset") {
+        assets.push(reference);
       } else if (resolution.kind === "external") {
         externals.push({
           from: file,
@@ -615,7 +736,9 @@ export function analyzeModuleUsage({ workspaceRoot, files, configPaths, includeT
     }
   }
 
-  return { files, edges, assets, externals, modules, failures };
+  return {
+    files, edges, assets, missingAssets, externals, modules, failures,
+  };
 }
 
 export function analyzeSourceArchitecture({
@@ -631,9 +754,10 @@ export function analyzeSourceArchitecture({
     absoluteWorkspaceRoot,
     sourceDirectory,
   );
-  const files = typescriptFiles(absoluteSourceDirectory);
+  const tree = sourceTree(absoluteSourceDirectory);
+  const files = tree.files;
   const {
-    edges: referencedEdges, assets, externals, modules, failures,
+    edges: referencedEdges, assets, missingAssets, externals, modules, failures,
   } = analyzeModuleUsage({
     workspaceRoot: absoluteWorkspaceRoot,
     files,
@@ -641,97 +765,56 @@ export function analyzeSourceArchitecture({
     includeTypeQueries: true,
   });
   const edges = referencedEdges.filter((edge) => edge.kind !== "type-query");
-  const physicalWorkspaceRoot = physicalPath(absoluteWorkspaceRoot)
-    ?? absoluteWorkspaceRoot;
-  const physicalSourceDirectory = physicalPath(absoluteSourceDirectory)
-    ?? absoluteSourceDirectory;
-  const physicalFiles = new Map(files.map((file) => [file, physicalPath(file)]));
-  const physicalLayer = (path) => (
-    path && isContained(physicalSourceDirectory, path)
-      ? sourceLayer(physicalSourceDirectory, path)
-      : null
-  );
-  const physicalDisplay = (path) => workspacePath(physicalWorkspaceRoot, path);
   const reviewedAssetImports = allowedAssetImports.map(({ from, directory }) => ({
-    from: physicalPath(resolve(absoluteWorkspaceRoot, from)),
-    directory: physicalPath(resolve(absoluteWorkspaceRoot, directory)),
+    from: resolve(absoluteWorkspaceRoot, from),
+    directory: resolve(absoluteWorkspaceRoot, directory),
   }));
 
+  for (const link of tree.links) {
+    failures.push(linkFailure(absoluteWorkspaceRoot, link));
+  }
   for (const file of files) {
-    const physical = physicalFiles.get(file);
-    const path = workspacePath(absoluteWorkspaceRoot, file);
-    if (!physical || !isContained(physicalWorkspaceRoot, physical)) {
-      failures.push(`${path} resolves outside the repository.`);
-      continue;
-    }
-    if (!isContained(physicalSourceDirectory, physical)) {
-      failures.push(
-        `${path} resolves to ${physicalDisplay(physical)} outside `
-        + `${workspacePath(absoluteWorkspaceRoot, absoluteSourceDirectory)}.`,
-      );
-      continue;
-    }
-    const layer = physicalLayer(physical);
+    const layer = sourceLayer(absoluteSourceDirectory, file);
     if (!allowedLayers.has(layer)) {
       failures.push(
-        `${path} belongs to unknown `
+        `${workspacePath(absoluteWorkspaceRoot, file)} belongs to unknown `
         + `source layer ${layer || "(root)"}.`,
       );
     }
   }
-  const layeredEdges = referencedEdges.map((edge) => ({
-    ...edge,
-    to: physicalFiles.get(edge.to),
-  }));
-  for (const asset of assets) {
-    const physical = physicalPath(asset.to);
-    const importer = physicalFiles.get(asset.from);
-    const from = workspacePath(absoluteWorkspaceRoot, asset.from);
-    if (!physical) {
-      failures.push(
-        `${from}:${asset.line} cannot resolve local asset ${asset.specifier}.`,
-      );
-    } else if (!isContained(physicalWorkspaceRoot, physical)) {
-      failures.push(
-        `${from}:${asset.line} imports asset ${asset.specifier}, which `
-        + "resolves outside the repository.",
-      );
-    } else if (
-      isContained(physicalSourceDirectory, physical)
-      && !reviewedAssetImports.some(({ from: reviewed, directory }) =>
-        reviewed
-        && directory
-        && importer
-        && canonicalPath(reviewed) === canonicalPath(importer)
-        && isContained(canonicalPath(directory), canonicalPath(physical))
-      )
-    ) {
-      layeredEdges.push({ ...asset, to: physical });
-    }
+  for (const asset of missingAssets) {
+    failures.push(
+      `${workspacePath(absoluteWorkspaceRoot, asset.from)}:${asset.line} `
+      + `cannot resolve local asset ${asset.specifier}.`,
+    );
   }
-  for (const edge of layeredEdges) {
-    const fromLayer = physicalLayer(physicalFiles.get(edge.from));
-    const toLayer = physicalLayer(edge.to);
+  const layeredAssets = assets.filter((asset) =>
+    isContained(absoluteSourceDirectory, asset.to)
+    && !reviewedAssetImports.some(({ from, directory }) =>
+      canonicalPath(from) === canonicalPath(asset.from)
+      && isContained(canonicalPath(directory), canonicalPath(asset.to))
+    )
+  );
+  for (const edge of [...referencedEdges, ...layeredAssets]) {
+    const fromLayer = sourceLayer(absoluteSourceDirectory, edge.from);
+    const toLayer = sourceLayer(absoluteSourceDirectory, edge.to);
     if (
-      fromLayer !== null
-      && toLayer !== null
-      && fromLayer !== toLayer
+      fromLayer !== toLayer
       && !allowedLayers.get(fromLayer)?.has(toLayer)
     ) {
       failures.push(
         `${workspacePath(absoluteWorkspaceRoot, edge.from)}:${edge.line} crosses `
         + `source layers ${fromLayer} -> ${toLayer} via `
-        + `${physicalDisplay(edge.to)}.`,
+        + `${workspacePath(absoluteWorkspaceRoot, edge.to)}.`,
       );
     }
   }
   for (const external of externals) {
-    const physical = physicalFiles.get(external.from);
-    const layer = physicalLayer(physical);
+    const layer = sourceLayer(absoluteSourceDirectory, external.from);
     const path = workspacePath(absoluteWorkspaceRoot, external.from);
     if (
       platformNeutralLayers.has(layer)
-      && !PLATFORM_NEUTRAL_BUILD_CONFIGS.has(physicalDisplay(physical))
+      && !PLATFORM_NEUTRAL_BUILD_CONFIGS.has(path)
       && isElectronOrNodeBuiltin(external.specifier)
     ) {
       failures.push(
@@ -797,17 +880,27 @@ export function lineCeilingFailures({
   label,
 }) {
   const absoluteWorkspaceRoot = resolve(workspaceRoot);
-  const absoluteDirectory = resolve(absoluteWorkspaceRoot, directory);
-  return typescriptFiles(absoluteDirectory).flatMap((file) => {
-    if (!include(file)) return [];
-    const lines = readFileSync(file, "utf8").split(/\r?\n/u).length;
-    return lines > ceiling
-      ? [
-          `${workspacePath(absoluteWorkspaceRoot, file)} has ${lines} lines `
-          + `(${label}: ${ceiling}).`,
-        ]
-      : [];
-  });
+  const physicalWorkspaceRoot = physicalRoot(absoluteWorkspaceRoot);
+  const tree = sourceTree(resolve(absoluteWorkspaceRoot, directory));
+  return [
+    ...tree.links.map((link) => linkFailure(absoluteWorkspaceRoot, link)),
+    ...tree.files.flatMap((file) => {
+      if (!include(file)) return [];
+      const read = readAnalyzedFile(
+        absoluteWorkspaceRoot,
+        physicalWorkspaceRoot,
+        file,
+      );
+      if (read.failure) return [read.failure];
+      const lines = read.contents.split(/\r?\n/u).length;
+      return lines > ceiling
+        ? [
+            `${workspacePath(absoluteWorkspaceRoot, file)} has ${lines} lines `
+            + `(${label}: ${ceiling}).`,
+          ]
+        : [];
+    }),
+  ];
 }
 
 export function isTestCaseFile(file) {

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,6 +81,37 @@ describe("architecture checker", () => {
     expect(check(root)).toMatch(
       /passed \(3 source files, 2 internal edges, 0 derived compatibility facades\)/u,
     );
+  });
+
+  it("cannot bypass the shared contracts facade rule through a linked directory", () => {
+    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "huge.test.ts"), "x".repeat(2 * 1024 * 1024));
+    const root = fixture({
+      "src/shared/contracts.ts": 'export { runtimeValue } from "./value";\n',
+      "src/shared/value.ts": "export const runtimeValue = true;\n",
+      "tests/value.test.ts": "export {};\n",
+      "src/renderer/runtime.ts": [
+        'import { runtimeValue } from "./shared-link/contracts";',
+        "export const value = runtimeValue;",
+        "",
+      ].join("\n"),
+    });
+    const type = process.platform === "win32" ? "junction" : "dir";
+    symlinkSync(join(root, "src/shared"), join(root, "src/renderer/shared-link"), type);
+    symlinkSync(outside, join(root, "tests/outside"), type);
+
+    const error = rejectedCheck(root);
+    expect(error).toContain(
+      "src/renderer/shared-link is a symbolic link or reparse point; analysed source trees must not contain links.",
+    );
+    expect(error).toContain(
+      "src/renderer/runtime.ts:1 cannot resolve local module ./shared-link/contracts.",
+    );
+    expect(error).toContain(
+      "tests/outside is a symbolic link or reparse point; analysed source trees must not contain links.",
+    );
+    expect(error).not.toContain("huge.test.ts");
   });
 
   it("keeps renderer runtime values out of the broad shared contracts facade", () => {

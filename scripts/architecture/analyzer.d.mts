@@ -1,3 +1,5 @@
+export const MAX_ANALYZED_FILE_BYTES: number;
+
 export function analyzeSourceArchitecture(options: {
   workspaceRoot: string;
   sourceDirectory?: string;

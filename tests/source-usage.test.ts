@@ -144,7 +144,6 @@ describe("source usage inventory", () => {
     expect(report.testAndToolOnly).toEqual([
       "src/renderer/private-connect/vite.config.ts",
       "src/server/codex/app-server-notifications.ts",
-      "src/server/runtime/backends/kimi-claude-preset.ts",
     ]);
     expect(report.unreferenced).toEqual([]);
     expect(report.production).toContain("src/server/provider/adapters.ts");

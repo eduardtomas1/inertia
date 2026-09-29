@@ -698,6 +698,7 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     let overrunWithRowRemount = 0;
     let overrunWithLayoutMeasurement = 0;
     let maximumDescendants = 0;
+    let followStateSettleFrames = 0;
     const timeline = viewport.querySelector<HTMLElement>(".response-timeline");
     if (!timeline || viewport.scrollHeight <= viewport.clientHeight) {
       throw new Error("The authoritative transcript viewport is not scrollable.");
@@ -718,6 +719,21 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         deltaY: target === 0 ? -1 : 1,
       }));
       viewport.scrollTop = target;
+    };
+    const followControlsShown = (): boolean =>
+      document.querySelector(".timeline-follow-controls") !== null;
+    const settleFollowState = async (atTop: boolean): Promise<number | null> => {
+      let settledAt: number | null = null;
+      for (let frame = 0; followControlsShown() !== atTop; frame += 1) {
+        if (frame >= maximumPreflightFrames) {
+          throw new Error(
+            `The transcript follow state did not settle at the ${atTop ? "top" : "bottom"} within ${maximumPreflightFrames} frames.`,
+          );
+        }
+        settledAt = await waitForFrame();
+        followStateSettleFrames += 1;
+      }
+      return settledAt;
     };
     // Calibrate the dynamically measured bottom range before starting the
     // exact 120-frame sample. The virtualizer wraps ResizeObserver work in
@@ -775,6 +791,8 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     let previous = performance.now();
     let previousRowCount = feed.querySelectorAll(".response-virtual-item").length;
     for (let index = 0; index < 120; index += 1) {
+      const settledAt = await settleFollowState(index % 2 === 0);
+      if (settledAt !== null) previous = settledAt;
       const before = viewport.scrollTop;
       const target = index % 2 === 0 ? viewport.scrollHeight : 0;
       scrollTo(target);
@@ -861,6 +879,7 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         frames: preflightFrames,
         heightChanges: preflightHeightChanges,
       },
+      followStateSettleFrames,
       totalTimelineRows: totalRows,
       maximumDomDescendants: maximumDescendants,
       scrollHeight: viewport.scrollHeight,
@@ -2198,7 +2217,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; bounded, unmeasured setup renders both virtual edge ranges and waits for stable geometry at each end before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; bounded, unmeasured setup renders both virtual edge ranges and waits for stable geometry at each end before the exact 120-frame sample, each sampled scroll starts after the follow state for the previous edge has committed, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
         "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence; those four gate-controlled intervals are excluded from visible-cadence statistics, while every later visible interval remains measured. It then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",

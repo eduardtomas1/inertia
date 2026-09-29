@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -82,6 +83,37 @@ describe("architecture checker", () => {
     );
   });
 
+  it("cannot bypass the shared contracts facade rule through a linked directory", () => {
+    const outside = mkdtempSync(join(tmpdir(), "inertia-architecture-outside-"));
+    roots.push(outside);
+    writeFileSync(join(outside, "huge.test.ts"), "x".repeat(2 * 1024 * 1024));
+    const root = fixture({
+      "src/shared/contracts.ts": 'export { runtimeValue } from "./value";\n',
+      "src/shared/value.ts": "export const runtimeValue = true;\n",
+      "tests/value.test.ts": "export {};\n",
+      "src/renderer/runtime.ts": [
+        'import { runtimeValue } from "./shared-link/contracts";',
+        "export const value = runtimeValue;",
+        "",
+      ].join("\n"),
+    });
+    const type = process.platform === "win32" ? "junction" : "dir";
+    symlinkSync(join(root, "src/shared"), join(root, "src/renderer/shared-link"), type);
+    symlinkSync(outside, join(root, "tests/outside"), type);
+
+    const error = rejectedCheck(root);
+    expect(error).toContain(
+      "src/renderer/shared-link is a symbolic link or reparse point; analysed source trees must not contain links.",
+    );
+    expect(error).toContain(
+      "src/renderer/runtime.ts:1 cannot resolve local module ./shared-link/contracts.",
+    );
+    expect(error).toContain(
+      "tests/outside is a symbolic link or reparse point; analysed source trees must not contain links.",
+    );
+    expect(error).not.toContain("huge.test.ts");
+  });
+
   it("keeps renderer runtime values out of the broad shared contracts facade", () => {
     const root = fixture({
       "src/shared/contracts.ts": [
@@ -113,32 +145,26 @@ describe("architecture checker", () => {
     expect(error).not.toContain("src/renderer/types.ts");
   });
 
-  it("keeps the sunset CLI harness fixture outside production source", () => {
+  it("limits the reviewed main-to-renderer asset import to the mascot sprite stills", () => {
     const root = fixture({
-      "src/server/provider/cli-agent-harness.ts": [
-        "export interface LegacyFixture { id: string }",
-        "export const legacyFixture: LegacyFixture = { id: \"legacy\" };",
+      "src/renderer/src/assets/mascot/idle.png": "png",
+      "src/main/mascot-sprites.ts": [
+        'import idle from "../renderer/src/assets/mascot/idle.png?inline";',
+        "export const sprites = [idle];",
         "",
       ].join("\n"),
-      "src/server/runtime-consumer.ts": [
-        'import { legacyFixture } from "./provider/cli-agent-harness";',
-        "export const fixtureId = legacyFixture.id;",
-        "",
-      ].join("\n"),
-      "src/server/type-consumer.ts": [
-        'import type { LegacyFixture } from "./provider/cli-agent-harness";',
-        "export type ConsumerFixture = LegacyFixture;",
+      "src/main/mascot-main.ts": [
+        'import idle from "../renderer/src/assets/mascot/idle.png?inline";',
+        "export const sprite = idle;",
         "",
       ].join("\n"),
     });
 
     const error = rejectedCheck(root);
     expect(error).toContain(
-      "src/server/runtime-consumer.ts:1 imports the sunset CLI harness fixture from production source",
+      "src/main/mascot-main.ts:1 crosses source layers main -> renderer via src/renderer/src/assets/mascot/idle.png",
     );
-    expect(error).toContain(
-      "src/server/type-consumer.ts:1 imports the sunset CLI harness fixture from production source",
-    );
+    expect(error).not.toContain("src/main/mascot-sprites.ts");
   });
 
   it("rejects production imports of relocated test fixtures", () => {

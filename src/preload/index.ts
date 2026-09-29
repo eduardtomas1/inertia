@@ -11,72 +11,9 @@ import type {
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
+import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
+import { DETACHED_CHAT_IPC } from "../shared/detached-chat-ipc.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
-
-const IPC = {
-  getRuntimeConnection: "inertia:runtime-connection",
-  runtimeReady: "inertia:runtime-ready",
-  selectDirectory: "inertia:select-directory",
-  selectCodexExecutable: "inertia:select-codex-executable",
-  exportRecoveryData: "inertia:export-recovery-data",
-  importRecoveryData: "inertia:import-recovery-data",
-  revealRuntimeLogs: "inertia:reveal-runtime-logs",
-  copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
-  copyText: "inertia:copy-text",
-  checkAppUpdate: "inertia:check-app-update",
-  downloadAppUpdate: "inertia:download-app-update",
-  cancelAppUpdateDownload: "inertia:cancel-app-update-download",
-  installAppUpdate: "inertia:install-app-update",
-  appUpdateStatus: "inertia:app-update-status",
-  getCanaryRollbackStatus: "inertia:get-canary-rollback-status",
-  prepareCanaryRollback: "inertia:prepare-canary-rollback",
-  openCanaryRollback: "inertia:open-canary-rollback",
-  sendDiscordReleaseInfo: "inertia:send-discord-release-info",
-  selectAttachments: "inertia:select-attachments",
-  beginAttachmentImport: "inertia:begin-attachment-import",
-  importAttachments: "inertia:import-attachments",
-  commitAttachmentImport: "inertia:commit-attachment-import",
-  cancelAttachmentImport: "inertia:cancel-attachment-import",
-  prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
-  finishAttachmentHandoff: "inertia:finish-attachment-handoff",
-  releaseAttachment: "inertia:release-attachment",
-  openAttachmentExternally: "inertia:open-attachment-externally",
-  openProjectPath: "inertia:open-project-path",
-  openExternal: "inertia:open-external",
-  showThreadNotification: "inertia:show-thread-notification",
-  threadNotificationActivated: "inertia:thread-notification-activated",
-  getAppHealth: "inertia:get-app-health",
-  clearAppCache: "inertia:clear-app-cache",
-  previewConnect: "inertia:preview-connect",
-  previewNavigate: "inertia:preview-navigate",
-  previewCommand: "inertia:preview-command",
-  previewTab: "inertia:preview-tab",
-  previewSetBounds: "inertia:preview-set-bounds",
-  previewClose: "inertia:preview-close",
-  previewInspectEvidenceImage: "inertia:preview-inspect-evidence-image",
-  previewState: "inertia:preview-state",
-  syncThemePreference: "inertia:sync-theme-preference",
-  setBackendCredential: "inertia:set-backend-credential",
-  clearBackendCredential: "inertia:clear-backend-credential",
-  getBackendCredentialState: "inertia:get-backend-credential-state",
-} as const;
-const DETACHED_CHAT_IPC = {
-  getWindowContext: "inertia:window-context",
-  open: "inertia:detached-chat-open",
-  focus: "inertia:detached-chat-focus",
-  getWindows: "inertia:detached-chat-windows",
-  getPendingDrafts: "inertia:detached-chat-pending-drafts",
-  acknowledgeDraft: "inertia:detached-chat-acknowledge-draft",
-  windowsChanged: "inertia:detached-chat-windows-changed",
-  draftChanged: "inertia:detached-chat-draft-changed",
-  draftMirrored: "inertia:detached-chat-draft-mirrored",
-  persistDraft: "inertia:detached-chat-persist-draft",
-  mirrorDraft: "inertia:detached-chat-mirror-draft",
-  setAlwaysOnTop: "inertia:detached-chat-always-on-top",
-  retarget: "inertia:detached-chat-retarget",
-  dock: "inertia:detached-chat-dock",
-  close: "inertia:detached-chat-close",
-} as const;
 
 const threadNotificationActivations = new ThreadNotificationActivationBuffer();
 ipcRenderer.on(
@@ -334,11 +271,11 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.sendDiscordReleaseInfo, request) as ReturnType<
       DesktopBridge["sendDiscordReleaseInfo"]
     >,
-  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke("inertia:snapshot", request),
+  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke(IPC.snapshot, request),
   onSnapshot: (listener: (delivery: import("../shared/snapshots").SnapshotDelivery) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, delivery: import("../shared/snapshots").SnapshotDelivery): void => listener(delivery);
-    ipcRenderer.on("inertia:snapshot-ready", handler);
-    return () => { ipcRenderer.removeListener("inertia:snapshot-ready", handler); };
+    ipcRenderer.on(IPC.snapshotReady, handler);
+    return () => { ipcRenderer.removeListener(IPC.snapshotReady, handler); };
   },
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   beginAttachmentImport: () => ipcRenderer.invoke(IPC.beginAttachmentImport) as ReturnType<DesktopBridge["beginAttachmentImport"]>,

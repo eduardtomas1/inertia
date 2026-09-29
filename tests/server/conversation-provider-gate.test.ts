@@ -152,6 +152,31 @@ describe("conversation provider gate", () => {
       .toThrow("Production ProviderManager construction requires a conversation provider gate.");
   });
 
+  it("creates conversation-scoped provider control clients only behind the gate", () => {
+    const sources = productionSources(sourceRoot).map((path) => ({
+      path: relative(sourceRoot, path).replaceAll("\\", "/"),
+      text: readFileSync(path, "utf8"),
+    }));
+    const calling = (pattern: RegExp) => sources
+      .filter(({ path, text }) => path !== "server/providers.ts" && pattern.test(text))
+      .map(({ path }) => path);
+    expect(calling(/providers\.codexControlContext\(/u)).toEqual([
+      "server/runtime/conversation-provider-contact.ts",
+      "server/usage/native.ts",
+    ]);
+    expect(calling(/providers\.claudeSkills\(/u)).toEqual(["server/runtime/conversation-provider-contact.ts"]);
+    const contact = sources.find(({ path }) => path === "server/runtime/conversation-provider-contact.ts")!.text;
+    for (const method of ["codexControlContext", "claudeSkills"]) {
+      const call = contact.indexOf(`.${method}(`);
+      expect(contact.lastIndexOf("assertConversationProvider(", call)).toBeGreaterThan(-1);
+    }
+    expect(calling(/withCodexControlClient\(/u)).toEqual([
+      "server/codex-metadata.ts",
+      "server/runtime/agent-workflow-controller.ts",
+      "server/usage/native.ts",
+    ]);
+  });
+
   it("starts provider harnesses only behind the gate", () => {
     const sources = productionSources(sourceRoot).map((path) => ({
       path: relative(sourceRoot, path).replaceAll("\\", "/"),

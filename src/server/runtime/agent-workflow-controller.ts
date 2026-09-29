@@ -14,6 +14,8 @@ import type {
 import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { boundedDisplayString, exactBoundedString, parseCodexGoal } from "./codex-goal-parsing";
+import { ConversationProviderContact } from "./conversation-provider-contact";
+import { ConversationProviderChangeError } from "../persistence/errors";
 import type { RuntimeStore } from "../database";
 import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
@@ -150,12 +152,25 @@ export class AgentWorkflowController {
   private readonly skillDiscoveryFlights =
     new Map<string, SkillDiscoveryFlight>();
   private nativeGoalRuntime: NativeGoalRuntime | null = null;
+  private readonly contact: ConversationProviderContact;
 
   constructor(
     private readonly store: RuntimeStore,
-    private readonly providers: ProviderManager,
+    providers: ProviderManager,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.contact = new ConversationProviderContact(store, providers);
+  }
+
+  private providerContactRefusal(conversationId: string): string | null {
+    try {
+      this.store.assertConversationProvider(conversationId, this.store.conversation(conversationId).providerId);
+      return null;
+    } catch (error) {
+      if (error instanceof ConversationProviderChangeError) return error.message;
+      throw error;
+    }
+  }
 
   attachNativeGoalRuntime(runtime: NativeGoalRuntime): void {
     if (this.nativeGoalRuntime) {
@@ -177,6 +192,7 @@ export class AgentWorkflowController {
     const currentSkillDiscovery = this.skillDiscovery.get(conversationId);
     const nativeGoalRefreshWarning =
       this.nativeGoalRefreshWarnings.get(conversationId);
+    const contactRefusal = this.providerContactRefusal(conversationId);
     if (
       nativeGoalRefreshWarning
       && (
@@ -218,7 +234,14 @@ export class AgentWorkflowController {
         .sort((left, right) =>
           left.scope.localeCompare(right.scope, "en")
           || left.name.localeCompare(right.name, "en")),
-      skillsCapability: native
+      skillsCapability: contactRefusal
+        ? {
+            kind: "unavailable",
+            available: false,
+            label: "Skills unavailable",
+            reason: contactRefusal,
+          }
+        : native
         ? {
             kind: "codex-native",
             available: true,
@@ -237,8 +260,9 @@ export class AgentWorkflowController {
             reason:
               "This route does not expose safe structured skill invocation.",
           },
-      goalRefreshWarning:
-        native
+      goalRefreshWarning: native && contactRefusal
+        ? contactRefusal
+        : native
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
           ? nativeGoalRefreshWarning.message
@@ -255,6 +279,7 @@ export class AgentWorkflowController {
     if (
       isNativeCodexConversation(conversation)
       && conversation.providerSessionId
+      && !this.providerContactRefusal(conversationId)
     ) {
       const providerSessionId = conversation.providerSessionId;
       await this.withNativeGoalOperation(
@@ -275,9 +300,7 @@ export class AgentWorkflowController {
             );
           let response: JsonObject;
           try {
-            const context = await this.providers.codexControlContext(
-              this.store.conversationPath(conversationId),
-            );
+            const context = await this.contact.codexControl(conversationId);
             response = await withCodexControlClient(
               context,
               ({ request }) => request("thread/goal/get", {
@@ -548,9 +571,7 @@ export class AgentWorkflowController {
           this.nativeGoalRefreshWarnings.delete(input.conversationId);
           return stored;
         }
-        const context = await this.providers.codexControlContext(
-          this.store.conversationPath(input.conversationId),
-        );
+        const context = await this.contact.codexControl(input.conversationId);
         const params: JsonObject = {
           threadId: providerSessionId,
           status: input.status,
@@ -622,9 +643,7 @@ export class AgentWorkflowController {
             return false;
           }
           if (routed === null) {
-            const context = await this.providers.codexControlContext(
-              this.store.conversationPath(conversationId),
-            );
+            const context = await this.contact.codexControl(conversationId);
             await withCodexControlClient(
               context,
               ({ request }) => request("thread/goal/clear", {
@@ -792,7 +811,7 @@ export class AgentWorkflowController {
     routeKey: string,
   ): Promise<AgentSkillSummary[]> {
     if (isNativeClaudeConversation(conversation)) {
-      const rawSkills = await this.providers.claudeSkills(cwd, forceReload);
+      const rawSkills = await this.contact.claudeSkills(conversationId, forceReload);
       this.requireCurrentSkillRoute(conversationId, routeKey);
       return this.replaceSkills(
         conversationId,
@@ -830,7 +849,7 @@ export class AgentWorkflowController {
         routeKey,
       );
     }
-    const context = await this.providers.codexControlContext(cwd);
+    const context = await this.contact.codexControl(conversationId);
     const response = await withCodexControlClient(
       context,
       ({ request }) => request("skills/list", {

@@ -456,6 +456,54 @@ describe("AgentWorkflowController", () => {
     expect(controlRequest).not.toHaveBeenCalled();
   });
 
+  it("shows a mixed-provider history in the workflow state without contacting Codex", async () => {
+    controlRequest.mockClear();
+    const runtime = harness({ goals: [nativeGoal()], providerRejection: MIXED_PROVIDER_HISTORY_MESSAGE });
+
+    const state = await runtime.controller.refresh("conversation-1");
+
+    expect(state.goalRefreshWarning).toBe(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(state.skillsCapability).toEqual({
+      kind: "unavailable",
+      available: false,
+      label: "Skills unavailable",
+      reason: MIXED_PROVIDER_HISTORY_MESSAGE,
+    });
+    expect(state.goals).toEqual([nativeGoal()]);
+    expect(runtime.providers.codexControlContext).not.toHaveBeenCalled();
+    expect(controlRequest).not.toHaveBeenCalled();
+  });
+
+  it("refuses to clear a native goal for a mixed-provider history without contacting Codex", async () => {
+    controlRequest.mockClear();
+    const runtime = harness({ goals: [nativeGoal()], providerRejection: MIXED_PROVIDER_HISTORY_MESSAGE });
+
+    await expect(runtime.controller.clearGoal("conversation-1", "codex-native"))
+      .rejects.toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+
+    expect(runtime.providers.codexControlContext).not.toHaveBeenCalled();
+    expect(controlRequest).not.toHaveBeenCalled();
+    expect(runtime.goals).toEqual([nativeGoal()]);
+  });
+
+  it.each([
+    ["Codex", undefined],
+    ["Claude", conversation({
+      providerId: "claude",
+      modelSelection: { ...conversation().modelSelection, harnessId: "claude-agent-sdk", backendProfileId: "builtin:anthropic" },
+    })],
+  ] as const)("does not discover %s skills for a mixed-provider history", async (_provider, current) => {
+    controlRequest.mockClear();
+    const runtime = harness({ ...(current ? { current } : {}), providerRejection: MIXED_PROVIDER_HISTORY_MESSAGE });
+
+    await expect(runtime.controller.listSkills("conversation-1", true))
+      .rejects.toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+
+    expect(runtime.providers.codexControlContext).not.toHaveBeenCalled();
+    expect(runtime.providers.claudeSkills).not.toHaveBeenCalled();
+    expect(controlRequest).not.toHaveBeenCalled();
+  });
+
   it("starts an idle native goal through the durable turn runtime", async () => {
     const runtime = harness();
     const setNativeGoal = vi.fn(async () => ({

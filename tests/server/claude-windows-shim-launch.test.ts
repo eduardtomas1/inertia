@@ -1,11 +1,12 @@
 // @inertia-test-suite portable
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createClaudeOwnedQueryProcess } from "../../src/server/provider/claude-owned-query";
+import { removePortableFixture } from "../helpers/portable-provider-fixture";
 
 const MANAGED_SETTINGS = "{\"disableAllHooks\":true,\"note\":\"quote \\\" & percent % and caret ^\"}";
 
@@ -33,17 +34,17 @@ describe.runIf(process.platform === "win32")("Claude npm shim launch on Windows"
         env: { ...process.env },
         signal: new AbortController().signal,
       });
+      const closed = once(owned.child()!, "close");
       let output = "";
       spawned.stdout.setEncoding("utf8");
       spawned.stdout.on("data", (chunk: string) => { output += chunk; });
       await once(spawned.stdout, "end");
-      const child = owned.child()!;
-      if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
+      const [exitCode] = await closed;
 
       expect(JSON.parse(output.trim())).toEqual(["--managed-settings", MANAGED_SETTINGS]);
-      expect(child.exitCode).toBe(0);
+      expect(exitCode).toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await removePortableFixture(root);
     }
   });
 });

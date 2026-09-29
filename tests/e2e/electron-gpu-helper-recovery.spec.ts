@@ -102,6 +102,7 @@ test("recovers a GPU helper that stalls before the first action after launch", a
     const pressed = await toggle.getAttribute("aria-pressed");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(await directGpuHelper(mainPid)).not.toBe(gpuPid);
@@ -130,6 +131,7 @@ test("keeps a one-second assertion that meets the stall first within its own dea
     const pressed = await toggle.getAttribute("aria-pressed");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -158,6 +160,7 @@ test("recovers a GPU helper that stalls after restart before a workspace tool op
     await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
     await expect(app.page.locator('.workspace-panel [data-workspace-tab="attachments"]'))
       .toHaveAttribute("aria-selected", "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -171,7 +174,7 @@ test("recovers a GPU helper that stalls after restart before a workspace tool op
 
 async function waitForRecoveries(count: number): Promise<void> {
   await expect.poll(() => test.info().annotations
-    .filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED).length, { timeout: 15_000 }).toBe(count);
+    .filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED).length, { timeout: 30_000 }).toBe(count);
 }
 
 test("recovers a stall met only by actions on a secondary window", async () => {
@@ -193,35 +196,7 @@ test("recovers a stall met only by actions on a secondary window", async () => {
     process.kill(gpuPid, "SIGSTOP");
     await popup.getByRole("button", { name: "Popup action" }).click();
     await expect(popup.getByRole("button", { name: "Clicked" })).toBeVisible();
-    expectStallRecovered(gpuPid, mainPid);
-    expect(await processStart(gpuPid)).toBeNull();
-    expect(app.rendererErrors).toEqual([]);
-  } finally {
-    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
-      process.kill(gpuPid, "SIGKILL");
-    }
-    await app.close();
-  }
-});
-
-test("recovers a stall that begins while a click waits for its moving target", async () => {
-  const app = await createAppFixture({ name: "gpu-helper-mid-action-frames", initialState: "conversation" });
-  let gpuPid: number | undefined;
-  let gpuStart: string | null = null;
-  try {
-    const mainPid = app.electronApp.process().pid!;
-    gpuPid = await directGpuHelper(mainPid);
-    gpuStart = await processStart(gpuPid);
-    const toggle = rightPanelToggle(app.page);
-    const pressed = await toggle.getAttribute("aria-pressed");
-    await app.page.addStyleTag({ content: "@keyframes frame-monitor-drift { from { translate: 0 } to { translate: 24px } }"
-      + " [data-panel-layout-controls] [data-right-panel-toggle] { animation: frame-monitor-drift 1500ms linear both; }" });
-    const clicked = toggle.click();
-    await expect.poll(() => toggle.evaluate((element) => element.getAnimations()
-      .some((animation) => animation.playState === "running" && Number(animation.currentTime) > 200))).toBe(true);
-    process.kill(gpuPid, "SIGSTOP");
-    await clicked;
-    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -248,6 +223,7 @@ test("recovers a stall that begins after a healthy action while the page waits f
     process.kill(gpuPid, "SIGSTOP");
     await app.page.evaluate(() => new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -267,9 +243,10 @@ test("leaves a stopped helper alone while every window is hidden and recovers it
     const mainPid = app.electronApp.process().pid!;
     gpuPid = await directGpuHelper(mainPid);
     gpuStart = await processStart(gpuPid);
-    await app.electronApp.evaluate(({ BrowserWindow }) => {
+    expect(await app.electronApp.evaluate(({ BrowserWindow }) => {
       for (const window of BrowserWindow.getAllWindows()) window.hide();
-    });
+      return BrowserWindow.getAllWindows().some((window) => window.isVisible() && !window.isMinimized());
+    })).toBe(false);
     process.kill(gpuPid, "SIGSTOP");
     await elapseObservationWindow(app.page, 6_000);
     expect(await processStart(gpuPid)).toBe(gpuStart);

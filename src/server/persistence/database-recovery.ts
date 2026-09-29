@@ -20,6 +20,7 @@ import {
   type DatabaseRequiredTables,
   REQUIRED_TABLES_BY_SCHEMA_VERSION,
 } from "./database-recovery-required-tables";
+import { schemaLessEmptyDatabase } from "./database-empty-primary";
 import {
   databaseFamilyEntryExists,
   quarantineDatabaseFamily,
@@ -790,15 +791,20 @@ export function recoverDatabaseOnStartup(
       "The database was created by a newer version of Inertia and was left unchanged.",
     );
   }
-  if (primaryValidation === "inconsistent") {
+  if (
+    primaryValidation === "inconsistent"
+    && !schemaLessEmptyDatabase(paths.databasePath)
+  ) {
     throw new Error(
       "The database schema or stored relationships are inconsistent. The primary and backups were left unchanged; explicit recovery is required.",
     );
   }
-  if (primaryValidation === "valid-current") {
+  const freshPrimary = primaryValidation === "inconsistent"
+    && listBackupMetadata(paths.databasePath).length === 0;
+  if (primaryValidation === "valid-current" || freshPrimary) {
     return {
       checkedAt: now.toISOString(),
-      outcome: "healthy",
+      outcome: freshPrimary ? "first-launch" : "healthy",
       trigger: "none",
       restoredBackup: null,
       preservedCorruptPrimary: false,

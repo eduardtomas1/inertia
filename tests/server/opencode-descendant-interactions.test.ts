@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
@@ -19,6 +19,7 @@ function descendantInteractionServer(
   root: string,
   capturePath: string,
   emitRootActivity = true,
+  eventSubscription: number | "after-prompt" | "never" | "rejected" = 0,
 ): string {
   return `
 const http = require("node:http");
@@ -29,7 +30,9 @@ const captured = [];
 const sessionID = "opencode-root-session";
 const childID = "opencode-child-session";
 const emitRootActivity = ${JSON.stringify(emitRootActivity)};
+const eventSubscription = ${JSON.stringify(eventSubscription)};
 let events;
+let openPendingEvents;
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ port, captured }));
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "root", projectID: "project", directory: ${JSON.stringify(root)}, title: "Root", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
@@ -49,12 +52,23 @@ const server = http.createServer((req, res) => {
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") {
-      events = res;
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-      return res.flushHeaders();
+      const openEvents = () => {
+        events = res;
+        captured.push({ method: "SSE", path: "/event/opened" });
+        save();
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+        res.flushHeaders();
+      };
+      if (eventSubscription === "rejected") return json(res, { error: "unavailable" }, 503);
+      if (eventSubscription === "never") return;
+      if (eventSubscription === "after-prompt") return void (openPendingEvents = openEvents);
+      if (eventSubscription > 0) return setTimeout(openEvents, eventSubscription);
+      return openEvents();
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
       json(res, undefined, 204);
+      openPendingEvents?.();
+      openPendingEvents = undefined;
       if (emitRootActivity) setTimeout(() => sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "root-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } }), 10);
       setTimeout(() => sendEvent({ type: "session.created", properties: { sessionID: childID, info: { ...session, id: childID, parentID: sessionID } } }), 20);
       setTimeout(() => sendEvent({ type: "permission.v2.asked", properties: { id: "child-permission", sessionID: "unrelated-session", action: "edit", resources: ["foreign.ts"], source: { type: "tool", messageID: "foreign-assistant", callID: "foreign-call" } } }), 30);
@@ -115,14 +129,18 @@ describe("OpenCode descendant interactions", () => {
       providerId: "opencode", conversationId: "human-wait", cwd: root,
       prompt: "Delegate with supervised interactions", access: "supervised", interactionMode: "build",
     }), { onApproval, onInput });
+    const settledFirst = result.then((value) => {
+      throw new Error(`The run settled before its interaction: ${JSON.stringify(value.failure ?? value.status)}`);
+    });
+    void settledFirst.catch(() => undefined);
     try {
-      const pendingApproval = await approval;
+      const pendingApproval = await Promise.race([approval, settledFirst]);
       await new Promise((resolve) => setTimeout(resolve, 700));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToApproval("human-wait", pendingApproval.request.requestId, "approve", {
         runId: pendingApproval.runId, turnId: pendingApproval.turnId,
       })).toBe(true);
-      const pendingInput = await input;
+      const pendingInput = await Promise.race([input, settledFirst]);
       await new Promise((resolve) => setTimeout(resolve, 700));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToInput("human-wait", pendingInput.request.requestId, {
@@ -208,6 +226,207 @@ describe("OpenCode descendant interactions", () => {
     }));
     expect(capture.captured.some(({ path }) =>
       path.includes("/api/session/unrelated-session/"))).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("sends the prompt only after OpenCode accepts the event subscription", async () => {
+    const root = portableFixtureRoot("OpenCode late event subscription");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, join(root, "capture.json"), true, 250),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 2_000,
+      })]),
+    );
+    let approvals = 0;
+    let questions = 0;
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-late-event-subscription",
+      cwd: root,
+      prompt: "Delegate after a slow event subscription",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (approval) => {
+        approvals += 1;
+        expect(manager.respondToApproval(
+          approval.conversationId,
+          approval.request.requestId,
+          "approve",
+          { runId: approval.runId, turnId: approval.turnId },
+        )).toBe(true);
+      },
+      onInput: (input) => {
+        questions += 1;
+        expect(manager.respondToInput(
+          input.conversationId,
+          input.request.requestId,
+          { [input.request.questions[0]!.id]: ["Yes"] },
+          { runId: input.runId, turnId: input.turnId },
+        )).toBe(true);
+      },
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Parent resumed after child interaction",
+    });
+    expect(approvals).toBe(1);
+    expect(questions).toBe(1);
+    const capture = JSON.parse(readFileSync(join(root, "capture.json"), "utf8")) as {
+      captured: Array<{ path: string }>;
+    };
+    const paths = capture.captured.map(({ path }) => path);
+    expect(paths.indexOf("/event/opened")).toBeGreaterThanOrEqual(0);
+    expect(paths.indexOf("/event/opened")).toBeLessThan(
+      paths.indexOf("/session/opencode-root-session/prompt_async"),
+    );
+  });
+
+  it("sends the prompt once without confirmation when the subscription is not acknowledged in time", async () => {
+    const root = portableFixtureRoot("OpenCode unacknowledged event subscription");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, capturePath, true, "after-prompt"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 5_000,
+        initializationTimeoutMs: 1_000,
+      })]),
+    );
+    const providerStates: string[] = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-unacknowledged-subscription",
+      cwd: root,
+      prompt: "Delegate without an acknowledged event subscription",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onStatus: (event) => {
+        if (event.providerState) providerStates.push(event.providerState);
+      },
+      onApproval: (approval) => {
+        expect(manager.respondToApproval(
+          approval.conversationId,
+          approval.request.requestId,
+          "approve",
+          { runId: approval.runId, turnId: approval.turnId },
+        )).toBe(true);
+      },
+      onInput: (input) => {
+        expect(manager.respondToInput(
+          input.conversationId,
+          input.request.requestId,
+          { [input.request.questions[0]!.id]: ["Yes"] },
+          { runId: input.runId, turnId: input.turnId },
+        )).toBe(true);
+      },
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Parent resumed after child interaction",
+    });
+    expect(providerStates).toContain("event subscription unacknowledged");
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string }>;
+    };
+    const paths = capture.captured.map(({ path }) => path);
+    expect(paths.filter((path) => path.endsWith("/prompt_async"))).toHaveLength(1);
+    expect(paths.indexOf("/session/opencode-root-session/prompt_async")).toBeLessThan(
+      paths.indexOf("/event/opened"),
+    );
+  });
+
+  it("does not send the prompt when the event subscription fails before acknowledging", async () => {
+    const root = portableFixtureRoot("OpenCode rejected event subscription");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, capturePath, true, "rejected"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({ runDeadlineMs: 10_000 })]),
+    );
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-rejected-subscription",
+      cwd: root,
+      prompt: "Never reach a disconnected OpenCode session",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "OpenCode closed its event stream before the session completed.",
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string }>;
+    };
+    expect(capture.captured.map(({ path }) => path)).toContain("/event");
+    expect(capture.captured.some(({ path }) => path.endsWith("/prompt_async"))).toBe(false);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("cancels promptly while waiting for the event subscription", async () => {
+    const root = portableFixtureRoot("OpenCode cancelled subscription wait");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, capturePath, true, "never"),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({ runDeadlineMs: 10_000 })]),
+    );
+    const readPaths = (): string[] => (JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string }>;
+    }).captured.map(({ path }) => path);
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-cancelled-subscription-wait",
+      cwd: root,
+      prompt: "Cancel before the event stream is acknowledged",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+    await vi.waitFor(() => expect(readPaths()).toContain("/event"), { timeout: 5_000, interval: 10 });
+    const cancelledAt = Date.now();
+    manager.cancel("opencode-cancelled-subscription-wait");
+
+    await expect(result).resolves.toMatchObject({ status: "cancelled" });
+    expect(Date.now() - cancelledAt).toBeLessThan(5_000);
+    expect(readPaths().some((path) => path.endsWith("/prompt_async"))).toBe(false);
     expect(manager.activeConversationIds()).toEqual([]);
   });
 

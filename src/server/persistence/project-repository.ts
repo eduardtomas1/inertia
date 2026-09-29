@@ -114,7 +114,10 @@ export class ProjectRepository {
 
   remove(projectId: string): void {
     this.context.requireProject(projectId);
+    const state = this.context.database.prepare("SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
     this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    const activeProjectId = state?.active_project_id ?? null;
+    if (activeProjectId !== null && activeProjectId !== projectId) return;
     const next = this.context.database.prepare("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1").get() as { id: string } | undefined;
     if (next) this.select(next.id);
   }

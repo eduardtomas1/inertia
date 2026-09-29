@@ -9,6 +9,9 @@ const LAUNCHABLE_EXTENSIONS = new Set([
   ".url", ".website", ".application", ".appref-ms", ".scf",
   ".app", ".command", ".tool", ".terminal", ".pkg", ".workflow", ".webloc",
   ".desktop", ".appimage", ".sh", ".bash", ".zsh", ".fish", ".py", ".pl",
+  ".jar", ".inetloc", ".fileloc", ".afploc", ".chm", ".dmg", ".iso", ".img",
+  ".vhd", ".vhdx", ".pif", ".docm", ".dotm", ".xlsm", ".xltm", ".xlam", ".xll",
+  ".pptm", ".potm", ".ppsm", ".ppam", ".sldm",
 ]);
 
 interface ProjectPathShell {

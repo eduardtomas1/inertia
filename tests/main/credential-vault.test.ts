@@ -475,6 +475,44 @@ describe("FileCredentialVaultPersistence", () => {
     }
   });
 
+  it("discards a torn first-write stage instead of promoting it to the vault", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const stagePath = join(directory, ".credential-vault-00000000-0000-4000-8000-000000000001.stage");
+    await writeFile(stagePath, '{"schemaVersion":2,"entries":{"backend-profile:fake', { mode: 0o600 });
+
+    expect(await new FileCredentialVaultPersistence(path).read()).toBeNull();
+    await expect(stat(stagePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("restores the previous vault when an interrupted replacement left a torn stage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const previous = '{"schemaVersion":2,"entries":{}}';
+    const token = "00000000-0000-4000-8000-000000000002";
+    await writeFile(join(directory, `.credential-vault-${token}.stage`), "\0\0\0\0", { mode: 0o600 });
+    await writeFile(join(directory, `.credential-vault-${token}.backup`), previous, { mode: 0o600 });
+
+    expect(await new FileCredentialVaultPersistence(path).read()).toBe(previous);
+  });
+
+  it("promotes a complete first-write stage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const complete = '{"schemaVersion":2,"entries":{}}';
+    await writeFile(
+      join(directory, ".credential-vault-00000000-0000-4000-8000-000000000003.stage"),
+      complete,
+      { mode: 0o600 },
+    );
+
+    expect(await new FileCredentialVaultPersistence(path).read()).toBe(complete);
+  });
+
   it.runIf(process.platform !== "win32")(
     "refuses to read or replace a symlinked vault target",
     async () => {

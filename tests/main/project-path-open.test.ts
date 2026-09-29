@@ -20,6 +20,12 @@ it.each([
   ["win32", "setup.EXE"], ["win32", "instructions.js"], ["win32", "shortcut.lnk"],
   ["darwin", "setup.command"], ["darwin", "setup.pkg"],
   ["linux", "launcher.desktop"], ["linux", "tool.AppImage"],
+  ...(["darwin", "win32", "linux"] as const).flatMap((platform) => [
+    "tool.jar", "Link.inetloc", "Link.fileloc", "Share.afploc", "help.chm", "Installer.dmg", "disk.iso",
+    "disk.img", "disk.vhd", "disk.vhdx", "program.pif", "report.docm", "template.dotm", "sheet.xlsm",
+    "template.xltm", "addin.xlam", "addin.xll", "deck.pptm", "template.potm", "show.ppsm",
+    "addin.ppam", "slide.sldm",
+  ].map((name) => [platform, name] as const)),
 ] as const)("reveals a potential %s launcher named %s", async (platform, name) => {
   const { path, shell } = fixture(name);
   expect(await openAuthorizedProjectPath(path, "open-externally", shell, platform)).toBe("");

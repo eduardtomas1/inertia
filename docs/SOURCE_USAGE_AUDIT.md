@@ -120,7 +120,7 @@ candidate ACK. Historical schema-1 crash/recovery fixtures were preserved.
 | --- | --- |
 | `src/renderer/private-connect/vite.config.ts` (tool only) | Private Connect build. Correct build-time location; retain while the separate Vite build uses it. |
 | `src/server/codex/app-server-notifications.ts` (tool only) | Provider conformance. The scheduled drift probe reads its disposition table by filename, and status tests import it. Review relocation with the drift owner; never delete because the runtime graph excludes it. |
-| `src/server/runtime/backends/kimi-claude-preset.ts` (test only) | Backend integration. Only its focused runtime-preset tests import it at this head; production uses the general backend adapter. Defer a separate obsolete-preset/fixture decision until its integration contract is reviewed. |
+| `src/server/runtime/backends/kimi-claude-preset.ts` (test only) | Removed on 27 September 2026 with its focused test. No production import, build input or tool caller existed; production Kimi routing, readiness and launch resolution run through `backend-profile-runtime.ts`, `backend-profile-controller.ts` and `claude-compatible-adapter.ts`, which keep their own coverage. |
 | `src/renderer/src/utils/composerToolReadiness.ts` (unreferenced) | Removed on 24 September 2026. No import, build, resource or test caller existed at any checkout since its introduction; the composer reads skills capability directly. The baseline now expects zero unreferenced source files. |
 | `src/main/inline-image.d.ts` (ambient) | Main TypeScript compilation. Asset declarations are compiler inputs, not runtime module entry points. Retain while those declarations are required. |
 

@@ -1,6 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import { createIncidentReporter, type IncidentSink } from "../node/application-incidents.js";
 import type { SendDiscordReleaseInfoResult } from "../shared/desktop.js";
+import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 
 import {
   DISCORD_RELEASE_WEBHOOK_PROFILE_ID,
@@ -17,8 +18,6 @@ type CredentialResolver = {
   resolve: (secretReference: string) => Promise<string | null>;
 };
 
-const SEND_RELEASE_CHANNEL = "inertia:send-discord-release-info";
-
 export function registerInertiaReleaseIpc(
   ipcMain: IpcMain,
   fetch: typeof globalThis.fetch,
@@ -31,7 +30,7 @@ export function registerInertiaReleaseIpc(
   onIncident?: IncidentSink,
 ): void {
   const report = createIncidentReporter(onIncident);
-  ipcMain.handle(SEND_RELEASE_CHANNEL, async (event, ...args): Promise<SendDiscordReleaseInfoResult> => {
+  ipcMain.handle(DESKTOP_IPC.sendDiscordReleaseInfo, async (event, ...args): Promise<SendDiscordReleaseInfoResult> => {
     assertTrusted(event, args.length, 1);
     try {
       const request = args[0];

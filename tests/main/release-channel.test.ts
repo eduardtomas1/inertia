@@ -11,6 +11,7 @@ import {
   installedApplicationName,
   releaseArtifactName,
   resolveInertiaReleaseChannel,
+  temporaryAttachmentRoot,
 } from "../../src/main/release-channel";
 
 const roots: string[] = [];
@@ -26,6 +27,25 @@ function packaged(channel: unknown): string {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("temporary attachment root", () => {
+  const paths = { temp: "/shared/tmp", userData: "/home/test/.config/inertia" };
+  const getPath = (name: "temp" | "userData") => paths[name];
+
+  it("keeps Linux attachment sessions out of the shared temporary directory", () => {
+    for (const channel of ["stable", "canary"] as const) {
+      const configuration = channelConfiguration(channel);
+      expect(temporaryAttachmentRoot(getPath, configuration, "linux"))
+        .toBe(join(paths.userData, configuration.temporaryAttachmentDirectoryName));
+    }
+  });
+
+  it.each(["darwin", "win32"] as const)("keeps %s attachment sessions in the per-user temporary directory", (platform) => {
+    const configuration = channelConfiguration("stable");
+    expect(temporaryAttachmentRoot(getPath, configuration, platform))
+      .toBe(join(paths.temp, configuration.temporaryAttachmentDirectoryName));
+  });
 });
 
 describe("stable and Canary coexistence", () => {

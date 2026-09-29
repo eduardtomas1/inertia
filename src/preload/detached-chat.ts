@@ -21,6 +21,8 @@ const IPC = {
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
   openExternal: "inertia:open-external",
+  snapshot: "inertia:snapshot",
+  snapshotReady: "inertia:snapshot-ready",
 } as const;
 // Keep preload entry points self-contained: sandboxed Electron preloads cannot
 // require Rollup's relative shared chunks at runtime.
@@ -84,11 +86,11 @@ const bridge = Object.freeze({
       IPC.copyText,
       typeof text === "string" ? text : "",
     ) as ReturnType<DesktopBridge["copyText"]>,
-  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke("inertia:snapshot", request),
+  snapshot: (request: import("../shared/snapshots").SnapshotRequest) => ipcRenderer.invoke(IPC.snapshot, request),
   onSnapshot: (listener: (delivery: import("../shared/snapshots").SnapshotDelivery) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, delivery: import("../shared/snapshots").SnapshotDelivery): void => listener(delivery);
-    ipcRenderer.on("inertia:snapshot-ready", handler);
-    return () => { ipcRenderer.removeListener("inertia:snapshot-ready", handler); };
+    ipcRenderer.on(IPC.snapshotReady, handler);
+    return () => { ipcRenderer.removeListener(IPC.snapshotReady, handler); };
   },
   selectAttachments: (
     mode: Parameters<DesktopBridge["selectAttachments"]>[0],

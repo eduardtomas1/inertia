@@ -11,6 +11,7 @@ const MAIN_PROCESS_REPLY_MS = 3_000;
 const MONITOR_INTERVAL_MS = 2_000;
 const UNCONFIRMED_STALL_BACKOFF_MS = 30_000;
 const MAX_RECOVERIES_PER_APP = 2;
+const CONSECUTIVE_STALLED_PROBES = 2;
 const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const SAMPLE_TIMEOUT_MS = 6_000;
 const MAX_TOOL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -121,7 +122,7 @@ export async function probeVisibleWindows(electronApp: ElectronApplication): Pro
 }
 
 async function recordRecovery(recovery: GpuHelperRecovery): Promise<void> {
-  const description = `No visible window produced two consecutive animation frames within ${FRAME_TIMEOUT_MS} ms; `
+  const description = `No visible window produced two consecutive animation frames within ${FRAME_TIMEOUT_MS} ms on ${CONSECUTIVE_STALLED_PROBES} consecutive probes; `
     + `the fixture terminated only the stalled GPU helper (${recovery.helper}) so Chromium relaunches it.`;
   process.stderr.write(`[Inertia E2E] ${description}\n`);
   try {
@@ -138,6 +139,7 @@ export function createFrameStallMonitor(dependencies: FrameStallMonitorDependenc
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let recoveries = 0;
+  let stalledProbes = 0;
   let evidenceBlockedUntil = 0;
   const schedule = (): void => {
     if (!controller.signal.aborted) timer = setTimeout(() => void tick(), MONITOR_INTERVAL_MS);
@@ -145,9 +147,11 @@ export function createFrameStallMonitor(dependencies: FrameStallMonitorDependenc
   const tick = async (): Promise<void> => {
     try {
       const probe = await dependencies.probe();
-      if (probe !== "stalled" || controller.signal.aborted) return;
+      stalledProbes = probe === "stalled" ? stalledProbes + 1 : 0;
+      if (stalledProbes < CONSECUTIVE_STALLED_PROBES || controller.signal.aborted) return;
       if (Date.now() < evidenceBlockedUntil || recoveries >= MAX_RECOVERIES_PER_APP) return;
       const recovery = await dependencies.recover(controller.signal);
+      stalledProbes = 0;
       if (controller.signal.aborted) return;
       if (!recovery) {
         evidenceBlockedUntil = Date.now() + UNCONFIRMED_STALL_BACKOFF_MS;

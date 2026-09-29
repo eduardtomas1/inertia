@@ -12,7 +12,7 @@ import {
   checkpointFromRow,
   conversationFromRow,
   conversationShellFromRow,
-  conversationWithHistoryFromRow,
+  conversationDetailFromRow,
   messageFromRow,
   planFromRow,
   projectFromRow,
@@ -49,7 +49,7 @@ import type {
   WorkspaceRunRow,
 } from "./rows";
 import type { RuntimeStoreSnapshot } from "./types";
-import { CONVERSATION_HAS_HISTORY_SQL } from "./conversation-provider-policy";
+import { CONVERSATION_HAS_HISTORY_SQL, CONVERSATION_MIXED_PROVIDER_SQL } from "./conversation-provider-policy";
 import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from "../../shared/conversation-history";
 import {
   conversationStoredBytes,
@@ -69,6 +69,7 @@ import {
 } from "./stream-text-storage";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
+type ConversationDetailRow = ConversationShellRow & { mixed_provider_history: number };
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
@@ -189,6 +190,14 @@ export class SnapshotRepository {
     `).get(conversationId) as ConversationShellRow | undefined;
   }
 
+  private conversationDetailRow(conversationId: string): ConversationDetailRow | undefined {
+    return this.context.database.prepare(`
+      SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history,
+        ${CONVERSATION_MIXED_PROVIDER_SQL} AS mixed_provider_history
+      FROM conversations WHERE id = ?
+    `).get(conversationId) as ConversationDetailRow | undefined;
+  }
+
   conversationShell(conversationId: string): ConversationShell | null {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
@@ -205,7 +214,7 @@ export class SnapshotRepository {
   }
 
   conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {
-    const conversationRow = this.conversationRow(conversationId);
+    const conversationRow = this.conversationDetailRow(conversationId);
     if (!conversationRow) return null;
     const scope = selectConversationHistory(this.context.database, conversationId, request);
     const latest = !request.before && !request.messageId && !request.turnId;
@@ -213,7 +222,7 @@ export class SnapshotRepository {
       throw new ConversationHistoryTooLargeError(CONVERSATION_RECORDS_TOO_LARGE_MESSAGE);
     }
     const shared = {
-      conversation: conversationWithHistoryFromRow(conversationRow),
+      conversation: conversationDetailFromRow(conversationRow),
       attachmentGallery: conversationAttachmentGallery(this.context.database, conversationId),
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
     };
@@ -246,24 +255,24 @@ export class SnapshotRepository {
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    const conversationRow = this.conversationRow(conversationId);
+    const conversationRow = this.conversationDetailRow(conversationId);
     if (!conversationRow) return null;
     return {
-      conversation: conversationWithHistoryFromRow(conversationRow),
+      conversation: conversationDetailFromRow(conversationRow),
       ...this.historyRecords(conversationId),
       ...this.conversationRecords(conversationId),
     };
   }
 
   recentConversationDetail(conversationId: string, limits: RecentConversationLimits): ConversationDetail | null {
-    const conversationRow = this.conversationRow(conversationId);
+    const conversationRow = this.conversationDetailRow(conversationId);
     if (!conversationRow) return null;
     const newest = <T>(sql: string, ...parameters: (string | number)[]) =>
       (this.context.database.prepare(sql).all(...parameters) as T[]).reverse();
     return {
       ...EMPTY_HISTORY_RECORDS,
       ...EMPTY_CONVERSATION_RECORDS,
-      conversation: conversationWithHistoryFromRow(conversationRow),
+      conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
           attachments_json, compaction_json, private_connect_device_id, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages

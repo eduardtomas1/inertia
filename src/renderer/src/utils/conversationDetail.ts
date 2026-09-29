@@ -12,8 +12,9 @@ export function mergeConversationShell(
   detail: ConversationDetail,
   shell: ConversationShell,
 ): ConversationDetail {
+  const { mixedProviderHistory } = detail.conversation;
   const conversation = Object.fromEntries(
-    Object.entries(shell).filter(([field]) =>
+    Object.entries(mixedProviderHistory === undefined ? shell : { mixedProviderHistory, ...shell }).filter(([field]) =>
       field !== "latestTurn"
       && field !== "pendingApproval"
       && field !== "pendingInput"),

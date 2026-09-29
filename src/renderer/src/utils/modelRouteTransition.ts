@@ -6,6 +6,7 @@ import type {
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
+import type { PendingModelRoute } from "../components/composer/types";
 import {
   conversationHasHistory,
   officiallyAllowsFastModeSwitchWithinSession,
@@ -33,6 +34,7 @@ export interface ModelRouteTransitionContext {
   /** Only session presence is accepted; session identifiers never enter this policy. */
   hasProviderSession: boolean;
   hasHistory: boolean;
+  mixedProviderHistory: boolean;
 }
 
 export interface ModelRouteTransitionCandidate {
@@ -77,6 +79,36 @@ export function modelRouteTransitionContext(
       : null,
     hasProviderSession: Boolean(conversation.providerSessionId),
     hasHistory: conversationHasHistory(conversation),
+    mixedProviderHistory: conversation.mixedProviderHistory === true,
+  };
+}
+
+export function pendingModelRoute(
+  conversation: Conversation,
+  latestTurn: { id: string; modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
+  selection: ModelSelection,
+  label: string,
+  reason: string,
+  configuration?: PendingModelRoute["configuration"],
+): PendingModelRoute {
+  return {
+    selection,
+    ...(configuration ? { configuration } : {}),
+    label,
+    reason,
+    sourceConversationId: conversation.id,
+    sourceProjectId: conversation.projectId,
+    sourceSelectionKey: JSON.stringify(conversation.modelSelection),
+    sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
+    sourceLatestTurnId: latestTurn?.id ?? null,
+    sourceLatestTurnKey: JSON.stringify(latestTurn
+      ? {
+          id: latestTurn.id,
+          modelSelection: latestTurn.modelSelection,
+          continuationIdentity: latestTurn.continuationIdentity,
+        }
+      : null),
+    destinationRevision: selection.backendConfigurationRevision,
   };
 }
 
@@ -97,6 +129,7 @@ export function resolveModelRouteTransition(
       context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
     ) ?? context.providerId,
     hasHistory: context.hasHistory,
+    mixedProviderHistory: context.mixedProviderHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,
     previousModelId,

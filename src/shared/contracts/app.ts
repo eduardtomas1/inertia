@@ -265,6 +265,7 @@ export interface Conversation {
   /** Optional only for snapshots created before thread organization shipped. */
   snoozedUntil?: string | null;
   hasHistory?: boolean;
+  mixedProviderHistory?: boolean;
   createdAt: string;
   updatedAt: string;
 }

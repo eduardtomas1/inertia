@@ -63,6 +63,7 @@ function context(
     },
     hasProviderSession: true,
     hasHistory: true,
+    mixedProviderHistory: false,
     ...update,
   };
 }
@@ -330,6 +331,7 @@ describe("model route transition policy", () => {
         latestTurn: evidence === "turn" ? { selection, continuationIdentity: identity } : null,
         hasProviderSession: evidence === "session",
         hasHistory: evidence === "history",
+        mixedProviderHistory: false,
       }, nativeCandidate(providerNativeModelSelection({ providerId: "claude" })));
       expect(transition).toMatchObject({
         kind: "create-new-conversation",

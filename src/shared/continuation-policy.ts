@@ -77,6 +77,14 @@ export interface ContinuationDecision {
 export const CHAT_PROVIDER_CHANGE_MESSAGE =
   "Start a new chat to use a different provider. This chat keeps its original provider and history.";
 
+export const MIXED_PROVIDER_HISTORY_MESSAGE =
+  "This chat's history includes turns from another provider, so it can't continue here. Start a new chat to keep working; this chat keeps its history.";
+
+export function isChatProviderRejection(error: unknown): error is Error {
+  return error instanceof Error && [CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE]
+    .some((message) => error.message.startsWith(message));
+}
+
 export function conversationHasHistory(conversation: { hasHistory?: boolean }): boolean {
   return conversation.hasHistory !== false;
 }
@@ -84,6 +92,7 @@ export function conversationHasHistory(conversation: { hasHistory?: boolean }): 
 export interface ContinuationDecisionInput {
   previousProviderId?: ProviderId;
   hasHistory?: boolean;
+  mixedProviderHistory?: boolean;
   previousIdentity: ContinuationIdentity | null;
   nextIdentity: ContinuationIdentity;
   previousModelId: string | null;
@@ -237,13 +246,13 @@ export function resolveContinuationDecision(
   const previousProviderId = input.previousProviderId
     ?? (input.previousIdentity ? providerIdForHarness(input.previousIdentity.harnessId) : null);
   const nextProviderId = providerIdForHarness(input.nextIdentity.harnessId);
-  if (establishedConversation && previousProviderId && nextProviderId
-    && previousProviderId !== nextProviderId) {
+  if (input.mixedProviderHistory || (establishedConversation && previousProviderId && nextProviderId
+    && previousProviderId !== nextProviderId)) {
     return {
       action: "new-conversation-required",
       changeKind: "harness",
       reasonCode: "harness-changed",
-      reason: CHAT_PROVIDER_CHANGE_MESSAGE,
+      reason: input.mixedProviderHistory ? MIXED_PROVIDER_HISTORY_MESSAGE : CHAT_PROVIDER_CHANGE_MESSAGE,
     };
   }
   if (!input.previousIdentity) {

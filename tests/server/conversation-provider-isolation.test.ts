@@ -5,7 +5,14 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
-import { CONVERSATION_HAS_HISTORY_SQL } from "../../src/server/persistence/conversation-provider-policy";
+import { publicRuntimeError } from "../../src/server/runtime-errors";
+import {
+  CONVERSATION_HAS_HISTORY_SQL,
+  CONVERSATION_MIXED_PROVIDER_SQL,
+} from "../../src/server/persistence/conversation-provider-policy";
+import { ConversationProviderChangeError } from "../../src/server/persistence/errors";
+import { CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
+import { createQuietLedgerFixture } from "../e2e/support/quiet-ledger-fixture";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { resolveTurnRequest, type PrepareTurnRequestDependencies } from "../../src/server/runtime/turns/turn-request-preparation";
@@ -156,8 +163,9 @@ describe("chat provider isolation", () => {
     database.prepare("UPDATE conversations SET provider_id = ?, model_selection_json = ? WHERE id = ?")
       .run("claude", JSON.stringify(providerNativeModelSelection({ providerId: "claude" })), conversation.id);
     database.close();
-    expect(() => resolveTurnRequest(preparation, { conversationId: conversation.id, content: "Do not cross providers" })).toThrow(guidance);
-    expect(() => store.beginAgentTurn(turnInput("claude"))).toThrow(guidance);
+    expect(() => resolveTurnRequest(preparation, { conversationId: conversation.id, content: "Do not cross providers" }))
+      .toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(() => store.beginAgentTurn(turnInput("claude"))).toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(store.latestAgentTurnForConversation(conversation.id)?.id).toBe(original.turn.id);
   });
 
@@ -176,7 +184,8 @@ describe("chat provider isolation", () => {
     database.prepare("UPDATE agent_turns SET provider_id = ? WHERE id = ?").run("claude", first.turn.id);
     database.close();
     const before = [store.agentTurn(first.turn.id), store.agentTurn(second.turn.id)];
-    expect(() => resolveTurnRequest(preparation, { conversationId: conversation.id, content: "Keep history intact" })).toThrow(guidance);
+    expect(() => resolveTurnRequest(preparation, { conversationId: conversation.id, content: "Keep history intact" }))
+      .toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(() => store.beginAgentTurn(turnInput("claude"))).toThrow(guidance);
     expect(store.updateConversation(conversation.id, { title: "Archived mixed history" }).title).toBe("Archived mixed history");
     store.archiveConversation(conversation.id, true);
@@ -245,6 +254,77 @@ describe("chat provider isolation", () => {
     });
     expect(serverRejects).toBe(established);
     expect(transition.kind === "create-new-conversation").toBe(established);
+  });
+
+  it.each([
+    ["an unused chat", false],
+    ["a single-provider history", false],
+    ["a mixed-provider history", true],
+    ["a history whose provider differs from the saved selection", true],
+  ] as const)("publishes the mixed-provider fact on conversation details for %s", (evidence, mixed) => {
+    const { store, conversation, turnInput, databasePath } = fixture();
+    if (evidence !== "an unused chat") store.beginAgentTurn(turnInput("codex"));
+    const database = new Database(databasePath);
+    if (evidence === "a mixed-provider history") {
+      store.beginAgentTurn({ ...turnInput("codex"), runId: "second-run" });
+      database.prepare("UPDATE agent_turns SET provider_id = 'claude' WHERE run_id = 'run-codex'").run();
+    }
+    if (evidence === "a history whose provider differs from the saved selection") {
+      database.prepare("UPDATE conversations SET provider_id = ?, model_selection_json = ? WHERE id = ?")
+        .run("claude", JSON.stringify(providerNativeModelSelection({ providerId: "claude" })), conversation.id);
+    }
+    const { mixed_provider_history: policy } = database.prepare(`
+      SELECT ${CONVERSATION_MIXED_PROVIDER_SQL} AS mixed_provider_history FROM conversations WHERE id = ?
+    `).get(conversation.id) as { mixed_provider_history: number };
+    database.close();
+    expect(policy === 1).toBe(mixed);
+    expect({
+      history: store.conversationHistory(conversation.id)?.conversation.mixedProviderHistory,
+      olderHistoryPage: store.conversationHistory(conversation.id, {
+        before: { at: "9999-01-01T00:00:00.000Z", id: "older", kind: "message" },
+      })?.conversation.mixedProviderHistory,
+      detail: store.conversationDetail(conversation.id)?.conversation.mixedProviderHistory,
+      recentDetail: store.recentConversationDetail(conversation.id, {
+        messages: 1, activities: 1, subagents: 1, contentCharacters: 1,
+      })?.conversation.mixedProviderHistory,
+    }).toEqual({ history: mixed, olderHistoryPage: mixed, detail: mixed, recentDetail: mixed });
+    expect(store.conversationShell(conversation.id)).not.toHaveProperty("mixedProviderHistory");
+    const saved = store.conversation(conversation.id).providerId;
+    for (const providerId of ["codex", "claude", "kimi"] as const) {
+      let message: string | null = null;
+      try {
+        store.assertConversationProvider(conversation.id, providerId, true);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConversationProviderChangeError);
+        message = publicRuntimeError(error);
+      }
+      if (mixed) {
+        expect(message).toBe(providerId === saved ? MIXED_PROVIDER_HISTORY_MESSAGE : CHAT_PROVIDER_CHANGE_MESSAGE);
+      } else if (evidence === "an unused chat" || providerId === saved) {
+        expect(message).toBeNull();
+      } else {
+        expect(message).toBe(CHAT_PROVIDER_CHANGE_MESSAGE);
+      }
+    }
+  });
+
+  it("publishes the Quiet Ledger fixture's restored history as mixed and rejects every provider in place", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-quiet-ledger-mixed-"));
+    directories.push(directory);
+    const workspaceDirectory = join(directory, "workspace");
+    mkdirSync(workspaceDirectory);
+    mkdirSync(join(directory, "data"));
+    const { conversation, databasePath } = createQuietLedgerFixture({ testDirectory: directory, workspaceDirectory });
+    const store = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
+    stores.push(store);
+    expect(store.conversationHistory(conversation.id)?.conversation).toMatchObject({
+      hasHistory: true,
+      mixedProviderHistory: true,
+    });
+    for (const providerId of ["codex", "claude", "kimi"] as const) {
+      expect(() => store.assertConversationProvider(conversation.id, providerId, true))
+        .toThrow(ConversationProviderChangeError);
+    }
   });
 
   it("keeps the in-flight configuration guard for same-provider updates", async () => {

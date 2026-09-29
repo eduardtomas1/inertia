@@ -13,7 +13,8 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
-import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../utils/modelRouteTransition";
+import { modelRouteTransitionContext, pendingModelRoute, resolveModelRouteTransition } from "../../utils/modelRouteTransition";
+import { isChatProviderRejection } from "../../../../shared/continuation-policy";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
@@ -586,7 +587,7 @@ export const Composer = memo(function Composer({
           setSubmitting(false);
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
+    } catch (error) {
       const ownsSubmission =
         activeSubmissionsRef.current.get(submittedConversationId)
         === submissionSequence;
@@ -617,6 +618,9 @@ export const Composer = memo(function Composer({
         submittingRef.current = false;
         setSubmitting(false);
         textareaRef.current?.focus();
+        if (isChatProviderRejection(error) && onCreateConversationForSelection) {
+          offerNewChat(conversation.modelSelection, currentRouteLabel, error.message);
+        }
       }
     }
   };
@@ -771,6 +775,7 @@ export const Composer = memo(function Composer({
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
   const updateConversation = async (
     update: Parameters<ComposerProps["onUpdateConversation"]>[0],
+    newChatLabel = currentRouteLabel,
   ): Promise<void> => {
     const sequence = conversationUpdateSequenceRef.current + 1;
     conversationUpdateSequenceRef.current = sequence;
@@ -780,6 +785,12 @@ export const Composer = memo(function Composer({
       await onUpdateConversation(update);
     } catch (error) {
       if (mountedRef.current && conversationUpdateSequenceRef.current === sequence) {
+        if (update.modelSelection && isChatProviderRejection(error)) {
+          offerNewChat(update.modelSelection, newChatLabel, error.message, update.accessMode && update.interactionMode
+            ? { accessMode: update.accessMode, interactionMode: update.interactionMode }
+            : undefined);
+          return;
+        }
         setConversationUpdateError(
           error instanceof Error
             ? error.message
@@ -830,43 +841,43 @@ export const Composer = memo(function Composer({
     modelRoutes,
     conversation.modelSelection,
   ), [conversation.modelSelection, modelRoutes]);
+  const currentRouteLabel = selectedModelRoute
+    ? `${selectedModelRoute.backendProfileName} · ${selectedModelRoute.displayName}`
+    : conversation.modelSelection.modelId;
+  const offerNewChat = (
+    selection: PendingModelRoute["selection"],
+    label: string,
+    reason: string,
+    configuration?: PendingModelRoute["configuration"],
+  ): void => {
+    if (!onCreateConversationForSelection) {
+      setConversationUpdateError(
+        "Return this chat to the main window to choose a model that requires a new chat.",
+      );
+      return;
+    }
+    setRouteCreationError(null);
+    setPendingRoute(pendingModelRoute(
+      conversation,
+      latestTurnSummary ?? latestTurn ?? null,
+      selection,
+      label,
+      reason,
+      configuration,
+    ));
+  };
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
     const transition = resolveModelRouteTransition(
       modelRouteTransitionContext(conversation, latestTurnSummary ?? latestTurn ?? null),
       route,
     );
+    const label = `${route.backendProfileName} · ${route.displayName}`;
+    const configuration = route.configuration && {
+      accessMode: route.configuration.accessMode,
+      interactionMode: route.configuration.interactionMode,
+    };
     if (transition.kind === "create-new-conversation") {
-      if (!onCreateConversationForSelection) {
-        setConversationUpdateError(
-          "Return this chat to the main window to choose a model that requires a new chat.",
-        );
-        return;
-      }
-      const sourceLatestTurn = latestTurnSummary ?? latestTurn;
-      setRouteCreationError(null);
-      setPendingRoute({
-        selection: transition.selection,
-        ...(route.configuration ? { configuration: {
-          accessMode: route.configuration.accessMode,
-          interactionMode: route.configuration.interactionMode,
-        } } : {}),
-        label: `${route.backendProfileName} · ${route.displayName}`,
-        reason: transition.reason,
-        sourceConversationId: conversation.id,
-        sourceProjectId: conversation.projectId,
-        sourceSelectionKey: JSON.stringify(conversation.modelSelection),
-        sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
-        sourceLatestTurnId: sourceLatestTurn?.id ?? null,
-        sourceLatestTurnKey: JSON.stringify(sourceLatestTurn
-          ? {
-              id: sourceLatestTurn.id,
-              modelSelection: sourceLatestTurn.modelSelection,
-              continuationIdentity: sourceLatestTurn.continuationIdentity,
-            }
-          : null),
-        destinationRevision:
-          transition.selection.backendConfigurationRevision,
-      });
+      offerNewChat(transition.selection, label, transition.reason, configuration);
       return;
     }
     const providerId = route.providerId
@@ -874,11 +885,8 @@ export const Composer = memo(function Composer({
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
-      ...(route.configuration ? {
-        accessMode: route.configuration.accessMode,
-        interactionMode: route.configuration.interactionMode,
-      } : {}),
-    });
+      ...configuration,
+    }, label);
   };
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],

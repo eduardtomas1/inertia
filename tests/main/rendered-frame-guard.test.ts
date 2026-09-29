@@ -85,7 +85,7 @@ describe("frame-stall monitor", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(kill).not.toHaveBeenCalled();
     gpu = "T";
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(8_000);
     expect(kill).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
     monitor.stop();
   });
@@ -99,7 +99,7 @@ describe("frame-stall monitor", () => {
     expect(fake.app.evaluate.mock.calls.length).toBeGreaterThanOrEqual(5);
     expect(kill).not.toHaveBeenCalled();
     gpu = "T";
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(8_000);
     expect(kill).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
     monitor.stop();
   });
@@ -134,6 +134,32 @@ describe("frame-stall monitor", () => {
       .resolves.toBe("stalled");
   });
 
+  it("never samples or kills after a single probe without frames when the next probe renders", async () => {
+    const verdicts: FrameProbe[] = ["stalled", "frames", "stalled", "frames", "stalled", "idle", "stalled", "frames"];
+    const probe = vi.fn(async (): Promise<FrameProbe> => verdicts.shift() ?? "frames");
+    const recover = vi.fn(async (): Promise<GpuHelperRecovery> => ({ helper: "gpu", sample: "" }));
+    const monitor = createFrameStallMonitor({ probe, recover, record: vi.fn(async () => undefined) });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(probe.mock.calls.length).toBeGreaterThanOrEqual(8);
+    expect(recover).not.toHaveBeenCalled();
+    monitor.stop();
+  });
+
+  it("does not kill a stopped helper when the only visible window is hidden right after a probe listed it", async () => {
+    replyToProcessTools(() => "T");
+    const workbench: FakeWindow = { visible: true, frames: stalledFrames };
+    const fake = fakeElectronApp([workbench]);
+    const monitor = startFrameStallMonitor(fake.electronApp);
+    await vi.advanceTimersByTimeAsync(2_000);
+    workbench.visible = false;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(kill).not.toHaveBeenCalled();
+    workbench.visible = true;
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(kill).toHaveBeenCalledExactlyOnceWith(GPU_PID, "SIGKILL");
+    monitor.stop();
+  });
+
   it("treats a closing app whose evaluate rejects as idle", async () => {
     const fake = fakeElectronApp([]);
     fake.app.evaluate.mockRejectedValueOnce(new Error("Target closed"));
@@ -145,9 +171,9 @@ describe("frame-stall monitor", () => {
     const recover = vi.fn(async (): Promise<GpuHelperRecovery> => ({ helper: "gpu", sample: "" }));
     const record = vi.fn(async () => undefined);
     const monitor = createFrameStallMonitor({ probe, recover, record });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(recover).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(recover).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(recover).toHaveBeenCalledTimes(2);
@@ -159,7 +185,7 @@ describe("frame-stall monitor", () => {
     const probe = vi.fn(async (): Promise<FrameProbe> => "stalled");
     const recover = vi.fn(async (): Promise<GpuHelperRecovery | null> => null);
     const monitor = createFrameStallMonitor({ probe, recover, record: vi.fn(async () => undefined) });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(recover).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(29_000);
     expect(recover).toHaveBeenCalledTimes(1);
@@ -177,13 +203,13 @@ describe("frame-stall monitor", () => {
     });
     const record = vi.fn(async () => undefined);
     const monitor = createFrameStallMonitor({ probe, recover, record });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(recover).toHaveBeenCalledOnce();
     monitor.stop();
     expect(signal?.aborted).toBe(true);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(record).not.toHaveBeenCalled();
-    expect(probe).toHaveBeenCalledOnce();
+    expect(probe).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
   });
 

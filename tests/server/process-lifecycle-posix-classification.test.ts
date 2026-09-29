@@ -35,10 +35,14 @@ function noSuchProcess(message: string): NodeJS.ErrnoException {
 
 describe("provider process-tree POSIX classification", () => {
   describe("terminal (PID-owned) tree with a delayed stop", () => {
-    const pidTermination = (tablesByRead: (read: number) => string) => {
+    const pidTermination = (
+      tablesByRead: (read: number) => string | null,
+      options: { groupSurvives?: boolean } = {},
+    ) => {
       const killed = new Set<number>();
       const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
         if (signal === 0) {
+          if (target === -4_242 && options.groupSurvives) return true as const;
           if (killed.has(target)) throw noSuchProcess("gone");
           return true as const;
         }
@@ -46,7 +50,10 @@ describe("provider process-tree POSIX classification", () => {
         return true as const;
       });
       let reads = 0;
-      const spawnProcessSync = vi.fn(() => ({ status: 0, stdout: tablesByRead(++reads) }));
+      const spawnProcessSync = vi.fn(() => {
+        const stdout = tablesByRead(++reads);
+        return stdout === null ? { status: null, stdout: "" } : { status: 0, stdout };
+      });
       const terminate = createOwnedPidProcessTreeTermination(
         4_242,
         async () => killed.has(4_242),
@@ -88,6 +95,68 @@ describe("provider process-tree POSIX classification", () => {
       });
       await expect(terminate()).resolves.toBe(true);
       expect(rootStops).toBe(2);
+    });
+
+    const signalled = (killProcess: ReturnType<typeof vi.fn>, target: number, signal: NodeJS.Signals) =>
+      killProcess.mock.calls.findIndex(([pid, sent]) => pid === target && sent === signal);
+
+    it("rescans after the stop is observed and kills a child forked while the root still ran", async () => {
+      const { terminate, killProcess, spawnProcessSync } = pidTermination((read) =>
+        read === 1 ? "4242 1 Ss+\n"
+          : read === 2 ? "4242 1 Ss+\n5000 4242 S\n"
+            : "4242 1 Ts+\n5000 4242 T\n");
+      await expect(terminate()).resolves.toBe(true);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(3);
+      expect(signalled(killProcess, 5_000, "SIGSTOP")).toBeGreaterThan(-1);
+      expect(signalled(killProcess, 5_000, "SIGKILL")).toBeGreaterThan(-1);
+      expect(signalled(killProcess, 5_000, "SIGKILL"))
+        .toBeLessThan(signalled(killProcess, 4_242, "SIGKILL"));
+    });
+
+    it("freezes and rescans a child that first appears in the read that shows the stop", async () => {
+      const { terminate, killProcess, spawnProcessSync } = pidTermination((read) =>
+        read === 1 ? "4242 1 Ss+\n" : "4242 1 Ts+\n5000 4242 S\n");
+      await expect(terminate()).resolves.toBe(true);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(3);
+      expect(signalled(killProcess, 5_000, "SIGSTOP")).toBeGreaterThan(-1);
+      expect(signalled(killProcess, 5_000, "SIGKILL")).toBeGreaterThan(-1);
+    });
+
+    it("never accepts a stable snapshot read before the stop was observed", async () => {
+      const { terminate, killProcess } = pidTermination((read) =>
+        read <= 2 ? "4242 1 Ss+\n5000 4242 S\n"
+          : read === 3 ? "4242 1 Ts+\n5000 4242 T\n6000 4242 S\n"
+            : null);
+      await expect(terminate()).resolves.toBe(false);
+      expect(posixCleanupFailures().at(-1)).toMatchObject({
+        scope: "pid",
+        rootStop: "sent",
+        rootState: "stopped",
+        rootRunningObserved: true,
+        scanStabilized: false,
+      });
+      expect(signalled(killProcess, 6_000, "SIGKILL")).toBeGreaterThan(-1);
+    });
+
+    it.each([
+      { groupSurvives: true, confirmed: false },
+      { groupSurvives: false, confirmed: true },
+    ])("gates a child that left the tree but stayed in the group on the group probe (survives $groupSurvives)", async ({
+      groupSurvives, confirmed,
+    }) => {
+      vi.useFakeTimers();
+      try {
+        const { terminate, killProcess } = pidTermination((read) =>
+          read === 1 ? "4242 1 Ss+\n" : "4242 1 Ts+\n5000 1 S\n", { groupSurvives });
+        let result: boolean | undefined;
+        void terminate().then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(result).toBe(confirmed);
+        expect(killProcess.mock.calls.some(([pid]) => pid === 5_000 || pid === -5_000)).toBe(false);
+        expect(signalled(killProcess, -4_242, "SIGKILL")).toBeGreaterThan(-1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("reports its classification inputs when the stop is never observed", async () => {

@@ -131,6 +131,16 @@ interface ProviderRunRequest {
 
 export type ProviderRunInput = ProviderRunRequest & { conversationId: string };
 
+const ISOLATED_PROVIDER_CONVERSATION_MARKER = ":isolated:";
+
+export function isolatedProviderConversationId(conversationId: string, taskId: string): string {
+  return `${conversationId}${ISOLATED_PROVIDER_CONVERSATION_MARKER}${taskId}`;
+}
+
+export function isIsolatedProviderConversationId(conversationId: string): boolean {
+  return conversationId.includes(ISOLATED_PROVIDER_CONVERSATION_MARKER);
+}
+
 /**
  * Privileged input for one parent-turn follow-up. Local image paths never
  * cross the runtime/renderer boundary and are valid only for the exact live
@@ -619,6 +629,7 @@ export interface ProviderManagerOptions {
     baseEnvironment: NodeJS.ProcessEnv,
     context: ProviderBackendLaunchContext,
   ) => ProviderBackendLaunchOptions | Promise<ProviderBackendLaunchOptions>;
+  conversationProviderGate?: (conversationId: string, providerId: ProviderId) => void;
 }
 
 export interface ProviderBackendLaunchContext {

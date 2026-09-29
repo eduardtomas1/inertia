@@ -46,6 +46,8 @@ import {
   fixtureClaudeQuery,
 } from "../helpers/claude-agent-sdk-protocol";
 import { resolveNativeModelRoute } from "./model-route-fixture";
+import { ConversationProviderChangeError } from "../../src/server/persistence/errors";
+import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
 import {
   portableFixtureRoot,
   portableNodeExecutable,
@@ -107,6 +109,7 @@ function fixture(options: {
   latestSessionId?: string | null;
   acquire?: boolean;
   duoReserved?: boolean;
+  mixedHistory?: boolean;
   reconfigured?: boolean;
   providerDefault?: boolean;
   providerId?: ProviderId;
@@ -180,6 +183,9 @@ function fixture(options: {
     store: {
       conversation: conversationLookup,
       conversationPath: vi.fn(() => "/workspace"),
+      assertConversationProvider: vi.fn(() => {
+        if (options.mixedHistory) throw new ConversationProviderChangeError(MIXED_PROVIDER_HISTORY_MESSAGE);
+      }),
       assertDuoComparisonTurnAllowed: vi.fn(() => {
         if (options.duoReserved) {
           throw new Error(
@@ -788,6 +794,23 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       requestId,
       payload: { conversationId },
     })).rejects.toThrow("does not have a provider session");
+    expect(compact).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("explains a mixed-provider history before readiness, authority or any provider call", async () => {
+    const { compact, dependencies, release } = fixture({ mixedHistory: true });
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+
+    expect(dependencies.store.assertConversationProvider).toHaveBeenCalledWith(conversationId, "claude");
+    expect(dependencies.backendProfileController.readiness).not.toHaveBeenCalled();
+    expect(dependencies.providerTerminalResumes.acquire).not.toHaveBeenCalled();
     expect(compact).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
   });

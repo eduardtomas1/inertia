@@ -505,6 +505,7 @@ export class AgentWorkflowController {
       });
     }
     this.requireNativeCodexRoute(conversation);
+    this.store.assertConversationProvider(input.conversationId, "codex");
     const existingNativeGoal = this.store.agentGoals(input.conversationId)
       .find(({ source }) => source === "codex-native");
     assertRecoverableGoalBudget(existingNativeGoal, input);

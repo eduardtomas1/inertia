@@ -324,6 +324,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     metadataCache,
     installationLeases: providerInstallationLeases,
     lifetimeSignal: runtimeLifetimeAbort.signal,
+    conversationProviderGate: (conversationId, providerId) => store.assertConversationProvider(conversationId, providerId),
     commands: options.codexBinaryPath
       ? { codex: options.codexBinaryPath }
       : savedSettings.codexBinaryPath

@@ -704,6 +704,7 @@ export const Composer = memo(function Composer({
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
+    onProviderRejection: (reason) => onCreateConversationForSelection && offerNewChat(conversation.modelSelection, currentRouteLabel, reason),
   });
   const followUpState = composerFollowUpState({
     running,

@@ -11,6 +11,7 @@ import { PROVIDER_INFO } from "./catalog";
 import {
   hasConsistentProviderTerminalOutcome,
   hasExactProviderRunIdentity,
+  isIsolatedProviderConversationId,
   ProviderRunRefusedError,
   ProviderRuntimeError,
   providerRunIdentity,
@@ -80,6 +81,7 @@ export interface ProviderRunCoordinatorOptions {
   metadataCache: ProviderMetadataCache;
   resolveBackendLaunchOptions:
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
+  conversationProviderGate?: ProviderManagerOptions["conversationProviderGate"];
   commandFor(providerId: ProviderId): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
@@ -223,6 +225,17 @@ export class ProviderRunCoordinator {
       );
     }
     const expectedIdentity = providerRunIdentity(input);
+    if (!isIsolatedProviderConversationId(conversationId)) {
+      try {
+        this.options.conversationProviderGate?.(conversationId, input.providerId);
+      } catch (error) {
+        this.refuse(
+          expectedIdentity,
+          "invalid_input",
+          error instanceof Error ? error.message : "This chat cannot use this provider.",
+        );
+      }
+    }
     if (
       input.backendProfile.source === "custom"
       && (

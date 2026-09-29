@@ -53,6 +53,7 @@ async function fixture(options: {
   const manager = ProviderManager.createProduction({
     commands: { codex: process.execPath },
     installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
     detectProvider: async () => ({
       provider: { id: "codex", name: "Codex", command: "codex" },
       available: true, version: "1.0.0", executable: process.execPath,

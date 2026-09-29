@@ -249,6 +249,38 @@ describe("composer mixed-provider history", () => {
     expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ reasoningEffort: "high" });
   });
 
+  it.each(["main window", "detached window"] as const)(
+    "explains a compaction refused for mixed history in the %s",
+    async (surface) => {
+      const current = { ...conversation(conversationId), hasHistory: true };
+      const onCompact = vi.fn(async () => {
+        throw new RuntimeCommandError(MIXED_PROVIDER_HISTORY_MESSAGE, "rejected");
+      });
+      const onCreateConversationForSelection = vi.fn<NonNullable<ComposerProps["onCreateConversationForSelection"]>>(async () => undefined);
+      render(<Composer {...composerProps(current, {
+        providers,
+        onCompact,
+        onCreateConversationForSelection: surface === "detached window" ? undefined : onCreateConversationForSelection,
+      })} />);
+      const input = screen.getByRole("textbox", { name: "Message" });
+      fireEvent.change(input, { target: { value: "/compact keep the plan" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(await screen.findByText(MIXED_PROVIDER_HISTORY_MESSAGE, { selector: "span" })).toBeVisible();
+      expect(onCompact).toHaveBeenCalledOnce();
+      await waitFor(() => expect(input).toHaveValue(""));
+      if (surface === "detached window") {
+        expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+        expect(screen.queryByText(returnToMain)).not.toBeInTheDocument();
+        return;
+      }
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+      await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
+      expect(onCreateConversationForSelection.mock.calls[0]).toEqual([current.modelSelection, undefined]);
+    },
+  );
+
   it("offers a new chat with the unsent text when the server rejects a send for mixed history", async () => {
     const current = { ...conversation(conversationId), hasHistory: true };
     const onSend = vi.fn<ComposerProps["onSend"]>(async () => {

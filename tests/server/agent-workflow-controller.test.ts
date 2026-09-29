@@ -5,6 +5,8 @@ import type {
   Conversation,
 } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
+import { ConversationProviderChangeError } from "../../src/server/persistence/errors";
+import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
 import type { ProviderManager } from "../../src/server/providers";
 
 const controlRequest = vi.hoisted(() => vi.fn());
@@ -99,6 +101,7 @@ function sameNativeGoalPayload(left: AgentGoal, right: AgentGoal): boolean {
 
 function harness(options: {
   current?: Conversation;
+  providerRejection?: string;
   goals?: AgentGoal[];
   nativeGoalTombstone?: AgentGoal;
   now?: Date;
@@ -139,6 +142,9 @@ function harness(options: {
   });
   const store = {
     conversation: vi.fn(() => current),
+    assertConversationProvider: vi.fn(() => {
+      if (options.providerRejection) throw new ConversationProviderChangeError(options.providerRejection);
+    }),
     conversationPath: vi.fn(() => "/workspace/project"),
     agentGoals: vi.fn(() => [...goals]),
     upsertAgentGoal: vi.fn((goal: AgentGoal) => {
@@ -433,6 +439,21 @@ describe("AgentWorkflowController", () => {
 
     expect(updated.objective).toBe("Externally updated objective");
     expect(updated.status).toBe("paused");
+  });
+
+  it("rejects a native goal for a mixed-provider history before any Codex request", async () => {
+    controlRequest.mockClear();
+    const runtime = harness({ goals: [nativeGoal()], providerRejection: MIXED_PROVIDER_HISTORY_MESSAGE });
+
+    await expect(runtime.controller.setGoal({
+      conversationId: "conversation-1",
+      source: "codex-native",
+      status: "active",
+      objective: "Continue the legacy chat",
+    })).rejects.toThrow(MIXED_PROVIDER_HISTORY_MESSAGE);
+
+    expect(runtime.providers.codexControlContext).not.toHaveBeenCalled();
+    expect(controlRequest).not.toHaveBeenCalled();
   });
 
   it("starts an idle native goal through the durable turn runtime", async () => {

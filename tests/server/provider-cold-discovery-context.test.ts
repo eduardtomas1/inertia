@@ -49,6 +49,7 @@ it.each(scenarios)("keeps cold $operation discovery in its workspace (late detec
   let detections = 0;
   const manager = ProviderManager.createProduction({
     commands: { [providerId]: process.execPath }, installationLeases: leases, metadataCache,
+    conversationProviderGate: () => undefined,
     detectProvider: async (providerId, options) => {
       detections += 1;
       if (detections === 1) {

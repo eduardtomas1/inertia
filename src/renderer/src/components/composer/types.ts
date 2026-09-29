@@ -24,6 +24,7 @@ import type { QueueCommandRunner } from "./runtimeQueueClient";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import type { ChatConfiguration, ReplacementChatRequest } from "../../lib/newConversation";
 import type { ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
@@ -90,10 +91,7 @@ export interface ComposerProps {
       | "accessMode"
     >>,
   ) => Promise<void>;
-  onCreateConversationForSelection?: (
-    selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode">; onCreated?: (conversationId: string) => void },
-  ) => Promise<void>;
+  onCreateConversationForSelection?: (request: ReplacementChatRequest) => Promise<void>;
   onChooseAttachments: (
     mode?: AttachmentPickerMode,
   ) => Promise<ComposerAttachmentImportLease | null>;
@@ -164,12 +162,13 @@ export type MoreSection = "actions" | "reasoning" | "speed" | "mode" | "access";
 
 export interface PendingModelRoute {
   selection: ModelSelection;
-  configuration?: Pick<Conversation, "accessMode" | "interactionMode">;
+  configuration: ChatConfiguration;
   label: string;
   reason: string;
   sourceConversationId: string;
   sourceProjectId: string;
   sourceSelectionKey: string;
+  sourceConfigurationKey: string;
   sourceContinuationKey: string;
   sourceLatestTurnId: string | null;
   sourceLatestTurnKey: string;

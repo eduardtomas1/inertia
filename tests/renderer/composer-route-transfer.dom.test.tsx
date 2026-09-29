@@ -54,7 +54,6 @@ describe("composer route transfer", () => {
       view.rerender(<Composer {...composerProps(target, { providers: [routedProvider], onCreateConversationForSelection })} />);
     };
     const onCreateConversationForSelection = vi.fn(async (
-      _selection: unknown,
       options?: RouteOptions,
     ): Promise<void> => {
       if (options?.prefillText) persistComposerDraft(target.id, options.prefillText);
@@ -66,7 +65,7 @@ describe("composer route transfer", () => {
 
     await confirmNewChat();
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]![1]).toMatchObject({ prefillText: text });
+    expect(onCreateConversationForSelection.mock.calls[0]![0]).toMatchObject({ prefillText: text });
     await act(async () => { await Promise.resolve(); });
     if (!switchFirst) act(showTarget);
 
@@ -85,7 +84,6 @@ describe("composer route transfer", () => {
     window.localStorage.setItem(`inertia:draft:${other.id}`, "Other chat draft");
     let settle!: () => void;
     const onCreateConversationForSelection = vi.fn((
-      _selection: unknown,
       options?: RouteOptions,
     ) => new Promise<void>((resolve) => {
       settle = () => {

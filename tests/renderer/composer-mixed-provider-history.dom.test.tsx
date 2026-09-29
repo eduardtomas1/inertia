@@ -246,7 +246,7 @@ describe("composer mixed-provider history", () => {
       element.textContent?.includes(MIXED_PROVIDER_HISTORY_MESSAGE))).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ reasoningEffort: "high" });
+    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ selection: { reasoningEffort: "high" } });
   });
 
   it.each(["main window", "detached window"] as const)(
@@ -277,7 +277,11 @@ describe("composer mixed-provider history", () => {
       expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
       fireEvent.click(screen.getByRole("button", { name: "New chat" }));
       await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-      expect(onCreateConversationForSelection.mock.calls[0]).toEqual([current.modelSelection, { onCreated: expect.any(Function) }]);
+      expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
+        selection: current.modelSelection,
+        configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+        onCreated: expect.any(Function),
+      }]);
     },
   );
 
@@ -301,9 +305,11 @@ describe("composer mixed-provider history", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Continue this work.");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]).toEqual([
-      current.modelSelection,
-      { prefillText: "Continue this work.", onCreated: expect.any(Function) },
-    ]);
+    expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
+      selection: current.modelSelection,
+      configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+      prefillText: "Continue this work.",
+      onCreated: expect.any(Function),
+    }]);
   });
 });

@@ -60,8 +60,8 @@ describe("split pane route transfer", () => {
     const show = (owner: typeof source): void => {
       view.rerender(<Composer {...composerProps(owner, {
         providers: [routedProvider],
-        onCreateConversationForSelection: (selection, options) =>
-          (scene.actions as WorkspaceSceneActions).createConversationForSelection(selection, options),
+        onCreateConversationForSelection: (request) =>
+          (scene.actions as WorkspaceSceneActions).createConversationForSelection(request),
       })} />);
     };
     const sendCommand = vi.fn(async (command: { type: string; requestId: string }): Promise<ServerEvent> => ({

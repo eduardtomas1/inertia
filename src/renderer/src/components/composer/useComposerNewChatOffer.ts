@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared/contracts";
 
-import { pendingModelRoute } from "../../utils/modelRouteTransition";
+import { pendingModelRoute, replacementChatRequest } from "../../utils/modelRouteTransition";
 import { useComposerRouteConversation } from "./composerRouteConversation";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
@@ -72,6 +72,7 @@ export function useComposerNewChatOffer(options: {
       pendingRoute.sourceConversationId !== conversation.id
       || pendingRoute.sourceProjectId !== conversation.projectId
       || pendingRoute.sourceSelectionKey !== JSON.stringify(conversation.modelSelection)
+      || pendingRoute.sourceConfigurationKey !== `${conversation.accessMode}:${conversation.interactionMode}`
       || pendingRoute.sourceContinuationKey
         !== JSON.stringify(conversation.continuationIdentity)
       || pendingRoute.sourceLatestTurnId !== latestTurnId
@@ -82,8 +83,10 @@ export function useComposerNewChatOffer(options: {
       setRouteCreationError(null);
     }
   }, [
+    conversation.accessMode,
     conversation.continuationIdentity,
     conversation.id,
+    conversation.interactionMode,
     conversation.modelSelection,
     conversation.projectId,
     backendProfiles,
@@ -107,10 +110,9 @@ export function useComposerNewChatOffer(options: {
     setPendingRoute(pendingModelRoute(
       conversation,
       latestTurn,
-      selection,
+      replacementChatRequest(conversation, { selection, configuration }),
       label,
       reason,
-      configuration,
     ));
   };
 

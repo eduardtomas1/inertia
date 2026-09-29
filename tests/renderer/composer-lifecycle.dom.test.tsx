@@ -1414,10 +1414,12 @@ describe("composer asynchronous ownership", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Carry this exact text.");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledTimes(2));
-    expect(onCreateConversationForSelection.mock.calls[1]).toEqual([
-      expect.objectContaining({ harnessId: "claude-agent-sdk", modelId: "claude-route" }),
-      { prefillText: "Carry this exact text.", onCreated: expect.any(Function) },
-    ]);
+    expect(onCreateConversationForSelection.mock.calls[1]).toEqual([{
+      selection: expect.objectContaining({ harnessId: "claude-agent-sdk", modelId: "claude-route" }),
+      configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+      prefillText: "Carry this exact text.",
+      onCreated: expect.any(Function),
+    }]);
     expect(onUpdateConversation).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   });

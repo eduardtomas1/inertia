@@ -45,9 +45,10 @@ export function useComposerRouteConversation(): (
     const sourceEditorRevision = editorRevisionsRef.current.get(conversationId) ?? 0;
     const prefillText = message.trim() ? message : undefined;
     let createdConversationId: string | null = null;
-    void onCreateConversationForSelection(pendingRoute.selection, {
+    void onCreateConversationForSelection({
+      selection: pendingRoute.selection,
+      configuration: pendingRoute.configuration,
       ...(prefillText ? { prefillText } : {}),
-      ...(pendingRoute.configuration ? { configuration: pendingRoute.configuration } : {}),
       onCreated: (createdId) => { createdConversationId = createdId; },
     }).then(
       () => {

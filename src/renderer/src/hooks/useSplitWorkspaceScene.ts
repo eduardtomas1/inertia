@@ -8,7 +8,6 @@ import type {
   AppSettings,
   ChatAttachment,
   Conversation,
-  ModelSelection,
   MessageSendAcceptance,
   Project,
   ProviderMaintenanceProviderId,
@@ -25,8 +24,8 @@ import {
 } from "../components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "../components/workspace-scene/createWorkspaceTurnActions";
 import {
-  buildNewConversationPayload,
-  withNewConversationModelSelection,
+  replacementConversationPayload,
+  type ReplacementChatRequest,
 } from "../lib/newConversation";
 import {
   commandRefreshesConversationDetail,
@@ -299,31 +298,21 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
-    createConversationForSelection: async (
-      selection: ModelSelection,
-      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode">; onCreated?: (conversationId: string) => void },
-    ) => {
+    createConversationForSelection: async (request: ReplacementChatRequest) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
       }
       const event = resultEvent(await run("conversation.create", {
         type: "conversation.create",
-        payload: {
-          ...withNewConversationModelSelection(
-            buildNewConversationPayload(splitProject, settings),
-            selection,
-          ),
-          ...options?.configuration,
-          activate: false,
-        },
+        payload: replacementConversationPayload(splitProject, settings, request),
       }));
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }
-      if (options?.prefillText) {
-        persistComposerDraft(event.result.conversationId, options.prefillText);
+      if (request.prefillText) {
+        persistComposerDraft(event.result.conversationId, request.prefillText);
       }
-      options?.onCreated?.(event.result.conversationId);
+      request.onCreated?.(event.result.conversationId);
       onConversationCreated(event.result.conversationId);
     },
     sendMessage: async (

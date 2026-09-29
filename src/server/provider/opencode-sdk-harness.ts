@@ -56,6 +56,7 @@ import {
 import {
   boundedOpenCodeEventFetch,
   OPENCODE_OVERSIZED_EVENT_MESSAGE,
+  openCodeEventSubscriptionAcknowledged,
 } from "./opencode-event-stream";
 import {
   createOpenCodeEventState,
@@ -716,8 +717,16 @@ function startOpenCodeRun(
           return true;
         },
       });
-      await Promise.race([eventStreamConnected, pump, runInterrupted]);
+      const subscriptionAcknowledged = await openCodeEventSubscriptionAcknowledged(
+        eventStreamConnected,
+        deadlines.initializationTimeoutMs,
+        pump,
+        runInterrupted,
+      );
       if (cancelRequested) throw new Error("OpenCode run was cancelled before the prompt was sent.");
+      if (!subscriptionAcknowledged) {
+        emitter.status("starting", undefined, "event subscription unacknowledged");
+      }
       const providerOperation = compacting
         ? (() => {
             manualCompaction.initiatedAt = compactionTimestampNow();

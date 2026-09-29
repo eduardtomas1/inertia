@@ -3,6 +3,29 @@ const CARRIAGE_RETURN = 0x0d;
 
 export const OPENCODE_OVERSIZED_EVENT_MESSAGE = "OpenCode sent an oversized event.";
 
+export async function openCodeEventSubscriptionAcknowledged(
+  acknowledged: Promise<void>,
+  timeoutMs: number,
+  ...stops: Promise<unknown>[]
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      acknowledged.then(() => true),
+      expired,
+      ...stops.map(async (stop) => {
+        await stop;
+        return true;
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function boundedOpenCodeEventFetch(
   maxFrameBytes: number,
   onOverflow: () => void,

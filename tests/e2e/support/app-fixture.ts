@@ -29,6 +29,7 @@ import {
   readNativePreviewSnapshot,
   type NativePreviewTestSnapshot,
 } from "./native-preview-diagnostics";
+import { startFrameStallMonitor, type FrameStallMonitor } from "./rendered-frame";
 import { waitForViewportToMatchWindow } from "./stable-sample";
 
 const execFileAsync = promisify(execFile);
@@ -813,10 +814,12 @@ export async function createAppFixture(
     if (startupDiagnostics.length > 40) startupDiagnostics.shift();
   };
   let electronApp: ElectronApplication | null = null;
+  let frameMonitor: FrameStallMonitor | null = null;
   let page: Page;
   try {
     electronApp = await electron.launch(launchOptions);
     observeElectronProcess(electronApp, appendDiagnostic);
+    frameMonitor = startFrameStallMonitor(electronApp);
     page = await waitForWorkbenchPage(electronApp);
     observeElectronPage(page, rendererErrors, electronApp.process(), options.observePage);
     if (options.windowDisplay === "primary") {
@@ -832,6 +835,7 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
+    frameMonitor?.stop();
     try {
       if (electronApp) {
         await closeElectronAppBounded(electronApp).catch(() => undefined);
@@ -917,6 +921,7 @@ export async function createAppFixture(
       const previousApp = electronApp;
       if (!previousApp) throw new Error("The Electron fixture is unavailable");
       const previousChild = previousApp.process();
+      frameMonitor?.stop();
       const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid
         ?? null;
       const quit = await quitElectronAppBounded(
@@ -938,6 +943,7 @@ export async function createAppFixture(
       const diagnosticStart = startupDiagnostics.length;
       const nextApp = await electron.launch(launchOptions);
       observeElectronProcess(nextApp, appendDiagnostic);
+      frameMonitor = startFrameStallMonitor(nextApp);
       try {
         const nextPage = await waitForWorkbenchPage(nextApp);
         observeElectronPage(nextPage, rendererErrors, nextApp.process(), options.observePage);
@@ -952,6 +958,7 @@ export async function createAppFixture(
         page = nextPage;
         return { electronApp: nextApp, page: nextPage };
       } catch (cause) {
+        frameMonitor.stop();
         await closeElectronAppBounded(nextApp);
         const diagnostics = startupDiagnostics.slice(diagnosticStart)
           .join("\n")
@@ -965,6 +972,7 @@ export async function createAppFixture(
       }
     },
     close: async () => {
+      frameMonitor?.stop();
       const activeApp = electronApp;
       electronApp = null;
       const recovery = await closeElectronFixtureBounded({

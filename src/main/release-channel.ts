@@ -102,6 +102,17 @@ export function canaryUserDataPath(appDataPath: string): string {
   return join(appDataPath, CHANNELS.canary.profileDirectoryName);
 }
 
+export function temporaryAttachmentRoot(
+  getPath: (name: "temp" | "userData") => string,
+  configuration: InertiaReleaseChannelConfiguration,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return join(
+    getPath(platform === "linux" ? "userData" : "temp"),
+    configuration.temporaryAttachmentDirectoryName,
+  );
+}
+
 export function initializeInertiaReleaseChannel(
   app: Pick<App, "getAppPath" | "getPath" | "isPackaged" | "setAppUserModelId" | "setName" | "setPath">,
   environment: NodeJS.ProcessEnv,

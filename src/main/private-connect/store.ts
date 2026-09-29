@@ -232,6 +232,12 @@ export async function createPrivateConnectStoreEncryption(
   };
 }
 
+function canonicalBase64(value: string): boolean {
+  return value.length % 4 === 0
+    && /^[A-Za-z0-9+/]+={0,2}$/u.test(value)
+    && Buffer.from(value, "base64").toString("base64") === value;
+}
+
 export class PrivateConnectStore {
   private readonly persistence: CredentialVaultPersistence;
 
@@ -242,6 +248,7 @@ export class PrivateConnectStore {
   ) {
     this.persistence = persistence ?? new FileCredentialVaultPersistence(filePath, {
       temporaryPrefix: ".private-connect-vault-",
+      validateStage: (value) => canonicalBase64(value) && (!this.available() || this.opens(value)),
     });
   }
 
@@ -251,6 +258,10 @@ export class PrivateConnectStore {
     if (!this.available()) return null;
     const encoded = await this.persistence.read();
     if (encoded === null) return null;
+    return this.decode(encoded);
+  }
+
+  private decode(encoded: string): PersistedPrivateConnect {
     if (
       Buffer.byteLength(encoded, "utf8") > MAX_CREDENTIAL_VAULT_BYTES
       || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)
@@ -262,6 +273,15 @@ export class PrivateConnectStore {
       return privateConnectStoreSchema.parse(JSON.parse(decoded) as unknown);
     } catch {
       throw new Error("The encrypted Private Connect store could not be opened.");
+    }
+  }
+
+  private opens(encoded: string): boolean {
+    try {
+      this.decode(encoded);
+      return true;
+    } catch {
+      return false;
     }
   }
 

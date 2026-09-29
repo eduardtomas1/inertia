@@ -36,7 +36,7 @@ async function stagedAttachmentPath(
   expect(id).toBeTruthy();
   const root = join(
     await electronApp.evaluate(({ app: electron }) =>
-      electron.getPath("temp")),
+      electron.getPath(process.platform === "linux" ? "userData" : "temp")),
     "inertia-attachments",
   );
   const sessions = (await readdir(root))

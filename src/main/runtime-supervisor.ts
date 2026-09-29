@@ -396,11 +396,9 @@ export class RuntimeSupervisor {
       ? Promise.reject(record)
       : this.privateConnectPrompts.prepare(record, subject, request);
   }
-  forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void {
-    const record = this.current;
-    if (this.phase !== "ready" || !record?.ready) return;
-    this.post(record.child, { type: "runtime.private-connect-forget", scope });
-  }
+  focusMascotChat(conversationId: string | null, request: number): void { this.postWhenReady({ type: "runtime.mascot-focus", conversationId, request }); }
+  forgetPrivateConnectTranscripts(scope: RuntimePrivateConnectForgetScope): void { this.postWhenReady({ type: "runtime.private-connect-forget", scope }); }
+  private postWhenReady(command: RuntimeWorkerCommand): void { const record = this.current; if (this.phase === "ready" && record?.ready) this.post(record.child, command); }
   commitPrivateConnectPrompt(
     subject: PrivateConnectRuntimeAuthorization,
     request: PrivateConnectPromptRequest,
@@ -659,7 +657,7 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
-    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status); return; }
+    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status, event.chats, event.focus, event.counts, event.request); return; }
     if (event.type === "runtime.credential-request") {
       this.credentials.handle(record, event); return;
     }

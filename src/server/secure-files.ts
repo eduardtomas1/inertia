@@ -66,3 +66,17 @@ export interface RuntimeSecureFileBroker {
     signal?: AbortSignal,
   ): Promise<SecureFileReplace>;
 }
+
+async function unavailableSecureFiles(): Promise<never> {
+  throw new SecureFileError(
+    "unavailable",
+    "Secure workspace file access is unavailable.",
+  );
+}
+
+export const unavailableSecureFileBroker: RuntimeSecureFileBroker = {
+  authorizeRoot: unavailableSecureFiles,
+  verifyRoot: unavailableSecureFiles,
+  read: unavailableSecureFiles,
+  replace: unavailableSecureFiles,
+};

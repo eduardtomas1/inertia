@@ -1,7 +1,7 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
-import { emptyMascotStatus, type MascotBridge, type MascotSnapshot } from "../../src/shared/mascot";
+import { emptyMascotStatus, type MascotBridge, type MascotCounts, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
 
@@ -41,6 +41,10 @@ function fixture() {
       snapshot = { ...snapshot, dragging, placement, gesture: [1, gesture] };
       act(() => receive(snapshot));
     },
+    list(status: MascotStatus, chats: MascotStatus[], pinned: string | null = null, counts?: MascotCounts): void {
+      snapshot = { ...snapshot, status, chats, pinned, counts };
+      act(() => receive(snapshot));
+    },
     update(phase: MascotSnapshot["status"]["phase"], motion = true, context: Partial<MascotSnapshot["status"]> = {}): void {
       snapshot = {
         ...snapshot,
@@ -51,6 +55,207 @@ function fixture() {
     },
   };
 }
+
+function chat(id: string, phase: MascotStatus["phase"], context: Partial<MascotStatus> = {}): MascotStatus {
+  return { ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
+    activeCount: 2, chatTitle: `Chat ${id}`, projectName: "Inertia", ...context };
+}
+
+describe("mascot chat context and chooser", () => {
+  it("shows project, elapsed time, and measured plan progress for the shown chat", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-09-06T10:12:30.000Z"), toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const app = fixture();
+    const view = renderMascot();
+    await act(async () => { await Promise.resolve(); });
+    const working = chat("a", "running", { since: "2026-09-06T10:00:00.000Z", steps: { completed: 3, total: 5 }, progress: "3 of 5 steps complete" });
+    app.list(working, [working]);
+    const text = (selector: string): string => view.container.querySelector(selector)!.textContent!;
+    expect(text(".mascot-time")).toBe("12m");
+    expect(text(".mascot-project")).toBe("Inertia");
+    expect(text(".mascot-detail")).toBe("3 of 5 steps");
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps")!.hidden).toBe(false);
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps i")!.style.getPropertyValue("--mascot-steps")).toBe("0.6");
+    expect(view.container.querySelector<HTMLButtonElement>(".mascot-picker")!.hidden).toBe(true);
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(text(".mascot-time")).toBe("13m");
+    const done = chat("b", "completed", { since: "2026-09-06T10:10:00.000Z", steps: { completed: 5, total: 5 } });
+    app.list(emptyMascotStatus(), [done]);
+    expect(view.container.querySelector<HTMLButtonElement>(".mascot-picker")!.hidden).toBe(false);
+    app.list(done, [done]);
+    expect(text(".mascot-time")).toBe("3m ago");
+    expect(view.container.querySelector<HTMLElement>(".mascot-steps")!.hidden).toBe(true);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("lists chats, pins a choice, flags other chats that need attention, and returns to automatic", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const question = chat("q", "waiting-for-input");
+    const working = chat("w", "running");
+    app.list(question, [question, working]);
+    const picker = screen.getByRole("button", { name: /Show chat: most urgent\. 2 chats/ });
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(picker.dataset.attention).toBe("false");
+    fireEvent.click(picker);
+    expect(picker).toHaveAttribute("aria-expanded", "true");
+    const group = screen.getByRole("group", { name: "Show chat" });
+    expect([...group.querySelectorAll("button")].map((row) => row.textContent)).toEqual(["Most urgent chatAuto", "Chat qInertiaNeeds you", "Chat wInertiaWorking"]);
+    expect(within(group).getByRole("button", { name: /Most urgent/ })).toHaveAttribute("aria-pressed", "true");
+    expect(document.activeElement).toBe(within(group).getByRole("button", { name: /Most urgent/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(document.activeElement).toHaveTextContent("Chat w");
+    fireEvent.click(document.activeElement!);
+    expect(app.action).toHaveBeenLastCalledWith("pin", "w");
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(view.container.querySelector<HTMLElement>(".mascot-chooser")!.hidden).toBe(true);
+    app.list(working, [question, working], "w");
+    expect(picker).toHaveTextContent("Pinned");
+    expect(picker.dataset.attention).toBe("true");
+    expect(screen.getByRole("button", { name: /Chat w.*1 other chat needs you.*Open chat/ })).toBeEnabled();
+    fireEvent.click(picker);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(app.action).not.toHaveBeenCalledWith("hide");
+    fireEvent.click(picker);
+    fireEvent.click(screen.getByRole("button", { name: /Most urgent/ }));
+    expect(app.action).toHaveBeenLastCalledWith("pin", null);
+  });
+
+  it("names every chat choice by title, project, and an age ordinal for exact twins", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const project = "A very long project name that keeps going well past the chooser width";
+    const chats = [
+      chat("newer", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:05:00.000Z" }),
+      chat("beta", "running", { chatTitle: "Fix login", projectName: "Beta" }),
+      chat("older", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:00:00.000Z" }),
+      chat("loose", "running", { chatTitle: "Fix login", projectName: null }),
+      chat("long", "completed", { chatTitle: "Ship", projectName: project.slice(0, 64) }),
+    ];
+    app.list(chats[0]!, chats);
+    fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
+    const rows = within(screen.getByRole("group", { name: "Show chat" })).getAllByRole("button").slice(1);
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Fix login (2), Alpha, Working",
+      "Fix login, Beta, Working",
+      "Fix login (1), Alpha, Working",
+      "Fix login, Working",
+      `Ship, ${project.slice(0, 64)}, Done`,
+    ]);
+    expect(rows.map((row) => row.querySelector(".mascot-option-project")!.textContent)).toEqual(["Alpha", "Beta", "Alpha", "", project.slice(0, 64)]);
+    expect(rows[0]!.querySelector(".mascot-option-title")).toHaveTextContent("Fix login (2)");
+    expect(rows[4]!.title).toBe(`Ship — ${project.slice(0, 64)} — Work complete`);
+    rows[0]!.focus();
+    fireEvent.keyDown(rows[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rows[1]);
+    fireEvent.click(rows[2]!);
+    expect(app.action).toHaveBeenLastCalledWith("pin", "older");
+  });
+
+  it("keeps keyboard focus on a chooser row through every live list update", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => chat(id, "running"));
+    app.list(a!, [a!, b!, c!, d!]);
+    const picker = screen.getByRole("button", { name: /Show chat/ });
+    fireEvent.click(picker);
+    const group = screen.getByRole("group", { name: "Show chat" });
+    const row = (key: string): HTMLElement => group.querySelector<HTMLElement>(`[data-key="${key}"]`)!;
+    const arrowsStillWork = (): void => {
+      const start = document.activeElement;
+      expect(group.contains(start)).toBe(true);
+      fireEvent.keyDown(start!, { key: "ArrowDown" });
+      expect(group.contains(document.activeElement)).toBe(true);
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(start);
+      expect(app.action).not.toHaveBeenCalledWith("down");
+    };
+    row("c").focus();
+    app.list(a!, [c!, a!, b!, d!]);
+    expect(document.activeElement).toBe(row("c"));
+    arrowsStillWork();
+    app.list(a!, [{ ...c!, phase: "completed", chatTitle: "Renamed chat" }, a!, b!, d!]);
+    expect(document.activeElement).toBe(row("c"));
+    expect(row("c")).toHaveAccessibleName(/Renamed chat/);
+    arrowsStillWork();
+    row("a").focus();
+    app.list(c!, [c!, b!, d!]);
+    expect(document.activeElement).toBe(row("b"));
+    arrowsStillWork();
+    const ranked = ["e", "f", "g", "h", "i"].map((id) => chat(id, "running"));
+    app.list(c!, [c!, b!, d!, ...ranked]);
+    row("i").focus();
+    const urgent = chat("urgent", "waiting-for-input");
+    app.list(urgent, [urgent, c!, b!, d!, ...ranked.slice(0, 4)]);
+    expect(document.activeElement).toBe(row("h"));
+    arrowsStillWork();
+    app.list(emptyMascotStatus(), []);
+    expect(picker).toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(row(""));
+    arrowsStillWork();
+    app.list(a!, [a!, b!]);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    app.list(b!, [b!, a!]);
+    expect(document.activeElement).toBe(outside);
+    picker.focus();
+    app.list(a!, [a!]);
+    expect(document.activeElement).toBe(picker);
+    fireEvent.click(picker);
+    expect(picker).toHaveAttribute("aria-expanded", "false");
+    app.list(a!, [a!, b!]);
+    expect(document.activeElement).toBe(picker);
+  });
+
+  it("states every count with its meaning and never announces more chats needing you than chats", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const detail = (): string => view.container.querySelector(".mascot-detail")!.textContent!;
+    const picker = (): string => view.container.querySelector<HTMLElement>(".mascot-picker")!.getAttribute("aria-label")!;
+    const bubble = (): string => view.container.querySelector<HTMLElement>(".mascot-open")!.getAttribute("aria-label")!;
+    const announced = (): string => screen.getByRole("status").textContent!.replace(/\s+/gu, " ").trim();
+    const flagged = (): string => view.container.querySelector<HTMLElement>(".mascot-picker")!.dataset.attention!;
+    const waiting = Array.from({ length: 11 }, (_, index) => chat(`w${index}`, "waiting-for-input", { activeCount: 11, message: "Choose a scope" }));
+    const done = chat("done", "completed", { activeCount: 11, message: "Shipped the fix" });
+    const listed = [...waiting.slice(0, 7), done];
+    app.list(done, listed, "done", { chats: 12, attention: 11 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 12 chats, 11 need you");
+    expect(detail()).toBe("11 other chats need you");
+    expect(bubble()).toBe("Work complete. Chat done. Inertia. Shipped the fix. 11 other chats need you. View result ↗");
+    expect(announced()).toBe("Work complete InertiaChat done Shipped the fix");
+    expect(flagged()).toBe("true");
+    app.list(waiting[0]!, waiting.slice(0, 8), null, { chats: 12, attention: 11 });
+    expect(picker()).toBe("Show chat: most urgent. 12 chats, 11 need you");
+    expect(detail()).toBe("10 other chats need you");
+    app.list(waiting[0]!, waiting.slice(0, 8), null, { chats: 8, attention: 8 });
+    expect(picker()).toBe("Show chat: most urgent. 8 chats, 8 need you");
+    expect(detail()).toBe("7 other chats need you");
+    app.list(done, [waiting[0]!, done], "done", { chats: 2, attention: 1 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats, 1 needs you");
+    expect(detail()).toBe("1 other chat needs you");
+    app.list(done, listed, "done", { chats: 250, attention: 180 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 99+ chats, 99+ need you");
+    expect(detail()).toBe("99+ other chats need you");
+    app.list(done, listed, "done");
+    expect(picker()).toBe("Show chat: pinned to Chat done. 8+ chats, 7+ need you");
+    expect(detail()).toBe("7+ other chats need you");
+    app.list(done, [waiting[0]!, done], "done");
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats, 1 needs you");
+    expect(detail()).toBe("1 other chat needs you");
+    const settled = { ...done, activeCount: 0 };
+    app.list(settled, [settled, chat("quiet", "completed", { activeCount: 0 })], "done", { chats: 2, attention: 0 });
+    expect(picker()).toBe("Show chat: pinned to Chat done. 2 chats");
+    expect(detail()).toBe("");
+    expect(flagged()).toBe("false");
+  });
+});
 
 describe("mascot rendering", () => {
   it("renders an applied custom sprite set and returns to the bundled artwork on reset", async () => {
@@ -79,7 +284,7 @@ describe("mascot rendering", () => {
     app.interaction(true);
     expect(pickup.getAttribute("src")).toBe(url("pickup.webp"));
     app.interaction(false);
-    expect(image.getAttribute("src")).toBe(url("thinking.png"));
+    expect(image.getAttribute("src")).toBe(url("thinking.webp"));
     app.update("idle");
     app.customize(undefined);
     expect(main.dataset.sprites).toBe("default");

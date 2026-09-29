@@ -1,22 +1,31 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
-import type { ConversationShell } from "../../shared/contracts/app";
+import type { ConversationShell, Project } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
-import { emptyMascotStatus, type MascotStatus } from "../../shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../shared/mascot";
 
-function candidate(conversation: ConversationShell): MascotStatus | null {
+function timestamp(value: string | null | undefined): string | null {
+  const time = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+function candidate(conversation: ConversationShell, projectName: string | null): { status: MascotStatus; seen: boolean } | null {
   const turn = conversation.latestTurn;
   if (conversation.archivedAt || !turn) return null;
   const phase = agentRunStateForTurn(turn);
   const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(phase);
-  if (terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt)) return null;
   return {
-    phase,
-    projectId: conversation.projectId,
-    conversationId: conversation.id,
-    runId: turn.runId,
-    turnId: turn.id,
-    activeCount: terminal ? 0 : 1,
-    chatTitle: preview(conversation.title, 96), message: null, progress: null,
+    seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt),
+    status: {
+      phase,
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: turn.runId,
+      turnId: turn.id,
+      activeCount: terminal ? 0 : 1,
+      chatTitle: preview(conversation.title, 96), projectName: preview(projectName, 64),
+      message: null, progress: null, steps: null,
+      since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt),
+    },
   };
 }
 
@@ -38,25 +47,49 @@ function preview(value: string | null | undefined, limit = 280): string | null {
 }
 interface Candidate {
   status: MascotStatus;
+  seen: boolean;
   at: string;
   activityAt: string;
   requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null }>;
 }
 
+const settledRequests: Candidate["requests"] = new Map();
+
+export function keepBest<T>(best: T[], entry: T, limit: number, compare: (left: T, right: T) => number): void {
+  if (best.length === limit && compare(entry, best[limit - 1]!) > 0) return;
+  let index = best.length;
+  while (index > 0 && compare(entry, best[index - 1]!) < 0) index -= 1;
+  best.splice(index, 0, entry);
+  if (best.length > limit) best.pop();
+}
+
 /** Event-driven previews, scoped to the authoritative turn; never retains a transcript. */
 export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
+  private projects = new Map<string, string | null>();
+  private focused: string | null = null;
+  private request: number | null = null;
+  private pending = false;
   private last = "";
   constructor(
-    private readonly publish?: (status: MascotStatus) => void,
+    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts, request: number | null) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
+    private readonly projectName?: (id: string) => string | null,
+    private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
   ) {}
 
-  replace(conversations: readonly ConversationShell[]): void {
+  replace(conversations: readonly ConversationShell[], projects: readonly Pick<Project, "id" | "name">[] = []): void {
     if (!this.publish) return;
+    this.projects = new Map(projects.map(({ id, name }) => [id, name]));
     const ids = new Set(conversations.map(({ id }) => id));
     for (const id of this.conversations.keys()) if (!ids.has(id)) this.conversations.delete(id);
     for (const conversation of conversations) this.store(conversation);
+    this.emit();
+  }
+
+  focus(conversationId: string | null, request: number): void {
+    this.request = request;
+    this.focused = conversationId !== null && this.conversations.has(conversationId) ? conversationId : null;
     this.emit();
   }
 
@@ -113,8 +146,12 @@ export class MascotStatusPublisher {
         break;
       case "agent.plan.updated":
         if (!live) return;
-        status.progress = event.plan.steps.length
-          ? `${event.plan.steps.filter(({ status: stepStatus }) => stepStatus === "completed").length} of ${event.plan.steps.length} steps complete` : null;
+      {
+        const completed = event.plan.steps.filter(({ status: stepStatus }) => stepStatus === "completed").length;
+        const total = Math.min(event.plan.steps.length, 1_000);
+        status.steps = total ? { completed: Math.min(completed, total), total } : null;
+        status.progress = total ? `${completed} of ${event.plan.steps.length} steps complete` : null;
+      }
         status.message = preview(event.plan.steps.find(({ status: stepStatus }) => stepStatus === "inProgress")?.step) ?? status.message;
         break;
       case "agent.completed":
@@ -125,6 +162,7 @@ export class MascotStatusPublisher {
           : event.status === "completed" && final?.conversationId === status.conversationId
             && final.turnId === status.turnId && final.role === "assistant" ? preview(final.content) : null;
         status.progress = null;
+        status.steps = null;
         requests.clear();
         break;
       }
@@ -135,38 +173,70 @@ export class MascotStatusPublisher {
   }
 
   private store(conversation: ConversationShell): void {
-    const status = candidate(conversation);
-    if (!status) { this.conversations.delete(conversation.id); return; }
+    const { projectId } = conversation;
+    if (!this.projects.has(projectId)) this.projects.set(projectId, this.projectName?.(projectId) ?? null);
+    const next = candidate(conversation, this.projects.get(projectId) ?? null);
+    if (!next) { this.conversations.delete(conversation.id); return; }
+    const { status, seen } = next;
     const previous = this.conversations.get(conversation.id);
     const sameTurn = previous?.status.turnId === status.turnId && previous.status.runId === status.runId;
     const keep = sameTurn && (status.activeCount > 0 || previous.status.phase === status.phase);
     this.conversations.set(conversation.id, {
-      status: { ...status, message: keep ? previous.status.message : null, progress: keep ? previous.status.progress : null },
+      status: { ...status, message: keep ? previous.status.message : null, progress: keep ? previous.status.progress : null,
+        steps: keep ? previous.status.steps : null },
+      seen,
       // Activity updates must not bounce between live chats.
       at: status.activeCount ? conversation.latestTurn!.requestedAt : conversation.latestTurn!.updatedAt,
       activityAt: keep ? previous.activityAt : "",
-      requests: sameTurn && status.activeCount ? previous.requests : new Map(),
+      requests: !status.activeCount ? settledRequests : sameTurn && previous.status.activeCount ? previous.requests : new Map(),
     });
   }
 
   private emit(): void {
-    let selected: Candidate | undefined;
+    if (!this.publish || this.pending) return;
+    this.pending = true;
+    this.schedule(() => {
+      this.pending = false;
+      this.flush();
+    });
+  }
+
+  private flush(): void {
     let activeCount = 0;
-    for (const next of this.conversations.values()) {
-      activeCount += next.status.activeCount;
-      if (!selected || priority(next.status) > priority(selected.status)
-        || (priority(next.status) === priority(selected.status)
-          && (next.at > selected.at || (next.at === selected.at
-            && next.status.conversationId! < selected.status.conversationId!)))) selected = next;
+    let attention = 0;
+    let focused: Candidate | undefined;
+    const listed: Candidate[] = [];
+    for (const entry of this.conversations.values()) {
+      activeCount += entry.status.activeCount;
+      if (priority(entry.status) === 4) attention += 1;
+      if (entry.status.conversationId === this.focused) focused = entry;
+      keepBest(listed, entry, MASCOT_CHAT_LIMIT, rank);
     }
-    const request = selected && [...selected.requests.values()].find(({ phase }) => phase === selected.status.phase);
-    const status = selected ? { ...selected.status, activeCount,
-      ...(request ? { message: request.message, progress: request.progress }
-        : selected.status.phase.startsWith("waiting-") ? { message: null, progress: null } : {}),
-    } : emptyMascotStatus();
-    const serialized = JSON.stringify(status);
+    const display = (entry: Candidate): MascotStatus => {
+      const request = [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase);
+      return { ...entry.status, activeCount,
+        ...(request ? { message: request.message, progress: request.progress }
+          : entry.status.phase.startsWith("waiting-") ? { message: null, progress: null } : {}),
+      };
+    };
+    const selected = listed[0] && !listed[0].seen ? listed[0] : undefined;
+    const status = selected ? display(selected) : emptyMascotStatus();
+    if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
+    const chats = listed.map(display);
+    if (!focused) this.focused = null;
+    const focus = this.focused;
+    const counts = { chats: this.conversations.size, attention };
+    const serialized = JSON.stringify([status, chats, focus, counts, this.request]);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status);
+    this.publish?.(status, chats, focus, counts, this.request);
   }
+}
+
+function rank(left: Candidate, right: Candidate): number {
+  if (left.seen !== right.seen) return left.seen ? 1 : -1;
+  const priorities = priority(right.status) - priority(left.status);
+  if (priorities) return priorities;
+  if (left.at !== right.at) return left.at > right.at ? -1 : 1;
+  return left.status.conversationId! < right.status.conversationId! ? -1 : 1;
 }

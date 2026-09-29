@@ -103,10 +103,7 @@ import {
   TrustedAttachmentResolver,
 } from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
-import {
-  SecureFileError,
-  type RuntimeSecureFileBroker,
-} from "./secure-files";
+import { unavailableSecureFileBroker } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
 import { privateConnectStoreReads } from "./private-connect/store-detail";
@@ -144,7 +141,17 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
-  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id));
+  const mascotStatus = new MascotStatusPublisher(
+    options.onMascotStatus,
+    (id) => store.conversationShell(id),
+    (id) => {
+      try {
+        return store.project(id).name;
+      } catch {
+        return null;
+      }
+    },
+  );
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {
@@ -237,32 +244,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const testOnlyProviderRefresh = process.env.NODE_ENV === "test"
     ? options.testOnlyProviderRefresh
     : undefined;
-  const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
-    authorizeRoot: async () => {
-      throw new SecureFileError(
-        "unavailable",
-        "Secure workspace file access is unavailable.",
-      );
-    },
-    verifyRoot: async () => {
-      throw new SecureFileError(
-        "unavailable",
-        "Secure workspace file access is unavailable.",
-      );
-    },
-    read: async () => {
-      throw new SecureFileError(
-        "unavailable",
-        "Secure workspace file access is unavailable.",
-      );
-    },
-    replace: async () => {
-      throw new SecureFileError(
-        "unavailable",
-        "Secure workspace file access is unavailable.",
-      );
-    },
-  };
+  const secureFiles = options.secureFiles ?? unavailableSecureFileBroker;
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
@@ -423,7 +405,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
     }));
-    mascotStatus.replace(conversations);
+    mascotStatus.replace(conversations, snapshot.projects);
     const runs = snapshot.runs.map((run) => ({
       ...run,
       canStop: canStopWorkspaceRun(run),
@@ -1024,6 +1006,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ),
     startPostReadyWork,
     websocketUrl,
+    focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),

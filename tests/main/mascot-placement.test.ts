@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mascotBounds, readMascotWindowState, supportsMascotPlacement, writeMascotWindowState } from "../../src/main/mascot-placement";
-import { emptyMascotStatus, parseMascotPreferences, parseMascotStatus } from "../../src/shared/mascot";
-import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
+import { mascotChatChoices } from "../../src/shared/mascot-choices";
+import { emptyMascotStatus, parseMascotChats, parseMascotPreferences, parseMascotStatus, type MascotStatus } from "../../src/shared/mascot";
+import { parseRuntimeWorkerCommand, parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
 const primary = { workArea: { x: 0, y: 24, width: 1440, height: 876 } };
 const secondary = { workArea: { x: -1920, y: -200, width: 1920, height: 1080 } };
@@ -61,9 +62,66 @@ describe("mascot placement and contracts", () => {
       { ...emptyMascotStatus(), conversationId: "chat" }, { ...emptyMascotStatus(), activeCount: Infinity },
       { ...emptyMascotStatus(), text: "secret" }, { ...emptyMascotStatus(), phase: "running" }]) {
       expect(parseMascotStatus(value)).toBeNull();
-      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value })).toBeNull();
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: value, chats: [], focus: null })).toBeNull();
     }
-    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus() }))
-      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus() });
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [] })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: 7 })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null }))
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: null });
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 0, attention: 0 } }))
+      .toEqual({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 0, attention: 0 } });
+    for (const counts of [
+      { chats: 3, attention: 4 }, { chats: -1, attention: 0 }, { chats: 2, attention: -1 }, { chats: 1.5, attention: 1 },
+      { chats: 1_000_001, attention: 0 }, { chats: Number.NaN, attention: 0 }, { chats: Infinity, attention: 0 }, { chats: "3", attention: 1 },
+      { chats: 3 }, { chats: 3, attention: 1, extra: 1 }, [3, 1], 3, null, undefined,
+    ]) {
+      expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts })).toBeNull();
+    }
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: emptyMascotStatus(), chats: [], focus: null, counts: { chats: 1, attention: 1 }, extra: 1 })).toBeNull();
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat", request: 4 }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: "chat", request: 4 });
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, request: 0 }))
+      .toEqual({ type: "runtime.mascot-focus", conversationId: null, request: 0 });
+    for (const request of [-1, 1.5, 2_147_483_648, Number.NaN, "4", null, undefined]) {
+      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: "chat", request })).toBeNull();
+    }
+    for (const conversationId of ["", "a\u0000b", "x".repeat(201), 3, undefined]) {
+      expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId, request: 1 })).toBeNull();
+    }
+    expect(parseRuntimeWorkerCommand({ type: "runtime.mascot-focus", conversationId: null, request: 1, extra: true })).toBeNull();
+  });
+
+  it("bounds chat context, plan steps, timestamps, and the chat list", () => {
+    const chat = (id: string, context: Partial<MascotStatus> = {}): MascotStatus => ({
+      ...emptyMascotStatus(), phase: "running", conversationId: id, projectId: "project", runId: "run", turnId: "turn", activeCount: 1,
+      projectName: "Inertia", steps: { completed: 1, total: 3 }, since: "2026-09-06T09:00:00.000Z", ...context,
+    });
+    expect(parseMascotStatus(chat("chat"))).toEqual(chat("chat"));
+    for (const context of [
+      { steps: { completed: 4, total: 3 } }, { steps: { completed: 0, total: 0 } }, { steps: { completed: 1, total: 3, label: "x" } },
+      { since: "yesterday" }, { since: "2026-09-06 09:00" }, { projectName: "x".repeat(65) }, { projectName: "\u202einertia" },
+    ] as Partial<MascotStatus>[]) expect(parseMascotStatus(chat("chat", context))).toBeNull();
+    expect(parseMascotStatus({ ...emptyMascotStatus(), steps: { completed: 0, total: 1 } })).toBeNull();
+    expect(parseMascotChats([chat("a"), chat("b")])).toHaveLength(2);
+    expect(parseMascotChats([chat("a"), chat("a")])).toBeNull();
+    expect(parseMascotChats([emptyMascotStatus()])).toBeNull();
+    expect(parseMascotChats(Array.from({ length: 9 }, (_, index) => chat(`chat-${index}`)))).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", status: chat("a"), chats: [chat("a"), chat("a")], focus: null })).toBeNull();
+  });
+
+  it("gives every chat choice a distinct title and project, even when a title already carries an ordinal", () => {
+    const chat = (id: string, chatTitle: string | null, projectName: string | null, since: string | null = null): MascotStatus => ({
+      ...emptyMascotStatus(), phase: "running", conversationId: id, projectId: "project", runId: "run", turnId: "turn",
+      activeCount: 1, chatTitle, projectName, since,
+    });
+    const choices = mascotChatChoices([
+      chat("b", "Fix", "Alpha", "2026-09-06T10:00:00.000Z"), chat("a", "Fix", "Alpha", "2026-09-06T10:00:00.000Z"),
+      chat("c", "Fix (1)", "Alpha"), chat("d", null, null), chat("e", "", ""),
+    ]);
+    expect(choices).toEqual([
+      { title: "Fix (2)", project: "Alpha" }, { title: "Fix (1) (2)", project: "Alpha" }, { title: "Fix (1) (1)", project: "Alpha" },
+      { title: "Untitled chat (1)", project: null }, { title: "Untitled chat (2)", project: null },
+    ]);
+    expect(new Set(choices.map((choice) => JSON.stringify(choice))).size).toBe(choices.length);
   });
 });

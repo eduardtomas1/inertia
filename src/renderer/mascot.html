@@ -15,14 +15,21 @@
           <div class="mascot-lift" aria-hidden="true"></div>
           <img class="mascot-pickup" width="96" height="96" alt="" draggable="false" />
         </div>
-        <button class="mascot-status" type="button" disabled title="Open chat. Arrow keys move the mascot; Escape hides it.">
-          <span class="mascot-content" role="status" aria-live="polite" aria-atomic="true">
-            <span class="mascot-label"></span>
-            <span class="mascot-chat"></span>
-            <span class="mascot-message"></span>
-          </span>
-          <span class="mascot-footer"><span class="mascot-detail"></span><span class="mascot-action"></span></span>
-        </button>
+        <div class="mascot-status" data-view="status">
+          <button class="mascot-open" type="button" disabled title="Open chat. Arrow keys move the mascot; Escape hides it.">
+            <span class="mascot-content" role="status" aria-live="polite" aria-atomic="true">
+              <span class="mascot-heading"><span class="mascot-dot" aria-hidden="true"></span><span class="mascot-label"></span></span>
+              <span class="mascot-chat"><span class="mascot-project"></span><span class="mascot-title"></span><span class="mascot-time"></span></span>
+              <span class="mascot-message"></span>
+            </span>
+            <span class="mascot-footer"><span class="mascot-steps" aria-hidden="true" hidden><i></i></span><span class="mascot-detail"></span><span class="mascot-action"></span></span>
+          </button>
+          <div class="mascot-chooser" hidden>
+            <span class="mascot-chooser-title">Show chat</span>
+            <div class="mascot-chats" role="group" aria-label="Show chat"></div>
+          </div>
+          <button class="mascot-picker" type="button" aria-expanded="false" hidden><span class="mascot-picker-label"></span></button>
+        </div>
       </main>
       <!-- Inert artwork declarations keep URLs out of JavaScript and do not
            fetch/decode inactive animation loops. Vite emits these local assets. -->

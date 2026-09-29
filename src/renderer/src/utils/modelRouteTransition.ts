@@ -7,7 +7,7 @@ import type {
   ProviderId,
 } from "@shared/contracts";
 import type { PendingModelRoute } from "../components/composer/types";
-import type { ReplacementChatRequest } from "../lib/newConversation";
+import type { ChatConfiguration, ReplacementChatRequest } from "../lib/newConversation";
 import {
   conversationContinuationRefusal,
   conversationHasHistory,
@@ -82,6 +82,18 @@ export function modelRouteTransitionContext(
     hasProviderSession: Boolean(conversation.providerSessionId),
     hasHistory: conversationHasHistory(conversation),
     mixedProviderHistory: conversationContinuationRefusal(conversation) !== null,
+  };
+}
+
+export function replacementChatRequest(
+  conversation: Pick<Conversation, "modelSelection" | "accessMode" | "interactionMode">,
+  choice: { selection?: ModelSelection; configuration?: ChatConfiguration; prefillText?: string } = {},
+): ReplacementChatRequest {
+  return {
+    selection: choice.selection ?? conversation.modelSelection,
+    configuration: choice.configuration
+      ?? { accessMode: conversation.accessMode, interactionMode: conversation.interactionMode },
+    ...(choice.prefillText ? { prefillText: choice.prefillText } : {}),
   };
 }
 

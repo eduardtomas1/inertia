@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared/contracts";
 
-import { replacementChatRequest } from "../../lib/newConversation";
-import { pendingModelRoute } from "../../utils/modelRouteTransition";
+import { pendingModelRoute, replacementChatRequest } from "../../utils/modelRouteTransition";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
 export function useComposerNewChatOffer(options: {

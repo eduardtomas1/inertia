@@ -6,10 +6,10 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { replacementChatStarter } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import {
   buildNewConversationPayload,
-  replacementChatRequest,
   replacementConversationPayload,
   withNewConversationModelSelection,
 } from "../../src/renderer/src/lib/newConversation";
+import { replacementChatRequest } from "../../src/renderer/src/utils/modelRouteTransition";
 import { conversation } from "./composer-fixtures";
 
 const project: Project = {

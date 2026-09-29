@@ -42,7 +42,8 @@ import {
 } from "../../hooks/useWorkspaceLayout";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
-import { replacementChatRequest, type NewConversationLocation, type ReplacementChatRequest } from "../../lib/newConversation";
+import type { NewConversationLocation, ReplacementChatRequest } from "../../lib/newConversation";
+import { replacementChatRequest } from "../../utils/modelRouteTransition";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import {
   canFollowUpSubagentTrace,

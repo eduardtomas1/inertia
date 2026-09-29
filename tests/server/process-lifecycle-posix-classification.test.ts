@@ -212,7 +212,7 @@ describe("provider process-tree POSIX classification", () => {
         const spawnProcessSync = vi.fn(() => {
           reads += 1;
           const root = reads === 1 ? "4242 1 S" : later;
-          return { status: 0, stdout: `${[root, "5000 4242 T"].filter(Boolean).join("\n")}\n` };
+          return { status: 0, stdout: `${root}\n` };
         });
         let result: boolean | undefined;
         void terminateProcessTreeAndWait(child as never, true, {

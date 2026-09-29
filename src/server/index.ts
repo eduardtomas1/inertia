@@ -123,6 +123,7 @@ import { runRecoveryImportWorker } from "./persistence/database-recovery-import-
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
+import { DatabaseRecoveryImportAdmission } from "./database-recovery-import-admission";
 import { gitScanCoordinator } from "./git/scan-coordinator";
 import { gitInspectionLifecycle } from "./git/inspection-lifecycle";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
@@ -176,12 +177,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const runtimeLifetimeAbort = new AbortController();
   let postReadyWorkStarted = false;
   let postReadyWork: Promise<void> = Promise.resolve();
-  let databaseRecoveryImportActive = false;
+  const recoveryImportAdmission = new DatabaseRecoveryImportAdmission();
   let activeRuntimeCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
-    databaseRecoveryActive: () => databaseRecoveryImportActive,
+    databaseRecoveryActive: () => recoveryImportAdmission.isActive(),
     agentWorkActive: () => turns.activeConversationIds().length > 0
       || isolatedRuns.activeCount() > 0
       || store.hasRecordedActiveWorkspaceRun(),
@@ -210,7 +211,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       recoverInterruptedRuns: false,
       canStartDatabaseBackup: () =>
         !closed
-        && !databaseRecoveryImportActive
+        && !recoveryImportAdmission.isActive()
         && activeRuntimeCommands === 0
         && (turns?.activeConversationIds().length ?? 0) === 0,
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
@@ -510,7 +511,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   startProjectAutoPull({
     store, workspaceRuns, signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation,
     idle: () => !closed && !updatePreparation.isAdmissionClosed() && activeRuntimeCommands === 0
-      && !databaseRecoveryImportActive && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
+      && !recoveryImportAdmission.isActive() && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
     reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
   });
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
@@ -691,7 +692,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcast, broadcastSnapshot, send,
   };
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
-    signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation,
+    signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   queuedMessages.start();
   const executeCommand = createRuntimeCommandExecutor({
@@ -837,7 +838,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
-    if (databaseRecoveryImportActive) {
+    if (recoveryImportAdmission.isActive()) {
       send(socket, {
         type: "request.error",
         requestId: command.requestId,
@@ -1054,7 +1055,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
         })
-      : databaseRecoveryImportActive
+      : recoveryImportAdmission.isActive()
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -1080,7 +1081,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           code: "unavailable",
           message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
         })
-      : databaseRecoveryImportActive
+      : recoveryImportAdmission.isActive()
       ? Promise.resolve({
           type: "response",
           requestId: request.requestId,
@@ -1106,7 +1107,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             code: "unavailable",
             message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
           }
-        : databaseRecoveryImportActive
+        : recoveryImportAdmission.isActive()
         ? {
             type: "response",
             requestId: request.requestId,
@@ -1136,19 +1137,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         if (runtimeSafetyLock) {
           throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
         }
-        if (databaseRecoveryImportActive) {
-          throw new Error("A database recovery import is already active.");
-        }
         if (!operationId) {
           throw new Error("The database recovery import identity is required.");
         }
-        databaseRecoveryImportActive = true;
+        recoveryImportAdmission.begin();
         try {
           if (activeRuntimeCommands > 0) {
             await new Promise<void>((resolveDrain) => {
               runtimeCommandDrainWaiters.add(resolveDrain);
             });
           }
+          await recoveryImportAdmission.drain();
           await projectIdentityRefresh;
           await artifactReconciliation;
           if (
@@ -1191,7 +1190,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           broadcastSnapshot();
           throw error;
         } finally {
-          databaseRecoveryImportActive = false;
+          recoveryImportAdmission.end();
         }
       }),
     close: (cause = "runtime-shutdown") => {

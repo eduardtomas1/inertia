@@ -172,7 +172,7 @@ const budgets = {
 };
 
 function formatBytes(bytes) {
-  return `${(bytes / kibibyte).toFixed(1)} KiB`;
+  return `${(bytes / kibibyte).toFixed(1)} KiB (${Math.floor(bytes)} bytes)`;
 }
 
 async function assetBytes(assetPath) {

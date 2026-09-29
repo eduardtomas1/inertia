@@ -34,6 +34,7 @@ import type { SplitDropZone } from "../utils/splitConversation";
 import type { SplitDropPlan, SplitPaneOwner } from "../utils/splitLayout";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
+import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
@@ -277,6 +278,8 @@ export const AppLayout = memo(function AppLayout({
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
+  const [paletteView, setPaletteView] = useState<CommandPaletteView>("search");
+  useEffect(() => { if (!paletteOpen) setPaletteView("search"); }, [paletteOpen]);
   const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
@@ -318,6 +321,10 @@ export const AppLayout = memo(function AppLayout({
     openConversationInWindow: actions.openConversationInWindow,
     closeConversationSplit: actions.closeConversationSplit,
     createConversation: actions.createConversation,
+    chooseNewChatProject: () => {
+      setPaletteView("new-chat");
+      setPaletteOpen(true);
+    },
     openMultiSpawn: multiSpawn.openDialog,
     openDailyWork: () => setDailyWorkOpen(true),
     renameConversation: (thread: Conversation, title: string) => {
@@ -590,6 +597,7 @@ export const AppLayout = memo(function AppLayout({
             onOpenConversationInWindow={sidebarActions.openConversationInWindow}
             onCloseConversationSplit={sidebarActions.closeConversationSplit}
             onCreateConversation={sidebarActions.createConversation}
+            onChooseNewChatProject={sidebarActions.chooseNewChatProject}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
             dailyWorkOpen={dailyWorkOpen}
@@ -851,6 +859,8 @@ export const AppLayout = memo(function AppLayout({
       <AppNavigationOverlays
         snapshot={connection.snapshot}
         paletteOpen={paletteOpen}
+        paletteView={paletteView}
+        currentProjectId={projectScopeId ?? connection.snapshot?.activeProjectId ?? null}
         newThreadShortcut={formatAppShortcutLabel(
           platform,
           settings.keybindings["new-chat"],
@@ -862,6 +872,7 @@ export const AppLayout = memo(function AppLayout({
         selectMessage={actions.selectMessage}
         sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
+        createConversationIn={(project) => actions.createConversation(project)}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
       />

@@ -367,6 +367,8 @@ describe("trusted overlay native preview suspension", () => {
       onSelectProject: vi.fn(),
       onSelectConversation: vi.fn(),
       onNewThread: vi.fn(),
+      onNewThreadIn: vi.fn(),
+      currentProjectId: null,
       onAddProject: vi.fn(),
       onOpenSettings: vi.fn(),
     };

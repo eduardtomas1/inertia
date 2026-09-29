@@ -7,6 +7,7 @@ export interface PosixCleanupFailure {
   readonly scope: "child" | "pid";
   readonly rootStop: PosixRootStopResult;
   readonly rootState: PosixRootState;
+  readonly rootRunningObserved: boolean;
   readonly scanStabilized: boolean;
   readonly groupExited: boolean | null;
   readonly descendantsExited: boolean | null;

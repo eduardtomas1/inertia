@@ -28,6 +28,7 @@ describe("POSIX process tree root observation", () => {
     expect(result).toMatchObject({
       rootStop: "sent",
       rootState: "stopped",
+      rootRunningObserved: true,
       scanStabilized: true,
       snapshotConfirmed: true,
     });
@@ -38,6 +39,33 @@ describe("POSIX process tree root observation", () => {
       [-4_242, "SIGKILL"],
       [4_242, "SIGKILL"],
     ]);
+  });
+
+  it("remembers a running observation after the root later disappears", () => {
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: tables("4242 1 Ss\n", "1 0 Ss\n") as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "absent",
+      rootRunningObserved: true,
+      snapshotConfirmed: false,
+    });
+  });
+
+  it("does not report a running observation when the first read already shows the stop", () => {
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: tables("4242 1 Ts\n") as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootState: "stopped",
+      rootRunningObserved: false,
+      snapshotConfirmed: true,
+    });
   });
 
   it("stays unconfirmed when a sent stop is never observed within the bounded re-reads", () => {

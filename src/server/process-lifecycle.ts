@@ -470,8 +470,10 @@ function posixTreeEnumeration(
     return "root-authorized";
   }
   const rootAbsenceObserved = killed.rootStop === "absent"
-    || killed.rootState === "absent"
-    || killed.rootState === "zombie";
+    || (
+      (killed.rootState === "absent" || killed.rootState === "zombie")
+      && !killed.rootRunningObserved
+    );
   return rootGoneAccepted && rootAbsenceObserved ? "root-gone" : "incomplete";
 }
 
@@ -495,6 +497,7 @@ function recordPosixTreeTermination(
       scope,
       rootStop: killed.rootStop,
       rootState: killed.rootState,
+      rootRunningObserved: killed.rootRunningObserved,
       scanStabilized: killed.scanStabilized,
       groupExited: evidence?.groupExited ?? null,
       descendantsExited: evidence?.descendantsExited ?? null,
@@ -919,6 +922,7 @@ export async function terminateProcessTreeAndWait(
         scanStabilized: false,
         rootStop: "absent",
         rootState: "absent",
+        rootRunningObserved: false,
       };
     const enumeration = posixTreeEnumeration(killed, true);
     const { descendants } = killed;

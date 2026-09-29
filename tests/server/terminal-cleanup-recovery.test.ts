@@ -49,6 +49,7 @@ describe("TerminalManager cleanup recovery", () => {
       scope: "pid" as const,
       rootStop: "sent" as const,
       rootState: "running" as const,
+      rootRunningObserved: true,
       scanStabilized: false,
       groupExited: null,
       descendantsExited: null,

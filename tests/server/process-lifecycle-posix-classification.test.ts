@@ -82,6 +82,7 @@ describe("provider process-tree POSIX classification", () => {
         scope: "pid",
         rootStop: "sent",
         rootState: "running",
+        rootRunningObserved: true,
         scanStabilized: false,
         groupExited: null,
         descendantsExited: null,
@@ -187,8 +188,8 @@ describe("provider process-tree POSIX classification", () => {
 
     it.each([
       { later: "4242 1 T", classification: "root-authorized" },
-      { later: "4242 1 Z", classification: "root-gone" },
-      { later: "", classification: "root-gone" },
+      { later: "4242 1 Z", classification: "incomplete" },
+      { later: "", classification: "incomplete" },
     ])("stop sent but first observed running, then $later: $classification", async ({ later, classification }) => {
       vi.useFakeTimers();
       try {
@@ -226,6 +227,96 @@ describe("provider process-tree POSIX classification", () => {
         await vi.advanceTimersByTimeAsync(1_000);
         expect(result).toBe(classification !== "incomplete");
         expect(spawnProcessSync.mock.calls.length).toBeGreaterThan(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    type Observed = "running" | "stopped" | "zombie" | "absent";
+    const observedLine: Record<Observed, string> = {
+      running: "4242 1 S",
+      stopped: "4242 1 T",
+      zombie: "4242 1 Z",
+      absent: "",
+    };
+    const reachableLater: Record<Observed, Observed[]> = {
+      running: ["running", "stopped", "zombie", "absent"],
+      stopped: ["running", "stopped", "zombie", "absent"],
+      zombie: ["zombie", "absent"],
+      absent: ["absent"],
+    };
+    const historyExpected = (
+      stop: "sent" | "EPERM",
+      first: Observed,
+      later: Observed,
+      scope: "child" | "pid",
+    ): Expected => {
+      if (stop === "sent" && later === "stopped") return "root-authorized";
+      const gone = later === "zombie" || later === "absent";
+      const runningObserved = first === "running" || later === "running";
+      return scope === "child" && gone && !runningObserved ? "root-gone" : "incomplete";
+    };
+    const historyRows = (["sent", "EPERM"] as const).flatMap((stop) =>
+      (Object.keys(reachableLater) as Observed[]).flatMap((first) =>
+        reachableLater[first].flatMap((later) =>
+          (["child", "pid"] as const).map((scope) => ({
+            stop, first, later, scope,
+            classification: historyExpected(stop, first, later, scope),
+          })))));
+
+    it.each(historyRows)("history: stop $stop, root $first then $later, $scope path: $classification", async ({
+      stop, first, later, scope, classification,
+    }) => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal === "SIGSTOP" && stop === "EPERM") {
+            const error = new Error(stop) as NodeJS.ErrnoException;
+            error.code = stop;
+            throw error;
+          }
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") {
+            killed.add(target);
+            if (target === 4_242 && child.exitCode === null) {
+              child.exitCode = 1;
+              queueMicrotask(() => child.emit("close", 1));
+            }
+          }
+          return true as const;
+        });
+        let reads = 0;
+        const spawnProcessSync = vi.fn(() => {
+          reads += 1;
+          const root = observedLine[reads === 1 ? first : later];
+          const descendant = reads === 1 ? "5000 4242 S" : "5000 4242 T";
+          return { status: 0, stdout: `${[root, descendant].filter(Boolean).join("\n")}\n` };
+        });
+        const dependencies = {
+          platform: "linux" as const,
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        };
+        let result: boolean | undefined;
+        const outcome = scope === "child"
+          ? terminateProcessTreeAndWait(child as never, true, dependencies)
+          : createOwnedPidProcessTreeTermination(
+            4_242,
+            async () => killed.has(4_242),
+            dependencies,
+          )();
+        void outcome.then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(spawnProcessSync.mock.calls.length).toBeGreaterThan(1);
+        expect(result).toBe(classification !== "incomplete");
       } finally {
         vi.useRealTimers();
       }

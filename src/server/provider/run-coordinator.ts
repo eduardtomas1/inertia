@@ -11,6 +11,7 @@ import { PROVIDER_INFO } from "./catalog";
 import {
   hasConsistentProviderTerminalOutcome,
   hasExactProviderRunIdentity,
+  ProviderRunRefusedError,
   ProviderRuntimeError,
   providerRunIdentity,
   providerRunTerminal,
@@ -26,6 +27,7 @@ import {
   type ProviderRunIdentity,
   type ProviderRunInput,
   type ProviderRunResult,
+  type ProviderRuntimeErrorCode,
   ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
@@ -105,6 +107,12 @@ export interface ProviderRunCoordinatorOptions {
 const MAX_OWNED_STOP_GRACE_MS = 30_000;
 const FORCE_DETACH_GRACE_MS = 250;
 const MAX_CLEANUP_RECEIPTS = 256;
+const MAX_REFUSED_OWNERS_PER_CONVERSATION = 64;
+const MAX_REFUSED_OWNERS = 1_024;
+
+function runOwnerKey(identity: { runId: string; turnId: string }): string {
+  return JSON.stringify([identity.runId, identity.turnId]);
+}
 
 function capabilitiesForEvent(
   event: ProviderEvent,
@@ -168,6 +176,8 @@ export class ProviderRunCoordinator {
    * lifecycle owner asks stopOwned() for the same barrier.
    */
   private readonly cleanupReceipts = new Map<string, ProviderRunIdentity>();
+  private readonly refusalReceipts = new Map<string, Set<string>>();
+  private refusalReceiptCount = 0;
 
   constructor(private readonly options: ProviderRunCoordinatorOptions) {}
 
@@ -196,9 +206,18 @@ export class ProviderRunCoordinator {
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderRunResult> {
-    const conversationId = validateProviderRunInput(input);
+    let conversationId: string;
+    try {
+      conversationId = validateProviderRunInput(input);
+    } catch (error) {
+      if (error instanceof ProviderRuntimeError) {
+        this.refuse(providerRunIdentity(input), error.code, error.message);
+      }
+      throw error;
+    }
     if (this.activeRuns.has(conversationId)) {
-      throw new ProviderRuntimeError(
+      this.refuse(
+        providerRunIdentity(input),
         "already_running",
         "This conversation already has an active provider run.",
       );
@@ -211,15 +230,14 @@ export class ProviderRunCoordinator {
         || input.model !== input.modelSelection.modelId
       )
     ) {
-      this.rememberCleanupReceipt(expectedIdentity);
-      throw new ProviderRuntimeError(
+      this.refuse(
+        expectedIdentity,
         "invalid_input",
         "The custom backend run does not match the exact probed model identity.",
       );
     }
     if (input.toolRestriction === "none" && (input.harnessId !== "claude-agent-sdk" || callbacks.hostTools || input.skills?.length || input.sessionId || input.access !== "supervised")) {
-      this.rememberCleanupReceipt(expectedIdentity);
-      throw new ProviderRuntimeError("invalid_input", "This provider cannot enforce a report chat without tools.");
+      this.refuse(expectedIdentity, "invalid_input", "This provider cannot enforce a report chat without tools.");
     }
     const providerId = input.providerId;
     const runId = input.runId;
@@ -259,8 +277,8 @@ export class ProviderRunCoordinator {
       // refusal precedes installation admission, launch preparation, and the
       // harness invocation, so the exact owner has no process to clean up.
       // Keep arbitrary exceptions and all post-start failures fail-closed.
-      this.rememberCleanupReceipt(expectedIdentity);
-      throw new ProviderRuntimeError(
+      this.refuse(
+        expectedIdentity,
         "invalid_input",
         this.options.evidenceUncertain?.(providerId)
           ? `${PROVIDER_INFO[providerId].name} is paused because Inertia could not confirm that an earlier ${PROVIDER_INFO[providerId].name} process was cleaned up. Restart Inertia to continue.`
@@ -409,7 +427,7 @@ export class ProviderRunCoordinator {
       // so this exact turn owns no provider process requiring cleanup. Keep
       // unexpected authority failures fail-closed as before.
       if (error instanceof ProviderInstallationAdmissionError) {
-        this.rememberCleanupReceipt(expectedIdentity);
+        this.refuse(expectedIdentity, "invalid_input", error.message);
       }
       throw error;
     }
@@ -597,6 +615,7 @@ export class ProviderRunCoordinator {
     };
     this.activeRuns.set(conversationId, active);
     this.cleanupReceipts.delete(conversationId);
+    this.consumeRefusal(conversationId, active);
 
     let launched: Promise<ProviderRunResult>;
     try {
@@ -869,13 +888,15 @@ export class ProviderRunCoordinator {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
       const receipt = this.cleanupReceipts.get(conversationId);
-      return receipt
+      return (receipt
         && receipt.runId === identity.runId
-        && receipt.turnId === identity.turnId
+        && receipt.turnId === identity.turnId)
+        || this.consumeRefusal(conversationId, identity)
         ? "settled"
         : "missing";
     }
     if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
+      if (this.consumeRefusal(conversationId, identity)) return "settled";
       active.quarantine("provider-run-stop-owner-mismatch");
       this.cancelStartedHarness(active);
       return "identity-mismatch";
@@ -913,6 +934,48 @@ export class ProviderRunCoordinator {
       if (oldest === undefined) break;
       this.cleanupReceipts.delete(oldest);
     }
+  }
+
+  private refuse(
+    identity: ProviderRunIdentity,
+    code: ProviderRuntimeErrorCode,
+    message: string,
+  ): never {
+    const active = this.activeRuns.get(identity.conversationId);
+    if (active?.runId === identity.runId && active.turnId === identity.turnId) {
+      throw new ProviderRuntimeError(code, message);
+    }
+    throw new ProviderRunRefusedError(
+      code,
+      message,
+      identity,
+      this.rememberRefusal(identity),
+    );
+  }
+
+  private rememberRefusal(identity: ProviderRunIdentity): boolean {
+    const owners = this.refusalReceipts.get(identity.conversationId) ?? new Set<string>();
+    const key = runOwnerKey(identity);
+    if (owners.has(key)) return true;
+    if (
+      owners.size >= MAX_REFUSED_OWNERS_PER_CONVERSATION
+      || this.refusalReceiptCount >= MAX_REFUSED_OWNERS
+    ) return false;
+    owners.add(key);
+    this.refusalReceiptCount += 1;
+    this.refusalReceipts.set(identity.conversationId, owners);
+    return true;
+  }
+
+  private consumeRefusal(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    const owners = this.refusalReceipts.get(conversationId);
+    if (!owners?.delete(runOwnerKey(identity))) return false;
+    this.refusalReceiptCount -= 1;
+    if (owners.size === 0) this.refusalReceipts.delete(conversationId);
+    return true;
   }
 
   async disposeAll(): Promise<boolean> {

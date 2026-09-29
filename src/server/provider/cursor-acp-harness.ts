@@ -52,7 +52,6 @@ import {
   type ProviderHostToolMcpConnection,
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
-import { redactHostToolPayload } from "./host-tool-redaction";
 import {
   cursorCleanupResult,
   cursorRuntimeFailure,
@@ -236,12 +235,7 @@ function startCursorRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
-  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(hostMcpConnection
-    ? redactHostToolPayload(value, [
-        hostMcpConnection.bearerToken,
-        hostMcpConnection.url,
-      ])
-    : value);
+  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(value);
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
   let activeFailurePhase = "initialize";
@@ -342,7 +336,7 @@ function startCursorRun(
         todoSessions.reset(sessionId);
       }
       handleCursorProviderEvent(() => {
-        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions);
+        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions, secretRedactor);
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
@@ -534,6 +528,9 @@ function startCursorRun(
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
     emitter.capability("images", supportsImages);
     hostMcpConnection = await hostMcpSession?.start();
+    if (hostMcpConnection) {
+      secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
+    }
     const hostMcpServers = hostMcpConnection
       ? acpHostMcpServers(
           hostMcpConnection,
@@ -639,6 +636,11 @@ function startCursorRun(
       && compactions.completionEvidence() !== "completed"
       ? unconfirmedAcpCompactionFailure("Cursor")
       : undefined;
+    if (!cancelRequested && response.stopReason === "end_turn" && !compactionFailure) {
+      finishOutputStreams();
+    } else {
+      secretRedactor.discardStreams();
+    }
     const outcome = cancelRequested || response.stopReason === "cancelled"
       ? finish("cancelled")
       : response.stopReason !== "end_turn"
@@ -660,6 +662,7 @@ function startCursorRun(
     requestProcessTermination(true);
     return outcome;
   }).catch((error: unknown) => {
+    secretRedactor.discardStreams();
     requestProcessTermination(true);
     if (cancelRequested) return finish("cancelled");
     const redactHostMcp = (value: string): string => redactHostMcpPayload(value);
@@ -730,8 +733,19 @@ function startCursorRun(
     };
   }
 
+  function finishOutputStreams(): void {
+    const assistant = secretRedactor.finishAssistant();
+    if (assistant) {
+      resultText.append(assistant);
+      emitter.text(assistant);
+    }
+    const reasoning = secretRedactor.finishReasoning();
+    if (reasoning) emitter.rich({ type: "reasoning-summary", text: reasoning });
+  }
+
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
+    secretRedactor.discardStreams();
     cancelRequested = true;
     promptPreparationAbort.abort();
     hostToolRuntime?.settle();
@@ -860,6 +874,7 @@ function handleCursorUpdate(
     }
   >,
   compactions: AcpCompactionProjection,
+  secretRedactor: AcpSecretRedactor,
 ): void {
   const update = notification.update;
   switch (update.sessionUpdate) {
@@ -868,17 +883,17 @@ function handleCursorUpdate(
       return;
     case "agent_message_chunk":
       if (update.content.type === "text") {
-        const value = bounded(update.content.text);
-        resultText.append(value);
-        emitter.text(value);
+        const value = secretRedactor.assistantChunk(bounded(update.content.text));
+        if (value) {
+          resultText.append(value);
+          emitter.text(value);
+        }
       }
       return;
     case "agent_thought_chunk":
       if (update.content.type === "text") {
-        emitter.rich({
-          type: "reasoning-summary",
-          text: bounded(update.content.text),
-        });
+        const value = secretRedactor.reasoningChunk(bounded(update.content.text));
+        if (value) emitter.rich({ type: "reasoning-summary", text: value });
       }
       return;
     case "tool_call": {

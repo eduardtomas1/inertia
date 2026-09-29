@@ -673,6 +673,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
   const child = spawnLockBroker(assembly, environment);
   let stdoutBuffer = "";
   const stdoutLines: string[] = [];
+  const resultReceivedAt = new Map<string, number>();
   let stderr = "";
   let errored = false;
   let closed = false;
@@ -686,7 +687,9 @@ async function acquireWindowsRuntimeJobExecutableLock(
     while (true) {
       const newline = stdoutBuffer.indexOf("\n");
       if (newline < 0) break;
-      stdoutLines.push(stdoutBuffer.slice(0, newline).replace(/\r$/u, ""));
+      const line = stdoutBuffer.slice(0, newline).replace(/\r$/u, "");
+      if (line.startsWith("RESULT ")) resultReceivedAt.set(line, Date.now());
+      stdoutLines.push(line);
       stdoutBuffer = stdoutBuffer.slice(newline + 1);
       if (stdoutLines.length > 64) {
         errored = true;
@@ -767,14 +770,18 @@ async function acquireWindowsRuntimeJobExecutableLock(
         }
         child.stdin.write(command);
         const prefix = `RESULT ${requestId} `;
-        while (Date.now() < operationDeadlineAt) {
+        while (true) {
           if (!isHeld()) {
             throw new Error("The verified Windows runtime executable lock was lost.");
           }
           const resultIndex = stdoutLines.findIndex((line) => line.startsWith(prefix));
           if (resultIndex >= 0) {
+            const resultLine = stdoutLines.splice(resultIndex, 1)[0]!;
+            const receivedAt = resultReceivedAt.get(resultLine);
+            resultReceivedAt.delete(resultLine);
+            if (receivedAt === undefined || receivedAt >= operationDeadlineAt) break;
             const [tag, id, status, encodedOutput, encodedError, ...extra] =
-              stdoutLines.splice(resultIndex, 1)[0]!.split(" ");
+              resultLine.split(" ");
             if (
               tag !== "RESULT"
               || id !== requestId
@@ -798,6 +805,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
             }
             return result;
           }
+          if (Date.now() >= operationDeadlineAt) break;
           await new Promise<void>((resolve) => setTimeout(resolve, 10));
         }
         held = false;

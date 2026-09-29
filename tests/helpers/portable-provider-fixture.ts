@@ -2,6 +2,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -92,6 +93,26 @@ export function writeNodeFlagExecutable(
     "utf8",
   );
   chmodSync(executable, 0o755);
+  return executable;
+}
+
+export function writeNodeClaudeExecutable(root: string, source: string): string {
+  if (process.platform !== "win32") return writeNodeFlagExecutable(root, "claude", source);
+  const packageDirectory = join(root, "node_modules", "@anthropic-ai", "claude-code");
+  mkdirSync(packageDirectory, { recursive: true });
+  writeFileSync(
+    join(packageDirectory, "package.json"),
+    JSON.stringify({ name: "@anthropic-ai/claude-code", bin: { claude: "cli.js" } }),
+    "utf8",
+  );
+  writeFileSync(join(packageDirectory, "cli.js"), `${source.trimStart()}\n`, "utf8");
+  copyFileSync(process.execPath, join(root, "node.exe"));
+  const executable = join(root, "claude.cmd");
+  writeFileSync(
+    executable,
+    "@echo off\r\n\"%~dp0node.exe\" \"%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n",
+    "utf8",
+  );
   return executable;
 }
 

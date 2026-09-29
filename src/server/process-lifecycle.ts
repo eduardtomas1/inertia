@@ -8,8 +8,8 @@ import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
 import {
-  forceKillPosixProcessTree,
   forceKillPosixProcessTreeWithStatus,
+  type PosixProcessTreeKillResult,
 } from "../node/posix-process-tree";
 import {
   linuxProcessCanExecute,
@@ -172,13 +172,44 @@ export function createOwnedProcessTreeTermination(
   };
 }
 
-function killDirectChild(child: ChildProcess, force: boolean): void {
+function confirmedBefore(
+  confirmation: Promise<boolean>,
+  deadlineAt: number,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), Math.max(0, deadlineAt - Date.now()));
+    void confirmation.then(
+      (confirmed) => {
+        clearTimeout(timer);
+        resolve(confirmed);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(false);
+      },
+    );
+  });
+}
+
+function killDirectChild(child: ChildProcess, force: boolean): boolean {
   try {
-    child.kill(force ? "SIGKILL" : "SIGTERM");
+    return child.kill(force ? "SIGKILL" : "SIGTERM");
   } catch {
-    // The child may already have exited.
+    return false;
   }
 }
+
+interface WindowsTerminationSequence {
+  readonly deadlineAt: number;
+  forcedTerminated: boolean;
+  fallbackReached: boolean;
+  settle: Promise<void> | null;
+}
+
+const windowsTerminationSequences = new WeakMap<
+  ChildProcess,
+  WindowsTerminationSequence
+>();
 
 function inheritedWindowsSystemRoot(
   environment: NodeJS.ProcessEnv = process.env,
@@ -289,6 +320,7 @@ function observeDirectChildClose(
 
   return (waitMs) => {
     if (closed) return Promise.resolve(true);
+    if (waitMs <= 0) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const finish = (didClose: boolean): void => {
@@ -305,17 +337,35 @@ function observeDirectChildClose(
   };
 }
 
-async function confirmWindowsChildResourcesClosed(
-  waitForObservedClose: (waitMs: number) => Promise<boolean>,
+function windowsTerminationSequence(
+  child: ChildProcess,
   waitMs: number,
+): WindowsTerminationSequence {
+  const sequence = windowsTerminationSequences.get(child) ?? {
+    deadlineAt: Date.now() + 2 * waitMs + WINDOWS_RESOURCE_SETTLE_MS,
+    forcedTerminated: false,
+    fallbackReached: false,
+    settle: null,
+  };
+  windowsTerminationSequences.set(child, sequence);
+  return sequence;
+}
+
+async function confirmClosedWindowsTermination(
+  sequence: WindowsTerminationSequence,
+  withinDeadline: boolean,
 ): Promise<boolean> {
-  if (!await waitForObservedClose(waitMs)) return false;
-  // Windows can report ChildProcess `close` just before the executable image
-  // becomes deletable. Give the kernel one short, bounded quiescence window
-  // before callers release temporary executables or other owned resources.
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, Math.min(waitMs, WINDOWS_RESOURCE_SETTLE_MS));
-  });
+  if (sequence.fallbackReached) return false;
+  if (!sequence.settle) {
+    if (
+      withinDeadline
+      && sequence.deadlineAt - Date.now() < WINDOWS_RESOURCE_SETTLE_MS
+    ) return false;
+    sequence.settle = new Promise<void>((resolve) => {
+      setTimeout(resolve, WINDOWS_RESOURCE_SETTLE_MS);
+    });
+  }
+  await sequence.settle;
   return true;
 }
 
@@ -325,10 +375,19 @@ function waitForPosixProcessGroupExit(
   waitMs: number,
   processGroupCanExecute:
     ((processGroupId: number) => boolean | null) | null = null,
+  resignalWhile: () => boolean = () => false,
 ): Promise<boolean> {
   const deadline = Date.now() + waitMs;
+  const killGroup = (): boolean => {
+    try {
+      return killProcess(-pid, "SIGKILL");
+    } catch {
+      return false;
+    }
+  };
   return new Promise<boolean>((resolve) => {
     const inspect = (): void => {
+      if (resignalWhile()) killGroup();
       try {
         killProcess(-pid, 0);
       } catch (error) {
@@ -391,6 +450,37 @@ function waitForPosixProcessesExit(
     };
     inspect();
   });
+}
+
+type PosixTreeEnumeration = "root-authorized" | "root-gone" | "incomplete";
+
+interface PosixTreeTerminationEvidence {
+  readonly enumeration: PosixTreeEnumeration;
+  readonly groupExited: boolean;
+  readonly descendantsExited: boolean;
+  readonly rootExited: boolean;
+}
+
+function posixTreeEnumeration(
+  killed: PosixProcessTreeKillResult,
+  rootGoneAccepted: boolean,
+): PosixTreeEnumeration {
+  if (killed.snapshotConfirmed && killed.rootState === "stopped") {
+    return "root-authorized";
+  }
+  const rootAbsenceObserved = killed.rootStop === "absent"
+    || killed.rootState === "absent"
+    || killed.rootState === "zombie";
+  return rootGoneAccepted && rootAbsenceObserved ? "root-gone" : "incomplete";
+}
+
+function posixTreeTerminationConfirmed(
+  evidence: PosixTreeTerminationEvidence,
+): boolean {
+  return evidence.enumeration !== "incomplete"
+    && evidence.groupExited
+    && evidence.descendantsExited
+    && evidence.rootExited;
 }
 
 function nativePosixProcessObserver(
@@ -551,7 +641,7 @@ export function createOwnedPidProcessTreeTermination(
   );
   let started = false;
   let treeTerminationConfirmed = false;
-  let snapshotConfirmed = false;
+  let enumeration: PosixTreeEnumeration = "incomplete";
   let descendants: readonly number[] = [];
 
   return async () => {
@@ -606,10 +696,10 @@ export function createOwnedPidProcessTreeTermination(
         rootProcessGroup: true,
         deadlineAt,
       });
-      snapshotConfirmed = killed.snapshotConfirmed;
+      enumeration = posixTreeEnumeration(killed, false);
       descendants = killed.descendants;
     }
-    if (!snapshotConfirmed) return false;
+    if (enumeration === "incomplete") return false;
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
     if (exitWaitMs <= 0) return false;
     const [groupExited, descendantsExited, rootExited] = await Promise.all([
@@ -627,7 +717,9 @@ export function createOwnedPidProcessTreeTermination(
       ),
       waitForRootExit(exitWaitMs),
     ]);
-    return groupExited && descendantsExited && rootExited;
+    return posixTreeTerminationConfirmed({
+      enumeration, groupExited, descendantsExited, rootExited,
+    });
   };
 }
 
@@ -644,7 +736,6 @@ export async function terminateProcessTreeAndWait(
   dependencies: AwaitableProcessLifecycleDependencies = {},
 ): Promise<boolean> {
   const pid = child.pid;
-  if (!pid) return true;
   const platform = dependencies.platform ?? process.platform;
   const spawnProcess = dependencies.spawnProcess ?? spawn;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
@@ -653,6 +744,12 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  if (!pid) {
+    return await confirmedBefore(
+      awaitRuntimeOwnedProcessStopped(child),
+      Date.now() + waitMs,
+    );
+  }
   const processCanExecute = nativePosixProcessObserver(platform, dependencies);
   const processGroupCanExecute = nativePosixProcessGroupObserver(
     platform,
@@ -662,37 +759,64 @@ export async function terminateProcessTreeAndWait(
   if (platform === "win32") {
     // Never target a reused Windows PID after Node has already observed the
     // complete owned child close.
-    if (directChildResourcesAreClosed(child)) return true;
+    const sequence = windowsTerminationSequence(child, waitMs);
+    if (directChildResourcesAreClosed(child)) {
+      return await confirmClosedWindowsTermination(sequence, false);
+    }
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const startedAt = performance.now();
-    const treeTerminated = await terminateWindowsProcessTree(
-      pid,
-      force,
-      spawnProcess,
-      windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
-      waitMs,
-      "child",
-    );
-    if (treeTerminated) {
+    const closeDeadlineAt = sequence.deadlineAt - WINDOWS_RESOURCE_SETTLE_MS;
+    const gracefulDeadlineAt = closeDeadlineAt - waitMs;
+    const taskkill = async (
+      forced: boolean,
+      phaseDeadlineAt: number,
+    ): Promise<boolean | null> => {
+      const remainingMs = Math.min(waitMs, phaseDeadlineAt - Date.now());
+      if (remainingMs <= 0) return null;
+      return await terminateWindowsProcessTree(
+        pid,
+        forced,
+        spawnProcess,
+        windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
+        remainingMs,
+        "child",
+      );
+    };
+    let gracefulAccepted = false;
+    if (!sequence.forcedTerminated && !sequence.fallbackReached) {
+      if (force) {
+        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt) === true;
+      } else if (await taskkill(false, gracefulDeadlineAt) === true) {
+        gracefulAccepted = true;
+      } else if (child.exitCode === null && child.signalCode === null) {
+        const escalated = await taskkill(true, closeDeadlineAt);
+        if (escalated === null) return false;
+        sequence.forcedTerminated = escalated;
+      }
+    }
+    if (sequence.forcedTerminated || gracefulAccepted) {
       // taskkill confirms that it issued termination for the owned tree, but
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
-      const closed = await confirmWindowsChildResourcesClosed(
-        waitForObservedDirectChildClose,
-        waitMs,
-      );
-      if (!closed) recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
+      const closeDeadline = sequence.forcedTerminated
+        ? closeDeadlineAt
+        : gracefulDeadlineAt;
+      if (!await waitForObservedDirectChildClose(closeDeadline - Date.now())) {
+        recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
+        return false;
+      }
+      const confirmed = await confirmClosedWindowsTermination(sequence, true);
+      if (!confirmed) recordWindowsCleanupFailure({ phase: "resource-settle", scope: "child", force,
         elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
-      return closed;
+      return confirmed;
     }
+    sequence.fallbackReached = true;
     killDirectChild(child, force);
     // Direct-child fallback cannot prove that taskkill's unobserved
     // descendants stopped, even if the child releases its handles.
-    await confirmWindowsChildResourcesClosed(
-      waitForObservedDirectChildClose,
-      waitMs,
-    );
+    await waitForObservedDirectChildClose(closeDeadlineAt - Date.now());
     return false;
   }
 
@@ -712,18 +836,24 @@ export async function terminateProcessTreeAndWait(
     // A no-signal existence probe can still prove that the owned group is
     // already gone for an untracked child. Never signal a group after this
     // point: an extant numeric PGID may have been recycled.
+    let groupExited: boolean;
     try {
       killProcess(-pid, 0);
-      const canExecute = processGroupCanExecute?.(pid);
-      return canExecute === false;
+      groupExited = processGroupCanExecute?.(pid) === false;
     } catch (error) {
       // `ESRCH` is the only proof that the group no longer exists. `EPERM`
       // still means an extant group, and unexpected probe failures must remain
       // unconfirmed rather than releasing ownership unsafely.
-      return (error as NodeJS.ErrnoException).code === "ESRCH";
+      groupExited = (error as NodeJS.ErrnoException).code === "ESRCH";
     }
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: true,
+    });
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
+  const deadlineAt = Date.now() + waitMs;
+  const remainingMs = (): number => deadlineAt - Date.now();
 
   const guardianStopBarrier = requestRuntimeOwnedGuardianStop(child);
   if (guardianStopBarrier) {
@@ -745,46 +875,71 @@ export async function terminateProcessTreeAndWait(
     return true;
   }
 
+  const leaderUnreaped = (): boolean =>
+    child.exitCode === null && child.signalCode === null;
   if (force) {
-    const descendants = forceKillPosixProcessTree(pid, {
-      kill: killProcess,
-      spawnProcessSync,
-      rootProcessGroup: true,
-    });
+    const leaderSignalable = leaderUnreaped();
+    const killed: PosixProcessTreeKillResult = leaderSignalable
+      ? forceKillPosixProcessTreeWithStatus(pid, {
+        kill: killProcess,
+        spawnProcessSync,
+        rootProcessGroup: true,
+        deadlineAt,
+      })
+      : {
+        descendants: [],
+        snapshotConfirmed: false,
+        scanStabilized: false,
+        rootStop: "absent",
+        rootState: "absent",
+      };
+    const enumeration = posixTreeEnumeration(killed, true);
+    const { descendants } = killed;
+    const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(
         pid,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processGroupCanExecute,
+        leaderUnreaped,
       ),
       waitForPosixProcessesExit(
         descendants,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processCanExecute,
       ),
-      waitForObservedDirectChildClose(waitMs),
+      waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return groupExited && descendantsExited && childClosed;
+    return posixTreeTerminationConfirmed({
+      enumeration, groupExited, descendantsExited, rootExited: childClosed,
+    });
   }
   try {
-    killProcess(-pid, "SIGTERM");
+    if (leaderUnreaped()) killProcess(-pid, "SIGTERM");
+    const exitWaitMs = remainingMs();
     const [groupExited, childClosed] = await Promise.all([
       waitForPosixProcessGroupExit(
         pid,
         killProcess,
-        waitMs,
+        exitWaitMs,
         processGroupCanExecute,
       ),
-      waitForObservedDirectChildClose(waitMs),
+      waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return groupExited && childClosed;
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: childClosed,
+    });
   } catch (error) {
     killDirectChild(child, false);
-    const groupAbsent = (error as NodeJS.ErrnoException).code === "ESRCH"
+    const groupExited = (error as NodeJS.ErrnoException).code === "ESRCH"
       || processGroupCanExecute?.(pid) === false;
-    const childClosed = await waitForObservedDirectChildClose(waitMs);
-    return groupAbsent && childClosed;
+    const childClosed = await waitForObservedDirectChildClose(remainingMs());
+    return posixTreeTerminationConfirmed({
+      enumeration: "root-gone", groupExited,
+      descendantsExited: true, rootExited: childClosed,
+    });
   }
 }

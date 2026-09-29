@@ -52,6 +52,17 @@ export function posixProcessGroupKillIsConfirmed(
   groupStillExists: boolean,
 ): boolean;
 
+export function terminatePosixProcessGroup(
+  processGroupId: number,
+  options?: {
+    readonly resignalWhile?: () => boolean;
+    readonly kill?: (pid: number, signal: NodeJS.Signals | 0) => void;
+    readonly groupExists?: (processGroupId: number) => boolean;
+    readonly groupCanExecute?: (processGroupId: number) => boolean | null;
+    readonly timeoutMs?: number;
+  },
+): Promise<boolean>;
+
 export function linuxProcessGroupCanExecute(
   processGroupId: number,
   dependencies?: {

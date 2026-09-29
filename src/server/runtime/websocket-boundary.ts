@@ -17,6 +17,7 @@ import {
   rejectRuntimeUpgrade,
   sendRuntimeEvent,
 } from "../runtime-protocol";
+import { publicRuntimeError } from "../runtime-errors";
 import { parseRuntimeResumeRequest } from "../runtime-sequencing";
 import type { IsolatedRunController } from "./reviews/isolated-run-controller";
 import {
@@ -154,11 +155,18 @@ export function attachRuntimeWebSocketBoundary(
           return;
         }
         inFlightCommands += 1;
+        const { requestId } = parsed.command;
         void options.dispatchCommand(
           socket,
           parsed.command,
           authority,
-        ).finally(() => {
+        ).catch((error: unknown) => {
+          sendRuntimeEvent(socket, {
+            type: "request.error",
+            requestId,
+            message: publicRuntimeError(error),
+          });
+        }).finally(() => {
           inFlightCommands -= 1;
         });
       }

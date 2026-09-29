@@ -25,6 +25,7 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
   const tasks = new Set<Promise<unknown>>();
   const events: ServerEvent[] = [];
   const hooks: { operationSettled?: () => void } = {};
+  const admission = { closed: false, refusals: 0 };
   const dependencies: TurnInteractionCommandDependencies = {
     store: runtime.store, turns: runtime.controller, conversationAttachments: attachments,
     backendProfileController: {
@@ -45,6 +46,7 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
     broadcastSnapshot: () => undefined, send: (_socket, event) => { events.push(event); },
   };
   queue = createQueuedMessageRuntime(dependencies, { signal: abort.signal, track: (operation) => {
+    if (admission.closed && ++admission.refusals < 50) return Promise.reject(new Error("The runtime is preparing for an application update."));
     const task = operation().then((value) => { hooks.operationSettled?.(); return value; }); tasks.add(task); void task.finally(() => tasks.delete(task)); return task;
   } });
   const drain = async () => {
@@ -59,7 +61,7 @@ async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
       },
     } as ClientCommand);
   };
-  return { ...runtime, dependencies, queue, attachments, events, hooks, drain, command, abort,
+  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, abort,
     close: async () => { abort.abort(); await drain(); await runtime.controller.dispose(); await attachments.close(); runtime.store.close(); },
   };
 }
@@ -317,6 +319,42 @@ describe("durable runtime message queue", () => {
       await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
       await f.drain();
       expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("waits for refused runtime admission to reopen instead of rescheduling in a microtask loop", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id); f.provider.resolve({ status: "completed" }); await f.drain();
+      f.admission.closed = true;
+      const id = randomUUID(); await f.command("message.queue.enqueue", id);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.admission.refusals).toBe(1);
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      f.admission.closed = false;
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"), { timeout: 5_000 });
+      await f.drain();
+      expect(f.admission.refusals).toBe(1);
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("returns a claimed head to waiting when runtime shutdown interrupts its dispatch", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id);
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockImplementationOnce(async () => {
+        f.abort.abort(new Error("The runtime is shutting down."));
+        throw new Error("The runtime is shutting down.");
+      });
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(admission).toHaveBeenCalledOnce());
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+      expect(f.provider.runCount).toBe(1);
     } finally { await f.close(); }
   });
 

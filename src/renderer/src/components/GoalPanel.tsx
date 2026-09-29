@@ -72,6 +72,7 @@ export interface GoalPanelProps {
   onClearGoal?: (goal: AgentGoal) => void | Promise<void>;
   onInsertSkill?: (skill: AgentSkillSummary) => void;
   onRefreshSkills?: () => void;
+  onStartNewChat?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
   onOpenSubagent?: (trace: SubagentTrace) => void;
@@ -811,6 +812,7 @@ export function GoalPanel({
   onClearGoal,
   onInsertSkill,
   onRefreshSkills,
+  onStartNewChat,
   canFollowUpSubagent,
   onFollowUpSubagent,
   onOpenSubagent,
@@ -878,6 +880,11 @@ export function GoalPanel({
           <p className="goal-panel-capability-note" role="status">
             {workflow.goalRefreshWarning}
           </p>
+        )}
+        {onStartNewChat && (
+          <button type="button" className="secondary-button" onClick={onStartNewChat}>
+            New chat
+          </button>
         )}
         <section className="goal-panel-section" aria-labelledby={currentHeadingId}>
           <header className="goal-panel-section-heading">

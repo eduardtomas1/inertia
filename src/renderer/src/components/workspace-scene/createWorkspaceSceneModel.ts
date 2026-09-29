@@ -1006,6 +1006,10 @@ export function createWorkspaceSceneModel({
               : "Skills could not be refreshed.",
           ));
         },
+        onStartNewChat: detail?.conversation.mixedProviderHistory
+          ? () => void actions.createConversationForSelection(detail.conversation.modelSelection)
+            .catch((error) => setActionError(error instanceof Error ? error.message : "The new chat could not be created."))
+          : undefined,
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

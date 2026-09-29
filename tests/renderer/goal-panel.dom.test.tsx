@@ -19,6 +19,7 @@ import type {
   AgentWorkflowState,
   SubagentTrace,
 } from "../../src/shared/contracts";
+import { MIXED_PROVIDER_HISTORY_MESSAGE } from "../../src/shared/continuation-policy";
 
 function goal(update: Partial<AgentGoal> = {}): AgentGoal {
   return {
@@ -230,6 +231,29 @@ describe("GoalPanel", () => {
     expect(screen.getByText(
       "This route does not expose structured skill input.",
     )).toBeInTheDocument();
+  });
+
+  it("explains a mixed-provider history and offers a new chat without provider work", async () => {
+    const onStartNewChat = vi.fn();
+    renderPanel({
+      workflow: workflow({
+        skills: [],
+        skillsCapability: {
+          kind: "unavailable",
+          available: false,
+          label: "Skills unavailable",
+          reason: MIXED_PROVIDER_HISTORY_MESSAGE,
+        },
+        goalRefreshWarning: MIXED_PROVIDER_HISTORY_MESSAGE,
+      }),
+      onStartNewChat,
+    });
+
+    expect(screen.getAllByText(MIXED_PROVIDER_HISTORY_MESSAGE, { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Refresh skills" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: /Loading/u })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(onStartNewChat).toHaveBeenCalledOnce();
   });
 
   it("keeps local goals and skills visible when native refresh degrades", () => {

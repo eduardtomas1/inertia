@@ -9,7 +9,6 @@ import {
   createOwnedProcessTreeTermination,
   terminateProcessTreeAndWait,
 } from "../../src/server/process-lifecycle";
-import { posixCleanupFailures } from "../../src/server/posix-cleanup-diagnostics";
 
 function fakeChild(pid = 4_242) {
   const child = new EventEmitter() as EventEmitter & {
@@ -128,8 +127,9 @@ describe("provider process-tree POSIX classification", () => {
           : read === 3 ? "4242 1 Ts+\n5000 4242 T\n6000 4242 S\n"
             : null);
       await expect(terminate()).resolves.toBe(false);
-      expect(posixCleanupFailures().at(-1)).toMatchObject({
+      expect(terminate.posixCleanupFailure).toMatchObject({
         scope: "pid",
+        reason: "incomplete-scan",
         rootStop: "sent",
         rootState: "stopped",
         rootRunningObserved: true,
@@ -159,11 +159,67 @@ describe("provider process-tree POSIX classification", () => {
       }
     });
 
+    it("records this attempt when an authorized snapshot leaves no exit budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const earlier = pidTermination(() => "4242 1 Ss+\n");
+        await expect(earlier.terminate()).resolves.toBe(false);
+        const { terminate } = pidTermination(() => {
+          vi.setSystemTime(Date.now() + 1_000);
+          return "4242 1 Ts+\n";
+        });
+        await expect(terminate()).resolves.toBe(false);
+        expect(terminate.posixCleanupFailure).toEqual({
+          scope: "pid",
+          reason: "no-exit-budget",
+          rootStop: "sent",
+          rootState: "stopped",
+          rootRunningObserved: false,
+          scanStabilized: true,
+          groupExited: null,
+          descendantsExited: null,
+          rootExited: null,
+        });
+        expect(earlier.terminate.posixCleanupFailure).toMatchObject({
+          reason: "incomplete-scan",
+          rootState: "running",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps back-to-back terminations from reading each other's records", async () => {
+      const failed = pidTermination(() => "4242 1 Ss+\n");
+      const confirmed = pidTermination(() => "4242 1 Ts+\n");
+      await expect(failed.terminate()).resolves.toBe(false);
+      await expect(confirmed.terminate()).resolves.toBe(true);
+      expect(confirmed.terminate.posixCleanupFailure).toBeNull();
+      expect(failed.terminate.posixCleanupFailure).toMatchObject({
+        reason: "incomplete-scan",
+        rootState: "running",
+      });
+    });
+
+    it("reports a repeated confirmation of an incomplete attempt as that attempt", async () => {
+      const { terminate, spawnProcessSync } = pidTermination(() => "4242 1 Ss+\n");
+      await expect(terminate()).resolves.toBe(false);
+      const reads = spawnProcessSync.mock.calls.length;
+      await expect(terminate()).resolves.toBe(false);
+      expect(spawnProcessSync.mock.calls.length).toBe(reads);
+      expect(terminate.posixCleanupFailure).toMatchObject({
+        reason: "incomplete-scan",
+        rootStop: "sent",
+        rootState: "running",
+      });
+    });
+
     it("reports its classification inputs when the stop is never observed", async () => {
       const { terminate } = pidTermination(() => "4242 1 Ss+\n");
       await expect(terminate()).resolves.toBe(false);
-      expect(posixCleanupFailures().at(-1)).toEqual({
+      expect(terminate.posixCleanupFailure).toEqual({
         scope: "pid",
+        reason: "incomplete-scan",
         rootStop: "sent",
         rootState: "running",
         rootRunningObserved: true,
@@ -172,6 +228,63 @@ describe("provider process-tree POSIX classification", () => {
         descendantsExited: null,
         rootExited: null,
       });
+    });
+  });
+
+  describe("forced and graceful child cleanup records", () => {
+    const childTermination = (force: boolean, table: string) => {
+      const child = fakeChild();
+      const failures: unknown[] = [];
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (target === 4_242 && signal === "SIGKILL" && child.exitCode === null) {
+          child.exitCode = 1;
+          queueMicrotask(() => child.emit("close", 1));
+        }
+        return true as const;
+      });
+      const outcome = terminateProcessTreeAndWait(child as never, force, {
+        platform: "linux",
+        killProcess: killProcess as never,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: table })) as never,
+        processCanExecute: () => null,
+        processGroupCanExecute: () => null,
+        waitMs: 1_000,
+        onPosixCleanupFailure: (failure) => failures.push(failure),
+      });
+      return { outcome, failures };
+    };
+
+    it.each([
+      {
+        force: true,
+        expected: {
+          scope: "child", reason: "exit-unconfirmed", rootStop: "sent", rootState: "stopped",
+          rootRunningObserved: false, scanStabilized: true,
+          groupExited: false, descendantsExited: true, rootExited: true,
+        },
+      },
+      {
+        force: false,
+        expected: {
+          scope: "child", reason: "graceful-unconfirmed", rootStop: null, rootState: null,
+          rootRunningObserved: null, scanStabilized: null,
+          groupExited: false, descendantsExited: true, rootExited: false,
+        },
+      },
+    ])("reports only its own record when the group survives (force $force)", async ({ force, expected }) => {
+      vi.useFakeTimers();
+      try {
+        const first = childTermination(force, "4242 1 Ts\n");
+        const second = childTermination(force, "4242 1 Ts\n");
+        let results: boolean[] | undefined;
+        void Promise.all([first.outcome, second.outcome]).then((values) => { results = values; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(results).toEqual([false, false]);
+        expect(first.failures).toEqual([expected]);
+        expect(second.failures).toEqual([expected]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

@@ -13,6 +13,7 @@ import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { DETACHED_CHAT_IPC } from "../shared/detached-chat-ipc.js";
+import { COMPLETION_SOUND_IPC } from "../shared/completion-sound.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const threadNotificationActivations = new ThreadNotificationActivationBuffer();
@@ -281,6 +282,12 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.showThreadNotification, request) as Promise<boolean>,
   onThreadNotificationActivated: (listener: (conversationId: string) => void) =>
     threadNotificationActivations.subscribe(listener),
+  importCompletionSound: (keep: readonly string[]) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "import", [...keep]) as ReturnType<DesktopBridge["importCompletionSound"]>,
+  readCompletionSound: (file: string) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "read", file) as ReturnType<DesktopBridge["readCompletionSound"]>,
+  removeCompletionSound: (file: string) =>
+    ipcRenderer.invoke(COMPLETION_SOUND_IPC, "remove", file) as Promise<void>,
   getAppHealth: () =>
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>

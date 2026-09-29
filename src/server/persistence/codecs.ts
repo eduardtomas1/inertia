@@ -41,6 +41,7 @@ import {
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
+import { parseCompletionSoundJson } from "../../shared/completion-sound";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -446,6 +447,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
     workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
+    completionSound: parseCompletionSoundJson(state.completion_sound_json),
   };
 }
 

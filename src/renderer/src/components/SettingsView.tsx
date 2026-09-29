@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArchiveRestore,
+  Bell,
   Bot,
   ChevronDown,
   Compass,
@@ -77,6 +78,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useRovingRadios } from "../hooks/useRovingRadios";
 import { ThemeLibrary } from "./ThemeLibrary";
 import { WorkingIndicatorSettings } from "./working-indicator/WorkingIndicatorSettings";
+import { CompletionSoundSettings } from "./notifications/CompletionSoundSettings";
 import { StorageStatusSettings } from "./StorageStatusSettings";
 import "./SettingsView.css";
 
@@ -628,7 +630,6 @@ export function SettingsView({
                 <SettingSwitch title="Message timestamps" detail="Show a quiet time label alongside each message." checked={settings.showTimestamps} disabled={disabled} onChange={(showTimestamps) => onUpdate({ showTimestamps })} />
                 <SettingSwitch title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
                 <SettingSwitch title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
-                <SettingSwitch title="Desktop notifications" detail="Show privacy-safe completion and attention alerts without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
                 {MascotSettings && <MascotSettings />}
                 <SettingSwitch title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
               </div>
@@ -637,6 +638,14 @@ export function SettingsView({
                 <div role="radiogroup" aria-label="Usage and context display" {...usageDisplayRadios.groupProps}>
                   {usageDisplayModes.map((mode) => <button type="button" {...usageDisplayRadios.radioProps(mode)} className={clsx(settings.usageDisplayMode === mode && "is-active")} disabled={disabled} key={mode}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
                 </div>
+              </div>
+            </section>
+
+            <section className="settings-card" aria-labelledby="notifications-heading">
+              <div className="settings-card-heading"><div><Bell size={18} /></div><span><h3 id="notifications-heading">Notifications</h3><p>Decide how Inertia tells you a task has finished or needs you.</p></span></div>
+              <div className="settings-rows">
+                <SettingSwitch title="Desktop notifications" detail="Show privacy-safe completion and attention alerts without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
+                <CompletionSoundSettings settings={settings.completionSound} disabled={disabled} onUpdate={updateSettingsRequest} />
               </div>
             </section>
 

@@ -111,7 +111,6 @@ export interface ComposerInputZoneProps {
   compactUnavailableReason: string | null;
   continuationRefusal: string | null;
   continuationNoticeId: string;
-  onStartNewChat: () => void;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -182,7 +181,6 @@ export function ComposerInputZone({
   compactNotice,
   continuationRefusal,
   continuationNoticeId,
-  onStartNewChat,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -441,21 +439,9 @@ export function ComposerInputZone({
           onRemove={onRemoveAttachment}
         />
         {continuationRefusal && (
-          <div
-            id={continuationNoticeId}
-            className="composer-route-confirmation"
-            role="status"
-            data-continuation-refusal=""
-          >
-            <CircleAlert size={16} aria-hidden="true" />
-            <span>
-              <strong>This chat can&apos;t continue here</strong>
-              <small>{continuationRefusal}</small>
-            </span>
-            <button type="button" className="primary-button" onClick={onStartNewChat}>
-              New chat
-            </button>
-          </div>
+          <span id={continuationNoticeId} className="visually-hidden" data-continuation-refusal="">
+            {continuationRefusal}
+          </span>
         )}
         {pendingRoute && (
           <RouteChangeConfirmation
@@ -593,7 +579,10 @@ export function ComposerInputZone({
               ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
               : undefined}
           aria-label="Message"
-          placeholder={running
+          aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
+          placeholder={continuationRefusal
+            ? "This chat can't continue here. Start a new chat to keep working."
+            : running
             ? "Enter sends · Tab queues"
             : imageInputUnavailable
               ? "Ask for follow-up changes"

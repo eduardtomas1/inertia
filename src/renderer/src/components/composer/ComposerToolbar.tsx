@@ -513,7 +513,7 @@ export function ComposerToolbar({
               primaryAction={primaryAction}
               onSubmit={onSubmit}
               onStop={onStop}
-              unavailableReasonId={continuationRefusal ? continuationNoticeId : undefined}
+              newChatReasonId={continuationRefusal ? continuationNoticeId : undefined}
             />
           )}
         >
@@ -530,7 +530,7 @@ export function ComposerToolbar({
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}
-            unavailableReasonId={continuationRefusal ? continuationNoticeId : undefined}
+            newChatReasonId={continuationRefusal ? continuationNoticeId : undefined}
           />
         </Suspense>
       </div>

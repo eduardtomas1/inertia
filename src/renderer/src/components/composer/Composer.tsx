@@ -1030,7 +1030,6 @@ export const Composer = memo(function Composer({
           compactNotice={compactNotice}
           continuationRefusal={continuationRefusal}
           continuationNoticeId={continuationNoticeId}
-          onStartNewChat={startNewChat}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
             updateMessage("");

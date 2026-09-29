@@ -84,38 +84,47 @@ function renderComposer(mixed: boolean, overrides: Partial<ComposerProps> = {}) 
 }
 
 function explanation(): HTMLElement {
-  const notice = screen.getAllByText(MIXED_PROVIDER_HISTORY_MESSAGE)
-    .find((element) => element.closest("[data-continuation-refusal]"));
-  if (!notice) throw new Error("Expected the composer continuation notice.");
-  return notice.closest<HTMLElement>("[data-continuation-refusal]")!;
+  const notice = document.querySelector<HTMLElement>("[data-continuation-refusal]");
+  if (!notice) throw new Error("Expected the composer continuation description.");
+  return notice;
 }
 
 describe("composer for a chat that cannot continue", () => {
-  it("explains the chat state and offers a new chat without sending anything", async () => {
+  it("describes the chat state without adding visible composer height and offers a new chat", async () => {
     const { onSend, onCreateConversationForSelection, current } = renderComposer(true);
     const notice = explanation();
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(notice).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(notice).toHaveClass("visually-hidden");
+    const input = screen.getByRole("textbox", { name: "Message" });
+    expect(input.getAttribute("aria-describedby")).toBe(notice.id);
+    expect(input).toHaveAttribute("placeholder", "This chat can't continue here. Start a new chat to keep working.");
+    const start = screen.getByRole("button", { name: "Start a new chat" });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
-    fireEvent.click(screen.getAllByRole("button", { name: "New chat" }).at(-1)!);
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toEqual(current.modelSelection);
+    expect(onCreateConversationForSelection.mock.calls[0]).toEqual([current.modelSelection, undefined]);
     expect(onSend).not.toHaveBeenCalled();
-    expect(notice).toHaveAttribute("role", "status");
   });
 
-  it.each(["click", "Enter"] as const)("marks send unavailable and routes %s to the new-chat confirmation", async (trigger) => {
-    const { onSend } = renderComposer(true);
+  it.each(["click", "Enter"] as const)("replaces send with the new-chat action for %s and keeps the draft", async (trigger) => {
+    const { onSend, onCreateConversationForSelection } = renderComposer(true);
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Continue the legacy work." } });
-    const send = screen.getByRole("button", { name: "Send message" });
-    expect(send).toHaveAttribute("aria-disabled", "true");
-    expect(send.getAttribute("aria-describedby")).toBe(explanation().id);
-    if (trigger === "click") fireEvent.click(send);
+    const start = screen.getByRole("button", { name: "Start a new chat" });
+    expect(start).not.toHaveAttribute("aria-disabled");
+    expect(start.getAttribute("aria-describedby")).toBe(explanation().id);
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    if (trigger === "click") fireEvent.click(start);
     else fireEvent.keyDown(input, { key: "Enter" });
     expect(await screen.findByRole("alertdialog")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("Continue the legacy work.");
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
+    expect(onCreateConversationForSelection.mock.calls[0]?.[1]).toEqual({ prefillText: "Continue the legacy work." });
   });
 
   it.each([
@@ -139,7 +148,7 @@ describe("composer for a chat that cannot continue", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/compact keep the plan" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.getAllByText(MIXED_PROVIDER_HISTORY_MESSAGE).length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE));
     expect(onCompact).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: "/com" } });
     expect(await screen.findByText(`Unavailable: ${MIXED_PROVIDER_HISTORY_MESSAGE}`)).toBeInTheDocument();
@@ -164,7 +173,8 @@ describe("composer for a chat that cannot continue", () => {
 
   it("leaves every control unchanged for a chat that can continue", async () => {
     const { onSend } = renderComposer(false);
-    expect(screen.queryByText(MIXED_PROVIDER_HISTORY_MESSAGE)).not.toBeInTheDocument();
+    expect(document.querySelector("[data-continuation-refusal]")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveAttribute("aria-describedby");
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Keep going." } });
     const send = screen.getByRole("button", { name: "Send message" });

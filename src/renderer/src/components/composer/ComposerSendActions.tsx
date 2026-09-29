@@ -71,7 +71,7 @@ export function ComposerSendActions({
   onReleaseAttachment,
   onSubmit,
   onStop,
-  unavailableReasonId,
+  newChatReasonId,
 }: {
   conversationId: string;
   primaryAction: ComposerPrimaryActionState;
@@ -88,7 +88,7 @@ export function ComposerSendActions({
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
-  unavailableReasonId?: string;
+  newChatReasonId?: string;
 }): React.JSX.Element {
   const [intent, setIntent] = useState(false);
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
@@ -106,7 +106,10 @@ export function ComposerSendActions({
     if (group !== focusedGroup || document.activeElement !== document.body) return;
     if (focusedAction === "primary") primaryRef.current?.focus();
   }, [focusedAction, focusedGroup]);
-  const presentation = primaryPresentation(primaryAction, intent);
+  const primary = primaryPresentation(primaryAction, intent);
+  const presentation = newChatReasonId && primary.action === "send" && !primary.busy
+    ? { ...primary, disabled: false, label: "Start a new chat" }
+    : primary;
   return (
     <>
       <Suspense fallback={null}>
@@ -134,8 +137,7 @@ export function ComposerSendActions({
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
-        aria-disabled={unavailableReasonId && presentation.action !== "stop" ? true : undefined}
-        aria-describedby={presentation.action !== "stop" ? unavailableReasonId : undefined}
+        aria-describedby={presentation.action !== "stop" ? newChatReasonId : undefined}
         onPointerEnter={() => setIntent(true)}
         onPointerLeave={() => setIntent(false)}
         onFocus={() => setIntent(true)}

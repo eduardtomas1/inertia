@@ -12,6 +12,7 @@ import {
   checkpointFromRow,
   conversationFromRow,
   conversationShellFromRow,
+  conversationWithHistoryFromRow,
   messageFromRow,
   planFromRow,
   projectFromRow,
@@ -181,11 +182,15 @@ export class SnapshotRepository {
     };
   }
 
-  conversationShell(conversationId: string): ConversationShell | null {
-    const row = this.context.database.prepare(`
+  private conversationRow(conversationId: string): ConversationShellRow | undefined {
+    return this.context.database.prepare(`
       SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
       FROM conversations WHERE id = ?
     `).get(conversationId) as ConversationShellRow | undefined;
+  }
+
+  conversationShell(conversationId: string): ConversationShell | null {
+    const row = this.conversationRow(conversationId);
     if (!row) return null;
     const latestTurn = this.context.database.prepare(`
       SELECT * FROM agent_turns
@@ -200,9 +205,7 @@ export class SnapshotRepository {
   }
 
   conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {
-    const conversationRow = this.context.database.prepare(
-      "SELECT * FROM conversations WHERE id = ?",
-    ).get(conversationId) as ConversationRow | undefined;
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     const scope = selectConversationHistory(this.context.database, conversationId, request);
     const latest = !request.before && !request.messageId && !request.turnId;
@@ -210,7 +213,7 @@ export class SnapshotRepository {
       throw new ConversationHistoryTooLargeError(CONVERSATION_RECORDS_TOO_LARGE_MESSAGE);
     }
     const shared = {
-      conversation: conversationFromRow(conversationRow),
+      conversation: conversationWithHistoryFromRow(conversationRow),
       attachmentGallery: conversationAttachmentGallery(this.context.database, conversationId),
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
     };
@@ -243,28 +246,24 @@ export class SnapshotRepository {
   }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
-    const conversationRow = this.context.database.prepare(
-      "SELECT * FROM conversations WHERE id = ?",
-    ).get(conversationId) as ConversationRow | undefined;
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     return {
-      conversation: conversationFromRow(conversationRow),
+      conversation: conversationWithHistoryFromRow(conversationRow),
       ...this.historyRecords(conversationId),
       ...this.conversationRecords(conversationId),
     };
   }
 
   recentConversationDetail(conversationId: string, limits: RecentConversationLimits): ConversationDetail | null {
-    const conversationRow = this.context.database.prepare(
-      "SELECT * FROM conversations WHERE id = ?",
-    ).get(conversationId) as ConversationRow | undefined;
+    const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     const newest = <T>(sql: string, ...parameters: (string | number)[]) =>
       (this.context.database.prepare(sql).all(...parameters) as T[]).reverse();
     return {
       ...EMPTY_HISTORY_RECORDS,
       ...EMPTY_CONVERSATION_RECORDS,
-      conversation: conversationFromRow(conversationRow),
+      conversation: conversationWithHistoryFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
           attachments_json, compaction_json, private_connect_device_id, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages

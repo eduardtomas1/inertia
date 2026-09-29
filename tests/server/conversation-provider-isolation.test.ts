@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { CONVERSATION_HAS_HISTORY_SQL } from "../../src/server/persistence/conversation-provider-policy";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { resolveTurnRequest, type PrepareTurnRequestDependencies } from "../../src/server/runtime/turns/turn-request-preparation";
@@ -204,8 +205,31 @@ describe("chat provider isolation", () => {
       database.close();
     }
     const shell = store.conversationShell(conversation.id)!;
-    expect(shell.hasHistory).toBe(established);
-    expect(store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.hasHistory).toBe(established);
+    const database = new Database(databasePath, { readonly: true });
+    const { has_history: policy } = database.prepare(
+      `SELECT ${CONVERSATION_HAS_HISTORY_SQL} AS has_history FROM conversations WHERE id = ?`,
+    ).get(conversation.id) as { has_history: number };
+    database.close();
+    expect(policy === 1).toBe(established);
+    expect({
+      shell: shell.hasHistory,
+      shellSnapshot: store.shellSnapshot().conversations.find(({ id }) => id === conversation.id)?.hasHistory,
+      history: store.conversationHistory(conversation.id)?.conversation.hasHistory,
+      olderHistoryPage: store.conversationHistory(conversation.id, {
+        before: { at: "9999-01-01T00:00:00.000Z", id: "older", kind: "message" },
+      })?.conversation.hasHistory,
+      detail: store.conversationDetail(conversation.id)?.conversation.hasHistory,
+      recentDetail: store.recentConversationDetail(conversation.id, {
+        messages: 1, activities: 1, subagents: 1, contentCharacters: 1,
+      })?.conversation.hasHistory,
+    }).toEqual({
+      shell: established,
+      shellSnapshot: established,
+      history: established,
+      olderHistoryPage: established,
+      detail: established,
+      recentDetail: established,
+    });
     let serverRejects = false;
     try {
       store.assertConversationProvider(conversation.id, "claude", true);

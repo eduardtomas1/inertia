@@ -343,6 +343,12 @@ function conversationTurnSummary(
   };
 }
 
+export function conversationWithHistoryFromRow(
+  row: ConversationRow & { has_history: number },
+): Conversation {
+  return { ...conversationFromRow(row), hasHistory: row.has_history === 1 };
+}
+
 export function conversationShellFromRow(
   row: ConversationRow & { has_history: number },
   latestTurn: AgentTurn | null,

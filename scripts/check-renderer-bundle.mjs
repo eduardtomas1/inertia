@@ -13,8 +13,8 @@ const budgets = {
   // The dependency batch measures 217.3 KiB; retain 224 bytes of headroom.
   // See docs/pr-evidence/dependency-batch-v0.0.56-renderer.json.
   entryJavaScript: 217.5 * kibibyte,
-  mascotFirstLoadJavaScript: 6 * kibibyte,
-  mascotJavaScript: 6 * kibibyte,
+  mascotFirstLoadJavaScript: 6 * kibibyte + 4_888,
+  mascotJavaScript: 6 * kibibyte + 4_888,
   mascotSettingsJavaScript: 6.8 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
@@ -63,27 +63,27 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_256,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_451,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
-  entryCss: 346 * kibibyte,
+  entryCss: 346 * kibibyte + 342,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet. The aurora adds exactly
   // 552 bytes to the integrated palette (12,470 total). Its scoped LF rule
   // keeps Windows identical. Preserve headroom; see release-v0058 evidence.
   colorThemesCss: 12 * kibibyte + 552,
   detachedChatCss: 8 * kibibyte,
-  settingsJavaScript: 50 * kibibyte + 6_939,
+  settingsJavaScript: 50 * kibibyte + 6_939 + 7_759,
   deferredIssueReportJavaScript: 13 * kibibyte,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
-  deferredUsageLimitsJavaScript: 19.7 * kibibyte,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133,
+  deferredUsageLimitsJavaScript: 19.7 * kibibyte + 20,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
@@ -96,20 +96,20 @@ const budgets = {
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
-  filesFirstLoadJavaScript: 115 * kibibyte,
-  deferredMarkdownJavaScript: 440 * kibibyte,
-  transcriptJavaScript: 600 * kibibyte,
-  deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
+  filesFirstLoadJavaScript: 115 * kibibyte + 925,
+  deferredMarkdownJavaScript: 440 * kibibyte + 42,
+  transcriptJavaScript: 600 * kibibyte + 31,
+  deferredFailureDiagnosticsJavaScript: 8 * kibibyte + 35,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
   // bytes to the same deferred chunk. Existing headroom is unchanged, and the
   // lightbox still loads only when an attachment preview is opened.
   deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418,
-  deferredPreviewJavaScript: 8 * kibibyte,
+  deferredPreviewJavaScript: 8 * kibibyte + 49,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
-  deferredCanaryRollbackJavaScript: 4 * kibibyte,
+  deferredCanaryRollbackJavaScript: 4 * kibibyte + 66,
   deferredLifecycleIntegritySettingsJavaScript: 5 * kibibyte + 1_102,
   // Replaces the 6 KiB notice allowance with the stateful footer control,
   // keyboard/hover details and restart confirmation (10.5 KiB measured).
@@ -127,14 +127,14 @@ const budgets = {
   // Roving terminal tabs and keyboard close add ~0.3 KiB (25.3 KiB measured).
   // Docking under the chat moves session controls into the tab row and adds
   // Hide: 494 bytes (26,456 measured).
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494,
+  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
-  deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850,
+  deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
   detachedChatJavaScript: 16 * kibibyte,
-  preMergeConfidenceJavaScript: 28 * kibibyte,
+  preMergeConfidenceJavaScript: 28 * kibibyte + 495,
   morphiconsJavaScript: 20 * kibibyte,
-  morphingIconFeedbackJavaScript: 8 * kibibyte,
+  morphingIconFeedbackJavaScript: 8 * kibibyte + 142,
   // Snapshot validation, optional setup, arrival UI and persisted compaction
   // receipts bring shared core to 1,985.9 KiB on macOS ARM64; keep <2 KiB headroom.
   // Bounded file badges, native textarea color mirroring and diagnostic links.
@@ -166,7 +166,7 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 31_276,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

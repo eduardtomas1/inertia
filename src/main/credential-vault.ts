@@ -69,6 +69,7 @@ export interface CredentialVaultPersistence {
 export interface FileCredentialVaultPersistenceOptions {
   platform?: NodeJS.Platform;
   temporaryPrefix?: `.${string}-`;
+  validateStage?: (value: string) => boolean;
 }
 
 interface PersistedCredentialEntry {
@@ -180,6 +181,7 @@ export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
 export class FileCredentialVaultPersistence implements CredentialVaultPersistence {
   private readonly platform: NodeJS.Platform;
   private readonly temporaryPrefix: string;
+  private readonly validateStage: (value: string) => boolean;
 
   constructor(
     private readonly path: string,
@@ -187,6 +189,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
   ) {
     this.platform = options.platform ?? process.platform;
     this.temporaryPrefix = options.temporaryPrefix ?? ".credential-vault-";
+    this.validateStage = options.validateStage ?? credentialVaultPayloadIsValid;
     const name = basename(this.path);
     if (
       !/^\.[a-z0-9-]{1,48}-$/u.test(this.temporaryPrefix)
@@ -441,7 +444,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       await unlinkSafeTemporary(transaction.backup);
       return;
     }
-    if (transaction.stage && await regularFile(transaction.stage)) {
+    if (transaction.stage && await this.completeStage(transaction.stage)) {
       await rename(transaction.stage, target);
       await unlinkSafeTemporary(transaction.backup);
       return;
@@ -453,6 +456,21 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
     }
     await unlinkSafeTemporary(transaction.stage);
     await unlinkSafeTemporary(transaction.backup);
+  }
+
+  private async completeStage(path: string): Promise<boolean> {
+    if (!await regularFile(path)) return false;
+    let file: FileHandle | null = null;
+    try {
+      file = await open(path, fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
+      const metadata = await file.stat();
+      if (!metadata.isFile() || metadata.size > MAX_CREDENTIAL_VAULT_BYTES) return false;
+      return this.validateStage((await readOpenedFile(file, metadata.size)).toString("utf8"));
+    } catch {
+      return false;
+    } finally {
+      await file?.close().catch(() => undefined);
+    }
   }
 }
 
@@ -499,6 +517,15 @@ function validCiphertext(value: unknown): value is string {
     && value.length > 0
     && value.length <= MAX_CIPHERTEXT_BASE64_LENGTH
     && /^[A-Za-z0-9+/]+={0,2}$/u.test(value);
+}
+
+function credentialVaultPayloadIsValid(value: string): boolean {
+  try {
+    parseVault(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseVault(value: string | null): PersistedCredentialVault {

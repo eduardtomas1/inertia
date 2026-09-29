@@ -421,6 +421,7 @@ export async function deriveGitCommitSelection(
       })).stdout.toString("utf8").trim();
     }
     await runGit(root, tempIndexArguments([
+      "--literal-pathspecs",
       "reset",
       resetTarget,
       "--pathspec-from-file=-",

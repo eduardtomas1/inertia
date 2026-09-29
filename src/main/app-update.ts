@@ -90,6 +90,7 @@ export function compareAppVersions(left: string, right: string): number {
 async function boundedJson(response: Response): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel();
     throw new Error("The update response was too large.");
   }
   if (!response.body) throw new Error("The update response was empty.");
@@ -478,7 +479,10 @@ export class AppUpdateService {
           "User-Agent": `Inertia/${this.currentVersion}`,
         },
       });
-      if (!response.ok) throw new Error(`Update request failed (${response.status}).`);
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`Update request failed (${response.status}).`);
+      }
       return await boundedJson(response);
     } finally {
       clearTimeout(timeout);

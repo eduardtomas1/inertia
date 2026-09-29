@@ -60,3 +60,37 @@ it.each(["checkout", "advance"])("pins the pushed commit and upstream across con
   expect(git(root, "config", "branch.reviewed.merge")).toBe("refs/heads/reviewed");
   expect(() => git(root, "config", "branch.other.remote")).toThrow();
 });
+
+it("keeps a triangular upstream when pushing to a separate push remote", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inertia-push-triangular-"));
+  const upstream = mkdtempSync(join(tmpdir(), "inertia-push-upstream-"));
+  const fork = mkdtempSync(join(tmpdir(), "inertia-push-fork-"));
+  roots.push(root, upstream, fork);
+  git(root, "init", "-b", "main");
+  git(root, "config", "user.name", "Inertia Test");
+  git(root, "config", "user.email", "test@inertia.local");
+  writeFileSync(join(root, "base.txt"), "base\n");
+  git(root, "add", "base.txt");
+  git(root, "commit", "-m", "base");
+  git(upstream, "init", "--bare");
+  git(fork, "init", "--bare");
+  git(root, "remote", "add", "upstream", upstream);
+  git(root, "remote", "add", "fork", fork);
+  git(root, "push", "upstream", "main");
+  git(root, "fetch", "upstream");
+  git(root, "switch", "-c", "feature", "--track", "upstream/main");
+  git(root, "config", "branch.feature.pushRemote", "fork");
+  writeFileSync(join(root, "feature.txt"), "feature\n");
+  git(root, "add", "feature.txt");
+  git(root, "commit", "-m", "feature");
+  const feature = git(root, "rev-parse", "HEAD");
+
+  await pushCurrentBranch(root);
+
+  expect(git(fork, "rev-parse", "refs/heads/feature")).toBe(feature);
+  expect(() => git(upstream, "rev-parse", "--verify", "refs/heads/feature")).toThrow();
+  expect(git(root, "config", "branch.feature.remote")).toBe("upstream");
+  expect(git(root, "config", "branch.feature.merge")).toBe("refs/heads/main");
+  expect(git(root, "config", "branch.feature.pushRemote")).toBe("fork");
+  expect(git(root, "rev-parse", "--abbrev-ref", "feature@{upstream}")).toBe("upstream/main");
+});

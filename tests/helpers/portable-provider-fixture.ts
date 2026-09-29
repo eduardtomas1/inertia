@@ -2,6 +2,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -95,6 +96,26 @@ export function writeNodeFlagExecutable(
   return executable;
 }
 
+export function writeNodeClaudeExecutable(root: string, source: string): string {
+  if (process.platform !== "win32") return writeNodeFlagExecutable(root, "claude", source);
+  const packageDirectory = join(root, "node_modules", "@anthropic-ai", "claude-code");
+  mkdirSync(packageDirectory, { recursive: true });
+  writeFileSync(
+    join(packageDirectory, "package.json"),
+    JSON.stringify({ name: "@anthropic-ai/claude-code", bin: { claude: "cli.js" } }),
+    "utf8",
+  );
+  writeFileSync(join(packageDirectory, "cli.js"), `${source.trimStart()}\n`, "utf8");
+  copyFileSync(process.execPath, join(root, "node.exe"));
+  const executable = join(root, "claude.cmd");
+  writeFileSync(
+    executable,
+    "@echo off\r\n\"%~dp0node.exe\" \"%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n",
+    "utf8",
+  );
+  return executable;
+}
+
 export async function waitFor(
   description: string,
   predicate: () => boolean | Promise<boolean>,
@@ -128,13 +149,30 @@ export async function loopbackPortIsOpen(port: number): Promise<boolean> {
   });
 }
 
+export interface FixtureRemovalDependencies {
+  remove(root: string): void;
+  wait(milliseconds: number): Promise<void>;
+}
+
+const nodeFixtureRemoval: FixtureRemovalDependencies = {
+  remove: (root) => rmSync(root, { recursive: true, force: true }),
+  wait: (milliseconds) => delay(milliseconds),
+};
+
 export async function removePortableFixture(root: string): Promise<void> {
+  await removeFixtureDirectory(root, nodeFixtureRemoval);
+}
+
+export async function removeFixtureDirectory(
+  root: string,
+  dependencies: FixtureRemovalDependencies,
+): Promise<void> {
   const retryDelays = [0, 50, 150, 350, 750, 1_500];
   let lastError: unknown;
   for (const retryDelay of retryDelays) {
-    if (retryDelay > 0) await delay(retryDelay);
+    if (retryDelay > 0) await dependencies.wait(retryDelay);
     try {
-      rmSync(root, { recursive: true, force: true });
+      dependencies.remove(root);
       return;
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
@@ -142,5 +180,9 @@ export async function removePortableFixture(root: string): Promise<void> {
       lastError = error;
     }
   }
-  throw lastError;
+  const waitedMs = retryDelays.reduce((total, retryDelay) => total + retryDelay, 0);
+  throw new Error(
+    `Fixture directory ${root} could not be removed after ${retryDelays.length} attempts over ${waitedMs} ms: ${(lastError as Error).message}`,
+    { cause: lastError },
+  );
 }

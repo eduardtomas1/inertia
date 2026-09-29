@@ -7,8 +7,10 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shut
 import { privilegedShutdownEnvelopeMs } from
   "../../src/main/privileged-shutdown-deadline";
 import {
+  CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS,
   closeElectronAppBounded,
   closeElectronFixtureBounded,
+  FIXTURE_PREPARED_EXIT_TIMEOUT_MS,
   fixtureElectronGracefulTimeoutMs,
   fixtureRuntimeExitTimeoutMs,
   formatElectronConsoleError,
@@ -61,6 +63,24 @@ function controlledElectronApp(options: {
     get closeSettled() {
       return state.closeSettled;
     },
+  };
+}
+
+function runtimeSocket(url: string): EventEmitter & { url: () => string } {
+  return Object.assign(new EventEmitter(), { url: () => url });
+}
+
+function rendererConsoleError(text: string) {
+  return {
+    type: () => "error",
+    location: () => ({
+      url: "inertia://bundle/assets/runtime.js",
+      line: 1,
+      column: 0,
+      lineNumber: 1,
+      columnNumber: 0,
+    }),
+    text: () => text,
   };
 }
 
@@ -133,6 +153,54 @@ describe("Electron E2E application lifecycle", () => {
     expect(rendererErrors.at(-1)).toContain("Renderer exception 45:");
     expect(rendererErrors.at(-1)?.length).toBeLessThanOrEqual(2_048);
     expect(rendererErrors.at(-1)).toMatch(/…$/u);
+  });
+
+  it("clears a runtime socket buffer-space failure once a later runtime socket receives a frame", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+    const established = runtimeSocket("ws://127.0.0.1:56724/runtime/capability");
+    events.emit("websocket", established);
+    const failed = runtimeSocket("ws://127.0.0.1:56724/runtime/capability");
+    events.emit("websocket", failed);
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    established.emit("framereceived", { payload: "late frame" });
+    expect(rendererErrors).toHaveLength(1);
+
+    const reconnected = runtimeSocket(
+      "ws://127.0.0.1:56724/runtime/capability?runtimeGeneration=1&afterSequence=4",
+    );
+    events.emit("websocket", reconnected);
+    expect(rendererErrors).toHaveLength(1);
+    reconnected.emit("framereceived", { payload: "welcome" });
+
+    expect(rendererErrors).toEqual([]);
+  });
+
+  it("keeps unrecovered runtime socket failures and every other connection failure", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED",
+    ));
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:41000/preview' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    const unrelated = runtimeSocket("ws://127.0.0.1:41000/preview");
+    events.emit("websocket", unrelated);
+    unrelated.emit("framereceived", { payload: "preview" });
+
+    expect(rendererErrors).toEqual([
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:41000/preview' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
+    ]);
   });
 
   it("retains renderer console source locations for hosted diagnostics", () => {
@@ -470,6 +538,64 @@ describe("Electron E2E application lifecycle", () => {
     expect(requestRuntimeQuit).toHaveBeenCalledOnce();
     expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
     expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("lets a prepared quit outlast Chromium's bounded network-service exit wait on a slow runner", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn((signal: NodeJS.Signals) => {
+          process.signalCode = signal;
+          queueMicrotask(() => process.emit("exit", null, signal));
+          return true;
+        }),
+      });
+      const nativeExitAfterQuitMs = CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS + 2_500;
+      const closing = closeElectronFixtureBounded({
+        platform: "darwin",
+        current: {
+          process: () => process,
+          close: async () => undefined,
+        } as unknown as ElectronApplication,
+        prepareRuntimeQuit: async () => ({
+          phase: "privileged-cleanup-complete",
+          runtimePid: null,
+          cleanupConfirmed: true,
+          errorMessage: null,
+        }),
+        requestRuntimeQuit: async () => {
+          setTimeout(() => {
+            process.exitCode = 0;
+            process.emit("exit", 0, null);
+          }, nativeExitAfterQuitMs);
+          return null;
+        },
+        waitForRuntimeExit: vi.fn(async () => undefined),
+        closeServer: vi.fn(async () => undefined),
+        removeDirectory: vi.fn(async () => undefined),
+        rpcTimeoutMs: 50,
+        preparedExitTimeoutMs: FIXTURE_PREPARED_EXIT_TIMEOUT_MS,
+        serverTimeoutMs: 50,
+        removeTimeoutMs: 50,
+        createMainProcessDiagnostic: () => ({
+          capture: () => undefined,
+          watchQuit: () => () => undefined,
+          terminateStalledGpuHelper: async () => false,
+          stop: () => undefined,
+          samples: [],
+        }),
+      });
+      const settled = closing.then(() => "closed", (error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(nativeExitAfterQuitMs + 1_000);
+
+      await expect(settled).resolves.toBe("closed");
+      expect(process.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("force-cleans when privileged cleanup cannot confirm every owner stopped", async () => {

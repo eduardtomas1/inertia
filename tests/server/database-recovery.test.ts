@@ -1015,7 +1015,7 @@ describe("database backup and startup recovery", () => {
         } finally {
           if (existsSync(backupPath)) chmodSync(backupPath, 0o600);
         }
-        expect(readFileSync(backupPath)).toEqual(backupBytes);
+        expect(readFileSync(backupPath).equals(backupBytes)).toBe(true);
         const recovered = new RuntimeStore(databasePath, directory, {
           recoverInterruptedRuns: false,
         });
@@ -1042,7 +1042,7 @@ describe("database backup and startup recovery", () => {
         .mockImplementationOnce(() => { throw failure; });
       try {
         expect(() => recoverDatabaseOnStartup(databasePath)).toThrow();
-        expect(readFileSync(databasePath)).toEqual(original);
+        expect(readFileSync(databasePath).equals(original)).toBe(true);
         expect(existsSync(databaseRecoveryPaths(databasePath).corruptDirectory))
           .toBe(false);
       } finally {

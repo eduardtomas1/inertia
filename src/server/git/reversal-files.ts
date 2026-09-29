@@ -9,7 +9,8 @@ import {
   type RuntimeSecureFileBroker,
   type SecureFileRootCapability,
 } from "../secure-files";
-import { runGit } from "./runner";
+import { literalPathspecs } from "./paths";
+import { runGit, runGitInspection } from "./runner";
 import { GitError } from "./types";
 import { reversalFileLocation, type ReversalWorkspaceScope } from "./reversal-scope";
 import { restoreReversalIndexEntry } from "./reversal-index";
@@ -39,7 +40,7 @@ export async function readIndexEntry(
   root: string,
   path: string,
 ): Promise<IndexEntry> {
-  const listed = await runGit(root, ["ls-files", "--stage", "-z", "--", path], {
+  const listed = await runGitInspection(root, ["ls-files", "--stage", "-z", "--", ...literalPathspecs([path])], {
     maxOutputBytes: MAX_PATH_LENGTH + 256,
     failureMessage: "Unable to inspect the selected file in the Git index.",
   });
@@ -93,7 +94,7 @@ export async function updateIndexEntry(
   scope?: { secureFiles: RuntimeSecureFileBroker; repository: SecureFileRootCapability; workspace: ReversalWorkspaceScope },
 ): Promise<void> {
   if (scope) await reversalFileLocation(scope.secureFiles, scope.repository, path, scope.workspace);
-  await runGit(root, ["update-index", "--cacheinfo", mode, oid, path], {
+  await runGit(root, ["-c", "core.fsmonitor=false", "update-index", "--cacheinfo", mode, oid, path], {
     maxOutputBytes: 256,
     failureMessage: "Unable to update the selected file in the Git index.",
   });

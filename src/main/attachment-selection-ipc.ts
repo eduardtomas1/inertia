@@ -1,5 +1,6 @@
 import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { parseAttachmentPickerMode } from "../shared/desktop";
+import { DESKTOP_IPC } from "../shared/desktop-ipc";
 import { attachmentPickerConfiguration } from "./attachment-import";
 import { attachmentImportDocumentFromEvent, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc";
 import type { AttachmentRegistry } from "./attachment-registry";
@@ -10,7 +11,7 @@ export function registerAttachmentSelectionIpc(options: {
   registry(): AttachmentRegistry;
   imports: RendererAttachmentImportCoordinator;
 }): void {
-  ipcMain.handle("inertia:select-attachments", async (event, ...args) => {
+  ipcMain.handle(DESKTOP_IPC.selectAttachments, async (event, ...args) => {
     const ownerWindow = options.owner(event, args.length);
     const mode = parseAttachmentPickerMode(args[0]);
     if (!mode) throw new Error("Invalid attachment picker mode.");

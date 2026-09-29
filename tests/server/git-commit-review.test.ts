@@ -354,6 +354,70 @@ setInterval(() => {}, 1000);
     expect(readFileSync(join(root, "other.txt"), "utf8")).toBe("other staged\n");
   });
 
+  const pathspecMetacharacterNames = [
+    { name: "docs/[a].md", windows: true },
+    { name: "docs/*.md", windows: false },
+    { name: "docs/?.md", windows: false },
+    { name: "docs/:(glob)a.md", windows: false },
+  ];
+
+  function metacharacterRepository(name: string): string {
+    const root = repository();
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, name), "special before\n");
+    writeFileSync(join(root, "docs", "a.md"), "plain before\n");
+    git(root, "add", "--", "docs");
+    git(root, "commit", "-q", "-m", "Add docs");
+    writeFileSync(join(root, name), "special reviewed\n");
+    writeFileSync(join(root, "docs", "a.md"), "plain staged\n");
+    git(root, "add", "--", "docs/a.md");
+    return root;
+  }
+
+  for (const { name, windows } of pathspecMetacharacterNames) {
+    it.skipIf(process.platform === "win32" && !windows)(
+      `keeps unrelated staged work when committing ${name} literally`,
+      async () => {
+        const root = metacharacterRepository(name);
+        const review = await captureGitCommitReview(root);
+
+        await commitReviewedChanges(
+          root,
+          "Commit special path",
+          [name],
+          review.fingerprint,
+        );
+
+        expect(git(root, "show", `HEAD:${name}`)).toBe("special reviewed");
+        expect(git(root, "show", "HEAD:docs/a.md")).toBe("plain before");
+        expect(git(root, "diff", "--cached", "--name-only"))
+          .toBe("docs/a.md");
+        expect(git(root, "show", ":docs/a.md")).toBe("plain staged");
+      },
+    );
+
+    it.skipIf(process.platform === "win32" && !windows)(
+      `commits a plain path beside unselected ${name}`,
+      async () => {
+        const root = metacharacterRepository(name);
+        const review = await captureGitCommitReview(root);
+
+        await commitReviewedChanges(
+          root,
+          "Commit plain path",
+          ["docs/a.md"],
+          review.fingerprint,
+        );
+
+        expect(git(root, "show", "HEAD:docs/a.md")).toBe("plain staged");
+        expect(git(root, "show", `HEAD:${name}`)).toBe("special before");
+        expect(git(root, "diff", "--cached", "--name-only")).toBe("");
+        expect(git(root, "diff", "--name-only", "--", `:(literal)${name}`))
+          .toBe(name);
+      },
+    );
+  }
+
   it("commits the captured selected tree when source changes after final verification", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed source\n");

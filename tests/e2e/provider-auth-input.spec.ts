@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 
 import { executableProcessExists } from "../helpers/executable-process";
-import { writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
+import { writeNodeClaudeExecutable, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 type ProviderKey = "claude" | "codex" | "cursor" | "kimi" | "opencode" | "antigravity";
@@ -485,7 +485,7 @@ test.beforeAll(async () => {
       const home = join(testDirectory, "provider-home");
       state = join(testDirectory, "provider-auth-state");
       await Promise.all([bin, home, state].map((path) => mkdir(path, { recursive: true })));
-      writeNodeFlagExecutable(bin, "claude", claudeFake(state));
+      writeNodeClaudeExecutable(bin, claudeFake(state));
       writeNodeFlagExecutable(bin, "cursor-agent", cursorFake(state));
       writeNodeFlagExecutable(bin, "kimi", kimiFake(state));
       writeNodeFlagExecutable(bin, "opencode", openCodeFake(state));

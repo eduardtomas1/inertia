@@ -108,6 +108,33 @@ function waitForTerminal(
 }
 
 describe("ProviderMaintenanceController", () => {
+  it("retains the installation restriction when a release check fails and recovers on forced refresh", async () => {
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(new Response(JSON.stringify({ version: "2.0.0" })));
+    const latest = new ProviderLatestVersionCache({ fetch });
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      latestVersions: latest,
+      resolveCapabilities: async () => ({
+        ...capabilities("codex", "npm", "@openai/codex"),
+        update: null,
+        updateAvailability: "instructions-only",
+        message: "This Codex installation is not writable by your account. See Instructions.",
+      }),
+    });
+    const [failed] = await controller.refresh(["codex"]);
+    expect(failed).toMatchObject({ versionStatus: "unknown", freshness: "unavailable" });
+    expect(failed?.message).toContain("temporarily unavailable");
+    expect(failed?.message).toContain("not writable");
+    const [recovered] = await controller.refresh(["codex"], true);
+    expect(recovered).toMatchObject({ versionStatus: "update-available", updateAvailability: "instructions-only" });
+    expect(recovered?.message).toContain("not writable");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects an update outside the active capability attestation", async () => {
     const runAction = vi.fn(async () => success());
     const controller = new ProviderMaintenanceController({
@@ -394,6 +421,54 @@ describe("ProviderMaintenanceController", () => {
     const started = await first;
     await controller.dispose();
     expect(started.providerId).toBe("claude");
+  });
+
+  it("quarantines and releases a provider whose journal fails while settling a cancelled update", async () => {
+    const first = deferred<ProviderMaintenanceRunResult>();
+    const journal = providerMaintenanceJournalTestDouble();
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: {
+        ...journal,
+        markVerified: (operationId, observedIdentity) => {
+          if (observedIdentity.providerId === "opencode") {
+            throw new Error("A provider maintenance journal record is invalid.");
+          }
+          return journal.markVerified(operationId, observedIdentity);
+        },
+        abandonUnadmitted: (operationId, identity) => {
+          if (identity.providerId === "opencode") {
+            throw new Error("A provider maintenance journal record is invalid.");
+          }
+          return journal.abandonUnadmitted(operationId, identity);
+        },
+      },
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      runAction: async (action) => action.executable.endsWith("claude")
+        ? await first.promise
+        : success(),
+      operationId: operationIds(),
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const claude = await controller.startUpdate("claude");
+    const opencode = await controller.startUpdate("opencode");
+    controller.cancel(opencode.id);
+
+    expect(await waitForTerminal(operations, opencode.id)).toMatchObject({
+      status: "cancelled",
+    });
+    await vi.waitFor(() => expect(controller.diagnosticStates()).toContainEqual({
+      providerId: "opencode",
+      state: "quarantined",
+    }));
+    await expect(controller.startUpdate("opencode")).rejects.toThrow(
+      "Provider maintenance ownership could not be recorded durably.",
+    );
+    first.resolve(success());
+    await waitForTerminal(operations, claude.id);
   });
 
   it("aborts and awaits owned operations during disposal", async () => {

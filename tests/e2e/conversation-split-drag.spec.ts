@@ -1,4 +1,4 @@
-// @inertia-e2e-resource isolated
+// @inertia-e2e-resource primary-display
 import { expect, test, type Locator } from "@playwright/test";
 import { join } from "node:path";
 

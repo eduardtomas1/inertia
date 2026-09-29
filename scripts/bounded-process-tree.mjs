@@ -205,6 +205,7 @@ async function waitForCompletion(completion, timeoutMs) {
 async function waitForPosixProcessGroupExit(
   processGroupId,
   timeoutMs = PROCESS_TREE_SETTLE_TIMEOUT_MS,
+  signal = 0,
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -213,7 +214,7 @@ async function waitForPosixProcessGroupExit(
       && linuxProcessGroupCanExecute(processGroupId) === false
     ) return true;
     try {
-      process.kill(-processGroupId, 0);
+      process.kill(-processGroupId, signal);
     } catch (error) {
       if (error?.code === "ESRCH") return true;
       if (error?.code === "EPERM") {
@@ -356,7 +357,11 @@ async function terminatePosixProcessGroup(processGroupId) {
     posixProcessGroupExists(processGroupId),
   );
   if (!terminationConfirmed) return false;
-  return await waitForPosixProcessGroupExit(processGroupId);
+  return await waitForPosixProcessGroupExit(
+    processGroupId,
+    PROCESS_TREE_SETTLE_TIMEOUT_MS,
+    "SIGKILL",
+  );
 }
 
 async function terminateProcessTree(child, completion, windowsGuardian) {

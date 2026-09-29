@@ -131,17 +131,36 @@ it("accepts complete bounded pagination and rejects counts changing during pagin
     () => ++calls === 1 ? page : { jobs: [{ id: 100 }], total_count: 102 })).toThrow();
 });
 
-it("shadows only existing regular DOM contents while preserving every other contract identity", async () => {
+async function contractFixture() {
   const root = await mkdtemp(join(tmpdir(), "inertia-ci-shadow-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-  const commit = () => { git("add", "."); git("commit", "--quiet", "-m", "fixture"); return git("rev-parse", "HEAD"); };
-  const fingerprint = (sha: string) => verificationContractAt(sha, root, { rendererDomShadow: true });
+  let tip = "";
+  const commit = () => { git("add", "."); git("commit", "--quiet", "-m", "fixture"); tip = git("rev-parse", "HEAD"); return tip; };
+  const fingerprints = new Map<string, string | null>();
+  const fingerprint = (sha: string) => {
+    const known = fingerprints.get(sha);
+    if (known !== undefined) return known;
+    const value = verificationContractAt(sha, root, { rendererDomShadow: true });
+    fingerprints.set(sha, value);
+    return value;
+  };
   try {
     git("init", "--quiet"); git("config", "user.name", "CI fixture"); git("config", "user.email", "ci@example.invalid");
+    git("config", "maintenance.auto", "false");
     await mkdir(join(root, "tests/renderer"), { recursive: true });
     await writeFile(join(root, "package.json"), "{}\n");
     await writeFile(join(root, "tests/renderer/focus.dom.test.tsx"), "original test\n");
     const base = commit();
+    return { root, git, commit, fingerprint, base, tip: () => tip };
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+it("shadows only existing regular DOM contents", async () => {
+  const { root, commit, fingerprint, base } = await contractFixture();
+  try {
     await writeFile(join(root, "tests/renderer/focus.dom.test.tsx"), "current candidate regression\n");
     const changed = commit();
     expect(verificationContractAt(base, root)).not.toBe(verificationContractAt(changed, root));
@@ -167,36 +186,40 @@ it("shadows only existing regular DOM contents while preserving every other cont
       [{ ...gate, conclusion: "cancelled" }], [{ ...gate, status: "in_progress" }]]) {
       expect((await observe(jobs)).shadow?.base).toBeNull();
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
+it("preserves every other contract identity under the DOM shadow", async () => {
+  const { root, git, commit, fingerprint, tip } = await contractFixture();
+  try {
     // Additions, unknown test paths, shared helpers, control-plane changes and
     // resource declarations all keep their exact blob/path inventory.
     for (const file of ["tests/renderer/added.dom.test.tsx", "tests/renderer/dom/setup.ts",
       "tests/renderer/shared-fixture.ts", "tests/helpers/shared.ts", "tests/support/e2e-resource-policy.ts",
       "tests/e2e/resource.spec.ts", "tests/server/new.test.ts", "scripts/ci/renamed.mjs",
       ".github/workflows/ci.yml", "playwright.config.ts", "package-lock.json"]) {
-      const previous = git("rev-parse", "HEAD");
+      const previous = tip();
       await mkdir(join(root, file, ".."), { recursive: true });
       await writeFile(join(root, file), "first\n");
       expect(fingerprint(commit())).not.toBe(fingerprint(previous));
       if (file !== "tests/renderer/added.dom.test.tsx") {
-        const beforeEdit = git("rev-parse", "HEAD");
+        const beforeEdit = tip();
         await writeFile(join(root, file), "changed resource or toolchain\n");
         expect(fingerprint(commit())).not.toBe(fingerprint(beforeEdit));
       }
     }
-    let previous = git("rev-parse", "HEAD");
+    let previous = tip();
     git("mv", "tests/renderer/focus.dom.test.tsx", "tests/renderer/moved.dom.test.tsx");
     expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    previous = git("rev-parse", "HEAD");
+    previous = tip();
     git("rm", "tests/renderer/moved.dom.test.tsx");
     expect(fingerprint(commit())).not.toBe(fingerprint(previous));
-    previous = git("rev-parse", "HEAD");
+    previous = tip();
     await chmod(join(root, "tests/renderer/added.dom.test.tsx"), 0o755);
     git("update-index", "--chmod=+x", "tests/renderer/added.dom.test.tsx");
-    git("commit", "--quiet", "-m", "mode");
-    expect(fingerprint(git("rev-parse", "HEAD"))).not.toBe(fingerprint(previous));
+    expect(fingerprint(commit())).not.toBe(fingerprint(previous));
     if (process.platform !== "win32") {
-      previous = git("rev-parse", "HEAD");
+      previous = tip();
       await rm(join(root, "tests/renderer/added.dom.test.tsx"));
       await symlink("shared-fixture.ts", join(root, "tests/renderer/added.dom.test.tsx"));
       expect(fingerprint(commit())).not.toBe(fingerprint(previous));

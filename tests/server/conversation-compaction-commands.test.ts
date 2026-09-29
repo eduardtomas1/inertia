@@ -24,7 +24,11 @@ import {
   type ProviderDetection,
 } from "../../src/server/providers";
 import type { AgentHarness } from "../../src/server/provider/agent-harness";
-import { providerRunTerminal } from "../../src/server/provider/contracts";
+import {
+  ProviderRunRefusedError,
+  providerRunIdentity,
+  providerRunTerminal,
+} from "../../src/server/provider/contracts";
 import {
   CLAUDE_AGENT_SDK_CAPABILITIES,
   createClaudeAgentSdkHarness,
@@ -839,6 +843,32 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       requestId,
       payload: { conversationId },
     })).rejects.toThrow("could not compact");
+    expect(release).toHaveBeenCalledWith(conversationId);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [false, 0],
+    [true, 1],
+  ] as const)("releases authority after a refused compaction start (receipted: %s)", async (receipted, stops) => {
+    const { compact, dependencies, release, send } = fixture();
+    vi.mocked(dependencies.providers.stopOwned).mockResolvedValue("settled");
+    compact.mockImplementation(((input: Parameters<typeof providerRunIdentity>[0]) => {
+      throw new ProviderRunRefusedError(
+        "already_running",
+        "This conversation already has an active provider run.",
+        providerRunIdentity(input),
+        receipted,
+      );
+    }) as never);
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow("already has an active provider run");
+    expect(dependencies.providers.stopOwned).toHaveBeenCalledTimes(stops);
     expect(release).toHaveBeenCalledWith(conversationId);
     expect(send).not.toHaveBeenCalled();
   });

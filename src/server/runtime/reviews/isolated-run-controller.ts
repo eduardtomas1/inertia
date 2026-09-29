@@ -29,6 +29,8 @@ import type {
 import {
   hasConsistentProviderTerminalOutcome,
   hasExactProviderRunIdentity,
+  isProviderRunRefusal,
+  isUnreceiptedProviderRunRefusal,
   providerRunIdentity,
 } from "../../provider/contracts";
 import { assembleTurnRequest } from "../turns/request-context";
@@ -487,7 +489,12 @@ export class IsolatedRunController<Owner extends object> {
         providerPromise = this.providers.run(providerInput, callbacks);
         active.providerPromise = providerPromise;
         active.providerStarted = true;
-      } catch {
+      } catch (error) {
+        const refusedIdentity = providerRunIdentity(providerInput);
+        if (isProviderRunRefusal(error, refusedIdentity)) {
+          active.providerStarted = !isUnreceiptedProviderRunRefusal(error, refusedIdentity);
+          throw new IsolatedRunError("provider-failed");
+        }
         // Provider admission and harness startup can happen synchronously
         // before run() returns its terminal promise. If that boundary throws,
         // consult the exact provider owner tuple rather than assuming that no

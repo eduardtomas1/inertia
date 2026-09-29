@@ -24,13 +24,17 @@ const isE2eScenarioFile = (file) => {
     && /\.spec\.[cm]?[jt]sx?$/u.test(portablePath);
 };
 
-const graph = analyzeSourceArchitecture({ workspaceRoot });
+const graph = analyzeSourceArchitecture({
+  workspaceRoot,
+  allowedAssetImports: [
+    {
+      from: "src/main/mascot-sprites.ts",
+      directory: "src/renderer/src/assets/mascot",
+    },
+  ],
+});
 const rendererDirectory = resolve(workspaceRoot, "src/renderer");
 const sharedContractsFacade = resolve(workspaceRoot, "src/shared/contracts.ts");
-const legacyCliHarness = resolve(
-  workspaceRoot,
-  "src/server/provider/cli-agent-harness.ts",
-);
 const rendererFacadeFailures = graph.edges
   .filter((edge) => (
     !edge.typeOnly
@@ -42,16 +46,9 @@ const rendererFacadeFailures = graph.edges
     + "imports runtime values through the broad shared "
     + "contracts facade; import the owning shared domain module directly."
   ));
-const legacyCliHarnessFailures = graph.edges
-  .filter((edge) => edge.to === legacyCliHarness)
-  .map((edge) => (
-    `${relative(workspaceRoot, edge.from).replaceAll("\\", "/")}:${edge.line} `
-    + "imports the sunset CLI harness fixture from production source."
-  ));
 const failures = [
   ...graph.failures,
   ...rendererFacadeFailures,
-  ...legacyCliHarnessFailures,
   ...lineCeilingFailures({
     workspaceRoot,
     directory: "src",

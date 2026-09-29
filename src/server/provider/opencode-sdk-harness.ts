@@ -56,6 +56,7 @@ import {
 import {
   boundedOpenCodeEventFetch,
   OPENCODE_OVERSIZED_EVENT_MESSAGE,
+  openCodeEventSubscriptionAcknowledged,
 } from "./opencode-event-stream";
 import {
   createOpenCodeEventState,
@@ -573,6 +574,10 @@ function startOpenCodeRun(
         throw new Error("The active OpenCode model does not advertise image input support.");
       }
       usageState.maxTokens = finite(effectiveModel?.limit.context);
+      let markEventStreamConnected!: () => void;
+      const eventStreamConnected = new Promise<void>((resolve) => {
+        markEventStreamConnected = resolve;
+      });
       const subscribed = await client.event.subscribe({ directory: options.input.cwd }, {
         signal: eventAbort.signal,
         throwOnError: true,
@@ -580,7 +585,7 @@ function startOpenCodeRun(
         fetch: boundedOpenCodeEventFetch(MAX_EVENT_FRAME_BYTES, () => failRuntime(
           OPENCODE_OVERSIZED_EVENT_MESSAGE,
           "event/oversized",
-        )),
+        ), markEventStreamConnected),
       });
       if (cancelRequested) throw new Error("OpenCode run was cancelled before the prompt was sent.");
       armEventInactivityDeadline();
@@ -712,6 +717,16 @@ function startOpenCodeRun(
           return true;
         },
       });
+      const subscriptionAcknowledged = await openCodeEventSubscriptionAcknowledged(
+        eventStreamConnected,
+        deadlines.initializationTimeoutMs,
+        pump,
+        runInterrupted,
+      );
+      if (cancelRequested) throw new Error("OpenCode run was cancelled before the prompt was sent.");
+      if (!subscriptionAcknowledged) {
+        emitter.status("starting", undefined, "event subscription unacknowledged");
+      }
       const providerOperation = compacting
         ? (() => {
             manualCompaction.initiatedAt = compactionTimestampNow();

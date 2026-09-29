@@ -117,6 +117,7 @@ export function resolveTurnRequest(
       })
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
+  dependencies.store.assertConversationProvider(conversation.id, route.providerId);
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const capabilityContract = exactProvider?.capabilityContract;
   const hostToolBridgeAttested = capabilityContract !== undefined

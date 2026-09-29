@@ -14,6 +14,7 @@ import {
 } from "../../../../shared/provider";
 import type { CompactComposerCommand } from "../../utils/composerCommands";
 import { clearPersistedComposerDraft } from "../../utils/composerDraftPersistence";
+import { isChatProviderRejection } from "../../../../shared/continuation-policy";
 
 export interface ComposerCompactNotice {
   kind: "working" | "success" | "error";
@@ -37,6 +38,8 @@ export function useComposerCompaction(options: {
   clearMessage: () => void;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   onCompact: (instruction?: string) => Promise<{ message: string }>;
+  onProviderRejection: (reason: string) => void;
+  continuationRefusal: string | null;
 }): {
   compactNotice: ComposerCompactNotice | null;
   compactUnavailableReason: string | null;
@@ -60,15 +63,17 @@ export function useComposerCompaction(options: {
     clearMessage,
     setSubmitting,
     onCompact,
+    onProviderRejection,
+    continuationRefusal,
   } = options;
   const [compactNotices, setCompactNotices] = useState<Readonly<
     Record<string, ComposerCompactNotice>
   >>({});
   const operationSequence = useRef(0);
   const activeOperations = useRef(new Map<string, number>());
-  const compactUnavailableReason = providerId === "antigravity"
+  const compactUnavailableReason = continuationRefusal ?? (providerId === "antigravity"
     ? ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
-    : null;
+    : null);
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {
@@ -132,12 +137,7 @@ export function useComposerCompaction(options: {
       kind: "working",
       message: "Compacting context…",
     });
-    try {
-      const result = await onCompact(command.instruction);
-      if (
-        !mountedRef.current
-        || activeOperations.current.get(ownerId) !== operationId
-      ) return;
+    const consumeCommand = (): boolean => {
       const ownsVisibleComposer = conversationIdRef.current === ownerId;
       if ((editorRevisions.current.get(ownerId) ?? 0) === submittedRevision) {
         clearPersistedComposerDraft(ownerId, submittedDraft);
@@ -146,6 +146,15 @@ export function useComposerCompaction(options: {
           clearMessage();
         }
       }
+      return ownsVisibleComposer;
+    };
+    try {
+      const result = await onCompact(command.instruction);
+      if (
+        !mountedRef.current
+        || activeOperations.current.get(ownerId) !== operationId
+      ) return;
+      const ownsVisibleComposer = consumeCommand();
       setCompactNotice(ownerId, { kind: "success", message: result.message });
       if (ownsVisibleComposer) textareaRef.current?.focus();
     } catch (error) {
@@ -153,6 +162,7 @@ export function useComposerCompaction(options: {
         mountedRef.current
         && activeOperations.current.get(ownerId) === operationId
       ) {
+        if (isChatProviderRejection(error) && consumeCommand()) onProviderRejection(error.message);
         setCompactNotice(ownerId, {
           kind: "error",
           message: error instanceof Error

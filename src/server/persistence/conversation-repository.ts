@@ -12,6 +12,7 @@ import {
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
+import { assertConversationProvider } from "./conversation-provider-policy";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
@@ -173,6 +174,10 @@ export class ConversationRepository {
     ).get(conversationId) !== undefined;
   }
 
+  assertProvider(conversationId: string, providerId: Conversation["providerId"], allowUnusedDraftChange = false): void {
+    assertConversationProvider(this.context, conversationId, providerId, allowUnusedDraftChange);
+  }
+
   update(
     conversationId: string,
     update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
@@ -212,6 +217,9 @@ export class ConversationRepository {
     if (!selectedProviderId) throw new Error("The selected harness is unavailable in this build.");
     if (update.providerId && update.providerId !== selectedProviderId) {
       throw new Error("The legacy provider and model selection harness do not match.");
+    }
+    if (legacySelectionChanged || update.modelSelection !== undefined) {
+      this.assertProvider(conversationId, selectedProviderId, true);
     }
     const continuationBoundaryChanged = (
       modelSelection.harnessId !== current.modelSelection.harnessId

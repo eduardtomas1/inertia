@@ -140,6 +140,7 @@ export function createConversationCompactionCommandHandler(
           : "That judge chat is reserved for a Duo comparison.",
       );
     }
+    dependencies.store.assertConversationProvider(conversation.id, conversation.providerId);
     if (
       dependencies.providerTerminalResumes.isActive(conversation.id)
       || dependencies.turns.isActive(conversation.id)

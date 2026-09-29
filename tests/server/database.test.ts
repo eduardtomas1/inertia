@@ -273,13 +273,14 @@ describe("RuntimeStore conversation lifecycle", () => {
     const { store } = await createStore();
     const first = store.snapshot().conversations[0]!;
     const second = store.createConversation(first.projectId, "Second chat");
-    const shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
     const messageCount = 100;
     const payload = "x".repeat(4_096);
+    let shellSizeBefore = 0;
 
     for (let index = 0; index < messageCount; index += 1) {
       store.createMessage(first.id, `first:${index}:${payload}`);
       store.createMessage(second.id, `second:${index}:${payload}`);
+      if (index === 0) shellSizeBefore = JSON.stringify(store.shellSnapshot()).length;
     }
 
     const shell = store.shellSnapshot();
@@ -288,6 +289,7 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(shell).not.toHaveProperty("messages");
     expect(shell.conversations).toHaveLength(2);
     expect(shell.conversations.every(({ latestTurn }) => latestTurn === null)).toBe(true);
+    expect(shell.conversations.every(({ hasHistory }) => hasHistory === true)).toBe(true);
 
     const firstDetail = store.conversationDetail(first.id);
     expect(firstDetail?.conversation.id).toBe(first.id);
@@ -516,6 +518,7 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("guards turn lifecycle order, write-once boundaries, and terminal metadata", async () => {
     const { store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;
+    store.updateConversation(conversation.id, { providerId: "claude" });
     const userMessage = store.createMessage(conversation.id, "Exercise lifecycle guards.");
     const requestedAt = userMessage.createdAt;
     const at = (offsetMs: number): string =>
@@ -831,6 +834,7 @@ describe("RuntimeStore conversation lifecycle", () => {
   it("recovers only the explicitly interrupted turn instead of rewriting older turn records", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const conversation = store.snapshot().conversations[0]!;
+    store.updateConversation(conversation.id, { providerId: "claude" });
     const oldUser = store.createMessage(conversation.id, "Older work");
     const oldTurn = store.createAgentTurn({
       id: "turn-before-interruption",
@@ -1252,21 +1256,6 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
-  it("clears a provider session explicitly or when a conversation switches providers", async () => {
-    const { store } = await createStore();
-    const project = store.snapshot().projects[0];
-    const conversation = store.createConversation(project.id, "Provider switch", { providerId: "codex" });
-
-    store.updateConversation(conversation.id, { providerSessionId: "codex-session" });
-    expect(store.updateConversation(conversation.id, { model: "gpt-test" }).providerSessionId).toBe("codex-session");
-    expect(store.updateConversation(conversation.id, { providerSessionId: null })).toMatchObject({
-      providerSessionId: null,
-      continuationIdentity: null,
-    });
-    store.updateConversation(conversation.id, { providerSessionId: "replacement-session" });
-    expect(store.updateConversation(conversation.id, { providerId: "claude" }).providerSessionId).toBeNull();
-    store.close();
-  });
 
   it("persists only provider-supported model flexibility in continuation identities", async () => {
     const { databasePath, workspacePath, store } = await createStore();

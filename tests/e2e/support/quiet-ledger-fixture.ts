@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../../src/server/database";
 import {
   createKimiClaudeBackendProfile,
   createKimiClaudeModelSelection,
 } from "../../../src/shared/claude-backend-profiles";
-import { providerNativeModelSelection } from "../../../src/shared/model-routing";
+import { continuationIdentityForSelection, providerNativeModelSelection } from "../../../src/shared/model-routing";
 
 export const createQuietLedgerFixture = ({
   testDirectory,
@@ -55,6 +56,7 @@ export const createQuietLedgerFixture = ({
   });
   const kimiSelection = createKimiClaudeModelSelection({ profile: kimiProfile });
 
+  const legacyClaudeTurnIds: string[] = [];
   const beginTurn = (
     suffix: string,
     index: number,
@@ -64,20 +66,24 @@ export const createQuietLedgerFixture = ({
   ) => {
     const requestedAt = new Date(fixtureBaseTime + index * 90_000).toISOString();
     const startedAt = new Date(Date.parse(requestedAt) + 3_000).toISOString();
+    // New admissions are provider-bound. Restore the two historical Claude
+    // routes only after seeding finishes, to represent a pre-fix mixed history.
+    const admittedSelection = providerId === "codex" ? selection : codexSelection;
     const result = store.beginAgentTurn({
       id: `${fixturePrefix}-${suffix}`,
       conversationId: conversation.id,
       runId: `${fixturePrefix}-${suffix}-run`,
       content,
-      providerId,
-      modelSelection: selection,
-      reasoningEffort: selection.reasoningEffort ?? "",
+      providerId: "codex",
+      modelSelection: admittedSelection,
+      reasoningEffort: admittedSelection.reasoningEffort ?? "",
       interactionMode: "build",
       accessMode: "supervised",
-      configurationRevision: selection.backendConfigurationRevision,
+      configurationRevision: admittedSelection.backendConfigurationRevision,
       association: "authoritative",
       requestedAt,
     });
+    if (providerId === "claude") legacyClaudeTurnIds.push(result.turn.id);
     store.updateAgentTurnLifecycle(result.turn.id, {
       status: "running",
       startedAt,
@@ -508,6 +514,29 @@ export const createQuietLedgerFixture = ({
       createdAt: activeAt(seconds),
     }));
   store.close();
+
+  // This fixture exercises display of histories saved before provider isolation.
+  // Keep their original attribution; no new turn is admitted after restoration.
+  const historicalDatabase = new Database(databasePath);
+  try {
+    historicalDatabase.transaction(() => {
+      for (const turnId of legacyClaudeTurnIds) {
+        historicalDatabase.prepare(`
+          UPDATE agent_turns SET provider_id = 'claude', model_selection_json = ?,
+            continuation_identity_json = ?, harness_id = ?, backend_profile_id = ?,
+            model = ?, model_alias = ?, reasoning_effort = ?, configuration_revision = ?
+          WHERE id = ?
+        `).run(
+          JSON.stringify(kimiSelection), JSON.stringify(continuationIdentityForSelection(kimiSelection)),
+          kimiSelection.harnessId, kimiSelection.backendProfileId, kimiSelection.modelId,
+          kimiSelection.alias, kimiSelection.reasoningEffort ?? "", kimiSelection.backendConfigurationRevision,
+          turnId,
+        );
+      }
+    })();
+  } finally {
+    historicalDatabase.close();
+  }
 
   return {
     active,

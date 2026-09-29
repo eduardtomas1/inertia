@@ -156,6 +156,7 @@ export function buildDraftConversation(
     settledAt: null,
     completedAt: null,
     lastViewedAt: now,
+    hasHistory: false,
     createdAt: now,
     updatedAt: now,
   };

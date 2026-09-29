@@ -343,8 +343,18 @@ function conversationTurnSummary(
   };
 }
 
+export function conversationDetailFromRow(
+  row: ConversationRow & { has_history: number; mixed_provider_history: number },
+): Conversation {
+  return {
+    ...conversationFromRow(row),
+    hasHistory: row.has_history === 1,
+    mixedProviderHistory: row.mixed_provider_history === 1,
+  };
+}
+
 export function conversationShellFromRow(
-  row: ConversationRow,
+  row: ConversationRow & { has_history: number },
   latestTurn: AgentTurn | null,
 ): ConversationShell {
   const conversation = conversationFromRow(row);
@@ -371,6 +381,7 @@ export function conversationShellFromRow(
     markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
+    hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     latestTurn: conversationTurnSummary(latestTurn),

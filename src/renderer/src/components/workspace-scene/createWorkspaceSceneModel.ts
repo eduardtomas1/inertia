@@ -20,6 +20,7 @@ import type {
   TurnRequestContext,
 } from "@shared/contracts";
 import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
+import { conversationContinuationRefusal } from "@shared/continuation-policy";
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
@@ -116,6 +117,28 @@ export function visibleWorkspaceConversation(
   draft: Conversation | null,
 ): Conversation | null {
   return draft ?? persisted;
+}
+
+export function planActionsAvailable(
+  conversation: Pick<Conversation, "status"> | null,
+  continuationRefusal: string | null,
+): boolean {
+  return Boolean(
+    conversation
+    && !continuationRefusal
+    && conversation.status !== "running"
+    && conversation.status !== "needs-input",
+  );
+}
+
+export function chatResumeAvailability(
+  conversation: Parameters<typeof providerTerminalResumeAvailability>[0],
+  provider: Parameters<typeof providerTerminalResumeAvailability>[1],
+  continuationRefusal: string | null,
+): ReturnType<typeof providerTerminalResumeAvailability> {
+  return continuationRefusal
+    ? { kind: "unavailable", resume: null, reason: continuationRefusal }
+    : providerTerminalResumeAvailability(conversation, provider);
 }
 
 export function visibleChatConversation(
@@ -315,6 +338,7 @@ export function createWorkspaceSceneModel({
     detailState,
     refreshDetail,
   } = projection;
+  const continuationRefusal = conversationContinuationRefusal(detail?.conversation);
   const conversation = visibleWorkspaceConversation(
     persistedConversation,
     draftConversation,
@@ -387,11 +411,12 @@ export function createWorkspaceSceneModel({
           projectName: candidateProject.name,
           conversationId: candidate.id,
           conversationTitle: candidate.title,
-          availability: providerTerminalResumeAvailability(
+          availability: chatResumeAvailability(
             candidate,
             connection.snapshot?.providers.find(
               ({ id }) => id === candidate.providerId,
             ),
+            candidate.id === detail?.conversation.id ? continuationRefusal : null,
           ),
         });
       }
@@ -485,11 +510,7 @@ export function createWorkspaceSceneModel({
     usageIdentity,
     usageQuotaSource,
   });
-  const canUpdatePlan = Boolean(
-    conversation
-    && conversation.status !== "running"
-    && conversation.status !== "needs-input",
-  );
+  const canUpdatePlan = planActionsAvailable(conversation, continuationRefusal);
   const latestPlan = projection.plans.at(-1) ?? null;
   const planSummary = latestPlan?.explanation
       ? latestPlan.explanation
@@ -871,6 +892,7 @@ export function createWorkspaceSceneModel({
       } : null,
       changes: {
         projectName: project.name,
+        agentRevisionUnavailable: continuationRefusal !== null,
         projectId: project.id,
         conversationId: persistedConversation?.id,
         busyAction,
@@ -1010,6 +1032,11 @@ export function createWorkspaceSceneModel({
               : "Skills could not be refreshed.",
           ));
         },
+        continuationRefusal,
+        onStartNewChat: continuationRefusal && detail
+          ? () => void actions.createConversationForSelection(detail.conversation.modelSelection)
+            .catch((error) => setActionError(error instanceof Error ? error.message : "The new chat could not be created."))
+          : undefined,
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

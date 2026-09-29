@@ -159,24 +159,20 @@ it("starts empty, mutates, and persists a deterministic app snapshot", async () 
   expect(messageDetail.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
   expect(messageSnapshot.snapshot.conversations.find(({ id }) => id === conversation?.id)?.providerId).toBe("claude");
 
-  const unsentProviderRequestId = randomUUID();
+  const crossProviderRequestId = randomUUID();
   send(client.socket, {
     type: "conversation.update",
-    requestId: unsentProviderRequestId,
+    requestId: crossProviderRequestId,
     payload: { conversationId: conversation?.id, providerId: "codex" },
   });
-  await client.events.next(
-    (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
-      event.type === "request.ok" && event.requestId === unsentProviderRequestId,
+  const rejected = await client.events.next(
+    (event): event is Extract<ServerEvent, { type: "request.error" }> =>
+      event.type === "request.error" && event.requestId === crossProviderRequestId,
   );
-  const switchedProvider = await client.events.next(
-    (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-      event.type === "snapshot.updated"
-      && event.snapshot.conversations.some(({ id, providerId }) =>
-        id === conversation?.id && providerId === "codex"),
-  );
-  expect(switchedProvider.snapshot.conversations.find(({ id }) =>
-    id === conversation?.id)?.providerId).toBe("codex");
+  expect(rejected.message).toContain("Start a new chat to use a different provider.");
+  const unchanged = await loadConversationDetail(client.socket, client.events, conversation!.id);
+  expect(unchanged.conversation.providerId).toBe("claude");
+  expect(unchanged.messages).toEqual(messageDetail.messages);
 
   client.socket.close();
   await runtime.close();
@@ -195,5 +191,6 @@ it("starts empty, mutates, and persists a deterministic app snapshot", async () 
     persistedClient.events,
     persisted.snapshot.activeConversationId!,
   );
+  expect(persistedDetail.conversation.providerId).toBe("claude");
   expect(persistedDetail.messages.some(({ content }) => content === "Keep the runtime calm.")).toBe(true);
 });

@@ -1,9 +1,15 @@
+import { providerIdForHarness } from "../../../shared/model-routing";
 import type {
   ContinuationIdentity,
+  Conversation,
   HarnessBackendCompatibility,
   ModelSelection,
+  ProviderId,
 } from "@shared/contracts";
+import type { PendingModelRoute } from "../components/composer/types";
 import {
+  conversationContinuationRefusal,
+  conversationHasHistory,
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
@@ -19,6 +25,7 @@ type TransitionCompatibility = Pick<
 export interface ModelRouteTransitionContext {
   /** The selected project is carried across a required new-conversation path. */
   projectId: string;
+  providerId: ProviderId;
   selection: ModelSelection;
   continuationIdentity: ContinuationIdentity | null;
   latestTurn: {
@@ -27,6 +34,8 @@ export interface ModelRouteTransitionContext {
   } | null;
   /** Only session presence is accepted; session identifiers never enter this policy. */
   hasProviderSession: boolean;
+  hasHistory: boolean;
+  mixedProviderHistory: boolean;
 }
 
 export interface ModelRouteTransitionCandidate {
@@ -57,6 +66,53 @@ export type ModelRouteTransition =
       continuationAction: "new-conversation-required";
     });
 
+export function modelRouteTransitionContext(
+  conversation: Conversation,
+  latestTurn: { modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
+): ModelRouteTransitionContext {
+  return {
+    projectId: conversation.projectId,
+    providerId: conversation.providerId,
+    selection: conversation.modelSelection,
+    continuationIdentity: conversation.continuationIdentity,
+    latestTurn: latestTurn
+      ? { selection: latestTurn.modelSelection, continuationIdentity: latestTurn.continuationIdentity }
+      : null,
+    hasProviderSession: Boolean(conversation.providerSessionId),
+    hasHistory: conversationHasHistory(conversation),
+    mixedProviderHistory: conversationContinuationRefusal(conversation) !== null,
+  };
+}
+
+export function pendingModelRoute(
+  conversation: Conversation,
+  latestTurn: { id: string; modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
+  selection: ModelSelection,
+  label: string,
+  reason: string,
+  configuration?: PendingModelRoute["configuration"],
+): PendingModelRoute {
+  return {
+    selection,
+    ...(configuration ? { configuration } : {}),
+    label,
+    reason,
+    sourceConversationId: conversation.id,
+    sourceProjectId: conversation.projectId,
+    sourceSelectionKey: JSON.stringify(conversation.modelSelection),
+    sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
+    sourceLatestTurnId: latestTurn?.id ?? null,
+    sourceLatestTurnKey: JSON.stringify(latestTurn
+      ? {
+          id: latestTurn.id,
+          modelSelection: latestTurn.modelSelection,
+          continuationIdentity: latestTurn.continuationIdentity,
+        }
+      : null),
+    destinationRevision: selection.backendConfigurationRevision,
+  };
+}
+
 /**
  * Plans a chooser route change without accepting or returning a provider
  * session identifier. The shared continuation policy remains authoritative.
@@ -70,6 +126,11 @@ export function resolveModelRouteTransition(
   const previousModelId = context.latestTurn?.selection.modelId
     ?? (previousIdentity ? context.selection.modelId : null);
   const decision = resolveContinuationDecision({
+    previousProviderId: providerIdForHarness(
+      context.latestTurn?.selection.harnessId ?? context.selection.harnessId,
+    ) ?? context.providerId,
+    hasHistory: context.hasHistory,
+    mixedProviderHistory: context.mixedProviderHistory,
     previousIdentity,
     nextIdentity: candidate.continuationIdentity,
     previousModelId,

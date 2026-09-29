@@ -48,6 +48,7 @@ it("re-verifies Codex after its executable is replaced while Inertia runs", asyn
   const manager = ProviderManager.createProduction({
     commands: { codex: executable },
     installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
     metadataCache: new ProviderMetadataCache(),
   });
   const input = nativeProviderRunInput({
@@ -103,6 +104,7 @@ it("invalidates admission when a native executable is replaced at the same path"
   const manager = ProviderManager.createProduction({
     commands: { codex: executable },
     installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
     metadataCache: new ProviderMetadataCache(),
     detectProvider: async () => ({
       provider: PROVIDER_INFO.codex, available: true, executable,
@@ -150,6 +152,7 @@ it.each([true, false])("re-verifies a relocated CLI without quarantining the old
   const leases = new ProviderInstallationLeaseCoordinator();
   const manager = ProviderManager.createProduction({
     installationLeases: leases,
+    conversationProviderGate: () => undefined,
     metadataCache: new ProviderMetadataCache(),
     // Discovery's PATH selection changes after a version-manager update.
     // Keep the production fingerprint, lease and admission boundaries real.

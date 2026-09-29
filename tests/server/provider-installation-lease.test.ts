@@ -941,6 +941,7 @@ describe("provider manager installation ownership", () => {
           ...(commandKind === "configured" ? { commands: { claude: command } } : {}),
           metadataCache,
           installationLeases: leases,
+          conversationProviderGate: () => undefined,
           detectProvider: async (): Promise<ProviderDetection> => ({
             provider: { id: "claude", name: "Claude", command: "claude" },
             available: true,

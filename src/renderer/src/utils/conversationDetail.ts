@@ -11,9 +11,13 @@ export function mergeConversationShell(
   detail: ConversationDetail,
   shell: ConversationShell,
 ): ConversationDetail {
-  const { latestTurn, pendingApproval, pendingInput, ...conversation } = shell;
+  const { latestTurn, pendingApproval, pendingInput, ...shellConversation } = shell;
   void pendingApproval;
   void pendingInput;
+  const { mixedProviderHistory } = detail.conversation;
+  const conversation = mixedProviderHistory === undefined
+    ? shellConversation
+    : { mixedProviderHistory, ...shellConversation };
   if (!latestTurn) return { ...detail, conversation };
   const turnIndex = detail.agentTurns.findIndex(
     ({ id }) => id === latestTurn.id,

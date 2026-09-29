@@ -23,6 +23,7 @@ import {
   type PersistedTurnExecutionContext,
   type SanitizedTurnExecutionManifest,
 } from "../runtime/turns/request-context";
+import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import {
   agentTurnFromRow,
@@ -148,6 +149,8 @@ export class TurnLedgerRepository {
     const reasoningEffort = (modelSelection.reasoningEffort ?? "").trim();
     if (reasoningEffort.length > 80) throw new Error("Turn reasoning effort cannot exceed 80 characters.");
 
+    assertConversationProvider(this.context, input.conversationId, input.providerId);
+
     const turn: AgentTurn = {
       id: requiredTurnString(input.id ?? randomUUID(), "Turn ID", 200),
       conversationId: input.conversationId,
@@ -239,6 +242,7 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
+      assertConversationProvider(this.context, input.conversationId, input.providerId);
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
           throw new Error(

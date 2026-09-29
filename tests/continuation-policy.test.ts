@@ -218,8 +218,23 @@ describe("provider continuation policy", () => {
     });
   });
 
+  it("requires a new chat when an established harness belongs to another provider", () => {
+    expect(resolveContinuationDecision({
+      previousIdentity: codexIdentity,
+      nextIdentity: { ...codexIdentity, harnessId: "claude-agent-sdk" },
+      previousModelId: codex.modelId,
+      nextModelId: "claude-model",
+      hasProviderSession: false,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({
+      action: "new-conversation-required",
+      reasonCode: "harness-changed",
+      reason: expect.stringContaining("Start a new chat to use a different provider."),
+    });
+  });
+
   it.each([
-    ["harness", { harnessId: "claude-agent-sdk" }, "harness-changed"],
     ["backend-profile", { backendProfileId: "custom:other" }, "backend-profile-changed"],
     [
       "backend-configuration",

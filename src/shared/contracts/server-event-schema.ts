@@ -213,7 +213,9 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "settledAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
-    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key));
+    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key))
+    && optionalBooleanField(value, "hasHistory")
+    && optionalBooleanField(value, "mixedProviderHistory");
 }
 
 function conversationShell(value: unknown): boolean {
@@ -549,11 +551,12 @@ function agentSkill(value: unknown): boolean {
 }
 
 function workflowGoalCapability(value: unknown): boolean {
-  if (!recordWithStrings(value, "kind", "label") || value.available !== true) {
-    return false;
+  if (!recordWithStrings(value, "kind", "label")) return false;
+  if (value.kind === "unavailable") {
+    return value.available === false && stringField(value, "reason");
   }
-  return value.kind === "codex-native"
-    || (value.kind === "inertia-local" && stringField(value, "reason"));
+  return value.available === true && (value.kind === "codex-native"
+    || (value.kind === "inertia-local" && stringField(value, "reason")));
 }
 
 function workflowSkillsCapability(value: unknown): boolean {

@@ -1,6 +1,6 @@
 import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
@@ -13,7 +13,8 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
-import { resolveModelRouteTransition } from "../../utils/modelRouteTransition";
+import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../utils/modelRouteTransition";
+import { conversationContinuationRefusal, isChatProviderRejection } from "../../../../shared/continuation-policy";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
@@ -35,14 +36,14 @@ import {
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
 import { ComposerToolbar } from "./ComposerToolbar";
-import type { ComposerProps, PendingModelRoute } from "./types";
+import type { ComposerProps } from "./types";
 import { useComposerMenus } from "./useComposerMenus";
+import { useComposerNewChatOffer } from "./useComposerNewChatOffer";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
-import { useComposerRouteConversation } from "./composerRouteConversation";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
@@ -167,9 +168,6 @@ export const Composer = memo(function Composer({
   const previewContextKey = JSON.stringify([conversation.id, previewContextUrl]);
   const visiblePreviewContextUrl = previewContextUrl && !dismissedPreviews.has(previewContextKey)
     ? previewContextUrl : null;
-  const [pendingRoute, setPendingRoute] = useState<PendingModelRoute | null>(null);
-  const [creatingRouteConversation, setCreatingRouteConversation] = useState(false);
-  const [routeCreationError, setRouteCreationError] = useState<string | null>(null);
   const [routeRepairing, setRouteRepairing] = useState(false);
   const [conversationUpdatePending, setConversationUpdatePending] = useState(false);
   const [conversationUpdateError, setConversationUpdateError] = useState<string | null>(null);
@@ -177,12 +175,23 @@ export const Composer = memo(function Composer({
   const [commandSurface, setCommandSurface] = useState<"goal" | "resume" | null>(null);
   const conversationUpdateSequenceRef = useRef(0);
   const menuController = useComposerMenus();
-  const createRouteConversation = useComposerRouteConversation();
   const { menu, dismissMenu } = menuController;
   useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const routeCancelRef = useRef<HTMLButtonElement>(null);
+  const continuationRefusal = conversationContinuationRefusal(conversation);
+  const continuationNoticeId = useId();
+  const {
+    pendingRoute, creatingRouteConversation, routeCancelRef, canCreateRouteConversation, routeCreationBlockedReason,
+    offerNewChat, dismissPendingRoute, createRouteConversation, resetNewChatOffer,
+  } = useComposerNewChatOffer({
+    conversation, latestTurn: latestTurnSummary ?? latestTurn ?? null, backendProfiles, message,
+    composerRef, textareaRef, mountedRef, conversationIdRef, editorRevisionsRef, onCreateConversationForSelection, setConversationUpdateError,
+    blockedReason: attachments.length > 0 || Boolean(promptContext) || previewContextSelected || fileReferences.length > 0 || contextPacketIds.length > 0
+      ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
+      : null,
+    updateMessage: (next) => updateMessage(next),
+  });
   const skillCompletion = useComposerSkillCompletion(skills, message, menu === "skills");
   const { setMenuTrigger } = menuController;
   useLayoutEffect(() => {
@@ -340,8 +349,7 @@ export const Composer = memo(function Composer({
     setFileReferences([]);
     selectedPreviewUrlRef.current = null;
     setPreviewContextSelected(false);
-    setPendingRoute(null);
-    setCreatingRouteConversation(false);
+    resetNewChatOffer();
     setRouteRepairing(false);
     conversationUpdateSequenceRef.current += 1;
     setConversationUpdatePending(false);
@@ -353,6 +361,7 @@ export const Composer = memo(function Composer({
     dismissMenu,
     flushDraftPersistence,
     onReleaseAttachment,
+    resetNewChatOffer,
   ]);
 
   useEffect(() => {
@@ -379,58 +388,6 @@ export const Composer = memo(function Composer({
       return;
     }
   }, [dismissMenu, running]);
-
-  useEffect(() => {
-    if (!pendingRoute) return;
-    let settleFrame = 0;
-    const closeFrame = window.requestAnimationFrame(() => {
-      settleFrame = window.requestAnimationFrame(() =>
-        routeCancelRef.current?.focus());
-    });
-    return () => {
-      window.cancelAnimationFrame(closeFrame);
-      if (settleFrame) window.cancelAnimationFrame(settleFrame);
-    };
-  }, [pendingRoute]);
-
-  useEffect(() => {
-    if (!pendingRoute) return;
-    const latestTurnAuthority = latestTurnSummary ?? latestTurn;
-    const latestTurnId = latestTurnAuthority?.id ?? null;
-    const latestTurnKey = JSON.stringify(latestTurnAuthority
-      ? {
-          id: latestTurnAuthority.id,
-          modelSelection: latestTurnAuthority.modelSelection,
-          continuationIdentity: latestTurnAuthority.continuationIdentity,
-        }
-      : null);
-    const destinationRevision = backendProfiles.find(({ id }) =>
-      id === pendingRoute.selection.backendProfileId)
-      ?.configurationRevision
-      ?? pendingRoute.selection.backendConfigurationRevision;
-    if (
-      pendingRoute.sourceConversationId !== conversation.id
-      || pendingRoute.sourceProjectId !== conversation.projectId
-      || pendingRoute.sourceSelectionKey !== JSON.stringify(conversation.modelSelection)
-      || pendingRoute.sourceContinuationKey
-        !== JSON.stringify(conversation.continuationIdentity)
-      || pendingRoute.sourceLatestTurnId !== latestTurnId
-      || pendingRoute.sourceLatestTurnKey !== latestTurnKey
-      || pendingRoute.destinationRevision !== destinationRevision
-    ) {
-      setPendingRoute(null);
-      setRouteCreationError(null);
-    }
-  }, [
-    conversation.continuationIdentity,
-    conversation.id,
-    conversation.modelSelection,
-    conversation.projectId,
-    backendProfiles,
-    latestTurn,
-    latestTurnSummary,
-    pendingRoute,
-  ]);
 
   useEffect(() => () => {
     if (submissionReleaseTimerRef.current !== null) window.clearTimeout(submissionReleaseTimerRef.current);
@@ -513,6 +470,10 @@ export const Composer = memo(function Composer({
       await compact(compactCommand);
       return;
     }
+    if (continuationRefusal) {
+      startNewChat();
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -588,7 +549,7 @@ export const Composer = memo(function Composer({
           setSubmitting(false);
         }
       }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
+    } catch (error) {
       const ownsSubmission =
         activeSubmissionsRef.current.get(submittedConversationId)
         === submissionSequence;
@@ -629,6 +590,9 @@ export const Composer = memo(function Composer({
         submittingRef.current = false;
         setSubmitting(false);
         textareaRef.current?.focus();
+        if (isChatProviderRejection(error) && onCreateConversationForSelection) {
+          offerNewChat(conversation.modelSelection, currentRouteLabel, error.message);
+        }
       }
     }
   };
@@ -712,6 +676,8 @@ export const Composer = memo(function Composer({
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
+    onProviderRejection: (reason) => onCreateConversationForSelection && offerNewChat(conversation.modelSelection, currentRouteLabel, reason),
+    continuationRefusal,
   });
   const followUpState = composerFollowUpState({
     running,
@@ -783,6 +749,7 @@ export const Composer = memo(function Composer({
   const reasoningLabel = selectedModel?.reasoningOptions.find(({ value }) => value === selectedReasoning)?.label ?? "Provider default";
   const updateConversation = async (
     update: Parameters<ComposerProps["onUpdateConversation"]>[0],
+    newChatLabel = currentRouteLabel,
   ): Promise<void> => {
     const sequence = conversationUpdateSequenceRef.current + 1;
     conversationUpdateSequenceRef.current = sequence;
@@ -792,6 +759,12 @@ export const Composer = memo(function Composer({
       await onUpdateConversation(update);
     } catch (error) {
       if (mountedRef.current && conversationUpdateSequenceRef.current === sequence) {
+        if (update.modelSelection && isChatProviderRejection(error)) {
+          offerNewChat(update.modelSelection, newChatLabel, error.message, update.accessMode && update.interactionMode
+            ? { accessMode: update.accessMode, interactionMode: update.interactionMode }
+            : undefined);
+          return;
+        }
         setConversationUpdateError(
           error instanceof Error
             ? error.message
@@ -805,9 +778,13 @@ export const Composer = memo(function Composer({
       }
     }
   };
+  const startNewChat = (): void => {
+    if (continuationRefusal) offerNewChat(conversation.modelSelection, currentRouteLabel, continuationRefusal);
+  };
   const updateReasoningEffort = async (
     reasoningEffort: string,
   ): Promise<void> => {
+    if (continuationRefusal) return startNewChat();
     await updateConversation({
       modelSelection: {
         ...conversation.modelSelection,
@@ -816,6 +793,7 @@ export const Composer = memo(function Composer({
     });
   };
   const updateFastMode = async (enabled: boolean): Promise<void> => {
+    if (continuationRefusal) return startNewChat();
     const providerValue = enabled
       ? selectedModel?.fastMode?.providerValue ?? null
       : null;
@@ -842,56 +820,21 @@ export const Composer = memo(function Composer({
     modelRoutes,
     conversation.modelSelection,
   ), [conversation.modelSelection, modelRoutes]);
+  const currentRouteLabel = selectedModelRoute
+    ? `${selectedModelRoute.backendProfileName} · ${selectedModelRoute.displayName}`
+    : conversation.modelSelection.modelId;
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
-    const transition = resolveModelRouteTransition({
-      projectId: conversation.projectId,
-      selection: conversation.modelSelection,
-      continuationIdentity: conversation.continuationIdentity,
-      latestTurn: latestTurnSummary
-        ? {
-            selection: latestTurnSummary.modelSelection,
-            continuationIdentity: latestTurnSummary.continuationIdentity,
-          }
-        : latestTurn
-          ? {
-              selection: latestTurn.modelSelection,
-              continuationIdentity: latestTurn.continuationIdentity,
-            }
-        : null,
-      hasProviderSession: Boolean(conversation.providerSessionId),
-    }, route);
+    const transition = resolveModelRouteTransition(
+      modelRouteTransitionContext(conversation, latestTurnSummary ?? latestTurn ?? null),
+      route,
+    );
+    const label = `${route.backendProfileName} · ${route.displayName}`;
+    const configuration = route.configuration && {
+      accessMode: route.configuration.accessMode,
+      interactionMode: route.configuration.interactionMode,
+    };
     if (transition.kind === "create-new-conversation") {
-      if (!onCreateConversationForSelection) {
-        setConversationUpdateError(
-          "Return this chat to the main window to choose a model that requires a new chat.",
-        );
-        return;
-      }
-      const sourceLatestTurn = latestTurnSummary ?? latestTurn;
-      setRouteCreationError(null);
-      setPendingRoute({
-        selection: transition.selection,
-        ...(route.configuration ? { configuration: {
-          accessMode: route.configuration.accessMode,
-          interactionMode: route.configuration.interactionMode,
-        } } : {}),
-        label: `${route.backendProfileName} · ${route.displayName}`,
-        reason: transition.reason,
-        sourceConversationId: conversation.id,
-        sourceProjectId: conversation.projectId,
-        sourceSelectionKey: JSON.stringify(conversation.modelSelection),
-        sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
-        sourceLatestTurnId: sourceLatestTurn?.id ?? null,
-        sourceLatestTurnKey: JSON.stringify(sourceLatestTurn
-          ? {
-              id: sourceLatestTurn.id,
-              modelSelection: sourceLatestTurn.modelSelection,
-              continuationIdentity: sourceLatestTurn.continuationIdentity,
-            }
-          : null),
-        destinationRevision:
-          transition.selection.backendConfigurationRevision,
-      });
+      offerNewChat(transition.selection, label, transition.reason, configuration);
       return;
     }
     const providerId = route.providerId
@@ -899,11 +842,8 @@ export const Composer = memo(function Composer({
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
-      ...(route.configuration ? {
-        accessMode: route.configuration.accessMode,
-        interactionMode: route.configuration.interactionMode,
-      } : {}),
-    });
+      ...configuration,
+    }, label);
   };
   const updatePromptStash = (
     update: (current: readonly PromptStashEntry[]) => PromptStashEntry[],
@@ -1002,25 +942,6 @@ export const Composer = memo(function Composer({
       );
     });
   };
-  const dismissPendingRoute = (): void => {
-    setPendingRoute(null);
-    setRouteCreationError(null);
-    window.requestAnimationFrame(() => {
-      composerRef.current
-        ?.querySelector<HTMLButtonElement>(".selected-model-chip")
-        ?.focus();
-    });
-  };
-  const routeCreationBlockedReason = pendingRoute && (
-    attachments.length > 0
-    || Boolean(promptContext)
-    || previewContextSelected
-    || fileReferences.length > 0
-    || contextPacketIds.length > 0
-  )
-    ? "Remove attachments, shared chat context, preview or diff context, and file references before transferring this text to a new chat."
-    : null;
-
   return (
     <div className="composer-shell">
       <section
@@ -1043,6 +964,8 @@ export const Composer = memo(function Composer({
           <Suspense fallback={null}>
             <ChatGoalControl
               {...goal}
+              continuationRefusal={continuationRefusal}
+              onStartNewChat={startNewChat}
               open={commandSurface === "goal"}
               onDismiss={dismissCommandSurface}
             />
@@ -1085,27 +1008,10 @@ export const Composer = memo(function Composer({
           pendingRoute={pendingRoute}
           creatingRouteConversation={creatingRouteConversation}
           routeCancelRef={routeCancelRef}
-          canCreateRouteConversation={Boolean(
-            onCreateConversationForSelection && !routeCreationBlockedReason,
-          )}
-          routeCreationBlockedReason={
-            routeCreationBlockedReason ?? routeCreationError
-          }
+          canCreateRouteConversation={canCreateRouteConversation}
+          routeCreationBlockedReason={routeCreationBlockedReason}
           onDismissPendingRoute={dismissPendingRoute}
-          onCreateRouteConversation={() => createRouteConversation({
-            pendingRoute,
-            message,
-            conversationId: conversation.id,
-            onCreateConversationForSelection,
-            conversationIdRef,
-            mountedRef,
-            editorRevisionsRef,
-            textareaRef,
-            clearMessage: () => updateMessage(""),
-            setPendingRoute,
-            setRouteCreationError,
-            setCreatingRouteConversation,
-          })}
+          onCreateRouteConversation={createRouteConversation}
           textareaRef={textareaRef}
           message={message}
           onMessageChange={promptHistoryController.onMessageChange}
@@ -1132,6 +1038,8 @@ export const Composer = memo(function Composer({
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactNotice}
+          continuationRefusal={continuationRefusal}
+          continuationNoticeId={continuationNoticeId}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
             updateMessage("");
@@ -1212,6 +1120,8 @@ export const Composer = memo(function Composer({
           newChatProjectPicker={newChatProjectPicker}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
+          continuationRefusal={continuationRefusal}
+          continuationNoticeId={continuationNoticeId}
           conversationUpdateError={conversationUpdateError}
           menuController={menuController}
           selectedProvider={selectedProvider}
@@ -1222,7 +1132,7 @@ export const Composer = memo(function Composer({
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={primaryAction}
-          canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
+          canSendQueuedNow={!continuationRefusal && !disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}

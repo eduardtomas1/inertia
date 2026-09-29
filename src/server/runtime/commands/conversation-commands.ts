@@ -390,6 +390,7 @@ export function createConversationCommandHandler(
               "The selected provider does not match the verified model route.",
             );
           }
+          dependencies.store.assertConversationProvider(conversationId, route.providerId, true);
           canonicalSelection = selection;
           canonicalProviderId = route.providerId;
           const latestTurn = dependencies.store

@@ -394,6 +394,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       {
         commands: { kimi: command },
         installationLeases: new ProviderInstallationLeaseCoordinator(),
+        conversationProviderGate: () => undefined,
         detectProvider: async () => ({
           provider: { id: "kimi", name: "Kimi Code", command: "kimi" },
           available: true,

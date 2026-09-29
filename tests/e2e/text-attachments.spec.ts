@@ -90,6 +90,8 @@ test("text and log files survive picker, drop, paste, provider delivery and rest
     await app.page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
   }
+  const routeReadiness = app.page.locator(".composer .provider-readiness");
+  await expect.poll(async () => await routeReadiness.allTextContents()).toEqual([]);
   await app.page.getByRole("textbox", { name: "Message" }).fill("Inspect all four text attachments.");
   await app.page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(app.page.getByText("Attachment text received.", { exact: true })).toBeVisible();

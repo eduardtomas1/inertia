@@ -66,6 +66,24 @@ function controlledElectronApp(options: {
   };
 }
 
+function runtimeSocket(url: string): EventEmitter & { url: () => string } {
+  return Object.assign(new EventEmitter(), { url: () => url });
+}
+
+function rendererConsoleError(text: string) {
+  return {
+    type: () => "error",
+    location: () => ({
+      url: "inertia://bundle/assets/runtime.js",
+      line: 1,
+      column: 0,
+      lineNumber: 1,
+      columnNumber: 0,
+    }),
+    text: () => text,
+  };
+}
+
 // These mocks model direct POSIX children. Windows launcher/tree ownership is
 // exercised with the real repository terminator in electron-windows-process.test.ts.
 describe("Electron E2E application lifecycle", () => {
@@ -135,6 +153,54 @@ describe("Electron E2E application lifecycle", () => {
     expect(rendererErrors.at(-1)).toContain("Renderer exception 45:");
     expect(rendererErrors.at(-1)?.length).toBeLessThanOrEqual(2_048);
     expect(rendererErrors.at(-1)).toMatch(/…$/u);
+  });
+
+  it("clears a runtime socket buffer-space failure once a later runtime socket receives a frame", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+    const established = runtimeSocket("ws://127.0.0.1:56724/runtime/capability");
+    events.emit("websocket", established);
+    const failed = runtimeSocket("ws://127.0.0.1:56724/runtime/capability");
+    events.emit("websocket", failed);
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    established.emit("framereceived", { payload: "late frame" });
+    expect(rendererErrors).toHaveLength(1);
+
+    const reconnected = runtimeSocket(
+      "ws://127.0.0.1:56724/runtime/capability?runtimeGeneration=1&afterSequence=4",
+    );
+    events.emit("websocket", reconnected);
+    expect(rendererErrors).toHaveLength(1);
+    reconnected.emit("framereceived", { payload: "welcome" });
+
+    expect(rendererErrors).toEqual([]);
+  });
+
+  it("keeps unrecovered runtime socket failures and every other connection failure", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED",
+    ));
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:41000/preview' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    events.emit("console", rendererConsoleError(
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE",
+    ));
+    const unrelated = runtimeSocket("ws://127.0.0.1:41000/preview");
+    events.emit("websocket", unrelated);
+    unrelated.emit("framereceived", { payload: "preview" });
+
+    expect(rendererErrors).toEqual([
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:41000/preview' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
+      "WebSocket connection to 'ws://127.0.0.1:56724/runtime/capability' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE (inertia://bundle/assets/runtime.js:2:1)",
+    ]);
   });
 
   it("retains renderer console source locations for hosted diagnostics", () => {

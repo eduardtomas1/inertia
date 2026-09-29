@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ConversationAttachmentStore,
+  ConversationAttachmentStoreReconcilingError,
   type ConversationAttachmentPayload,
 } from "../../src/node/conversation-attachment-store";
 import {
@@ -15,6 +16,7 @@ import {
   ConversationAttachmentStorageFullError,
 } from "../../src/node/conversation-attachment-store-capacity";
 import { runConversationAttachmentStoreChild } from "../../src/node/conversation-attachment-store-child";
+import type { ChatAttachment } from "../../src/shared/contracts";
 
 const roots: string[] = [];
 const stores: ConversationAttachmentStore[] = [];
@@ -30,7 +32,12 @@ afterEach(async () => {
 });
 
 async function openStore(
-  limits: { maxRecords?: number; maxBytes?: number; autoRemoveOldAttachments?: boolean },
+  limits: {
+    maxRecords?: number;
+    maxBytes?: number;
+    autoRemoveOldAttachments?: boolean;
+    reconciliationBatchTimeoutMs?: number;
+  },
   directory?: string,
 ): Promise<ConversationAttachmentStore> {
   const root = directory ?? await mkdtemp(join(tmpdir(), "inertia-attachment-capacity-"));
@@ -38,6 +45,20 @@ async function openStore(
   const store = await ConversationAttachmentStore.open(root, { autoRemoveOldAttachments: true, ...limits });
   stores.push(store);
   return store;
+}
+
+async function settled(store: ConversationAttachmentStore): Promise<void> {
+  await vi.waitFor(async () => {
+    expect((await store.storageStatus(() => [])).state).toBe("ready");
+  }, { timeout: 30_000, interval: 25 });
+}
+
+async function reconciled(
+  store: ConversationAttachmentStore,
+  references: readonly ChatAttachment[],
+): Promise<void> {
+  await store.reconcile(references);
+  await settled(store);
 }
 
 async function seededHistory(count: number, size: number) {
@@ -152,7 +173,7 @@ describe("durable conversation attachment capacity", () => {
     stores.push(store);
     // No child read per kept record is the property; wall time is not asserted
     // because hosted Windows shards make a 4,095-directory scan itself slow.
-    await store.reconcile(references);
+    await reconciled(store, references);
     expect(reads).toEqual([]);
     await expect(store.usage()).resolves.toEqual({ records: 4_095, bytes: 4_095 * 256 * 1024 });
     const order = () => references.map(({ id }) => id);
@@ -174,7 +195,7 @@ describe("durable conversation attachment capacity", () => {
   it("evicts the oldest history once the configured 2 GiB byte budget would be exceeded", async () => {
     const { root: directory, references } = await seededHistory(4, 512 * 1024 * 1024 - 1_024);
     const store = await openStore({ maxBytes: 2 * 1024 ** 3 }, directory);
-    await store.reconcile(references);
+    await reconciled(store, references);
     const order = () => references.map(({ id }) => id);
 
     const [fits] = await store.retain([image()], undefined, randomUUID(), order);
@@ -221,7 +242,7 @@ it("explicit cleanup protects active retentions and reports exact released bytes
   await expect(store.usage()).resolves.toEqual({ records: 1, bytes: png.length });
   await store.close();
   const restarted = await openStore({}, roots[roots.length - 1]);
-  await restarted.reconcile(pending);
+  await reconciled(restarted, pending);
   await expect(restarted.usage()).resolves.toEqual({ records: 1, bytes: png.length });
   await expect(restarted.preview(history[0]!)).resolves.toBeNull();
 });
@@ -249,10 +270,29 @@ it("serializes cleanup with imports and holds the admission authority until ever
 
 it("retains more than 4,096 images without evicting history under the new default", async () => {
   const { root, references } = await seededHistory(4_097, png.length);
-  const store = await openStore({ autoRemoveOldAttachments: false }, root);
-  await store.reconcile(references);
+  const store = await openStore({ autoRemoveOldAttachments: false, reconciliationBatchTimeoutMs: 1 }, root);
+  await reconciled(store, references);
   await expect(store.usage()).resolves.toEqual({ records: 4_097, bytes: 4_097 * png.length });
   await sent(store, [image()]);
   await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 4_098 * png.length });
   await expect(readFile(join(root, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`))).resolves.toEqual(png);
+}, 60_000);
+
+it("never evicts history on the full-looking usage reported while restart reconciliation is still running", async () => {
+  const { root, references } = await seededHistory(4_097, png.length);
+  const store = await openStore({ maxRecords: 4_098, reconciliationBatchTimeoutMs: 1 }, root);
+  const order = () => references.map(({ id }) => id);
+  const oldest = join(root, "conversation-attachments", references[0]!.id, `${references[0]!.id}.png`);
+  await store.reconcile(references);
+  await expect(store.storageStatus(order)).resolves.toMatchObject({
+    state: "reconciling", records: null, bytes: null, removableRecords: 0,
+  });
+  await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 16 * 1024 ** 3 });
+  await expect(store.retain([image()], undefined, randomUUID(), order))
+    .rejects.toBeInstanceOf(ConversationAttachmentStoreReconcilingError);
+  await expect(readFile(oldest)).resolves.toEqual(png);
+  await settled(store);
+  await sent(store, [image()]);
+  await expect(store.usage()).resolves.toEqual({ records: 4_098, bytes: 4_098 * png.length });
+  await expect(readFile(oldest)).resolves.toEqual(png);
 }, 60_000);

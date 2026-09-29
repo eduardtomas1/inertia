@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 
 import type {
-  ChangedFile,
   DiffReviewNote,
   DiffReviewState,
   WorkspaceGitDiffSnapshot,
@@ -27,6 +26,10 @@ import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { headerGitActions } from "../utils/headerGitActions";
 import {
+  retainedDiffLock,
+  type RetainedDiffValidation,
+} from "../utils/retainedDiffLock";
+import {
   parseWorkspaceGitIdentity,
   workspaceGitFile,
   workspaceGitOpenFilePath,
@@ -36,6 +39,10 @@ import {
   type WorkspaceGitFileIdentity,
 } from "../utils/workspaceGit";
 import {
+  changedFilePathParts,
+  changedFileStatusCode,
+  changedFileStatusLabel,
+  changedFileWorkingState,
   ChangesPanel,
   type ChangesPanelProps,
   type DiffSelection,
@@ -63,6 +70,8 @@ type ForwardedChangesProps = Omit<
   | "diffEmptyState"
   | "capabilities"
   | "repositoryPath"
+  | "reviewScope"
+  | "reviewLock"
   | "onSelectFile"
   | "onOpenFile"
   | "onRefresh"
@@ -72,6 +81,8 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   projectName: string;
   snapshot: WorkspaceGitSnapshot | null;
   loading?: boolean;
+  statusError?: string | null;
+  statusStale?: boolean;
   onRefresh: () => void;
   onLoadRepositoryDiff: (
     repositoryPath: string,
@@ -88,26 +99,10 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   onChangesRequestHandled?: (revision: number) => void;
 }
 
-function fileStatus(file: ChangedFile): string {
-  if (file.untracked || file.status.toLocaleLowerCase("en-US") === "untracked") return "U";
-  if (file.status.toLocaleLowerCase("en-US") === "deleted") return "D";
-  if (file.status.toLocaleLowerCase("en-US") === "added") return "A";
-  if (file.status.toLocaleLowerCase("en-US") === "renamed") return "R";
-  if (file.status.toLocaleLowerCase("en-US") === "unmerged") return "!";
-  return "M";
-}
-
 function repositoryStatus(repository: WorkspaceGitRepositorySnapshot): string {
   if (repository.state === "error") return "Unavailable";
   if (repository.clean) return "Clean";
   return `${repository.files.length} ${repository.files.length === 1 ? "file" : "files"}`;
-}
-
-function fileWorkingState(file: ChangedFile): string {
-  if (file.untracked) return "untracked";
-  if (file.staged && file.unstaged) return "staged + unstaged";
-  if (file.staged) return "staged";
-  return "unstaged";
 }
 
 function pullRequestActionRevision(
@@ -203,6 +198,8 @@ export function WorkspaceChangesPanel({
   projectName,
   snapshot,
   loading = false,
+  statusError = null,
+  statusStale = false,
   onRefresh,
   onLoadRepositoryDiff,
   onOpenWorkspaceFile,
@@ -231,11 +228,13 @@ export function WorkspaceChangesPanel({
   const [diff, setDiff] = useState<WorkspaceGitDiffSnapshot | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [validatedFor, setValidatedFor] = useState<RetainedDiffValidation | null>(null);
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [commitDiff, setCommitDiff] = useState<WorkspaceGitDiffSnapshot | null>(null);
   const [commitDiffLoading, setCommitDiffLoading] = useState(false);
   const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
   const commitDiffRequestRef = useRef(0);
+  const diffIdentityRef = useRef<string | null>(null);
   const handledChangesRequestRef = useRef(0);
   const parsedCommitDiff = useParsedUnifiedDiff(
     commitDiff?.patch ?? "",
@@ -313,6 +312,24 @@ export function WorkspaceChangesPanel({
     snapshot,
     effectiveSelection,
   );
+  const diffIdentity = activeRepositoryPath && effectiveSelection
+    ? JSON.stringify([
+        projectId ?? null,
+        conversationId ?? null,
+        workspaceGitIdentity(effectiveSelection),
+      ])
+    : null;
+  const reviewLock = retainedDiffLock({
+    snapshot,
+    identity: diffIdentity,
+    repositoryReady: activeRepository?.state === "ready",
+    statusLoading: loading,
+    statusError,
+    statusStale,
+    diffLoading,
+    diffError,
+    validatedFor,
+  });
   const missingReviewRepositories = useMemo(
     () => workspaceGitRepositoriesWithMissingReviewTargets(
       snapshot,
@@ -363,7 +380,7 @@ export function WorkspaceChangesPanel({
     setCommitDiff(null);
     setCommitDiffLoading(false);
     setCommitDiffError(null);
-  }, [activeRepositoryActionRevision, activeRepositoryPath]);
+  }, [activeRepositoryActionRevision, activeRepositoryPath, conversationId, projectId]);
 
   useEffect(() => {
     if (!changesRequest || !snapshot) return;
@@ -400,6 +417,10 @@ export function WorkspaceChangesPanel({
   }, [activeRepositoryPath, effectiveSelection, selected, selectedRepositoryPath]);
 
   useEffect(() => {
+    if (statusError !== null) setValidatedFor(null);
+  }, [statusError]);
+
+  useEffect(() => {
     for (const repositoryPath of missingReviewRepositories) {
       void onLoadRepositoryDiff(repositoryPath).catch(() => undefined);
     }
@@ -414,14 +435,21 @@ export function WorkspaceChangesPanel({
       || !effectiveSelection
       || activeRepository?.state !== "ready"
       || activeFiles.length === 0
+      || !snapshot
+      || diffIdentity === null
     ) {
+      diffIdentityRef.current = null;
+      setValidatedFor(null);
       setDiff(null);
       setDiffError(null);
       setDiffLoading(false);
       return;
     }
     let cancelled = false;
-    setDiff(null);
+    if (diffIdentityRef.current !== diffIdentity) {
+      diffIdentityRef.current = diffIdentity;
+      setDiff(null);
+    }
     setDiffLoading(true);
     setDiffError(null);
     void onLoadRepositoryDiff(
@@ -431,15 +459,18 @@ export function WorkspaceChangesPanel({
       .then((nextDiff) => {
         if (cancelled) return;
         if (nextDiff.repositoryPath !== activeRepositoryPath) {
-          setDiff(null);
           setDiffError("The repository changed while its diff was loading. Refresh and try again.");
           return;
         }
-        setDiff(nextDiff);
+        setDiff((current) => current
+          && current.patch === nextDiff.patch
+          && current.truncated === nextDiff.truncated
+          ? current
+          : nextDiff);
+        setValidatedFor({ snapshot, identity: diffIdentity });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setDiff(null);
         setDiffError(error instanceof Error ? error.message : "This repository diff could not be loaded.");
       })
       .finally(() => {
@@ -452,6 +483,7 @@ export function WorkspaceChangesPanel({
     activeFiles.length,
     activeRepository?.state,
     activeRepositoryPath,
+    diffIdentity,
     effectiveSelection,
     onLoadRepositoryDiff,
     selectedFileRevision,
@@ -776,9 +808,7 @@ export function WorkspaceChangesPanel({
               const isSelected = effectiveSelection
                 ? workspaceGitIdentity(effectiveSelection) === workspaceGitIdentity(identity)
                 : false;
-              const parent = file.path.includes("/")
-                ? file.path.slice(0, file.path.lastIndexOf("/"))
-                : "";
+              const { name, parent } = changedFilePathParts(file.path);
               return (
                 <li key={file.path}>
                   <button
@@ -788,9 +818,9 @@ export function WorkspaceChangesPanel({
                     aria-current={isSelected ? "true" : undefined}
                     onClick={() => setSelected(identity)}
                   >
-                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status">{fileStatus(file)}</span></span>
-                    <span className="workspace-repository-file-copy"><strong title={file.path}>{file.path.split("/").at(-1)}</strong>{parent && <small>{parent}</small>}</span>
-                    <span className="workspace-repository-file-stats"><small>{fileWorkingState(file)}</small><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
+                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
+                    <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
+                    <span className="workspace-repository-file-stats"><small>{changedFileWorkingState(file)}</small><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
                   <IconButton
                     label={`Open ${file.path} from ${label}`}
@@ -827,7 +857,7 @@ export function WorkspaceChangesPanel({
             const identity = { repositoryPath: activeRepository.repositoryPath, filePath: file.path };
             return (
               <option value={workspaceGitIdentity(identity)} key={workspaceGitIdentity(identity)}>
-                {fileStatus(file)} · {file.path}
+                {changedFileStatusCode(file)} · {file.path}
               </option>
             );
           })}
@@ -853,7 +883,13 @@ export function WorkspaceChangesPanel({
       )}
       {diffError && (
         <div className="panel-notice workspace-repository-notice is-error" role="alert">
-          <AlertTriangle size={14} /><span><strong>Diff unavailable.</strong> {diffError}</span>
+          <AlertTriangle size={14} /><span><strong>{diff ? "Diff could not be refreshed." : "Diff unavailable."}</strong> {diffError}</span>
+        </div>
+      )}
+      {statusError && (
+        <div className="panel-notice workspace-repository-notice is-error" role="alert">
+          <AlertTriangle size={14} /><span><strong>Git status could not be refreshed.</strong> {statusError}</span>
+          <button type="button" className="subtle-button" disabled={loading} onClick={onRefresh}>Retry</button>
         </div>
       )}
     </>
@@ -890,6 +926,8 @@ export function WorkspaceChangesPanel({
       diff={diff}
       selectedPath={effectiveSelection?.filePath ?? null}
       repositoryPath={activeRepositoryPath ?? "."}
+      reviewScope={diffIdentity ?? ""}
+      reviewLock={reviewLock}
       summary={nestedRepository ? null : summary}
       selectionAnswer={selectionAnswer}
       reviewStates={activeReviewStates}

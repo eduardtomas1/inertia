@@ -18,6 +18,8 @@ export type TerminalPanelProps = {
   fontSize: number;
   theme: ThemePreference;
   colorTheme?: ColorThemeId;
+  lightColorTheme?: ColorThemeId;
+  darkColorTheme?: ColorThemeId;
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   actionId?: string | null;

@@ -94,6 +94,8 @@ export function useWorkspaceGit({
   const [workspaceGitStatus, setWorkspaceGitStatus] =
     useState<WorkspaceGitSnapshot | null>(null);
   const [workspaceGitOwner, setWorkspaceGitOwner] = useState<string | null>(null);
+  const [workspaceGitStale, setWorkspaceGitStale] = useState(false);
+  const invalidationRef = useRef(0);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const branchRequestRef = useRef(0);
@@ -139,6 +141,7 @@ export function useWorkspaceGit({
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
     const generation = requestGenerationRef.current;
+    const invalidation = invalidationRef.current;
     const active = loadGitInFlightRef.current;
     if (active?.identity === identity) {
       if (
@@ -229,6 +232,7 @@ export function useWorkspaceGit({
       if (!ownsResponse()) return;
       setWorkspaceGitStatus(workspaceEvent.result.status);
       setWorkspaceGitOwner(`${owner}:${projectRefreshIdentity}`);
+      if (invalidationRef.current === invalidation) setWorkspaceGitStale(false);
       if (scope === "workspace-status") return;
       if (!status.isRepository) return;
       if (!status.authorityRef) {
@@ -283,6 +287,7 @@ export function useWorkspaceGit({
     setGitDiff(null);
     commitReviewRef.current = null;
     setWorkspaceGitStatus(null);
+    setWorkspaceGitStale(false);
     setBranches([]);
     branchRequestRef.current += 1;
     setBranchesLoading(false);
@@ -382,7 +387,7 @@ export function useWorkspaceGit({
         ignoreWhitespace,
         ...(commitReview ? { commitReview: true } : {}),
       },
-    }));
+    }, { passive: !commitReview }));
     if (event.result.kind !== "git.workspace.diff") {
       throw new Error("Unexpected workspace diff response.");
     }
@@ -475,12 +480,13 @@ export function useWorkspaceGit({
   useEffect(() => subscribe((event) => {
     if (
       event.type !== "workspace.git.invalidated"
-      || !enabled
-      || !online
       || !project?.id
       || event.projectId !== project.id
       || event.conversationId !== (conversation?.id ?? null)
     ) return;
+    invalidationRef.current += 1;
+    setWorkspaceGitStale(true);
+    if (!enabled || !online) return;
     commitReviewRef.current = null;
     setCommitReviewRevision((current) => current + 1);
     setLoading(true);
@@ -633,6 +639,7 @@ export function useWorkspaceGit({
     gitDiff,
     setGitDiff,
     workspaceGitStatus: workspaceGitOwner === `${authority}:${projectRefreshIdentity}` ? workspaceGitStatus : null,
+    workspaceGitStale,
     branches,
     branchesLoading,
     branchesError,

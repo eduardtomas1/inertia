@@ -51,6 +51,24 @@ describe("preview panel URL routing", () => {
     expect(html).toContain("localhost:3000 or https://example.com");
   });
 
+  it("labels an untitled page whose address is not absolute without failing", () => {
+    const tabId = "11111111-1111-4111-8111-111111111111";
+    const html = renderToStaticMarkup(createElement(PreviewPanel, {
+      owner: "primary",
+      url: "",
+      tabs: [
+        { id: tabId, title: "", url: "127.0.0.1:3000/app", loading: false },
+        { id: "22222222-2222-4222-8222-222222222222", title: "", url: "http://127.0.0.1:4173/app", loading: false },
+      ],
+      activeTabId: tabId,
+      onNavigate: () => undefined,
+      onOpenExternal: () => undefined,
+    }));
+
+    expect(html).toContain("<span>127.0.0.1:3000/app</span>");
+    expect(html).toContain("<span>127.0.0.1</span>");
+  });
+
   it("renders bounded browser pages and visible agent activity", () => {
     const activeTabId = "11111111-1111-4111-8111-111111111111";
     const html = renderToStaticMarkup(createElement(PreviewPanel, {

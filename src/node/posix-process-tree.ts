@@ -101,6 +101,13 @@ export function forceKillPosixProcessTreeWithStatus(
   const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
   const now = dependencies.now ?? Date.now;
 
+  const sendStop = (target: number): void => {
+    try {
+      kill(target, "SIGSTOP");
+    } catch {
+      return;
+    }
+  };
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
   }
@@ -161,6 +168,8 @@ export function forceKillPosixProcessTreeWithStatus(
         && stopObservationReads < MAX_STOP_OBSERVATION_READS
       ) {
         stopObservationReads += 1;
+        if (rootProcessGroup) sendStop(-rootPid);
+        sendStop(rootPid);
         pass -= 1;
         continue;
       }

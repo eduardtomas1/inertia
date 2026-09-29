@@ -70,9 +70,24 @@ describe("provider process-tree POSIX classification", () => {
       expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([
         [-4_242, "SIGSTOP"],
         [4_242, "SIGSTOP"],
+        [-4_242, "SIGSTOP"],
+        [4_242, "SIGSTOP"],
         [-4_242, "SIGKILL"],
         [4_242, "SIGKILL"],
       ]);
+    });
+
+    it("confirms when the first stop was discarded and the re-sent stop takes effect", async () => {
+      let rootStops = 0;
+      const { terminate, killProcess } = pidTermination(() =>
+        rootStops >= 2 ? "4242 1 Ts+\n" : "4242 1 Ss+\n");
+      const kill = killProcess.getMockImplementation()!;
+      killProcess.mockImplementation((target: number, signal?: NodeJS.Signals | number) => {
+        if (target === 4_242 && signal === "SIGSTOP") rootStops += 1;
+        return kill(target, signal);
+      });
+      await expect(terminate()).resolves.toBe(true);
+      expect(rootStops).toBe(2);
     });
 
     it("reports its classification inputs when the stop is never observed", async () => {

@@ -36,9 +36,38 @@ describe("POSIX process tree root observation", () => {
     expect(kill.mock.calls).toEqual([
       [-4_242, "SIGSTOP"],
       [4_242, "SIGSTOP"],
+      [-4_242, "SIGSTOP"],
+      [4_242, "SIGSTOP"],
+      [-4_242, "SIGSTOP"],
+      [4_242, "SIGSTOP"],
       [-4_242, "SIGKILL"],
       [4_242, "SIGKILL"],
     ]);
+  });
+
+  it("re-sends the stop when the first one was discarded before it took effect", () => {
+    let rootStops = 0;
+    const kill = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === 4_242 && signal === "SIGSTOP") rootStops += 1;
+      return true;
+    });
+    const spawnProcessSync = vi.fn(() => ({
+      status: 0,
+      stdout: rootStops >= 2 ? "4242 1 Ts+\n" : "4242 1 Ss+\n",
+    }));
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: kill as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      scanStabilized: true,
+      snapshotConfirmed: true,
+    });
+    expect(rootStops).toBe(2);
+    expect(spawnProcessSync).toHaveBeenCalledTimes(2);
   });
 
   it("remembers a running observation after the root later disappears", () => {

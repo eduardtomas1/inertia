@@ -1085,27 +1085,32 @@ export class ProviderManager {
       this.installationAuthority.operationIdentity("metadata-discovery", authority),
       authority,
     );
+    let skills: Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>;
     try {
-      const skills = await readClaudeAgentSdkSkills(
+      skills = await readClaudeAgentSdkSkills(
         executable,
         providerChildEnvironment("claude", environment.env),
         cwd,
         forceReload,
       );
-      if (!this.installationAuthority.release(admission)) {
-        throw new ProviderRuntimeError(
-          "lifecycle_corruption",
-          "Claude skill discovery could not release exact installation authority.",
-        );
-      }
-      return skills;
     } catch (error) {
-      this.installationAuthority.quarantine(
-        admission,
-        "claude-skill-discovery-cleanup-unconfirmed",
-      );
+      if (isProcessTreeTerminationUnconfirmed(error)) {
+        this.installationAuthority.quarantine(
+          admission,
+          "claude-skill-discovery-cleanup-unconfirmed",
+        );
+      } else {
+        this.installationAuthority.release(admission);
+      }
       throw error;
     }
+    if (!this.installationAuthority.release(admission)) {
+      throw new ProviderRuntimeError(
+        "lifecycle_corruption",
+        "Claude skill discovery could not release exact installation authority.",
+      );
+    }
+    return skills;
   }
 
   run(

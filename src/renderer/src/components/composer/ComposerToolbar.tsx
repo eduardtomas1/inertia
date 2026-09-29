@@ -243,6 +243,8 @@ export function ComposerToolbar({
     dismissMenu,
     setMenuTrigger,
     setMenuPopover,
+    handleComposerMenuNavigation,
+    handleComposerMenuTriggerKeyDown,
   } = menuController;
   return (
     <div
@@ -437,6 +439,8 @@ export function ComposerToolbar({
               aria-controls={menuId("action")}
               aria-expanded={menu === "action"}
               onClick={() => toggleMenu("action")}
+              onKeyDown={(event) =>
+                handleComposerMenuTriggerKeyDown("action", event)}
             >
               <Wrench size={14} />
               <span>Actions</span>
@@ -449,6 +453,7 @@ export function ComposerToolbar({
                 className="composer-popover action-popover"
                 role="menu"
                 aria-label="Project actions"
+                onKeyDown={handleComposerMenuNavigation}
               >
                 <div className="popover-title">Project actions</div>
                 {actions.map((action) => (

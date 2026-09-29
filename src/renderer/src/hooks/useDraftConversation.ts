@@ -29,6 +29,7 @@ import { projectNameFromPath } from "../lib/format";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { ConversationContextCommandRunner } from "../components/conversation-context/types";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
+import { persistComposerDraft } from "../utils/composerDraftPersistence";
 import {
   forgetPersistedDraftConversation,
   forgetPersistedMaterializedDraftConversation,
@@ -221,13 +222,7 @@ export function useDraftConversation({
     } else {
       forgetPersistedDraftConversation(current.conversation.id);
     }
-    try {
-      window.localStorage.removeItem(
-        `inertia:draft:${current.conversation.id}`,
-      );
-    } catch {
-      // The draft is already unreachable when storage is unavailable.
-    }
+    persistComposerDraft(current.conversation.id, "");
   }, [replaceDraft]);
 
   useEffect(() => {

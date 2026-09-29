@@ -388,6 +388,29 @@ describe("streamed agent text", () => {
       .toEqual(Object.fromEntries(background.map((name) => [name, 0])));
   });
 
+  it("keeps the app layout still when only app-local attention state changes", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const { default: App } = await import("../../src/renderer/src/App");
+    let appRenders = 0;
+    function CountedApp(): React.JSX.Element {
+      appRenders += 1;
+      return App();
+    }
+    await renderReadyTranscript(<CountedApp />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    appRenders = 0;
+    counting.renders.AppLayout = 0;
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(appRenders).toBeGreaterThan(0);
+    expect(counting.renders.AppLayout).toBe(0);
+  });
+
   it("reveals each streamed word in its own commit behind the caret", async () => {
     const { default: App } = await import("../../src/renderer/src/App");
     const view = await renderReadyTranscript(<App />);

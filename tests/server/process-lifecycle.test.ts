@@ -1173,7 +1173,7 @@ describe("provider process-tree termination", () => {
     const dependencies = (killProcess: ReturnType<typeof vi.fn>) => ({
       platform: "linux" as const,
       killProcess: killProcess as never,
-      spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
+      spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 T\n" })) as never,
       processCanExecute: () => null,
       processGroupCanExecute: () => null,
       waitMs: 100,
@@ -1277,6 +1277,180 @@ describe("provider process-tree termination", () => {
     });
   });
 
+  describe("POSIX root classification (exhaustive)", () => {
+    type Stop = "sent" | "ESRCH" | "EPERM" | "EINVAL";
+    type Table = "running" | "stopped" | "zombie" | "absent" | "unknown";
+    type Expected = "root-authorized" | "root-gone" | "incomplete";
+    const expected: Record<Stop, Record<Table, [Expected, Expected]>> = {
+      sent: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["root-authorized", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+      ESRCH: {
+        running: ["root-gone", "root-gone"],
+        stopped: ["root-gone", "root-gone"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["root-gone", "root-gone"],
+      },
+      EPERM: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["incomplete", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+      EINVAL: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["incomplete", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+    };
+    const rows = (Object.keys(expected) as Stop[]).flatMap((stop) =>
+      (Object.keys(expected[stop]) as Table[]).flatMap((table) =>
+        ([true, false] as const)
+          .filter((stabilised) => table !== "unknown" || !stabilised)
+          .map((stabilised) => ({
+            stop, table, stabilised,
+            classification: expected[stop][table][stabilised ? 0 : 1],
+          }))));
+
+    it.each(rows)("stop $stop, root $table, stabilised $stabilised: $classification", async ({
+      stop, table, stabilised, classification,
+    }) => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal === "SIGSTOP" && stop !== "sent") {
+            const error = new Error(stop) as NodeJS.ErrnoException;
+            error.code = stop;
+            throw error;
+          }
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") {
+            killed.add(target);
+            if (target === 4_242 && child.exitCode === null) {
+              child.exitCode = 1;
+              queueMicrotask(() => child.emit("close", 1));
+            }
+          }
+          return true as const;
+        });
+        let next = 5_000;
+        const spawnProcessSync = vi.fn(() => {
+          if (table === "unknown") return { status: null, stdout: "" };
+          const rootLine = table === "running" ? "4242 1 S"
+            : table === "stopped" ? "4242 1 T"
+              : table === "zombie" ? "4242 1 Z" : "";
+          const children = stabilised ? ["5000 4242 T"] : [`${next++} 4242 S`];
+          return { status: 0, stdout: `${[rootLine, ...children].filter(Boolean).join("\n")}\n` };
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(killProcess.mock.calls.slice(0, 2)).toEqual([[-4_242, "SIGSTOP"], [4_242, "SIGSTOP"]]);
+        expect(result).toBe(classification !== "incomplete");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never confirms a live root that refused both stops even after the scan stabilised and the root later exited", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const denied = (): never => {
+          const error = new Error("EPERM") as NodeJS.ErrnoException;
+          error.code = "EPERM";
+          throw error;
+        };
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal !== 0) denied();
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") killed.add(target);
+          return true as const;
+        });
+        setTimeout(() => {
+          child.exitCode = 0;
+          child.emit("close", 0);
+        }, 50);
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n5000 4242 T\n" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0).slice(0, 8)).toEqual([
+          [-4_242, "SIGSTOP"],
+          [4_242, "SIGSTOP"],
+          [-5_000, "SIGSTOP"],
+          [5_000, "SIGSTOP"],
+          [-5_000, "SIGKILL"],
+          [5_000, "SIGKILL"],
+          [-4_242, "SIGKILL"],
+          [4_242, "SIGKILL"],
+        ]);
+        expect(result).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("classifies a root whose exit Node observed before cleanup as gone without signalling it", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (signal === 0 && target === -4_242) throw noSuchProcess("gone");
+          return true as const;
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        child.stdio[1] = { closed: true };
+        child.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(result).toBe(true);
+        expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("POSIX tree termination truth table", () => {
     interface Row {
       label: string;
@@ -1332,7 +1506,7 @@ describe("provider process-tree termination", () => {
         }
         return true as const;
       });
-      const rootLine = row.rootAtStop === "alive" ? "4242 1 S"
+      const rootLine = row.rootAtStop === "alive" ? "4242 1 T"
         : row.rootAtStop === "zombie" ? "4242 1 Z" : "";
       const descendantLine = row.descendant === "none" || row.rootAtStop !== "alive"
         ? "" : "5000 4242 S";
@@ -1563,7 +1737,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "4242 1 S\n",
+          stdout: "4242 1 T\n",
         })) as never,
         waitMs: 100,
       },
@@ -1795,7 +1969,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "linux",
         killProcess,
-        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 T\n" })) as never,
         waitMs: 100,
       },
     ).then((confirmed) => {

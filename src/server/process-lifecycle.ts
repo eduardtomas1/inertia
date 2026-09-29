@@ -465,8 +465,13 @@ function posixTreeEnumeration(
   killed: PosixProcessTreeKillResult,
   rootGoneAccepted: boolean,
 ): PosixTreeEnumeration {
-  if (killed.snapshotConfirmed) return "root-authorized";
-  return rootGoneAccepted ? "root-gone" : "incomplete";
+  if (killed.snapshotConfirmed && killed.rootState === "stopped") {
+    return "root-authorized";
+  }
+  const rootAbsenceObserved = killed.rootStop === "absent"
+    || killed.rootState === "absent"
+    || killed.rootState === "zombie";
+  return rootGoneAccepted && rootAbsenceObserved ? "root-gone" : "incomplete";
 }
 
 function posixTreeTerminationConfirmed(
@@ -874,18 +879,21 @@ export async function terminateProcessTreeAndWait(
     child.exitCode === null && child.signalCode === null;
   if (force) {
     const leaderSignalable = leaderUnreaped();
-    const killed = leaderSignalable
+    const killed: PosixProcessTreeKillResult = leaderSignalable
       ? forceKillPosixProcessTreeWithStatus(pid, {
         kill: killProcess,
         spawnProcessSync,
         rootProcessGroup: true,
         deadlineAt,
       })
-      : { descendants: [], snapshotConfirmed: false, scanStabilized: false };
-    const enumeration = posixTreeEnumeration(
-      killed,
-      !leaderSignalable || killed.scanStabilized,
-    );
+      : {
+        descendants: [],
+        snapshotConfirmed: false,
+        scanStabilized: false,
+        rootStop: "absent",
+        rootState: "absent",
+      };
+    const enumeration = posixTreeEnumeration(killed, true);
     const { descendants } = killed;
     const exitWaitMs = remainingMs();
     const [groupExited, descendantsExited, childClosed] = await Promise.all([

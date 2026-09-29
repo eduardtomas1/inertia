@@ -13,10 +13,16 @@ export interface PosixProcessTreeDependencies {
   now: () => number;
 }
 
+export type PosixRootStopResult = "sent" | "absent" | "denied" | "failed";
+
+export type PosixRootState = "running" | "stopped" | "zombie" | "absent" | "unknown";
+
 export interface PosixProcessTreeKillResult {
   descendants: number[];
   snapshotConfirmed: boolean;
   scanStabilized: boolean;
+  rootStop: PosixRootStopResult;
+  rootState: PosixRootState;
 }
 
 export function posixDescendantPids(
@@ -57,6 +63,18 @@ function liveProcessState(rootPid: number, processTable: string): boolean {
   return false;
 }
 
+function posixRootState(rootPid: number, processTable: string): PosixRootState {
+  for (const line of processTable.split(/\r?\n/gu)) {
+    const match = line.trim().match(/^(\d+)\s+\d+\s+(\S+)$/u);
+    if (!match || Number(match[1]) !== rootPid) continue;
+    const state = match[2]!.charAt(0).toUpperCase();
+    if (state === "Z") return "zombie";
+    if (state === "X") return "absent";
+    return state === "T" ? "stopped" : "running";
+  }
+  return "absent";
+}
+
 /**
  * Freezes an owned POSIX process tree, rescans for children created during the
  * snapshot race, then force-kills descendants before their parents.
@@ -66,7 +84,13 @@ export function forceKillPosixProcessTreeWithStatus(
   dependencies: Partial<PosixProcessTreeDependencies> = {},
 ): PosixProcessTreeKillResult {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 1) {
-    return { descendants: [], snapshotConfirmed: true, scanStabilized: true };
+    return {
+      descendants: [],
+      snapshotConfirmed: true,
+      scanStabilized: true,
+      rootStop: "absent",
+      rootState: "absent",
+    };
   }
   const kill = dependencies.kill ?? process.kill;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
@@ -77,11 +101,16 @@ export function forceKillPosixProcessTreeWithStatus(
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
   }
-  let rootFreezeConfirmed = false;
+  let rootStop: PosixRootStopResult = "failed";
   try {
     kill(rootPid, "SIGSTOP");
-    rootFreezeConfirmed = true;
-  } catch { /* A missing root cannot authorize a descendant snapshot. */ }
+    rootStop = "sent";
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    rootStop = code === "ESRCH" ? "absent" : code === "EPERM" ? "denied" : "failed";
+  }
+  const rootFreezeConfirmed = rootStop === "sent";
+  let rootState: PosixRootState = "unknown";
 
   const frozen = new Set<number>();
   let killOrder: number[] = [];
@@ -116,6 +145,7 @@ export function forceKillPosixProcessTreeWithStatus(
       // Callers treat a missing stabilized snapshot as unconfirmed cleanup.
     }
     if (!snapshotRead) continue;
+    rootState = posixRootState(rootPid, processTable);
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
     if (newlyDiscovered.length === 0) {
@@ -143,5 +173,5 @@ export function forceKillPosixProcessTreeWithStatus(
     try { kill(-rootPid, "SIGKILL"); } catch { /* The group may already be gone. */ }
   }
   try { kill(rootPid, "SIGKILL"); } catch { /* Already gone. */ }
-  return { descendants: targets, snapshotConfirmed, scanStabilized };
+  return { descendants: targets, snapshotConfirmed, scanStabilized, rootStop, rootState };
 }

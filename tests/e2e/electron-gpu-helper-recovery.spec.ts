@@ -102,6 +102,7 @@ test("recovers a GPU helper that stalls before the first action after launch", a
     const pressed = await toggle.getAttribute("aria-pressed");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(await directGpuHelper(mainPid)).not.toBe(gpuPid);
@@ -130,6 +131,7 @@ test("keeps a one-second assertion that meets the stall first within its own dea
     const pressed = await toggle.getAttribute("aria-pressed");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -158,6 +160,7 @@ test("recovers a GPU helper that stalls after restart before a workspace tool op
     await selectWorkspaceTool(await ensureWorkspaceTools(app.page), "Attachments");
     await expect(app.page.locator('.workspace-panel [data-workspace-tab="attachments"]'))
       .toHaveAttribute("aria-selected", "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -193,6 +196,7 @@ test("recovers a stall met only by actions on a secondary window", async () => {
     process.kill(gpuPid, "SIGSTOP");
     await popup.getByRole("button", { name: "Popup action" }).click();
     await expect(popup.getByRole("button", { name: "Clicked" })).toBeVisible();
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -222,6 +226,7 @@ test("recovers a stall that begins while a click waits for its moving target", a
     process.kill(gpuPid, "SIGSTOP");
     await clicked;
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);
@@ -248,6 +253,7 @@ test("recovers a stall that begins after a healthy action while the page waits f
     process.kill(gpuPid, "SIGSTOP");
     await app.page.evaluate(() => new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await waitForRecoveries(1);
     expectStallRecovered(gpuPid, mainPid);
     expect(await processStart(gpuPid)).toBeNull();
     expect(app.rendererErrors).toEqual([]);

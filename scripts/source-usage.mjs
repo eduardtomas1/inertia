@@ -3,7 +3,7 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "@babel/parser";
 
-import { analyzeModuleUsage, typescriptFiles } from "./architecture/analyzer.mjs";
+import { analyzeModuleUsage, linkFailure, sourceTree } from "./architecture/analyzer.mjs";
 
 const BUILD_CONFIGS = [
   "electron.vite.config.ts",
@@ -130,7 +130,8 @@ export function sourceUsage(root) {
     return moduleScripts(read(input)).map((source) =>
       resolve(root, dirname(input), source.replace(/^\//u, "")));
   })), ...resourceReview.sourceEntries.map((entry) => resolve(root, entry.path))])].sort();
-  const source = typescriptFiles(resolve(root, "src"));
+  const sourceScan = sourceTree(resolve(root, "src"));
+  const source = sourceScan.files;
   const tools = [...new Set(toolingFiles(root))].sort();
   const files = [...new Set([...source, ...tools])].sort();
   for (const entry of productionRoots) {
@@ -179,7 +180,10 @@ export function sourceUsage(root) {
     resourceReview,
     // Dynamic tool imports (for example generated package-smoke output) remain
     // visible; a partial graph is never reported as an exhaustive proof.
-    analysisLimitations: graph.failures,
+    analysisLimitations: [
+      ...sourceScan.links.map((link) => linkFailure(root, link)),
+      ...graph.failures,
+    ],
   };
 }
 

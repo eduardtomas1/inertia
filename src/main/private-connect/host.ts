@@ -9,7 +9,7 @@ import {
   parsePrivateConnectEnableRequest,
   parsePrivateConnectPairingApprovalRequest,
 } from "../../shared/desktop";
-import type { PrivateConnectStateView } from "../../shared/private-connect/protocol";
+import { isPrivateConnectUuid, type PrivateConnectStateView } from "../../shared/private-connect/protocol";
 import type { RuntimeSupervisor } from "../runtime-supervisor";
 import { PrivateConnectService } from "./service";
 import { createPrivateConnectStoreEncryption, PrivateConnectStore } from "./store";
@@ -180,13 +180,13 @@ export class PrivateConnectHost {
     });
     ipcMain.handle(PRIVATE_CONNECT_IPC.denyPairing, async (event, ...args) => {
       assertTrusted(event, args.length, 1);
-      if (typeof args[0] !== "string") throw new Error("Invalid Private Connect pairing request.");
+      if (!isPrivateConnectUuid(args[0])) throw new Error("Invalid Private Connect pairing request.");
       await this.requireService().denyPairing(args[0]);
       return this.requireService().state();
     });
     ipcMain.handle(PRIVATE_CONNECT_IPC.revokeDevice, async (event, ...args) => {
       assertTrusted(event, args.length, 1);
-      if (typeof args[0] !== "string") throw new Error("Invalid Private Connect device.");
+      if (!isPrivateConnectUuid(args[0])) throw new Error("Invalid Private Connect device.");
       await this.requireService().revokeDevice(args[0]);
       return this.requireService().state();
     });

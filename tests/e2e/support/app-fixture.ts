@@ -13,8 +13,8 @@ import { seedAppConversation } from "../../support/seed-app-conversation";
 import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
-  closePreviewServerBounded, observeElectronPage, observeElectronProcess,
-  quitElectronAppBounded, removeFixtureDirectory,
+  closePreviewServerBounded, FIXTURE_PREPARED_EXIT_TIMEOUT_MS, observeElectronPage,
+  observeElectronProcess, quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
 import { attachElectronFixtureCloseFailure,
   attachElectronGpuHelperRecovery } from "./electron-failure-evidence";
@@ -29,10 +29,10 @@ import {
   readNativePreviewSnapshot,
   type NativePreviewTestSnapshot,
 } from "./native-preview-diagnostics";
+import { waitForViewportToMatchWindow } from "./stable-sample";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
-const FIXTURE_PREPARED_EXIT_TIMEOUT_MS = 12_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;
@@ -880,9 +880,13 @@ export async function createAppFixture(
   };
   const resizeWindow = async (width: number, height: number): Promise<void> => {
     const nativeWindow = await currentApp().browserWindow(page);
-    try { await nativeWindow.evaluate((window, size) => window.setContentSize(size.width, size.height), { width, height }); }
-    finally { await nativeWindow.dispose(); }
-    await page.waitForTimeout(250);
+    try {
+      await nativeWindow.evaluate((window, size) => window.setContentSize(size.width, size.height), { width, height });
+      await waitForViewportToMatchWindow(page, () => nativeWindow.evaluate((window) => {
+        const [contentWidth = 0, contentHeight = 0] = window.getContentSize();
+        return { width: contentWidth, height: contentHeight, zoomFactor: window.webContents.getZoomFactor() };
+      }));
+    } finally { await nativeWindow.dispose(); }
   };
   const nativePreviewSnapshot = async (
     url: string,

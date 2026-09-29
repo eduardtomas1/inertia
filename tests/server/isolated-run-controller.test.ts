@@ -15,7 +15,11 @@ import type {
   ProviderRunInput,
   ProviderRunResult,
 } from "../../src/server/providers";
-import { providerRunTerminal } from "../../src/server/provider/contracts";
+import {
+  ProviderRunRefusedError,
+  providerRunIdentity,
+  providerRunTerminal,
+} from "../../src/server/provider/contracts";
 import {
   IsolatedRunController,
   type IsolatedRunFileSystem,
@@ -156,6 +160,7 @@ class FakeProvider implements IsolatedRunProviderRuntime {
 class SynchronouslyFailingProvider extends FakeProvider {
   ownershipAfterFailure: "exact" | "different" | "missing" | "unknown" =
     "missing";
+  refusal: "receipted" | "unreceipted" | null = null;
   readonly stopOutcomes: Array<
     "settled" | "identity-mismatch" | "force-detached"
   > = [];
@@ -166,6 +171,14 @@ class SynchronouslyFailingProvider extends FakeProvider {
   ): Promise<ProviderRunResult> {
     this.inputs.push(input);
     this.callbacks.push(callbacks);
+    if (this.refusal) {
+      throw new ProviderRunRefusedError(
+        "already_running",
+        "This conversation already has an active provider run.",
+        providerRunIdentity(input),
+        this.refusal === "receipted",
+      );
+    }
     throw new Error("Provider startup failed synchronously.");
   }
 
@@ -593,6 +606,37 @@ describe("IsolatedRunController", () => {
       },
       graceMs: 2_500,
     }]);
+    expect(controller.has("conversation-1")).toBe(false);
+    expect(fileSystem.remove).toHaveBeenCalledOnce();
+    expect(store.updates[0]?.update).toMatchObject({ status: "failed" });
+  });
+
+  it.each([
+    ["receipted", 1],
+    ["unreceipted", 0],
+  ] as const)("releases a provider refusal (%s) after exactly the stops it needs", async (refusal, stops) => {
+    const store = new FakeStore();
+    const provider = new SynchronouslyFailingProvider();
+    provider.ownershipAfterFailure = "different";
+    provider.refusal = refusal;
+    const fileSystem = fakeFileSystem();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem },
+    );
+    provider.stopOwned = async (conversationId, identity, graceMs) => {
+      provider.stops.push({ conversationId, identity, graceMs });
+      return "settled";
+    };
+
+    await expect(controller.run(request({}))).rejects.toMatchObject({
+      reason: "provider-failed",
+    });
+
+    expect(provider.stops).toHaveLength(stops);
     expect(controller.has("conversation-1")).toBe(false);
     expect(fileSystem.remove).toHaveBeenCalledOnce();
     expect(store.updates[0]?.update).toMatchObject({ status: "failed" });

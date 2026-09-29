@@ -1,27 +1,33 @@
-import { act, renderHook } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
-import type { Conversation, Project } from "../../src/shared/contracts";
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Project, ServerEvent } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts/app";
+import { buildDraftConversation, buildNewConversationPayload } from "../../src/renderer/src/lib/newConversation";
 import { useConversationPaneLayout } from "../../src/renderer/src/hooks/useConversationPaneLayout";
+import type { InertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { useSplitPaneScenes } from "../../src/renderer/src/hooks/useSplitPaneScenes";
 import type { SplitPanes } from "../../src/renderer/src/hooks/useSplitPanes";
 
-// Keep the real layout and split-scene assembly hooks; external runtime data
-// and tool contents do not participate in the pane toggle's state contract.
-vi.mock("../../src/renderer/src/hooks/useConversationProjection", () => ({ useConversationProjection: () => ({}) }));
-vi.mock("../../src/renderer/src/hooks/useAgentWorkflows", () => ({
-  useAgentWorkflows: () => ({}), agentWorkflowRouteIdentity: () => "test-route",
-}));
-vi.mock("../../src/renderer/src/hooks/useWorkspaceTools", () => ({ useWorkspaceTools: () => ({}) }));
-vi.mock("../../src/renderer/src/hooks/useDesktopTools", () => ({ useDesktopTools: () => ({}) }));
-vi.mock("../../src/renderer/src/hooks/useActivityActions", () => ({ useActivityActions: () => ({}) }));
-vi.mock("../../src/renderer/src/hooks/usePlanSteps", () => ({ usePlanSteps: () => [] }));
-vi.mock("../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel", () => ({
-  createWorkspaceSceneModel: () => ({ detailState: null, chat: {}, resizeHandle: null, tools: null }),
-}));
-
-const project = { id: "project", name: "Project" } as Project;
-const conversation = (id: string): Conversation => ({ id, projectId: project.id, title: id, status: "idle" }) as Conversation;
+const now = "2026-09-15T10:00:00.000Z";
+const project: Project = {
+  id: "61616161-6161-4161-8161-616161616161",
+  name: "Project",
+  path: "/workspace/project",
+  normalizedPath: "/workspace/project",
+  repositoryIdentity: null,
+  repositoryRoot: null,
+  repositoryRelativePath: "",
+  groupingMode: null,
+  gitRepositoryLimit: 64,
+  color: "#6366f1",
+  status: "ready",
+  createdAt: now,
+  updatedAt: now,
+};
+const conversation = (id: string) => ({
+  ...buildDraftConversation(buildNewConversationPayload(project.id, defaultSettings), { id, now }),
+  title: id,
+});
 const primary = conversation("primary");
 const secondary = conversation("secondary");
 const split = {
@@ -30,14 +36,42 @@ const split = {
   layout: { axis: "columns", ratio: 50, first: { owner: "primary" }, second: { owner: "secondary" } },
   commitLayout: vi.fn(), closePane: vi.fn(), setPaneConversation: vi.fn(), updateSplitConversationId: vi.fn(),
 } as unknown as SplitPanes;
+const pendingCommand = (): Promise<ServerEvent> => new Promise<ServerEvent>(() => undefined);
+const connection: InertiaConnection = {
+  snapshot: null,
+  runtimeGeneration: null,
+  status: "offline",
+  error: null,
+  databaseRecoveryNotice: null,
+  dismissDatabaseRecoveryNotice: () => undefined,
+  clearError: () => undefined,
+  sendCommand: pendingCommand,
+  subscribe: () => () => undefined,
+};
 const shared = {
-  snapshotProjects: [project], settings: defaultSettings,
-  connection: { snapshot: null, status: "offline" },
+  snapshotProjects: [project], settings: defaultSettings, connection,
   providerMaintenance: { statuses: new Map(), operations: new Map() },
-  actions: {}, sendingConversationIds: new Set<string>(), busyAction: null,
+  backendProfileActions: {}, appUpdate: {},
+  busyAction: null, setBusyAction: vi.fn(), setActionError: vi.fn(), gitRefreshVersion: 0,
+  request: pendingCommand, actions: {}, sendingConversationIds: new Set<string>(), onTerminal: vi.fn(),
 } as unknown as Parameters<typeof useSplitPaneScenes>[0]["shared"];
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  Object.defineProperty(window, "inertia", {
+    configurable: true,
+    value: {
+      onPreviewState: vi.fn(() => () => undefined),
+      previewConnect: vi.fn(() => new Promise(() => undefined)),
+      previewClose: vi.fn(async () => undefined),
+    },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  Reflect.deleteProperty(window, "inertia");
+});
 
 it.each(["primary", "secondary"] as const)("reports the open launcher for the %s pane without a selected surface", (owner) => {
   const hook = renderHook(() => {

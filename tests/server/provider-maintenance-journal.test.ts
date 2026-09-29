@@ -219,6 +219,31 @@ describe("provider maintenance startup recovery", () => {
     expect(journal(dataDirectory, SECOND_GENERATION).pending()).toHaveLength(1);
   });
 
+  it("retires a verified record left unretired and reopens admission only after startup recovery", async () => {
+    const dataDirectory = root();
+    const owning = identity();
+    const verified = identity("2.0.0");
+    expect(journal(dataDirectory).begin("recover-unretired", owning)).toBe(true);
+    expect(journal(dataDirectory).markVerified("recover-unretired", verified)).toBe(true);
+    const leases = new ProviderInstallationLeaseCoordinator();
+
+    await expect(recoverProviderMaintenanceJournal({
+      journal: journal(dataDirectory, SECOND_GENERATION),
+      installationLeases: leases,
+      runtime: runtime(vi.fn(async () => verified)),
+      cwd: "/workspace",
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID,
+      priorBootCleanupConfirmed: false,
+    })).resolves.toEqual([]);
+    expect(leases.isQuarantined(verified)).toBe(false);
+    const reopened = leases.acquireUse(verified, {
+      kind: "provider-run",
+      operationId: "run-after-unretired-recovery",
+    });
+    expect(reopened.release({ cleanupConfirmed: true })).toBe(true);
+  });
+
   it("retains verified state when fresh conformance no longer matches it", async () => {
     const dataDirectory = root();
     const owning = identity();

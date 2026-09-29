@@ -293,7 +293,16 @@ describe("streamed agent text", () => {
   it("re-renders only the transcript for each token", async () => {
     // LiveElapsed ticks independently of token delivery. Keep its clock fixed
     // while counting token commits, including on slower Windows workers.
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "setTimeout",
+        "clearTimeout",
+        "requestAnimationFrame",
+        "cancelAnimationFrame",
+      ],
+    });
     const { default: App } = await import("../../src/renderer/src/App");
     let commits = 0;
     const rootFlush = { current: () => undefined as void };
@@ -308,7 +317,7 @@ describe("streamed agent text", () => {
       counting.renders.App = (counting.renders.App ?? 0) + 1;
       return App();
     }
-    const view = await renderReadyTranscript(
+    const view = render(
       <Profiler id="app" onRender={() => { commits += 1; }}>
         <RootFlusher><CountedApp /></RootFlusher>
       </Profiler>,
@@ -317,9 +326,11 @@ describe("streamed agent text", () => {
     for (let cycle = 0; cycle < 200 && quietCycles < 3; cycle += 1) {
       const commitsBefore = commits;
       await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await vi.dynamicImportSettled();
+        await vi.advanceTimersByTimeAsync(50);
       });
-      const mounted = COUNTED_SHELL.every((name) => (counting.renders[name] ?? 0) > 0);
+      const mounted = COUNTED_SHELL.every((name) => (counting.renders[name] ?? 0) > 0)
+        && view.container.querySelector(`[data-turn-id="${turn.id}"]`) !== null;
       quietCycles = mounted && commits === commitsBefore ? quietCycles + 1 : 0;
     }
     expect(COUNTED_SHELL.filter((name) => !counting.renders[name])).toEqual([]);
@@ -351,6 +362,7 @@ describe("streamed agent text", () => {
       ResponseTimeline: TOKENS,
       TurnTimeline: TOKENS,
     });
+    vi.useRealTimers();
     await waitFor(() => expect(view.container.textContent)
       .toContain(`token${TOKENS - 1}`));
   });

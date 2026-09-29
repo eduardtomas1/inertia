@@ -192,6 +192,7 @@ function openCodeServer(
   echoPath?: string,
   nestedLeak = false,
   sessionResponseLeak = false,
+  failDisconnect = false,
 ): string {
   const command = portableNodeExecutable(root, failAfterMcp ? "opencode-host-fail" : "opencode-host");
   writeNodeSubcommand(root, "serve", `
@@ -216,7 +217,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
   return json(res,{"inertia-chat-manager":{status:"connected"}});
  }
  if(req.method==="POST"&&url.pathname==="/mcp/inertia-chat-manager/disconnect"){
-  captured.push({kind:"mcp-disconnect",directory:url.searchParams.get("directory")});save();return json(res,true);
+  captured.push({kind:"mcp-disconnect",directory:url.searchParams.get("directory")});save();return ${failDisconnect ? "json(res,{message:\"disconnect failed\"},500)" : "json(res,true)"};
  }
  if(req.method==="GET"&&url.pathname==="/provider")return ${failAfterMcp ? "json(res,{message:\"provider failed \"+secretToken+\" \"+secretUrl},500)" : "json(res,{all:[{id:\"fake\",name:\"Fake\",source:\"config\",env:[],options:{},models:{\"model-a\":model}}],default:{fake:\"model-a\"},connected:[\"fake\"]})"};
  if(req.method==="GET"&&url.pathname==="/agent")return json(res,[]);
@@ -589,6 +590,46 @@ describe("provider host-tool injection", { concurrent: false }, () => {
     }
     expect(existsSync(capturePath)).toBe(true);
     expect(await loopbackPortIsOpen(capture.port)).toBe(false);
+  });
+
+  it("keeps the run outcome when OpenCode fails to disconnect a bridge on a server that is then stopped", async () => {
+    const root = portableFixtureRoot("OpenCode host disconnect failure");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: openCodeServer(root, capturePath, false, undefined, undefined, false, false, true) } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const input = nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-disconnect-failure",
+      runId: "run-opencode-disconnect-failure",
+      turnId: "turn-opencode-disconnect-failure",
+      cwd: root,
+      prompt: "Use chat tools",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    await expect(manager.run(input, { hostTools })).resolves.toMatchObject({
+      status: "completed",
+      cleanupConfirmed: true,
+    });
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      port: number;
+      captured: Array<Record<string, unknown>>;
+    };
+    expect(capture.captured.map(({ kind }) => kind)).toEqual([
+      "mcp-add",
+      "prompt",
+      "mcp-disconnect",
+    ]);
+    expect(await loopbackPortIsOpen(capture.port)).toBe(false);
+    await expect(manager.run({
+      ...input,
+      runId: "run-opencode-after-disconnect-failure",
+      turnId: "turn-opencode-after-disconnect-failure",
+    }, { hostTools })).resolves.toMatchObject({ status: "completed" });
   });
 
   it("does not start or inject provider MCP state for ordinary runs without host tools", async () => {

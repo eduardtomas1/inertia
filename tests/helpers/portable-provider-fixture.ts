@@ -2,6 +2,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -51,6 +52,20 @@ export function readStableFixtureCapture<T>(capturePath: string): T {
   throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
 }
 
+export function fixtureCaptureWriterSource(capturePath: string): string {
+  return `((value) => {
+  const nextPath = ${JSON.stringify(`${capturePath}.next`)};
+  fs.writeFileSync(nextPath, JSON.stringify(value));
+  try {
+    fs.renameSync(nextPath, ${JSON.stringify(capturePath)});
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    fs.copyFileSync(nextPath, ${JSON.stringify(capturePath)});
+    fs.unlinkSync(nextPath);
+  }
+})`;
+}
+
 /**
  * Create a portable executable for CLIs whose protocol is selected by a flag
  * (for example `agy --output-format stream-json`) instead of a Node-compatible subcommand.
@@ -78,6 +93,26 @@ export function writeNodeFlagExecutable(
     "utf8",
   );
   chmodSync(executable, 0o755);
+  return executable;
+}
+
+export function writeNodeClaudeExecutable(root: string, source: string): string {
+  if (process.platform !== "win32") return writeNodeFlagExecutable(root, "claude", source);
+  const packageDirectory = join(root, "node_modules", "@anthropic-ai", "claude-code");
+  mkdirSync(packageDirectory, { recursive: true });
+  writeFileSync(
+    join(packageDirectory, "package.json"),
+    JSON.stringify({ name: "@anthropic-ai/claude-code", bin: { claude: "cli.js" } }),
+    "utf8",
+  );
+  writeFileSync(join(packageDirectory, "cli.js"), `${source.trimStart()}\n`, "utf8");
+  copyFileSync(process.execPath, join(root, "node.exe"));
+  const executable = join(root, "claude.cmd");
+  writeFileSync(
+    executable,
+    "@echo off\r\n\"%~dp0node.exe\" \"%~dp0node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n",
+    "utf8",
+  );
   return executable;
 }
 

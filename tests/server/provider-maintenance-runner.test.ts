@@ -103,12 +103,18 @@ describe("provider maintenance runner", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
-  it("runs npm with its owning Node installation first on PATH", async () => {
+  it("pins npm to its owning Node, keeps the explicit prefix and strips npm environment overrides", async () => {
     const nvmRoot = "/home/ada/.nvm/versions/node/v22.19.0";
     let spawnedEnvironment: NodeJS.ProcessEnv | undefined;
+    const spawn = vi.fn((_command, _args, options) => {
+      spawnedEnvironment = options.env;
+      const child = fakeChild();
+      queueMicrotask(() => child.emit("close", 0, null));
+      return child;
+    });
     const result = await runProviderMaintenanceAction(action({
-      executable: `${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`,
-      args: ["install", "-g", "@openai/codex@latest"],
+      executable: `${nvmRoot}/bin/node`,
+      args: [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@latest"],
       environmentPathPrefix: `${nvmRoot}/bin`,
       lockKey: "package-manager:npm-global",
       installMethod: "npm-global",
@@ -116,20 +122,24 @@ describe("provider maintenance runner", () => {
       environment: {
         HOME: "/home/ada",
         PATH: "/usr/bin:/bin",
+        NPM_CONFIG_PREFIX: "/unrelated",
+        npm_config_prefix: "/also-unrelated",
+        NODE_OPTIONS: "--require=/untrusted.js",
       },
       platform: "linux",
       signal: new AbortController().signal,
-      spawn: (_command, _args, options) => {
-        spawnedEnvironment = options.env;
-        const child = fakeChild();
-        queueMicrotask(() => child.emit("close", 0, null));
-        return child;
-      },
+      spawn,
     });
 
     expect(result.status).toBe("succeeded");
     expect(spawnedEnvironment?.PATH)
       .toBe(`${nvmRoot}/bin:/usr/bin:/bin`);
+    expect(spawn).toHaveBeenCalledWith(`${nvmRoot}/bin/node`,
+      [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@latest"],
+      expect.objectContaining({ shell: false }));
+    expect(spawnedEnvironment).not.toHaveProperty("NPM_CONFIG_PREFIX");
+    expect(spawnedEnvironment).not.toHaveProperty("npm_config_prefix");
+    expect(spawnedEnvironment).not.toHaveProperty("NODE_OPTIONS");
   });
 
   it("routes Windows npm.cmd through a quoted cmd.exe invocation without generic shell mode", async () => {

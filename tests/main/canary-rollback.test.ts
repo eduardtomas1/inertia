@@ -145,6 +145,30 @@ describe("Canary last-known-good rollback", () => {
     expect(readdirSync(directory)).toEqual([]);
   });
 
+  it.each([
+    ["checksum", { status: 503 }, "checksum unavailable"],
+    ["checksum", { headers: { "content-length": String(2 * 1_024 * 1_024) } }, "checksum is oversized"],
+    ["package", { status: 404 }, "package unavailable"],
+    ["package", { headers: { "content-length": "0" } }, "package has an invalid size"],
+  ] as const)("cancels a rejected %s body (%j)", async (target, init, message) => {
+    const cancel = vi.fn();
+    const subject = manager({
+      fetch: vi.fn<typeof globalThis.fetch>(async (input) => {
+        const checksum = String(input).endsWith("SHA256SUMS.txt");
+        if (checksum && target === "package") {
+          return new Response(`${packageDigest}  ${packageName}\n`);
+        }
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) { controller.enqueue(new Uint8Array(1_024)); },
+          cancel,
+        }), init);
+      }),
+    });
+
+    await expect(subject.prepare()).rejects.toThrow(message);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("removes the bounded temporary package when Linux chmod fails", async () => {
     const subject = manager({
       chmodPath: vi.fn(async () => {

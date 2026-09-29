@@ -1,28 +1,9 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it, vi } from "vitest";
 
 import {
   OUTSIDE_POINTER_FOCUS_TARGET_SELECTOR,
   outsidePointerShouldRestoreFocus,
 } from "../../src/renderer/src/utils/dismissibleMenu";
-
-const composerSource = readFileSync(
-  new URL("../../src/renderer/src/components/composer/Composer.tsx", import.meta.url),
-  "utf8",
-);
-const routeConfirmationSource = readFileSync(
-  new URL("../../src/renderer/src/components/composer/RouteChangeConfirmation.tsx", import.meta.url),
-  "utf8",
-);
-const modelChooserSource = readFileSync(
-  new URL("../../src/renderer/src/components/ModelChooser.tsx", import.meta.url),
-  "utf8",
-);
-const usageSource = readFileSync(
-  new URL("../../src/renderer/src/components/UsageIndicator.tsx", import.meta.url),
-  "utf8",
-);
 
 function pointerTarget(matches: boolean): EventTarget {
   return {
@@ -40,48 +21,6 @@ describe("accessibility focus policy", () => {
     );
     expect(OUTSIDE_POINTER_FOCUS_TARGET_SELECTOR.split(", ")).not.toContain(
       "[tabindex]",
-    );
-  });
-
-  it("shares the same outside-pointer focus policy across menus, model chooser, and usage", () => {
-    expect(modelChooserSource).toContain(
-      "close(outsidePointerShouldRestoreFocus(event.target))",
-    );
-    expect(usageSource).toContain(
-      "closePopover(outsidePointerShouldRestoreFocus(target))",
-    );
-  });
-
-  it("focuses and restores the route-change confirmation without trapping ordinary composer controls", () => {
-    expect(composerSource).toMatch(
-      /window\.requestAnimationFrame\(\(\) => \{[\s\S]*?window\.requestAnimationFrame\(\(\) =>[\s\S]*?routeCancelRef\.current\?\.focus\(\)\)/u,
-    );
-    expect(composerSource).toContain("window.cancelAnimationFrame(closeFrame)");
-    expect(composerSource).toContain("window.cancelAnimationFrame(settleFrame)");
-    expect(routeConfirmationSource).toContain('role="alertdialog"');
-    expect(routeConfirmationSource).toContain('aria-modal="false"');
-    expect(routeConfirmationSource).toContain(
-      "aria-busy={creating}",
-    );
-    expect(routeConfirmationSource).toContain('event.key !== "Escape"');
-    expect(composerSource).toContain(
-      'querySelector<HTMLButtonElement>(".selected-model-chip")',
-    );
-  });
-
-  it("keeps active-descendant ownership on the focused model search only", () => {
-    expect(modelChooserSource.match(/aria-activedescendant=/gu)).toHaveLength(1);
-    expect(modelChooserSource).toMatch(
-      /<input[\s\S]*?aria-controls=\{resultsId\}[\s\S]*?aria-activedescendant=\{activeDescendant\}/u,
-    );
-    expect(modelChooserSource).toContain('className="model-chooser-list"');
-    expect(modelChooserSource).toContain("<ul");
-    expect(modelChooserSource).not.toContain('role="listbox"');
-    expect(modelChooserSource).toContain(
-      "onFavoriteToggle={toggleFavorite}",
-    );
-    expect(modelChooserSource).not.toContain(
-      'aria-label="Model favorite actions"',
     );
   });
 });

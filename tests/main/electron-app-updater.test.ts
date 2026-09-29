@@ -93,6 +93,8 @@ import {
   appUpdateHandoffOwner,
   type AppUpdateHandoffSnapshot,
 } from "../../src/main/app-update-handoff";
+import { AppUpdateInstallCoordinator } from "../../src/main/app-update-install";
+import type { AppUpdateStatus } from "../../src/shared/desktop";
 import {
   parseWindowsUpdateOperationClaim,
   windowsUpdateOperationClaimAuthenticationTag,
@@ -100,6 +102,7 @@ import {
   windowsUpdateTerminalReceiptTemporaryName,
 } from "../../src/main/windows-update-terminal-receipt";
 const roots: string[] = [];
+const macosStagingBoundMs = 10 * 60_000;
 
 function windowsInstallerBytes(candidateDigest = "b".repeat(64)): Buffer {
   return Buffer.concat([
@@ -418,6 +421,162 @@ describe("electron updater adapter", () => {
     const handoff = adapter.quitAndInstall();
     updaterFixture.emit("error", new Error("installer failed"));
     await expect(handoff).resolves.toBe("native-outcome-uncertain");
+  });
+
+  it("keeps the macOS staging bound unref'd and clears it on handoff", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    try {
+      const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+      const handoff = adapter.quitAndInstall(vi.fn());
+      const bound = setTimeoutSpy.mock.calls.findIndex(([, delay]) =>
+        delay === macosStagingBoundMs);
+      expect(bound).toBeGreaterThanOrEqual(0);
+      const timer = setTimeoutSpy.mock.results[bound]!.value as NodeJS.Timeout;
+      expect(timer.hasRef()).toBe(false);
+
+      updaterFixture.emitNative("before-quit-for-update");
+      await expect(handoff).resolves.toBe("handoff-confirmed");
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("waits for slow Squirrel staging inside the bound", async () => {
+    vi.useFakeTimers();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+    const onHandoff = vi.fn();
+    let result: string | null = null;
+    const handoff = adapter.quitAndInstall(onHandoff);
+    void handoff.then((value) => { result = value; });
+
+    await vi.advanceTimersByTimeAsync(macosStagingBoundMs - 1);
+    expect(result).toBeNull();
+    expect(onHandoff).not.toHaveBeenCalled();
+
+    updaterFixture.emitNative("before-quit-for-update");
+    await expect(handoff).resolves.toBe("handoff-confirmed");
+    expect(onHandoff).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(updaterFixture.nativeListeners.get("before-quit-for-update")?.size ?? 0).toBe(0);
+    expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
+  });
+
+  it("declares staging beyond the bound uncertain and still honours a late handoff", async () => {
+    vi.useFakeTimers();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+    const onHandoff = vi.fn();
+    const handoff = adapter.quitAndInstall(onHandoff);
+
+    await vi.advanceTimersByTimeAsync(macosStagingBoundMs);
+    await expect(handoff).resolves.toBe("native-outcome-uncertain");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(onHandoff).not.toHaveBeenCalled();
+    expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
+
+    updaterFixture.emitNative("before-quit-for-update");
+    expect(onHandoff).toHaveBeenCalledTimes(1);
+    expect(updaterFixture.nativeListeners.get("before-quit-for-update")?.size ?? 0).toBe(0);
+  });
+
+  it("still honours a native handoff that arrives after an uncertain error", async () => {
+    vi.useFakeTimers();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+    const onHandoff = vi.fn();
+    const handoff = adapter.quitAndInstall(onHandoff);
+    await vi.advanceTimersByTimeAsync(6_000);
+    updaterFixture.emit("error", new Error("unrelated updater failure"));
+    await expect(handoff).resolves.toBe("native-outcome-uncertain");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(onHandoff).not.toHaveBeenCalled();
+    expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
+
+    updaterFixture.emitNative("before-quit-for-update");
+    updaterFixture.emitNative("before-quit-for-update");
+    expect(onHandoff).toHaveBeenCalledTimes(1);
+    expect(updaterFixture.nativeListeners.get("before-quit-for-update")?.size ?? 0).toBe(0);
+  });
+
+  it.each([
+    "late-handoff",
+    "late-handoff-after-bound",
+    "quit-while-staging",
+    "quit-after-error",
+    "quit-after-bound",
+  ] as const)(
+    "never leaves a macOS install coordinator unable to quit (%s)",
+    async (scenario) => {
+      vi.useFakeTimers();
+      const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+      const status = { state: "downloaded" } as AppUpdateStatus;
+      const failInstall = vi.fn(() => status);
+      const finishNormalShutdown = vi.fn();
+      const coordinator = new AppUpdateInstallCoordinator({
+        platform: "darwin",
+        service: {
+          current: () => status,
+          beginInstall: () => status,
+          blockInstall: () => status,
+          failInstall,
+          abortInstall: async () => await adapter.abortInstall!(),
+          quitAndInstall: async (onHandoff) =>
+            await adapter.quitAndInstall(onHandoff),
+        },
+        runtime: () => ({
+          prepareForUpdate: async () => ({ ready: true as const }),
+          releaseUpdatePreparation: async () => true,
+        }),
+        privateConnect: () => null,
+        cleanup: async () => true,
+        finishNormalShutdown,
+        onUnconfirmedShutdown: vi.fn(),
+        reportError: vi.fn(),
+      });
+
+      const installing = coordinator.install();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(updaterFixture.updater.quitAndInstall).toHaveBeenCalledOnce();
+      if (scenario.endsWith("after-bound")) {
+        await vi.advanceTimersByTimeAsync(macosStagingBoundMs);
+        await installing;
+        expect(failInstall).toHaveBeenCalledOnce();
+      }
+      if (scenario.startsWith("late-handoff")) {
+        updaterFixture.emitNative("before-quit-for-update");
+        await installing;
+        expect(coordinator.allowBeforeQuit()).toBe(true);
+        expect(finishNormalShutdown).not.toHaveBeenCalled();
+        return;
+      }
+      if (scenario === "quit-after-error") {
+        updaterFixture.emit("error", new Error("Squirrel rejected the update"));
+        await installing;
+      }
+      expect(coordinator.allowBeforeQuit()).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      await installing;
+      expect(finishNormalShutdown).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("releases pending Squirrel staging when a normal quit aborts the install", async () => {
+    vi.useFakeTimers();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
+    const onHandoff = vi.fn();
+    let result: string | null = null;
+    void adapter.quitAndInstall(onHandoff).then((value) => { result = value; });
+    expect(vi.getTimerCount()).toBe(1);
+
+    await adapter.abortInstall!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toBe("native-outcome-uncertain");
+    expect(vi.getTimerCount()).toBe(0);
+    await expect(adapter.abortInstall!()).resolves.toBeUndefined();
+    expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
+    expect(onHandoff).not.toHaveBeenCalled();
   });
 
   it("refuses Windows native install without a durable preparation receipt", async () => {

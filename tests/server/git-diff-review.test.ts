@@ -500,6 +500,91 @@ describe("safe selected diff reversal", () => {
     expect(readFileSync(lockPath, "utf8")).toBe("foreign lock owner\n");
   });
 
+  it("restores a deleted line whose content starts with two dashes", async () => {
+    const root = repository("select 1;\n-- keep this comment\nselect 2;\n");
+    writeFileSync(join(root, "example.txt"), "select 1;\nselect 2;\n");
+    const selection = await selectionFor(root, (line) => line.kind === "deletion" && line.content === "-- keep this comment");
+
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("select 1;\n-- keep this comment\nselect 2;\n");
+  });
+
+  it("restores a deletion at its own position after an added line that starts with two pluses", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\n++ example.txt\nbeta\n");
+    const selection = await selectionFor(root, (line) => line.kind === "deletion" && line.content === "gamma");
+
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("alpha\n++ example.txt\nbeta\ngamma\n");
+  });
+
+  it("finds a changed non-ASCII file in the parsed diff", async () => {
+    const root = repository();
+    writeFileSync(join(root, "café.txt"), "alpha\nbeta\n");
+    git(root, "add", "café.txt");
+    git(root, "commit", "-m", "unicode");
+    writeFileSync(join(root, "café.txt"), "alpha\nbeta\ngamma\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "gamma");
+
+    expect(selection.filePath).toBe("café.txt");
+    await apply(root, selection);
+
+    expect(readFileSync(join(root, "café.txt"), "utf8")).toBe("alpha\nbeta\n");
+  });
+
+  it.skipIf(process.platform === "win32")("inspects a reversal without running a repository filesystem monitor", async () => {
+    const root = repository();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\nepsilon\n");
+    const selection = await selectionFor(root, (line) => line.kind === "addition" && line.content === "epsilon");
+    const hooks = mkdtempSync(join(tmpdir(), "inertia-fsmonitor-hook-"));
+    roots.push(hooks);
+    const marker = join(hooks, "marker");
+    const hook = join(hooks, "fsmonitor");
+    writeFileSync(hook, `#!/bin/sh\necho ran >> "${marker}"\nexit 1\n`);
+    chmodSync(hook, 0o755);
+    git(root, "config", "core.fsmonitor", hook);
+
+    const plan = await inspectDiffSelection(root, selection);
+
+    expect(plan.affectedLayers).toEqual(["worktree"]);
+    expect(() => readFileSync(marker, "utf8")).toThrow();
+
+    const staged = await selectionFor(root, (line) => line.kind === "addition" && line.content === "delta");
+    const { result } = await apply(root, staged);
+    expect(git(root, "-c", "core.fsmonitor=false", "show", ":example.txt")).toBe("alpha\nbeta\ngamma\n");
+    await undoDiffSelection(root, result.operation.id);
+
+    expect(readFileSync(join(root, "example.txt"), "utf8")).toBe("alpha\nbeta\ngamma\ndelta\nepsilon\n");
+    expect(() => readFileSync(marker, "utf8")).toThrow();
+  });
+
+  it.skipIf(process.platform === "win32")("recovers a reversal index entry without running a repository filesystem monitor", async () => {
+    const root = repository();
+    const committed = git(root, "rev-parse", ":example.txt").trim();
+    writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");
+    git(root, "add", "example.txt");
+    const staged = git(root, "rev-parse", ":example.txt").trim();
+    const hooks = mkdtempSync(join(tmpdir(), "inertia-fsmonitor-hook-"));
+    roots.push(hooks);
+    const marker = join(hooks, "marker");
+    const hook = join(hooks, "fsmonitor");
+    writeFileSync(hook, `#!/bin/sh\necho ran >> "${marker}"\nexit 1\n`);
+    chmodSync(hook, 0o755);
+    git(root, "config", "core.fsmonitor", hook);
+
+    await restoreReversalIndexEntry(
+      root, "example.txt", { mode: "100644", oid: staged },
+      { mode: "100644", oid: committed }, async () => undefined,
+    );
+
+    expect(() => readFileSync(marker, "utf8")).toThrow();
+    expect(git(root, "-c", "core.fsmonitor=false", "rev-parse", ":example.txt").trim()).toBe(committed);
+  });
+
   it("does not reconcile a live reversal during concurrent inspection", async () => {
     const root = repository();
     writeFileSync(join(root, "example.txt"), "alpha\nbeta\ngamma\ndelta\n");

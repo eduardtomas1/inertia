@@ -2,6 +2,63 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.64 — 2026-09-27
+
+Sign in to every provider from inside Inertia, keep large conversations and
+attachments under control, and trust what the app says about each provider.
+
+### Provider sign-in and status
+
+- Sign in to Claude, Codex, Cursor, Kimi Code, OpenCode and Antigravity from
+  the in-app **Connect** window. Typing and pasting codes now reach the
+  provider, including after returning from the browser, and Ctrl+V pastes on
+  Windows and Linux.
+- A slow provider check no longer tells you to sign in. It shows **Checking**,
+  retries in the background, and then reports a connection problem with a
+  **Refresh** action. A definite signed-out answer still shows **Sign in**.
+- OpenCode asks for a CLI update only when the CLI is actually incompatible.
+  A slow safety check is retried instead.
+
+### Conversations and history
+
+- Open very large conversations in pages instead of losing the connection.
+  **Load earlier messages** keeps your reading position, and search results
+  and turn links load the right place in main, split and detached chats.
+- While offline, **Load earlier messages** explains why it is unavailable,
+  and a load interrupted by a disconnect resumes when the connection returns.
+- Queued messages survive a restart and are not sent twice after a lost
+  acknowledgement. An explicit send retries once after a failed turn.
+- When a provider does not confirm a follow-up, Inertia says so and asks you
+  to check the chat before resending, instead of reporting it as refused.
+- Cursor plans show cancelled steps as cancelled, keep the full list as todos
+  update, and never count cancelled work as complete.
+- If a provider rejects the first message of a new chat, the composer stays
+  on the saved chat so you can retry right away.
+
+### Attachments and storage
+
+- Attach UTF-16 text and colour-coded logs, plus JSONC, JSON5, notebooks,
+  MDX, Dockerfiles and other common configuration files. Unsupported files
+  get a clear explanation.
+- See attachment storage for every chat in **Settings → Archive & data**, with
+  a 2–64 GiB budget (16 GiB by default). Nothing is deleted without your
+  confirmation, and active chats are always protected.
+- The newest attachment previews stay available while scrolling long
+  conversations, and new follow-up images appear immediately.
+
+### Reliability
+
+- Stop a Claude turn reliably even when the provider stops responding.
+- Antigravity shows failed tools as failed and replaces oversized streamed
+  output with the final answer. Claude usage separates session totals from
+  each run's own usage.
+- Closing a window with Browser tabs open no longer interrupts their cleanup,
+  and Inertia quits faster on macOS.
+- Changing the system clock no longer leaves a turn stuck, and panels keep
+  working when layout preferences cannot be saved.
+- Update Electron to 44.4.5, the Claude Agent SDK to 0.3.283, ACP to 1.5.0 and
+  the OpenCode SDK to 1.18.32, and refresh the Kimi icon.
+
 ## 0.0.63 — 2026-09-25
 
 A clearer workspace, richer chat references and attachments, and more

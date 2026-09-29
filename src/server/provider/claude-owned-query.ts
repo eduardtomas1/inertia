@@ -18,6 +18,11 @@ import {
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 import { BoundedClaudeTransport, type ClaudeTransportLimits } from "./claude-transport";
+import { providerProcessInvocation } from "./process";
+import {
+  resolveClaudeLaunchTarget,
+  type ClaudeLaunchTargetOptions,
+} from "./claude-launch-target";
 
 const MAX_CLAUDE_STDERR_TAIL_CHARS = 4 * 1024;
 
@@ -28,6 +33,8 @@ export interface ClaudeOwnedQueryDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
   /** Small deterministic wire budgets for synthetic transport tests. */
   transportLimits?: ClaudeTransportLimits;
+  platform?: NodeJS.Platform;
+  launchTarget?: Omit<ClaudeLaunchTargetOptions, "platform">;
 }
 
 export interface ClaudeOwnedQueryProcess {
@@ -82,15 +89,27 @@ export function createClaudeOwnedQueryProcess(
         "Claude Agent SDK attempted to spawn more than one process for a single query.",
       );
     }
-    const invocation = runtimeOwnedProcessInvocation(
-      spawnOptions.command,
-      spawnOptions.args,
+    const launch = resolveClaudeLaunchTarget(spawnOptions.command, spawnOptions.env, {
+      ...dependencies.launchTarget,
+      ...(dependencies.platform ? { platform: dependencies.platform } : {}),
+    });
+    if (!launch.ok) throw new Error(`${launch.reason}.`);
+    const invocation = providerProcessInvocation(
+      launch.target.command,
+      [...launch.target.scriptPrefix, ...spawnOptions.args],
+      spawnOptions.env,
+      dependencies.platform,
     );
-    const ownedChild = spawnRuntimeOwnedProcess(() => spawnProcess(invocation.command, invocation.args, {
+    const ownedInvocation = runtimeOwnedProcessInvocation(
+      invocation.command,
+      invocation.args,
+    );
+    const ownedChild = spawnRuntimeOwnedProcess(() => spawnProcess(ownedInvocation.command, ownedInvocation.args, {
       cwd: spawnOptions.cwd,
       env: spawnOptions.env,
       detached: process.platform !== "win32",
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     }));

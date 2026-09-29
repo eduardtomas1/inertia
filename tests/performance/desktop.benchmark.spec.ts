@@ -43,6 +43,7 @@ import {
 } from "../helpers/desktop-benchmark-readiness-diagnostic";
 import { loadSeededConversationTurns } from "../e2e/support/conversation-history";
 import { attachRuntimeLifecycleFailureDiagnostic } from "../e2e/support/runtime-lifecycle-diagnostics";
+import { elapseObservationWindow } from "../e2e/support/stable-sample";
 import { collectGuardianFailureCodes, type GuardianFailureCode } from "../helpers/guardian-failure-codes";
 import {
   AsyncCleanupCoordinator,
@@ -1912,7 +1913,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
     const idleStart = await processSample(cold.electronApp);
     cold.cleanup.resource.runtimePid = idleStart.runtimePid;
-    await cold.page.waitForTimeout(1_500);
+    await elapseObservationWindow(cold.page, 1_500);
     const idleEnd = await processSample(cold.electronApp);
     const prefetchedOverlays = await prefetchedOverlayMeasurements(cold.page);
     const memoryBaseline = await rendererMemorySample(
@@ -2011,13 +2012,13 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       cold.page,
       "split-and-terminal-closed-immediate",
     );
-    await cold.page.waitForTimeout(5_000);
+    await elapseObservationWindow(cold.page, 5_000);
     const memoryPostClose5s = await rendererMemorySample(
       cold.electronApp,
       cold.page,
       "split-and-terminal-closed-after-5s",
     );
-    await cold.page.waitForTimeout(25_000);
+    await elapseObservationWindow(cold.page, 25_000);
     const memoryPostClose30s = await rendererMemorySample(
       cold.electronApp,
       cold.page,

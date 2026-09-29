@@ -207,13 +207,40 @@ export async function pushCurrentBranch(
   );
   // An OID refspec cannot set upstream automatically. Name the intended local
   // branch explicitly even if a different branch is now checked out.
-  await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.remote`, remote], {
-    failureMessage: "The commit was pushed, but its upstream remote could not be saved.",
-  });
-  await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.merge`, `refs/heads/${branch}`], {
-    failureMessage: "The commit was pushed, but its upstream branch could not be saved.",
-  });
+  const [trackedRemotes, trackedMerges] = await Promise.all([
+    configuredValues(root, `branch.${branch}.remote`),
+    configuredValues(root, `branch.${branch}.merge`),
+  ]);
+  if (
+    trackedRemotes.every((value) => value === remote)
+    && trackedMerges.every((value) => value === `refs/heads/${branch}`)
+  ) {
+    await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.remote`, remote], {
+      failureMessage: "The commit was pushed, but its upstream remote could not be saved.",
+    });
+    await runGit(root, ["config", "--local", "--replace-all", `branch.${branch}.merge`, `refs/heads/${branch}`], {
+      failureMessage: "The commit was pushed, but its upstream branch could not be saved.",
+    });
+  }
   return { status: await getRepositoryStatus(root) };
+}
+
+async function configuredValues(root: string, key: string): Promise<string[]> {
+  try {
+    const result = await runGitInspection(root, ["config", "--null", "--get-all", key], {
+      maxOutputBytes: 16 * 1024,
+      failureMessage: "The commit was pushed, but its upstream configuration could not be inspected.",
+    });
+    return result.stdout.toString("utf8").split("\0").filter(Boolean);
+  } catch (error) {
+    if (
+      error instanceof GitError
+      && error.code === "operation-failed"
+      && error.exitCode === 1
+      && !isGitProcessTreeTerminationFailure(error)
+    ) return [];
+    throw error;
+  }
 }
 
 function remoteSelectionError(

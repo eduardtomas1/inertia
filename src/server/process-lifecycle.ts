@@ -340,10 +340,19 @@ function waitForPosixProcessGroupExit(
   waitMs: number,
   processGroupCanExecute:
     ((processGroupId: number) => boolean | null) | null = null,
+  resignal = false,
 ): Promise<boolean> {
   const deadline = Date.now() + waitMs;
+  const killGroup = (): boolean => {
+    try {
+      return killProcess(-pid, "SIGKILL");
+    } catch {
+      return false;
+    }
+  };
   return new Promise<boolean>((resolve) => {
     const inspect = (): void => {
+      if (resignal) killGroup();
       try {
         killProcess(-pid, 0);
       } catch (error) {
@@ -636,6 +645,7 @@ export function createOwnedPidProcessTreeTermination(
       return true;
     }
 
+    const originalAttempt = !started;
     if (!started) {
       started = true;
       // node-pty creates POSIX terminals with forkpty, making the shell root
@@ -659,6 +669,7 @@ export function createOwnedPidProcessTreeTermination(
         killProcess,
         exitWaitMs,
         processGroupCanExecute,
+        originalAttempt,
       ),
       waitForPosixProcessesExit(
         descendants,
@@ -842,6 +853,7 @@ export async function terminateProcessTreeAndWait(
         killProcess,
         exitWaitMs,
         processGroupCanExecute,
+        true,
       ),
       waitForPosixProcessesExit(
         descendants,

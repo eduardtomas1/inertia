@@ -821,6 +821,112 @@ describe("provider process-tree termination", () => {
     }
   });
 
+  describe("POSIX group kill that misses a forking member", () => {
+    const groupDroppingFirstKill = (child: ReturnType<typeof fakeChild>) => {
+      let groupKills = 0;
+      let groupAlive = true;
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (target === -4_242 && signal === 0) {
+          if (!groupAlive) throw noSuchProcess("group gone");
+          return true as const;
+        }
+        if (target === -4_242 && signal === "SIGKILL") {
+          groupKills += 1;
+          if (groupKills > 1) groupAlive = false;
+        }
+        if (target === 4_242 && signal === "SIGKILL" && child.exitCode === null) {
+          child.exitCode = 1;
+          queueMicrotask(() => child.emit("close", 1));
+        }
+        return true as const;
+      });
+      return { killProcess, groupKills: () => groupKills };
+    };
+
+    it("re-signals the group on each settle probe until a member forked during the first kill is gone", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const { killProcess, groupKills } = groupDroppingFirstKill(child);
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 100,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(20);
+        expect(groupKills()).toBeGreaterThan(1);
+        expect(result).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(100);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("re-signals the group of a PID-owned tree on each settle probe", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const { killProcess, groupKills } = groupDroppingFirstKill(child);
+        let result: boolean | undefined;
+        void createOwnedPidProcessTreeTermination(
+          4_242,
+          async () => true,
+          {
+            platform: "linux",
+            killProcess: killProcess as never,
+            spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
+            processCanExecute: () => null,
+            processGroupCanExecute: () => null,
+            waitMs: 100,
+          },
+        )().then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(20);
+        expect(groupKills()).toBeGreaterThan(1);
+        expect(result).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(100);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the result unconfirmed when the group survives every re-signal until the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal === "SIGKILL" && child.exitCode === null) {
+            child.exitCode = 1;
+            queueMicrotask(() => child.emit("close", 1));
+          }
+          return true as const;
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 100,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(result).toBe(false);
+        expect(killProcess.mock.calls.filter(([target, signal]) =>
+          target === -4_242 && signal === "SIGKILL").length).toBeGreaterThan(2);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(100);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("POSIX tree termination truth table", () => {
     interface Row {
       label: string;

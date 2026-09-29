@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 const MAX_FREEZE_PASSES = 8;
+const MAX_STOP_OBSERVATION_READS = 8;
 const PROCESS_TABLE_COMMAND = "/bin/ps";
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 250;
 const PROCESS_TABLE_MAX_BYTES = 2 * 1024 * 1024;
@@ -23,6 +24,7 @@ export interface PosixProcessTreeKillResult {
   scanStabilized: boolean;
   rootStop: PosixRootStopResult;
   rootState: PosixRootState;
+  rootRunningObserved: boolean;
 }
 
 export function posixDescendantPids(
@@ -90,6 +92,7 @@ export function forceKillPosixProcessTreeWithStatus(
       scanStabilized: true,
       rootStop: "absent",
       rootState: "absent",
+      rootRunningObserved: false,
     };
   }
   const kill = dependencies.kill ?? process.kill;
@@ -98,6 +101,13 @@ export function forceKillPosixProcessTreeWithStatus(
   const deadlineAt = dependencies.deadlineAt ?? Number.POSITIVE_INFINITY;
   const now = dependencies.now ?? Date.now;
 
+  const sendStop = (target: number): void => {
+    try {
+      kill(target, "SIGSTOP");
+    } catch {
+      return;
+    }
+  };
   if (rootProcessGroup) {
     try { kill(-rootPid, "SIGSTOP"); } catch { /* It may not be a group leader. */ }
   }
@@ -116,6 +126,8 @@ export function forceKillPosixProcessTreeWithStatus(
   let killOrder: number[] = [];
   let snapshotConfirmed = false;
   let scanStabilized = false;
+  let stopObservationReads = 0;
+  let rootRunningObserved = false;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
     const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
@@ -146,10 +158,22 @@ export function forceKillPosixProcessTreeWithStatus(
     }
     if (!snapshotRead) continue;
     rootState = posixRootState(rootPid, processTable);
+    if (rootState === "running") rootRunningObserved = true;
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
     if (newlyDiscovered.length === 0) {
-      scanStabilized = true;
+      if (
+        rootStop === "sent"
+        && rootState === "running"
+        && stopObservationReads < MAX_STOP_OBSERVATION_READS
+      ) {
+        stopObservationReads += 1;
+        if (rootProcessGroup) sendStop(-rootPid);
+        sendStop(rootPid);
+        pass -= 1;
+        continue;
+      }
+      scanStabilized = rootStop !== "sent" || rootState !== "running";
       snapshotConfirmed = rootFreezeConfirmed
         && liveProcessState(rootPid, processTable);
       break;
@@ -173,5 +197,12 @@ export function forceKillPosixProcessTreeWithStatus(
     try { kill(-rootPid, "SIGKILL"); } catch { /* The group may already be gone. */ }
   }
   try { kill(rootPid, "SIGKILL"); } catch { /* Already gone. */ }
-  return { descendants: targets, snapshotConfirmed, scanStabilized, rootStop, rootState };
+  return {
+    descendants: targets,
+    snapshotConfirmed,
+    scanStabilized,
+    rootStop,
+    rootState,
+    rootRunningObserved,
+  };
 }

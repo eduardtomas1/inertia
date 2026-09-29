@@ -35,7 +35,7 @@ import {
 } from "./terminal-invocation";
 import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
-import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
+import { terminalCleanupFailureOptions } from "./terminal-cleanup-failure";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 
 import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
@@ -1023,15 +1023,10 @@ export class TerminalManager {
     const windowsTerminalAtStop = this.platform === "win32"
       ? terminalStopObservation(session)
       : null;
-    const windowsFailureOptions = (): ErrorOptions | undefined => windowsTerminalAtStop
-      ? { cause: {
-          windowsCleanupFailures: windowsCleanupFailures(),
-          windowsTerminalCleanup: {
-            atStop: windowsTerminalAtStop,
-            atFailure: terminalStopObservation(session),
-          },
-        } }
-      : undefined;
+    const windowsFailureOptions = (): ErrorOptions => terminalCleanupFailureOptions(
+      windowsTerminalAtStop,
+      () => terminalStopObservation(session),
+    );
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();

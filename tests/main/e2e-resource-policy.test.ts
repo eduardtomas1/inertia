@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -82,6 +82,11 @@ describe("Electron scenario resource ownership", () => {
     expect(() => assertE2eWindowResource("runtime-recovery", "primary")).toThrow("primary-display");
     expect(() => assertE2eWindowResource("display-sensitive", "primary")).not.toThrow();
     expect(() => assertE2eWindowResource("isolated", undefined)).not.toThrow();
+  });
+
+  it("keeps scenarios that hold a synthetic pointer button out of the parallel isolated lane", () => {
+    const { isolated } = discoverE2eResources(join(process.cwd(), "tests/e2e"));
+    expect(isolated.filter((file) => /\.mouse\.down\(/u.test(readFileSync(file, "utf8")))).toEqual([]);
   });
 
   it("assigns every current spec/scenario exactly once in the actual Playwright configuration", () => {

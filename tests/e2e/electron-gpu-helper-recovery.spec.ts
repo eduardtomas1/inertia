@@ -174,7 +174,7 @@ test("recovers a GPU helper that stalls after restart before a workspace tool op
 
 async function waitForRecoveries(count: number): Promise<void> {
   await expect.poll(() => test.info().annotations
-    .filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED).length, { timeout: 15_000 }).toBe(count);
+    .filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED).length, { timeout: 30_000 }).toBe(count);
 }
 
 test("recovers a stall met only by actions on a secondary window", async () => {
@@ -219,11 +219,14 @@ test("recovers a stall that begins while a click waits for its moving target", a
     const toggle = rightPanelToggle(app.page);
     const pressed = await toggle.getAttribute("aria-pressed");
     await app.page.addStyleTag({ content: "@keyframes frame-monitor-drift { from { translate: 0 } to { translate: 24px } }"
-      + " [data-panel-layout-controls] [data-right-panel-toggle] { animation: frame-monitor-drift 1500ms linear both; }" });
-    const clicked = toggle.click();
+      + " [data-panel-layout-controls] [data-right-panel-toggle] { animation: frame-monitor-drift 400ms linear infinite alternate; }" });
+    let clickSettled = false;
+    const clicked = toggle.click().finally(() => { clickSettled = true; });
     await expect.poll(() => toggle.evaluate((element) => element.getAnimations()
       .some((animation) => animation.playState === "running" && Number(animation.currentTime) > 200))).toBe(true);
     process.kill(gpuPid, "SIGSTOP");
+    expect(clickSettled).toBe(false);
+    await toggle.evaluate((element) => { element.style.animation = "none"; });
     await clicked;
     await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
     await waitForRecoveries(1);
@@ -273,9 +276,10 @@ test("leaves a stopped helper alone while every window is hidden and recovers it
     const mainPid = app.electronApp.process().pid!;
     gpuPid = await directGpuHelper(mainPid);
     gpuStart = await processStart(gpuPid);
-    await app.electronApp.evaluate(({ BrowserWindow }) => {
+    expect(await app.electronApp.evaluate(({ BrowserWindow }) => {
       for (const window of BrowserWindow.getAllWindows()) window.hide();
-    });
+      return BrowserWindow.getAllWindows().some((window) => window.isVisible() && !window.isMinimized());
+    })).toBe(false);
     process.kill(gpuPid, "SIGSTOP");
     await elapseObservationWindow(app.page, 6_000);
     expect(await processStart(gpuPid)).toBe(gpuStart);

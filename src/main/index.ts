@@ -75,7 +75,7 @@ import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator, appUpdateInstallRuntimeContext } from
   "./app-update-install.js";
 import { CanaryRollbackManager } from "./canary-rollback.js";
-import { APP_UPDATE_IPC, registerAppUpdateIpc } from "./app-update-ipc.js";
+import { registerAppUpdateIpc } from "./app-update-ipc.js";
 import { initializeReleaseUpdates } from "./release-updates.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
@@ -87,6 +87,7 @@ import {
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
+import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
@@ -132,42 +133,6 @@ import { disableShutdownBlockingProfileFeatures } from "./chromium-profile-featu
 disableShutdownBlockingProfileFeatures(app.commandLine);
 const installedUpdateFixture = installedUpdateTestFixture();
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
-const IPC = {
-  getRuntimeConnection: "inertia:runtime-connection",
-  runtimeReady: "inertia:runtime-ready",
-  selectDirectory: "inertia:select-directory",
-  selectCodexExecutable: "inertia:select-codex-executable",
-  exportRecoveryData: "inertia:export-recovery-data",
-  importRecoveryData: "inertia:import-recovery-data",
-  revealRuntimeLogs: "inertia:reveal-runtime-logs",
-  copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
-  copyText: "inertia:copy-text",
-  ...APP_UPDATE_IPC,
-  selectAttachments: "inertia:select-attachments",
-  beginAttachmentImport: "inertia:begin-attachment-import",
-  importAttachments: "inertia:import-attachments",
-  commitAttachmentImport: "inertia:commit-attachment-import",
-  cancelAttachmentImport: "inertia:cancel-attachment-import",
-  prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
-  finishAttachmentHandoff: "inertia:finish-attachment-handoff",
-  releaseAttachment: "inertia:release-attachment",
-  openAttachmentExternally: "inertia:open-attachment-externally",
-  openProjectPath: "inertia:open-project-path",
-  openExternal: "inertia:open-external",
-  showThreadNotification: "inertia:show-thread-notification",
-  threadNotificationActivated: "inertia:thread-notification-activated",
-  getAppHealth: "inertia:get-app-health",
-  clearAppCache: "inertia:clear-app-cache",
-  previewConnect: "inertia:preview-connect",
-  previewNavigate: "inertia:preview-navigate",
-  previewCommand: "inertia:preview-command",
-  previewTab: "inertia:preview-tab",
-  previewSetBounds: "inertia:preview-set-bounds",
-  previewClose: "inertia:preview-close",
-  previewInspectEvidenceImage: "inertia:preview-inspect-evidence-image",
-  previewState: "inertia:preview-state",
-  syncThemePreference: "inertia:sync-theme-preference",
-} as const;
 protocol.registerSchemesAsPrivileged([
   {
     scheme: releaseChannel.protocolScheme,

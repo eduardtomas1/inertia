@@ -1,9 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { MascotSettingsBridge, MascotSnapshot } from "../shared/mascot.js";
+import { MASCOT_IPC, type MascotSettingsBridge, type MascotSnapshot } from "../shared/mascot.js";
 import type { MascotSpriteImport, MascotTemplateExport } from "../shared/mascot-sprites.js";
-
-// Sandboxed preloads cannot require a shared emitted CommonJS chunk.
-const MASCOT_IPC = { snapshot: "inertia:mascot-snapshot", configure: "inertia:mascot-configure", action: "inertia:mascot-action", changed: "inertia:mascot-changed", sprites: "inertia:mascot-sprites" } as const;
 
 export function exposeMascotSettings(): void {
   const bridge: MascotSettingsBridge = {

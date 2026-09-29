@@ -36,6 +36,7 @@ import {
 import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
+import { posixCleanupFailures } from "./posix-cleanup-diagnostics";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 
 import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
@@ -1031,7 +1032,7 @@ export class TerminalManager {
             atFailure: terminalStopObservation(session),
           },
         } }
-      : undefined;
+      : { cause: { posixCleanupFailures: posixCleanupFailures() } };
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();

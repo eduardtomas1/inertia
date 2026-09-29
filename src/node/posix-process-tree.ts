@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 const MAX_FREEZE_PASSES = 8;
+const MAX_STOP_OBSERVATION_READS = 8;
 const PROCESS_TABLE_COMMAND = "/bin/ps";
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 250;
 const PROCESS_TABLE_MAX_BYTES = 2 * 1024 * 1024;
@@ -116,6 +117,7 @@ export function forceKillPosixProcessTreeWithStatus(
   let killOrder: number[] = [];
   let snapshotConfirmed = false;
   let scanStabilized = false;
+  let stopObservationReads = 0;
   for (let pass = 0; pass < MAX_FREEZE_PASSES; pass += 1) {
     const remainingMs = deadlineAt - now();
     if (remainingMs <= 0) break;
@@ -149,7 +151,16 @@ export function forceKillPosixProcessTreeWithStatus(
     killOrder = descendants;
     const newlyDiscovered = descendants.filter((pid) => !frozen.has(pid));
     if (newlyDiscovered.length === 0) {
-      scanStabilized = true;
+      if (
+        rootStop === "sent"
+        && rootState === "running"
+        && stopObservationReads < MAX_STOP_OBSERVATION_READS
+      ) {
+        stopObservationReads += 1;
+        pass -= 1;
+        continue;
+      }
+      scanStabilized = rootStop !== "sent" || rootState !== "running";
       snapshotConfirmed = rootFreezeConfirmed
         && liveProcessState(rootPid, processTable);
       break;

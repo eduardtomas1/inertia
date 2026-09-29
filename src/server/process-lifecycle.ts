@@ -5,6 +5,7 @@ import {
 } from "node:child_process";
 import { win32 } from "node:path";
 import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
+import { recordPosixCleanupFailure } from "./posix-cleanup-diagnostics";
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
 import {
@@ -483,6 +484,26 @@ function posixTreeTerminationConfirmed(
     && evidence.rootExited;
 }
 
+function recordPosixTreeTermination(
+  scope: "child" | "pid",
+  killed: PosixProcessTreeKillResult,
+  evidence: PosixTreeTerminationEvidence | null,
+): boolean {
+  const confirmed = evidence !== null && posixTreeTerminationConfirmed(evidence);
+  if (!confirmed) {
+    recordPosixCleanupFailure({
+      scope,
+      rootStop: killed.rootStop,
+      rootState: killed.rootState,
+      scanStabilized: killed.scanStabilized,
+      groupExited: evidence?.groupExited ?? null,
+      descendantsExited: evidence?.descendantsExited ?? null,
+      rootExited: evidence?.rootExited ?? null,
+    });
+  }
+  return confirmed;
+}
+
 function nativePosixProcessObserver(
   platform: NodeJS.Platform,
   dependencies: AwaitableProcessLifecycleDependencies,
@@ -642,6 +663,7 @@ export function createOwnedPidProcessTreeTermination(
   let started = false;
   let treeTerminationConfirmed = false;
   let enumeration: PosixTreeEnumeration = "incomplete";
+  let observation: PosixProcessTreeKillResult | null = null;
   let descendants: readonly number[] = [];
 
   return async () => {
@@ -697,7 +719,11 @@ export function createOwnedPidProcessTreeTermination(
         deadlineAt,
       });
       enumeration = posixTreeEnumeration(killed, false);
+      observation = killed;
       descendants = killed.descendants;
+      if (enumeration === "incomplete") {
+        return recordPosixTreeTermination("pid", killed, null);
+      }
     }
     if (enumeration === "incomplete") return false;
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
@@ -717,9 +743,10 @@ export function createOwnedPidProcessTreeTermination(
       ),
       waitForRootExit(exitWaitMs),
     ]);
-    return posixTreeTerminationConfirmed({
-      enumeration, groupExited, descendantsExited, rootExited,
-    });
+    const evidence = { enumeration, groupExited, descendantsExited, rootExited };
+    return observation
+      ? recordPosixTreeTermination("pid", observation, evidence)
+      : posixTreeTerminationConfirmed(evidence);
   };
 }
 
@@ -912,7 +939,7 @@ export async function terminateProcessTreeAndWait(
       ),
       waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return posixTreeTerminationConfirmed({
+    return recordPosixTreeTermination("child", killed, {
       enumeration, groupExited, descendantsExited, rootExited: childClosed,
     });
   }

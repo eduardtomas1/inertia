@@ -13,6 +13,7 @@ import {
   terminateProcessTree,
   terminateProcessTreeAndWait,
 } from "../../src/server/process-lifecycle";
+import { posixCleanupFailures } from "../../src/server/posix-cleanup-diagnostics";
 
 function fakeChild(pid = 4_242) {
   const child = new EventEmitter() as EventEmitter & {
@@ -1125,7 +1126,7 @@ describe("provider process-tree termination", () => {
           killProcess: killProcess as never,
           spawnProcessSync: vi.fn(() => {
             vi.setSystemTime(Date.now() + 80);
-            return { status: 0, stdout: "4242 1 S\n" };
+            return { status: 0, stdout: "4242 1 T\n" };
           }) as never,
           processCanExecute: () => true,
           processGroupCanExecute: () => true,
@@ -1277,6 +1278,62 @@ describe("provider process-tree termination", () => {
     });
   });
 
+  describe("terminal (PID-owned) tree with a delayed stop", () => {
+    const pidTermination = (tablesByRead: (read: number) => string) => {
+      const killed = new Set<number>();
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0) {
+          if (killed.has(target)) throw noSuchProcess("gone");
+          return true as const;
+        }
+        if (signal === "SIGKILL") killed.add(target);
+        return true as const;
+      });
+      let reads = 0;
+      const spawnProcessSync = vi.fn(() => ({ status: 0, stdout: tablesByRead(++reads) }));
+      const terminate = createOwnedPidProcessTreeTermination(
+        4_242,
+        async () => killed.has(4_242),
+        {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        },
+      );
+      return { terminate, killProcess, spawnProcessSync };
+    };
+
+    it("confirms once the sent stop is observed on a later read", async () => {
+      const { terminate, killProcess, spawnProcessSync } = pidTermination((read) =>
+        read === 1 ? "4242 1 Ss+\n" : "4242 1 Ts+\n");
+      await expect(terminate()).resolves.toBe(true);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(2);
+      expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([
+        [-4_242, "SIGSTOP"],
+        [4_242, "SIGSTOP"],
+        [-4_242, "SIGKILL"],
+        [4_242, "SIGKILL"],
+      ]);
+    });
+
+    it("reports its classification inputs when the stop is never observed", async () => {
+      const { terminate } = pidTermination(() => "4242 1 Ss+\n");
+      await expect(terminate()).resolves.toBe(false);
+      expect(posixCleanupFailures().at(-1)).toEqual({
+        scope: "pid",
+        rootStop: "sent",
+        rootState: "running",
+        scanStabilized: false,
+        groupExited: null,
+        descendantsExited: null,
+        rootExited: null,
+      });
+    });
+  });
+
   describe("POSIX root classification (exhaustive)", () => {
     type Stop = "sent" | "ESRCH" | "EPERM" | "EINVAL";
     type Table = "running" | "stopped" | "zombie" | "absent" | "unknown";
@@ -1367,6 +1424,52 @@ describe("provider process-tree termination", () => {
         await vi.advanceTimersByTimeAsync(1_000);
         expect(killProcess.mock.calls.slice(0, 2)).toEqual([[-4_242, "SIGSTOP"], [4_242, "SIGSTOP"]]);
         expect(result).toBe(classification !== "incomplete");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      { later: "4242 1 T", classification: "root-authorized" },
+      { later: "4242 1 Z", classification: "root-gone" },
+      { later: "", classification: "root-gone" },
+    ])("stop sent but first observed running, then $later: $classification", async ({ later, classification }) => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") {
+            killed.add(target);
+            if (target === 4_242 && child.exitCode === null) {
+              child.exitCode = 1;
+              queueMicrotask(() => child.emit("close", 1));
+            }
+          }
+          return true as const;
+        });
+        let reads = 0;
+        const spawnProcessSync = vi.fn(() => {
+          reads += 1;
+          const root = reads === 1 ? "4242 1 S" : later;
+          return { status: 0, stdout: `${[root, "5000 4242 T"].filter(Boolean).join("\n")}\n` };
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(result).toBe(classification !== "incomplete");
+        expect(spawnProcessSync.mock.calls.length).toBeGreaterThan(1);
       } finally {
         vi.useRealTimers();
       }

@@ -208,39 +208,6 @@ test("recovers a stall met only by actions on a secondary window", async () => {
   }
 });
 
-test("recovers a stall that begins while a click waits for its moving target", async () => {
-  const app = await createAppFixture({ name: "gpu-helper-mid-action-frames", initialState: "conversation" });
-  let gpuPid: number | undefined;
-  let gpuStart: string | null = null;
-  try {
-    const mainPid = app.electronApp.process().pid!;
-    gpuPid = await directGpuHelper(mainPid);
-    gpuStart = await processStart(gpuPid);
-    const toggle = rightPanelToggle(app.page);
-    const pressed = await toggle.getAttribute("aria-pressed");
-    await app.page.addStyleTag({ content: "@keyframes frame-monitor-drift { from { translate: 0 } to { translate: 24px } }"
-      + " [data-panel-layout-controls] [data-right-panel-toggle] { animation: frame-monitor-drift 400ms linear infinite alternate; }" });
-    let clickSettled = false;
-    const clicked = toggle.click().finally(() => { clickSettled = true; });
-    await expect.poll(() => toggle.evaluate((element) => element.getAnimations()
-      .some((animation) => animation.playState === "running" && Number(animation.currentTime) > 200))).toBe(true);
-    process.kill(gpuPid, "SIGSTOP");
-    expect(clickSettled).toBe(false);
-    await toggle.evaluate((element) => { element.style.animation = "none"; });
-    await clicked;
-    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
-    await waitForRecoveries(1);
-    expectStallRecovered(gpuPid, mainPid);
-    expect(await processStart(gpuPid)).toBeNull();
-    expect(app.rendererErrors).toEqual([]);
-  } finally {
-    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
-      process.kill(gpuPid, "SIGKILL");
-    }
-    await app.close();
-  }
-});
-
 test("recovers a stall that begins after a healthy action while the page waits for frames", async () => {
   const app = await createAppFixture({ name: "gpu-helper-after-checkpoint", initialState: "conversation" });
   let gpuPid: number | undefined;

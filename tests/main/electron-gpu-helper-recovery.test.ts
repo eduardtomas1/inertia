@@ -4,7 +4,7 @@ import type { ChildProcess, spawn } from "node:child_process";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createElectronMainProcessDiagnostic, mainThreadNanosleepShare,
+import { createElectronMainProcessDiagnostic, gpuMainThreadStall, mainThreadNanosleepShare,
   type ElectronMainProcessDiagnostic } from
   "../e2e/support/electron-main-process-diagnostic";
 import { closeElectronFixtureBounded, ElectronFixtureCloseError, GPU_HELPER_RECOVERY_GRACE_MS,
@@ -279,6 +279,13 @@ describe("stalled window-destroy GPU helper recovery", () => {
     expect(mainThreadNanosleepShare(PARTLY_SLEEPING_SAMPLE)).toBeCloseTo(60 / 109);
     expect(mainThreadNanosleepShare("    109 Thread_1\n    + 109 nanosleep  (in libsystem_c.dylib)")).toBeNull();
     expect(mainThreadNanosleepShare("")).toBeNull();
+  });
+
+  it("reports a GPU stall only for a main thread at or above the nanosleep threshold", () => {
+    expect(gpuMainThreadStall(BACKPRESSURE_SAMPLE)).toBe("main-thread-nanosleep=100%");
+    expect(gpuMainThreadStall(PARTLY_SLEEPING_SAMPLE)).toBeNull();
+    expect(gpuMainThreadStall(IDLE_SAMPLE)).toBeNull();
+    expect(gpuMainThreadStall("gpu helper stack")).toBeNull();
   });
 
   it("stops waiting for a stuck helper sample four seconds before the deadline", async () => {

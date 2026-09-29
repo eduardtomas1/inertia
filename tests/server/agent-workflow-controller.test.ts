@@ -462,7 +462,13 @@ describe("AgentWorkflowController", () => {
 
     const state = await runtime.controller.refresh("conversation-1");
 
-    expect(state.goalRefreshWarning).toBe(MIXED_PROVIDER_HISTORY_MESSAGE);
+    expect(state.goalCapability).toEqual({
+      kind: "unavailable",
+      available: false,
+      label: "Goals unavailable",
+      reason: MIXED_PROVIDER_HISTORY_MESSAGE,
+    });
+    expect(state.goalRefreshWarning).toBeNull();
     expect(state.skillsCapability).toEqual({
       kind: "unavailable",
       available: false,

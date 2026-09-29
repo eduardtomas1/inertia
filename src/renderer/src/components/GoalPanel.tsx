@@ -1,5 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { useId, useMemo, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   Check,
@@ -72,6 +72,7 @@ export interface GoalPanelProps {
   onClearGoal?: (goal: AgentGoal) => void | Promise<void>;
   onInsertSkill?: (skill: AgentSkillSummary) => void;
   onRefreshSkills?: () => void;
+  continuationRefusal?: string | null;
   onStartNewChat?: () => void;
   canFollowUpSubagent?: (trace: SubagentTrace) => boolean;
   onFollowUpSubagent?: (trace: SubagentTrace) => void;
@@ -812,6 +813,7 @@ export function GoalPanel({
   onClearGoal,
   onInsertSkill,
   onRefreshSkills,
+  continuationRefusal = null,
   onStartNewChat,
   canFollowUpSubagent,
   onFollowUpSubagent,
@@ -828,22 +830,37 @@ export function GoalPanel({
   const skillsHeadingId = `${panelId}-skills`;
   const subagentsHeadingId = `${panelId}-subagents`;
   const subagentsListId = `${panelId}-subagent-list`;
-  const capabilitySource = workflow?.goalCapability.kind ?? null;
+  const capability = workflow?.goalCapability;
+  const refusal = continuationRefusal
+    ?? (capability?.kind === "unavailable" ? capability.reason : null);
+  const capabilitySource = !refusal && capability?.available ? capability.kind : null;
   const primaryGoals = workflow?.goals.filter(
-    ({ source }) => source === capabilitySource,
+    ({ source }) => refusal !== null || source === capabilitySource,
   ) ?? [];
-  const localTrackingGoals = workflow?.goals.filter(
+  const localTrackingGoals = refusal ? [] : workflow?.goals.filter(
     ({ source }) => source !== capabilitySource,
   ) ?? [];
   const hasEditableGoal = workflow?.goals.some(
     ({ source }) => source === capabilitySource,
   ) ?? false;
   const controlsBusy = busy || executionStatus === "starting";
+  const panelHadFocus = useRef(false);
+  const newChatRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!refusal || !panelHadFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    newChatRef.current?.focus();
+  }, [refusal]);
   return (
     <section
       className="goal-panel"
       aria-label="Goals and agent workflows"
       data-goal-source={capabilitySource ?? "unavailable"}
+      onFocusCapture={() => { panelHadFocus.current = true; }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) panelHadFocus.current = false;
+      }}
     >
       <header className="panel-toolbar goal-panel-toolbar">
         <div className="panel-heading">
@@ -881,10 +898,20 @@ export function GoalPanel({
             {workflow.goalRefreshWarning}
           </p>
         )}
-        {onStartNewChat && (
-          <button type="button" className="secondary-button" onClick={onStartNewChat}>
-            New chat
-          </button>
+        {refusal && (
+          <div className="goal-panel-error" role="status">
+            <span>{refusal}</span>
+            {onStartNewChat && (
+              <button
+                ref={newChatRef}
+                type="button"
+                className="goal-panel-text-button"
+                onClick={onStartNewChat}
+              >
+                New chat
+              </button>
+            )}
+          </div>
         )}
         <section className="goal-panel-section" aria-labelledby={currentHeadingId}>
           <header className="goal-panel-section-heading">
@@ -914,7 +941,7 @@ export function GoalPanel({
                 <GoalCard
                   key={goal.source}
                   goal={goal}
-                  editable={goal.source === capabilitySource}
+                  editable={!refusal && goal.source === capabilitySource}
                   busy={controlsBusy}
                   executionStatus={goal.source === "codex-native"
                     ? executionStatus
@@ -923,9 +950,9 @@ export function GoalPanel({
                   onClearGoal={onClearGoal}
                 />
               ))}
-              {!hasEditableGoal && onSetGoal && (
+              {!hasEditableGoal && onSetGoal && capabilitySource && (
                 <GoalComposer
-                  source={workflow.goalCapability.kind}
+                  source={capabilitySource}
                   sourceName={workflow.goalCapability.label}
                   busy={controlsBusy}
                   onSetGoal={onSetGoal}

@@ -233,10 +233,19 @@ describe("GoalPanel", () => {
     )).toBeInTheDocument();
   });
 
-  it("explains a mixed-provider history and offers a new chat without provider work", async () => {
+  it.each([
+    ["the published conversation fact", MIXED_PROVIDER_HISTORY_MESSAGE, undefined],
+    ["the runtime goal capability", null, MIXED_PROVIDER_HISTORY_MESSAGE],
+  ] as const)("keeps saved goals read-only and offers a new chat from %s", async (_source, continuationRefusal, capabilityReason) => {
     const onStartNewChat = vi.fn();
+    const onSetGoal = vi.fn();
+    const onClearGoal = vi.fn();
     renderPanel({
       workflow: workflow({
+        goals: [goal(), goal({ source: "inertia-local", providerSessionId: null, objective: "Local note" })],
+        ...(capabilityReason ? {
+          goalCapability: { kind: "unavailable", available: false, label: "Goals unavailable", reason: capabilityReason },
+        } : {}),
         skills: [],
         skillsCapability: {
           kind: "unavailable",
@@ -244,16 +253,49 @@ describe("GoalPanel", () => {
           label: "Skills unavailable",
           reason: MIXED_PROVIDER_HISTORY_MESSAGE,
         },
-        goalRefreshWarning: MIXED_PROVIDER_HISTORY_MESSAGE,
       }),
+      continuationRefusal,
+      onSetGoal,
+      onClearGoal,
       onStartNewChat,
     });
 
-    expect(screen.getAllByText(MIXED_PROVIDER_HISTORY_MESSAGE, { exact: false }).length).toBeGreaterThan(0);
+    const status = screen.getAllByRole("status").find((element) =>
+      element.textContent?.includes(MIXED_PROVIDER_HISTORY_MESSAGE));
+    expect(status).toBeDefined();
+    expect(screen.getByText("Ship truthful workflow controls")).toBeInTheDocument();
+    expect(screen.getByText("Local note")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pause|Resume|Complete|Clear|Mark active|Reopen/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh skills" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("progressbar", { name: /Loading/u })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "New chat" }));
     expect(onStartNewChat).toHaveBeenCalledOnce();
+    expect(onSetGoal).not.toHaveBeenCalled();
+    expect(onClearGoal).not.toHaveBeenCalled();
+  });
+
+  it("moves lost focus to the new-chat action when the chat becomes unable to continue", () => {
+    const view = render(<GoalPanel workflow={workflow({ goals: [] })} plan={null} subagents={[]} turns={[]} onSetGoal={vi.fn()} />);
+    const objective = screen.getByLabelText("Objective");
+    objective.focus();
+    expect(objective).toHaveFocus();
+    view.rerender(<GoalPanel
+      workflow={workflow({ goals: [] })}
+      plan={null}
+      subagents={[]}
+      turns={[]}
+      onSetGoal={vi.fn()}
+      continuationRefusal={MIXED_PROVIDER_HISTORY_MESSAGE}
+      onStartNewChat={vi.fn()}
+    />);
+    expect(screen.getByRole("button", { name: "New chat" })).toHaveFocus();
+  });
+
+  it("keeps goal controls unchanged for a chat that can continue", () => {
+    renderPanel({ onSetGoal: vi.fn(), onClearGoal: vi.fn(), continuationRefusal: null });
+
+    expect(screen.queryByRole("button", { name: "New chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pause/u })).toBeInTheDocument();
   });
 
   it("keeps local goals and skills visible when native refresh degrades", () => {

@@ -8,6 +8,7 @@ import type {
 } from "@shared/contracts";
 import type { PendingModelRoute } from "../components/composer/types";
 import {
+  conversationContinuationRefusal,
   conversationHasHistory,
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -79,7 +80,7 @@ export function modelRouteTransitionContext(
       : null,
     hasProviderSession: Boolean(conversation.providerSessionId),
     hasHistory: conversationHasHistory(conversation),
-    mixedProviderHistory: conversation.mixedProviderHistory === true,
+    mixedProviderHistory: conversationContinuationRefusal(conversation) !== null,
   };
 }
 

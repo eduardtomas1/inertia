@@ -1569,6 +1569,14 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent({ type: "agent.approval.requested", request: approval })).toBeTruthy();
     expect(parseServerEvent({ type: "agent.input.requested", request: input })).toBeTruthy();
     expect(parseServerEvent(event({ kind: "agent.workflow", workflow }))).toBeTruthy();
+    const unavailableGoals = { kind: "unavailable", available: false, label: "Goals unavailable", reason: "History belongs elsewhere." };
+    expect(parseServerEvent(event({ kind: "agent.workflow", workflow: { ...workflow, goalCapability: unavailableGoals } }))).toBeTruthy();
+    expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: {
+      ...workflow, goalCapability: { ...unavailableGoals, available: true },
+    } }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: {
+      ...workflow, goalCapability: { kind: "unavailable", available: false, label: "Goals unavailable" },
+    } }))).toThrow("Malformed server event");
     expect(parseServerEvent(event({
       kind: "agent.skills",
       conversationId: conversation.id,

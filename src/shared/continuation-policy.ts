@@ -80,6 +80,12 @@ export const CHAT_PROVIDER_CHANGE_MESSAGE =
 export const MIXED_PROVIDER_HISTORY_MESSAGE =
   "This chat's history includes turns from another provider, so it can't continue here. Start a new chat to keep working; this chat keeps its history.";
 
+export function conversationContinuationRefusal(
+  conversation: { mixedProviderHistory?: boolean } | null | undefined,
+): string | null {
+  return conversation?.mixedProviderHistory === true ? MIXED_PROVIDER_HISTORY_MESSAGE : null;
+}
+
 export function isChatProviderRejection(error: unknown): error is Error {
   return error instanceof Error && [CHAT_PROVIDER_CHANGE_MESSAGE, MIXED_PROVIDER_HISTORY_MESSAGE]
     .some((message) => error.message.startsWith(message));

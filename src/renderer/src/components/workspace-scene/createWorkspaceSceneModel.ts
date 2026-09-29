@@ -20,6 +20,7 @@ import type {
   TurnRequestContext,
 } from "@shared/contracts";
 import { providerTerminalResumeAvailability } from "@shared/provider-terminal-resume";
+import { conversationContinuationRefusal } from "@shared/continuation-policy";
 
 import type { PlanPanel } from "../PlanPanel";
 import type { WorkspaceSceneProps } from "../WorkspaceScene";
@@ -315,6 +316,7 @@ export function createWorkspaceSceneModel({
     detailState,
     refreshDetail,
   } = projection;
+  const continuationRefusal = conversationContinuationRefusal(detail?.conversation);
   const conversation = visibleWorkspaceConversation(
     persistedConversation,
     draftConversation,
@@ -1006,7 +1008,8 @@ export function createWorkspaceSceneModel({
               : "Skills could not be refreshed.",
           ));
         },
-        onStartNewChat: detail?.conversation.mixedProviderHistory
+        continuationRefusal,
+        onStartNewChat: continuationRefusal && detail
           ? () => void actions.createConversationForSelection(detail.conversation.modelSelection)
             .catch((error) => setActionError(error instanceof Error ? error.message : "The new chat could not be created."))
           : undefined,

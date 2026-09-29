@@ -214,7 +214,14 @@ export class AgentWorkflowController {
     return {
       conversationId,
       goals,
-      goalCapability: native
+      goalCapability: contactRefusal
+        ? {
+            kind: "unavailable",
+            available: false,
+            label: "Goals unavailable",
+            reason: contactRefusal,
+          }
+        : native
         ? {
             kind: "codex-native",
             available: true,
@@ -260,9 +267,8 @@ export class AgentWorkflowController {
             reason:
               "This route does not expose safe structured skill invocation.",
           },
-      goalRefreshWarning: native && contactRefusal
-        ? contactRefusal
-        : native
+      goalRefreshWarning: native
+        && !contactRefusal
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
           ? nativeGoalRefreshWarning.message

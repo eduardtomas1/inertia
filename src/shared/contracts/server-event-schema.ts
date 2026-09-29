@@ -551,11 +551,12 @@ function agentSkill(value: unknown): boolean {
 }
 
 function workflowGoalCapability(value: unknown): boolean {
-  if (!recordWithStrings(value, "kind", "label") || value.available !== true) {
-    return false;
+  if (!recordWithStrings(value, "kind", "label")) return false;
+  if (value.kind === "unavailable") {
+    return value.available === false && stringField(value, "reason");
   }
-  return value.kind === "codex-native"
-    || (value.kind === "inertia-local" && stringField(value, "reason"));
+  return value.available === true && (value.kind === "codex-native"
+    || (value.kind === "inertia-local" && stringField(value, "reason")));
 }
 
 function workflowSkillsCapability(value: unknown): boolean {

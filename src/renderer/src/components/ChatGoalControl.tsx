@@ -45,6 +45,8 @@ export interface ChatGoalControlProps {
   onRetry: () => Promise<void>;
   onSetGoal: (input: GoalInput) => Promise<void>;
   onClearGoal: (source: AgentGoalSource) => Promise<void>;
+  continuationRefusal?: string | null;
+  onStartNewChat?: () => void;
 }
 
 export interface ChatGoalInlineProps extends ChatGoalControlProps {
@@ -124,6 +126,8 @@ export function ChatGoalControl({
   onRetry,
   onSetGoal,
   onClearGoal,
+  continuationRefusal = null,
+  onStartNewChat,
   open,
   onDismiss,
 }: ChatGoalInlineProps): React.JSX.Element | null {
@@ -137,7 +141,10 @@ export function ChatGoalControl({
   const [tokenBudget, setTokenBudget] = useState("");
   const [recoveryBudget, setRecoveryBudget] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const source = workflow?.goalCapability.kind ?? null;
+  const capability = workflow?.goalCapability;
+  const refusal = continuationRefusal
+    ?? (capability?.kind === "unavailable" ? capability.reason : null);
+  const source = !refusal && capability?.available ? capability.kind : null;
   const nativeGoal = source === "codex-native";
   const goal = workflow ? currentRouteGoal(workflow) : null;
   const recoveryBudgetFloor = Math.max(
@@ -163,6 +170,13 @@ export function ChatGoalControl({
   useLayoutEffect(() => {
     if (!open) restoreActionFocus.current = false;
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !refusal) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    firstActionRef.current?.focus();
+  }, [open, refusal]);
 
   useLayoutEffect(() => {
     if (!open || !restoreActionFocus.current) return;
@@ -337,7 +351,17 @@ export function ChatGoalControl({
             </div>
           )}
 
-          {!workflow ? (
+          {refusal ? (
+            <div className="chat-goal-unavailable">
+              <p role="status">{refusal}</p>
+              {onStartNewChat && (
+                <button ref={firstActionRef} type="button" onClick={onStartNewChat}>
+                  <Flag size={13} aria-hidden="true" />
+                  New chat
+                </button>
+              )}
+            </div>
+          ) : !workflow ? (
             <div className="chat-goal-unavailable">
               <p role={error ? "alert" : "status"}>
                 {error ?? (loading
@@ -508,8 +532,8 @@ export function ChatGoalControl({
                     ? "This becomes the native goal for this Codex thread."
                     : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
                 </small>
-                {workflow.goalCapability.kind === "inertia-local" && (
-                  <p>{workflow.goalCapability.reason}</p>
+                {capability?.kind === "inertia-local" && (
+                  <p>{capability.reason}</p>
                 )}
               </div>
               <button

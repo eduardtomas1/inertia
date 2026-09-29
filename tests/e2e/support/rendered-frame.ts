@@ -7,7 +7,6 @@ import { electronHelperProcesses, gpuMainThreadStall } from "./electron-main-pro
 
 const execFileAsync = promisify(execFile);
 const FRAME_TIMEOUT_MS = 1_000;
-const FRAME_RESUME_ATTEMPTS = 10;
 const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const SAMPLE_TIMEOUT_MS = 6_000;
 const MAX_TOOL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -76,7 +75,7 @@ async function terminateStalledGpuHelper(mainPid: number): Promise<GpuHelperReco
 }
 
 async function recordRecovery(recovery: GpuHelperRecovery): Promise<void> {
-  const description = `The renderer did not produce two consecutive animation frames within ${FRAME_TIMEOUT_MS} ms before an action; `
+  const description = `The renderer did not produce two consecutive animation frames within ${FRAME_TIMEOUT_MS} ms after an action checkpoint; `
     + `the fixture terminated only the stalled GPU helper (${recovery.helper}) so Chromium relaunches it.`;
   process.stderr.write(`[Inertia E2E] ${description}\n`);
   try {
@@ -93,15 +92,15 @@ async function recoverRenderedFrames(page: Page, electronApp: ElectronApplicatio
   if (await renderedFrame(page)) return;
   const mainPid = electronApp.process().pid;
   const recovery = mainPid ? await terminateStalledGpuHelper(mainPid) : null;
-  if (!recovery) return;
-  await recordRecovery(recovery);
-  for (let attempt = 0; attempt < FRAME_RESUME_ATTEMPTS; attempt += 1) {
-    if (await renderedFrame(page)) return;
-  }
+  if (recovery) await recordRecovery(recovery);
 }
 
 export async function guardRenderedFrames(page: Page, electronApp: ElectronApplication): Promise<void> {
   if (process.platform !== "darwin") return;
-  await page.addLocatorHandler(page.locator(":root"),
-    async () => await recoverRenderedFrames(page, electronApp), { noWaitAfter: true });
+  let monitor: Promise<void> | null = null;
+  await page.addLocatorHandler(page.locator(":root"), async () => {
+    monitor ??= recoverRenderedFrames(page, electronApp)
+      .catch(() => undefined)
+      .finally(() => { monitor = null; });
+  }, { noWaitAfter: true });
 }

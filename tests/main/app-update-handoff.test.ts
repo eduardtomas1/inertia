@@ -536,6 +536,44 @@ describe("app update handoff journal", () => {
       .toMatchObject({ state: "terminal", expired: true });
   });
 
+  it("records rollback without reordering the journal after the clock steps back", () => {
+    const root = directory();
+    const journal = new AppUpdateHandoffJournal(root, {
+      clock: () => new Date("2029-12-31T23:00:00.000Z"),
+    });
+    const prepared = journal.prepare(preparation())!;
+    expect(journal.transition(
+      appUpdateHandoffOwner(prepared),
+      "candidate-launched",
+    )).toBeNull();
+    const launched = advance(journal, prepared, "candidate-launched");
+
+    const rollback = journal.transition(
+      appUpdateHandoffOwner(launched),
+      "rollback-required",
+    );
+    expect(rollback).toMatchObject({
+      phase: "rollback-required",
+      revision: launched.revision + 1,
+      previousChecksum: launched.checksum,
+      transitionedAt: launched.transitionedAt,
+    });
+    const completed = journal.transition(
+      appUpdateHandoffOwner(rollback!),
+      "rollback-completed",
+    );
+    expect(completed).toMatchObject({
+      phase: "rollback-completed",
+      previousChecksum: rollback!.checksum,
+      transitionedAt: launched.transitionedAt,
+    });
+
+    const reader = new AppUpdateHandoffJournal(root);
+    expect(reader.current()).toEqual(completed);
+    expect(reader.retire(appUpdateHandoffOwner(completed!))).toBe(true);
+    expect(reader.current()).toBeNull();
+  });
+
   it("repairs exact publisher crash prefixes and discards partial publishers", () => {
     const root = directory();
     let interrupt = true;

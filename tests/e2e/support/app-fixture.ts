@@ -13,8 +13,8 @@ import { seedAppConversation } from "../../support/seed-app-conversation";
 import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
-  closePreviewServerBounded, observeElectronPage, observeElectronProcess,
-  quitElectronAppBounded, removeFixtureDirectory,
+  closePreviewServerBounded, FIXTURE_PREPARED_EXIT_TIMEOUT_MS, observeElectronPage,
+  observeElectronProcess, quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
 import { attachElectronFixtureCloseFailure,
   attachElectronGpuHelperRecovery } from "./electron-failure-evidence";
@@ -34,7 +34,6 @@ import { waitForViewportToMatchWindow } from "./stable-sample";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
-const FIXTURE_PREPARED_EXIT_TIMEOUT_MS = 12_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;

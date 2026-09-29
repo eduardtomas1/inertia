@@ -340,6 +340,14 @@ export function completeWindowsUpdateRollback(
   }
 }
 
+function rolledBackFromPreparedReceipt(
+  snapshot: AppUpdateHandoffSnapshot,
+): boolean {
+  return snapshot.platform === "win32"
+    && snapshot.phase === "rollback-completed"
+    && snapshot.revision === 2;
+}
+
 async function completeAuthenticatedWindowsUpdateRollback(
   options: AppUpdateStartupOptions,
   journal: AppUpdateHandoffJournal,
@@ -526,6 +534,13 @@ async function reconcileUnclaimedWindowsAppUpdate(
     return;
   }
   if (pending.phase === "rollback-completed") {
+    if (
+      options.version !== pending.oldVersion
+      && rolledBackFromPreparedReceipt(pending)
+    ) {
+      completeWindowsUpdateRollback(journal, vault, pending);
+      return;
+    }
     if (options.version !== pending.oldVersion) {
       throw new Error("The rolled-back Windows app update identity is invalid.");
     }
@@ -537,6 +552,10 @@ async function reconcileUnclaimedWindowsAppUpdate(
     );
     return;
   }
+  if (pending.phase === "prepared") {
+    completeWindowsUpdateRollback(journal, vault, pending);
+    return;
+  }
   if (options.version === pending.newVersion) {
     throw new Error(
       "The installed Windows update lacks completed candidate admission.",
@@ -544,10 +563,6 @@ async function reconcileUnclaimedWindowsAppUpdate(
   }
   if (options.version !== pending.oldVersion) {
     throw new Error("The pending Windows app update version is incompatible.");
-  }
-  if (pending.phase === "prepared") {
-    completeWindowsUpdateRollback(journal, vault, pending);
-    return;
   }
   if (pending.phase === "old-generation-cleanup-confirmed") {
     await completeAuthenticatedWindowsUpdateRollback(

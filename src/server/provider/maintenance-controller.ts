@@ -103,6 +103,7 @@ interface ActiveProviderMaintenanceOperation {
   installationIdentity: ProviderInstallationIdentity;
   installationLease: ProviderInstallationMaintenanceLease | null;
   verificationAuthority: ProviderInstallationVerificationAuthority | null;
+  verifiedIdentity: ProviderInstallationIdentity | null;
   journalQuarantined: boolean;
   journalRetired: boolean;
 }
@@ -353,6 +354,7 @@ export class ProviderMaintenanceController {
         installationIdentity,
         installationLease: null,
         verificationAuthority: null,
+        verifiedIdentity: null,
         journalQuarantined: false,
         journalRetired: false,
       };
@@ -624,38 +626,42 @@ export class ProviderMaintenanceController {
         });
       }
     } finally {
-      if (active.installationLease && !installationAuthoritySettled) {
-        if (!commandStarted) {
-          installationAuthoritySettled = await this.completeInstallationAuthority(
-            active,
+      try {
+        if (active.installationLease && !installationAuthoritySettled) {
+          if (!commandStarted) {
+            installationAuthoritySettled = await this.completeInstallationAuthority(
+              active,
+              active.installationIdentity,
+            );
+          } else {
+            this.quarantineInstallation(
+              active,
+              result?.cleanupConfirmed === true
+                ? "maintenance-terminal-state-unverified"
+                : "maintenance-process-cleanup-unconfirmed",
+            );
+            this.cleanupUnconfirmed ||= result?.cleanupConfirmed !== true;
+            await this.invalidateUncertainInstallationEvidence(active);
+            installationAuthoritySettled = true;
+          }
+        }
+        if (
+          !active.installationLease
+          && !commandStarted
+          && !active.journalQuarantined
+          && !active.journalRetired
+        ) {
+          active.journalRetired = this.options.maintenanceJournal.abandonUnadmitted(
+            active.operation.id,
             active.installationIdentity,
           );
-        } else {
-          this.quarantineInstallation(
-            active,
-            result?.cleanupConfirmed === true
-              ? "maintenance-terminal-state-unverified"
-              : "maintenance-process-cleanup-unconfirmed",
-          );
-          this.cleanupUnconfirmed ||= result?.cleanupConfirmed !== true;
-          await this.invalidateUncertainInstallationEvidence(active);
-          installationAuthoritySettled = true;
+          if (!active.journalRetired) {
+            this.quarantineInstallation(active, "maintenance-journal-abandonment-unconfirmed");
+          }
         }
-      }
-      if (
-        !active.installationLease
-        && !commandStarted
-        && !active.journalQuarantined
-        && !active.journalRetired
-      ) {
-        active.journalRetired = this.options.maintenanceJournal.abandonUnadmitted(
-          active.operation.id,
-          active.installationIdentity,
-        );
-        if (!active.journalRetired) {
-          this.quarantinedProviders.add(active.operation.providerId);
-          active.journalQuarantined = true;
-        }
+      } catch {
+        this.quarantineInstallation(active, "maintenance-journal-unavailable");
+        await this.invalidateUncertainInstallationEvidence(active);
       }
       if (this.active.get(providerId)?.operation.id === active.operation.id) {
         this.active.delete(providerId);
@@ -839,28 +845,40 @@ export class ProviderMaintenanceController {
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
     }
-    const completed = lease.complete({
-      cleanupConfirmed: true,
-      stateDurable: true,
-      observedIdentity,
-    });
-    active.installationLease = null;
+    active.verifiedIdentity = observedIdentity;
+    let completed = false;
+    try {
+      completed = lease.complete({
+        cleanupConfirmed: true,
+        stateDurable: true,
+        observedIdentity,
+      });
+    } catch {
+      completed = false;
+    }
     if (!completed) {
-      this.quarantinedProviders.add(active.operation.providerId);
+      this.quarantineInstallation(
+        active,
+        "maintenance-completion-unconfirmed",
+        observedIdentity,
+      );
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
     }
-    active.journalRetired = this.options.maintenanceJournal.retireVerified(
-      active.operation.id,
-      observedIdentity,
-    );
-    if (!active.journalRetired) {
-      this.quarantinedProviders.add(active.operation.providerId);
-      active.journalQuarantined = true;
-      this.installationLeases.quarantineObservation(
+    active.installationLease = null;
+    try {
+      active.journalRetired = this.options.maintenanceJournal.retireVerified(
+        active.operation.id,
         observedIdentity,
-        { kind: "startup-recovery", operationId: active.operation.id },
+      );
+    } catch {
+      active.journalRetired = false;
+    }
+    if (!active.journalRetired) {
+      this.quarantineInstallation(
+        active,
         "maintenance-journal-retirement-unconfirmed",
+        observedIdentity,
       );
       await this.invalidateUncertainInstallationEvidence(active);
       return false;
@@ -875,8 +893,23 @@ export class ProviderMaintenanceController {
   ): void {
     this.quarantinedProviders.add(active.operation.providerId);
     active.journalQuarantined = true;
-    active.installationLease?.quarantine(reason, observedIdentity);
+    const lease = active.installationLease;
     active.installationLease = null;
+    if (lease?.quarantine(reason, observedIdentity)) return;
+    const scopes = new Set<string>();
+    for (const identity of [
+      active.installationIdentity,
+      active.verifiedIdentity,
+      observedIdentity,
+    ]) {
+      if (!identity || scopes.has(identity.scopeId)) continue;
+      scopes.add(identity.scopeId);
+      this.installationLeases.quarantineObservation(
+        identity,
+        { kind: "startup-recovery", operationId: active.operation.id },
+        reason,
+      );
+    }
   }
 
   private async invalidateUncertainInstallationEvidence(

@@ -566,6 +566,38 @@ export class ProviderRuntimeError extends Error {
   }
 }
 
+export class ProviderRunRefusedError extends ProviderRuntimeError {
+  constructor(
+    code: ProviderRuntimeErrorCode,
+    message: string,
+    readonly identity: ProviderRunIdentity,
+    readonly receipted: boolean,
+  ) {
+    super(code, message);
+  }
+}
+
+export function isUnreceiptedProviderRunRefusal(
+  error: unknown,
+  identity: { conversationId: string; runId: string; turnId: string },
+): boolean {
+  return error instanceof ProviderRunRefusedError
+    && !error.receipted
+    && error.identity.conversationId === identity.conversationId
+    && error.identity.runId === identity.runId
+    && error.identity.turnId === identity.turnId;
+}
+
+export function isProviderRunRefusal(
+  error: unknown,
+  identity: { conversationId: string; runId: string; turnId: string },
+): boolean {
+  return error instanceof ProviderRunRefusedError
+    && error.identity.conversationId === identity.conversationId
+    && error.identity.runId === identity.runId
+    && error.identity.turnId === identity.turnId;
+}
+
 export interface ProviderManagerOptions {
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;

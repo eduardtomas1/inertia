@@ -77,6 +77,9 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   });
   await expect(patchRows).toHaveCount(5);
   await expect(patchRows.locator(".lucide-wrench")).toHaveCount(5);
+  await app.page.mouse.move(1, 1);
+  await expect.poll(() => patchRows.evaluateAll((rows) =>
+    rows.filter((row) => row.matches(":hover")).length)).toBe(0);
   await expect.poll(() => patchRows.evaluateAll((rows) => {
     const animations = new Set<Animation>();
     for (const row of rows) {
@@ -104,6 +107,7 @@ test("keeps an edit-heavy completed patch history terminal without historical an
         row.classList.contains("is-running")).length,
       completedPatchRows: rows.filter((row) =>
         row.classList.contains("is-completed")).length,
+      hoveredPatchRows: rows.filter((row) => row.matches(":hover")).length,
       retainedPatchAnimationCount: retainedAnimations.size,
       activePatchAnimationCount: activeAnimations.size,
       documentAnimationCount: document.getAnimations().length,
@@ -121,6 +125,7 @@ test("keeps an edit-heavy completed patch history terminal without historical an
     mountedPatchRows: 5,
     runningPatchRows: 0,
     completedPatchRows: 5,
+    hoveredPatchRows: 0,
     activePatchAnimationCount: 0,
   });
 

@@ -27,7 +27,7 @@ describe("final answer copy feedback", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Answer copied.");
   });
 
-  it("keeps the Copy icon when the clipboard rejects the write", async () => {
+  it("keeps the Copy icon and shows a visible failure when the clipboard rejects the write", async () => {
     const copyText = vi.fn(async () => false);
     Object.defineProperty(window, "inertia", {
       configurable: true,
@@ -43,5 +43,8 @@ describe("final answer copy feedback", () => {
     expect(copy.querySelector("[data-icon-state]"))
       .toHaveAttribute("data-icon-state", "copy");
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    expect(await screen.findByRole("alert"))
+      .toHaveTextContent("Couldn't copy. Try again or select the text manually.");
+    expect(copy).toHaveTextContent("Copy failed");
   });
 });

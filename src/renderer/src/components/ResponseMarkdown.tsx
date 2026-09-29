@@ -5,7 +5,6 @@ import {
   memo,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useContext,
   type ComponentProps,
@@ -34,7 +33,7 @@ import {
   workspaceFileReferenceFallback,
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
-import { writeClipboardText } from "../utils/clipboard";
+import { useCopiedState } from "../hooks/useCopiedState";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
@@ -371,43 +370,6 @@ function nodeText(node: ReactNode): string {
   if (Array.isArray(node)) return node.map(nodeText).join("");
   if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
   return "";
-}
-
-interface ClipboardControlState {
-  copied: boolean;
-  pending: boolean;
-  error: string | null;
-  copy: (text: string) => Promise<void>;
-}
-
-function useCopiedState(): ClipboardControlState {
-  const [copied, setCopied] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const timer = useRef<number | null>(null);
-  const operation = useRef(0);
-  useEffect(() => () => {
-    operation.current += 1;
-    if (timer.current !== null) window.clearTimeout(timer.current);
-  }, []);
-  const copy = async (text: string): Promise<void> => {
-    const sequence = operation.current + 1;
-    operation.current = sequence;
-    setPending(true);
-    setCopied(false);
-    setError(null);
-    const succeeded = await writeClipboardText(text);
-    if (operation.current !== sequence) return;
-    setPending(false);
-    if (!succeeded) {
-      setError("Couldn't copy. Try again or select the text manually.");
-      return;
-    }
-    setCopied(true);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setCopied(false), 1_500);
-  };
-  return { copied, pending, error, copy };
 }
 
 function quoteCsvCell(value: string): string {

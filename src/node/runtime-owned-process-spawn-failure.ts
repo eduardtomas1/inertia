@@ -30,6 +30,7 @@ function startIntentRetirement(
   registry: ActiveRuntimeOwnedProcessRegistry,
   ownershipId: string,
   onRetired: () => void,
+  failureProven: () => boolean,
 ): RuntimeOwnedIntentRetirement {
   let attempts = 0;
   let lastAttemptAt = Number.NEGATIVE_INFINITY;
@@ -73,6 +74,7 @@ function startIntentRetirement(
   const retirement: RuntimeOwnedIntentRetirement = {
     attempt: () => {
       if (outcome !== null) return outcome;
+      if (!failureProven()) return false;
       if (
         registry.active
         && Date.now() - lastAttemptAt >= INTENT_RETIREMENT_MIN_SPACING_MS
@@ -82,7 +84,11 @@ function startIntentRetirement(
     },
     settled,
     finalize: () => {
-      if (outcome === null && attempts < MAX_INTENT_RETIREMENT_ATTEMPTS) tryOnce();
+      if (
+        outcome === null
+        && failureProven()
+        && attempts < MAX_INTENT_RETIREMENT_ATTEMPTS
+      ) tryOnce();
       conclude(outcome === true);
     },
   };
@@ -94,7 +100,7 @@ export function retireUnspawnedRuntimeOwnedIntent(
   registry: ActiveRuntimeOwnedProcessRegistry,
   ownershipId: string,
 ): void {
-  startIntentRetirement(registry, ownershipId, () => undefined).attempt();
+  startIntentRetirement(registry, ownershipId, () => undefined, () => true).attempt();
 }
 
 export function retireFailedRuntimeOwnedSpawn(
@@ -103,14 +109,20 @@ export function retireFailedRuntimeOwnedSpawn(
   child: ChildProcess,
 ): void {
   registry.claims.set(child, claim);
+  let spawnFailed = false;
+  const retirement = startIntentRetirement(
+    registry,
+    claim.ownershipId,
+    () => { claim.released = true; },
+    () => spawnFailed,
+  );
+  claim.intentRetirement = retirement;
   child.once("error", () => {
-    if (child.pid !== undefined || claim.intentRetirement) return;
-    claim.intentRetirement = startIntentRetirement(registry, claim.ownershipId, () => {
-      claim.released = true;
-    });
-    claim.intentRetirement.attempt();
+    if (child.pid !== undefined) return;
+    spawnFailed = true;
+    retirement.attempt();
   });
   child.once("close", () => {
-    claim.intentRetirement?.attempt();
+    retirement.attempt();
   });
 }

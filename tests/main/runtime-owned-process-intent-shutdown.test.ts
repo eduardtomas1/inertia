@@ -14,6 +14,10 @@ import {
 } from "../../src/node/runtime-owned-processes";
 import type { RuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "../../src/server/runtime-shutdown";
+import {
+  createOwnedProcessTreeTermination,
+  terminateProcessTreeAndWait,
+} from "../../src/server/process-lifecycle";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 import { activatePreparedRuntimeOwnedProcessRegistry } from
   "../helpers/prepared-runtime-owned-process-registry";
@@ -142,5 +146,58 @@ describe.each(["darwin", "win32"] as const)("%s shutdown joins pending spawn-int
     expect(release.mock.calls.length).toBe(callsAtDeactivation);
     await expect(retired).resolves.toBe(false);
     expect(vi.getTimerCount()).toBe(0);
+  });
+  const terminateFromErrorListener = (directory: string, waitMs: number) => {
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      process.execPath,
+      ["-e", ""],
+      { cwd: join(directory, "deleted-worktree"), detached: platform !== "win32", shell: false, stdio: "pipe" },
+    ));
+    const order: string[] = [];
+    let outcome: "confirmed" | "unconfirmed" | undefined;
+    let settledAt: number | undefined;
+    const startedAt = Date.now();
+    child.once("error", () => {
+      order.push("error");
+      void createOwnedProcessTreeTermination(
+        child,
+        "Provider update process tree",
+        (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, { platform, waitMs }),
+      )(false).then(
+        () => { outcome = "confirmed"; settledAt = Date.now() - startedAt; },
+        () => { outcome = "unconfirmed"; settledAt = Date.now() - startedAt; },
+      );
+    });
+    const closed = new Promise<void>((resolve) => child.once("close", () => { order.push("close"); resolve(); }));
+    return { child, order, closed, outcome: () => outcome, settledAt: () => settledAt };
+  };
+
+  it("confirms an owned termination started from the caller's error listener once the retry retires the intent", async () => {
+    const directory = activate();
+    fakeClock();
+    const release = journalWritableAfter(50);
+    const run = terminateFromErrorListener(directory, 1_000);
+    await run.closed;
+    expect(run.order).toEqual(["error", "close"]);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(run.outcome()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.outcome()).toBe("confirmed");
+    expect(run.settledAt()).toBe(100);
+    expect(confirmRuntimeOwnedProcessStopped(run.child)).toBe(true);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reports an owned termination unconfirmed at its own deadline when the retry would land later", async () => {
+    const directory = activate();
+    fakeClock();
+    journalWritableAfter(50);
+    const run = terminateFromErrorListener(directory, 30);
+    await run.closed;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(run.outcome()).toBe("unconfirmed");
+    expect(run.settledAt()).toBe(60);
+    expect(confirmRuntimeOwnedProcessStopped(run.child)).toBe(true);
   });
 });

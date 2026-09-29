@@ -172,6 +172,25 @@ export function createOwnedProcessTreeTermination(
   };
 }
 
+function confirmedBefore(
+  confirmation: Promise<boolean>,
+  deadlineAt: number,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), Math.max(0, deadlineAt - Date.now()));
+    void confirmation.then(
+      (confirmed) => {
+        clearTimeout(timer);
+        resolve(confirmed);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(false);
+      },
+    );
+  });
+}
+
 function killDirectChild(child: ChildProcess, force: boolean): boolean {
   try {
     return child.kill(force ? "SIGKILL" : "SIGTERM");
@@ -712,7 +731,6 @@ export async function terminateProcessTreeAndWait(
   dependencies: AwaitableProcessLifecycleDependencies = {},
 ): Promise<boolean> {
   const pid = child.pid;
-  if (!pid) return true;
   const platform = dependencies.platform ?? process.platform;
   const spawnProcess = dependencies.spawnProcess ?? spawn;
   const spawnProcessSync = dependencies.spawnProcessSync ?? spawnSync;
@@ -721,6 +739,12 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  if (!pid) {
+    return await confirmedBefore(
+      awaitRuntimeOwnedProcessStopped(child),
+      Date.now() + waitMs,
+    );
+  }
   const processCanExecute = nativePosixProcessObserver(platform, dependencies);
   const processGroupCanExecute = nativePosixProcessGroupObserver(
     platform,
@@ -741,9 +765,10 @@ export async function terminateProcessTreeAndWait(
     const taskkill = async (
       forced: boolean,
       phaseDeadlineAt: number,
-    ): Promise<boolean> => {
+    ): Promise<boolean | null> => {
       const remainingMs = Math.min(waitMs, phaseDeadlineAt - Date.now());
-      return remainingMs > 0 && await terminateWindowsProcessTree(
+      if (remainingMs <= 0) return null;
+      return await terminateWindowsProcessTree(
         pid,
         forced,
         spawnProcess,
@@ -755,11 +780,13 @@ export async function terminateProcessTreeAndWait(
     let gracefulAccepted = false;
     if (!sequence.forcedTerminated && !sequence.fallbackReached) {
       if (force) {
-        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt);
-      } else if (await taskkill(false, gracefulDeadlineAt)) {
+        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt) === true;
+      } else if (await taskkill(false, gracefulDeadlineAt) === true) {
         gracefulAccepted = true;
       } else if (child.exitCode === null && child.signalCode === null) {
-        sequence.forcedTerminated = await taskkill(true, gracefulDeadlineAt);
+        const escalated = await taskkill(true, closeDeadlineAt);
+        if (escalated === null) return false;
+        sequence.forcedTerminated = escalated;
       }
     }
     if (sequence.forcedTerminated || gracefulAccepted) {

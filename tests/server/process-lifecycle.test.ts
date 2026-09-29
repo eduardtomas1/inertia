@@ -472,9 +472,11 @@ describe("provider process-tree termination", () => {
       expect(spawnProcess).toHaveBeenCalledTimes(2);
 
       await vi.advanceTimersByTimeAsync(60);
+      expect(forced.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(40);
       expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
-      await vi.advanceTimersByTimeAsync(99);
+      await vi.advanceTimersByTimeAsync(59);
       expect(result).toBeUndefined();
       await vi.advanceTimersByTimeAsync(1);
       expect(result).toBe(false);
@@ -588,6 +590,69 @@ describe("provider process-tree termination", () => {
         expect(outcome()).toBe("unconfirmed");
         expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
         expect(child.kill.mock.calls).toEqual([["SIGKILL"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives the forced escalation the remaining sequence budget after a graceful taskkill consumed its window", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const events: Array<[number, string]> = [];
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          events.push([Date.now() - startedAt, args.join(" ")]);
+          if (forced) {
+            setTimeout(() => {
+              taskkill.emit("close", 0);
+              child.exitCode = 1;
+              child.emit("close", 1);
+            }, 30);
+          }
+          return taskkill;
+        });
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(events).toEqual([[0, "/pid 4242 /t"], [100, "/pid 4242 /t /f"]]);
+        expect(outcome()).toBe("confirmed");
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(400);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves a starved escalation to the forced call instead of marking the tree unconfirmed from the graceful call", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        child.kill = vi.fn(() => true);
+        const graceful = fakeTaskkill();
+        const forced = fakeTaskkill();
+        const spawnProcess = vi.fn()
+          .mockImplementationOnce(() => {
+            setTimeout(() => {
+              vi.setSystemTime(startedAt + 250);
+              graceful.emit("close", 1);
+            }, 40);
+            return graceful;
+          })
+          .mockImplementationOnce(() => forced);
+        let first: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, false, {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        }).then((value) => { first = value; });
+        await vi.advanceTimersByTimeAsync(40);
+        expect(first).toBe(false);
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(spawnProcess).toHaveBeenCalledOnce();
       } finally {
         vi.useRealTimers();
       }
@@ -820,21 +885,29 @@ describe("provider process-tree termination", () => {
       }
     });
 
-    it("skips escalation once a graceful taskkill consumes the taskkill budget", async () => {
+    it("escalates within the remaining sequence budget after a graceful taskkill consumed its window, then falls back at the close deadline", async () => {
       vi.useFakeTimers();
       try {
         const startedAt = Date.now();
         const child = fakeChild();
         const graceful = fakeTaskkill();
-        const spawnProcess = vi.fn(() => graceful);
+        const forced = fakeTaskkill();
+        const spawnProcess = vi.fn()
+          .mockReturnValueOnce(graceful)
+          .mockReturnValueOnce(forced);
         const outcome = run(child, spawnProcess, false);
         await vi.advanceTimersByTimeAsync(100);
         expect(graceful.kill).toHaveBeenCalledWith("SIGKILL");
-        expect(spawnProcess).toHaveBeenCalledOnce();
-        expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
+        expect(child.kill).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(99);
         expect(outcome.value).toBeUndefined();
         await vi.advanceTimersByTimeAsync(1);
+        expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(child.kill).toHaveBeenCalledWith("SIGTERM");
         expect(outcome.value).toBe(false);
         expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
       } finally {
@@ -886,7 +959,7 @@ describe("provider process-tree termination", () => {
         const startedAt = Date.now();
         const child = fakeChild();
         const graceful = fakeTaskkill();
-        const spawnProcess = vi.fn(() => graceful);
+        const spawnProcess = vi.fn((_command: string, _args: string[]) => graceful);
         const terminate = createOwnedProcessTreeTermination(
           child as never,
           "Provider update process tree",
@@ -902,7 +975,10 @@ describe("provider process-tree termination", () => {
         await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS + 100);
         expect(rejectedAt).toBe(200);
         expect(rejectedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
-        expect(spawnProcess).toHaveBeenCalledOnce();
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
       } finally {
         vi.useRealTimers();
       }

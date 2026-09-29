@@ -201,5 +201,4 @@ it("never retires the intent of a child whose spawn produced a PID", () => {
   child.emit("close", 0);
   expect(release).not.toHaveBeenCalled();
   expect(claim.released).toBe(false);
-  expect(registry.pendingIntentRetirements.size).toBe(0);
 });

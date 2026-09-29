@@ -68,6 +68,7 @@ import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageV
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
+import { SidebarHelpButton } from "./sidebar/SidebarHelpButton";
 import "./sidebar/workspace-navigation.css";
 import type { SidebarProps } from "./sidebar/SidebarProps";
 import {
@@ -1014,6 +1015,7 @@ function SidebarView({
           <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
+          <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
             <SidebarUpdateControl controller={appUpdate} />
           </Suspense>}

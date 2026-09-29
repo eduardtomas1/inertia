@@ -263,7 +263,7 @@ export interface WorkspaceSceneActions {
 export interface WorkspaceSceneModelInput {
   view: "workspace" | "settings";
   settingsTarget: {
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    section: import("../settingsSections").SettingsSection;
     projectId?: string;
     profileId?: string;
     selection?: import("../../utils/diagnosticNavigation").DiagnosticSelection;

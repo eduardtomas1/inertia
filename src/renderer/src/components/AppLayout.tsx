@@ -43,6 +43,10 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
+import { HelpGuideHost } from "./HelpGuideHost";
+import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
+import type { SettingsSection } from "./settingsSections";
+import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
 import {
@@ -111,6 +115,7 @@ interface AppLayoutActions {
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
+  openSettingsSection: (section: SettingsSection) => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -225,6 +230,7 @@ export function activeConversationIsVisible(input: {
   paletteOpen: boolean;
   providerAuthOpen: boolean;
   mobileSidebarOpen: boolean;
+  helpOpen?: boolean;
 }): boolean {
   return input.view === "workspace"
     && !input.commitDialogOpen
@@ -233,7 +239,8 @@ export function activeConversationIsVisible(input: {
     && !input.multiSpawnOpen
     && !input.paletteOpen
     && !input.providerAuthOpen
-    && !input.mobileSidebarOpen;
+    && !input.mobileSidebarOpen
+    && !input.helpOpen;
 }
 
 export const AppLayout = memo(function AppLayout({
@@ -459,6 +466,7 @@ export const AppLayout = memo(function AppLayout({
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
+  const helpOpen = useHelpGuideOpen();
   const activeConversationVisible = !conversationSuppressedInMain
     && activeConversationIsVisible({
     view,
@@ -469,6 +477,7 @@ export const AppLayout = memo(function AppLayout({
     paletteOpen,
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
+    helpOpen,
     });
 
   const splitActive = splitConversationIds.size > 0;
@@ -916,6 +925,19 @@ export const AppLayout = memo(function AppLayout({
         ]}
         onOpenProviderSetup={actions.openProviderSetup}
         onAddProject={() => void actions.importProject()}
+      />
+      <HelpGuideHost
+        shortcutLabel={(action) => formatAppShortcutLabel(platform, settings.keybindings[action])}
+        commands={{
+          "add-project": () => void actions.importProject(),
+          search: () => setPaletteOpen(true),
+          usage: () => setView("usage"),
+          "daily-work": () => setDailyWorkOpen(true),
+          "welcome-guide": openWelcomeGuide,
+        }}
+        onOpenSettings={actions.openSettingsSection}
+        onLeave={() => setSidebarOpen(false)}
+        onLoadError={setActionError}
       />
     </div>
   );

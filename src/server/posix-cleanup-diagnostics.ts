@@ -3,24 +3,23 @@ import type {
   PosixRootStopResult,
 } from "../node/posix-process-tree";
 
+export type PosixCleanupFailureReason =
+  | "invalid-pid"
+  | "incomplete-scan"
+  | "no-exit-budget"
+  | "exit-unconfirmed"
+  | "graceful-unconfirmed"
+  | "closed-unconfirmed"
+  | "owned-stop-unconfirmed";
+
 export interface PosixCleanupFailure {
   readonly scope: "child" | "pid";
-  readonly rootStop: PosixRootStopResult;
-  readonly rootState: PosixRootState;
-  readonly rootRunningObserved: boolean;
-  readonly scanStabilized: boolean;
+  readonly reason: PosixCleanupFailureReason;
+  readonly rootStop: PosixRootStopResult | null;
+  readonly rootState: PosixRootState | null;
+  readonly rootRunningObserved: boolean | null;
+  readonly scanStabilized: boolean | null;
   readonly groupExited: boolean | null;
   readonly descendantsExited: boolean | null;
   readonly rootExited: boolean | null;
-}
-
-const failures: PosixCleanupFailure[] = [];
-
-export function recordPosixCleanupFailure(failure: PosixCleanupFailure): void {
-  failures.push({ ...failure });
-  if (failures.length > 8) failures.shift();
-}
-
-export function posixCleanupFailures(): PosixCleanupFailure[] {
-  return failures.map((failure) => ({ ...failure }));
 }

@@ -1026,6 +1026,7 @@ export class TerminalManager {
     const windowsFailureOptions = (): ErrorOptions => terminalCleanupFailureOptions(
       windowsTerminalAtStop,
       () => terminalStopObservation(session),
+      session.terminateProcessTree?.posixCleanupFailure ?? null,
     );
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.

@@ -22,6 +22,9 @@ const MAX_RENDERER_DIAGNOSTIC_ENTRIES = 40;
 const MAX_RENDERER_DIAGNOSTIC_CHARACTERS = 2_048;
 const OMITTED_RENDERER_DIAGNOSTICS =
   /^\[(\d+) earlier renderer diagnostics omitted\]$/u;
+const RUNTIME_WEBSOCKET_URL = /^ws:\/\/127\.0\.0\.1:\d+\/runtime\//u;
+const RUNTIME_WEBSOCKET_BUFFER_SPACE_FAILURE =
+  /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/runtime\/[^']*' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE$/u;
 export function fixtureElectronGracefulTimeoutMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
@@ -148,12 +151,29 @@ export function observeElectronPage(
       electronProcessEvidence(mainWindowChild).record("main-window-page-closed");
     });
   }
+  let runtimeSockets = 0;
+  const recoverableRuntimeFailures: { diagnostic: string; socketOrdinal: number }[] = [];
+  currentPage.on("websocket", (socket) => {
+    if (!RUNTIME_WEBSOCKET_URL.test(socket.url())) return;
+    runtimeSockets += 1;
+    const ordinal = runtimeSockets;
+    socket.once("framereceived", () => {
+      for (let index = recoverableRuntimeFailures.length - 1; index >= 0; index -= 1) {
+        const failure = recoverableRuntimeFailures[index]!;
+        if (failure.socketOrdinal >= ordinal) continue;
+        recoverableRuntimeFailures.splice(index, 1);
+        const entry = rendererErrors.lastIndexOf(failure.diagnostic);
+        if (entry >= 0) rendererErrors.splice(entry, 1);
+      }
+    });
+  });
   currentPage.on("console", (message) => {
     if (message.type() === "error") {
-      appendElectronRendererDiagnostic(
-        rendererErrors,
-        formatElectronConsoleError(message),
-      );
+      const diagnostic = formatElectronConsoleError(message);
+      appendElectronRendererDiagnostic(rendererErrors, diagnostic);
+      if (RUNTIME_WEBSOCKET_BUFFER_SPACE_FAILURE.test(message.text())) {
+        recoverableRuntimeFailures.push({ diagnostic, socketOrdinal: runtimeSockets });
+      }
     }
   });
   currentPage.on("pageerror", (error) => {

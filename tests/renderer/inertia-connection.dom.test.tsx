@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   clientCommandSchema,
+  defaultSettings,
   MAX_WORKSPACE_FILE_EDIT_BYTES,
   type ServerEvent,
 } from "../../src/shared/contracts";
@@ -78,6 +79,66 @@ describe("useInertiaConnection", () => {
 
     await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(2));
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("reconnects and returns online after the runtime socket fails before opening", async () => {
+    const getRuntimeConnection = vi.fn().mockResolvedValue({
+      websocketUrl: "ws://127.0.0.1:12345/runtime/test",
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const hook = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    vi.useFakeTimers();
+    const failed = FakeWebSocket.instances[0]!;
+    act(() => {
+      failed.readyState = 3;
+      failed.dispatchEvent(new Event("error"));
+      failed.dispatchEvent(new Event("close"));
+    });
+    expect(hook.result.current.status).toBe("offline");
+    expect(failed.close).not.toHaveBeenCalled();
+
+    await act(async () => vi.advanceTimersByTimeAsync(599));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(251));
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    const reconnected = FakeWebSocket.instances[1]!;
+    const sync = { runtimeGeneration: "runtime-after-failed-open", latestSequence: 0 };
+    act(() => {
+      reconnected.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({
+          type: "server.welcome",
+          protocolVersion: 1,
+          snapshot: {
+            projects: [],
+            conversations: [],
+            runs: [],
+            providers: [],
+            settings: defaultSettings,
+            activeProjectId: null,
+            activeConversationId: null,
+            sync,
+          },
+          sync,
+        }),
+      }));
+      reconnected.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({ type: "runtime.sync.completed", sync }),
+      }));
+    });
+    await vi.waitFor(() => expect(hook.result.current.status).toBe("online"));
+    expect(hook.result.current.error).toBeNull();
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
   it("does not poll a non-retryable startup blocker", async () => {

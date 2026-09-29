@@ -93,6 +93,13 @@ export function mainThreadNanosleepShare(sample: string): number | null {
   return Math.min(1, sleeping / total);
 }
 
+export function gpuMainThreadStall(sample: string): string | null {
+  const share = mainThreadNanosleepShare(sample);
+  return share !== null && share >= GPU_STALL_NANOSLEEP_SHARE
+    ? `main-thread-nanosleep=${Math.round(share * 100)}%`
+    : null;
+}
+
 export function createElectronMainProcessDiagnostic(
   main: ChildProcess,
   dependencies: {
@@ -340,10 +347,8 @@ export function createElectronMainProcessDiagnostic(
     if (gpu.stat.startsWith("T")) return "stopped";
     for (const [sample, sampledIdentity] of validatedHelperSamples) {
       if (sample.pid !== gpu.pid || sampledIdentity !== identity) continue;
-      const share = mainThreadNanosleepShare(sample.output);
-      if (share !== null && share >= GPU_STALL_NANOSLEEP_SHARE) {
-        return `main-thread-nanosleep=${Math.round(share * 100)}%`;
-      }
+      const stall = gpuMainThreadStall(sample.output);
+      if (stall) return stall;
     }
     return null;
   };

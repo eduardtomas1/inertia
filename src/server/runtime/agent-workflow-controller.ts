@@ -13,6 +13,7 @@ import type {
 } from "../../shared/contracts";
 import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
+import { boundedDisplayString, exactBoundedString, parseCodexGoal } from "./codex-goal-parsing";
 import type { RuntimeStore } from "../database";
 import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
@@ -73,119 +74,12 @@ const EMPTY_SKILL_DISCOVERY: SkillDiscoveryState = {
   synchronizedAt: null,
 };
 
-function exactBoundedString(
-  value: unknown,
-  maximum: number,
-): string | undefined {
-  if (
-    typeof value !== "string"
-    || value.length === 0
-    || value.length > maximum
-    || value.includes("\0")
-  ) return undefined;
-  return value;
-}
-
-function boundedDisplayString(
-  value: unknown,
-  maximum: number,
-): string | undefined {
-  const exact = exactBoundedString(value, maximum);
-  const clean = exact?.trim();
-  return clean || undefined;
-}
-
 function sameProviderSkillIdentity(
   left: ProviderSkillInput,
   right: ProviderSkillInput,
 ): boolean {
   if (left.source !== right.source || left.name !== right.name) return false;
   return normalizeIdentityPath(left.path) === normalizeIdentityPath(right.path);
-}
-
-function boundedInteger(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): number | null {
-  if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value < minimum
-    || value > maximum
-  ) return null;
-  return value;
-}
-
-function isoFromUnixSeconds(value: unknown): string | null {
-  const seconds = boundedInteger(value, 0, 32_503_680_000);
-  if (seconds === null) return null;
-  const date = new Date(seconds * 1_000);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function goalStatus(value: unknown): AgentGoalStatus | null {
-  return value === "active"
-    || value === "paused"
-    || value === "blocked"
-    || value === "usageLimited"
-    || value === "budgetLimited"
-    || value === "complete"
-    ? value
-    : null;
-}
-
-export function parseCodexGoal(
-  conversationId: string,
-  expectedSessionId: string,
-  value: unknown,
-  synchronizedAt = new Date().toISOString(),
-): AgentGoal | null {
-  const goal = objectValue(value);
-  const providerSessionId = exactBoundedString(goal?.threadId, 512);
-  const objective = boundedDisplayString(goal?.objective, 4_000);
-  const status = goalStatus(goal?.status);
-  const tokensUsed = boundedInteger(
-    goal?.tokensUsed,
-    0,
-    1_000_000_000_000,
-  );
-  const timeUsedSeconds = boundedInteger(
-    goal?.timeUsedSeconds,
-    0,
-    315_360_000,
-  );
-  const createdAt = isoFromUnixSeconds(goal?.createdAt);
-  const updatedAt = isoFromUnixSeconds(goal?.updatedAt);
-  const hasTokenBudget = goal?.tokenBudget !== undefined
-    && goal.tokenBudget !== null;
-  const tokenBudget = hasTokenBudget
-    ? boundedInteger(goal?.tokenBudget, 1, 1_000_000_000)
-    : null;
-  if (
-    providerSessionId !== expectedSessionId
-    || !objective
-    || !status
-    || tokensUsed === null
-    || timeUsedSeconds === null
-    || !createdAt
-    || !updatedAt
-    || createdAt > updatedAt
-    || (hasTokenBudget && tokenBudget === null)
-  ) return null;
-  return {
-    conversationId,
-    source: "codex-native",
-    providerSessionId,
-    objective,
-    status,
-    tokenBudget,
-    tokensUsed,
-    timeUsedSeconds,
-    createdAt,
-    updatedAt,
-    synchronizedAt,
-  };
 }
 
 function skillScope(value: unknown): AgentSkillScope | null {
@@ -240,6 +134,8 @@ function assertRecoverableGoalBudget(
     );
   }
 }
+
+export { parseCodexGoal };
 
 export class AgentWorkflowController {
   private readonly skills = new Map<string, PrivateSkillCapability>();

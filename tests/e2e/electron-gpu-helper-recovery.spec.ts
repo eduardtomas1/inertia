@@ -8,6 +8,7 @@ import { FIXTURE_PREPARED_EXIT_TIMEOUT_MS, GPU_HELPER_RECOVERY_GRACE_MS } from "
 import { electronHelperProcesses } from "./support/electron-main-process-diagnostic";
 import { electronProcessEvidence } from "./support/electron-process-evidence";
 import { GPU_HELPER_STALL_RECOVERED, renderedFrame } from "./support/rendered-frame";
+import { elapseObservationWindow } from "./support/stable-sample";
 import { ensureWorkspaceTools, rightPanelToggle, selectWorkspaceTool } from "./support/workspace-tools";
 
 const execFileAsync = promisify(execFile);
@@ -163,6 +164,153 @@ test("recovers a GPU helper that stalls after restart before a workspace tool op
   } finally {
     if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
       process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+async function waitForRecoveries(count: number): Promise<void> {
+  await expect.poll(() => test.info().annotations
+    .filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED).length, { timeout: 15_000 }).toBe(count);
+}
+
+test("recovers a stall met only by actions on a secondary window", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-popup-frames", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
+  try {
+    const popupOpened = app.electronApp.waitForEvent("window");
+    await app.electronApp.evaluate(async ({ BrowserWindow }) => {
+      const popup = new BrowserWindow({ width: 360, height: 240, show: true });
+      await popup.loadURL("data:text/html,<title>Frame monitor popup</title>"
+        + "<button onclick=\"this.textContent='Clicked'\">Popup action</button>");
+    });
+    const popup = await popupOpened;
+    await expect(popup.getByRole("button", { name: "Popup action" })).toBeVisible();
+    const mainPid = app.electronApp.process().pid!;
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
+    process.kill(gpuPid, "SIGSTOP");
+    await popup.getByRole("button", { name: "Popup action" }).click();
+    await expect(popup.getByRole("button", { name: "Clicked" })).toBeVisible();
+    expectStallRecovered(gpuPid, mainPid);
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+test("recovers a stall that begins while a click waits for its moving target", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-mid-action-frames", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
+  try {
+    const mainPid = app.electronApp.process().pid!;
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
+    const toggle = rightPanelToggle(app.page);
+    const pressed = await toggle.getAttribute("aria-pressed");
+    await app.page.addStyleTag({ content: "@keyframes frame-monitor-drift { from { translate: 0 } to { translate: 24px } }"
+      + " [data-panel-layout-controls] [data-right-panel-toggle] { animation: frame-monitor-drift 1500ms linear both; }" });
+    const clicked = toggle.click();
+    await expect.poll(() => toggle.evaluate((element) => element.getAnimations()
+      .some((animation) => animation.playState === "running" && Number(animation.currentTime) > 200))).toBe(true);
+    process.kill(gpuPid, "SIGSTOP");
+    await clicked;
+    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    expectStallRecovered(gpuPid, mainPid);
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+test("recovers a stall that begins after a healthy action while the page waits for frames", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-after-checkpoint", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
+  try {
+    const mainPid = app.electronApp.process().pid!;
+    const toggle = rightPanelToggle(app.page);
+    const pressed = await toggle.getAttribute("aria-pressed");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
+    process.kill(gpuPid, "SIGSTOP");
+    await app.page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expectStallRecovered(gpuPid, mainPid);
+    expect(await processStart(gpuPid)).toBeNull();
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+test("leaves a stopped helper alone while every window is hidden and recovers it once one is shown", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-hidden-frames", initialState: "conversation" });
+  let gpuPid: number | undefined;
+  let gpuStart: string | null = null;
+  try {
+    const mainPid = app.electronApp.process().pid!;
+    gpuPid = await directGpuHelper(mainPid);
+    gpuStart = await processStart(gpuPid);
+    await app.electronApp.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) window.hide();
+    });
+    process.kill(gpuPid, "SIGSTOP");
+    await elapseObservationWindow(app.page, 6_000);
+    expect(await processStart(gpuPid)).toBe(gpuStart);
+    expect(test.info().annotations.filter((entry) => entry.type === GPU_HELPER_STALL_RECOVERED)).toEqual([]);
+    await app.electronApp.evaluate(({ BrowserWindow }) => {
+      for (const window of BrowserWindow.getAllWindows()) window.show();
+    });
+    await waitForRecoveries(1);
+    expectStallRecovered(gpuPid, mainPid);
+    const toggle = rightPanelToggle(app.page);
+    const pressed = await toggle.getAttribute("aria-pressed");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+  } finally {
+    if (gpuPid !== undefined && gpuStart !== null && await processStart(gpuPid) === gpuStart) {
+      process.kill(gpuPid, "SIGKILL");
+    }
+    await app.close();
+  }
+});
+
+test("recovers a relaunched GPU helper that stalls again in the same test", async () => {
+  const app = await createAppFixture({ name: "gpu-helper-second-stall", initialState: "conversation" });
+  const stopped: { pid: number; start: string | null }[] = [];
+  try {
+    const mainPid = app.electronApp.process().pid!;
+    const toggle = rightPanelToggle(app.page);
+    for (let stall = 1; stall <= 2; stall += 1) {
+      const gpuPid = await directGpuHelper(mainPid);
+      stopped.push({ pid: gpuPid, start: await processStart(gpuPid) });
+      process.kill(gpuPid, "SIGSTOP");
+      const pressed = await toggle.getAttribute("aria-pressed");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", pressed === "true" ? "false" : "true");
+      await waitForRecoveries(stall);
+      expect(await processStart(gpuPid)).toBeNull();
+    }
+    expect(app.rendererErrors).toEqual([]);
+  } finally {
+    for (const { pid, start } of stopped) {
+      if (start !== null && await processStart(pid) === start) process.kill(pid, "SIGKILL");
     }
     await app.close();
   }

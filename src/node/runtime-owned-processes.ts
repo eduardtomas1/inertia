@@ -47,7 +47,10 @@ import {
   signalExactDarwinGuardianStop as signalExactDarwinGuardianStopWith,
 } from "./runtime-owned-process-darwin-stop.js";
 import type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
-import { retireFailedRuntimeOwnedSpawn } from "./runtime-owned-process-spawn-failure.js";
+import {
+  retireFailedRuntimeOwnedSpawn,
+  retireUnspawnedRuntimeOwnedIntent,
+} from "./runtime-owned-process-spawn-failure.js";
 import {
   taintRuntimeOwnedProcessRegistry,
   type RuntimeOwnedProcessRegistryOptions,
@@ -159,6 +162,7 @@ export function activateRuntimeOwnedProcessRegistry(
     admissionController: new AbortController(),
     pendingAdmissions: new Set(),
     pendingReleaseConfirmations: new Set(),
+    pendingIntentRetirements: new Set(),
     onTainted: options.onTainted ?? (() => undefined),
     tainted: false,
   };
@@ -168,6 +172,7 @@ export function activateRuntimeOwnedProcessRegistry(
     activeRegistry = null;
     registry.admissionController.abort();
     for (const stopMonitor of registry.activeLinuxMonitors) stopMonitor();
+    for (const retirement of registry.pendingIntentRetirements) retirement.cancel();
     registry.activeLinuxMonitors.clear();
   };
 }
@@ -819,7 +824,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   if (registry.tainted) throw new Error("Runtime process ownership is tainted until restart.");
   const ownershipId = registry.journal.begin(registry.runtimeGenerationId, registry.systemBootId, registry.sessionCapability);
   const spawnedAfterMs = Date.now();
-  let child: T;
+  let child: T | undefined;
   try {
     child = spawnProcess();
     if (
@@ -827,7 +832,8 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
       && child.spawnfile !== registry.darwinGuardianPath
     ) throw new Error("The macOS owned process did not use its guardian.");
   } catch (error) {
-    registry.journal.release(ownershipId);
+    if (child === undefined) retireUnspawnedRuntimeOwnedIntent(registry, ownershipId);
+    else registry.journal.release(ownershipId);
     throw error;
   }
   let settleStopRequest!: () => void;
@@ -1110,7 +1116,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           options.processCanExecute ?? processCanExecute,
         );
       }
-    } else registry.journal.release(ownershipId);
+    } else retireUnspawnedRuntimeOwnedIntent(registry, ownershipId);
     throw error;
   }
   const confirmedOwned = owned;
@@ -1164,6 +1170,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
 export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean {
   const registry = activeRegistry;
   const claim = registry?.claims.get(child);
+  if (claim && !claim.released) claim.retireIntent?.();
   return registry && claim
     ? (registry.platform === "linux"
         ? claim.released
@@ -1203,6 +1210,7 @@ export function runtimeOwnedProcessCleanupConfirmed(): boolean {
   if (!activeRegistry) {
     return !supportedRuntimeOwnedProcessPlatform(process.platform);
   }
+  for (const retirement of activeRegistry.pendingIntentRetirements) retirement.attempt();
   const records = activeRegistry.journal.records(
     activeRegistry.runtimeGenerationId,
   );

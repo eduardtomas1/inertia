@@ -74,6 +74,7 @@ import {
 } from "./settingsSectionLoaders";
 import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { useRovingRadios } from "../hooks/useRovingRadios";
 import { ThemeLibrary } from "./ThemeLibrary";
 import { WorkingIndicatorSettings } from "./working-indicator/WorkingIndicatorSettings";
 import { StorageStatusSettings } from "./StorageStatusSettings";
@@ -167,6 +168,11 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Sun }> 
   { id: "archive", label: "Archive & data", icon: ArchiveRestore },
 ];
 
+const interfaceScales = ["compact", "default", "comfortable", "large"] as const;
+const projectGroupings = ["repository", "repository-path", "separate"] as const;
+const usageDisplayModes = ["expanded", "compact", "hidden"] as const;
+const responseDensities = ["compact", "default", "comfortable"] as const;
+
 const shortcuts: Array<[AppShortcutAction, string]> = [
   ["search", "Search everything"],
   ["new-chat", "New chat"],
@@ -254,6 +260,16 @@ export function SettingsView({
   }, []);
   const onUpdate = (updates: Partial<AppSettings>): void => {
     void updateSettingsRequest(updates).catch(() => undefined);
+  };
+  const interfaceScaleRadios = useRovingRadios(interfaceScales, settings.interfaceScale, (interfaceScale) => onUpdate({ interfaceScale }));
+  const projectGroupingRadios = useRovingRadios(projectGroupings, settings.projectGrouping, (projectGrouping) => onUpdate({ projectGrouping }));
+  const usageDisplayRadios = useRovingRadios(usageDisplayModes, settings.usageDisplayMode, (usageDisplayMode) => onUpdate({ usageDisplayMode }));
+  const responseDensityRadios = useRovingRadios(responseDensities, settings.responseDensity, (responseDensity) => onUpdate({ responseDensity }));
+  const restoreDefaults = (): void => {
+    if (
+      !settings.confirmDestructiveActions
+      || window.confirm("Restore every setting to its default? Keybindings, provider labels, the Codex binary path, and the default provider and model are reset too.")
+    ) onUpdate(defaultSettings);
   };
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
@@ -575,7 +591,7 @@ export function SettingsView({
         {section === "snapshots" && (SnapshotSettings ? <SnapshotSettings /> : <SettingsSectionFallback />)}
         {section === "general" && (
           <div className="settings-toolbar">
-            <button type="button" className="secondary-button" disabled={disabled} onClick={() => onUpdate(defaultSettings)}><RotateCcw size={14} />Restore defaults</button>
+            <button type="button" className="secondary-button" disabled={disabled} onClick={restoreDefaults}><RotateCcw size={14} />Restore defaults</button>
           </div>
         )}
 
@@ -586,8 +602,8 @@ export function SettingsView({
               <ThemeLibrary settings={settings} disabled={disabled} onUpdate={onUpdate} />
               <div className="response-density-setting interface-scale-setting">
                 <span><strong>Interface scale</strong><small>Scale navigation, messages, controls, files, and diffs live. Terminal text stays independent.</small></span>
-                <div role="radiogroup" aria-label="Interface scale">
-                  {(["compact", "default", "comfortable", "large"] as const).map((scale) => <button type="button" role="radio" aria-checked={settings.interfaceScale === scale} className={clsx(settings.interfaceScale === scale && "is-active")} disabled={disabled} key={scale} onClick={() => onUpdate({ interfaceScale: scale })}>{scale === "default" ? "Default" : scale[0].toUpperCase() + scale.slice(1)}</button>)}
+                <div role="radiogroup" aria-label="Interface scale" {...interfaceScaleRadios.groupProps}>
+                  {interfaceScales.map((scale) => <button type="button" {...interfaceScaleRadios.radioProps(scale)} className={clsx(settings.interfaceScale === scale && "is-active")} disabled={disabled} key={scale}>{scale === "default" ? "Default" : scale[0].toUpperCase() + scale.slice(1)}</button>)}
                 </div>
               </div>
               <WorkingIndicatorSettings settings={settings.workingIndicator} disabled={disabled} onUpdate={updateSettingsRequest} />
@@ -601,10 +617,10 @@ export function SettingsView({
               </div>
               <div className="response-density-setting project-grouping-setting">
                 <span><strong>Logical project grouping</strong><small>Use canonical Git identity and normalized paths, never display names.</small></span>
-                <div role="radiogroup" aria-label="Logical project grouping">
-                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "repository"} className={clsx(settings.projectGrouping === "repository" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "repository" })}>Repository</button>
-                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "repository-path"} className={clsx(settings.projectGrouping === "repository-path" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "repository-path" })}>Repo + folder</button>
-                  <button type="button" role="radio" aria-checked={settings.projectGrouping === "separate"} className={clsx(settings.projectGrouping === "separate" && "is-active")} disabled={disabled} onClick={() => onUpdate({ projectGrouping: "separate" })}>Keep separate</button>
+                <div role="radiogroup" aria-label="Logical project grouping" {...projectGroupingRadios.groupProps}>
+                  <button type="button" {...projectGroupingRadios.radioProps("repository")} className={clsx(settings.projectGrouping === "repository" && "is-active")} disabled={disabled}>Repository</button>
+                  <button type="button" {...projectGroupingRadios.radioProps("repository-path")} className={clsx(settings.projectGrouping === "repository-path" && "is-active")} disabled={disabled}>Repo + folder</button>
+                  <button type="button" {...projectGroupingRadios.radioProps("separate")} className={clsx(settings.projectGrouping === "separate" && "is-active")} disabled={disabled}>Keep separate</button>
                 </div>
               </div>
               <div className="settings-rows">
@@ -618,8 +634,8 @@ export function SettingsView({
               </div>
               <div className="response-density-setting usage-display-setting">
                 <span><strong>Usage and context</strong><small>Choose a full composer card, a restrained summary, or hide provider usage entirely.</small></span>
-                <div role="radiogroup" aria-label="Usage and context display">
-                  {(["expanded", "compact", "hidden"] as const).map((mode) => <button type="button" role="radio" aria-checked={settings.usageDisplayMode === mode} className={clsx(settings.usageDisplayMode === mode && "is-active")} disabled={disabled} key={mode} onClick={() => onUpdate({ usageDisplayMode: mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
+                <div role="radiogroup" aria-label="Usage and context display" {...usageDisplayRadios.groupProps}>
+                  {usageDisplayModes.map((mode) => <button type="button" {...usageDisplayRadios.radioProps(mode)} className={clsx(settings.usageDisplayMode === mode && "is-active")} disabled={disabled} key={mode}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
                 </div>
               </div>
             </section>
@@ -628,8 +644,8 @@ export function SettingsView({
               <div className="settings-card-heading"><div><FileCode2 size={18} /></div><span><h3 id="responses-heading">Agent responses</h3><p>Choose how final answers and the work behind them are presented.</p></span></div>
               <div className="response-density-setting">
                 <span><strong>Response density</strong><small>Adjust spacing and type size without changing terminal text.</small></span>
-                <div role="radiogroup" aria-label="Response density">
-                  {(["compact", "default", "comfortable"] as const).map((density) => <button type="button" role="radio" aria-checked={settings.responseDensity === density} className={clsx(settings.responseDensity === density && "is-active")} disabled={disabled} key={density} onClick={() => onUpdate({ responseDensity: density })}>{density === "default" ? "Default" : density[0].toUpperCase() + density.slice(1)}</button>)}
+                <div role="radiogroup" aria-label="Response density" {...responseDensityRadios.groupProps}>
+                  {responseDensities.map((density) => <button type="button" {...responseDensityRadios.radioProps(density)} className={clsx(settings.responseDensity === density && "is-active")} disabled={disabled} key={density}>{density === "default" ? "Default" : density[0].toUpperCase() + density.slice(1)}</button>)}
                 </div>
               </div>
               <div className="settings-rows">

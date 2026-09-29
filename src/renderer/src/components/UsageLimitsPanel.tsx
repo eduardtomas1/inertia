@@ -309,7 +309,7 @@ export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void;
     return () => { if (previous?.isConnected) previous.focus(); };
   }, [returnFocusTo]);
   if (!context) return null;
-  return <div className="dialog-backdrop limits-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return <div className="dialog-backdrop limits-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-label="Provider usage limits" className="limits-dialog" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } else trapModalFocus(event, event.currentTarget); }}>
       <button type="button" className="limits-dialog-close" aria-label="Close provider limits" onClick={onClose}><X size={18} /></button>
       <UsageLimitsPanel request={context.request} status={context.status} compact />

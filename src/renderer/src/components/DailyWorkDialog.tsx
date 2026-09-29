@@ -18,6 +18,7 @@ import type {
 } from "@shared/contracts";
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { useBusyTriggerFocus } from "../hooks/useBusyTriggerFocus";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
@@ -153,6 +154,7 @@ export function DailyWorkDialog({
   const titleId = useId();
   const descriptionId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const loadGeneration = useRef(0);
@@ -167,6 +169,11 @@ export function DailyWorkDialog({
   const error = status === "offline"
     ? "Daily work is unavailable while the local service is offline."
     : requestError;
+  const holdRefreshFocus = useBusyTriggerFocus(loading, closeRef, refreshRef);
+  const refresh = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    holdRefreshFocus(event.currentTarget);
+    setRefreshVersion((version) => version + 1);
+  };
   const todayKey = localDateKey(new Date());
   const dateLabel = formatDateLabel(selectedDateKey);
   useNativePreviewSuspension(true);
@@ -248,11 +255,12 @@ export function DailyWorkDialog({
             }}
           />
           <button
+            ref={refreshRef}
             type="button"
             className="daily-work-refresh"
             aria-label="Refresh daily work"
             disabled={loading || status !== "online"}
-            onClick={() => setRefreshVersion((version) => version + 1)}
+            onClick={refresh}
           >
             <RefreshCw size={14} aria-hidden="true" />
           </button>
@@ -277,7 +285,7 @@ export function DailyWorkDialog({
           {!loading && error && (
             <div className="daily-work-error" role="alert">
               <span><strong>Daily work could not be loaded</strong><small>{error}</small></span>
-              <button type="button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={status !== "online"}>Try again</button>
+              <button type="button" onClick={refresh} disabled={status !== "online"}>Try again</button>
             </div>
           )}
           {!loading && !error && dashboard && (

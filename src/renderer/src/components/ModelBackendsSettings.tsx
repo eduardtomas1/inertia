@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -31,6 +31,7 @@ import {
   setBackendDraftAdvancedRouting,
   updateBackendDraftModel,
 } from "../utils/backendProfileDraft";
+import { useRovingRadios } from "../hooks/useRovingRadios";
 import { Switch } from "./ui";
 
 type ModelBackendsSettingsProps = {
@@ -63,6 +64,7 @@ type ModelBackendsSettingsProps = {
 };
 
 const emptyCapabilities: BackendModelDefinition["capabilities"] = [];
+const routingModes = ["simple", "advanced"] as const;
 const defaultReasoning = [
   { value: "auto", label: "Auto", description: "Let the backend choose." },
   { value: "low", label: "Low", description: "Use less reasoning." },
@@ -184,6 +186,9 @@ export function ModelBackendsSettings({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const restoreDeleteFocusRef = useRef(false);
   const selectionEpochRef = useRef(0);
   const [projectDefaultProjectId, setProjectDefaultProjectId] = useState(
     projects[0]?.id ?? "",
@@ -247,6 +252,16 @@ export function ModelBackendsSettings({
     );
     return () => { disposed = true; };
   }, [draft, onLoadDetail, selectedProfileId]);
+
+  useLayoutEffect(() => {
+    if (deleteConfirm) {
+      deleteCancelRef.current?.focus();
+      return;
+    }
+    if (!restoreDeleteFocusRef.current) return;
+    restoreDeleteFocusRef.current = false;
+    deleteRef.current?.focus();
+  }, [deleteConfirm]);
 
   const run = async (
     key: string,
@@ -391,21 +406,25 @@ export function ModelBackendsSettings({
     setAdvanced(enabled);
     setDraft(setBackendDraftAdvancedRouting(draft, enabled));
   };
+  const routingRadios = useRovingRadios(
+    routingModes,
+    advanced ? "advanced" : "simple",
+    (mode) => setAdvancedRouting(mode === "advanced"),
+  );
 
-  const setDefault = async (
-    projectId: string | null,
-    key: string,
-  ): Promise<void> => {
-    if (!key) {
-      await onClearDefault(projectId);
-      return;
-    }
-    const choice = modelChoices.find((candidate) => candidate.key === key);
-    if (!choice) return;
-    await onSetDefault(
-      projectId,
-      profileSelection(choice.profile, choice.model.id),
-    );
+  const setDefault = (projectId: string | null, key: string): void => {
+    void run("default", async () => {
+      if (!key) {
+        await onClearDefault(projectId);
+        return;
+      }
+      const choice = modelChoices.find((candidate) => candidate.key === key);
+      if (!choice) return;
+      await onSetDefault(
+        projectId,
+        profileSelection(choice.profile, choice.model.id),
+      );
+    });
   };
 
   return (
@@ -484,8 +503,8 @@ export function ModelBackendsSettings({
               <div className="backend-form-section">
                 <span className="backend-section-label">1 · Harness</span>
                 <div className="backend-choice-grid">
-                  <button type="button" disabled={editingBuiltIn} className={clsx(draft.harnessId === "claude-agent-sdk" && "is-active")} onClick={() => setHarness("claude-agent-sdk")}><Bot size={16} /><span><strong>Claude harness</strong><small>Anthropic Messages-compatible</small></span>{draft.harnessId === "claude-agent-sdk" && <Check size={14} />}</button>
-                  <button type="button" disabled={editingBuiltIn} className={clsx(draft.harnessId === "codex-app-server" && "is-active")} onClick={() => setHarness("codex-app-server")}><CloudCog size={16} /><span><strong>Codex harness</strong><small>OpenAI Responses-compatible</small></span>{draft.harnessId === "codex-app-server" && <Check size={14} />}</button>
+                  <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "claude-agent-sdk"} className={clsx(draft.harnessId === "claude-agent-sdk" && "is-active")} onClick={() => setHarness("claude-agent-sdk")}><Bot size={16} /><span><strong>Claude harness</strong><small>Anthropic Messages-compatible</small></span>{draft.harnessId === "claude-agent-sdk" && <Check size={14} />}</button>
+                  <button type="button" disabled={editingBuiltIn} aria-pressed={draft.harnessId === "codex-app-server"} className={clsx(draft.harnessId === "codex-app-server" && "is-active")} onClick={() => setHarness("codex-app-server")}><CloudCog size={16} /><span><strong>Codex harness</strong><small>OpenAI Responses-compatible</small></span>{draft.harnessId === "codex-app-server" && <Check size={14} />}</button>
                 </div>
               </div>
 
@@ -506,7 +525,7 @@ export function ModelBackendsSettings({
                 </div>
                 <div className="backend-editable-models">
                   {draft.models.map((model, index) => (
-                    <div className="backend-editable-model" key={`${index}-${model.id}`}>
+                    <div className="backend-editable-model" key={index}>
                       <label><span>Model ID</span><input disabled={editingBuiltIn} value={model.id} maxLength={500} spellCheck={false} onChange={(event) => updateDraftModel(index, "id", event.target.value)} /></label>
                       <label><span>Display name</span><input disabled={editingBuiltIn} value={model.displayName} maxLength={200} onChange={(event) => updateDraftModel(index, "displayName", event.target.value)} /></label>
                       <label><span>Context tokens</span><input disabled={editingBuiltIn} type="number" min={8192} max={100000000} value={model.contextWindowTokens ?? ""} placeholder="Unknown" onChange={(event) => updateDraftModel(index, "contextWindowTokens", event.target.value)} /></label>
@@ -517,9 +536,9 @@ export function ModelBackendsSettings({
                 {draft.harnessId === "claude-agent-sdk" && (
                   <div className="backend-routing-mode">
                     <span><strong>Model mapping</strong><small>Simple routes every Claude tier and subagent to the primary model. Advanced mappings can choose any configured model.</small></span>
-                    <div role="radiogroup" aria-label="Model mapping">
-                      <button type="button" className={!advanced ? "is-active" : undefined} onClick={() => setAdvancedRouting(false)}>Simple</button>
-                      <button type="button" className={advanced ? "is-active" : undefined} onClick={() => setAdvancedRouting(true)}>Advanced</button>
+                    <div role="radiogroup" aria-label="Model mapping" {...routingRadios.groupProps}>
+                      <button type="button" className={!advanced ? "is-active" : undefined} {...routingRadios.radioProps("simple")}>Simple</button>
+                      <button type="button" className={advanced ? "is-active" : undefined} {...routingRadios.radioProps("advanced")}>Advanced</button>
                     </div>
                   </div>
                 )}
@@ -666,13 +685,13 @@ export function ModelBackendsSettings({
                 <div className="backend-danger-zone">
                   <span><strong>Delete profile</strong><small>Historical turns keep this profile’s safe display identity. Its credential is forgotten.</small></span>
                   {deleteConfirm ? (
-                    <span><button type="button" className="secondary-button" onClick={() => setDeleteConfirm(false)}>Cancel</button><button type="button" className="danger-button" disabled={disabled || Boolean(busy)} onClick={() => { void run("delete", async () => {
+                    <span><button ref={deleteCancelRef} type="button" className="secondary-button" onClick={() => { restoreDeleteFocusRef.current = true; setDeleteConfirm(false); }}>Cancel</button><button type="button" className="danger-button" disabled={disabled || Boolean(busy)} onClick={() => { void run("delete", async () => {
                       setCredentialDraft(null);
                       await onDelete(selected.id);
                       setSelectedId(profiles.find(({ id }) => id !== selected.id)?.id ?? null);
                       setDetail(null);
                     }); }}>Delete permanently</button></span>
-                  ) : <button type="button" className="secondary-button" onClick={() => setDeleteConfirm(true)}><Trash2 size={14} />Delete</button>}
+                  ) : <button ref={deleteRef} type="button" className="secondary-button" onClick={() => setDeleteConfirm(true)}><Trash2 size={14} />Delete</button>}
                 </div>
               )}
             </>
@@ -687,9 +706,9 @@ export function ModelBackendsSettings({
       <section className="settings-card backend-defaults-card" aria-labelledby="backend-defaults-heading">
         <div className="settings-card-heading"><div><Bot size={18} /></div><span><h3 id="backend-defaults-heading">New chat defaults</h3><p>Choose a full harness, backend, and model identity. Project defaults override the global choice.</p></span></div>
         <div className="settings-form-grid">
-          <label><span>Global default</span><select value={globalDefault ? `${globalDefault.selection.backendProfileId}\0${globalDefault.selection.modelId}` : ""} disabled={disabled} onChange={(event) => { void setDefault(null, event.target.value); }}><option value="">Use native app default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
+          <label><span>Global default</span><select value={globalDefault ? `${globalDefault.selection.backendProfileId}\0${globalDefault.selection.modelId}` : ""} disabled={disabled || Boolean(busy)} onChange={(event) => setDefault(null, event.target.value)}><option value="">Use native app default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
           <label><span>Project</span><select value={projectDefaultProjectId} disabled={disabled || projects.length === 0} onChange={(event) => setProjectDefaultProjectId(event.target.value)}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
-          <label className="backend-project-default"><span>Project default</span><select value={projectDefault ? `${projectDefault.selection.backendProfileId}\0${projectDefault.selection.modelId}` : ""} disabled={disabled || !projectDefaultProjectId} onChange={(event) => { void setDefault(projectDefaultProjectId || null, event.target.value); }}><option value="">Use global default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
+          <label className="backend-project-default"><span>Project default</span><select value={projectDefault ? `${projectDefault.selection.backendProfileId}\0${projectDefault.selection.modelId}` : ""} disabled={disabled || Boolean(busy) || !projectDefaultProjectId} onChange={(event) => setDefault(projectDefaultProjectId || null, event.target.value)}><option value="">Use global default</option>{modelChoices.map(({ key, profile, model }) => <option value={key} key={key}>{identityLabel(profile)} · {model.displayName}</option>)}</select></label>
         </div>
       </section>
     </section>

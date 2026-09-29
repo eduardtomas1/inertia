@@ -278,7 +278,7 @@ export default function App({
     const timer = window.setInterval(() => {
       void jsonRequest<{ status: "pending" | "approved" | "denied" | "expired" }>("/api/pair/status", { requestId: pair.requestId, browserNonce }).then((status) => {
         if (cancelled) return;
-        if (status.status === "approved") void loadSession();
+        if (status.status === "approved") return loadSession();
         else if (status.status === "denied" || status.status === "expired") setPair({ kind: "pair", invitation: null, error: "Pairing was not approved." });
       }).catch((error) => {
         if (!cancelled) {

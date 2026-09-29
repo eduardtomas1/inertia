@@ -134,6 +134,42 @@ describe("workspace header overflow", () => {
     expect(menu).not.toBeVisible();
   });
 
+  it("focuses the first folded action and moves through them with the keyboard", async () => {
+    render(<WorkspaceHeader {...headerProps({ compact: true })} />);
+    const trigger = screen.getByRole("button", { name: "More header actions" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole("menu", { name: "Header actions" });
+    await within(menu).findByRole("menuitem", { name: "Commit" });
+    const item = (name: string): HTMLElement => within(menu).getByRole("menuitem", { name });
+
+    await waitFor(() => expect(item("Run Dev server")).toHaveFocus());
+
+    fireEvent.keyDown(item("Run Dev server"), { key: "ArrowDown" });
+    expect(item("Project actions")).toHaveFocus();
+
+    fireEvent.keyDown(item("Project actions"), { key: "End" });
+    expect(item("Git actions")).toHaveFocus();
+
+    fireEvent.keyDown(item("Git actions"), { key: "Home" });
+    expect(item("Run Dev server")).toHaveFocus();
+
+    fireEvent.keyDown(item("Run Dev server"), { key: "ArrowUp" });
+    expect(item("Git actions")).toHaveFocus();
+  });
+
+  it("leaves arrow keys alone on inline header actions", async () => {
+    render(<WorkspaceHeader {...headerProps()} />);
+    const run = await screen.findByRole("button", { name: "Run Dev server" });
+    run.focus();
+
+    const event = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
+    run.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(run).toHaveFocus();
+  });
+
   it("keeps the preferred project action when the header folds and unfolds", async () => {
     const props = headerProps();
     const view = render(<WorkspaceHeader {...props} />);

@@ -1,21 +1,11 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
 import { createHash } from "node:crypto";
 import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
   realpathSync,
   statSync,
-  type Stats,
 } from "node:fs";
 import {
   isAbsolute,
-  relative,
-  resolve,
-  sep,
 } from "node:path";
 
 import type {
@@ -25,7 +15,7 @@ import type {
   TurnRequestContext,
 } from "../../../shared/contracts";
 import { chatAttachmentKind } from "../../../shared/attachments";
-import { FILE_OPEN_NO_FOLLOW } from "../../../node/platform-file-open-flags";
+import { readContainedFileSync } from "../../contained-file-read";
 import {
   MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
@@ -342,67 +332,20 @@ export function validatePersistedTurnExecutionContext(
   return { manifest, blobs };
 }
 
-function relativePathWithinWorkspace(cwd: string, inputPath: string): {
-  absolutePath: string;
-  displayPath: string;
-  identity: Stats;
-} {
-  const trimmed = boundedText(inputPath.trim(), "File reference path", 4_096);
-  if (isAbsolute(trimmed)) throw new Error("File references must use project-relative paths.");
-  const workspace = realpathSync(cwd);
-  const candidate = realpathSync(resolve(workspace, trimmed));
-  const relation = relative(workspace, candidate);
-  if (relation === ".." || relation.startsWith(`..${sep}`) || isAbsolute(relation)) {
-    throw new Error("File reference resolves outside the project workspace.");
-  }
-  const file = lstatSync(candidate);
-  if (!file.isFile()) throw new Error("File reference must resolve to a regular file.");
-  if (file.size > MAX_FILE_SOURCE_BYTES) {
-    throw new Error("File reference is too large to inspect safely.");
-  }
-  return {
-    absolutePath: candidate,
-    displayPath: relation || trimmed,
-    identity: file,
-  };
-}
-
-function readPinnedFileReference(path: string, identity: Stats, displayPath: string): string {
-  const descriptor = openSync(path, fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
-  try {
-    const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) {
-      throw new Error(`File reference ${displayPath} changed while it was being read.`);
-    }
-    if (opened.size > MAX_FILE_SOURCE_BYTES) {
-      throw new Error("File reference is too large to inspect safely.");
-    }
-    const buffer = Buffer.alloc(opened.size + 1);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const bytesRead = readSync(descriptor, buffer, offset, buffer.length - offset, offset);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-    }
-    if (offset > opened.size) {
-      throw new Error(`File reference ${displayPath} changed while it was being read.`);
-    }
-    return buffer.subarray(0, offset).toString("utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
 function materializeFileReferences(
   cwd: string,
   references: NonNullable<TurnRequestContext["fileReferences"]>,
 ): MaterializedContext[] {
   return references.map((reference) => {
-    const { absolutePath, displayPath, identity } = relativePathWithinWorkspace(cwd, reference.path);
-    const source = rejectUnsafeText(
-      readPinnedFileReference(absolutePath, identity, displayPath),
-      `File reference ${displayPath}`,
+    const trimmed = boundedText(reference.path.trim(), "File reference path", 4_096);
+    if (isAbsolute(trimmed)) throw new Error("File references must use project-relative paths.");
+    const { relativePath: displayPath, content: bytes } = readContainedFileSync(
+      cwd,
+      trimmed,
+      MAX_FILE_SOURCE_BYTES,
+      "File reference",
     );
+    const source = rejectUnsafeText(bytes.toString("utf8"), `File reference ${displayPath}`);
     const lines = source.split("\n");
     const lineStart = reference.lineStart ?? 1;
     const lineEnd = reference.lineEnd ?? lines.length;

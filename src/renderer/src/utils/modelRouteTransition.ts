@@ -7,6 +7,7 @@ import type {
   ProviderId,
 } from "@shared/contracts";
 import type { PendingModelRoute } from "../components/composer/types";
+import type { ReplacementChatRequest } from "../lib/newConversation";
 import {
   conversationContinuationRefusal,
   conversationHasHistory,
@@ -87,19 +88,19 @@ export function modelRouteTransitionContext(
 export function pendingModelRoute(
   conversation: Conversation,
   latestTurn: { id: string; modelSelection: ModelSelection; continuationIdentity: ContinuationIdentity } | null,
-  selection: ModelSelection,
+  { selection, configuration }: ReplacementChatRequest,
   label: string,
   reason: string,
-  configuration?: PendingModelRoute["configuration"],
 ): PendingModelRoute {
   return {
     selection,
-    ...(configuration ? { configuration } : {}),
+    configuration,
     label,
     reason,
     sourceConversationId: conversation.id,
     sourceProjectId: conversation.projectId,
     sourceSelectionKey: JSON.stringify(conversation.modelSelection),
+    sourceConfigurationKey: `${conversation.accessMode}:${conversation.interactionMode}`,
     sourceContinuationKey: JSON.stringify(conversation.continuationIdentity),
     sourceLatestTurnId: latestTurn?.id ?? null,
     sourceLatestTurnKey: JSON.stringify(latestTurn

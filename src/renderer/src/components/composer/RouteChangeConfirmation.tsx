@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
+import { accessOptions } from "./config";
 import type { PendingModelRoute } from "./types";
 
 export interface RouteChangeConfirmationProps {
@@ -43,7 +44,11 @@ export function RouteChangeConfirmation({
         <strong id="route-confirmation-title">
           Open a new chat for {pendingRoute.label}?
         </strong>
-        <small id="route-confirmation-reason">{pendingRoute.reason}</small>
+        <small id="route-confirmation-reason">
+          {pendingRoute.reason} New chat settings: {accessOptions.find(({ value }) =>
+            value === pendingRoute.configuration.accessMode)?.label} · {pendingRoute.configuration.interactionMode === "plan"
+            ? "Plan" : "Build"}.
+        </small>
         {blockedReason && <small role="alert">{blockedReason}</small>}
       </span>
       <button

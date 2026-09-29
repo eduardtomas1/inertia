@@ -11,7 +11,6 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
-  ModelSelection,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -43,7 +42,7 @@ import {
 } from "../../hooks/useWorkspaceLayout";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
-import type { NewConversationLocation } from "../../lib/newConversation";
+import { replacementChatRequest, type NewConversationLocation, type ReplacementChatRequest } from "../../lib/newConversation";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import {
   canFollowUpSubagentTrace,
@@ -141,6 +140,17 @@ export function chatResumeAvailability(
     : providerTerminalResumeAvailability(conversation, provider);
 }
 
+export function replacementChatStarter(
+  conversation: Parameters<typeof replacementChatRequest>[0] | null | undefined,
+  continuationRefusal: string | null,
+  create: (request: ReplacementChatRequest) => Promise<void>,
+  onError: (message: string) => void,
+): (() => void) | undefined {
+  if (!continuationRefusal || !conversation) return undefined;
+  return () => void create(replacementChatRequest(conversation)).catch((error) =>
+    onError(error instanceof Error ? error.message : "The new chat could not be created."));
+}
+
 export function visibleChatConversation(
   draft: Conversation | null,
   detail: Conversation | null,
@@ -195,10 +205,7 @@ export interface WorkspaceSceneActions {
     targetProject?: Project | null,
     location?: NewConversationLocation,
   ) => void;
-  createConversationForSelection: (
-    selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-  ) => Promise<void>;
+  createConversationForSelection: (request: ReplacementChatRequest) => Promise<void>;
   sendMessage: (
     content: string,
     attachments: ChatAttachment[],
@@ -1029,10 +1036,7 @@ export function createWorkspaceSceneModel({
           ));
         },
         continuationRefusal,
-        onStartNewChat: continuationRefusal && detail
-          ? () => void actions.createConversationForSelection(detail.conversation.modelSelection)
-            .catch((error) => setActionError(error instanceof Error ? error.message : "The new chat could not be created."))
-          : undefined,
+        onStartNewChat: replacementChatStarter(detail?.conversation, continuationRefusal, actions.createConversationForSelection, setActionError),
         canFollowUpSubagent: canGuideParent,
         onFollowUpSubagent: actions.followUpSubagent,
         onOpenSubagent: (trace) => {

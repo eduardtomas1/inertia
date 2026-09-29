@@ -105,7 +105,10 @@ describe("composer for a chat that cannot continue", () => {
     expect(dialog).toHaveTextContent(MIXED_PROVIDER_HISTORY_MESSAGE);
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]).toEqual([current.modelSelection, undefined]);
+    expect(onCreateConversationForSelection.mock.calls[0]).toEqual([{
+      selection: current.modelSelection,
+      configuration: { accessMode: current.accessMode, interactionMode: current.interactionMode },
+    }]);
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -124,7 +127,7 @@ describe("composer for a chat that cannot continue", () => {
     expect(input).toHaveValue("Continue the legacy work.");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(onCreateConversationForSelection).toHaveBeenCalledOnce());
-    expect(onCreateConversationForSelection.mock.calls[0]?.[1]).toEqual({ prefillText: "Continue the legacy work." });
+    expect(onCreateConversationForSelection.mock.calls[0]?.[0]).toMatchObject({ prefillText: "Continue the legacy work." });
   });
 
   it.each([

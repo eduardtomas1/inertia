@@ -10,7 +10,6 @@ import {
   type AgentInputRequest,
   type AppSettings,
   type Conversation,
-  type ModelSelection,
   type Project,
   type ProviderId,
   type ProviderMaintenanceProviderId,
@@ -51,7 +50,7 @@ import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
-import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
+import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationPayload } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
@@ -693,25 +692,15 @@ export default function App(): React.JSX.Element {
     setSidebarCollapsed,
     setSidebarOpen,
   });
-  const createConversationForSelection = async (
-    selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-  ): Promise<void> => {
-    if (draftConversation.chooseModel(selection, options?.configuration)) return;
+  const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
+    if (draftConversation.chooseModel(request.selection, request.configuration)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
     const selectionGeneration =
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
     const event = await run("conversation.create", {
       type: "conversation.create",
-      payload: {
-        ...withNewConversationModelSelection(
-          buildNewConversationPayload(project, settings),
-          selection,
-        ),
-        ...options?.configuration,
-        activate: false,
-      },
+      payload: replacementConversationPayload(project, settings, request),
     });
     if (
       event.type !== "request.result"
@@ -727,11 +716,11 @@ export default function App(): React.JSX.Element {
     if (
       selectionGeneration !== conversationSelectionGenerationRef.current
     ) return;
-    if (options?.prefillText) {
+    if (request.prefillText) {
       const conversationId = event.result.conversationId;
       window.requestAnimationFrame(() => requestComposerPrefill({
         conversationId,
-        text: options.prefillText!,
+        text: request.prefillText!,
       }));
     }
     setView("workspace");

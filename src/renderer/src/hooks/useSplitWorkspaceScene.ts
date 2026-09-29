@@ -8,7 +8,6 @@ import type {
   AppSettings,
   ChatAttachment,
   Conversation,
-  ModelSelection,
   MessageSendAcceptance,
   Project,
   ProviderMaintenanceProviderId,
@@ -25,8 +24,8 @@ import {
 } from "../components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "../components/workspace-scene/createWorkspaceTurnActions";
 import {
-  buildNewConversationPayload,
-  withNewConversationModelSelection,
+  replacementConversationPayload,
+  type ReplacementChatRequest,
 } from "../lib/newConversation";
 import {
   commandRefreshesConversationDetail,
@@ -295,33 +294,23 @@ export function useSplitWorkspaceScene({
   ]);
   const sceneActions = useStableActions({
     ...actions,
-    createConversationForSelection: async (
-      selection: ModelSelection,
-      options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-    ) => {
+    createConversationForSelection: async (request: ReplacementChatRequest) => {
       if (!splitProject) {
         throw new Error("The split project is no longer available.");
       }
       const event = resultEvent(await run("conversation.create", {
         type: "conversation.create",
-        payload: {
-          ...withNewConversationModelSelection(
-            buildNewConversationPayload(splitProject, settings),
-            selection,
-          ),
-          ...options?.configuration,
-          activate: false,
-        },
+        payload: replacementConversationPayload(splitProject, settings, request),
       }));
       if (event.result.kind !== "conversation.created") {
         throw new Error("The new split chat could not be identified.");
       }
       onConversationCreated(event.result.conversationId);
-      if (options?.prefillText) {
+      if (request.prefillText) {
         const conversationId = event.result.conversationId;
         window.requestAnimationFrame(() => requestComposerPrefill({
           conversationId,
-          text: options.prefillText!,
+          text: request.prefillText!,
         }));
       }
     },

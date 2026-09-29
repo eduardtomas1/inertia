@@ -112,6 +112,38 @@ export function withNewConversationModelSelection(
   };
 }
 
+export type ChatConfiguration = Pick<Conversation, "accessMode" | "interactionMode">;
+
+export interface ReplacementChatRequest {
+  selection: ModelSelection;
+  configuration: ChatConfiguration;
+  prefillText?: string;
+}
+
+export function replacementChatRequest(
+  conversation: Pick<Conversation, "modelSelection" | "accessMode" | "interactionMode">,
+  choice: { selection?: ModelSelection; configuration?: ChatConfiguration; prefillText?: string } = {},
+): ReplacementChatRequest {
+  return {
+    selection: choice.selection ?? conversation.modelSelection,
+    configuration: choice.configuration
+      ?? { accessMode: conversation.accessMode, interactionMode: conversation.interactionMode },
+    ...(choice.prefillText ? { prefillText: choice.prefillText } : {}),
+  };
+}
+
+export function replacementConversationPayload(
+  project: Project,
+  settings: AppSettings,
+  request: ReplacementChatRequest,
+): NewConversationPayload {
+  return {
+    ...withNewConversationModelSelection(buildNewConversationPayload(project, settings), request.selection),
+    ...request.configuration,
+    activate: false,
+  };
+}
+
 export function buildDraftConversation(
   payload: NewConversationPayload,
   options: {

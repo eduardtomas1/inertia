@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import type { ContinuationIdentity, Conversation, ModelSelection } from "@shared/contracts";
 
+import { replacementChatRequest } from "../../lib/newConversation";
 import { pendingModelRoute } from "../../utils/modelRouteTransition";
 import type { ComposerProps, PendingModelRoute } from "./types";
 
@@ -68,6 +69,7 @@ export function useComposerNewChatOffer(options: {
       pendingRoute.sourceConversationId !== conversation.id
       || pendingRoute.sourceProjectId !== conversation.projectId
       || pendingRoute.sourceSelectionKey !== JSON.stringify(conversation.modelSelection)
+      || pendingRoute.sourceConfigurationKey !== `${conversation.accessMode}:${conversation.interactionMode}`
       || pendingRoute.sourceContinuationKey
         !== JSON.stringify(conversation.continuationIdentity)
       || pendingRoute.sourceLatestTurnId !== latestTurnId
@@ -78,8 +80,10 @@ export function useComposerNewChatOffer(options: {
       setRouteCreationError(null);
     }
   }, [
+    conversation.accessMode,
     conversation.continuationIdentity,
     conversation.id,
+    conversation.interactionMode,
     conversation.modelSelection,
     conversation.projectId,
     backendProfiles,
@@ -103,10 +107,9 @@ export function useComposerNewChatOffer(options: {
     setPendingRoute(pendingModelRoute(
       conversation,
       latestTurn,
-      selection,
+      replacementChatRequest(conversation, { selection, configuration }),
       label,
       reason,
-      configuration,
     ));
   };
 
@@ -129,13 +132,11 @@ export function useComposerNewChatOffer(options: {
       sourceConversationId,
     ) ?? 0;
     const prefillText = message.trim() ? message : undefined;
-    void onCreateConversationForSelection(
-      pendingRoute.selection,
-      prefillText || pendingRoute.configuration ? {
-        ...(prefillText ? { prefillText } : {}),
-        ...(pendingRoute.configuration ? { configuration: pendingRoute.configuration } : {}),
-      } : undefined,
-    ).then(
+    void onCreateConversationForSelection(replacementChatRequest(conversation, {
+      selection: pendingRoute.selection,
+      configuration: pendingRoute.configuration,
+      prefillText,
+    })).then(
       () => {
         setPendingRoute(null);
         if (

@@ -899,7 +899,7 @@ export function GoalPanel({
           </p>
         )}
         {refusal && (
-          <div className="goal-panel-error" role="status">
+          <div className="goal-panel-capability-note goal-panel-refusal" role="status">
             <span>{refusal}</span>
             {onStartNewChat && (
               <button

@@ -6822,6 +6822,9 @@ button.header-breadcrumb-project:hover {
   background: color-mix(in srgb, var(--surface-muted) 46%, transparent);
 }
 
+.goal-panel-refusal { display: flex; align-items: center; gap: 8px; }
+.goal-panel-refusal button { flex: 0 0 auto; white-space: nowrap; }
+
 .goal-panel-error {
   display: flex;
   align-items: center;

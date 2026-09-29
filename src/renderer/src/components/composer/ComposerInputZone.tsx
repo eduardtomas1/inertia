@@ -443,15 +443,16 @@ export function ComposerInputZone({
         {continuationRefusal && (
           <div
             id={continuationNoticeId}
-            className="composer-compact-notice is-error"
+            className="composer-route-confirmation"
             role="status"
             data-continuation-refusal=""
           >
-            <span className="composer-compact-notice-icon" aria-hidden="true">
-              <CircleAlert size={14} />
+            <CircleAlert size={16} aria-hidden="true" />
+            <span>
+              <strong>This chat can&apos;t continue here</strong>
+              <small>{continuationRefusal}</small>
             </span>
-            <span>{continuationRefusal}</span>
-            <button type="button" className="secondary-button" onClick={onStartNewChat}>
+            <button type="button" className="primary-button" onClick={onStartNewChat}>
               New chat
             </button>
           </div>

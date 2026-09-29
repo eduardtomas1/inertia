@@ -39,6 +39,7 @@ export function useComposerCompaction(options: {
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   onCompact: (instruction?: string) => Promise<{ message: string }>;
   onProviderRejection: (reason: string) => void;
+  continuationRefusal: string | null;
 }): {
   compactNotice: ComposerCompactNotice | null;
   compactUnavailableReason: string | null;
@@ -63,15 +64,16 @@ export function useComposerCompaction(options: {
     setSubmitting,
     onCompact,
     onProviderRejection,
+    continuationRefusal,
   } = options;
   const [compactNotices, setCompactNotices] = useState<Readonly<
     Record<string, ComposerCompactNotice>
   >>({});
   const operationSequence = useRef(0);
   const activeOperations = useRef(new Map<string, number>());
-  const compactUnavailableReason = providerId === "antigravity"
+  const compactUnavailableReason = continuationRefusal ?? (providerId === "antigravity"
     ? ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
-    : null;
+    : null);
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {

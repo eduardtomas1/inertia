@@ -4,10 +4,12 @@ export function ComposerSendActionsFallback({
   primaryAction,
   onSubmit,
   onStop,
+  unavailableReasonId,
 }: {
   primaryAction: ComposerPrimaryActionState;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
+  unavailableReasonId?: string;
 }): React.JSX.Element {
   const stopping = primaryAction === "stop-pending";
   const stop = primaryAction === "stop-ready" || stopping;
@@ -25,6 +27,8 @@ export function ComposerSendActionsFallback({
         }`}
         data-composer-action-state={primaryAction}
         aria-busy={stopping || submitting}
+        aria-disabled={unavailableReasonId && !stop ? true : undefined}
+        aria-describedby={stop ? undefined : unavailableReasonId}
         onClick={() => void (stop ? onStop() : onSubmit())}
         disabled={stopping || submitting || primaryAction === "send-disabled"}
       >

@@ -158,6 +158,39 @@ describe("WorkspaceChangesPanel repository scope", () => {
     expect(navigator.querySelectorAll(".workspace-repository-file")[1]).toHaveAttribute("aria-current", "true");
   });
 
+  it.each([
+    [false, true],
+    [true, false],
+  ])("offers agent revision only when the chat can continue (unavailable: %s)", async (agentRevisionUnavailable, offered) => {
+    const files = [changedFile("app/README.md")];
+    const onRequestRevision = vi.fn(async () => undefined);
+    await act(async () => {
+      render(<WorkspaceChangesPanel
+        projectName="Subfolder"
+        agentRevisionUnavailable={agentRevisionUnavailable}
+        snapshot={{ ...snapshot, repositories: [{ ...snapshot.repositories[0], workspacePrefix: "app", files }] }}
+        summary={null}
+        onRefresh={vi.fn()}
+        onLoadRepositoryDiff={async (repositoryPath, filePath) => ({ repositoryPath, patch: patchFor(filePath!), files, truncated: false })}
+        onOpenWorkspaceFile={vi.fn()}
+        onAsk={vi.fn(async () => undefined)}
+        onRequestRevision={onRequestRevision}
+        onRevert={vi.fn(async () => undefined)}
+        onSetReviewState={vi.fn(async () => undefined)}
+        onCreateNote={vi.fn(async () => undefined)}
+        onUpdateNote={vi.fn(async () => undefined)}
+        onDeleteNote={vi.fn(async () => undefined)}
+        onAddTextToPrompt={vi.fn()}
+        onAddToPrompt={vi.fn()}
+      />);
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open file" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "+ after" }));
+    expect(screen.getByRole("button", { name: "Ask about" })).toBeEnabled();
+    expect(screen.queryAllByRole("button", { name: "Request revision" })).toHaveLength(offered ? 1 : 0);
+    expect(onRequestRevision).not.toHaveBeenCalled();
+  });
+
   it("creates a file note through the in-app dialog with its repository scope", async () => {
     const onCreateNote = vi.fn(async () => undefined);
     render(<ChangesPanel

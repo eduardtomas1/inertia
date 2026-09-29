@@ -70,6 +70,7 @@ type ForwardedChangesProps = Omit<
 
 export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   projectName: string;
+  agentRevisionUnavailable?: boolean;
   snapshot: WorkspaceGitSnapshot | null;
   loading?: boolean;
   onRefresh: () => void;
@@ -201,6 +202,7 @@ export function workspaceGitRepositoriesWithMissingReviewTargets(
 
 export function WorkspaceChangesPanel({
   projectName,
+  agentRevisionUnavailable = false,
   snapshot,
   loading = false,
   onRefresh,
@@ -919,7 +921,7 @@ export function WorkspaceChangesPanel({
       }}
       capabilities={{
         persistentReview: true,
-        agentRevision: !nestedRepository && selectedOpenPath !== null,
+        agentRevision: !agentRevisionUnavailable && !nestedRepository && selectedOpenPath !== null,
         selectiveRevert: selectedOpenPath !== null,
       }}
       onSelectFile={(filePath) => {

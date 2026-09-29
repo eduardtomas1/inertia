@@ -139,6 +139,8 @@ export interface ComposerToolbarProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
+  continuationRefusal: string | null;
+  continuationNoticeId: string;
   conversationUpdateError: string | null;
   menuController: ComposerMenuController;
   selectedProvider: ProviderInfo | undefined;
@@ -210,6 +212,8 @@ export function ComposerToolbar({
   newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
+  continuationRefusal,
+  continuationNoticeId,
   conversationUpdateError,
   menuController,
   selectedProvider,
@@ -315,6 +319,8 @@ export function ComposerToolbar({
             onUpdateFastMode={onUpdateFastMode}
             onUpdateConversation={onUpdateConversation}
             conversationUpdatePending={conversationUpdatePending}
+            continuationRefusal={continuationRefusal}
+            continuationNoticeId={continuationNoticeId}
           />
           <Suspense fallback={null}>
             <ComposerMoreMenu
@@ -416,7 +422,7 @@ export function ComposerToolbar({
             completion={skillQuery}
             listboxId={skillListboxId}
             activeSkillId={activeSkillId}
-            disabled={disabled}
+            disabled={disabled || continuationRefusal !== null}
             running={running}
             menuController={menuController}
             onList={onListSkills}
@@ -507,6 +513,7 @@ export function ComposerToolbar({
               primaryAction={primaryAction}
               onSubmit={onSubmit}
               onStop={onStop}
+              unavailableReasonId={continuationRefusal ? continuationNoticeId : undefined}
             />
           )}
         >
@@ -523,6 +530,7 @@ export function ComposerToolbar({
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}
+            unavailableReasonId={continuationRefusal ? continuationNoticeId : undefined}
           />
         </Suspense>
       </div>

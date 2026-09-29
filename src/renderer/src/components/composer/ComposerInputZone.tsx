@@ -109,6 +109,9 @@ export interface ComposerInputZoneProps {
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
+  continuationRefusal: string | null;
+  continuationNoticeId: string;
+  onStartNewChat: () => void;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -177,6 +180,9 @@ export function ComposerInputZone({
   onCompactCommand,
   compactUnavailableReason,
   compactNotice,
+  continuationRefusal,
+  continuationNoticeId,
+  onStartNewChat,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -434,6 +440,22 @@ export function ComposerInputZone({
           pendingAttachmentIds={pendingAttachmentIds}
           onRemove={onRemoveAttachment}
         />
+        {continuationRefusal && (
+          <div
+            id={continuationNoticeId}
+            className="composer-compact-notice is-error"
+            role="status"
+            data-continuation-refusal=""
+          >
+            <span className="composer-compact-notice-icon" aria-hidden="true">
+              <CircleAlert size={14} />
+            </span>
+            <span>{continuationRefusal}</span>
+            <button type="button" className="secondary-button" onClick={onStartNewChat}>
+              New chat
+            </button>
+          </div>
+        )}
         {pendingRoute && (
           <RouteChangeConfirmation
             pendingRoute={pendingRoute}

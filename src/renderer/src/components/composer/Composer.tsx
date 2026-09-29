@@ -1,6 +1,6 @@
 import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
@@ -14,7 +14,7 @@ import {
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
 import { modelRouteTransitionContext, resolveModelRouteTransition } from "../../utils/modelRouteTransition";
-import { isChatProviderRejection } from "../../../../shared/continuation-policy";
+import { conversationContinuationRefusal, isChatProviderRejection } from "../../../../shared/continuation-policy";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
@@ -177,6 +177,8 @@ export const Composer = memo(function Composer({
   useNativePreviewSuspension(menu !== null || conversationContext.previewPacketId !== null || conversationContext.confirmation !== null || agentContextRequest !== null);
   const composerRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const continuationRefusal = conversationContinuationRefusal(conversation);
+  const continuationNoticeId = useId();
   const {
     pendingRoute, creatingRouteConversation, routeCancelRef, canCreateRouteConversation, routeCreationBlockedReason,
     offerNewChat, dismissPendingRoute, createRouteConversation, resetNewChatOffer,
@@ -468,6 +470,10 @@ export const Composer = memo(function Composer({
       await compact(compactCommand);
       return;
     }
+    if (continuationRefusal) {
+      startNewChat();
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -661,6 +667,7 @@ export const Composer = memo(function Composer({
     editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
     onProviderRejection: (reason) => onCreateConversationForSelection && offerNewChat(conversation.modelSelection, currentRouteLabel, reason),
+    continuationRefusal,
   });
   const followUpState = composerFollowUpState({
     running,
@@ -761,9 +768,13 @@ export const Composer = memo(function Composer({
       }
     }
   };
+  const startNewChat = (): void => {
+    if (continuationRefusal) offerNewChat(conversation.modelSelection, currentRouteLabel, continuationRefusal);
+  };
   const updateReasoningEffort = async (
     reasoningEffort: string,
   ): Promise<void> => {
+    if (continuationRefusal) return startNewChat();
     await updateConversation({
       modelSelection: {
         ...conversation.modelSelection,
@@ -772,6 +783,7 @@ export const Composer = memo(function Composer({
     });
   };
   const updateFastMode = async (enabled: boolean): Promise<void> => {
+    if (continuationRefusal) return startNewChat();
     const providerValue = enabled
       ? selectedModel?.fastMode?.providerValue ?? null
       : null;
@@ -942,6 +954,8 @@ export const Composer = memo(function Composer({
           <Suspense fallback={null}>
             <ChatGoalControl
               {...goal}
+              continuationRefusal={continuationRefusal}
+              onStartNewChat={startNewChat}
               open={commandSurface === "goal"}
               onDismiss={dismissCommandSurface}
             />
@@ -1014,6 +1028,9 @@ export const Composer = memo(function Composer({
           onCompactCommand={() => void compact({ kind: "compact" })}
           compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactNotice}
+          continuationRefusal={continuationRefusal}
+          continuationNoticeId={continuationNoticeId}
+          onStartNewChat={startNewChat}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
             updateMessage("");
@@ -1094,6 +1111,8 @@ export const Composer = memo(function Composer({
           newChatProjectPicker={newChatProjectPicker}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
+          continuationRefusal={continuationRefusal}
+          continuationNoticeId={continuationNoticeId}
           conversationUpdateError={conversationUpdateError}
           menuController={menuController}
           selectedProvider={selectedProvider}
@@ -1104,7 +1123,7 @@ export const Composer = memo(function Composer({
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={primaryAction}
-          canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
+          canSendQueuedNow={!continuationRefusal && !disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}

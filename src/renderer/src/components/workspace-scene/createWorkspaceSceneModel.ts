@@ -119,6 +119,28 @@ export function visibleWorkspaceConversation(
   return draft ?? persisted;
 }
 
+export function planActionsAvailable(
+  conversation: Pick<Conversation, "status"> | null,
+  continuationRefusal: string | null,
+): boolean {
+  return Boolean(
+    conversation
+    && !continuationRefusal
+    && conversation.status !== "running"
+    && conversation.status !== "needs-input",
+  );
+}
+
+export function chatResumeAvailability(
+  conversation: Parameters<typeof providerTerminalResumeAvailability>[0],
+  provider: Parameters<typeof providerTerminalResumeAvailability>[1],
+  continuationRefusal: string | null,
+): ReturnType<typeof providerTerminalResumeAvailability> {
+  return continuationRefusal
+    ? { kind: "unavailable", resume: null, reason: continuationRefusal }
+    : providerTerminalResumeAvailability(conversation, provider);
+}
+
 export function visibleChatConversation(
   draft: Conversation | null,
   detail: Conversation | null,
@@ -389,11 +411,12 @@ export function createWorkspaceSceneModel({
           projectName: candidateProject.name,
           conversationId: candidate.id,
           conversationTitle: candidate.title,
-          availability: providerTerminalResumeAvailability(
+          availability: chatResumeAvailability(
             candidate,
             connection.snapshot?.providers.find(
               ({ id }) => id === candidate.providerId,
             ),
+            candidate.id === detail?.conversation.id ? continuationRefusal : null,
           ),
         });
       }
@@ -487,11 +510,7 @@ export function createWorkspaceSceneModel({
     usageIdentity,
     usageQuotaSource,
   });
-  const canUpdatePlan = Boolean(
-    conversation
-    && conversation.status !== "running"
-    && conversation.status !== "needs-input",
-  );
+  const canUpdatePlan = planActionsAvailable(conversation, continuationRefusal);
   const latestPlan = projection.plans.at(-1) ?? null;
   const planSummary = latestPlan?.explanation
       ? latestPlan.explanation
@@ -873,6 +892,7 @@ export function createWorkspaceSceneModel({
       } : null,
       changes: {
         projectName: project.name,
+        agentRevisionUnavailable: continuationRefusal !== null,
         projectId: project.id,
         conversationId: persistedConversation?.id,
         busyAction,

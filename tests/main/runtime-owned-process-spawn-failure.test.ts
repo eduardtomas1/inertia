@@ -152,7 +152,7 @@ describe.each(["darwin", "win32"] as const)("%s spawn-intent retirement retries"
       await vi.advanceTimersByTimeAsync(100);
     }
     expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);
-    expect(release).toHaveBeenCalledTimes(6);
+    expect(release).toHaveBeenCalledTimes(4);
     expect(vi.getTimerCount()).toBe(0);
   });
 

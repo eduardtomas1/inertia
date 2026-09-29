@@ -33,41 +33,38 @@ function startIntentRetirement(
 ): RuntimeOwnedIntentRetirement {
   let attempts = 0;
   let lastAttemptAt = Number.NEGATIVE_INFINITY;
-  let retired = false;
   let scheduled = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const cancel = (): void => {
+  let outcome: boolean | null = null;
+  let settle!: (retired: boolean) => void;
+  const settled = new Promise<boolean>((resolve) => {
+    settle = resolve;
+  });
+  const conclude = (retired: boolean): void => {
+    if (outcome !== null) return;
+    outcome = retired;
     if (timer) clearTimeout(timer);
     timer = null;
     registry.pendingIntentRetirements.delete(retirement);
+    if (retired) onRetired();
+    settle(retired);
   };
-  const attempt = (): boolean => {
-    if (retired) return true;
-    if (
-      attempts >= MAX_INTENT_RETIREMENT_ATTEMPTS
-      || Date.now() - lastAttemptAt < INTENT_RETIREMENT_MIN_SPACING_MS
-    ) return false;
+  const tryOnce = (): void => {
     attempts += 1;
     lastAttemptAt = Date.now();
-    if (retirePendingIntent(registry, ownershipId)) {
-      retired = true;
-      cancel();
-      onRetired();
-      return true;
-    }
-    if (attempts >= MAX_INTENT_RETIREMENT_ATTEMPTS) cancel();
-    return false;
+    if (retirePendingIntent(registry, ownershipId)) conclude(true);
+    else if (attempts >= MAX_INTENT_RETIREMENT_ATTEMPTS) conclude(false);
   };
   const scheduleNext = (): void => {
-    if (
-      retired
-      || timer
-      || attempts >= MAX_INTENT_RETIREMENT_ATTEMPTS
-      || scheduled >= INTENT_RETIREMENT_RETRY_DELAYS_MS.length
-    ) return;
+    if (outcome !== null || timer) return;
+    if (scheduled >= INTENT_RETIREMENT_RETRY_DELAYS_MS.length) {
+      conclude(false);
+      return;
+    }
     timer = setTimeout(() => {
       timer = null;
-      attempt();
+      if (outcome !== null || !registry.active) return;
+      tryOnce();
       scheduleNext();
     }, INTENT_RETIREMENT_RETRY_DELAYS_MS[scheduled]);
     scheduled += 1;
@@ -75,11 +72,19 @@ function startIntentRetirement(
   };
   const retirement: RuntimeOwnedIntentRetirement = {
     attempt: () => {
-      const done = attempt();
-      if (!done) scheduleNext();
-      return done;
+      if (outcome !== null) return outcome;
+      if (
+        registry.active
+        && Date.now() - lastAttemptAt >= INTENT_RETIREMENT_MIN_SPACING_MS
+      ) tryOnce();
+      scheduleNext();
+      return outcome === true;
     },
-    cancel,
+    settled,
+    finalize: () => {
+      if (outcome === null && attempts < MAX_INTENT_RETIREMENT_ATTEMPTS) tryOnce();
+      conclude(outcome === true);
+    },
   };
   registry.pendingIntentRetirements.add(retirement);
   return retirement;
@@ -98,16 +103,14 @@ export function retireFailedRuntimeOwnedSpawn(
   child: ChildProcess,
 ): void {
   registry.claims.set(child, claim);
-  let retirement: RuntimeOwnedIntentRetirement | null = null;
   child.once("error", () => {
-    if (child.pid !== undefined || retirement) return;
-    retirement = startIntentRetirement(registry, claim.ownershipId, () => {
+    if (child.pid !== undefined || claim.intentRetirement) return;
+    claim.intentRetirement = startIntentRetirement(registry, claim.ownershipId, () => {
       claim.released = true;
     });
-    claim.retireIntent = retirement.attempt;
-    retirement.attempt();
+    claim.intentRetirement.attempt();
   });
   child.once("close", () => {
-    retirement?.attempt();
+    claim.intentRetirement?.attempt();
   });
 }

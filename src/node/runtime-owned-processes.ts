@@ -1,4 +1,10 @@
 import { stopExactLinuxGuardian } from "./runtime-owned-process-linux-stop.js";
+import {
+  PROCESS_GROUP_EXIT_WAIT_MS,
+  releaseActiveClaim,
+  releaseFailedPidClaimIfStopped,
+  releaseIfGroupExited,
+} from "./runtime-owned-process-release.js";
 import { guardianCloseDiagnostic, guardianSignalName, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
@@ -83,8 +89,6 @@ export {
 } from "./runtime-owned-process-darwin.js";
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
-const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
-const PROCESS_GROUP_EXIT_POLL_MS = 10;
 let activeRegistry: ActiveRuntimeOwnedProcessRegistry | null = null;
 
 export function activateRuntimeOwnedProcessRegistry(
@@ -163,6 +167,7 @@ export function activateRuntimeOwnedProcessRegistry(
     pendingAdmissions: new Set(),
     pendingReleaseConfirmations: new Set(),
     pendingIntentRetirements: new Set(),
+    active: true,
     onTainted: options.onTainted ?? (() => undefined),
     tainted: false,
   };
@@ -170,9 +175,10 @@ export function activateRuntimeOwnedProcessRegistry(
   return () => {
     if (activeRegistry !== registry) return;
     activeRegistry = null;
+    registry.active = false;
     registry.admissionController.abort();
     for (const stopMonitor of registry.activeLinuxMonitors) stopMonitor();
-    for (const retirement of registry.pendingIntentRetirements) retirement.cancel();
+    for (const retirement of registry.pendingIntentRetirements) retirement.finalize();
     registry.activeLinuxMonitors.clear();
   };
 }
@@ -251,178 +257,9 @@ function hardStopUnclaimed(
   try { child.kill("SIGKILL"); } catch { /* The child may be gone. */ }
 }
 
-function exactUnownedClaim(
-  registry: ActiveRuntimeOwnedProcessRegistry,
-  ownershipId: string,
-): boolean {
-  const records = registry.journal.records(registry.runtimeGenerationId);
-  if (!records) return false;
-  const matching = records.filter((record) =>
-    record.ownershipId === ownershipId);
-  return matching.length === 1
-    && (matching[0]?.state === "pending" || matching[0]?.state === "preauth")
-    && matching[0].runtimeGenerationId === registry.runtimeGenerationId
-    && matching[0].systemBootId === registry.systemBootId;
-}
-
 interface RuntimeOwnedPidProcessOptions {
   readonly processCanExecute?: (pid: number) => boolean | null;
   readonly darwinGuardianCommand?: string;
-}
-
-function releaseFailedPidClaimIfStopped(
-  registry: ActiveRuntimeOwnedProcessRegistry,
-  claim: ActiveRuntimeOwnedProcessClaim,
-  pid: number,
-  processCanExecute: (pid: number) => boolean | null,
-): Promise<boolean> {
-  if (claim.releaseConfirmation) return claim.releaseConfirmation;
-  let settleConfirmation!: (confirmed: boolean) => void;
-  const confirmation = new Promise<boolean>((resolve) => {
-    settleConfirmation = resolve;
-  });
-  claim.releaseConfirmation = confirmation;
-  claim.settleReleaseConfirmation = settleConfirmation;
-  registry.pendingReleaseConfirmations.add(confirmation);
-  void confirmation.then(() => {
-    registry.pendingReleaseConfirmations.delete(confirmation);
-    claim.settleReleaseConfirmation = null;
-  });
-  const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
-  const poll = (): void => {
-    if (
-      activeRegistry !== registry
-      || claim.released
-      || !exactUnownedClaim(registry, claim.ownershipId)
-    ) {
-      settleConfirmation(claim.released);
-      return;
-    }
-    const executable = processCanExecute(pid);
-    if (
-      executable === false
-      && exactProcessGroupTerminal(pid, registry.platform) === true
-    ) {
-      try {
-        if (!registry.journal.release(claim.ownershipId)) {
-          settleConfirmation(false);
-          return;
-        }
-        claim.stopLinuxMonitor?.();
-        claim.released = true;
-        claim.settleLinuxMonitorConfirmation?.(true);
-        settleConfirmation(true);
-      } catch {
-        settleConfirmation(false);
-      }
-      return;
-    }
-    const remainingMs = Math.trunc(deadlineAt - Date.now());
-    if (remainingMs <= 0) {
-      settleConfirmation(false);
-      return;
-    }
-    const timer = setTimeout(
-      poll,
-      Math.max(1, Math.min(PROCESS_GROUP_EXIT_POLL_MS, remainingMs)),
-    );
-    timer.unref();
-  };
-  poll();
-  return confirmation;
-}
-
-function releaseIfGroupExited(
-  registry: ActiveRuntimeOwnedProcessRegistry,
-  claim: ActiveRuntimeOwnedProcessClaim,
-  pid: number,
-): Promise<boolean> {
-  if (claim.releaseConfirmation) return claim.releaseConfirmation;
-  if (claim.released) return Promise.resolve(true);
-  let settleConfirmation!: (confirmed: boolean) => void;
-  const confirmation = new Promise<boolean>((resolve) => {
-    settleConfirmation = resolve;
-  });
-  claim.groupExitReleaseAttempts += 1;
-  claim.releaseConfirmation = confirmation;
-  claim.settleReleaseConfirmation = settleConfirmation;
-  registry.pendingReleaseConfirmations.add(confirmation);
-  void confirmation.then((confirmed) => {
-    registry.pendingReleaseConfirmations.delete(confirmation);
-    claim.settleReleaseConfirmation = null;
-    if (
-      !confirmed
-      && activeRegistry === registry
-      && !claim.released
-      && claim.releaseConfirmation === confirmation
-    ) {
-      claim.releaseConfirmation = null;
-      // A guardian can become reapable immediately after the first bounded
-      // absence check expires, especially under host contention. Retry once
-      // within the worker's shutdown budget; a second failure remains durable
-      // and fails closed.
-      if (claim.groupExitReleaseAttempts < 2) {
-        void releaseIfGroupExited(registry, claim, pid);
-      }
-    }
-  });
-  const deadlineAt = Date.now() + PROCESS_GROUP_EXIT_WAIT_MS;
-  const poll = async (): Promise<void> => {
-    if (activeRegistry !== registry) {
-      settleConfirmation(false);
-      return;
-    }
-    if (claim.released) {
-      settleConfirmation(true);
-      return;
-    }
-    try {
-      const containmentAbsent = registry.platform === "darwin"
-        ? await registry.readDarwinSessionEmptyAsync(
-            pid,
-            registry.admissionController.signal,
-          ) === true
-        : exactProcessGroupTerminal(pid, registry.platform) === true;
-      if (containmentAbsent) {
-        try {
-          if (!releaseActiveClaim(registry, claim)) settleConfirmation(false);
-        } catch {
-          // A removed test/runtime root cannot authorize further mutation.
-          settleConfirmation(false);
-        }
-        return;
-      }
-    } catch {
-      // An unreadable containment boundary remains durably owned.
-    }
-    const remainingMs = Math.trunc(deadlineAt - Date.now());
-    if (remainingMs <= 0) {
-      settleConfirmation(false);
-      return;
-    }
-    const timer = setTimeout(
-      () => { void poll(); },
-      Math.max(1, Math.min(PROCESS_GROUP_EXIT_POLL_MS, remainingMs)),
-    );
-    timer.unref();
-  };
-  void poll();
-  return confirmation;
-}
-
-function releaseActiveClaim(
-  registry: ActiveRuntimeOwnedProcessRegistry,
-  claim: ActiveRuntimeOwnedProcessClaim,
-): boolean {
-  if (claim.released) return true;
-  if (!(registry.platform === "linux"
-    ? registry.journal.releaseRetiring(claim.ownershipId)
-    : registry.journal.release(claim.ownershipId))) return false;
-  claim.stopLinuxMonitor?.();
-  claim.released = true;
-  claim.settleLinuxMonitorConfirmation?.(true);
-  claim.settleReleaseConfirmation?.(true);
-  return true;
 }
 
 function monitorLinuxGuardian(
@@ -1170,7 +1007,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
 export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean {
   const registry = activeRegistry;
   const claim = registry?.claims.get(child);
-  if (claim && !claim.released) claim.retireIntent?.();
+  if (claim && !claim.released) claim.intentRetirement?.attempt();
   return registry && claim
     ? (registry.platform === "linux"
         ? claim.released
@@ -1203,6 +1040,7 @@ export async function awaitRuntimeOwnedProcessStopped(child: ChildProcess): Prom
     const release = claim.releaseConfirmation;
     if (!await release && claim.releaseConfirmation === release) break;
   }
+  if (claim.intentRetirement) await claim.intentRetirement.settled;
   return activeRegistry === registry && confirmRuntimeOwnedProcessStopped(child);
 }
 
@@ -1236,6 +1074,7 @@ export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolea
     const closing = [
       ...registry.pendingAdmissions,
       ...registry.pendingReleaseConfirmations,
+      ...[...registry.pendingIntentRetirements].map(({ settled }) => settled),
     ];
     if (closing.length === 0) break;
     await Promise.all(closing);

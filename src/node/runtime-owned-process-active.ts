@@ -38,13 +38,15 @@ export interface ActiveRuntimeOwnedProcessRegistry {
   readonly pendingAdmissions: Set<Promise<boolean>>;
   readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
   readonly pendingIntentRetirements: Set<RuntimeOwnedIntentRetirement>;
+  active: boolean;
   readonly onTainted: (diagnostic: RuntimeOwnedProcessDiagnostic) => void;
   tainted: boolean;
 }
 
 export interface RuntimeOwnedIntentRetirement {
   readonly attempt: () => boolean;
-  readonly cancel: () => void;
+  readonly settled: Promise<boolean>;
+  readonly finalize: () => void;
 }
 
 export interface ActiveRuntimeOwnedProcessClaim {
@@ -67,5 +69,5 @@ export interface ActiveRuntimeOwnedProcessClaim {
   darwinStopBarrier?: Promise<boolean>;
   settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
   stopLinuxMonitor?: () => void;
-  retireIntent?: () => boolean;
+  intentRetirement?: RuntimeOwnedIntentRetirement;
 }

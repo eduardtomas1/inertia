@@ -52,7 +52,6 @@ import {
   type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
-import { redactHostToolPayload } from "./host-tool-redaction";
 import {
   BoundedKimiJsonLineTransform,
   kimiErrorDetail,
@@ -232,12 +231,7 @@ function startKimiRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
-  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(hostMcpConnection
-    ? redactHostToolPayload(value, [
-        hostMcpConnection.bearerToken,
-        hostMcpConnection.url,
-      ])
-    : value);
+  const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(value);
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
   let sessionReady = false;
@@ -355,6 +349,7 @@ function startKimiRun(
           toolActivities,
           turnEvidence,
           compactions,
+          secretRedactor,
         );
       } catch (error) {
         wireError = error instanceof Error
@@ -465,6 +460,9 @@ function startKimiRun(
         );
       }
       hostMcpConnection = await hostMcpSession?.start();
+      if (hostMcpConnection) {
+        secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
+      }
       const hostMcpServers = hostMcpConnection
         ? acpHostMcpServers(
             hostMcpConnection,
@@ -594,6 +592,15 @@ function startKimiRun(
         && compactions.completionEvidence() !== "completed"
         ? unconfirmedAcpCompactionFailure("Kimi")
         : undefined;
+      if (
+        !cancelRequested
+        && response.stopReason === "end_turn"
+        && (options.input.operation?.kind === "compact" ? !compactionFailure : turnEvidence.seen)
+      ) {
+        finishOutputStreams();
+      } else {
+        secretRedactor.discardStreams();
+      }
       const outcome = cancelRequested || response.stopReason === "cancelled"
         ? finish("cancelled")
         : response.stopReason === "end_turn"
@@ -624,6 +631,7 @@ function startKimiRun(
       return outcome;
     },
   ).catch(async (error: unknown) => {
+    secretRedactor.discardStreams();
     if (cancelRequested) {
       requestProcessTermination(true);
       return finish("cancelled");
@@ -737,8 +745,19 @@ function startKimiRun(
     };
   }
 
+  function finishOutputStreams(): void {
+    const assistant = secretRedactor.finishAssistant();
+    if (assistant) {
+      resultText.append(assistant);
+      emitter.text(assistant);
+    }
+    const reasoning = secretRedactor.finishReasoning();
+    if (reasoning) emitter.rich({ type: "reasoning-summary", text: reasoning });
+  }
+
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
+    secretRedactor.discardStreams();
     cancelRequested = true;
     promptPreparationAbort.abort();
     hostToolRuntime?.settle();
@@ -931,6 +950,7 @@ function handleKimiUpdate(
   toolActivities: Map<string, ToolActivity>,
   turnEvidence: TurnEvidence,
   compactions: AcpCompactionProjection,
+  secretRedactor: AcpSecretRedactor,
 ): void {
   const update = notification.update;
   switch (update.sessionUpdate) {
@@ -938,19 +958,20 @@ function handleKimiUpdate(
       return;
     case "agent_message_chunk":
       if (update.content.type === "text") {
-        const value = bounded(update.content.text);
-        if (value.trim()) turnEvidence.seen = true;
-        resultText.append(value);
-        emitter.text(value);
+        const text = bounded(update.content.text);
+        if (text.trim()) turnEvidence.seen = true;
+        const value = secretRedactor.assistantChunk(text);
+        if (value) {
+          resultText.append(value);
+          emitter.text(value);
+        }
       }
       return;
     case "agent_thought_chunk":
       if (update.content.type === "text") {
         if (update.content.text.trim()) turnEvidence.seen = true;
-        emitter.rich({
-          type: "reasoning-summary",
-          text: bounded(update.content.text),
-        });
+        const value = secretRedactor.reasoningChunk(bounded(update.content.text));
+        if (value) emitter.rich({ type: "reasoning-summary", text: value });
       }
       return;
     case "tool_call": {

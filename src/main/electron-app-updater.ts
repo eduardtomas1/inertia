@@ -111,7 +111,7 @@ export type WindowsUpdateSupervisorLauncher = (
 ) => Promise<WindowsUpdateSupervisorAdmission>;
 
 const ANONYMOUS_STAGING_ID = "inertia-anonymous";
-const INSTALL_HANDOFF_TIMEOUT_MS = 5_000;
+const MACOS_STAGING_TIMEOUT_MS = 10 * 60_000;
 const LINUX_CANDIDATE_HANDOFF_LIFETIME_MS = 60_000;
 // Native install and reboot are durable, cross-process steps. Keep their
 // receipt bounded by the journal's maximum while avoiding a spawn-like 60s
@@ -210,6 +210,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     nativeInvocationStarted: boolean;
   } | null = null;
   private windowsInstallPromise: Promise<AppUpdaterInstallResult> | null = null;
+  private releaseNativeHandoff: (() => void) | null = null;
 
   constructor(
     private readonly updater: AppUpdater,
@@ -416,6 +417,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
   }
 
   async abortInstall(): Promise<void> {
+    this.releaseNativeHandoff?.();
     const preparedWindows = this.preparedWindows;
     this.preparedWindows = null;
     if (preparedWindows) {
@@ -876,20 +878,26 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       let nativeListenerInstalled = false;
       let errorListenerInstalled = false;
       let timeout: ReturnType<typeof setTimeout> | null = null;
+      const removeNativeListener = (): void => {
+        if (!nativeListenerInstalled) return;
+        nativeListenerInstalled = false;
+        try {
+          this.installSignals.removeListener(
+            "before-quit-for-update",
+            onNativeHandoff,
+          );
+        } catch {
+          // A retained listener is inert because settlement is checked first.
+        }
+      };
       const finish = (result: AppUpdaterInstallResult): void => {
         if (settled) return;
         settled = true;
         if (timeout) clearTimeout(timeout);
-        if (nativeListenerInstalled) {
-          try {
-            this.installSignals.removeListener(
-              "before-quit-for-update",
-              onNativeHandoff,
-            );
-          } catch {
-            // A retained listener is inert because settlement is checked first.
-          }
+        if (this.releaseNativeHandoff === failUncertain) {
+          this.releaseNativeHandoff = null;
         }
+        if (result === "not-invoked") removeNativeListener();
         if (errorListenerInstalled) {
           try {
             this.updater.removeListener("error", onError);
@@ -905,7 +913,8 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         finish("native-outcome-uncertain");
       };
       const onNativeHandoff = (): void => {
-        if (settled || !invocationStarted) return;
+        if (!invocationStarted || !nativeListenerInstalled) return;
+        removeNativeListener();
         try {
           onHandoff();
           finish("handoff-confirmed");
@@ -928,7 +937,9 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         return;
       }
       if (settled) return;
-      timeout = setTimeout(failUncertain, INSTALL_HANDOFF_TIMEOUT_MS);
+      this.releaseNativeHandoff?.();
+      this.releaseNativeHandoff = failUncertain;
+      timeout = setTimeout(failUncertain, MACOS_STAGING_TIMEOUT_MS);
       timeout.unref?.();
       try {
         invocationStarted = true;

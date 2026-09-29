@@ -41,6 +41,10 @@ export function fixtureRuntimeExitTimeoutMs(
 }
 const FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS =
   fixtureElectronGracefulTimeoutMs();
+export const CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS = 10_000;
+const PREPARED_EXIT_HEADROOM_MS = 5_000;
+export const FIXTURE_PREPARED_EXIT_TIMEOUT_MS =
+  CHROMIUM_NETWORK_SERVICE_EXIT_WAIT_MS + PREPARED_EXIT_HEADROOM_MS;
 export const FIXTURE_RUNTIME_EXIT_TIMEOUT_MS = fixtureRuntimeExitTimeoutMs();
 
 export function processExists(pid: number): boolean {

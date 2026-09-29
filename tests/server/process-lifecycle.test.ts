@@ -484,6 +484,132 @@ describe("provider process-tree termination", () => {
     }
   });
 
+  describe("Windows tree evidence", () => {
+    const owned = (child: ReturnType<typeof fakeChild>, spawnProcess: ReturnType<typeof vi.fn>) => {
+      let outcome: "confirmed" | "unconfirmed" | undefined;
+      const terminate = createOwnedProcessTreeTermination(
+        child as never,
+        "Provider process tree",
+        (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        }),
+      );
+      void terminate(false).then(() => { outcome = "confirmed"; }, () => { outcome = "unconfirmed"; });
+      return () => outcome;
+    };
+    const taskkillExiting = (codeFor: (args: string[]) => number, after = 5) => vi.fn((_command: string, args: string[]) => {
+      const taskkill = fakeTaskkill();
+      setTimeout(() => taskkill.emit("close", codeFor(args)), after);
+      return taskkill;
+    });
+    const argsOf = (spawnProcess: ReturnType<typeof vi.fn>) => spawnProcess.mock.calls.map(([, args]) => args);
+
+    it("never confirms a retry after taskkill failed against a root that had already exited", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 3;
+        child.stdio[1] = { closed: false };
+        child.kill = vi.fn(() => false);
+        const spawnProcess = taskkillExiting(() => 128);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(10);
+        child.stdio[1] = { closed: true };
+        child.emit("close", 3);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never confirms a retry after both taskkills failed and the direct kill stopped the root", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.kill = vi.fn(() => {
+          child.exitCode = 1;
+          setTimeout(() => child.emit("close", 1), 1);
+          return true;
+        });
+        const spawnProcess = taskkillExiting(() => 1);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a tree after a forced taskkill succeeded while the root handle was held", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          setTimeout(() => {
+            taskkill.emit("close", forced ? 0 : 128);
+            if (forced) {
+              child.exitCode = 1;
+              child.emit("close", 1);
+            }
+          }, 5);
+          return taskkill;
+        });
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("confirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports a forced taskkill that finds an exiting root gone unconfirmed even after an accepted graceful request", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.kill = vi.fn(() => false);
+        const spawnProcess = taskkillExiting((args) => args.includes("/f") ? 128 : 0);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(150);
+        child.exitCode = 0;
+        child.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGKILL"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a root that fully closed before any termination attempt without running taskkill", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        const spawnProcess = taskkillExiting(() => 0);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(outcome()).toBe("confirmed");
+        expect(spawnProcess).not.toHaveBeenCalled();
+        expect(child.kill).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("Windows resource settle state", () => {
     const terminate = (child: ReturnType<typeof fakeChild>, spawnProcess: ReturnType<typeof vi.fn>, force = true) => {
       const outcome: { value?: boolean } = {};

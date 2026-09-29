@@ -180,11 +180,10 @@ function killDirectChild(child: ChildProcess, force: boolean): boolean {
   }
 }
 
-const unconfirmedWindowsTrees = new WeakSet<ChildProcess>();
-
 interface WindowsTerminationSequence {
   readonly deadlineAt: number;
   forcedTerminated: boolean;
+  fallbackReached: boolean;
   settle: Promise<void> | null;
 }
 
@@ -326,6 +325,7 @@ function windowsTerminationSequence(
   const sequence = windowsTerminationSequences.get(child) ?? {
     deadlineAt: Date.now() + 2 * waitMs + WINDOWS_RESOURCE_SETTLE_MS,
     forcedTerminated: false,
+    fallbackReached: false,
     settle: null,
   };
   windowsTerminationSequences.set(child, sequence);
@@ -333,11 +333,10 @@ function windowsTerminationSequence(
 }
 
 async function confirmClosedWindowsTermination(
-  child: ChildProcess,
   sequence: WindowsTerminationSequence,
   withinDeadline: boolean,
 ): Promise<boolean> {
-  if (unconfirmedWindowsTrees.has(child)) return false;
+  if (sequence.fallbackReached) return false;
   if (!sequence.settle) {
     if (
       withinDeadline
@@ -733,7 +732,7 @@ export async function terminateProcessTreeAndWait(
     // complete owned child close.
     const sequence = windowsTerminationSequence(child, waitMs);
     if (directChildResourcesAreClosed(child)) {
-      return await confirmClosedWindowsTermination(child, sequence, false);
+      return await confirmClosedWindowsTermination(sequence, false);
     }
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
     const startedAt = performance.now();
@@ -754,7 +753,7 @@ export async function terminateProcessTreeAndWait(
       );
     };
     let gracefulAccepted = false;
-    if (!sequence.forcedTerminated) {
+    if (!sequence.forcedTerminated && !sequence.fallbackReached) {
       if (force) {
         sequence.forcedTerminated = await taskkill(true, closeDeadlineAt);
       } else if (await taskkill(false, gracefulDeadlineAt)) {
@@ -776,12 +775,13 @@ export async function terminateProcessTreeAndWait(
           elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
         return false;
       }
-      const confirmed = await confirmClosedWindowsTermination(child, sequence, true);
+      const confirmed = await confirmClosedWindowsTermination(sequence, true);
       if (!confirmed) recordWindowsCleanupFailure({ phase: "resource-settle", scope: "child", force,
         elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
       return confirmed;
     }
-    if (killDirectChild(child, force)) unconfirmedWindowsTrees.add(child);
+    sequence.fallbackReached = true;
+    killDirectChild(child, force);
     // Direct-child fallback cannot prove that taskkill's unobserved
     // descendants stopped, even if the child releases its handles.
     await waitForObservedDirectChildClose(closeDeadlineAt - Date.now());

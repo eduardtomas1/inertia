@@ -205,16 +205,17 @@ async function waitForCompletion(completion, timeoutMs) {
 async function waitForPosixProcessGroupExit(
   processGroupId,
   timeoutMs = PROCESS_TREE_SETTLE_TIMEOUT_MS,
-  signal = 0,
+  options = {},
 ) {
+  const kill = options.kill ?? ((pid, signal) => process.kill(pid, signal));
+  const groupCanExecute = options.groupCanExecute
+    ?? (process.platform === "linux" ? linuxProcessGroupCanExecute : () => null);
+  const resignalWhile = options.resignalWhile ?? (() => false);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (
-      process.platform === "linux"
-      && linuxProcessGroupCanExecute(processGroupId) === false
-    ) return true;
+    if (groupCanExecute(processGroupId) === false) return true;
     try {
-      process.kill(-processGroupId, signal);
+      kill(-processGroupId, resignalWhile() ? "SIGKILL" : 0);
     } catch (error) {
       if (error?.code === "ESRCH") return true;
       if (error?.code === "EPERM") {
@@ -345,22 +346,23 @@ export function posixProcessGroupKillIsConfirmed(error, groupStillExists) {
   );
 }
 
-async function terminatePosixProcessGroup(processGroupId) {
+export async function terminatePosixProcessGroup(processGroupId, options = {}) {
+  const kill = options.kill ?? ((pid, signal) => process.kill(pid, signal));
   let killError = null;
   try {
-    process.kill(-processGroupId, "SIGKILL");
+    kill(-processGroupId, "SIGKILL");
   } catch (error) {
     killError = error;
   }
   const terminationConfirmed = posixProcessGroupKillIsConfirmed(
     killError,
-    posixProcessGroupExists(processGroupId),
+    options.groupExists?.(processGroupId) ?? posixProcessGroupExists(processGroupId),
   );
   if (!terminationConfirmed) return false;
   return await waitForPosixProcessGroupExit(
     processGroupId,
-    PROCESS_TREE_SETTLE_TIMEOUT_MS,
-    "SIGKILL",
+    options.timeoutMs ?? PROCESS_TREE_SETTLE_TIMEOUT_MS,
+    options,
   );
 }
 
@@ -410,7 +412,9 @@ async function terminateProcessTree(child, completion, windowsGuardian) {
       return false;
     }
   } else {
-    terminationConfirmed = await terminatePosixProcessGroup(child.pid);
+    terminationConfirmed = await terminatePosixProcessGroup(child.pid, {
+      resignalWhile: () => child.exitCode === null && child.signalCode === null,
+    });
   }
   if (!terminationConfirmed) {
     try {

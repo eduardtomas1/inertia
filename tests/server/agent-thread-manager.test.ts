@@ -703,6 +703,56 @@ describe("AgentThreadManager", () => {
     }
   });
 
+  it("releases follow-up admission when recording the dispatch fails", async () => {
+    const {
+      beginSourceTurn,
+      manager,
+      project,
+      source,
+      sourceTurn,
+      store,
+      turns,
+    } = await runtime();
+    try {
+      const child = store.createConversation(project.id, "Follow-up child", {
+        activate: false,
+      });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: sourceTurn.id,
+        sourceRunId: sourceTurn.runId,
+        sourceHarnessId: sourceTurn.harnessId,
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const startingParent = beginSourceTurn();
+      expect((await manager.bridgeFor({ conversation: source, turn: startingParent })!
+        .invoke(call("inertia_send_message", {
+          conversationId: child.id,
+          content: "Start work that keeps running",
+        }))).success).toBe(true);
+      expect(turns.isActive(child.id)).toBe(true);
+
+      const acquire = vi.spyOn(turns, "acquireFollowUpAdmission");
+      const transition = store.agentThreadManagement.transition.bind(store.agentThreadManagement);
+      vi.spyOn(store.agentThreadManagement, "transition").mockImplementation((...args) => {
+        if (args[2] === "dispatching") throw new Error("SQLite unavailable");
+        return transition(...args);
+      });
+      const followUp = await manager.bridgeFor({ conversation: source, turn: beginSourceTurn() })!
+        .invoke(call("inertia_send_message", {
+          conversationId: child.id,
+          content: "This follow-up cannot be recorded",
+        }));
+
+      expect(followUp.success).toBe(false);
+      expect(acquire).toHaveBeenCalledOnce();
+      expect(acquire.mock.results[0]?.value?.release).toHaveBeenCalledOnce();
+    } finally {
+      store.close();
+    }
+  });
+
   it("does not dispatch or archive across an active provider terminal", async () => {
     const {
       manager,

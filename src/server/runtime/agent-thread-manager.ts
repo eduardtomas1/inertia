@@ -1118,14 +1118,14 @@ export class AgentThreadManager {
     if (this.dependencies.turns.isActive(target.id)) {
       const lease = this.dependencies.turns.acquireFollowUpAdmission(target.id);
       if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
-      this.dependencies.store.agentThreadManagement.transition(
-        operationId,
-        ["approved"],
-        "dispatching",
-        { childConversationId: target.id },
-        this.now(),
-      );
       try {
+        this.dependencies.store.agentThreadManagement.transition(
+          operationId,
+          ["approved"],
+          "dispatching",
+          { childConversationId: target.id },
+          this.now(),
+        );
         const message = await this.dependencies.turns.steer(lease, {
           content: input.content,
           imagePaths: [],

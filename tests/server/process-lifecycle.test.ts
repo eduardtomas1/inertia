@@ -1,4 +1,5 @@
 // @inertia-test-suite portable
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
@@ -38,6 +39,8 @@ function fakeTaskkill() {
   taskkill.unref = vi.fn();
   return taskkill;
 }
+
+const WINDOWS_SEQUENCE_MS = 2 * 100 + 100;
 
 function noSuchProcess(message: string): NodeJS.ErrnoException {
   const error = new Error(message) as NodeJS.ErrnoException;
@@ -405,6 +408,661 @@ describe("provider process-tree termination", () => {
     await expect(termination).resolves.toBe(false);
   });
 
+  it("escalates a refused graceful Windows taskkill to a forced tree kill before touching the root", async () => {
+    const child = fakeChild();
+    const graceful = fakeTaskkill();
+    const forced = fakeTaskkill();
+    const spawnProcess = vi.fn()
+      .mockReturnValueOnce(graceful)
+      .mockReturnValueOnce(forced);
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      false,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 100,
+      },
+    );
+
+    graceful.emit("close", 128);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawnProcess).toHaveBeenNthCalledWith(
+      2,
+      "taskkill.exe",
+      ["/pid", "4242", "/t", "/f"],
+      expect.objectContaining({ shell: false }),
+    );
+    expect(child.kill).not.toHaveBeenCalled();
+
+    forced.emit("close", 0);
+    child.exitCode = 1;
+    child.emit("close", 1);
+    await expect(termination).resolves.toBe(true);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("shares one Windows termination budget across graceful and forced taskkill and the root close", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      child.kill = vi.fn(() => true);
+      const graceful = fakeTaskkill();
+      const forced = fakeTaskkill();
+      const spawnProcess = vi.fn()
+        .mockReturnValueOnce(graceful)
+        .mockReturnValueOnce(forced);
+      let result: boolean | undefined;
+      const startedAt = Date.now();
+      void terminateProcessTreeAndWait(
+        child as never,
+        false,
+        {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        },
+      ).then((value) => { result = value; });
+
+      await vi.advanceTimersByTimeAsync(40);
+      graceful.emit("close", 128);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(forced.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(40);
+      expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      await vi.advanceTimersByTimeAsync(59);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("Windows tree evidence", () => {
+    const owned = (child: ReturnType<typeof fakeChild>, spawnProcess: ReturnType<typeof vi.fn>) => {
+      let outcome: "confirmed" | "unconfirmed" | undefined;
+      const terminate = createOwnedProcessTreeTermination(
+        child as never,
+        "Provider process tree",
+        (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        }),
+      );
+      void terminate(false).then(() => { outcome = "confirmed"; }, () => { outcome = "unconfirmed"; });
+      return () => outcome;
+    };
+    const taskkillExiting = (codeFor: (args: string[]) => number, after = 5) => vi.fn((_command: string, args: string[]) => {
+      const taskkill = fakeTaskkill();
+      setTimeout(() => taskkill.emit("close", codeFor(args)), after);
+      return taskkill;
+    });
+    const argsOf = (spawnProcess: ReturnType<typeof vi.fn>) => spawnProcess.mock.calls.map(([, args]) => args);
+
+    it("never confirms a retry after taskkill failed against a root that had already exited", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 3;
+        child.stdio[1] = { closed: false };
+        child.kill = vi.fn(() => false);
+        const spawnProcess = taskkillExiting(() => 128);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(10);
+        child.stdio[1] = { closed: true };
+        child.emit("close", 3);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never confirms a retry after both taskkills failed and the direct kill stopped the root", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.kill = vi.fn(() => {
+          child.exitCode = 1;
+          setTimeout(() => child.emit("close", 1), 1);
+          return true;
+        });
+        const spawnProcess = taskkillExiting(() => 1);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a tree after a forced taskkill succeeded while the root handle was held", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          setTimeout(() => {
+            taskkill.emit("close", forced ? 0 : 128);
+            if (forced) {
+              child.exitCode = 1;
+              child.emit("close", 1);
+            }
+          }, 5);
+          return taskkill;
+        });
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(outcome()).toBe("confirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports a forced taskkill that finds an exiting root gone unconfirmed even after an accepted graceful request", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.kill = vi.fn(() => false);
+        const spawnProcess = taskkillExiting((args) => args.includes("/f") ? 128 : 0);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(150);
+        child.exitCode = 0;
+        child.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(outcome()).toBe("unconfirmed");
+        expect(argsOf(spawnProcess)).toEqual([["/pid", "4242", "/t"], ["/pid", "4242", "/t", "/f"]]);
+        expect(child.kill.mock.calls).toEqual([["SIGKILL"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives the forced escalation the remaining sequence budget after a graceful taskkill consumed its window", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const events: Array<[number, string]> = [];
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          events.push([Date.now() - startedAt, args.join(" ")]);
+          if (forced) {
+            setTimeout(() => {
+              taskkill.emit("close", 0);
+              child.exitCode = 1;
+              child.emit("close", 1);
+            }, 30);
+          }
+          return taskkill;
+        });
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(events).toEqual([[0, "/pid 4242 /t"], [100, "/pid 4242 /t /f"]]);
+        expect(outcome()).toBe("confirmed");
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(400);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves a starved escalation to the forced call instead of marking the tree unconfirmed from the graceful call", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        child.kill = vi.fn(() => true);
+        const graceful = fakeTaskkill();
+        const forced = fakeTaskkill();
+        const spawnProcess = vi.fn()
+          .mockImplementationOnce(() => {
+            setTimeout(() => {
+              vi.setSystemTime(startedAt + 250);
+              graceful.emit("close", 1);
+            }, 40);
+            return graceful;
+          })
+          .mockImplementationOnce(() => forced);
+        let first: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, false, {
+          platform: "win32",
+          spawnProcess: spawnProcess as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        }).then((value) => { first = value; });
+        await vi.advanceTimersByTimeAsync(40);
+        expect(first).toBe(false);
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(spawnProcess).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a root that fully closed before any termination attempt without running taskkill", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        const spawnProcess = taskkillExiting(() => 0);
+        const outcome = owned(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(outcome()).toBe("confirmed");
+        expect(spawnProcess).not.toHaveBeenCalled();
+        expect(child.kill).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("Windows resource settle state", () => {
+    const terminate = (child: ReturnType<typeof fakeChild>, spawnProcess: ReturnType<typeof vi.fn>, force = true) => {
+      const outcome: { value?: boolean } = {};
+      void terminateProcessTreeAndWait(child as never, force, {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 100,
+      }).then((value) => { outcome.value = value; });
+      return outcome;
+    };
+
+    it("does not confirm a retry after close was observed with 99 ms left until a full settle completes", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const spawnProcess = vi.fn(() => taskkill);
+        const first = terminate(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(189);
+        child.exitCode = 1;
+        child.emit("close", 1);
+        vi.setSystemTime(startedAt + 201);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(first.value).toBe(false);
+
+        const retry = terminate(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(99);
+        expect(retry.value).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(retry.value).toBe(true);
+        expect(spawnProcess).toHaveBeenCalledOnce();
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(2 * 100 + 2 * 100);
+
+        const again = terminate(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(again.value).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives an owned termination whose forced call ran out of budget one bounded settle on its retry", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const spawnProcess = vi.fn(() => taskkill);
+        let settled: "confirmed" | "unconfirmed" | undefined;
+        void createOwnedProcessTreeTermination(
+          child as never,
+          "Provider update process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "win32",
+            spawnProcess: spawnProcess as never,
+            windowsSystemRoot: null,
+            waitMs: 100,
+          }),
+        )(false).then(() => { settled = "confirmed"; }, () => { settled = "unconfirmed"; });
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(89);
+        child.exitCode = 1;
+        child.emit("close", 1);
+        vi.setSystemTime(startedAt + 201);
+        await vi.advanceTimersByTimeAsync(99);
+        expect(settled).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(settled).toBe("confirmed");
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(2 * 100 + 2 * 100 + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("settles an already-closed child on the first call before confirming it", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        const spawnProcess = vi.fn(() => fakeTaskkill());
+        const outcome = terminate(child, spawnProcess);
+        await vi.advanceTimersByTimeAsync(99);
+        expect(outcome.value).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(outcome.value).toBe(true);
+        expect(spawnProcess).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never confirms a closed child whose tree fell back to a direct kill", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.kill = vi.fn(() => {
+          child.exitCode = 1;
+          queueMicrotask(() => child.emit("close", 1));
+          return true;
+        });
+        const taskkill = fakeTaskkill();
+        const first = terminate(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 1);
+        await vi.advanceTimersByTimeAsync(300);
+        expect(first.value).toBe(false);
+        const retry = terminate(child, vi.fn(() => fakeTaskkill()));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(retry.value).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("Windows termination sequence deadline", () => {
+    const run = (
+      child: ReturnType<typeof fakeChild>,
+      spawnProcess: ReturnType<typeof vi.fn>,
+      force = true,
+    ) => {
+      const outcome: { value?: boolean } = {};
+      void terminateProcessTreeAndWait(child as never, force, {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 100,
+      }).then((value) => { outcome.value = value; });
+      return outcome;
+    };
+    const closeChild = (child: ReturnType<typeof fakeChild>): void => {
+      child.exitCode = 1;
+      child.emit("close", 1);
+    };
+
+    it.each([
+      { label: "1 ms before its close deadline", closeAt: 199, confirmed: true, settledAt: 299 },
+      { label: "at its close deadline", closeAt: 200, confirmed: false, settledAt: 200 },
+      { label: "1 ms before the sequence deadline", closeAt: 299, confirmed: false, settledAt: 200 },
+      { label: "after the sequence deadline", closeAt: 350, confirmed: false, settledAt: 200 },
+    ])("bounds a root that closes $label", async ({ closeAt, confirmed, settledAt }) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        let settledElapsedMs: number | undefined;
+        for (let elapsed = 10; elapsed < 400; elapsed += 1) {
+          if (elapsed === closeAt) closeChild(child);
+          await vi.advanceTimersByTimeAsync(1);
+          if (outcome.value !== undefined && settledElapsedMs === undefined) {
+            settledElapsedMs = Date.now() - startedAt;
+          }
+        }
+        expect(outcome.value).toBe(confirmed);
+        expect(settledElapsedMs).toBe(settledAt);
+        expect(settledElapsedMs).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports unconfirmed instead of shortening the resource settle when the close is observed late", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(189);
+        closeChild(child);
+        vi.setSystemTime(startedAt + 260);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reports unconfirmed without settling when the close is observed after the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        const outcome = run(child, vi.fn(() => taskkill));
+        await vi.advanceTimersByTimeAsync(10);
+        taskkill.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(189);
+        closeChild(child);
+        vi.setSystemTime(startedAt + WINDOWS_SEQUENCE_MS);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBe(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("escalates within the remaining sequence budget after a graceful taskkill consumed its window, then falls back at the close deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const graceful = fakeTaskkill();
+        const forced = fakeTaskkill();
+        const spawnProcess = vi.fn()
+          .mockReturnValueOnce(graceful)
+          .mockReturnValueOnce(forced);
+        const outcome = run(child, spawnProcess, false);
+        await vi.advanceTimersByTimeAsync(100);
+        expect(graceful.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
+        expect(child.kill).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(99);
+        expect(outcome.value).toBeUndefined();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(forced.kill).toHaveBeenCalledWith("SIGKILL");
+        expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+        expect(outcome.value).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives an ignored graceful request its grace period and the forced taskkill the rest of the sequence", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const spawnProcess = vi.fn((_command: string, args: string[]) => {
+          const taskkill = fakeTaskkill();
+          const forced = args.includes("/f");
+          setTimeout(() => {
+            taskkill.emit("close", 0);
+            if (forced) closeChild(child);
+          }, 10);
+          return taskkill;
+        });
+        const terminate = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider update process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "win32",
+            spawnProcess: spawnProcess as never,
+            windowsSystemRoot: null,
+            waitMs: 100,
+          }),
+        );
+        let resolvedAt: number | undefined;
+        void terminate(false).then(() => { resolvedAt = Date.now() - startedAt; });
+        await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS + 100);
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
+        expect(resolvedAt).toBe(210);
+        expect(resolvedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives the final forced call of an owned termination only the time left in the sequence", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const graceful = fakeTaskkill();
+        const spawnProcess = vi.fn((_command: string, _args: string[]) => graceful);
+        const terminate = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider update process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "win32",
+            spawnProcess: spawnProcess as never,
+            windowsSystemRoot: null,
+            waitMs: 100,
+          }),
+        );
+        let rejectedAt: number | undefined;
+        void terminate(false).catch(() => { rejectedAt = Date.now() - startedAt; });
+        await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS + 100);
+        expect(rejectedAt).toBe(200);
+        expect(rejectedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+        expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+          ["/pid", "4242", "/t"],
+          ["/pid", "4242", "/t", "/f"],
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("does not escalate a refused graceful Windows taskkill after the root has exited", async () => {
+    const child = fakeChild();
+    const graceful = fakeTaskkill();
+    const spawnProcess = vi.fn(() => graceful);
+    child.stdio[1] = { closed: false };
+    const termination = terminateProcessTreeAndWait(
+      child as never,
+      false,
+      {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 25,
+      },
+    );
+
+    child.exitCode = 0;
+    graceful.emit("close", 128);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawnProcess).toHaveBeenCalledOnce();
+
+    child.stdio[1] = { closed: true };
+    child.emit("close", 0);
+    await expect(termination).resolves.toBe(false);
+  });
+
+  it.each([
+    { label: "confirms", forcedExitCode: 0, confirmed: true },
+    { label: "rejects", forcedExitCode: 1, confirmed: false },
+  ])("$label a graceful-then-forced Windows owned termination by its forced tree kill", async ({
+    forcedExitCode,
+    confirmed,
+  }) => {
+    const child = fakeChild();
+    child.kill = vi.fn(() => {
+      queueMicrotask(() => {
+        child.exitCode = 1;
+        child.emit("close", 1);
+      });
+      return true;
+    });
+    const spawnProcess = vi.fn((_command: string, args: string[]) => {
+      const taskkill = fakeTaskkill();
+      const forced = args.includes("/f");
+      queueMicrotask(() => {
+        taskkill.emit("close", forced ? forcedExitCode : 128);
+        if (forced && forcedExitCode === 0) {
+          child.exitCode = 1;
+          child.emit("close", 1);
+        }
+      });
+      return taskkill;
+    });
+    const terminate = createOwnedProcessTreeTermination(
+      child as never,
+      "Provider update process tree",
+      (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+        platform: "win32",
+        spawnProcess: spawnProcess as never,
+        windowsSystemRoot: null,
+        waitMs: 25,
+      }),
+    );
+
+    const termination = terminate(false);
+    if (confirmed) await expect(termination).resolves.toBeUndefined();
+    else {
+      await expect(termination).rejects.toMatchObject({
+        code: "process-tree-termination-unconfirmed",
+      });
+    }
+    expect(spawnProcess.mock.calls.map(([, args]) => args)).toEqual([
+      ["/pid", "4242", "/t"],
+      ["/pid", "4242", "/t", "/f"],
+    ]);
+    expect(child.kill).toHaveBeenCalledTimes(confirmed ? 0 : 1);
+  });
+
   it("keeps the Windows tree unconfirmed when taskkill times out", async () => {
     const child = fakeChild();
     const taskkill = fakeTaskkill();
@@ -452,6 +1110,607 @@ describe("provider process-tree termination", () => {
     await expect(termination).resolves.toBe(false);
   });
 
+  it("counts the POSIX tree snapshot against the same termination deadline as the exit waits", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const child = fakeChild();
+      const killProcess = vi.fn(() => true as const);
+      let result: boolean | undefined;
+      void terminateProcessTreeAndWait(
+        child as never,
+        true,
+        {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => {
+            vi.setSystemTime(Date.now() + 80);
+            return { status: 0, stdout: "4242 1 S\n" };
+          }) as never,
+          processCanExecute: () => true,
+          processGroupCanExecute: () => true,
+          waitMs: 100,
+        },
+      ).then((value) => { result = value; });
+
+      await vi.advanceTimersByTimeAsync(19);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toBe(false);
+      expect(Date.now() - startedAt).toBe(100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("POSIX group signals stay tied to an unreaped leader", () => {
+    const signals = (killProcess: ReturnType<typeof vi.fn>) =>
+      killProcess.mock.calls.filter(([, signal]) => signal !== 0);
+    const tree = (options: {
+      child: ReturnType<typeof fakeChild>;
+      groupKillsNeeded: number;
+      leaderReapedAfterMs: number;
+      closeWithReap: boolean;
+    }) => {
+      let groupKills = 0;
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (target === -4_242 && signal === 0) {
+          if (groupKills >= options.groupKillsNeeded) throw noSuchProcess("group gone");
+          return true as const;
+        }
+        if (target === -4_242 && signal === "SIGKILL") groupKills += 1;
+        if (target === 4_242 && signal === "SIGKILL") {
+          setTimeout(() => {
+            options.child.exitCode = 1;
+            options.child.emit("exit", 1, null);
+            if (options.closeWithReap) options.child.emit("close", 1);
+          }, options.leaderReapedAfterMs);
+        }
+        return true as const;
+      });
+      return killProcess;
+    };
+    const dependencies = (killProcess: ReturnType<typeof vi.fn>) => ({
+      platform: "linux" as const,
+      killProcess: killProcess as never,
+      spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 T\n" })) as never,
+      processCanExecute: () => null,
+      processGroupCanExecute: () => null,
+      waitMs: 100,
+    });
+
+    it("re-signals the group while Node has not reaped its leader and confirms once a forked member is gone", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const killProcess = tree({ child, groupKillsNeeded: 2, leaderReapedAfterMs: 15, closeWithReap: true });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, dependencies(killProcess))
+          .then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(20);
+        expect(signals(killProcess)).toEqual([
+          [-4_242, "SIGSTOP"], [4_242, "SIGSTOP"],
+          [-4_242, "SIGKILL"], [4_242, "SIGKILL"],
+          [-4_242, "SIGKILL"],
+        ]);
+        expect(result).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(100);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never signals the group again once Node has reaped its leader, even while that group number is live", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        child.stdio[1] = { closed: false };
+        const killProcess = tree({ child, groupKillsNeeded: Number.POSITIVE_INFINITY, leaderReapedAfterMs: 5, closeWithReap: false });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, dependencies(killProcess))
+          .then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(signals(killProcess)).toEqual([
+          [-4_242, "SIGSTOP"], [4_242, "SIGSTOP"],
+          [-4_242, "SIGKILL"], [4_242, "SIGKILL"],
+          [-4_242, "SIGKILL"],
+        ]);
+        expect(result).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(100);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends no signal when Node observed the leader's exit before cleanup and reports a surviving group unconfirmed", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+        const killProcess = tree({ child, groupKillsNeeded: Number.POSITIVE_INFINITY, leaderReapedAfterMs: 0, closeWithReap: false });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, dependencies(killProcess))
+          .then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(signals(killProcess)).toEqual([]);
+        expect(result).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends no graceful group signal when Node observed the leader's exit before cleanup", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+        const killProcess = tree({ child, groupKillsNeeded: 0, leaderReapedAfterMs: 0, closeWithReap: false });
+        void terminateProcessTreeAndWait(child as never, false, dependencies(killProcess));
+        await vi.advanceTimersByTimeAsync(100);
+        expect(signals(killProcess)).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not re-signal the group of a PID-owned tree whose leader another thread reaps", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killProcess = tree({ child, groupKillsNeeded: 2, leaderReapedAfterMs: 15, closeWithReap: false });
+        let result: boolean | undefined;
+        void createOwnedPidProcessTreeTermination(4_242, async () => true, dependencies(killProcess))()
+          .then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(signals(killProcess)).toEqual([
+          [-4_242, "SIGSTOP"], [4_242, "SIGSTOP"],
+          [-4_242, "SIGKILL"], [4_242, "SIGKILL"],
+        ]);
+        expect(result).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("POSIX root classification (exhaustive)", () => {
+    type Stop = "sent" | "ESRCH" | "EPERM" | "EINVAL";
+    type Table = "running" | "stopped" | "zombie" | "absent" | "unknown";
+    type Expected = "root-authorized" | "root-gone" | "incomplete";
+    const expected: Record<Stop, Record<Table, [Expected, Expected]>> = {
+      sent: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["root-authorized", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+      ESRCH: {
+        running: ["root-gone", "root-gone"],
+        stopped: ["root-gone", "root-gone"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["root-gone", "root-gone"],
+      },
+      EPERM: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["incomplete", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+      EINVAL: {
+        running: ["incomplete", "incomplete"],
+        stopped: ["incomplete", "incomplete"],
+        zombie: ["root-gone", "root-gone"],
+        absent: ["root-gone", "root-gone"],
+        unknown: ["incomplete", "incomplete"],
+      },
+    };
+    const rows = (Object.keys(expected) as Stop[]).flatMap((stop) =>
+      (Object.keys(expected[stop]) as Table[]).flatMap((table) =>
+        ([true, false] as const)
+          .filter((stabilised) => table !== "unknown" || !stabilised)
+          .map((stabilised) => ({
+            stop, table, stabilised,
+            classification: expected[stop][table][stabilised ? 0 : 1],
+          }))));
+
+    it.each(rows)("stop $stop, root $table, stabilised $stabilised: $classification", async ({
+      stop, table, stabilised, classification,
+    }) => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal === "SIGSTOP" && stop !== "sent") {
+            const error = new Error(stop) as NodeJS.ErrnoException;
+            error.code = stop;
+            throw error;
+          }
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") {
+            killed.add(target);
+            if (target === 4_242 && child.exitCode === null) {
+              child.exitCode = 1;
+              queueMicrotask(() => child.emit("close", 1));
+            }
+          }
+          return true as const;
+        });
+        let next = 5_000;
+        const spawnProcessSync = vi.fn(() => {
+          if (table === "unknown") return { status: null, stdout: "" };
+          const rootLine = table === "running" ? "4242 1 S"
+            : table === "stopped" ? "4242 1 T"
+              : table === "zombie" ? "4242 1 Z" : "";
+          const children = stabilised ? ["5000 4242 T"] : [`${next++} 4242 S`];
+          return { status: 0, stdout: `${[rootLine, ...children].filter(Boolean).join("\n")}\n` };
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(killProcess.mock.calls.slice(0, 2)).toEqual([[-4_242, "SIGSTOP"], [4_242, "SIGSTOP"]]);
+        expect(result).toBe(classification !== "incomplete");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never confirms a live root that refused both stops even after the scan stabilised and the root later exited", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        const killed = new Set<number>();
+        const denied = (): never => {
+          const error = new Error("EPERM") as NodeJS.ErrnoException;
+          error.code = "EPERM";
+          throw error;
+        };
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (target === 4_242 && signal !== 0) denied();
+          if (signal === 0) {
+            if (killed.has(target)) throw noSuchProcess("gone");
+            return true as const;
+          }
+          if (signal === "SIGKILL") killed.add(target);
+          return true as const;
+        });
+        setTimeout(() => {
+          child.exitCode = 0;
+          child.emit("close", 0);
+        }, 50);
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 S\n5000 4242 T\n" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(100);
+        expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0).slice(0, 8)).toEqual([
+          [-4_242, "SIGSTOP"],
+          [4_242, "SIGSTOP"],
+          [-5_000, "SIGSTOP"],
+          [5_000, "SIGSTOP"],
+          [-5_000, "SIGKILL"],
+          [5_000, "SIGKILL"],
+          [-4_242, "SIGKILL"],
+          [4_242, "SIGKILL"],
+        ]);
+        expect(result).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("classifies a root whose exit Node observed before cleanup as gone without signalling it", async () => {
+      vi.useFakeTimers();
+      try {
+        const child = fakeChild();
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+        const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+          if (signal === 0 && target === -4_242) throw noSuchProcess("gone");
+          return true as const;
+        });
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "" })) as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 1_000,
+        }).then((value) => { result = value; });
+        child.stdio[1] = { closed: true };
+        child.emit("close", 0);
+        await vi.advanceTimersByTimeAsync(10);
+        expect(result).toBe(true);
+        expect(killProcess.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("POSIX tree termination truth table", () => {
+    interface Row {
+      label: string;
+      force: boolean;
+      rootExitObserved: boolean;
+      rootAtStop: "alive" | "gone" | "zombie";
+      descendant: "none" | "exits" | "survives";
+      groupExits: boolean;
+      closeArrives: boolean;
+      confirmed: boolean;
+    }
+    const rows: Row[] = [
+      { label: "a frozen live root whose whole tree exits", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "exits", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a frozen live root whose known descendant survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "survives", groupExits: true, closeArrives: true, confirmed: false },
+      { label: "a frozen live root whose group survives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a frozen live root whose close never arrives", force: true, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: false, confirmed: false },
+      { label: "a root that exits before the stop and whose exit Node observes in time", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a root that exits before the stop and whose exit Node never observes", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: false, confirmed: false },
+      { label: "a root that exits before the stop and leaves a group member running", force: true, rootExitObserved: false, rootAtStop: "gone", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a zombie root that Node reaps in time", force: true, rootExitObserved: false, rootAtStop: "zombie", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a normal exit Node observed before cleanup", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a normal exit that left a group member running", force: true, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a graceful stop whose root and group exit", force: false, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+      { label: "a graceful stop whose group survives", force: false, rootExitObserved: false, rootAtStop: "alive", descendant: "none", groupExits: false, closeArrives: true, confirmed: false },
+      { label: "a graceful stop after a normal exit", force: false, rootExitObserved: true, rootAtStop: "gone", descendant: "none", groupExits: true, closeArrives: true, confirmed: true },
+    ];
+
+    const tree = (row: Row) => {
+      const child = fakeChild();
+      if (row.rootExitObserved) {
+        child.exitCode = 0;
+        child.stdio[1] = { closed: false };
+      }
+      const exited = new Set<number>();
+      if (row.rootAtStop !== "alive") exited.add(4_242);
+      if (row.rootExitObserved && row.groupExits) exited.add(-4_242);
+      let closing = false;
+      const close = (): void => {
+        if (!row.closeArrives || closing) return;
+        closing = true;
+        child.exitCode ??= 1;
+        child.stdio[1] = { closed: true };
+        queueMicrotask(() => child.emit("close", child.exitCode));
+      };
+      if (row.rootExitObserved) setTimeout(close, 5);
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (exited.has(target)) throw noSuchProcess("gone");
+        if (signal === "SIGKILL" || signal === "SIGTERM") {
+          if (target === -4_242 && row.groupExits) exited.add(-4_242);
+          if (target === 4_242 && row.rootAtStop === "alive") exited.add(4_242);
+          if (target === 5_000 && row.descendant === "exits") exited.add(5_000);
+          if (target === -4_242 || target === 4_242) close();
+        }
+        return true as const;
+      });
+      const rootLine = row.rootAtStop === "alive" ? "4242 1 T"
+        : row.rootAtStop === "zombie" ? "4242 1 Z" : "";
+      const descendantLine = row.descendant === "none" || row.rootAtStop !== "alive"
+        ? "" : "5000 4242 S";
+      const listing = [rootLine, descendantLine].filter(Boolean).join("\n");
+      return {
+        child,
+        killProcess,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: `${listing}\n` })),
+      };
+    };
+
+    it.each(rows)("reports $confirmed for $label", async (row) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        let result: boolean | undefined;
+        void terminateProcessTreeAndWait(child as never, row.force, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          processCanExecute: () => null,
+          processGroupCanExecute: () => null,
+          waitMs: 100,
+        }).then((value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(row.confirmed ? 20 : 101);
+        expect(result).toBe(row.confirmed);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(101);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a normal exit through the owned termination without escalating or waiting out the budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const row = rows.find(({ label }) => label === "a graceful stop after a normal exit")!;
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        const terminateProcessTree = vi.fn((ownedChild: ChildProcess, force: boolean) =>
+          terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "linux",
+            killProcess: killProcess as never,
+            spawnProcessSync: spawnProcessSync as never,
+            processCanExecute: () => null,
+            processGroupCanExecute: () => null,
+            waitMs: 100,
+          }));
+        let settled = false;
+        void createOwnedProcessTreeTermination(
+          child as never,
+          "Provider process tree",
+          terminateProcessTree,
+        )(false).then(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(5);
+        expect(settled).toBe(true);
+        expect(terminateProcessTree).toHaveBeenCalledOnce();
+        expect(spawnProcessSync).not.toHaveBeenCalled();
+        expect(Date.now() - startedAt).toBe(5);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      { closeArrives: true, confirmed: "confirmed" },
+      { closeArrives: false, confirmed: "unconfirmed" },
+    ])("reports $confirmed for a cancellation whose forced call meets a vanished root (close arrives: $closeArrives)", async ({ closeArrives, confirmed }) => {
+      vi.useFakeTimers();
+      try {
+        const row = { ...rows.find(({ label }) => label.startsWith("a root that exits before the stop and whose exit Node observes"))!, closeArrives };
+        const { child, killProcess, spawnProcessSync } = tree(row);
+        const outcome = createOwnedProcessTreeTermination(
+          child as never,
+          "Provider process tree",
+          (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+            platform: "linux",
+            killProcess: killProcess as never,
+            spawnProcessSync: spawnProcessSync as never,
+            processCanExecute: () => null,
+            processGroupCanExecute: () => null,
+            waitMs: 100,
+          }),
+        )(true).then(() => "confirmed", (error: unknown) =>
+          (error as { code?: string }).code === "process-tree-termination-unconfirmed"
+            ? "unconfirmed" : error);
+        await vi.advanceTimersByTimeAsync(101);
+        await expect(outcome).resolves.toBe(confirmed);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("POSIX descendant snapshot confirmation", () => {
+    const posixTermination = (
+      spawnProcessSync: ReturnType<typeof vi.fn>,
+      closeOnKill: "sync" | "async" = "async",
+    ) => {
+      const child = fakeChild();
+      const exited = new Set<number>();
+      const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0) {
+          if (exited.has(Math.abs(target))) throw noSuchProcess("gone");
+          return true as const;
+        }
+        if (signal === "SIGKILL") {
+          exited.add(Math.abs(target));
+          if (Math.abs(target) === 4_242 && child.exitCode === null) {
+            child.exitCode = 1;
+            if (closeOnKill === "sync") child.emit("close", 1);
+            else queueMicrotask(() => child.emit("close", 1));
+          }
+        }
+        return true as const;
+      });
+      const terminate = createOwnedProcessTreeTermination(
+        child as never,
+        "Provider process tree",
+        (ownedChild, force) => terminateProcessTreeAndWait(ownedChild, force, {
+          platform: "linux",
+          killProcess: killProcess as never,
+          spawnProcessSync: spawnProcessSync as never,
+          waitMs: 1_000,
+        }),
+      );
+      return { child, exited, terminate };
+    };
+
+    it.each([
+      {
+        label: "a process listing that keeps timing out",
+        closeOnKill: "async" as const,
+        listing: () => {
+          vi.setSystemTime(Date.now() + 20);
+          return { status: null, stdout: "" };
+        },
+      },
+      {
+        label: "descendants that keep appearing until the scan stops",
+        closeOnKill: "async" as const,
+        listing: (() => {
+          let next = 5_000;
+          return () => {
+            vi.setSystemTime(Date.now() + 10);
+            const rows = ["4242 1 S"];
+            for (let pid = 5_000; pid <= next; pid += 1) rows.push(`${pid} 4242 S`);
+            next += 1;
+            return { status: 0, stdout: `${rows.join("\n")}\n` };
+          };
+        })(),
+      },
+      {
+        label: "a scan cut short by the deadline after the known tree already exited",
+        closeOnKill: "sync" as const,
+        listing: () => {
+          vi.setSystemTime(Date.now() + 1_001);
+          return { status: 0, stdout: "4242 1 S\n5000 4242 S\n" };
+        },
+      },
+    ])("keeps ownership unconfirmed for $label", async ({ listing, closeOnKill }) => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const { child, exited, terminate } = posixTermination(vi.fn(listing), closeOnKill);
+        const outcome = terminate(true).then(() => "confirmed", (error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await expect(outcome).resolves.toMatchObject({
+          code: "process-tree-termination-unconfirmed",
+        });
+        expect(exited.has(4_242)).toBe(true);
+        expect(child.exitCode).toBe(1);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(2_001);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("confirms a tree whose descendant snapshot stabilises just before the deadline", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        let listings = 0;
+        const spawnProcessSync = vi.fn(() => {
+          listings += 1;
+          vi.setSystemTime(Date.now() + 499);
+          return {
+            status: 0,
+            stdout: listings === 1 ? "4242 1 S\n5000 4242 S\n" : "4242 1 T\n5000 4242 T\n",
+          };
+        });
+        const { terminate } = posixTermination(spawnProcessSync);
+        let confirmed = false;
+        void terminate(true).then(() => { confirmed = true; });
+        await vi.advanceTimersByTimeAsync(2);
+        expect(listings).toBe(2);
+        expect(confirmed).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(1_000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("awaits POSIX process-group disappearance", async () => {
     const child = fakeChild();
     let running = true;
@@ -478,7 +1737,7 @@ describe("provider process-tree termination", () => {
         killProcess,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
-          stdout: "",
+          stdout: "4242 1 T\n",
         })) as never,
         waitMs: 100,
       },
@@ -710,7 +1969,7 @@ describe("provider process-tree termination", () => {
       {
         platform: "linux",
         killProcess,
-        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "" })) as never,
+        spawnProcessSync: vi.fn(() => ({ status: 0, stdout: "4242 1 T\n" })) as never,
         waitMs: 100,
       },
     ).then((confirmed) => {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import type {
   RuntimeEventScope,
@@ -252,6 +252,13 @@ export class RuntimeSequencer {
   }
 }
 
+function sameRuntimePath(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return actualBytes.length === expectedBytes.length
+    && timingSafeEqual(actualBytes, expectedBytes);
+}
+
 export function parseRuntimeResumeRequest(
   requestUrl: string | undefined,
   expectedPath: string,
@@ -263,7 +270,7 @@ export function parseRuntimeResumeRequest(
   } catch {
     return { kind: "invalid" };
   }
-  if (url.pathname !== expectedPath) return { kind: "invalid" };
+  if (!sameRuntimePath(url.pathname, expectedPath)) return { kind: "invalid" };
   const keys = [...url.searchParams.keys()];
   if (keys.length === 0) return { kind: "none" };
   if (

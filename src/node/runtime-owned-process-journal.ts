@@ -724,6 +724,15 @@ export class RuntimeOwnedProcessJournal {
     );
   }
 
+  claimPresent(ownershipId: string): boolean | null {
+    if (!UUID_PATTERN.test(ownershipId)) return null;
+    return readDirectRuntimeJournalLeaf(
+      this.root,
+      claimName(ownershipId),
+      MAX_RECORD_BYTES,
+    ) !== null;
+  }
+
   releaseExact(expected: RuntimeOwnedProcessRecord): boolean {
     if (!UUID_PATTERN.test(expected.ownershipId)) return false;
     const canonical = claimName(expected.ownershipId);

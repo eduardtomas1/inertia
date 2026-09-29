@@ -762,11 +762,13 @@ export function useDraftConversation({
       : null,
     [draftConversation, materializedConversationId],
   );
+  const materialized = draft?.materialized;
   const conversation = useMemo(
-    () => draftConversation && !materializedConversationId
-      ? { ...draftConversation, hasHistory: false }
+    () => draftConversation && materialized
+      && (materialized.acceptedTurnId !== null || materialized.awaitingReconciliation)
+      ? { ...draftConversation, hasHistory: true }
       : draftConversation ?? null,
-    [draftConversation, materializedConversationId],
+    [draftConversation, materialized],
   );
 
   return {

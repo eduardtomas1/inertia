@@ -3,6 +3,23 @@ import { createHash } from "node:crypto";
 import { dirname, relative, resolve } from "node:path";
 
 const MAX_REPORTS_PER_PHASE = 16;
+const GPU_HELPER_RECOVERIES = Object.freeze({
+  "electron-gpu-helper-stall-recovered": "beforeAction",
+  "electron-gpu-helper-terminated": "atClose",
+});
+
+function countGpuHelperRecoveries(tests) {
+  const counts = { beforeAction: 0, atClose: 0 };
+  for (const { test } of tests) {
+    for (const result of test.results) {
+      for (const { type } of result.annotations ?? []) {
+        const kind = GPU_HELPER_RECOVERIES[type];
+        if (kind) counts[kind] += 1;
+      }
+    }
+  }
+  return counts;
+}
 
 // Reporting only: no retries, outcome rewriting, trace changes or selection.
 // Avoid serializing Playwright's config/environment, titles, errors, stdio and
@@ -25,6 +42,9 @@ export default class PlaywrightTimings {
     if (!/^[a-z0-9+-]{1,150}$/u.test(phase) || this.tests.length > 20_000) {
       throw new Error("Unexpected timing report scope.");
     }
+    const gpuHelperRecoveries = countGpuHelperRecoveries(this.tests);
+    process.stdout.write(`[Inertia E2E] GPU helper recoveries in ${phase}: `
+      + `${gpuHelperRecoveries.beforeAction} before actions, ${gpuHelperRecoveries.atClose} at close.\n`);
     const report = {
       schemaVersion: 1,
       candidate: process.env.GITHUB_SHA ?? null,
@@ -38,6 +58,7 @@ export default class PlaywrightTimings {
       projects, shard, status: result.status, elapsedMs: result.duration,
       discovered: this.tests.length,
       files: new Set(this.tests.map(({ project, file }) => `${project}:${file}`)).size,
+      gpuHelperRecoveries,
       tests: this.tests.map(({ test, ...identity }) => ({
         ...identity, expectedStatus: test.expectedStatus, outcome: test.outcome(),
         attempts: test.results.map(({ retry, status, duration }) => ({ retry, status, durationMs: duration })),

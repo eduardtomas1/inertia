@@ -23,6 +23,8 @@ Choose **Add your first project** on the home screen, or the add-project button 
 
 Open **Settings → Providers** and connect a provider. Inertia uses the accounts you already have: each provider keeps its own authentication, and custom backend credentials are stored in your operating system's credential vault. If a provider stops responding, refresh it in the same place.
 
+For Codex, update the installed CLI from **Settings → Providers** when an update is available, then refresh the provider. Inertia reads models and their reasoning and speed options from that installation. GPT-6.1 Sol (`gpt-6.1-sol`) appears when Codex advertises it for your account; available options depend on your plan and workspace settings. See [OpenAI's model guide](https://learn.chatgpt.com/docs/models) for rollout details.
+
 ## Start a chat
 
 Use **New chat** in the sidebar, or press ⌘N on macOS (Ctrl+N elsewhere). In the composer, choose the model, reasoning level and access mode, then describe the task.

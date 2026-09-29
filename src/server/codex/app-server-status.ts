@@ -1,4 +1,5 @@
-import type { ProviderActivityPhase } from "../provider/contracts";
+import type { ProviderActivityPhase, ProviderRunFailure } from "../provider/contracts";
+import { boundedText, type JsonObject } from "./protocol";
 
 export type CodexCommandOrPatchStatus =
   | "inProgress"
@@ -55,6 +56,27 @@ export function codexHookActivityPhase(
   return status === undefined || status === null
     ? method === "hook/started" ? "started" : "completed"
     : "failed";
+}
+
+export function codexTurnInterruptionFailure(
+  status: string | undefined,
+  turnError: JsonObject | undefined,
+  cancelRequested: boolean,
+): Pick<ProviderRunFailure, "message" | "technicalDetail"> | undefined {
+  // Guardian's strict circuit breaker carries its error on the interrupted
+  // turn without a separate error notification. Earlier retry errors alone
+  // do not turn a plain interruption into a provider failure.
+  if (status !== "interrupted" || !turnError || cancelRequested) return undefined;
+  const technicalDetail = [
+    turnError.codexErrorInfo === "tooManyDenials"
+      ? "Codex error: tooManyDenials"
+      : undefined,
+    boundedText(turnError.message, 4_000),
+  ].filter(Boolean).join("\n");
+  return {
+    message: "Codex interrupted the turn before completion.",
+    ...(technicalDetail ? { technicalDetail } : {}),
+  };
 }
 
 function isRecordKey<T extends object>(

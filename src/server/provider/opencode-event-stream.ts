@@ -6,10 +6,12 @@ export const OPENCODE_OVERSIZED_EVENT_MESSAGE = "OpenCode sent an oversized even
 export function boundedOpenCodeEventFetch(
   maxFrameBytes: number,
   onOverflow: () => void,
+  onConnected: () => void = () => {},
 ): typeof fetch {
   return async (input, init) => {
     const response = await fetch(input, init);
     if (!response.body) return response;
+    if (response.ok) onConnected();
     let frameBytes = 0;
     let lineBreaks = 0;
     let afterCarriageReturn = false;

@@ -19,6 +19,7 @@ function descendantInteractionServer(
   root: string,
   capturePath: string,
   emitRootActivity = true,
+  eventSubscriptionDelayMs = 0,
 ): string {
   return `
 const http = require("node:http");
@@ -49,9 +50,13 @@ const server = http.createServer((req, res) => {
     if (req.method === "POST" && url.pathname === "/session") return json(res, session);
     if (req.method === "GET" && url.pathname === "/session/" + sessionID) return json(res, session);
     if (req.method === "GET" && url.pathname === "/event") {
-      events = res;
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-      return res.flushHeaders();
+      const openEvents = () => {
+        events = res;
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+        res.flushHeaders();
+      };
+      if (${eventSubscriptionDelayMs} > 0) return setTimeout(openEvents, ${eventSubscriptionDelayMs});
+      return openEvents();
     }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
       json(res, undefined, 204);
@@ -115,14 +120,18 @@ describe("OpenCode descendant interactions", () => {
       providerId: "opencode", conversationId: "human-wait", cwd: root,
       prompt: "Delegate with supervised interactions", access: "supervised", interactionMode: "build",
     }), { onApproval, onInput });
+    const settledFirst = result.then((value) => {
+      throw new Error(`The run settled before its interaction: ${JSON.stringify(value.failure ?? value.status)}`);
+    });
+    void settledFirst.catch(() => undefined);
     try {
-      const pendingApproval = await approval;
+      const pendingApproval = await Promise.race([approval, settledFirst]);
       await new Promise((resolve) => setTimeout(resolve, 700));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToApproval("human-wait", pendingApproval.request.requestId, "approve", {
         runId: pendingApproval.runId, turnId: pendingApproval.turnId,
       })).toBe(true);
-      const pendingInput = await input;
+      const pendingInput = await Promise.race([input, settledFirst]);
       await new Promise((resolve) => setTimeout(resolve, 700));
       expect(manager.activeConversationIds()).toContain("human-wait");
       expect(manager.respondToInput("human-wait", pendingInput.request.requestId, {
@@ -209,6 +218,62 @@ describe("OpenCode descendant interactions", () => {
     expect(capture.captured.some(({ path }) =>
       path.includes("/api/session/unrelated-session/"))).toBe(false);
     expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("sends the prompt only after OpenCode accepts the event subscription", async () => {
+    const root = portableFixtureRoot("OpenCode late event subscription");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(
+      root,
+      "serve",
+      descendantInteractionServer(root, join(root, "capture.json"), true, 250),
+    );
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness({
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 2_000,
+      })]),
+    );
+    let approvals = 0;
+    let questions = 0;
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-late-event-subscription",
+      cwd: root,
+      prompt: "Delegate after a slow event subscription",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onApproval: (approval) => {
+        approvals += 1;
+        expect(manager.respondToApproval(
+          approval.conversationId,
+          approval.request.requestId,
+          "approve",
+          { runId: approval.runId, turnId: approval.turnId },
+        )).toBe(true);
+      },
+      onInput: (input) => {
+        questions += 1;
+        expect(manager.respondToInput(
+          input.conversationId,
+          input.request.requestId,
+          { [input.request.questions[0]!.id]: ["Yes"] },
+          { runId: input.runId, turnId: input.turnId },
+        )).toBe(true);
+      },
+    });
+
+    expect(result.failure).toBeUndefined();
+    expect(result).toMatchObject({
+      status: "completed",
+      text: "Parent resumed after child interaction",
+    });
+    expect(approvals).toBe(1);
+    expect(questions).toBe(1);
   });
 
   it("does not let child interactions satisfy root completion activity", async () => {

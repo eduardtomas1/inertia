@@ -53,7 +53,6 @@ export function useComposerRouteConversation(): (
     }).then(
       () => {
         setPendingRoute(null);
-        if (!prefillText) return;
         if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
         focusFrameRef.current = window.requestAnimationFrame(() => {
           focusFrameRef.current = null;
@@ -61,6 +60,7 @@ export function useComposerRouteConversation(): (
             textareaRef.current?.focus();
           }
         });
+        if (!prefillText) return;
         if ((editorRevisionsRef.current.get(conversationId) ?? 0) !== sourceEditorRevision) return;
         if (mountedRef.current && conversationIdRef.current === conversationId) clearMessage();
         else clearPersistedComposerDraft(conversationId, prefillText);

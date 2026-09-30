@@ -63,8 +63,9 @@ export function RouteChangeConfirmation({
       <button
         type="button"
         className="primary-button"
-        disabled={!canCreate || creating}
-        onClick={onCreate}
+        disabled={!canCreate}
+        aria-disabled={creating || undefined}
+        onClick={() => { if (!creating) onCreate(); }}
       >
         {creating ? "Creating…" : "New chat"}
       </button>

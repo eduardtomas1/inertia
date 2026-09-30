@@ -10200,6 +10200,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .composer-route-confirmation small { color: var(--text-muted); font-size: max(calc(var(--ui-font-micro) - 1px), 8px); line-height: 1.4; }
 .composer-route-confirmation .secondary-button,
 .composer-route-confirmation .primary-button { min-height: var(--control-height-small); flex: 0 0 auto; padding: 0 9px; font-size: var(--ui-font-micro); }
+.composer-route-confirmation .primary-button[aria-disabled="true"] { cursor: not-allowed; opacity: var(--disabled-opacity); }
 
 .provider-popover {
   width: min(390px, calc(100vw - 28px));

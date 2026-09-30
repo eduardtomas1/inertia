@@ -219,4 +219,19 @@ describe("main window route transfer", () => {
     act(() => publish({ ...snapshot, activeConversationId: targetId }));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(text));
   });
+
+  it("moves keyboard focus into the new chat's composer after creating it with an empty draft", async () => {
+    const { default: App } = await import("../../src/renderer/src/App");
+    render(<App />);
+    await screen.findByRole("textbox", { name: "Message" }, { timeout: 5_000 });
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click((await screen.findByTitle("Routed Agent")).closest("button")!);
+    const create = await screen.findByRole("button", { name: "New chat" });
+    create.focus();
+    fireEvent.click(create);
+
+    await waitFor(() => expect(snapshot.activeConversationId).toBe(targetId));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+  });
 });

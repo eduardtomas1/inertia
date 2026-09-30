@@ -25,7 +25,6 @@ export interface ProviderMcpProtocolResult {
   body?: JsonRpcResponse | JsonRpcResponse[];
 }
 
-/** The same advertised contract for HTTP and in-process MCP transports. */
 export function providerMcpTools(definitions: readonly ProviderHostToolDefinition[]): Tool[] {
   return definitions.map(({ name, description, inputSchema, readOnly }) => {
     if (inputSchema.type !== "object") {

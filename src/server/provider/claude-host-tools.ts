@@ -87,9 +87,6 @@ export function createClaudeHostTools(
       },
     );
   }
-  // The SDK's high-level tools/list normalizes only Zod objects and advertises
-  // discriminated unions as empty objects. Publish our canonical JSON schemas
-  // through the public protocol handler; SDK call validation stays in place.
   config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: providerMcpTools(runtime.definitions()),
   }));

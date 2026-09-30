@@ -8,7 +8,7 @@ import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { createAppFixture } from "./support/app-fixture";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
-import { startPrivateXvfb } from "./support/private-xvfb";
+import { startPrivateX11Desktop } from "./support/private-x11-desktop";
 
 function fixturePixels(): number[] {
   const canvas = createCanvas(800, 500); const ctx = canvas.getContext("2d");
@@ -144,25 +144,33 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
   test.skip(Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === "wayland"
     || (runtimeDirectory !== undefined && existsSync(join(runtimeDirectory, "wayland-0"))), "A Wayland session would capture the real desktop");
-  const xvfb = await startPrivateXvfb();
+  const desktop = await startPrivateX11Desktop();
   let app: Awaited<ReturnType<typeof createAppFixture>>;
   try {
-    app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", additionalEnvironment: { DISPLAY: xvfb.display, XDG_SESSION_TYPE: "x11" }, beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+    app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", additionalEnvironment: { DISPLAY: desktop.display, XDG_SESSION_TYPE: "x11" }, beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
       try { store.updateSettings({ theme }); } finally { store.close(); }
     } });
-  } catch (error) { await xvfb.stop(); throw error; }
+  } catch (error) { await desktop.stop(); throw error; }
   let bodyFailure: { error: unknown } | undefined;
   try {
     const page = app.page;
     await app.resizeWindow(1100, 850); await closeWorkspaceTools(page);
+    await app.electronApp.evaluate(async ({ BrowserWindow }) => {
+      const target = new BrowserWindow({ width: 640, height: 480, show: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      target.removeMenu();
+      await target.loadURL(`data:text/html,${encodeURIComponent('<title>Reviewed screenshot fixture</title><style>body{background:#f8f6f1;color:#242424;font:18px sans-serif;padding:24px}input{background:#ffcc00}</style><h1>Release checklist</h1><p>This is synthetic local test content.</p><label>Private note <input value="review-only-sentinel"></label>')}`);
+    });
     await page.bringToFront();
     await page.getByRole("textbox", { name: "Message" }).focus();
     expect((await page.evaluate(() => window.inertia.snapshot({ type: "state" }))).enabled).toBe(false);
     await page.getByRole("button", { name: "Take reviewed screenshot" }).click();
     const dialog = page.getByRole("dialog", { name: "Review screenshot" });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("group", { name: "Windows and screens" }).getByRole("button", { name: /^(entire screen|screen \d+)$/iu }).first().click();
+    const fixture = dialog.getByRole("group", { name: "Windows and screens" }).getByRole("button", { name: "Reviewed screenshot fixture", exact: true });
+    await expect(fixture.or(dialog.getByRole("alert"))).toBeVisible({ timeout: 20_000 });
+    expect(await dialog.getByRole("alert").allTextContents()).toEqual([]);
+    await fixture.click();
     const preview = dialog.getByRole("img", { name: "Screenshot to review before attaching" });
     await expect(preview).toBeVisible();
     await expect(page.locator(".composer-attachment")).toHaveCount(0);
@@ -210,6 +218,6 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     expect(app.rendererErrors).toEqual([]);
   } catch (error) { bodyFailure = { error }; throw error; }
   finally {
-    try { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); } finally { await xvfb.stop(); }
+    try { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); } finally { await desktop.stop(); }
   }
 });

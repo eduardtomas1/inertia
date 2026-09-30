@@ -1610,8 +1610,6 @@ describe("TurnController authoritative lifecycle", () => {
     expect(queued.turn).toMatchObject({
       status: "queued",
       userMessageId: queued.message.id,
-      // A native session saved before installation identities existed is
-      // still resumed; only the provider itself can reject it.
       providerSessionBefore: "session-before",
       continuationReasonCode: "same-continuation",
       harnessId: "codex-app-server",

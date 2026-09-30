@@ -7,7 +7,6 @@ import { SnapshotReviewService } from "../../../src/main/snapshot-review";
 import type { AttachmentRegistry } from "../../../src/main/attachment-registry";
 import type { RendererAttachmentImportCoordinator } from "../../../src/main/attachment-import-ipc";
 
-/** Real desktop pixels with accessibility disabled; only the final import is a receipt fixture. */
 export async function verifyReviewedNativeScreenshot(window: BrowserWindow): Promise<void> {
   const frame = window.webContents.mainFrame;
   const owner = { window, conversationId: randomUUID(), document: { owner: window.webContents,

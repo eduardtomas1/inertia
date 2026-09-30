@@ -43,7 +43,6 @@ interface PendingReview extends ReviewOwner {
   detach(): void;
 }
 
-/** Unapproved pixels stay in memory, scoped to the exact initiating document and chat. */
 export class SnapshotReviewService {
   private pending: PendingReview | null = null;
   private acquisition: Promise<DesktopCapturerSource[]> | null = null;
@@ -68,8 +67,7 @@ export class SnapshotReviewService {
         conversationId: review.conversationId, review: state,
       } satisfies SnapshotDelivery);
     } catch {
-      // A renderer can disappear during delivery. Its transport must never
-      // prevent the cancellation/expiry path from releasing pixels and leases.
+      return;
     }
   }
 
@@ -93,7 +91,6 @@ export class SnapshotReviewService {
       if (request.type === "review-select") {
         const sourceId = review.sources.get(request.sourceId);
         if (!sourceId) throw new Error("Choose a window from this screenshot review.");
-        // On X11 the user chooses a source before requesting its full-size image.
         const sources = await this.capture(review, 2048, false, sourceId.startsWith("screen:"));
         if (!this.live(review)) return;
         const source = sources.find((candidate) => candidate.id === sourceId);
@@ -106,7 +103,6 @@ export class SnapshotReviewService {
           this.setImage(review, editReviewedImage(review.image, request.operation, request.area));
         } else {
           const png = review.image.toPNG();
-          // Nothing is registered as an attachment until this explicit approval.
           review.batchId = this.options.imports.begin(review.document);
           const attachments = await this.options.imports.importSelection(review.document, review.batchId,
             async (signal) => await this.options.registry().import([{
@@ -116,7 +112,7 @@ export class SnapshotReviewService {
           review.window.webContents.send(DESKTOP_IPC.snapshotReady, {
             conversationId: review.conversationId, selection: { batchId: review.batchId, attachments },
           } satisfies SnapshotDelivery);
-          review.batchId = null; // The existing renderer adoption lease now owns cleanup.
+          review.batchId = null;
           this.release(review);
         }
       }
@@ -152,8 +148,6 @@ export class SnapshotReviewService {
     };
     this.pending = review;
     try {
-      // PipeWire already presents the system picker and returns its selected source.
-      // Never enumerate again, choose an arbitrary source, or fall back after denial.
       const sources = await this.capture(review, backend === "system-picker" ? 2048 : 320, backend === "system-picker", backend === "system-picker");
       if (!this.live(review)) return;
       if (backend === "system-picker") {
@@ -188,7 +182,6 @@ export class SnapshotReviewService {
     const hidden = hidePicker && review.window.isVisible();
     if (hidden) review.window.hide();
     try {
-      // Let the compositor remove Inertia's picker before capturing a screen.
       if (hidden) await new Promise((resolve) => setTimeout(resolve, 150));
       return await this.acquire(size, interactive, review.controller.signal);
     } finally {
@@ -206,8 +199,6 @@ export class SnapshotReviewService {
     this.acquisition = acquisition;
     let timer: NodeJS.Timeout | undefined;
     let abort: (() => void) | undefined;
-    // Electron has no cancellation API for getSources. Retain the in-flight lock
-    // until it really settles; late pixels are discarded by the review identity.
     void acquisition.finally(() => { if (this.acquisition === acquisition) this.acquisition = null; }).catch(() => undefined);
     try {
       return await Promise.race([acquisition, new Promise<never>((_resolve, reject) => {

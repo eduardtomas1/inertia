@@ -27,7 +27,6 @@ export type SnapshotNode = SnapshotSource["accessibility"]["nodes"][number];
 export type SnapshotRect = z.infer<typeof rect>;
 
 export interface SnapshotState {
-  /** Protected shortcut capture; reviewed screenshots are explicitly requested separately. */
   enabled: boolean;
   reviewedBackend?: "system-picker" | "window-picker" | null;
   shortcut: "both-shift" | "accelerator";

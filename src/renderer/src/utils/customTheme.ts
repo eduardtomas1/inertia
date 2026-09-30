@@ -36,7 +36,7 @@ export function cacheCustomColor(storage: Pick<Storage, "setItem">, color: strin
     storage.setItem(`${CUSTOM_COLOR_CACHE_KEY}:${mode}`, JSON.stringify(isCustomColor(color)
       ? { color, tokens: Object.fromEntries(tokens) } : null));
   } catch {
-    // Runtime settings remain authoritative when renderer storage is unavailable.
+    return;
   }
 }
 

@@ -102,6 +102,28 @@ describe("General settings controls", () => {
     expect(onUpdate).toHaveBeenCalledWith(defaultSettings);
   });
 
+  it("resets the completion sound choice but keeps imported sounds when restoring defaults", () => {
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    const onUpdate = vi.fn(async () => undefined);
+    const library = [
+      { file: "0123456789abcdef.wav", name: "Ding" },
+      { file: "fedcba9876543210.mp3", name: "Rain" },
+    ] as AppSettings["completionSound"]["library"];
+    render(<SettingsView {...settingsProps({
+      ...defaultSettings,
+      completionSound: { enabled: true, sound: library[0]!.file, library, longRunsOnly: true, longRunSeconds: 300 },
+    }, onUpdate)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Imported completion sounds are kept."));
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({
+      ...defaultSettings,
+      completionSound: { ...defaultSettings.completionSound, library },
+    });
+  });
+
   it("restores defaults without asking when destructive confirmations are off", () => {
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);

@@ -39,6 +39,7 @@ import {
   type RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
+import { parseCompletionSoundSettings } from "@shared/completion-sound";
 import type {
   AppHealthSnapshot,
   AppUpdateStatus,
@@ -238,8 +239,16 @@ export function SettingsView({
   const restoreDefaults = (): void => {
     if (
       !settings.confirmDestructiveActions
-      || window.confirm("Restore every setting to its default? Keybindings, provider labels, the Codex binary path, and the default provider and model are reset too.")
-    ) onUpdate(defaultSettings);
+      || window.confirm("Restore every setting to its default? Keybindings, provider labels, the Codex binary path, and the default provider and model are reset too. Imported completion sounds are kept.")
+    ) {
+      onUpdate({
+        ...defaultSettings,
+        completionSound: {
+          ...defaultSettings.completionSound,
+          library: parseCompletionSoundSettings(settings.completionSound).library,
+        },
+      });
+    }
   };
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",

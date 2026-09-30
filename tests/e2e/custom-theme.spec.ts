@@ -22,11 +22,11 @@ test("selects custom colors per appearance, follows System, and restores them af
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "General", exact: true }).click();
     await page.getByRole("radio", { name: "Light", exact: true }).click();
-    const light = page.getByRole("textbox", { name: "Light hex color" });
+    const light = page.getByRole("textbox", { name: "Light color", exact: true });
     await light.fill("#0d9488");
     await light.press("Enter");
     await expectPalette(page, "#0d9488", "light");
-    const dark = page.getByRole("textbox", { name: "Dark hex color" });
+    const dark = page.getByRole("textbox", { name: "Dark color", exact: true });
     await dark.fill("#f97316");
     await dark.press("Enter");
     await expectPalette(page, "#0d9488", "light");
@@ -61,8 +61,8 @@ test("selects custom colors per appearance, follows System, and restores them af
     await popup.locator(".detached-chat-shell").waitFor();
     await expectPalette(popup, "#f97316", "dark");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Light hex color" })).toHaveValue("#0d9488");
-    await expect(page.getByRole("textbox", { name: "Dark hex color" })).toHaveValue("#f97316");
+    await expect(page.getByRole("textbox", { name: "Light color", exact: true })).toHaveValue("#0d9488");
+    await expect(page.getByRole("textbox", { name: "Dark color", exact: true })).toHaveValue("#f97316");
     await page.getByRole("button", { name: "Use Ocean for dark", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
     await expect.poll(() => page.locator("html").evaluate((root) => getComputedStyle(root).getPropertyValue("--accent").trim()))
@@ -81,8 +81,11 @@ test("selects custom colors per appearance, follows System, and restores them af
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     const path = info.outputPath("custom-theme-failure.png");
-    await page.screenshot({ path, animations: "disabled" });
-    await info.attach("Custom theme failure", { path, contentType: "image/png" });
+    if (!page.isClosed()) {
+      await page.screenshot({ path, animations: "disabled" })
+        .then(() => info.attach("Custom theme failure", { path, contentType: "image/png" }))
+        .catch(() => undefined);
+    }
     throw error;
   } finally {
     await app.close();

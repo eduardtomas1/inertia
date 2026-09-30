@@ -1,12 +1,14 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
 import { createCanvas } from "@napi-rs/canvas";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { createAppFixture } from "./support/app-fixture";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
+import { startPrivateXvfb } from "./support/private-xvfb";
 
 function fixturePixels(): number[] {
   const canvas = createCanvas(800, 500); const ctx = canvas.getContext("2d");
@@ -139,19 +141,21 @@ test("loads snapshot native bindings in the Electron utility runtime without des
 
 for (const theme of ["dark", "light"] as const) test(`reviews a real Linux screenshot in ${theme} before importing it`, async ({ browserName: _browserName }, testInfo) => {
   test.skip(process.platform !== "linux", "Reviewed screenshots are currently Linux-only");
-  const app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-    const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
-    try { store.updateSettings({ theme }); } finally { store.close(); }
-  } });
+  const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
+  test.skip(Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === "wayland"
+    || (runtimeDirectory !== undefined && existsSync(join(runtimeDirectory, "wayland-0"))), "A Wayland session would capture the real desktop");
+  const xvfb = await startPrivateXvfb();
+  let app: Awaited<ReturnType<typeof createAppFixture>>;
+  try {
+    app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", additionalEnvironment: { DISPLAY: xvfb.display, XDG_SESSION_TYPE: "x11" }, beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+      try { store.updateSettings({ theme }); } finally { store.close(); }
+    } });
+  } catch (error) { await xvfb.stop(); throw error; }
   let bodyFailure: { error: unknown } | undefined;
   try {
     const page = app.page;
     await app.resizeWindow(1100, 850); await closeWorkspaceTools(page);
-    await app.electronApp.evaluate(async ({ BrowserWindow }) => {
-      const target = new BrowserWindow({ width: 640, height: 480, show: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
-      target.removeMenu();
-      await target.loadURL(`data:text/html,${encodeURIComponent('<title>Reviewed screenshot fixture</title><style>body{background:#f8f6f1;color:#242424;font:18px sans-serif;padding:24px}input{background:#ffcc00}</style><h1>Release checklist</h1><p>This is synthetic local test content.</p><label>Private note <input value="review-only-sentinel"></label>')}`);
-    });
     await page.bringToFront();
     await page.getByRole("textbox", { name: "Message" }).focus();
     expect((await page.evaluate(() => window.inertia.snapshot({ type: "state" }))).enabled).toBe(false);
@@ -168,7 +172,19 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await dialog.getByRole("spinbutton", { name: "Top", exact: true }).fill(String(Math.floor(captured.height / 4)));
     await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill(String(crop.width));
     await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill(String(Math.floor(captured.height / 10)));
+    const masked = { x: 0, y: Math.floor(captured.height / 4), width: crop.width, height: Math.floor(captured.height / 10) };
+    const maskedPixels = () => preview.evaluate((element, area) => {
+      const image = element as HTMLImageElement; const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d")!; context.drawImage(image, 0, 0);
+      const data = context.getImageData(area.x, area.y, area.width, area.height).data;
+      let count = 0;
+      for (let offset = 0; offset < data.length; offset += 4) if (data[offset] === 36 && data[offset + 1] === 36 && data[offset + 2] === 36 && data[offset + 3] === 255) count += 1;
+      return { masked: count, total: data.length / 4 };
+    }, masked);
+    expect((await maskedPixels()).masked).toBeLessThan(masked.width * masked.height);
     await dialog.getByRole("button", { name: "Mask area", exact: true }).click();
+    await expect.poll(maskedPixels).toEqual({ masked: masked.width * masked.height, total: masked.width * masked.height });
     await expect(dialog.getByRole("button", { name: "Attach reviewed image" })).toBeEnabled();
     await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill(String(crop.width));
     await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill(String(crop.height));
@@ -180,8 +196,8 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await page.mouse.down();
     await page.mouse.move(bounds!.x + bounds!.width * 0.75, bounds!.y + bounds!.height * 0.75);
     await page.mouse.up();
-    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Left", exact: true }).inputValue()) - crop.width / 4)).toBeLessThanOrEqual(3);
-    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Width", exact: true }).inputValue()) - crop.width / 2)).toBeLessThanOrEqual(3);
+    await expect.poll(async () => Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Left", exact: true }).inputValue()) - crop.width / 4)).toBeLessThanOrEqual(3);
+    await expect.poll(async () => Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Width", exact: true }).inputValue()) - crop.width / 2)).toBeLessThanOrEqual(3);
     const path = testInfo.outputPath(`reviewed-screenshot-${theme}.png`);
     await page.screenshot({ path, animations: "disabled" }); await testInfo.attach("reviewed-screenshot", { path, contentType: "image/png" });
     await app.resizeWindow(760, 600); await app.expectNoViewportOverflow();
@@ -193,5 +209,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await expect(page.getByRole("textbox", { name: "Message" })).toBeEmpty();
     expect(app.rendererErrors).toEqual([]);
   } catch (error) { bodyFailure = { error }; throw error; }
-  finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
+  finally {
+    try { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); } finally { await xvfb.stop(); }
+  }
 });

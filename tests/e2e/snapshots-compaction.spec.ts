@@ -1,12 +1,14 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
 import { createCanvas } from "@napi-rs/canvas";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import { createAppFixture } from "./support/app-fixture";
 import { closeWorkspaceTools } from "./support/workspace-tools";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
+import { startPrivateXvfb } from "./support/private-xvfb";
 
 function fixturePixels(): number[] {
   const canvas = createCanvas(800, 500); const ctx = canvas.getContext("2d");
@@ -139,10 +141,17 @@ test("loads snapshot native bindings in the Electron utility runtime without des
 
 for (const theme of ["dark", "light"] as const) test(`reviews a real Linux screenshot in ${theme} before importing it`, async ({ browserName: _browserName }, testInfo) => {
   test.skip(process.platform !== "linux", "Reviewed screenshots are currently Linux-only");
-  const app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-    const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
-    try { store.updateSettings({ theme }); } finally { store.close(); }
-  } });
+  const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
+  test.skip(Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === "wayland"
+    || (runtimeDirectory !== undefined && existsSync(join(runtimeDirectory, "wayland-0"))), "A Wayland session would capture the real desktop");
+  const xvfb = await startPrivateXvfb();
+  let app: Awaited<ReturnType<typeof createAppFixture>>;
+  try {
+    app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", additionalEnvironment: { DISPLAY: xvfb.display, XDG_SESSION_TYPE: "x11" }, beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+      try { store.updateSettings({ theme }); } finally { store.close(); }
+    } });
+  } catch (error) { await xvfb.stop(); throw error; }
   let bodyFailure: { error: unknown } | undefined;
   try {
     const page = app.page;
@@ -188,5 +197,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await expect(page.getByRole("textbox", { name: "Message" })).toBeEmpty();
     expect(app.rendererErrors).toEqual([]);
   } catch (error) { bodyFailure = { error }; throw error; }
-  finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
+  finally {
+    try { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); } finally { await xvfb.stop(); }
+  }
 });

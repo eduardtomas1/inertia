@@ -19,7 +19,8 @@ import {
   providerNativeHarnessId,
 } from "../../shared/model-routing";
 import { readCodexMetadata } from "../codex-metadata";
-import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
+import { isProcessTreeTerminationUnconfirmed, posixCleanupDiagnosticOf } from "../process-lifecycle";
+import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import { readClaudeAgentSdkMetadata } from "./claude-agent-sdk-harness";
 import type { ProviderAuthState, ProviderId } from "./contracts";
 import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
@@ -500,7 +501,7 @@ export class ProviderMetadataCache {
   private readonly modelTtlMs: number;
   private readonly rateLimitTtlMs: number;
   /** Scoped per provider and cleared by its next successful read (#336). */
-  private readonly cleanupUnconfirmedProviders = new Set<ProviderId>();
+  private readonly cleanupUnconfirmedProviders = new Map<ProviderId, PosixCleanupDiagnostic | null>();
 
   constructor(options: ProviderMetadataCacheOptions = {}) {
     this.persistence = options.persistence;
@@ -524,6 +525,10 @@ export class ProviderMetadataCache {
     return providerId === undefined
       ? this.cleanupUnconfirmedProviders.size === 0
       : !this.cleanupUnconfirmedProviders.has(providerId);
+  }
+
+  processCleanupDiagnostics(): ReadonlyMap<ProviderId, PosixCleanupDiagnostic | null> {
+    return new Map(this.cleanupUnconfirmedProviders);
   }
 
   currentScoped(scopeInput: ProviderMetadataScope): ProviderMetadata {
@@ -779,7 +784,7 @@ export class ProviderMetadataCache {
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {
-        this.cleanupUnconfirmedProviders.add(scope.providerId);
+        this.cleanupUnconfirmedProviders.set(scope.providerId, posixCleanupDiagnosticOf(error));
       }
       if (signal?.aborted) return;
       if (entry.revision !== revision) return;

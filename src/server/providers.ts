@@ -86,6 +86,7 @@ import {
 } from
   "./provider/custom-backend-probe-admission";
 import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
+import { ProviderCleanupLedger, providerCleanupUnconfirmedError } from "./provider/provider-cleanup-ledger";
 import {
   ProviderRunCoordinator,
   type OwnedProviderStopResult,
@@ -163,7 +164,7 @@ export class ProviderManager {
   private readonly capabilityAuthority: ProviderCapabilityAuthority;
   private readonly runCoordinator: ProviderRunCoordinator;
   private processEnvironment: NodeJS.ProcessEnv | undefined;
-  private readonly auxiliaryCleanupUnconfirmed = new Set<ProviderId>();
+  private readonly auxiliaryCleanupUnconfirmed = new ProviderCleanupLedger();
 
   static createProduction(
     options: ProductionProviderManagerOptions,
@@ -673,7 +674,7 @@ export class ProviderManager {
         signal: this.lifetimeSignal,
       });
     } catch (error) {
-      const cleanupUnconfirmed = isProcessTreeTerminationUnconfirmed(error);
+      const cleanupUnconfirmed = this.auxiliaryCleanupUnconfirmed.recordFailure(providerId, error);
       if (cleanupUnconfirmed) {
         this.installationAuthority.quarantine(
           admission,
@@ -682,7 +683,6 @@ export class ProviderManager {
       } else {
         this.installationAuthority.release(admission);
       }
-      if (cleanupUnconfirmed) this.auxiliaryCleanupUnconfirmed.add(providerId);
       this.invalidateInstallationEvidence(providerId);
       throw error;
     }
@@ -701,7 +701,11 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    this.observeAuxiliaryCleanup(providerId, detection.cleanupConfirmed);
+    this.auxiliaryCleanupUnconfirmed.observe(
+      providerId,
+      detection.cleanupConfirmed,
+      detection.cleanupDiagnostic ?? null,
+    );
     if (detection.executable && detection.cleanupConfirmed) {
       this.resolvedCommands.set(providerId, detection.executable);
     } else {
@@ -759,7 +763,7 @@ export class ProviderManager {
         signal: this.lifetimeSignal,
       });
     } catch (error) {
-      const cleanupUnconfirmed = isProcessTreeTerminationUnconfirmed(error);
+      const cleanupUnconfirmed = this.auxiliaryCleanupUnconfirmed.recordFailure(providerId, error);
       if (cleanupUnconfirmed) {
         this.installationAuthority.quarantine(
           admission,
@@ -768,7 +772,6 @@ export class ProviderManager {
       } else {
         this.installationAuthority.release(admission);
       }
-      if (cleanupUnconfirmed) this.auxiliaryCleanupUnconfirmed.add(providerId);
       throw error;
     }
     this.installationAuthority.settleDetection(
@@ -780,7 +783,11 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    this.observeAuxiliaryCleanup(providerId, detection.cleanupConfirmed);
+    this.auxiliaryCleanupUnconfirmed.observe(
+      providerId,
+      detection.cleanupConfirmed,
+      detection.cleanupDiagnostic ?? null,
+    );
     return detection;
   }
 
@@ -793,14 +800,6 @@ export class ProviderManager {
     return !this.installationAuthority.uncertainFor(providerId)
       && !this.auxiliaryCleanupUnconfirmed.has(providerId)
       && this.metadataCache.processCleanupConfirmed(providerId);
-  }
-
-  private observeAuxiliaryCleanup(
-    providerId: ProviderId,
-    cleanupConfirmed: boolean,
-  ): void {
-    if (cleanupConfirmed) this.auxiliaryCleanupUnconfirmed.delete(providerId);
-    else this.auxiliaryCleanupUnconfirmed.add(providerId);
   }
 
   setCommand(providerId: ProviderId, command?: string): void {
@@ -1191,15 +1190,13 @@ export class ProviderManager {
     while (this.auxiliaryOperations.size > 0) {
       await Promise.allSettled(this.auxiliaryOperations);
     }
-    const runCleanupConfirmed = await this.runCoordinator.disposeAll();
-    if (
-      !runCleanupConfirmed
-      || this.auxiliaryCleanupUnconfirmed.size > 0
-      || this.installationAuthority.uncertain
-      || !this.metadataCache.processCleanupConfirmed()
-    ) {
-      throw new Error("Provider process cleanup could not be confirmed.");
-    }
+    const cleanupFailure = providerCleanupUnconfirmedError({
+      runCleanupConfirmed: await this.runCoordinator.disposeAll(),
+      installationUncertain: this.installationAuthority.uncertain,
+      discovery: this.auxiliaryCleanupUnconfirmed.diagnostics(),
+      metadata: this.metadataCache.processCleanupDiagnostics(),
+    });
+    if (cleanupFailure) throw cleanupFailure;
   }
 
   respondToApproval(

@@ -8,6 +8,7 @@ import {
 } from "../../node/runtime-owned-processes";
 import {
   isProcessTreeTerminationUnconfirmed,
+  posixCleanupDiagnosticOf,
   ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
@@ -353,6 +354,7 @@ export async function withCodexControlClient<T>(
       options.processLabel ?? "Codex control process tree",
       {
         priorError: operationError,
+        posixCleanupDiagnostic: posixCleanupDiagnosticOf(cleanupError),
         cause: new AggregateError(
           [operationError, cleanupError],
           "Codex control operation and cleanup both failed.",

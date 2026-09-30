@@ -47,7 +47,8 @@ export async function checkNativeBrowserEvidence(): Promise<void> {
     const report = /NATIVE_BROWSER_EVIDENCE (.+)/u.exec(output)?.[1];
     expect(report, output).toBeDefined();
     expect(JSON.parse(report!)).toMatchObject({
-      platform: "linux", captures: 5, timeoutRecovered: true, privacyRefusals: 4,
+      platform: "linux", captures: 5, timeoutRecovered: true, privacyRefusals: 2,
+      framesNotInspected: true,
     });
   } finally {
     let stopped = !child;

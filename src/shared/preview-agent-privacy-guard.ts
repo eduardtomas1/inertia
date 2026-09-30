@@ -12,7 +12,10 @@ interface AgentBrowserPrivacyState {
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
-  nestedContentObserved?: boolean;
+  evidenceWithheld?: PreviewAgentWithheldReason;
+  framesObserved?: boolean;
+  shadowRootsObserved?: boolean;
+  scanLimitReached?: boolean;
 }
 
 type AgentBrowserPrivacyGlobal = typeof globalThis & {
@@ -20,15 +23,23 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 };
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
+export const PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT = "__inertia_agent_credential_signal__";
+export type PreviewAgentWithheldReason = "credential-signal" | "hidden-input";
 export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
 export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retargeted";
 
 /** Runs in the page's main world before author scripts. */
-export function installPreviewAgentShadowBoundarySignal(eventName: string): void {
+export function installPreviewAgentShadowBoundarySignal(
+  eventName: string,
+  credentialEventName: string,
+): void {
   const dispatch = EventTarget.prototype.dispatchEvent;
   const EventConstructor = Event;
-  const signal = (): void => {
+  const signalShadowBoundary = (): void => {
     dispatch.call(document, new EventConstructor(eventName));
+  };
+  const signal = (): void => {
+    dispatch.call(document, new EventConstructor(credentialEventName));
   };
   const shadowDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "attachShadow");
   const attachShadow = shadowDescriptor?.value as Element["attachShadow"] | undefined;
@@ -37,7 +48,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       ...shadowDescriptor,
       value(this: Element, init: ShadowRootInit): ShadowRoot {
         const root = Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
-        signal();
+        signalShadowBoundary();
         return root;
       },
     });
@@ -52,7 +63,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       ...internalsDescriptor,
       value(this: HTMLElement): ElementInternals {
         const internals = Reflect.apply(attachInternals, this, []) as ElementInternals;
-        if (internals.shadowRoot) signal();
+        if (internals.shadowRoot) signalShadowBoundary();
         return internals;
       },
     });
@@ -381,11 +392,11 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const querySelector = typeof DocumentFragment === "undefined"
     ? undefined
     : DocumentFragment.prototype.querySelector;
-  const mayCreatePrivateContent = (value: unknown): boolean => {
-    if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return true;
+  const signalPrivateContent = (value: unknown): void => {
+    if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return;
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
       || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
-      || typeof templateContent !== "function" || typeof querySelector !== "function") return true;
+      || typeof templateContent !== "function" || typeof querySelector !== "function") return;
     try {
       // Parse in a fresh in-memory document with no browsing context or page
       // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
@@ -406,11 +417,14 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
         },
       }]);
       const content = Reflect.apply(templateContent, template, []) as DocumentFragment;
-      return Reflect.apply(querySelector, content, [
-        "template[shadowrootmode],input[type='password' i][value]:not([value=''])",
-      ]) !== null;
+      if (Reflect.apply(querySelector, content, [
+        "input[type='password' i][value]:not([value=''])",
+      ]) !== null) signal();
+      else if (Reflect.apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
+        signalShadowBoundary();
+      }
     } catch {
-      return true;
+      signal();
     }
   };
   const signalPrivateParser = (prototype: object, name: string): void => {
@@ -422,9 +436,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       value(this: unknown, ...args: unknown[]): unknown {
         // These APIs can create private content entirely outside the observed
         // document. Signal before author code can read, log, and remove it.
-        // Keep ordinary parser use available, but fail closed when bounded
-        // source inspection cannot prove that private syntax is absent.
-        if (mayCreatePrivateContent(args[0])) signal();
+        signalPrivateContent(args[0]);
         return Reflect.apply(parser, this, args);
       },
     });
@@ -446,7 +458,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     Object.defineProperty(prototype, name, {
       ...descriptor,
       set(this: unknown, value: unknown): void {
-        if (mayCreatePrivateContent(value)) signal();
+        signalPrivateContent(value);
         Reflect.apply(setter, this, [value]);
       },
     });
@@ -458,7 +470,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     Object.defineProperty(prototype, name, {
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
-        if (mayCreatePrivateContent(args[sourceIndex])) signal();
+        signalPrivateContent(args[sourceIndex]);
         return Reflect.apply(parser, this, args);
       },
     });
@@ -480,16 +492,16 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
         let source = "";
-        let unsafe = false;
+        let inspectable = true;
         for (const argument of args) {
           if (typeof argument !== "string"
             || source.length + argument.length > maximumParserSourceCharacters) {
-            unsafe = true;
+            inspectable = false;
             break;
           }
           source += argument;
         }
-        if (unsafe || mayCreatePrivateContent(source)) signal();
+        if (inspectable) signalPrivateContent(source);
         return Reflect.apply(parser, this, args);
       },
     });
@@ -600,6 +612,7 @@ export function installPreviewAgentPrivacyGuard(
 ): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
   const nestedBoundaryEvent = "__inertia_agent_nested_boundary__";
+  const credentialSignalEvent = "__inertia_agent_credential_signal__";
   let state = owner.__inertiaAgentBrowser;
   if (!state) {
     state = {
@@ -650,10 +663,13 @@ export function installPreviewAgentPrivacyGuard(
   };
   interface ScanBudget { exhausted: boolean; remaining: number }
   const scanBudget = (): ScanBudget => ({ exhausted: false, remaining: maximumScanNodes });
+  const withhold = (reason: PreviewAgentWithheldReason): void => {
+    state.evidenceWithheld ??= reason;
+  };
   const consume = (budget: ScanBudget): boolean => {
     if (budget.remaining <= 0) {
       budget.exhausted = true;
-      state.nestedContentObserved = true;
+      state.scanLimitReached = true;
       return false;
     }
     budget.remaining -= 1;
@@ -667,7 +683,7 @@ export function installPreviewAgentPrivacyGuard(
       : null;
     if (!iterator) {
       budget.exhausted = true;
-      state.nestedContentObserved = true;
+      withhold("credential-signal");
       return;
     }
     while (true) {
@@ -678,9 +694,9 @@ export function installPreviewAgentPrivacyGuard(
       // ordinary page code can query it. Mutation records retain the added
       // template node, so the document-start observer can taint the document
       // without enumerating or serializing the closed subtree.
-      if (descendant.matches?.("iframe,frame,template[shadowrootmode]")
-        || descendant.shadowRoot) {
-        state.nestedContentObserved = true;
+      if (descendant.matches?.("iframe,frame")) state.framesObserved = true;
+      if (descendant.matches?.("template[shadowrootmode]") || descendant.shadowRoot) {
+        state.shadowRootsObserved = true;
       }
       const input = inputElement(descendant);
       if (input) inspect(input);
@@ -692,14 +708,17 @@ export function installPreviewAgentPrivacyGuard(
     return path.length <= maximumScanNodes ? path : null;
   };
   activationTarget.addEventListener(nestedBoundaryEvent, () => {
-    state.nestedContentObserved = true;
+    state.shadowRootsObserved = true;
+  }, true);
+  activationTarget.addEventListener(credentialSignalEvent, () => {
+    withhold("credential-signal");
   }, true);
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
   const inspectInputEvent = (event: Event): void => {
     let exposedControl = false;
     const path = boundedEventPath(event);
     if (!path) {
-      if (event.isTrusted === true) state.nestedContentObserved = true;
+      if (event.isTrusted === true) withhold("hidden-input");
       return;
     }
     for (const node of path) {
@@ -717,7 +736,7 @@ export function installPreviewAgentPrivacyGuard(
     // path. Retain a lifetime taint for trusted native delivery before an
     // author handler can mirror the value and remove the host; synthetic page
     // events cannot permanently disable Browser evidence.
-    if (!exposedControl && event.isTrusted === true) state.nestedContentObserved = true;
+    if (!exposedControl && event.isTrusted === true) withhold("hidden-input");
   };
   // Preload installs this before author scripts. Observe from the earliest
   // capture boundary so a page-owned window handler cannot mirror and clear a
@@ -729,7 +748,6 @@ export function installPreviewAgentPrivacyGuard(
     const path = boundedEventPath(event);
     if (!path) {
       if (event.isTrusted === true) {
-        state.nestedContentObserved = true;
         recordRefusal("nested");
         stopActivationEvent(event);
       }
@@ -769,11 +787,7 @@ export function installPreviewAgentPrivacyGuard(
     event: Event,
     suppliedPath: EventTarget[] | null = boundedEventPath(event),
   ): "disabled" | "file" | "nested" | null => {
-    if (state.nestedContentObserved === true) return "nested";
-    if (!suppliedPath) {
-      state.nestedContentObserved = true;
-      return "nested";
-    }
+    if (!suppliedPath) return "nested";
     let disabled = false;
     for (const node of suppliedPath) {
       const candidate = node as Partial<HTMLInputElement> | null;

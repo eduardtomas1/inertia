@@ -1,301 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { PreviewAgentTarget } from "../../src/main/preview-agent-page";
-
-const electronState = vi.hoisted(() => ({
-  stalledCommands: [] as Array<(method: string, params?: Record<string, unknown>) => boolean>,
-  interactionTimeline: [] as string[],
-  viewOptions: [] as Array<Record<string, unknown>>,
-  contents: [] as Array<{
-    id: number;
-    capturePage: {
-      getMockImplementation(): (() => Promise<unknown>) | undefined;
-      mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
-    };
-    debugger: {
-      emitMessage(method: string, params: Record<string, unknown>): void;
-      isAttached: () => boolean;
-      sendCommand: ReturnType<typeof vi.fn<(
-        method: string,
-        params?: Record<string, unknown>,
-      ) => Promise<unknown>>>;
-    };
-    navigationHistory: {
-      canGoBack: ReturnType<typeof vi.fn>;
-      clear: ReturnType<typeof vi.fn>;
-      getActiveIndex: ReturnType<typeof vi.fn>;
-      getEntryAtIndex: ReturnType<typeof vi.fn>;
-      goBack: ReturnType<typeof vi.fn>;
-      removeEntryAtIndex: ReturnType<typeof vi.fn>;
-    };
-    emit(name: string, ...args: unknown[]): void;
-    on(name: string, handler: (...args: unknown[]) => void): void;
-    getURL(): string;
-    isDestroyed(): boolean;
-    close(): void;
-    insertedText: string[];
-    sentInputs: Array<Record<string, unknown>>;
-    setTitle(title: string): void;
-    setURL(url: string): void;
-  }>,
-  sessions: [] as Array<{
-    permissionChecks: number;
-    permissionRequests: number;
-    downloadHandlers: number;
-    clearStorageData: ReturnType<typeof vi.fn>;
-    emitBeforeRequest(details: Record<string, unknown>): void;
-    emitCompleted(details: Record<string, unknown>): void;
-    emitError(details: Record<string, unknown>): void;
-    hasEvidenceListeners(): boolean;
-  }>,
-}));
-
-vi.mock("electron", () => {
-  const sessionsByPartition = new Map<string, FakeSession>();
-  let nextWebContentsId = 1;
-
-  class FakeSession {
-    permissionChecks = 0;
-    permissionRequests = 0;
-    downloadHandlers = 0;
-    clearStorageData = vi.fn(async () => undefined);
-    private beforeRequest: ((details: Record<string, unknown>, callback: (response: object) => void) => void) | null = null;
-    private completed: ((details: Record<string, unknown>) => void) | null = null;
-    private error: ((details: Record<string, unknown>) => void) | null = null;
-    readonly webRequest = {
-      onBeforeRequest: (listener: typeof this.beforeRequest) => { this.beforeRequest = listener; },
-      onCompleted: (listener: typeof this.completed) => { this.completed = listener; },
-      onErrorOccurred: (listener: typeof this.error) => { this.error = listener; },
-    };
-
-    constructor() {
-      electronState.sessions.push(this);
-    }
-
-    setPermissionCheckHandler(): void { this.permissionChecks += 1; }
-    setPermissionRequestHandler(): void { this.permissionRequests += 1; }
-    on(name: string): void {
-      if (name === "will-download") this.downloadHandlers += 1;
-    }
-    emitBeforeRequest(details: Record<string, unknown>): void {
-      this.beforeRequest?.(details, () => undefined);
-    }
-    emitCompleted(details: Record<string, unknown>): void { this.completed?.(details); }
-    emitError(details: Record<string, unknown>): void { this.error?.(details); }
-    hasEvidenceListeners(): boolean {
-      return Boolean(this.beforeRequest || this.completed || this.error);
-    }
-  }
-
-  class FakeImage {
-    constructor(private readonly width = 1_920, private readonly height = 1_080) {}
-    getSize() { return { width: this.width, height: this.height }; }
-    resize(options: { width: number; height?: number }) {
-      const ratio = options.width / this.width;
-      return new FakeImage(options.width, options.height ?? Math.max(1, Math.floor(this.height * ratio)));
-    }
-    toPNG() { return Buffer.from("bounded-png"); }
-  }
-
-  class FakeWebContents {
-    readonly id = nextWebContentsId++;
-    readonly navigationHistory = {
-      canGoBack: vi.fn(() => false),
-      canGoForward: vi.fn(() => false),
-      clear: vi.fn(),
-      getActiveIndex: vi.fn(() => this.url === "about:blank" ? 0 : 2),
-      getEntryAtIndex: vi.fn((index: number) => ({
-        title: "",
-        url: index === 0 ? "about:blank" : this.url,
-      })),
-      goBack: vi.fn(),
-      goForward: vi.fn(),
-      removeEntryAtIndex: vi.fn(() => true),
-    };
-    readonly sentInputs: Array<Record<string, unknown>> = [];
-    readonly insertedText: string[] = [];
-    private readonly handlers = new Map<string, Array<(...args: unknown[]) => void>>();
-    private url = "";
-    private title = "";
-    private destroyed = false;
-    private mainFrameId = "main";
-    private readonly debuggerMessageHandlers: Array<(
-      event: unknown,
-      method: string,
-      params: Record<string, unknown>,
-    ) => void> = [];
-    readonly debugger = {
-      attached: false,
-      attach: vi.fn(() => { this.debugger.attached = true; }),
-      detach: vi.fn(() => { this.debugger.attached = false; }),
-      isAttached: vi.fn(() => this.debugger.attached),
-      on: vi.fn((name: string, handler: (
-        event: unknown,
-        method: string,
-        params: Record<string, unknown>,
-      ) => void) => {
-        if (name === "message") this.debuggerMessageHandlers.push(handler);
-      }),
-      removeListener: vi.fn((name: string, handler: (
-        event: unknown,
-        method: string,
-        params: Record<string, unknown>,
-      ) => void) => {
-        const index = name === "message" ? this.debuggerMessageHandlers.indexOf(handler) : -1;
-        if (index >= 0) this.debuggerMessageHandlers.splice(index, 1);
-      }),
-      emitMessage: (method: string, params: Record<string, unknown>): void => {
-        const frame = params.frame as { id?: unknown; parentId?: unknown } | undefined;
-        if (method === "Page.frameNavigated" && typeof frame?.id === "string" && frame.parentId === undefined) {
-          this.mainFrameId = frame.id;
-        }
-        for (const handler of this.debuggerMessageHandlers.slice()) handler({}, method, params);
-      },
-      sendCommand: vi.fn(async (method: string, params?: Record<string, unknown>) => {
-        const stalled = electronState.stalledCommands.findIndex((matches) => matches(method, params));
-        if (stalled >= 0) {
-          electronState.stalledCommands.splice(stalled, 1);
-          return await new Promise<never>(() => undefined);
-        }
-        if (method === "Runtime.enable") {
-          this.debugger.emitMessage("Runtime.executionContextCreated", {
-            context: {
-              id: 7,
-              name: "Electron Isolated Context",
-              auxData: { frameId: this.mainFrameId, isDefault: false, type: "isolated" },
-            },
-          });
-          return undefined;
-        }
-        if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
-        if (method === "Runtime.evaluate" && params?.contextId === 7) {
-          return { result: { type: "boolean", value: true } };
-        }
-        if (method === "Runtime.evaluate") {
-          return { result: { type: "object", subtype: "array", objectId: "boundary-hosts" } };
-        }
-        if (method === "Runtime.getProperties") {
-          return {
-            result: [{ name: "length", value: { type: "number", value: 0 } }],
-          };
-        }
-        return undefined;
-      }),
-    };
-
-    constructor(readonly session: FakeSession) {
-      electronState.contents.push(this);
-    }
-
-    setWindowOpenHandler(): void {}
-    on(name: string, handler: (...args: unknown[]) => void): void {
-      const handlers = this.handlers.get(name) ?? [];
-      handlers.push(handler);
-      this.handlers.set(name, handlers);
-    }
-    once(name: string, handler: (...args: unknown[]) => void): void {
-      const onceHandler = (...args: unknown[]): void => {
-        this.removeListener(name, onceHandler);
-        handler(...args);
-      };
-      this.on(name, onceHandler);
-    }
-    removeListener(name: string, handler: (...args: unknown[]) => void): void {
-      const handlers = this.handlers.get(name);
-      if (!handlers) return;
-      this.handlers.set(name, handlers.filter((candidate) => candidate !== handler));
-    }
-    emit(name: string, ...args: unknown[]): void {
-      const handlers = this.handlers.get(name)?.slice() ?? [];
-      for (const handler of handlers) handler(...args);
-    }
-    async loadURL(url: string): Promise<void> {
-      this.url = url;
-      this.title = new URL(url).pathname === "/" ? "Local app" : new URL(url).pathname.slice(1);
-      this.debugger.emitMessage("Page.frameNavigated", {
-        frame: { id: "main", url },
-      });
-      this.emit("dom-ready");
-      this.emit("did-navigate", {}, url);
-    }
-    getURL(): string { return this.url; }
-    setURL(url: string): void { this.url = url; }
-    getTitle(): string { return this.title; }
-    async executeJavaScriptInIsolatedWorld(
-      _worldId: number,
-      scripts: Array<{ code: string }>,
-    ): Promise<boolean | number> {
-      return scripts[0]?.code.includes("__inertia_boundary_count__") ? 3 : false;
-    }
-    setTitle(title: string): void { this.title = title; }
-    isLoading(): boolean { return false; }
-    isDestroyed(): boolean { return this.destroyed; }
-    reload(): void {}
-    stop(): void {}
-    close(): void { this.destroyed = true; }
-    sendInputEvent(input: Record<string, unknown>): void {
-      this.sentInputs.push(input);
-      electronState.interactionTimeline.push(String(input.type));
-      this.emit("input-event", {}, input);
-    }
-    async insertText(text: string): Promise<void> { this.insertedText.push(text); }
-    readonly capturePage = vi.fn(async (): Promise<FakeImage> => new FakeImage());
-  }
-
-  class FakeWebContentsView {
-    readonly webContents: FakeWebContents;
-    bounds = { x: 0, y: 0, width: 0, height: 0 };
-    visible = true;
-    readonly visibilityChanges: boolean[] = [];
-    constructor(options: Record<string, unknown>) {
-      electronState.viewOptions.push(options);
-      const preferences = options.webPreferences as { partition?: string } | undefined;
-      const partition = preferences?.partition ?? crypto.randomUUID();
-      const browserSession = sessionsByPartition.get(partition) ?? new FakeSession();
-      sessionsByPartition.set(partition, browserSession);
-      this.webContents = new FakeWebContents(browserSession);
-    }
-    setBounds(bounds: typeof this.bounds): void {
-      this.bounds = bounds;
-      electronState.interactionTimeline.push(
-        `bounds:${bounds.x},${bounds.y},${bounds.width},${bounds.height}`,
-      );
-    }
-    getBounds(): typeof this.bounds { return this.bounds; }
-    getVisible(): boolean { return this.visible; }
-    setVisible(visible: boolean): void {
-      this.visible = visible;
-      this.visibilityChanges.push(visible);
-    }
-    setBackgroundColor(): void {}
-  }
-
-  return { WebContentsView: FakeWebContentsView };
+const { electronState, pageTools } = await vi.hoisted(async () => {
+  const support = await import("./support/preview-broker-harness");
+  return {
+    electronState: support.createPreviewBrokerElectronState(),
+    pageTools: support.createPreviewBrokerPageTools(),
+  };
 });
 
-const pageTools = vi.hoisted(() => ({
-  AGENT_BROWSER_WORLD_ID: 999,
-  agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
-  agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
-  agentPageHasSensitiveEvidence: vi.fn(async () => false),
-  agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),
-  agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
-  agentPageRefHasFocus: vi.fn(async () => true),
-  installAgentPagePrivacyGuard: vi.fn(async () => undefined),
-  locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
-    found: true, blocked: false, disabled: false, editable: true,
-    label: "Run checks", x: 42, y: 28,
-  })),
-  semanticPageSnapshot: vi.fn(async () => JSON.stringify({ title: "Local app", elements: [] })),
-  setAgentPageInputGuard: vi.fn<(
-    contents: unknown,
-    active: boolean,
-    expectedClickRef?: string,
-  ) => Promise<void>>(async () => undefined),
-  showAgentPageCursor: vi.fn(async () => undefined),
-  waitForAgentPageHover: vi.fn(async () => undefined),
-}));
-
+vi.mock("electron", async () => (
+  (await import("./support/preview-broker-harness")).createPreviewBrokerElectronMock(electronState)
+));
 vi.mock("../../src/main/preview-agent-page", () => pageTools);
 
 import { PreviewBroker } from "../../src/main/preview-broker";
@@ -303,55 +18,15 @@ import {
   MAX_AGENT_BROWSER_TEXT_BYTES,
   parseAgentBrowserResult,
 } from "../../src/shared/agent-browser";
-
-const conversationId = "11111111-1111-4111-8111-111111111111";
-const connectionId = "22222222-2222-4222-8222-222222222222";
-const runIdentity = {
+import {
+  connectionId,
   conversationId,
-  runId: "22222222-2222-4222-8222-222222222222",
-  turnId: "33333333-3333-4333-8333-333333333333",
-};
+  createPreviewBrokerHarness,
+  runIdentity,
+  type PreviewBrokerHarnessContents,
+} from "./support/preview-broker-harness";
 
-function harness() {
-  const children: Array<{
-    webContents: {
-      sentInputs: Array<Record<string, unknown>>;
-      insertedText: string[];
-    };
-  }> = [];
-  const window = {
-    isDestroyed: vi.fn(() => false),
-    contentView: {
-      children,
-      addChildView: (view: typeof children[number]) => {
-        const index = children.indexOf(view);
-        if (index >= 0) children.splice(index, 1);
-        children.push(view);
-      },
-      removeChildView: (view: typeof children[number]) => {
-        const index = children.indexOf(view);
-        if (index >= 0) children.splice(index, 1);
-      },
-    },
-    webContents: { isDestroyed: () => false, send: vi.fn() },
-    getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
-  };
-  const recordOperationFailure = vi.fn();
-  const getWindow = vi.fn(() => window as typeof window | null);
-  const unregisterHealth: Array<ReturnType<typeof vi.fn>> = [];
-  const broker = new PreviewBroker({
-    getWindow: () => getWindow() as never,
-    openExternal: vi.fn(async () => undefined),
-    stateChannel: "preview-state",
-    recordOperationFailure,
-    registerHealthRenderer: () => {
-      const unregister = vi.fn();
-      unregisterHealth.push(unregister);
-      return unregister;
-    },
-  });
-  return { broker, children, recordOperationFailure, window, getWindow, unregisterHealth };
-}
+const harness = () => createPreviewBrokerHarness(PreviewBroker);
 
 describe("agent-owned native Browser", () => {
   it.each(["live", "destroyed", "missing", "destroyed-tabs"] as const)("releases every tab and session when its host is %s", async (state) => {
@@ -393,7 +68,7 @@ describe("agent-owned native Browser", () => {
       expect(session.clearStorageData).toHaveBeenCalledOnce();
       expect(session.hasEvidenceListeners()).toBe(false);
     }
-    expect((await broker.perform(conversationId, { action: "snapshot" })).ok).toBe(false);
+    expect((await broker.perform(conversationId, { action: "tabs" })).ok).toBe(state === "live");
   });
 
   it("opens one shared blank Browser page directly from empty visible bounds", () => {
@@ -471,13 +146,16 @@ describe("agent-owned native Browser", () => {
       .toBe("http://127.0.0.1:3000/reconnected");
     expect(Reflect.get(children[0]!, "bounds"))
       .toEqual({ x: 10, y: 20, width: 900, height: 600 });
+    expect(Reflect.get(children[0]!, "visible")).toBe(true);
 
     broker.closeRequest({
       ownerId: "primary",
       contextId: conversationId,
       connectionId: replacementConnectionId,
     });
-    expect(children).toHaveLength(0);
+    expect(children).toHaveLength(1);
+    expect(Reflect.get(children[0]!, "visible")).toBe(false);
+    expect(electronState.contents[contentsOffset]?.isDestroyed()).toBe(false);
   });
 
   it("reports a missing Browser lease so its live preload can reconnect and replay bounds", () => {
@@ -595,8 +273,13 @@ describe("agent-owned native Browser", () => {
 
     broker.close("primary", conversationId);
     await expect(broker.perform(runIdentity, { action: "tabs" }))
-      .resolves.toMatchObject({ ok: false, code: "unavailable" });
-    expect(children).toHaveLength(0);
+      .resolves.toMatchObject({ ok: true });
+    expect(children).toHaveLength(1);
+    expect(broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId,
+    }).tabs).toHaveLength(1);
   });
 
   it("keeps one hardened ephemeral tab session and manages bounded pages atomically", async () => {
@@ -741,7 +424,7 @@ describe("agent-owned native Browser", () => {
         Buffer.from("bounded-png").toString("base64"),
       );
     }
-    expect(pageTools.agentPageHasSensitiveEvidence).toHaveBeenCalled();
+    expect(pageTools.agentPageEvidencePrivacy).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(
@@ -1015,9 +698,9 @@ describe("agent-owned native Browser", () => {
       });
       expect(pathPreventDefault).toHaveBeenCalledOnce();
     }
-    await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
+    await vi.waitFor(() => expect(pageTools.agentPageEvidencePrivacy)
       .toHaveBeenCalledWith(contents));
-    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "password" });
     contents.emit("console-message", {
       level: "error",
       message: "hunter2",
@@ -1418,117 +1101,36 @@ describe("agent-owned native Browser", () => {
       mock: { calls: unknown[][] };
     };
     const captures = capturePage.mock.calls.length;
-    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "password" });
     await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({ ok: false, code: "invalid" });
+      .resolves.toMatchObject({
+        ok: false,
+        code: "sensitive",
+        message: expect.stringMatching(/holds a password value.*Navigate to the page again/u),
+      });
+    pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "password" });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: false, code: "sensitive" });
     pageTools.agentPageHasSensitiveScreenshotEvidence.mockResolvedValueOnce(true);
     await expect(broker.perform(conversationId, { action: "screenshot" }))
-      .resolves.toMatchObject({ ok: false, code: "invalid" });
+      .resolves.toMatchObject({ ok: false, code: "sensitive" });
     expect(capturePage).toHaveBeenCalledTimes(captures);
   });
 
-  it("discards semantic evidence when nested credential taint races collection", async () => {
+  it("discards semantic evidence when credential taint races collection", async () => {
     const { broker } = harness();
     await broker.navigate({
       ownerId: "primary",
       contextId: conversationId,
       url: "http://127.0.0.1:3000/login",
     });
-    pageTools.agentPageHasSensitiveEvidence
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    pageTools.agentPageEvidencePrivacy
+      .mockResolvedValueOnce({ withheld: null })
+      .mockResolvedValueOnce({ withheld: "password" });
 
     await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "invalid",
-        message: "Page evidence is unavailable until the password-bearing document navigates away.",
-      });
+      .resolves.toMatchObject({ ok: false, code: "sensitive" });
     expect(pageTools.semanticPageSnapshot).toHaveBeenCalled();
-  });
-
-  it("discards semantic evidence when an author shadow root races collection", async () => {
-    const contentsOffset = electronState.contents.length;
-    const { broker } = harness();
-    await broker.navigate({
-      ownerId: "primary",
-      contextId: conversationId,
-      url: "http://127.0.0.1:3000/login",
-    });
-    const contents = electronState.contents[contentsOffset]!;
-    pageTools.semanticPageSnapshot.mockImplementationOnce(async () => {
-      contents.debugger.emitMessage("DOM.shadowRootPushed", {
-        root: { nodeId: 21, shadowRootType: "closed" },
-      });
-      return JSON.stringify({ title: "Local app", elements: [] });
-    });
-
-    await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "invalid",
-        message: "Page evidence is unavailable for nested page content.",
-      });
-    expect(pageTools.semanticPageSnapshot).toHaveBeenCalled();
-    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
-  });
-
-  it("refuses evidence from unguarded nested page boundaries", async () => {
-    const contentsOffset = electronState.contents.length;
-    const { broker } = harness();
-    await broker.navigate({
-      ownerId: "primary",
-      contextId: conversationId,
-      url: "http://127.0.0.1:3000/nested-login",
-    });
-    const contents = electronState.contents[contentsOffset]!;
-    contents.debugger.emitMessage("Page.frameAttached", {
-      frameId: "credential-frame",
-      parentFrameId: "main",
-    });
-
-    await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "invalid",
-        message: "Page evidence is unavailable for nested page content.",
-      });
-    await expect(broker.perform(conversationId, { action: "screenshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "invalid",
-        message: "Screenshots are unavailable for nested page content.",
-      });
-    expect(contents.capturePage).not.toHaveBeenCalled();
-    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
-    expect(contents.debugger.sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
-  });
-
-  it("retains privileged lifetime taint after a declarative closed root disappears", async () => {
-    const contentsOffset = electronState.contents.length;
-    const { broker } = harness();
-    await broker.navigate({
-      ownerId: "primary",
-      contextId: conversationId,
-      url: "http://127.0.0.1:3000/declarative-shadow",
-    });
-    const contents = electronState.contents[contentsOffset]!;
-    contents.debugger.emitMessage("DOM.shadowRootPushed", {
-      root: { nodeId: 12, shadowRootType: "closed" },
-    });
-
-    await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({
-        ok: false,
-        code: "invalid",
-        message: "Page evidence is unavailable for nested page content.",
-      });
-    expect(contents.capturePage).not.toHaveBeenCalled();
-    contents.debugger.emitMessage("Page.frameNavigated", {
-      frame: { id: "replacement-main", url: "http://127.0.0.1:3000/clean" },
-    });
-    await expect(broker.perform(conversationId, { action: "snapshot" }))
-      .resolves.toMatchObject({ ok: true });
   });
 
   it("freezes visual capture and discards a screenshot when credential evidence races it", async () => {
@@ -1547,7 +1149,7 @@ describe("agent-owned native Browser", () => {
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({
         ok: false,
-        code: "invalid",
+        code: "sensitive",
         message: "Screenshots are unavailable while the document contains sensitive evidence.",
       });
     expect(contents.capturePage).toHaveBeenCalledOnce();
@@ -1738,7 +1340,7 @@ describe("agent-owned native Browser", () => {
       message: "The Browser page layout changed during this action. Inspect the page again for current refs.",
     });
     expect(electronState.interactionTimeline.slice(timelineOffset)).toEqual([
-      "bounds:0,0,0,0",
+      "bounds:0,0,1280,800",
       "bounds:10,20,600,400",
       "bounds:30,40,420,280",
     ]);
@@ -2058,8 +1660,8 @@ describe("agent-owned native Browser", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await expect(stalled).resolves.toMatchObject({
         ok: false,
-        code: "unavailable",
-        message: "The Browser page did not respond during the page snapshot within 15 seconds. Reload the page or open it in a new Browser tab, then try again.",
+        code: "timeout",
+        message: "The Browser page did not respond during the page snapshot within 15 seconds. Reload the page or open it in a new Browser tab, then try again. Nothing had been sent to the page yet, so it is safe to try again.",
       });
       await expect(queued).resolves.toMatchObject({ ok: true });
     } finally {
@@ -2211,7 +1813,7 @@ describe("agent-owned native Browser", () => {
     )).toBe(true);
   });
 
-  it("fails closed for remote agent navigation, stale ownership, and tab overflow", async () => {
+  it("fails closed for remote agent navigation and tab overflow", async () => {
     const { broker } = harness();
     await broker.navigate({
       ownerId: "primary",
@@ -2221,9 +1823,13 @@ describe("agent-owned native Browser", () => {
     await expect(broker.perform(conversationId, {
       action: "navigate", url: "https://example.com/",
     })).resolves.toMatchObject({ ok: false, code: "invalid" });
-    await expect(broker.perform("22222222-2222-4222-8222-222222222222", {
-      action: "snapshot",
-    })).resolves.toMatchObject({ ok: false, code: "unavailable" });
+    await expect(broker.perform(conversationId, {
+      action: "navigate", url: "not a url",
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "invalid",
+      message: expect.stringContaining("only opens local development addresses"),
+    });
     for (let index = 1; index < 8; index += 1) {
       await expect(broker.perform(conversationId, { action: "tab-open" }))
         .resolves.toMatchObject({ ok: true });
@@ -2241,7 +1847,7 @@ function never(): Promise<never> {
   return new Promise<never>(() => undefined);
 }
 
-type HarnessContents = (typeof electronState.contents)[number];
+type HarnessContents = PreviewBrokerHarnessContents;
 
 function lifecycleStates(contents: HarnessContents): unknown[] {
   return contents.debugger.sendCommand.mock.calls
@@ -2267,9 +1873,7 @@ describe("Browser evidence phase timeouts", () => {
     { phase: "page-freeze", description: "the evidence freeze", action: "snapshot",
       stall: () => { electronState.stalledCommands.push((method) => method === "Runtime.enable"); } },
     { phase: "privacy-check", description: "the page privacy check", action: "snapshot",
-      stall: () => { pageTools.agentPageHasSensitiveEvidence.mockImplementationOnce(never); } },
-    { phase: "nested-content-check", description: "the nested-content check", action: "snapshot",
-      stall: () => { electronState.stalledCommands.push((method) => method === "Page.createIsolatedWorld"); } },
+      stall: () => { pageTools.agentPageEvidencePrivacy.mockImplementationOnce(never); } },
     { phase: "page-snapshot", description: "the page snapshot", action: "snapshot",
       stall: () => { pageTools.semanticPageSnapshot.mockImplementationOnce(never); } },
     { phase: "privacy-check", description: "the page privacy check", action: "screenshot",
@@ -2302,8 +1906,8 @@ describe("Browser evidence phase timeouts", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await expect(stalled).resolves.toEqual({
         ok: false,
-        code: "unavailable",
-        message: stalledPhaseMessage(description),
+        code: "timeout",
+        message: `${stalledPhaseMessage(description)} Nothing had been sent to the page yet, so it is safe to try again.`,
       });
     } finally {
       vi.useRealTimers();
@@ -2345,8 +1949,8 @@ describe("Browser evidence phase timeouts", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       await expect(stalled).resolves.toEqual({
         ok: false,
-        code: "unavailable",
-        message: stalledPhaseMessage("Browser security setup"),
+        code: "timeout",
+        message: `${stalledPhaseMessage("Browser security setup")} Nothing had been sent to the page yet, so it is safe to try again.`,
       });
     } finally {
       vi.useRealTimers();
@@ -2376,7 +1980,7 @@ describe("Browser evidence phase timeouts", () => {
       contextId: conversationId,
       url: "http://127.0.0.1:3000/",
     });
-    pageTools.agentPageHasSensitiveEvidence.mockRejectedValueOnce(
+    pageTools.agentPageEvidencePrivacy.mockRejectedValueOnce(
       new Error("The Browser privacy guard is unavailable."),
     );
     await expect(broker.perform(conversationId, { action: "snapshot" })).resolves.toEqual({
@@ -2416,18 +2020,19 @@ describe("Browser evidence phase timeouts", () => {
     });
     const view = children[0] as unknown as { visibilityChanges: boolean[] };
 
+    expect(view.visibilityChanges).toEqual([false, true]);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
-    expect(view.visibilityChanges).toEqual([false, true]);
+    expect(view.visibilityChanges).toEqual([false, true, false, true]);
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({ ok: true });
-    expect(view.visibilityChanges).toEqual([false, true, false, true]);
+    expect(view.visibilityChanges).toEqual([false, true, false, true, false, true]);
 
     broker.setBounds({ ownerId: "primary", contextId: conversationId, connectionId, bounds: null });
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({ ok: true });
-    expect(view.visibilityChanges).toEqual([false, true, false, true]);
+    expect(view.visibilityChanges).toEqual([false, true, false, true, false, true, false]);
   });
 });

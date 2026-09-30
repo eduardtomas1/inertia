@@ -815,9 +815,9 @@ async function createMainWindow(): Promise<void> {
   });
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
   window.webContents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) previewBroker.close();
+    if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces();
   });
-  window.webContents.on("render-process-gone", () => previewBroker.close());
+  window.webContents.on("render-process-gone", () => previewBroker.releaseSurfaces());
   hardenDesktopSession(window.webContents.session);
 
   window.once("ready-to-show", () => window.show());

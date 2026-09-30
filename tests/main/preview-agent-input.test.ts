@@ -4,72 +4,58 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   agentPageActivationBlock,
-  agentPageHasUnguardedNestedContent,
+  agentPageBoundaryGaps,
   beginAgentFileChooserBlock,
-  hasUnguardedAgentPageContent,
+  ensureAgentFileChooserBlock,
   installAgentFileChooserBlock,
   releaseAgentFileChooserBlock,
   resetAgentFileChooserBlock,
   settleAgentPageInput,
 } from "../../src/main/preview-agent-input";
 
-describe("agent Browser nested evidence boundary", () => {
-  function boundaryCommands(closedRoot = false) {
-    return vi.fn(async (method: string) => {
+describe("agent Browser structural boundaries", () => {
+  function boundaryContents(
+    focused: { subtype?: string; shadowRoots?: unknown } = {},
+    url = "http://127.0.0.1:3000/",
+  ) {
+    const debuggerEvents = new EventEmitter();
+    let attached = false;
+    const sendCommand = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
       if (method === "Runtime.evaluate") {
-        return { result: { type: "object", subtype: "array", objectId: "boundary-hosts" } };
-      }
-      if (method === "Runtime.getProperties") {
-        return {
-          result: [
-            ...(closedRoot ? [{
-              name: "0",
-              value: { type: "object", subtype: "node", objectId: "closed-host" },
-            }] : []),
-            { name: "length", value: { type: "number", value: closedRoot ? 1 : 0 } },
-          ],
-        };
+        return { result: { type: "object", subtype: focused.subtype ?? "node", objectId: "focused-element" } };
       }
       if (method === "DOM.describeNode") {
-        return {
-          node: {
-            nodeType: 1,
-            attributes: [],
-            shadowRoots: [{ nodeType: 11, shadowRootType: "closed" }],
-          },
-        };
+        return { node: { nodeType: 1, shadowRoots: focused.shadowRoots } };
       }
       return undefined;
     });
-  }
-
-  it("allows only an initialized boundary state with no nested content", () => {
-    expect(hasUnguardedAgentPageContent({
-      mainFrameId: "main",
-      nestedContentObserved: false,
-    })).toBe(false);
-  });
-
-  it("rechecks focused activation after the privileged nested-content scan", async () => {
-    const debuggerEvents = new EventEmitter();
-    let attached = false;
-    const activationStates = [null, "disabled"];
+    const activationStates: Array<"disabled" | "file" | "nested" | null> = [];
     const contents = {
       debugger: Object.assign(debuggerEvents, {
         attach: vi.fn(() => { attached = true; }),
         detach: vi.fn(() => { attached = false; }),
         isAttached: vi.fn(() => attached),
-        sendCommand: boundaryCommands(),
+        sendCommand,
       }),
       executeJavaScriptInIsolatedWorld: vi.fn(async () => activationStates.shift() ?? null),
-      getURL: () => "http://127.0.0.1:3000/focus-race",
+      getURL: () => url,
       loadURL: vi.fn(async () => undefined),
       navigationHistory: {
         getActiveIndex: () => 0,
-        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/focus-race" }),
+        getEntryAtIndex: () => ({ url }),
       },
     };
+    return { activationStates, contents, debuggerEvents, sendCommand };
+  }
+
+  it("reports no gaps before a document or its boundaries are observed", () => {
+    expect(agentPageBoundaryGaps({} as never)).toEqual({ frames: false, shadowRoots: false });
+  });
+
+  it("rechecks focused activation after the privileged focus check", async () => {
+    const { activationStates, contents, debuggerEvents } = boundaryContents();
+    activationStates.push(null, "disabled");
     await installAgentFileChooserBlock(contents as never);
     debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "main" } });
 
@@ -77,134 +63,90 @@ describe("agent Browser nested evidence boundary", () => {
     expect(contents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2);
   });
 
-  it("fails closed for tainted or malformed boundary state", () => {
-    expect(hasUnguardedAgentPageContent({ nestedContentObserved: true })).toBe(true);
-    expect(hasUnguardedAgentPageContent({})).toBe(true);
-    expect(hasUnguardedAgentPageContent(undefined)).toBe(true);
-  });
-
-  it("tracks nested boundaries incrementally without serializing the page DOM", async () => {
-    const debuggerEvents = new EventEmitter();
-    let attached = false;
-    const sendCommand = boundaryCommands();
-    const contents = {
-      debugger: Object.assign(debuggerEvents, {
-        attach: vi.fn(() => { attached = true; }),
-        detach: vi.fn(() => { attached = false; }),
-        isAttached: vi.fn(() => attached),
-        sendCommand,
-      }),
-      getURL: () => "http://127.0.0.1:3000/",
-      loadURL: vi.fn(async () => undefined),
-      navigationHistory: {
-        getActiveIndex: () => 0,
-        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/" }),
-      },
-    };
+  it("tracks frames and shadow roots incrementally without serializing the page DOM", async () => {
+    const { contents, debuggerEvents, sendCommand } = boundaryContents();
 
     await installAgentFileChooserBlock(contents as never);
     debuggerEvents.emit("message", {}, "Page.frameNavigated", {
       frame: { id: "main" },
     });
-    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
-    expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
-    expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
-    expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: false });
 
     debuggerEvents.emit("message", {}, "Page.frameAttached", {
       frameId: "child",
       parentFrameId: "main",
     });
-    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: true, shadowRoots: false });
+
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", {
+      frame: { id: "child", parentId: "main" },
+    });
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: true, shadowRoots: false });
 
     debuggerEvents.emit("message", {}, "Page.frameNavigated", {
       frame: { id: "next-main" },
     });
-    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(false);
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: false });
 
+    debuggerEvents.emit("message", {}, "DOM.shadowRootPushed", {
+      root: { shadowRootType: "user-agent" },
+    });
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: false });
     debuggerEvents.emit("message", {}, "DOM.shadowRootPushed", {
       root: { shadowRootType: "closed" },
     });
-    expect(await agentPageHasUnguardedNestedContent(contents as never)).toBe(true);
+    expect(agentPageBoundaryGaps(contents as never)).toEqual({ frames: false, shadowRoots: true });
+    expect(sendCommand).not.toHaveBeenCalledWith("Page.getFrameTree");
+    expect(sendCommand).not.toHaveBeenCalledWith("DOMSnapshot.captureSnapshot", expect.anything());
+    expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());
   });
 
-  it("detects a parser-created closed root through bounded depth-zero host descriptors", async () => {
-    const debuggerEvents = new EventEmitter();
-    let attached = false;
-    const sendCommand = boundaryCommands(true);
-    const contents = {
-      debugger: Object.assign(debuggerEvents, {
-        attach: vi.fn(() => { attached = true; }),
-        detach: vi.fn(() => { attached = false; }),
-        isAttached: vi.fn(() => attached),
-        sendCommand,
-      }),
-      getURL: () => "http://127.0.0.1:3000/closed-root",
-      loadURL: vi.fn(async () => undefined),
-      navigationHistory: {
-        getActiveIndex: () => 0,
-        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/closed-root" }),
-      },
-    };
-
-    await installAgentFileChooserBlock(contents as never);
-    debuggerEvents.emit("message", {}, "Page.frameNavigated", {
-      frame: { id: "main" },
+  it("allows activation keys on pages that only contain frames or shadow roots elsewhere", async () => {
+    const { contents, debuggerEvents, sendCommand } = boundaryContents({
+      shadowRoots: [{ nodeType: 11, shadowRootType: "user-agent" }, { nodeType: 11, shadowRootType: "open" }],
     });
-    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(true);
-    expect(sendCommand).not.toHaveBeenCalledWith("DOM.performSearch", expect.anything());
+    await installAgentFileChooserBlock(contents as never);
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "main" } });
+    debuggerEvents.emit("message", {}, "Page.frameAttached", { frameId: "child", parentFrameId: "main" });
+    debuggerEvents.emit("message", {}, "DOM.shadowRootPushed", { root: { shadowRootType: "closed" } });
+
+    await expect(agentPageActivationBlock(contents as never)).resolves.toBeNull();
     expect(sendCommand).toHaveBeenCalledWith("DOM.describeNode", {
-      objectId: "closed-host",
+      objectId: "focused-element",
       depth: 0,
       pierce: true,
     });
+    expect(sendCommand).toHaveBeenCalledWith("Runtime.evaluate", expect.objectContaining({
+      contextId: 9,
+      returnByValue: false,
+      timeout: 3_000,
+    }));
+    expect(sendCommand).toHaveBeenLastCalledWith("Runtime.releaseObjectGroup", {
+      objectGroup: "inertia-agent-page-boundary",
+    });
   });
 
-  it("fails one unstable bounded prepass closed without lifetime-tainting the document", async () => {
-    const debuggerEvents = new EventEmitter();
-    let attached = false;
-    let unstable = true;
-    let evaluationParams: unknown;
-    const sendCommand = vi.fn(async (method: string, params?: unknown) => {
-      if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
-      if (method === "Runtime.evaluate") {
-        evaluationParams = params;
-        return unstable
-          ? { result: { type: "object", subtype: "null", value: null } }
-          : { result: { type: "object", subtype: "array", objectId: "boundary-hosts" } };
-      }
-      if (method === "Runtime.getProperties") {
-        return { result: [{ name: "length", value: { type: "number", value: 0 } }] };
-      }
-      return undefined;
-    });
-    const contents = {
-      debugger: Object.assign(debuggerEvents, {
-        attach: vi.fn(() => { attached = true; }),
-        detach: vi.fn(() => { attached = false; }),
-        isAttached: vi.fn(() => attached),
-        sendCommand,
-      }),
-      getURL: () => "http://127.0.0.1:3000/dashboard",
-      loadURL: vi.fn(async () => undefined),
-      navigationHistory: {
-        getActiveIndex: () => 0,
-        getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/dashboard" }),
-      },
-    };
-
+  it.each([
+    ["a closed shadow root owns focus", { shadowRoots: [{ nodeType: 11, shadowRootType: "closed" }] }],
+    ["the focused shadow root has an unknown type", { shadowRoots: [{ nodeType: 11 }] }],
+    ["the focused node description is malformed", { shadowRoots: "closed" }],
+    ["the focused element cannot be resolved", { subtype: "null" }],
+  ])("refuses activation keys when %s", async (_label, focused) => {
+    const { contents, debuggerEvents } = boundaryContents(focused);
     await installAgentFileChooserBlock(contents as never);
-    debuggerEvents.emit("message", {}, "Page.frameNavigated", {
-      frame: { id: "main" },
-    });
-    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(true);
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "main" } });
+
+    await expect(agentPageActivationBlock(contents as never)).resolves.toBe("nested");
+  });
+
+  it("refuses activation keys when an embedded frame owns focus", async () => {
+    const { activationStates, contents, debuggerEvents, sendCommand } = boundaryContents();
+    activationStates.push("nested");
+    await installAgentFileChooserBlock(contents as never);
+    debuggerEvents.emit("message", {}, "Page.frameNavigated", { frame: { id: "main" } });
+
+    await expect(agentPageActivationBlock(contents as never)).resolves.toBe("nested");
     expect(sendCommand).not.toHaveBeenCalledWith("DOM.describeNode", expect.anything());
-    unstable = false;
-    await expect(agentPageHasUnguardedNestedContent(contents as never)).resolves.toBe(false);
-    expect(evaluationParams).toMatchObject({
-      expression: expect.stringContaining("attributeCharacters > 16384"),
-      timeout: 3_000,
-    });
   });
 });
 
@@ -233,6 +175,35 @@ describe("agent Browser input settlement", () => {
     contents.emit("did-stop-loading");
     await expect(settlement).rejects.toThrow("Execution context was destroyed.");
     expect(contents.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent Browser slow navigation settlement", () => {
+  it("returns control after twenty seconds without stopping a navigation that is still loading", async () => {
+    vi.useFakeTimers();
+    try {
+      const contents = Object.assign(new EventEmitter(), {
+        getURL: () => "http://127.0.0.1:3000/source",
+        isDestroyed: () => false,
+        stop: vi.fn(),
+      });
+      const settlement = settleAgentPageInput(contents as never, () => undefined);
+      await Promise.resolve();
+      contents.emit("did-start-navigation", {
+        isMainFrame: true,
+        isSameDocument: false,
+        url: "http://127.0.0.1:3000/slow-destination",
+      });
+      let settled = false;
+      void settlement.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(settlement).resolves.toBeUndefined();
+      expect(contents.stop).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -291,6 +262,19 @@ describe("agent Browser file chooser boundary", () => {
       "Page.setInterceptFileChooserDialog",
       { enabled: false },
     );
+  });
+
+  it("reinstalls the security debugger after something else detached it", async () => {
+    const { contents } = chooserContents();
+    await ensureAgentFileChooserBlock(contents as never);
+    await ensureAgentFileChooserBlock(contents as never);
+    expect(contents.debugger.attach).toHaveBeenCalledOnce();
+
+    contents.debugger.detach();
+    contents.debugger.detach.mockClear();
+    await ensureAgentFileChooserBlock(contents as never);
+    expect(contents.debugger.attach).toHaveBeenCalledTimes(2);
+    expect(contents.debugger.isAttached()).toBe(true);
   });
 
   it("does not let a release from before a debugger reset disable the new agent action", async () => {

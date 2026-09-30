@@ -3,11 +3,10 @@ import type { WebContents } from "electron";
 import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-guard.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
-import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock, releaseAgentPageDebugger } from "./preview-agent-boundary.js";
+import { agentPageFocusIsHidden, installAgentFileChooserBlock, releaseAgentPageDebugger } from "./preview-agent-boundary.js";
 
 export {
-  agentPageHasUnguardedNestedContent,
-  hasUnguardedAgentPageContent,
+  agentPageBoundaryGaps,
   installAgentFileChooserBlock,
   setAgentPageFrozen,
   settleAgentPageDebuggerBootstrap,
@@ -15,7 +14,7 @@ export {
 
 const INPUT_NAVIGATION_GRACE_MS = 250;
 const HOVER_INPUT_TIMEOUT_MS = 15_000;
-const NAVIGATION_TIMEOUT_MS = 30_000;
+const NAVIGATION_SETTLE_LIMIT_MS = 20_000;
 const FILE_CHOOSER_ACTIVATION_POLL_MS = 100;
 const FILE_CHOOSER_ACTIVATION_LIMIT_MS = 10_000;
 const armedRefusalCaptures = new WeakSet<WebContents>();
@@ -55,7 +54,7 @@ export async function agentPageActivationBlock(
 ): Promise<"disabled" | "file" | "nested" | null> {
   const initial = await agentPageActivationBlocked(contents);
   if (initial) return initial;
-  if (await hasUnguardedNestedContent(contents)) return "nested";
+  if (await agentPageFocusIsHidden(contents)) return "nested";
   return await agentPageActivationBlocked(contents);
 }
 
@@ -169,7 +168,7 @@ export function agentPageActivationFailureMessage(
   if (refusal === "retargeted") {
     return "The focused page element changed during activation. Inspect the page again for current refs.";
   }
-  return "Activation keys are unavailable for nested page content.";
+  return "Enter and Space are unavailable while focus is inside an embedded frame or a closed shadow root, because Inertia cannot see the control they would activate. Click a control from the latest snapshot first.";
 }
 
 export async function hoverAgentPageRef(
@@ -200,6 +199,7 @@ export async function hoverAgentPageRef(
 interface AgentFileChooserBlock {
   generation: number;
   ready: Promise<void>;
+  attached: boolean;
 }
 
 const fileChooserBlocks = new WeakMap<WebContents, AgentFileChooserBlock>();
@@ -211,15 +211,21 @@ function agentFileChooserBlock(contents: WebContents): AgentFileChooserBlock {
   const state: AgentFileChooserBlock = {
     generation: 0,
     ready: installAgentFileChooserBlock(contents),
+    attached: false,
   };
   fileChooserBlocks.set(contents, state);
-  void state.ready.catch(() => {
+  void state.ready.then(() => {
+    state.attached = true;
+  }, () => {
     if (fileChooserBlocks.get(contents) === state) fileChooserBlocks.delete(contents);
   });
   return state;
 }
 
 export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void> {
+  if (fileChooserBlocks.get(contents)?.attached && !contents.debugger.isAttached()) {
+    resetAgentFileChooserBlock(contents);
+  }
   return agentFileChooserBlock(contents).ready;
 }
 
@@ -386,10 +392,7 @@ export async function settleAgentPageInput(
       new Error("The active Browser tab was closed after the input."),
     );
     const onAbort = (): void => finish(new Error("browser-action-cancelled"), true);
-    const timeout = setTimeout(() => finish(
-      new Error("The Browser page did not settle after the input."),
-      true,
-    ), NAVIGATION_TIMEOUT_MS);
+    const timeout = setTimeout(() => finish(), NAVIGATION_SETTLE_LIMIT_MS);
     timeout.unref();
     contents.on("did-start-navigation", onStarted);
     contents.on("did-navigate-in-page", onInPage);

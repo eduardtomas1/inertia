@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AGENT_BROWSER_FAILURE_CODES,
+  AGENT_BROWSER_INPUT_BUDGET_MS,
+  AGENT_BROWSER_INSPECT_BUDGET_MS,
+  AGENT_BROWSER_NAVIGATION_BUDGET_MS,
+  AGENT_BROWSER_QUEUE_WAIT_MS,
+  AGENT_BROWSER_RUNTIME_BACKSTOP_MS,
   MAX_AGENT_BROWSER_TEXT_BYTES,
+  MAX_AGENT_BROWSER_WAIT_MS,
   parseAgentBrowserCommand,
   parseAgentBrowserResult,
 } from "../../src/shared/agent-browser";
@@ -27,6 +34,50 @@ describe("agent browser boundary", () => {
       .toBeNull();
     expect(parseAgentBrowserCommand({ action: "scroll", deltaY: 2_001 }))
       .toBeNull();
+  });
+
+  it("accepts only exact bounded wait commands", () => {
+    expect(parseAgentBrowserCommand({ action: "wait", state: "present", timeoutMs: 10_000 }))
+      .toEqual({ action: "wait", state: "present", timeoutMs: 10_000 });
+    expect(parseAgentBrowserCommand({ action: "wait", text: "Saved", state: "absent", timeoutMs: 250 }))
+      .toEqual({ action: "wait", text: "Saved", state: "absent", timeoutMs: 250 });
+    for (const invalid of [
+      { action: "wait", state: "present" },
+      { action: "wait", state: "visible", timeoutMs: 1_000 },
+      { action: "wait", state: "present", timeoutMs: 249 },
+      { action: "wait", state: "present", timeoutMs: 30_001 },
+      { action: "wait", state: "present", timeoutMs: 1_000.5 },
+      { action: "wait", text: "", state: "present", timeoutMs: 1_000 },
+      { action: "wait", text: "   ", state: "present", timeoutMs: 1_000 },
+      { action: "wait", text: "two\nlines", state: "present", timeoutMs: 1_000 },
+      { action: "wait", text: "x".repeat(201), state: "present", timeoutMs: 1_000 },
+      { action: "wait", text: "Saved", state: "present", timeoutMs: 1_000, url: "/done" },
+    ]) expect(parseAgentBrowserCommand(invalid), JSON.stringify(invalid)).toBeNull();
+  });
+
+  it("carries every failure code across the process boundary and rejects unknown ones", () => {
+    expect(AGENT_BROWSER_FAILURE_CODES).toEqual([
+      "cancelled", "invalid", "not-found", "sensitive", "timeout", "too-large", "unavailable",
+    ]);
+    for (const code of AGENT_BROWSER_FAILURE_CODES) {
+      expect(parseAgentBrowserResult({ ok: false, code, message: "Explained." }))
+        .toEqual({ ok: false, code, message: "Explained." });
+    }
+    expect(parseAgentBrowserResult({ ok: false, code: "blocked", message: "Explained." })).toBeNull();
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "" })).toBeNull();
+    expect(parseAgentBrowserResult({ ok: false, code: "timeout", message: "Explained.", retry: true }))
+      .toBeNull();
+  });
+
+  it("keeps the runtime backstop above every deadline the main process enforces", () => {
+    expect(AGENT_BROWSER_RUNTIME_BACKSTOP_MS).toBeGreaterThan(
+      AGENT_BROWSER_QUEUE_WAIT_MS + Math.max(
+        AGENT_BROWSER_NAVIGATION_BUDGET_MS,
+        AGENT_BROWSER_INPUT_BUDGET_MS,
+        AGENT_BROWSER_INSPECT_BUDGET_MS,
+        MAX_AGENT_BROWSER_WAIT_MS + 5_000,
+      ),
+    );
   });
 
   it("strictly bounds semantic text and tab state while rejecting bitmap bytes", () => {

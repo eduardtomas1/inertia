@@ -4,6 +4,7 @@ import {
   installPreviewAgentPrivacyGuard,
   PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL,
   installPreviewAgentShadowBoundarySignal,
+  PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT,
   PREVIEW_AGENT_NESTED_BOUNDARY_EVENT,
 } from "../shared/preview-agent-privacy-guard.js";
 
@@ -12,5 +13,5 @@ installPreviewAgentPrivacyGuard((refusal) => {
 });
 contextBridge.executeInMainWorld({
   func: installPreviewAgentShadowBoundarySignal,
-  args: [PREVIEW_AGENT_NESTED_BOUNDARY_EVENT],
+  args: [PREVIEW_AGENT_NESTED_BOUNDARY_EVENT, PREVIEW_AGENT_CREDENTIAL_SIGNAL_EVENT],
 });

@@ -84,16 +84,21 @@ async function run(): Promise<void> {
     await capture();
     await perform({ action: "tab-open", url: `${url}?after-timeout` });
     await capture();
-    for (const path of ["private", "nested"]) {
-      await perform({ action: "navigate", url: `${url}${path}` });
-      for (const action of ["snapshot", "screenshot"] as const) {
-        const refused = await broker.perform(contextId, { action });
-        assert(!refused.ok && refused.code === "invalid", JSON.stringify(refused));
-        assert(!JSON.stringify(refused).includes("native-password-sentinel"));
-      }
+    await perform({ action: "navigate", url: `${url}private` });
+    for (const action of ["snapshot", "screenshot"] as const) {
+      const refused = await broker.perform(contextId, { action });
+      assert(!refused.ok && refused.code === "sensitive", JSON.stringify(refused));
+      assert(!JSON.stringify(refused).includes("native-password-sentinel"));
     }
+    await perform({ action: "navigate", url: `${url}nested` });
+    const nested = await perform({ action: "snapshot" });
+    const nestedPage = JSON.parse(nested.text) as { notInspected?: string[] };
+    assert.deepEqual(nestedPage.notInspected, ["frames"]);
+    assert(!nested.text.includes("Local browser diagnostic"));
+    await perform({ action: "screenshot" });
     console.log(`NATIVE_BROWSER_EVIDENCE ${JSON.stringify({ platform: process.platform, arch: process.arch,
-      electron: process.versions.electron, captures, timeoutRecovered: true, privacyRefusals: 4 })}`);
+      electron: process.versions.electron, captures, timeoutRecovered: true, privacyRefusals: 2,
+      framesNotInspected: true })}`);
   } finally {
     broker.close("primary", contextId);
     window.destroy();

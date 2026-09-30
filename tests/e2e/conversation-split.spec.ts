@@ -657,10 +657,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
             | undefined;
           return contents && urls.includes(contents.getURL());
         });
-      return previews.length === 2 && previews.every((view) => {
-          const bounds = view.getBounds();
-          return bounds.width === 0 && bounds.height === 0;
-        });
+      return previews.length === 2 && previews.every((view) => !view.getVisible());
     },
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
@@ -680,7 +677,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
         });
       return previews.length === 2 && previews.every((view) => {
           const bounds = view.getBounds();
-          return bounds.width > 0 && bounds.height > 0;
+          return view.getVisible() && bounds.width > 0 && bounds.height > 0;
         });
     },
     [primaryPreviewUrl, secondaryPreviewUrl],

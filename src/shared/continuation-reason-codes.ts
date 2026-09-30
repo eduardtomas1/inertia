@@ -58,8 +58,7 @@ export function isTurnSessionRecovery(value: unknown): value is TurnSessionRecov
   const record = value as Record<string, unknown>;
   const count = (input: unknown): boolean => typeof input === "number"
     && Number.isSafeInteger(input) && input >= 0 && input <= 1_002_000;
-  return Object.keys(record).length === ("historyWithheld" in record ? 3 : 2)
-    && (!("historyWithheld" in record) || record.historyWithheld === "endpoint-changed")
+  return Object.keys(record).length === (record.historyWithheld === "endpoint-changed" ? 3 : 2)
     && count(record.restoredMessageCount)
     && count(record.omittedMessageCount);
 }

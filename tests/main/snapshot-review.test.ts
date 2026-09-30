@@ -41,7 +41,14 @@ function fixture() {
   return { service, owner, imports, registry, reviewId, send, last, start, select, onFailure };
 }
 
-describe.runIf(process.platform === "linux")("reviewed screenshot ownership", () => {
+describe("reviewed screenshot ownership", () => {
+  let platform: PropertyDescriptor;
+  beforeEach(() => {
+    platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "linux" });
+  });
+  afterEach(() => { Object.defineProperty(process, "platform", platform); });
+
   it("requires source selection and exact revision approval before importing, without AX metadata", async () => {
     native.sources.mockResolvedValue([source()]);
     const f = fixture(); await f.start();

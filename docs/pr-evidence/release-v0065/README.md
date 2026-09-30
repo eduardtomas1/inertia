@@ -118,6 +118,18 @@ builds passed and nothing was published. The budget is now 75 minutes, in line
 with the other platforms, and the tag moves to main with that change before
 any publication.
 
+## Third release attempt and the remaining budgets
+
+The third attempt ran from `de221d8c` (run 36752772316). macOS ARM64 passed
+in 49 minutes under its new budget, and both Linux builds passed. Windows x64
+was cancelled by GitHub at its 75-minute budget during the isolated end-to-end
+step, and the run was cancelled because it could no longer publish. In the
+v0.0.64 release Windows x64 took 72 of its 75 minutes and Windows ARM64 97 of
+its 100, so those budgets had no room for the larger suite either. The budgets
+are now macOS x64 100, Windows x64 100 and Windows ARM64 130 minutes; macOS
+ARM64 stays at 75 and the Linux budgets are unchanged. The tag moves to main
+with this change before any publication.
+
 ## Packaging and README views
 
 The packaging below ran on main `d0e62178` plus this preparation, before #528

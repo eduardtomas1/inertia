@@ -100,7 +100,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
         <p className="snapshot-note">Automatic masking is not verified. Check the image, crop it or mask sensitive areas before attaching. Nothing is sent automatically.</p>
         {pending && <p role="status">{review ? "Preparing screenshot…" : "Choose a source in the system picker if it opens…"}</p>}
         {error && <p role="alert" className="snapshot-alert">{error}</p>}
-        {review?.stage === "sources" && <div className="screenshot-sources" aria-label="Windows and screens">
+        {review?.stage === "sources" && <div className="screenshot-sources" role="group" aria-label="Windows and screens">
           {review.sources.map((source) => <button type="button" key={source.id} disabled={pending}
             onClick={() => void request({ type: "review-select", reviewId: review.reviewId, sourceId: source.id })}>
             <img src={source.preview} alt="" /><span>{source.name}</span>

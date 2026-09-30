@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SnapshotRequest } from "../../src/shared/snapshots";
 import type { SnapshotReview } from "../../src/shared/snapshot-review";
@@ -73,7 +73,7 @@ it("keeps keyboard focus in the dialog when the chosen source is replaced by its
   render(<ReviewedScreenshotControl conversationId={chat} />);
   const id = await start();
   await deliver({ reviewId: id, stage: "sources", sources: [{ id: "source", name: "Example window", preview: "data:image/png;base64,fixture" }] });
-  const choice = screen.getByRole("button", { name: "Example window" });
+  const choice = within(screen.getByRole("group", { name: "Windows and screens" })).getByRole("button", { name: "Example window" });
   choice.focus(); fireEvent.click(choice);
   await deliver(preview(id));
   expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);

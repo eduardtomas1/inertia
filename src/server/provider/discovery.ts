@@ -18,10 +18,12 @@ import {
 import {
   isProcessTreeTerminationUnconfirmed,
   ProcessTreeTerminationError,
+  recordingProcessTreeTermination,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import { providerAuthStatusArgs } from "./auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -388,10 +390,34 @@ export async function detectProvider(
   options: ProviderDetectionOptions = {},
   dependencies: ProviderDiscoveryDependencies = {},
 ): Promise<ProviderDetection> {
+  const cleanupDiagnostics: PosixCleanupDiagnostic[] = [];
+  const detection = await detectProviderRecordingCleanup(providerId, options, {
+    ...dependencies,
+    terminateProcessTree: recordingProcessTreeTermination(
+      dependencies.terminateProcessTree ?? terminateProcessTreeAndWait,
+      cleanupDiagnostics,
+    ),
+  }, cleanupDiagnostics);
+  const cleanupDiagnostic = cleanupDiagnostics[0];
+  return detection.cleanupConfirmed || !cleanupDiagnostic
+    ? detection
+    : { ...detection, cleanupDiagnostic };
+}
+
+async function detectProviderRecordingCleanup(
+  providerId: ProviderId,
+  options: ProviderDetectionOptions,
+  dependencies: ProviderDiscoveryDependencies,
+  cleanupDiagnostics: readonly PosixCleanupDiagnostic[],
+): Promise<ProviderDetection> {
+  const cleanupUnconfirmed = (subject: string): ProcessTreeTerminationError =>
+    new ProcessTreeTerminationError(subject, {
+      posixCleanupDiagnostic: cleanupDiagnostics[0] ?? null,
+    });
   const requireActive = (cleanupConfirmed = true): void => {
     if (options.signal?.aborted) {
       if (!cleanupConfirmed) {
-        throw new ProcessTreeTerminationError("Provider discovery process tree");
+        throw cleanupUnconfirmed("Provider discovery process tree");
       }
       throw new Error("Provider discovery was cancelled.");
     }
@@ -437,7 +463,7 @@ export async function detectProvider(
     );
     if (!result.aborted) return result;
     if (result.cleanupConfirmed !== true) {
-      throw new ProcessTreeTerminationError("Provider discovery process tree");
+      throw cleanupUnconfirmed("Provider discovery process tree");
     }
     throw new Error("Provider discovery was cancelled.");
   };
@@ -675,9 +701,7 @@ export async function detectProvider(
     : { cleanupConfirmed: true, outcome: "verified" };
   if (options.signal?.aborted) {
     if (!openCodeIsolation.cleanupConfirmed) {
-      throw new ProcessTreeTerminationError(
-        "OpenCode isolation-proof server process tree",
-      );
+      throw cleanupUnconfirmed("OpenCode isolation-proof server process tree");
     }
     throw new Error("Provider discovery was cancelled.");
   }

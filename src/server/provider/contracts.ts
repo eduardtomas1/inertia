@@ -1,5 +1,7 @@
 import type { ZodType } from "zod";
 
+import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
+
 import type {
   AgentGoalStatus,
   ContinuationIdentity,
@@ -55,6 +57,7 @@ export interface ProviderDetection {
   protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
   cleanupConfirmed: boolean;
+  cleanupDiagnostic?: PosixCleanupDiagnostic;
   probeTimedOut?: boolean;
   statusMessage?: string;
 }

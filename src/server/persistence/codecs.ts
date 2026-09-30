@@ -415,6 +415,8 @@ export function settingsFromState(state: StateRow): AppSettings {
     colorTheme: state.color_theme,
     lightColorTheme: state.light_color_theme ?? state.color_theme,
     darkColorTheme: state.dark_color_theme ?? state.color_theme,
+    lightCustomColor: state.light_custom_color ?? null,
+    darkCustomColor: state.dark_custom_color ?? null,
     compactSidebar: state.compact_sidebar === 1,
     showTimestamps: state.show_timestamps === 1,
     terminalFontSize: state.terminal_font_size,

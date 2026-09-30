@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "composite": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",

@@ -259,7 +259,12 @@ export function TerminalSession({
     };
     update();
     if (theme === "system") media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-color-theme", "style"] });
+    return () => {
+      media.removeEventListener("change", update);
+      observer.disconnect();
+    };
   }, [colorTheme, darkColorTheme, fontSize, lightColorTheme, theme]);
 
   useEffect(() => {

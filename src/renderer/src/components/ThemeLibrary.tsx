@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { CustomThemeColor } from "./CustomThemeColor";
 import "./ThemeLibrary.css";
 
 import type {
@@ -71,7 +72,7 @@ export function ThemeLibrary({
   disabled,
   onUpdate,
 }: {
-  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme">;
+  settings: Pick<AppSettings, "theme" | "colorTheme" | "lightColorTheme" | "darkColorTheme" | "lightCustomColor" | "darkCustomColor">;
   disabled: boolean;
   onUpdate: (settings: Partial<AppSettings>) => void;
 }): React.JSX.Element {
@@ -126,8 +127,8 @@ export function ThemeLibrary({
         aria-label="Color theme"
       >
         {COLOR_THEME_OPTIONS.map((option) => {
-          const lightActive = (settings.lightColorTheme ?? settings.colorTheme) === option.id;
-          const darkActive = (settings.darkColorTheme ?? settings.colorTheme) === option.id;
+          const lightActive = !settings.lightCustomColor && (settings.lightColorTheme ?? settings.colorTheme) === option.id;
+          const darkActive = !settings.darkCustomColor && (settings.darkColorTheme ?? settings.colorTheme) === option.id;
           const active = lightActive && darkActive;
           return (
             <div
@@ -161,6 +162,16 @@ export function ThemeLibrary({
             </div>
           );
         })}
+      </div>
+      <div className="theme-library-heading">
+        <h4>Custom colors</h4>
+        <p>Pick a color for each appearance. Inertia adapts its shades to keep the workbench readable.</p>
+      </div>
+      <div className="custom-theme-options" role="group" aria-label="Custom colors">
+        <CustomThemeColor mode="light" value={settings.lightCustomColor} disabled={disabled}
+          onChange={(lightCustomColor) => onUpdate({ lightCustomColor })} />
+        <CustomThemeColor mode="dark" value={settings.darkCustomColor} disabled={disabled}
+          onChange={(darkCustomColor) => onUpdate({ darkCustomColor })} />
       </div>
     </div>
   );

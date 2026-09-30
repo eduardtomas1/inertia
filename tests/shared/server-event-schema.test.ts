@@ -930,6 +930,8 @@ describe("server event settings trust boundary", () => {
   });
   it.each([
     ["theme", "sepia"],
+    ["lightCustomColor", "red"],
+    ["darkCustomColor", "#12345g"],
     ["defaultProvider", "unknown-provider"],
     ["defaultAccessMode", "unrestricted"],
     ["newThreadMode", "remote"],

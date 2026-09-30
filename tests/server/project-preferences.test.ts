@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { clientCommandSchema } from "../../src/shared/contracts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +21,15 @@ function fixture() {
 }
 
 describe("durable project and thread organization", () => {
+  it("validates custom colors at the command boundary", () => {
+    const command = (value: unknown) => ({ type: "settings.update", requestId: "11111111-1111-4111-8111-111111111111", payload: { lightCustomColor: value } });
+    expect(clientCommandSchema.parse(command("#ABCDEF"))).toMatchObject({ payload: { lightCustomColor: "#abcdef" } });
+    expect(clientCommandSchema.safeParse(command(null)).success).toBe(true);
+    for (const value of ["red", "#abc", "#12345g", "url(example)", 123]) {
+      expect(clientCommandSchema.safeParse(command(value)).success).toBe(false);
+    }
+  });
+
   it("upgrades main's schema without changing the selected color family", () => {
     const database = new Database(":memory:");
     try {
@@ -44,6 +54,35 @@ describe("durable project and thread organization", () => {
     expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "grove", darkColorTheme: "iris" });
     reopened.updateSettings({ colorTheme: "ember" });
     expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "ember", darkColorTheme: "ember" });
+  });
+
+  it("persists custom colors independently and resets them when presets are selected", () => {
+    const { store, path, root } = fixture();
+    store.updateSettings({ colorTheme: "ocean", lightCustomColor: "#009688", darkCustomColor: "#f97316" });
+    store.updateSettings({ showTimestamps: false });
+    store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = new RuntimeStore(path, root); stores.push(reopened);
+    expect(reopened.shellSnapshot().settings).toMatchObject({ lightCustomColor: "#009688", darkCustomColor: "#f97316" });
+    reopened.updateSettings({ lightColorTheme: "grove" });
+    expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "grove", lightCustomColor: null, darkCustomColor: "#f97316" });
+    reopened.updateSettings({ darkCustomColor: null });
+    expect(reopened.shellSnapshot().settings).toMatchObject({ darkColorTheme: "ocean", darkCustomColor: null });
+    reopened.updateSettings({ lightCustomColor: "#009688", darkCustomColor: "#f97316" });
+    reopened.updateSettings({ colorTheme: "iris" });
+    expect(reopened.shellSnapshot().settings).toMatchObject({ lightColorTheme: "iris", darkColorTheme: "iris", lightCustomColor: null, darkCustomColor: null });
+  });
+
+  it("upgrades schema 83 without changing preset choices and rejects malformed custom colors", () => {
+    const database = new Database(":memory:");
+    try {
+      migrateRuntimeDatabase(database, 83);
+      database.prepare("INSERT INTO app_state (id, theme, compact_sidebar, show_timestamps, terminal_font_size, color_theme, light_color_theme, dark_color_theme) VALUES (1, 'system', 0, 1, 13, 'ocean', 'grove', 'iris')").run();
+      migrateRuntimeDatabase(database);
+      expect(database.prepare("SELECT light_color_theme, dark_color_theme, light_custom_color, dark_custom_color FROM app_state").get())
+        .toEqual({ light_color_theme: "grove", dark_color_theme: "iris", light_custom_color: null, dark_custom_color: null });
+      expect(() => database.prepare("UPDATE app_state SET light_custom_color = ?").run("red")).toThrow();
+      migrateRuntimeDatabase(database);
+    } finally { database.close(); }
   });
 
   it("retains project defaults and explicit unread state across restart without changing run state", () => {

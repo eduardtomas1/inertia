@@ -366,6 +366,8 @@ export const configurationCommandSchemas = [
           colorTheme: z.enum(COLOR_THEME_IDS).optional(),
           lightColorTheme: z.enum(COLOR_THEME_IDS).optional(),
           darkColorTheme: z.enum(COLOR_THEME_IDS).optional(),
+          lightCustomColor: z.string().regex(/^#[0-9a-f]{6}$/iu).transform((value) => value.toLowerCase()).nullable().optional(),
+          darkCustomColor: z.string().regex(/^#[0-9a-f]{6}$/iu).transform((value) => value.toLowerCase()).nullable().optional(),
           compactSidebar: z.boolean().optional(),
           showTimestamps: z.boolean().optional(),
           terminalFontSize: z.number().int().min(11).max(22).optional(),

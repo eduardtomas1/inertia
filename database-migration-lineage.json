@@ -672,6 +672,11 @@
       "version": 83,
       "name": "PersistCompletionSound",
       "digest": "00fbad4235b49b23aeb84643e241e240c970ecda15df4102a1c162c143416159"
+    },
+    {
+      "version": 84,
+      "name": "CustomAppearanceColors",
+      "digest": "9dbaed47d5de901b1788da82c4ff3fb7b24a71b5aa98715beeb45379c9a669b2"
     }
   ]
 }

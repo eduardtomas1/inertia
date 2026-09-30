@@ -28,7 +28,7 @@ import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
 import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import { issueReportsMigration } from "./issue-reports"; import { contextCompactionMigration } from "./context-compaction";
 import { projectPreferencesMigration } from "./project-preferences";
-import { appearanceThemePairMigration } from "./appearance-theme-pair";
+import { customAppearanceColorsMigration } from "./custom-appearance-colors"; import { appearanceThemePairMigration } from "./appearance-theme-pair";
 import { providerUsageLimitsMigration } from "./provider-usage-limits";
 import { messageChronologyMigration, privateConnectMessageOriginMigration } from "./message-metadata";
 import { nativeAntigravityProviderMigration } from "./native-antigravity-provider"; import { conversationContextWholeChatMigration } from "./conversation-context-whole-chat"; import { workingIndicatorMigration } from "./working-indicator"; import { conversationContextDeliveriesMigration } from "./conversation-context-deliveries"; import { attachmentStorageSettingsMigration } from "./attachment-storage-settings";
@@ -1238,7 +1238,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       appearanceThemePairMigration,
       providerUsageLimitsMigration,
       privateConnectMessageOriginMigration,
-      nativeAntigravityProviderMigration, conversationContextWholeChatMigration, workingIndicatorMigration, conversationContextDeliveriesMigration, attachmentStorageSettingsMigration, queuedMessagesMigration, agentThreadTargetOwnershipMigration, completionSoundMigration,
+      nativeAntigravityProviderMigration, conversationContextWholeChatMigration, workingIndicatorMigration, conversationContextDeliveriesMigration, attachmentStorageSettingsMigration, queuedMessagesMigration, agentThreadTargetOwnershipMigration, completionSoundMigration, customAppearanceColorsMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

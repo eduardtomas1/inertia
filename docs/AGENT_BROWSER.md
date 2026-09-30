@@ -182,7 +182,9 @@ so this cannot be closed without refusing every page that has a frame.
 Password fields are found by enumerating the document's inputs rather than by
 walking its elements, so a password field is seen wherever it sits in a large
 document. A document with more than 4,000 inputs is treated as unverifiable
-and its evidence is withheld.
+and its evidence is withheld with its own reason: the page has too many inputs
+to check safely, so the agent is told to open a smaller page or a more
+specific route rather than to navigate to the same page again.
 
 Enter and Space are refused while focus is inside an embedded frame or a
 closed shadow root, because Inertia cannot see the control they would

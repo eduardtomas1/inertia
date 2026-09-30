@@ -188,6 +188,9 @@ function withheldEvidenceMessage(reason: AgentPageWithheldReason, subject: strin
   if (reason === "hidden-input") {
     return `${subject} withheld because text was typed into a control Inertia cannot inspect (inside a closed shadow root), so it could be a password.${recovery}`;
   }
+  if (reason === "document-too-large") {
+    return `${subject} withheld because this page has more than 4,000 inputs, too many for Inertia to check safely for password values. Open a smaller page or a more specific route that shows fewer inputs, then continue.`;
+  }
   return `${subject} withheld because a script changed a password field in this document.${recovery}`;
 }
 

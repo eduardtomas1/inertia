@@ -679,6 +679,15 @@ describe("conversation-owned Browser sessions", () => {
         code: "sensitive",
         message: expect.stringContaining("a script changed a password field"),
       });
+    pageTools.agentPageEvidencePrivacy.mockResolvedValueOnce({ withheld: "document-too-large" });
+    const tooLarge = await broker.perform(conversationId, { action: "snapshot" });
+    expect(tooLarge).toMatchObject({
+      ok: false,
+      code: "sensitive",
+      message: expect.stringContaining("more than 4,000 inputs"),
+    });
+    expect(tooLarge.ok ? "" : tooLarge.message).not.toMatch(/password field|Navigate to the page again/u);
+    expect(tooLarge.ok ? "" : tooLarge.message).toMatch(/smaller page/u);
   });
 
   it("inspects pages with frames and shadow roots and reports them as not inspected", async () => {

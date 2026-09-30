@@ -63,7 +63,7 @@ describe("agent Browser privacy classification", () => {
     };
     const manyInputs = Array.from({ length: 4_001 }, () => ({ tagName: "INPUT", type: "text", value: "" }));
     await expect(run({ documentElement: {}, getElementsByTagName: () => manyInputs }))
-      .resolves.toEqual({ withheld: "credential-signal" });
+      .resolves.toEqual({ withheld: "document-too-large" });
 
     let nextNodeCalls = 0;
     await expect(run({
@@ -74,7 +74,7 @@ describe("agent Browser privacy classification", () => {
           return { tagName: "DIV" };
         },
       }),
-    })).resolves.toEqual({ withheld: "credential-signal" });
+    })).resolves.toEqual({ withheld: "document-too-large" });
     expect(nextNodeCalls).toBe(4_001);
     await expect(run({
       documentElement: {},
@@ -113,6 +113,9 @@ describe("agent Browser privacy classification", () => {
     state.evidenceWithheld = "credential-signal";
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "credential-signal" });
+    state.evidenceWithheld = "document-too-large";
+    await expect(agentPageEvidencePrivacy(contents as never))
+      .resolves.toEqual({ withheld: "document-too-large" });
     (state.passwordValues as Set<string>).add("hunter2");
     await expect(agentPageEvidencePrivacy(contents as never))
       .resolves.toEqual({ withheld: "password" });
@@ -165,7 +168,35 @@ describe("agent Browser privacy classification", () => {
       context,
     )).toMatchObject({ scanLimitReached: true });
     expect(runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld", context))
-      .toBe(enumerable ? undefined : "credential-signal");
+      .toBe(enumerable ? undefined : "document-too-large");
+  });
+
+  it("classifies a document with more than 4,000 inputs as too large at document start", async () => {
+    class MutationObserver {
+      constructor(_callback: (records: unknown[]) => void) {}
+      observe(): void {}
+    }
+    const inputs = Array.from({ length: 4_001 }, () => ({ nodeType: 1, tagName: "INPUT", type: "checkbox", value: "on" }));
+    const context = {
+      document: {
+        documentElement: {
+          nodeType: 1,
+          tagName: "HTML",
+          getElementsByTagName: (): unknown[] => inputs,
+        },
+        addEventListener: vi.fn(),
+        createNodeIterator: () => ({ nextNode: () => null }),
+      },
+      MutationObserver,
+    };
+    await installAgentPagePrivacyGuard({
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    } as never);
+    expect(runInNewContext("globalThis.__inertiaAgentBrowser.evidenceWithheld", context))
+      .toBe("document-too-large");
   });
 
   it("records a consumed declarative shadow template and an added frame as not inspected", async () => {

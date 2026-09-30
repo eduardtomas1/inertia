@@ -60,7 +60,14 @@ describe("runtime process protocol", () => {
     };
     expect(parseRuntimeWorkerEvent(request)).toEqual(request);
     expect(parseRuntimeWorkerEvent({ ...request, command: { ...request.command, x: 12 } }))
-      .toBeNull();
+      .toEqual({ ...request, command: null });
+    expect(parseRuntimeWorkerEvent({ ...request, command: undefined })).toEqual({ ...request, command: null });
+    const { command: _command, ...withoutCommand } = request;
+    expect(parseRuntimeWorkerEvent(withoutCommand)).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...withoutCommand, commands: request.command })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...request, requestId: "request" })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...request, identity: { ...browserIdentity, runId: "run" } })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ ...request, extra: true })).toBeNull();
     expect(parseRuntimeWorkerEvent({
       type: "runtime.agent-browser-cancel",
       requestId,

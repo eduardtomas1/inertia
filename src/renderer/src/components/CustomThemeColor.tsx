@@ -61,7 +61,7 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
         </div>
         <div className="custom-theme-inputs">
           <input ref={colorInput} type="color" aria-label={`${label} color picker`} defaultValue={color} disabled={disabled} />
-          <input id={`${id}-hex`} type="text" aria-label={`${label} hex color`} value={draft ?? color}
+          <input id={`${id}-hex`} type="text" value={draft ?? color}
             maxLength={7} spellCheck={false} autoComplete="off" disabled={disabled}
             aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined}
             onChange={(event) => setDraft(event.target.value)} onBlur={commit}

@@ -50,6 +50,7 @@ export function continuationRejectedForCompatibility(value: unknown): boolean {
 export interface TurnSessionRecovery {
   restoredMessageCount: number;
   omittedMessageCount: number;
+  withheldMessageCount?: number;
 }
 
 export function isTurnSessionRecovery(value: unknown): value is TurnSessionRecovery {
@@ -57,7 +58,8 @@ export function isTurnSessionRecovery(value: unknown): value is TurnSessionRecov
   const record = value as Record<string, unknown>;
   const count = (input: unknown): boolean => typeof input === "number"
     && Number.isSafeInteger(input) && input >= 0 && input <= 1_002_000;
-  return Object.keys(record).length === 2
+  return Object.keys(record).length === (record.withheldMessageCount === undefined ? 2 : 3)
     && count(record.restoredMessageCount)
-    && count(record.omittedMessageCount);
+    && count(record.omittedMessageCount)
+    && count(record.withheldMessageCount ?? 0);
 }

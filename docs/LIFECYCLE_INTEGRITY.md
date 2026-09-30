@@ -220,9 +220,11 @@ missing-conversation result) fails with a missing-session error, every harness
 reports an unavailable session. Errors that name a missing working directory,
 model, field or file path, and errors from any later step, do not count. If the
 first attempt produced no text, reasoning, tool, command, status or approval
-activity, the same turn restarts once on a fresh session; otherwise it fails.
-Either way the dead native ID is cleared, the fresh session records
-`stale-provider-session`, and no later turn retries it.
+activity, the same turn restarts once on a fresh session; otherwise it fails,
+and every harness reports the same explanation: the saved session is no
+longer available and the next turn starts a fresh one. Either way the dead
+native ID is cleared, the fresh session records `stale-provider-session`, and
+no later turn retries it.
 
 A rejection the harness does not recognise cannot strand the chat. The Codex,
 Cursor, Kimi and OpenCode harnesses also report any provider error at their
@@ -239,15 +241,32 @@ The token no longer retires native sessions, so a harness change that makes
 previously saved sessions unusable must retire them explicitly with a
 migration, as schema 65 did for Codex.
 
-A fresh session in an established chat never starts blank. The request carries
-the chat's earlier visible messages, selected by the same packer as an explicit
-reference to this chat: the opening request first, then the newest turns,
-bounded by the room left beside the selected context and, on a custom backend,
-by a smaller fixed share. Attachments, tool output and hidden provider state
-are not included, and known secret patterns are redacted. The turn records how
-many messages were restored and omitted, and the conversation shows that a new
-provider session started. An explicit reference to this chat in the same
-message is not duplicated.
+A fresh session in an established chat does not start blank. The request
+carries the chat's earlier visible messages that were already sent to the
+current backend profile and endpoint, selected by the same packer as an
+explicit reference to this chat: the opening request first, then the newest
+turns, bounded by the room left beside the selected context and, on a custom
+backend, by a smaller fixed share. Attachments, tool output and hidden provider
+state are not included, and known secret patterns (bearer, API, GitHub, Slack
+and AWS keys, JSON credential values, URL passwords and PEM private keys) are
+redacted. The turn records how many messages were restored, omitted and
+withheld, and the conversation shows that a new provider session started. An
+explicit reference to this chat in the same message is not duplicated.
+
+Earlier messages are never sent automatically to a backend profile or endpoint
+that did not already receive them. A message belongs to the route of the turn
+that carried it: the turn's user message, its follow-ups and its answers. Only
+messages whose turn used the current backend profile and endpoint are
+restored; the rest are withheld and the note says that earlier messages from
+another model endpoint were not restored. Each native provider profile counts
+as one endpoint, so a provider update or a configuration revision of the same
+backend and endpoint restores everything sent there. Moving a chat from
+endpoint A to B withholds the A messages; if B's session later goes stale,
+only the B messages are restored; returning to A restores the A messages and
+withholds the B ones. Legacy messages recorded without a turn are restored only
+while the conversation's recorded route, every turn and every earlier restore
+stayed on the current endpoint. The user can still attach this chat
+explicitly, with its preview, to carry the whole history across.
 
 ## Cross-version application handoff
 
@@ -382,7 +401,10 @@ observed after measurement.
   stay readable. Native routes resume them; custom backends fall back to a
   fresh session without deleting conversation data.
 - Schema 84 appends a nullable, bounded session-recovery column to agent
-  turns. Existing turns read as not recovered.
+  turns. Existing turns read as not recovered. The column holds either the
+  restored and omitted message counts of a fresh session, with an optional
+  count of messages withheld because another endpoint received them, or a
+  marker that the provider rejected the turn's resume.
 - Existing single-result backend probe JSON remains readable. The next
   successful probe writes a versioned, bounded collection with at most one
   monotonic result per configured model; incompatible profile revisions still

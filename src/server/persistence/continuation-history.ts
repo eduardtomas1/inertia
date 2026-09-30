@@ -8,6 +8,7 @@ import {
   conversationContextWorkspaceLabel,
   scrubConversationContextMetadata,
 } from "./conversation-context-excerpts";
+import type { ContinuationRouteFilter } from "./conversation-context-source";
 import { prepareConversationContextPacket } from "./conversation-context-transport";
 
 export interface ContinuationHistoryBlock {
@@ -19,6 +20,7 @@ export interface ContinuationHistory {
   blocks: ContinuationHistoryBlock[];
   messageCount: number;
   omittedMessageCount: number;
+  withheldMessageCount?: number;
 }
 
 interface ContinuationHistorySourceRow {
@@ -36,6 +38,7 @@ export function readContinuationHistory(
   capacityBytes: number,
   capturedAt: string,
   excludedMessageId?: string,
+  route?: ContinuationRouteFilter,
 ): ContinuationHistory | null {
   const source = database.prepare(`
     SELECT conversation.id, conversation.project_id, conversation.title,
@@ -50,9 +53,14 @@ export function readContinuationHistory(
     source.id,
     null,
     excludedMessageId,
+    route,
   );
   if (!collected) return null;
-  const { excerpts, droppedMessageCount } = collected;
+  const { excerpts, droppedMessageCount, withheldMessageCount } = collected;
+  const withheld = withheldMessageCount > 0 ? { withheldMessageCount } : {};
+  if (excerpts.length === 0) {
+    return { blocks: [], messageCount: 0, omittedMessageCount: 0, ...withheld };
+  }
   const workspaceLabel = scrubConversationContextMetadata(
     conversationContextWorkspaceLabel(source),
     "Workspace",
@@ -83,6 +91,7 @@ export function readContinuationHistory(
     blocks: [],
     messageCount: 0,
     omittedMessageCount: excerpts.length + droppedMessageCount,
+    ...withheld,
   };
   if (capacityBytes <= 0) return unavailable;
   try {
@@ -91,6 +100,7 @@ export function readContinuationHistory(
       blocks: prepared.blocks.map(({ label, content }) => ({ label, content })),
       messageCount: prepared.packet.messageCount,
       omittedMessageCount: prepared.packet.droppedMessageCount,
+      ...withheld,
     };
   } catch {
     return unavailable;

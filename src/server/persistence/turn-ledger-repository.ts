@@ -377,6 +377,31 @@ export class TurnLedgerRepository {
     return origin.started_after_retirement === 0 || origin.completed_turn === 1;
   }
 
+  historyStayedOnEndpoint(
+    conversationId: string,
+    backendProfileId: string,
+    endpointIdentity: string | null,
+  ): { turnCount: number; stayed: boolean } {
+    const row = this.context.database.prepare(`
+      SELECT COUNT(*) AS turn_count,
+        COALESCE(SUM(
+          backend_profile_id IS NOT @backendProfileId
+          OR (CASE WHEN json_valid(continuation_identity_json)
+            THEN json_extract(continuation_identity_json, '$.endpointIdentity')
+          END) IS NOT @endpointIdentity
+          OR (CASE WHEN json_valid(session_recovery_json)
+            THEN json_extract(session_recovery_json, '$.withheldMessageCount')
+          END) IS NOT NULL
+        ), 0) AS crossed
+      FROM agent_turns
+      WHERE conversation_id = @conversationId
+    `).get({ conversationId, backendProfileId, endpointIdentity }) as {
+      turn_count: number;
+      crossed: number;
+    };
+    return { turnCount: row.turn_count, stayed: row.crossed === 0 };
+  }
+
   recordRejectedResume(turnId: string, sessionId: string): void {
     this.context.database.prepare(`
       UPDATE agent_turns

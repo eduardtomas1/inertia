@@ -259,6 +259,8 @@ test("opens a language-aware project link at its exact validated Java range", as
     contentType: "image/png",
   });
 
+  await expect(lightPanel.locator(".file-git-status"))
+    .not.toHaveText("Checking Git changes…");
   const toolsHandle = page.getByRole("separator", {
     name: "Resize workspace tools",
   });

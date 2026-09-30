@@ -19,7 +19,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function fixture(providerId: (typeof providers)[number] = "claude") {
+async function fixture(providerId: (typeof providers)[number] = "claude", seeded = true) {
   const directory = await mkdtemp(join(tmpdir(), "inertia-session-continuity-"));
   directories.push(directory);
   const workspace = join(directory, "workspace");
@@ -34,18 +34,24 @@ async function fixture(providerId: (typeof providers)[number] = "claude") {
   const selection = providerNativeModelSelection({ providerId, modelId: "provider-default" });
   const conversation = store.createConversation(project.id, "Existing work", { modelSelection: selection });
   const route = resolveNativeModelRoute(selection);
-  store.createMessage(conversation.id, "The export must preserve accented names.", "user", [], null, "2030-01-01T00:00:00.000Z");
-  const answer = store.createMessage(conversation.id, "I will use UTF-8", "assistant", [], null, "2030-01-01T00:00:01.000Z");
-  store.appendMessageContent(answer.id, " and verify café.");
+  if (seeded) {
+    store.createMessage(conversation.id, "The export must preserve accented names.", "user", [], null, "2030-01-01T00:00:00.000Z");
+    const answer = store.createMessage(conversation.id, "I will use UTF-8", "assistant", [], null, "2030-01-01T00:00:01.000Z");
+    store.appendMessageContent(answer.id, " and verify café.");
+  }
   const other = store.createConversation(project.id, "Unrelated", { modelSelection: selection });
   store.createMessage(other.id, "OTHER_CHAT_PRIVATE_SENTINEL");
   const previous = { ...route.continuationIdentity, providerCompatibilityToken: "b".repeat(64) };
   let sequence = 0;
-  const resolve = (activeStore = store, request: Partial<QueueTurnRequest> = {}) => resolveTurnRequest({
+  const resolve = (
+    activeStore = store,
+    request: Partial<QueueTurnRequest> = {},
+    activeRoute = route,
+  ) => resolveTurnRequest({
     store: activeStore,
     providers: {
-      resolveModelRoute: () => route,
-      harnessIdFor: () => route.harnessId,
+      resolveModelRoute: () => activeRoute,
+      harnessIdFor: () => activeRoute.harnessId,
     } as unknown as TurnProviderRuntime,
     hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
     id: () => `continuity-${++sequence}`,
@@ -56,7 +62,28 @@ async function fixture(providerId: (typeof providers)[number] = "claude") {
     store.continuationHistory(conversation.id, capacityBytes, capturedAt, excludedMessageId);
   const restoredReferences = (turnId: string) => store.turnExecutionManifest(turnId)?.references
     .filter(({ label }) => label.startsWith(RESTORED_CHAT_HISTORY_LABEL)) ?? [];
-  return { store, conversation, route, previous, resolve, openStore, history, restoredReferences };
+  const routeOn = (endpointIdentity: string | null) => ({
+    ...route,
+    continuationIdentity: { ...route.continuationIdentity, endpointIdentity },
+  });
+  const runTurn = (content: string, activeRoute: typeof route, sessionId: string) => {
+    const resolved = resolve(store, { content }, activeRoute);
+    const queued = store.beginAgentTurn(resolved.input);
+    const active = resolved.adopt(queued).active;
+    store.createMessage(conversation.id, `Answer to ${content}`, "assistant", [], queued.turn.id);
+    store.settleAgentTurn(queued.turn.id, {
+      status: "completed", terminalReason: "provider-completed", providerSessionAfter: sessionId,
+      startedAt: queued.turn.requestedAt, completedAt: queued.turn.requestedAt, updatedAt: queued.turn.requestedAt,
+    });
+    store.updateConversation(conversation.id, {
+      providerSessionId: sessionId,
+      continuationIdentity: queued.turn.continuationIdentity,
+    });
+    return { turn: store.agentTurn(queued.turn.id), prompt: active.providerInput.prompt };
+  };
+  return {
+    store, conversation, route, previous, resolve, openStore, history, restoredReferences, routeOn, runTurn,
+  };
 }
 
 describe("provider session continuity", () => {
@@ -120,25 +147,140 @@ describe("provider session continuity", () => {
     expect(queued.message.content).toBe("Try the export again.");
   });
 
-  it.each(["backend", "endpoint"] as const)("restores earlier messages when the %s changes under an established chat", async (boundary) => {
+  it("restores earlier messages when the same backend is reconfigured under an established chat", async () => {
     const f = await fixture();
-    const previous: typeof f.route.continuationIdentity = { ...f.previous };
-    if (boundary === "backend") previous.backendConfigurationRevision += 1;
-    if (boundary === "endpoint") previous.endpointIdentity = "different-account-endpoint";
-    f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: previous });
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "before-update",
+      continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
+    });
     const resolved = f.resolve();
     const queued = f.store.beginAgentTurn(resolved.input);
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).toContain("The export must preserve accented names.");
-    expect(queued.turn.continuationReasonCode).toBe(
-      boundary === "backend" ? "backend-configuration-changed" : "backend-endpoint-changed",
-    );
+    expect(queued.turn.continuationReasonCode).toBe("backend-configuration-changed");
     expect(queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
-  it("keeps restoring after a failed fresh launch and a runtime restart", async () => {
+  it.each([
+    ["endpoint", { endpointIdentity: "different-account-endpoint" }, "backend-endpoint-changed"],
+    ["backend profile", { backendProfileId: "custom-other-backend" }, "backend-profile-changed"],
+  ] as const)("does not send messages recorded for another %s to a new session", async (_label, change, reason) => {
+    const f = await fixture();
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "before-update",
+      continuationIdentity: { ...f.previous, ...change },
+    });
+    const resolved = f.resolve();
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const input = resolved.adopt(queued).active.providerInput;
+    expect(input.sessionId).toBeUndefined();
+    expect(input.prompt).not.toContain("The export must preserve accented names.");
+    expect(input.prompt).not.toContain("restored automatically");
+    expect(input.prompt).toContain("Continue the export.");
+    expect(queued.turn).toMatchObject({
+      continuationReasonCode: reason,
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 },
+    });
+    expect(f.restoredReferences(queued.turn.id)).toEqual([]);
+    expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
+  });
+
+  it("withholds the messages sent to endpoint A when the chat moves to endpoint B", async () => {
+    const f = await fixture("codex", false);
+    f.runTurn("Request on endpoint A.", f.routeOn(null), "session-a");
+    const moved = f.runTurn("Request on endpoint B.", f.routeOn("account-b"), "session-b");
+    expect(moved.prompt).not.toContain("Request on endpoint A.");
+    expect(moved.prompt).not.toContain("Answer to Request on endpoint A.");
+    expect(moved.turn).toMatchObject({
+      continuationReasonCode: "backend-endpoint-changed",
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 },
+    });
+  });
+
+  it("restores only the endpoint B messages when B's session goes stale", async () => {
+    const f = await fixture("codex", false);
+    const b = f.routeOn("account-b");
+    f.runTurn("Request on endpoint A.", f.routeOn(null), "session-a");
+    f.runTurn("Request on endpoint B.", b, "session-b");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
+    const stale = f.runTurn("Second request on endpoint B.", b, "session-b2");
+    expect(stale.prompt).toContain("Request on endpoint B.");
+    expect(stale.prompt).toContain("Answer to Request on endpoint B.");
+    expect(stale.prompt).not.toContain("Request on endpoint A.");
+    expect(stale.turn).toMatchObject({
+      continuationReasonCode: "missing-continuation-identity",
+      sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 0, withheldMessageCount: 2 },
+    });
+  });
+
+  it("restores only the endpoint B messages when a resume on B is rejected inside the turn", async () => {
+    const f = await fixture("codex", false);
+    const b = f.routeOn("account-b");
+    f.runTurn("Request on endpoint A.", f.routeOn(null), "session-a");
+    f.runTurn("Request on endpoint B.", b, "session-b");
+    const resolved = f.resolve(f.store, { content: "Second request on endpoint B." }, b);
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const active = resolved.adopt(queued).active;
+    expect(active.providerInput.sessionId).toBe("session-b");
+    const fresh = active.freshSessionRequest!(queued.message.id);
+    expect(fresh.executionPrompt).toContain("Answer to Request on endpoint B.");
+    expect(fresh.executionPrompt).not.toContain("Request on endpoint A.");
+    expect(fresh.sessionRecovery).toEqual({
+      restoredMessageCount: 2,
+      omittedMessageCount: 0,
+      withheldMessageCount: 2,
+    });
+  });
+
+  it("restores the endpoint A messages again when the chat returns to A", async () => {
+    const f = await fixture("codex", false);
+    const a = f.routeOn(null);
+    f.runTurn("Request on endpoint A.", a, "session-a");
+    f.runTurn("Request on endpoint B.", f.routeOn("account-b"), "session-b");
+    const back = f.runTurn("Second request on endpoint A.", a, "session-a2");
+    expect(back.prompt).toContain("Request on endpoint A.");
+    expect(back.prompt).toContain("Answer to Request on endpoint A.");
+    expect(back.prompt).not.toContain("Request on endpoint B.");
+    expect(back.turn).toMatchObject({
+      continuationReasonCode: "backend-endpoint-changed",
+      sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 0, withheldMessageCount: 2 },
+    });
+  });
+
+  it("restores everything from the same endpoint after a configuration revision", async () => {
+    const f = await fixture("codex");
+    const a = f.routeOn(null);
+    const resolved = f.resolve(f.store, { content: "Request before the revision." }, a);
+    const revision = resolved.input.modelSelection!.backendConfigurationRevision + 1;
+    const earlier = f.store.beginAgentTurn({
+      ...resolved.input,
+      modelSelection: { ...resolved.input.modelSelection!, backendConfigurationRevision: revision },
+      continuationIdentity: { ...resolved.input.continuationIdentity!, backendConfigurationRevision: revision },
+      configurationRevision: revision,
+    });
+    f.store.createMessage(f.conversation.id, "Answer before the revision.", "assistant", [], earlier.turn.id);
+    f.store.settleAgentTurn(earlier.turn.id, {
+      status: "completed", terminalReason: "provider-completed", providerSessionAfter: "session-a",
+      startedAt: earlier.turn.requestedAt, completedAt: earlier.turn.requestedAt, updatedAt: earlier.turn.requestedAt,
+    });
+    f.store.updateConversation(f.conversation.id, {
+      providerSessionId: "session-a",
+      continuationIdentity: earlier.turn.continuationIdentity,
+    });
+    const revised = f.runTurn("Request after the revision.", a, "session-a2");
+    expect(revised.prompt).toContain("Request before the revision.");
+    expect(revised.prompt).toContain("Answer before the revision.");
+    expect(revised.prompt).toContain("The export must preserve accented names.");
+    expect(revised.turn).toMatchObject({
+      continuationReasonCode: "backend-configuration-changed",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
+    });
+    expect(revised.turn.sessionRecovery).not.toHaveProperty("withheldMessageCount");
+  });
+
+  it("keeps withholding the other endpoint's messages after a failed fresh launch and a runtime restart", async () => {
     const f = await fixture();
     f.store.updateConversation(f.conversation.id, {
       providerSessionId: "before-update",
@@ -155,13 +297,18 @@ describe("provider session continuity", () => {
     f.store.close();
     stores.splice(stores.indexOf(f.store), 1);
     const restarted = f.openStore();
-    const next = f.resolve(restarted);
+    const next = f.resolve(restarted, { content: "Try the export again." });
     const resumed = restarted.beginAgentTurn(next.input);
     const input = next.adopt(resumed).active.providerInput;
     expect(input.sessionId).toBeUndefined();
-    expect(input.prompt).toContain("The export must preserve accented names.");
+    expect(input.prompt).not.toContain("The export must preserve accented names.");
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
-    expect(resumed.turn.sessionRecovery).toEqual({ restoredMessageCount: 3, omittedMessageCount: 0 });
+    expect(input.prompt).toContain("Continue the export.");
+    expect(resumed.turn.sessionRecovery).toEqual({
+      restoredMessageCount: 1,
+      omittedMessageCount: 0,
+      withheldMessageCount: 2,
+    });
   });
 
   it("does not restore history into the first turn of a new chat", async () => {
@@ -345,7 +492,7 @@ describe("restored history on a custom backend", () => {
     }
     f.store.updateConversation(f.conversation.id, {
       providerSessionId: "before-update",
-      continuationIdentity: { ...f.previous, endpointIdentity: "different-account-endpoint" },
+      continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
     });
     const restoredBytes = (custom: boolean) => {
       const resolved = resolveTurnRequest({

@@ -282,6 +282,14 @@ describe("Quiet Ledger user request layer", () => {
       continuationReasonCode: "backend-endpoint-changed",
       sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0 },
     })).toBe("Model backend endpoint changed · Earlier messages were not restored automatically");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "backend-endpoint-changed",
+      sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 4 },
+    })).toBe("Model backend endpoint changed · Earlier messages from another model endpoint were not restored");
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "missing-continuation-identity",
+      sessionRecovery: { restoredMessageCount: 2, omittedMessageCount: 1, withheldMessageCount: 2 },
+    })).toBe("2 earlier messages restored · 1 omitted · Earlier messages from another model endpoint were not restored");
   });
 
   it("renders reloaded context provenance and states a deleted source truthfully", () => {

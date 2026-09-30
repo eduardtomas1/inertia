@@ -80,7 +80,8 @@ function continuationIdentity(value: unknown): boolean {
   return versionedContinuationIdentitySchema.safeParse(value).success;
 }
 function optionalContinuationReasonCode(value: UnknownRecord): boolean {
-  const reason = value.continuationReasonCode; const recovery = value.sessionRecovery;
+  const reason = value.continuationReasonCode;
+  const recovery = value.sessionRecovery;
   return (reason === undefined || reason === null || isContinuationReasonCode(reason)) && (recovery === undefined || recovery === null || isTurnSessionRecovery(recovery));
 }
 function backendProfile(value: unknown, detail = false): boolean {

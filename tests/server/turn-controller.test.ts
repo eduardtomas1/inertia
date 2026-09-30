@@ -36,6 +36,7 @@ describe("TurnController authoritative lifecycle", () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start the parent turn." });
     runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({ ...identity(runtime), type: "status", status: "running" });
     const beforeRejected = runtime.store.snapshot();
     vi.spyOn(runtime.provider, "steer").mockResolvedValue(false);
     const rejectedAdmission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;

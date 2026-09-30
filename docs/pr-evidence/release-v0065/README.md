@@ -49,6 +49,7 @@ commit `a8499929`):
   - #516 Let the mascot follow a chosen chat and show richer context.
   - #521 Add an in-app Help window built from the welcome guide.
 - #528 Support Codex 0.159.0 and GPT-6.1 Sol.
+- #536 Deliver follow-ups sent while the provider turn is still starting.
 
 ## Local validation
 
@@ -82,6 +83,40 @@ earlier main commits passed only on a rerun; the intermittent failures behind
 those reruns are what #510, #511, #520, #522, #523, #524, #526 and #527
 address. The CI run on `5d51f21e` was still in progress when this report was
 written.
+
+## First release attempt and #536
+
+The first release attempt ran from `cb93b1f5`, this preparation on main (run
+36690014523). Its macOS ARM64 build failed in the display-sensitive Electron
+end-to-end step, in `tests/e2e/image-follow-up-regression.spec.ts`: an image
+sent into a running turn was refused because Codex had not yet reported the
+turn running. That was a real product defect, and #536 fixes it. The rerun of
+that build reached its 50-minute job budget and was cancelled by GitHub, and
+nothing was published. The unpublished tag moves to the new main before any
+publication.
+
+#536 changes only server-side follow-up delivery, in three `src/server` files.
+It does not touch the renderer, and the renderer bundle is byte-identical. Its
+PR CI passed in runs 36711528031 (attempt 4) and 36724750393, and the local
+spec loops described in its PR body passed. The local validation above and the
+packaging below ran before #536, on `5d51f21e` and `d0e62178` plus this
+preparation.
+
+The CI run on main `8b8e9283` (#536), 36729398902, passed on its first
+attempt, and the CI run on main `6f042930` (#537), 36735439834, passed on its
+first attempt.
+
+## Second release attempt and the macOS ARM64 budget
+
+The second attempt ran from `6f042930` (run 36736016085). Its macOS ARM64
+build passed the display-sensitive end-to-end step, including the spec that
+failed the first attempt, and was then cancelled by GitHub at the job's
+50-minute budget while 102 of 126 isolated end-to-end specs had run. That
+budget dates from #168; the build took 44 to 48 minutes in the v0.0.61 to
+v0.0.64 releases and the larger v0.0.65 suite needs more. The other five
+builds passed and nothing was published. The budget is now 75 minutes, in line
+with the other platforms, and the tag moves to main with that change before
+any publication.
 
 ## Packaging and README views
 

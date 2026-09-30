@@ -46,6 +46,7 @@ export class AuthoritativeRunStateEngine {
   private requestedTerminal: AgentRunTerminalState | null = null;
   private terminal: AgentRunTerminalState | null = null;
   private quarantined = false;
+  private readonly providerTurnWaiters = new Set<() => void>();
   private current: AgentRunStateSnapshot = {
     state: "queued",
     providerState: null,
@@ -73,6 +74,18 @@ export class AuthoritativeRunStateEngine {
       && this.terminal === null
       && this.requestedTerminal === null
       && !this.cancellationObserved;
+  }
+
+  awaitingProviderTurn(): boolean {
+    return this.acceptsProviderEvents()
+      && (this.current.state === "queued" || this.current.state === "starting");
+  }
+
+  providerTurnStarted(): Promise<void> {
+    if (!this.awaitingProviderTurn()) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.providerTurnWaiters.add(resolve);
+    });
   }
 
   terminalRequest(): AgentRunTerminalState | null {
@@ -195,6 +208,13 @@ export class AuthoritativeRunStateEngine {
     this.requestedTerminal = outcome;
     if (snapshot) this.current = { ...snapshot };
     else this.refresh();
+    this.releaseProviderTurnWaiters();
+  }
+
+  private releaseProviderTurnWaiters(): void {
+    if (this.awaitingProviderTurn()) return;
+    for (const resolve of this.providerTurnWaiters) resolve();
+    this.providerTurnWaiters.clear();
   }
 
   private derivedState(): AgentRunState {
@@ -226,6 +246,7 @@ export class AuthoritativeRunStateEngine {
       providerState: native,
       revision: this.current.revision + 1,
     };
+    this.releaseProviderTurnWaiters();
     return true;
   }
 }

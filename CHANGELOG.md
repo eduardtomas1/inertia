@@ -87,6 +87,10 @@ reliability and safety fixes.
   failed send no longer leaves attachments that the next send loses. The
   response timeline stays steadier while streaming, and a failed copy says
   **Copy failed**.
+- A message or image you send to Codex or Claude in the moment before the
+  provider reports its turn running is now delivered once the turn starts,
+  instead of being refused with "This active agent route cannot accept a
+  follow-up."
 - Many intermittent test and CI failures were traced to their cause and
   fixed, and lucide-react is updated to 1.48.0.
 

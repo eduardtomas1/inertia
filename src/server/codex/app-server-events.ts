@@ -176,6 +176,7 @@ export class CodexAppServerEvents {
     this.subagents = new CodexSubagentLifecycle({
       rootThreadId: host.providerThreadId,
       rootTurnId: host.activeTurnId,
+      cancelRequested: host.cancelRequested,
       emitSubagent: (update, authority, isLive) => {
         this.emitSubagent(update, authority, isLive);
       },

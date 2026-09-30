@@ -1,5 +1,5 @@
 import type { ProviderActivityPhase, ProviderRunFailure } from "../provider/contracts";
-import { boundedText, type JsonObject } from "./protocol";
+import { objectValue, type JsonObject } from "./protocol";
 
 export type CodexCommandOrPatchStatus =
   | "inProgress"
@@ -67,16 +67,19 @@ export function codexTurnInterruptionFailure(
   // turn without a separate error notification. Earlier retry errors alone
   // do not turn a plain interruption into a provider failure.
   if (status !== "interrupted" || !turnError || cancelRequested) return undefined;
-  const technicalDetail = [
-    turnError.codexErrorInfo === "tooManyDenials"
-      ? "Codex error: tooManyDenials"
-      : undefined,
-    boundedText(turnError.message, 4_000),
-  ].filter(Boolean).join("\n");
+  const errorInfo = codexErrorInfoName(turnError.codexErrorInfo);
   return {
-    message: "Codex interrupted the turn before completion.",
-    ...(technicalDetail ? { technicalDetail } : {}),
+    message: errorInfo === "tooManyDenials"
+      ? "Codex stopped the turn after repeated approval denials."
+      : "Codex interrupted the turn before completion.",
+    ...(errorInfo ? { technicalDetail: `Codex error: ${errorInfo}` } : {}),
   };
+}
+
+function codexErrorInfoName(value: unknown): string | undefined {
+  const keys = Object.keys(objectValue(value) ?? {});
+  const name = typeof value === "string" ? value : keys.length === 1 ? keys[0] : undefined;
+  return name && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(name) ? name : undefined;
 }
 
 function isRecordKey<T extends object>(

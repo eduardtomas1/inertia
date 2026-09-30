@@ -5,6 +5,7 @@ import {
   stringValue,
   type JsonObject,
 } from "./protocol";
+import { codexTurnInterruptionFailure } from "./app-server-status";
 import type { CodexAppServerOptions } from "./types";
 
 export type CodexSubagentUpdate = Parameters<
@@ -22,6 +23,7 @@ export interface CodexSubagentProjection {
 interface CodexSubagentLifecycleHost {
   rootThreadId: () => string | undefined;
   rootTurnId: () => string | undefined;
+  cancelRequested: () => boolean;
   emitSubagent: (
     update: Omit<CodexSubagentUpdate, "sequence" | "isLive">,
     authority: CodexSubagentAuthority,
@@ -844,8 +846,15 @@ export class CodexSubagentLifecycle {
     this.completedChildTurns.add(completionKey);
     this.childActiveTurns.delete(threadId);
     const status = stringValue(turn?.status);
-    const failure = boundedText(objectValue(turn?.error)?.message, 16_000)
-      ?? null;
+    const turnError = objectValue(turn?.error);
+    const interruptionFailure = codexTurnInterruptionFailure(
+      status, turnError, this.host.cancelRequested(),
+    );
+    const failure = boundedText(
+      [interruptionFailure?.message, boundedText(turnError?.message, 16_000)]
+        .filter(Boolean).join("\n"),
+      16_000,
+    ) ?? null;
     const output = boundedText(
       this.childResults.get(threadId)?.toString(),
       16_000,
@@ -853,7 +862,7 @@ export class CodexSubagentLifecycle {
     const terminalStatus: CodexSubagentUpdate["status"] =
       status === "completed"
         ? "completed"
-        : status === "failed"
+        : status === "failed" || interruptionFailure
           ? "failed"
           : status === "interrupted"
             ? "interrupted"

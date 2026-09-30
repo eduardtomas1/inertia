@@ -27,9 +27,11 @@ function lifecycleHarness() {
   const projections = new Map<string, CodexSubagentProjection>();
   const rejectMalformed = vi.fn();
   let sequence = 0;
+  let cancelRequested = false;
   const lifecycle = new CodexSubagentLifecycle({
     rootThreadId: () => ROOT_THREAD_ID,
     rootTurnId: () => ROOT_TURN_ID,
+    cancelRequested: () => cancelRequested,
     emitSubagent: (update, authority, isLive = true) => {
       sequence += 1;
       updates.push({ sequence, ...update, isLive });
@@ -44,7 +46,10 @@ function lifecycleHarness() {
     projection: (providerAgentId) => projections.get(providerAgentId),
     rejectMalformed,
   });
-  return { lifecycle, projections, rejectMalformed, updates };
+  return {
+    lifecycle, projections, rejectMalformed, updates,
+    requestCancel: () => { cancelRequested = true; },
+  };
 }
 
 function activity(
@@ -270,6 +275,41 @@ describe("Codex delegated-agent lifecycle", () => {
       status,
       isLive: false,
     });
+    expect(lifecycle.interruptibleTurns()).toEqual([]);
+  });
+
+  it.each([
+    [
+      { message: "Guardian interrupted the turn after 3 consecutive approval denials.", codexErrorInfo: "tooManyDenials" },
+      false, "failed",
+      "Codex stopped the turn after repeated approval denials.\nGuardian interrupted the turn after 3 consecutive approval denials.",
+    ],
+    [{ codexErrorInfo: "tooManyDenials" }, false, "failed", "Codex stopped the turn after repeated approval denials."],
+    [{}, false, "failed", "Codex interrupted the turn before completion."],
+    [{ message: "Guardian interrupted the turn.", codexErrorInfo: "tooManyDenials" }, true, "interrupted", "Partial child output"],
+    [null, false, "interrupted", "Partial child output"],
+    ["UNEXPECTED_PAYLOAD", false, "interrupted", "Partial child output"],
+  ] as const)("classifies an interrupted child turn with error %j (cancel requested: %s) as %s", (error, cancel, status, result) => {
+    const { lifecycle, requestCancel, updates } = lifecycleHarness();
+    activity(lifecycle, "guarded-child");
+    childTurn(lifecycle, "turn/started", "guarded-child", "guarded-turn", "inProgress");
+    lifecycle.handleNotification("item/agentMessage/delta", {
+      threadId: "guarded-child", itemId: "child-message", delta: "Partial child output",
+    });
+    if (cancel) requestCancel();
+    lifecycle.handleNotification("turn/completed", {
+      threadId: "guarded-child",
+      turn: { id: "guarded-turn", status: "interrupted", items: [], error },
+    });
+
+    expect(updates.at(-1)).toMatchObject({
+      providerAgentId: "guarded-child",
+      providerStatus: "interrupted",
+      status,
+      result,
+      isLive: false,
+    });
+    expect(JSON.stringify(updates)).not.toContain("UNEXPECTED_PAYLOAD");
     expect(lifecycle.interruptibleTurns()).toEqual([]);
   });
 

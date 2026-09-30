@@ -326,9 +326,14 @@ export class TurnLedgerRepository {
     const attempts = this.context.database.prepare(`
       SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
         turn.terminal_assistant_message_id,
+        CASE WHEN json_valid(turn.session_recovery_json)
+          THEN json_extract(turn.session_recovery_json, '$.resumeRejected')
+        END AS resume_rejected,
         EXISTS(
           SELECT 1 FROM activities
-          WHERE activities.turn_id = turn.id AND activities.kind <> 'error'
+          WHERE activities.conversation_id = turn.conversation_id
+            AND activities.turn_id = turn.id
+            AND activities.kind <> 'error'
         ) AS progressed
       FROM agent_turns AS turn
       WHERE turn.conversation_id = ?
@@ -339,16 +344,55 @@ export class TurnLedgerRepository {
       terminal_reason: string | null;
       provider_session_before: string | null;
       terminal_assistant_message_id: string | null;
+      resume_rejected: number | null;
       progressed: 0 | 1;
     }>;
-    return attempts.length === 2 && attempts.every((attempt) =>
+    const rejectedTwice = attempts.length === 2 && attempts.every((attempt) =>
       attempt.status === "failed"
       && attempt.provider_session_before === sessionId
+      && attempt.resume_rejected === 1
       && attempt.terminal_assistant_message_id === null
       && attempt.progressed === 0
       && (attempt.terminal_reason === "provider-error"
         || attempt.terminal_reason === "provider-process-exit"
         || attempt.terminal_reason === "provider-process-crash"));
+    if (!rejectedTwice) return false;
+    const origin = this.context.database.prepare(`
+      SELECT
+        EXISTS(
+          SELECT 1 FROM agent_turns
+          WHERE conversation_id = ? AND provider_session_after = ?
+            AND provider_session_before IS NULL
+            AND continuation_reason_code = 'stale-provider-session'
+        ) AS started_after_retirement,
+        EXISTS(
+          SELECT 1 FROM agent_turns
+          WHERE conversation_id = ? AND provider_session_after = ?
+            AND status = 'completed'
+        ) AS completed_turn
+    `).get(conversationId, sessionId, conversationId, sessionId) as {
+      started_after_retirement: 0 | 1;
+      completed_turn: 0 | 1;
+    };
+    return origin.started_after_retirement === 0 || origin.completed_turn === 1;
+  }
+
+  recordRejectedResume(turnId: string, sessionId: string): void {
+    this.context.database.prepare(`
+      UPDATE agent_turns
+      SET session_recovery_json = '{"resumeRejected":true}'
+      WHERE id = ? AND provider_session_before = ? AND session_recovery_json IS NULL
+    `).run(turnId, sessionId);
+  }
+
+  turnHasProviderActivity(conversationId: string, turnId: string): boolean {
+    const row = this.context.database.prepare(`
+      SELECT EXISTS(
+        SELECT 1 FROM activities
+        WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
+      ) AS progressed
+    `).get(conversationId, turnId) as { progressed: 0 | 1 };
+    return row.progressed === 1;
   }
 
   restartOnFreshSession(turnId: string, input: {

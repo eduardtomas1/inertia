@@ -85,7 +85,7 @@ import {
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
-import { applyFreshSessionFallback, providerSessionUnavailable, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
+import { applyFreshSessionFallback, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
 
 export type {
   QueuedTurn,
@@ -1152,6 +1152,7 @@ export class TurnController {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     }
     const outcomeAlreadyRequested = active.deferredSettlement !== null;
+    if (!outcomeAlreadyRequested) recordRejectedProviderResume(this.store, active, result);
     if (!outcomeAlreadyRequested && providerSessionUnavailable(result)) {
       releaseUnavailableProviderSession(this.store, active);
     } else if (!outcomeAlreadyRequested && result.sessionId) {

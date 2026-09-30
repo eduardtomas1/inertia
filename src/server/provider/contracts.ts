@@ -195,6 +195,7 @@ export interface ProviderRunFailure {
   terminalEvent?: string;
   activityId?: string;
   sessionUnavailable?: true;
+  resumeRejected?: true;
 }
 
 export interface ProviderFreshSessionFallback {

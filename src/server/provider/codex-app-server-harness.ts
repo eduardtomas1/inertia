@@ -273,6 +273,9 @@ function startCodexRun(
         ...(continuationError === "stale-provider-session"
           ? { sessionUnavailable: true as const }
           : {}),
+        ...(continuationError === "resume-rejected" && !compatibilityError
+          ? { resumeRejected: true as const }
+          : {}),
       };
       emitter.status("failed", message);
       return {

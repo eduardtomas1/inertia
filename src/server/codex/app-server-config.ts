@@ -3,6 +3,7 @@ import {
   type JsonObject,
 } from "./protocol";
 import type { CodexAppServerOptions } from "./types";
+import { namesUnrelatedMissingResource } from "../provider/session-unavailable";
 
 export const CODEX_APP_SERVER_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const CODEX_APP_SERVER_MAX_WINDOW_BYTES = 256 * 1024 * 1024;
@@ -168,19 +169,11 @@ export function codexServiceTierMatches(
     : boundedText(attested, 40) === requested;
 }
 
+const STALE_THREAD = /\bthread\b[^.\n]{0,80}\b(?:not found|does not exist|no longer exists)\b|\b(?:unknown|no such) thread\b|\bno rollout found\b/iu;
+
 export function isStaleResumeError(error: unknown): boolean {
-  const message = (
-    error instanceof Error ? error.message : String(error)
-  ).toLowerCase();
-  return message.includes("thread")
-    && [
-      "not found",
-      "missing",
-      "unknown",
-      "does not exist",
-      "no such",
-      "no rollout found",
-    ].some((part) => message.includes(part));
+  const message = error instanceof Error ? error.message : String(error);
+  return STALE_THREAD.test(message) && !namesUnrelatedMissingResource(message);
 }
 
 export function validateCodexModelProvider(

@@ -61,6 +61,7 @@ import {
 } from "../process-lifecycle";
 
 class CodexRequestRefusedError extends Error {}
+class CodexErrorResponse extends CodexRequestRefusedError {}
 
 interface PendingClientRequest {
   method: string;
@@ -583,7 +584,7 @@ export function startCodexAppServerRun(
             errorMessage,
           );
         }
-        pending.reject(new CodexRequestRefusedError(errorMessage));
+        pending.reject(new CodexErrorResponse(errorMessage));
       } else {
         pending.resolve(objectValue(message.result) ?? {});
       }
@@ -972,9 +973,12 @@ export async function openCodexTurn({
         ...threadConfig,
       });
     } catch (error) {
-      if (!isStaleResumeError(error)) throw error;
-      setContinuationError("stale-provider-session");
-      throw new Error(staleProviderSessionDecision().reason);
+      if (isStaleResumeError(error)) {
+        setContinuationError("stale-provider-session");
+        throw new Error(staleProviderSessionDecision().reason);
+      }
+      if (error instanceof CodexErrorResponse) setContinuationError("resume-rejected");
+      throw error;
     }
   } else {
     opened = await request("thread/start", {

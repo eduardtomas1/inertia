@@ -125,6 +125,9 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "missing-rollout-resume" && message.method === "thread/resume") {
     return send({ id: message.id, error: { code: -32600, message: "no rollout found for thread id " + message.params.threadId } });
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "rejected-resume" && message.method === "thread/resume") {
+    return send({ id: message.id, error: { code: -32603, message: "rollout file is corrupt" } });
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "mismatched-resume" && message.method === "thread/resume") {
     return send({ id: message.id, result: { thread: { id: "thread-unrelated" }, cwd: process.cwd(), model: "fake", serviceTier: null } });
   }

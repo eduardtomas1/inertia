@@ -75,7 +75,7 @@ import {
 } from "./opencode-interaction-replies";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
-import { openCodeSessionUnavailable } from "./session-unavailable";
+import { openCodeRequestRejected, openCodeSessionUnavailable } from "./session-unavailable";
 import { openCodeModels } from "./opencode-sdk-metadata";
 import {
   createOpenCodeInteractionState,
@@ -254,6 +254,7 @@ function startOpenCodeRun(
   const pendingFollowUps = new Set<Promise<boolean>>();
   let sessionId = options.input.sessionId;
   let sessionUnavailable = false;
+  let resumeRejected = false;
   let client: OpencodeClient | undefined;
   let replies: OpenCodeInteractionReplies | undefined;
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -517,6 +518,7 @@ function startOpenCodeRun(
           ),
         ).catch((error: unknown) => {
           sessionUnavailable = openCodeSessionUnavailable(error);
+          resumeRejected = openCodeRequestRejected(error);
           throw error;
         });
         if (resumed.data.id !== sessionId) {
@@ -806,6 +808,7 @@ function startOpenCodeRun(
                 serverStopDetail,
               )),
               ...(sessionUnavailable ? { sessionUnavailable: true as const } : {}),
+              ...(resumeRejected ? { resumeRejected: true as const } : {}),
             },
           };
     }

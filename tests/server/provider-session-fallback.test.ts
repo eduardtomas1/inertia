@@ -299,7 +299,8 @@ describe("unavailable session classification", () => {
     expect(acpSessionUnavailable("session/load", "cwd does not exist")).toBe(false);
     expect(acpSessionUnavailable("session/load", "command not found")).toBe(false);
     expect(acpSessionUnavailable("session/load", "This Cursor ACP server does not advertise session resume support.")).toBe(true);
-    expect(acpSessionUnavailable("initialize", "This Kimi ACP server does not advertise session resume support.")).toBe(true);
+    expect(acpSessionUnavailable("session/load", "This Kimi ACP server does not advertise session resume support.")).toBe(true);
+    expect(acpSessionUnavailable("initialize", "This Kimi ACP server does not advertise session resume support.")).toBe(false);
     expect(acpSessionUnavailable("session/new", "Session not found")).toBe(false);
     expect(acpSessionUnavailable("session/prompt", "File not found")).toBe(false);
   });
@@ -340,6 +341,30 @@ describe("unavailable session classification", () => {
       terminalEvent: "session/load",
       diagnostic: "stderr: config file not found",
     })).not.toHaveProperty("sessionUnavailable");
+  });
+
+  it("marks every provider error at the Cursor or Kimi resume step as a rejected resume", () => {
+    const child = { exitCode: null, signalCode: null } as never;
+    expect(cursorRuntimeFailure("Internal error", child, "session", "session/load"))
+      .toMatchObject({ resumeRejected: true });
+    expect(cursorRuntimeFailure("Internal error", child, "session", "session/load"))
+      .not.toHaveProperty("sessionUnavailable");
+    expect(cursorRuntimeFailure("Internal error", child, "turn", "session/prompt"))
+      .not.toHaveProperty("resumeRejected");
+    expect(cursorRuntimeFailure("session/load timed out", child, "session", "session/load"))
+      .not.toHaveProperty("resumeRejected");
+    expect(cursorRuntimeFailure("Internal error", { exitCode: 1, signalCode: null } as never, "session", "session/load"))
+      .not.toHaveProperty("resumeRejected");
+
+    const context = { child, phase: "session", workspaceRoot: process.cwd(), diagnostic: "" };
+    expect(kimiRuntimeFailure(new Error("Internal error"), { ...context, terminalEvent: "session/resume" }))
+      .toMatchObject({ resumeRejected: true });
+    expect(kimiRuntimeFailure(new Error("Internal error"), { ...context, terminalEvent: "session/prompt" }))
+      .not.toHaveProperty("resumeRejected");
+    expect(kimiRuntimeFailure(new Error("Kimi ACP stream closed"), { ...context, terminalEvent: "session/resume" }))
+      .not.toHaveProperty("resumeRejected");
+    expect(kimiRuntimeFailure(new Error("auth_required"), { ...context, terminalEvent: "session/load" }))
+      .not.toHaveProperty("resumeRejected");
   });
 
   it("recognises OpenCode's missing-session response", () => {
@@ -432,6 +457,25 @@ describe("Codex App Server session fallback", { concurrent: false }, () => {
     expect(manager.isRunning(runInput.conversationId)).toBe(false);
   });
 
+  it("reports any other refused resume as rejected but not as an unavailable session", async () => {
+    const { fake, manager, runInput } = fixture("rejected-resume");
+    const result = await manager.run(runInput, { freshSessionFallback: () => ({ prompt: "unused" }) });
+    expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true, failure: { resumeRejected: true } });
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+    expect(captured(fake.capturePath).some(({ method }) => method === "thread/start")).toBe(false);
+  });
+
+  it("does not report an incompatible access policy at resume as a rejected resume", async () => {
+    const { manager, runInput } = fixture("incompatible-full-access");
+    const result = await manager.run({ ...runInput, access: "full" });
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "This Codex App Server version does not support Full Access. Update Codex CLI and try again.",
+    });
+    expect(result.failure).not.toHaveProperty("resumeRejected");
+    expect(result.failure).not.toHaveProperty("sessionUnavailable");
+  });
+
   it("keeps the failed resume when the turn declines the fallback", async () => {
     const { fake, manager, runInput } = fixture("missing-rollout-resume");
     const result = await manager.run(runInput, { freshSessionFallback: () => null });
@@ -480,7 +524,7 @@ describe("OpenCode session fallback", { concurrent: false }, () => {
     await expect(manager.run(runInput)).resolves.toMatchObject({
       status: "failed",
       cleanupConfirmed: true,
-      failure: { sessionUnavailable: true },
+      failure: { sessionUnavailable: true, resumeRejected: true },
     });
     expect(requests().some(({ method, path }) => method === "GET" && path === "/session/opencode-missing-session")).toBe(true);
     expect(requests().some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
@@ -554,7 +598,7 @@ describe.each([
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  function fixture(label: string) {
+  function fixture(label: string, capabilities: Record<string, unknown> = agentCapabilities) {
     const root = portableFixtureRoot(label);
     roots.push(root);
     const capturePath = join(root, "capture.jsonl");
@@ -567,7 +611,7 @@ const modes = { currentModeId: "build", availableModes: [{ id: "build", name: "B
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message) + "\\n");
-  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: ${JSON.stringify(agentCapabilities)}, agentInfo: { name: ${JSON.stringify(agentName)}, version: "test" } } });
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: ${JSON.stringify(capabilities)}, agentInfo: { name: ${JSON.stringify(agentName)}, version: "test" } } });
   if (message.method === ${JSON.stringify(resumeMethod)}) return send({ jsonrpc: "2.0", id: message.id, error: { code: -32002, message: "Session not found: " + message.params.sessionId } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "fresh-acp-session", modes, configOptions: [] } });
   if (message.method === "session/prompt") {
@@ -604,6 +648,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(requests().filter(({ method }) => method === resumeMethod)).toHaveLength(1);
     expect(requests().some(({ method }) => method === "session/new")).toBe(false);
+  });
+
+  it("reports a server without session resume as unavailable at the session step", async () => {
+    const { manager, runInput, requests } = fixture(`${providerId} ACP without resume`, {});
+    await expect(manager.run(runInput)).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { sessionUnavailable: true },
+    });
+    expect(requests().some(({ method }) => method === resumeMethod || method === "session/new")).toBe(false);
   });
 
   it("answers from a new session when the saved one is rejected", async () => {

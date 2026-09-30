@@ -10,6 +10,19 @@ export function providerSessionUnavailable(result: ProviderRunResult): boolean {
   return result.status === "failed" && result.failure?.sessionUnavailable === true;
 }
 
+export function recordRejectedProviderResume(
+  store: RuntimeStore,
+  active: ActiveTurn,
+  result: ProviderRunResult,
+): void {
+  const sessionId = active.providerInput.sessionId;
+  if (
+    sessionId
+    && result.status === "failed"
+    && (result.failure?.sessionUnavailable === true || result.failure?.resumeRejected === true)
+  ) store.turnLedgerRepository.recordRejectedResume(active.turn.id, sessionId);
+}
+
 export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
@@ -35,6 +48,14 @@ export function applyFreshSessionFallback(
     || active.deferredSettlement !== null
     || active.assistantText !== ""
     || active.latestAssistantMessageId !== null
+    || active.reasoningText !== ""
+    || active.reasoningId !== null
+    || active.approvalIds.size > 0
+    || active.inputIds.size > 0
+    || store.turnLedgerRepository.turnHasProviderActivity(
+      active.conversation.id,
+      active.turn.id,
+    )
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
   active.turn = store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {

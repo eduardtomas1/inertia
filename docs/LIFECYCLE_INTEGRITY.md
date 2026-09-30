@@ -214,15 +214,26 @@ A native provider keeps its sessions in its own store, independent of the
 executable that created them, so a native route resumes its saved session when
 only the token changed or could not be verified. Provider updates therefore do
 not reset a chat. The provider remains the authority on whether the session
-still exists: when it rejects the resume before any output, the same turn
-restarts once on a fresh session. Every harness reports that rejection as an
-unavailable session, the turn ledger clears the dead native ID and records
+still exists. When its resume or load step (Codex `thread/resume`, ACP
+`session/load` or `session/resume`, the OpenCode session lookup, or Claude's
+missing-conversation result) fails with a missing-session error, every harness
+reports an unavailable session. Errors that name a missing working directory,
+model, field or file path, and errors from any later step, do not count. If the
+first attempt produced no text, reasoning, tool, command, status or approval
+activity, the same turn restarts once on a fresh session; otherwise it fails.
+Either way the dead native ID is cleared, the fresh session records
 `stale-provider-session`, and no later turn retries it.
 
-A rejection the harness does not recognise cannot strand the chat. A saved
-session whose last two resumes both failed before the provider did anything
-(no answer and no activity other than the error) is retired, and the next turn
-starts fresh.
+A rejection the harness does not recognise cannot strand the chat. The Codex,
+Cursor, Kimi and OpenCode harnesses also report any provider error at their
+resume or load step as a rejected resume, whatever its wording, and the turn
+ledger records that on the failed turn. A saved session whose last two turns
+were both rejected resumes, with no answer and no activity other than the
+error, is retired, and the next turn starts fresh. Usage limits, outages,
+process exits and other failures never count. A session started after such a
+retirement is exempt from the rule until it completes a turn, so a lasting
+fault cannot cycle through new sessions. Claude has no separate resume step,
+so only its recognised missing-conversation result counts.
 
 The token no longer retires native sessions, so a harness change that makes
 previously saved sessions unusable must retire them explicitly with a

@@ -259,7 +259,12 @@ describe("provider session continuity", () => {
 describe("a saved session that keeps failing to open", () => {
   async function failedResumes(
     count: number,
-    outcome: { terminalReason?: string; activityKind?: "status" | "error"; answered?: boolean } = {},
+    outcome: {
+      terminalReason?: string;
+      activityKind?: "status" | "error";
+      answered?: boolean;
+      rejected?: boolean;
+    } = {},
   ) {
     const f = await fixture("codex");
     f.store.updateConversation(f.conversation.id, { providerSessionId: "before-update", continuationIdentity: f.previous });
@@ -280,6 +285,9 @@ describe("a saved session that keeps failing to open", () => {
       const answer = outcome.answered
         ? f.store.createMessage(f.conversation.id, "Partial answer", "assistant", [], queued.turn.id)
         : null;
+      if (outcome.rejected !== false) {
+        f.store.turnLedgerRepository.recordRejectedResume(queued.turn.id, "before-update");
+      }
       f.store.settleAgentTurn(queued.turn.id, {
         status: "failed",
         terminalReason: outcome.terminalReason ?? "provider-error",
@@ -313,6 +321,7 @@ describe("a saved session that keeps failing to open", () => {
     ["the provider made progress before failing", 2, { activityKind: "status" }],
     ["the provider had started answering", 2, { answered: true }],
     ["the turn never reached the provider", 2, { terminalReason: "turn-start-failed" }],
+    ["the provider did not reject the resume", 2, { rejected: false }],
   ] as const)("keeps resuming when %s", async (_label, count, outcome) => {
     const f = await failedResumes(count, outcome);
     expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(false);

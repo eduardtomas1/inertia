@@ -19,6 +19,7 @@ import {
   order,
   useGuideModal,
   useGuideTopic,
+  useLeavingTransition,
 } from "./GuideParts";
 import {
   clampWelcomeStep,
@@ -77,7 +78,7 @@ export function WelcomeGuide({
 }): React.JSX.Element {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(1);
-  const [leavingStep, setLeavingStep] = useState<number | null>(null);
+  const [leavingStep, leaveStep] = useLeavingTransition<number>(200);
   const primary = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const last = WELCOME_STEPS.length - 1;
@@ -94,11 +95,9 @@ export function WelcomeGuide({
   const go = (offset: number): void => {
     const next = clampWelcomeStep(step + offset);
     if (next === step) return;
-    const previous = step;
     setDirection(offset > 0 ? 1 : -1);
-    setLeavingStep(previous);
+    leaveStep(step);
     setStep(next);
-    window.setTimeout(() => setLeavingStep((value) => (value === previous ? null : value)), 200);
   };
   const advance = (): void => {
     if (step === last) onClose();

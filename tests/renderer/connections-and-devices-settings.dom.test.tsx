@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionsAndDevicesSettings } from "../../src/renderer/src/components/ConnectionsAndDevicesSettings";
@@ -43,6 +43,7 @@ function installBridge(initial: PrivateConnectStateView, overrides: Record<strin
 }
 
 afterEach(() => {
+  cleanup();
   Reflect.deleteProperty(window, "inertia");
   qr.toDataURL.mockReset();
 });
@@ -84,5 +85,31 @@ describe("Connections and devices settings", () => {
     expect(screen.getByLabelText("Private Connect pairing link")).toHaveValue(second.url);
     expect(screen.getByAltText("Short-lived Private Connect pairing QR code"))
       .toHaveAttribute("src", "data:image/png;base64,second");
+  });
+
+  it("ends while a committed pairing link still waits for its QR encode effect", async () => {
+    qr.toDataURL.mockResolvedValue("data:image/png;base64,pending");
+    let listener: ((next: PrivateConnectStateView) => void) | null = null;
+    installBridge(state(null), {
+      onPrivateConnectState: vi.fn((next: (value: PrivateConnectStateView) => void) => {
+        listener = next;
+        return () => { listener = null; };
+      }),
+    });
+    render(<ConnectionsAndDevicesSettings projects={[]} />);
+    await screen.findByRole("button", { name: "Create pairing link" });
+    const committed = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!screen.queryByLabelText("Private Connect pairing link")) return;
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(document.body, { subtree: true, childList: true });
+    });
+
+    listener!(state({ url: "https://inertia.example.ts.net/pair#pending", expiresAt: "2030-01-01T10:05:00.000Z" }));
+    await committed;
+
+    expect(qr.toDataURL).not.toHaveBeenCalled();
   });
 });

@@ -134,6 +134,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         : status.activeCount > 1 ? `${status.activeCount} active chats` : "");
     button.setAttribute("aria-label", [label.textContent, time.textContent, title.textContent, project.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
     button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
+    const pickerFocused = document.activeElement === picker;
     picker.hidden = !choosing && !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
     picker.dataset.attention = String(others > 0);
     pickerLabel.textContent = pinned ? "Pinned" : "Auto";
@@ -143,6 +144,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     bubble.dataset.view = choosing ? "chats" : "status";
     button.hidden = choosing;
     chooser.hidden = !choosing;
+    if (pickerFocused && picker.hidden) (button.disabled ? main : button).focus({ preventScroll: true });
     if (choosing) renderChats(chats, pinned);
     clearTimeout(clock);
     if (status.since && active && !document.hidden) {

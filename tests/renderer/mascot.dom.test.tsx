@@ -209,8 +209,46 @@ describe("mascot chat context and chooser", () => {
     expect(document.activeElement).toBe(picker);
     fireEvent.click(picker);
     expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(picker.hidden).toBe(true);
+    const open = screen.getByRole("button", { name: /Chat a/ });
+    expect(document.activeElement).toBe(open);
     app.list(a!, [a!, b!]);
+    expect(document.activeElement).toBe(open);
+  });
+
+  it("moves keyboard focus to the open button when choosing Auto hides the focused picker", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const a = chat("a", "running");
+    app.list(a, [a], "a");
+    const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
+    expect(picker.hidden).toBe(false);
+    picker.focus();
+    fireEvent.click(picker);
+    fireEvent.click(screen.getByRole("button", { name: /Most urgent/ }));
     expect(document.activeElement).toBe(picker);
+
+    app.list(a, [a], null);
+
+    expect(picker.hidden).toBe(true);
+    expect(document.activeElement).toBe(view.container.querySelector(".mascot-open"));
+  });
+
+  it("moves keyboard focus to the mascot when the hidden picker leaves no chat to open", async () => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    app.list(emptyMascotStatus(), [], "gone");
+    const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
+    expect(picker.hidden).toBe(false);
+    picker.focus();
+
+    app.list(emptyMascotStatus(), [], null);
+
+    expect(picker.hidden).toBe(true);
+    expect(view.container.querySelector<HTMLButtonElement>(".mascot-open")).toBeDisabled();
+    expect(document.activeElement).toBe(view.container.querySelector("main"));
   });
 
   it("states every count with its meaning and never announces more chats needing you than chats", async () => {

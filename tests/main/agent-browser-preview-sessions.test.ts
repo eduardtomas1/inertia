@@ -177,6 +177,35 @@ describe("conversation-owned Browser sessions", () => {
     broker.close();
   });
 
+  it("closes a hidden Browser thirty minutes after its last use even when another chat hides one meanwhile", async () => {
+    vi.useFakeTimers();
+    try {
+      const window = harness().window;
+      const broker = new PreviewBroker({
+        getWindow: () => window as never,
+        openExternal: vi.fn(async () => undefined),
+        stateChannel: "preview-state",
+      });
+      const contentsOffset = electronState.contents.length;
+      const first = { ...runIdentity, conversationId: "77777771-7777-4777-8777-777777777777" };
+      const second = { ...runIdentity, conversationId: "77777772-7777-4777-8777-777777777777" };
+      await expect(broker.perform(first, { action: "tabs" })).resolves.toMatchObject({ ok: true });
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      await expect(broker.perform(second, { action: "tabs" })).resolves.toMatchObject({ ok: true });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+        .toEqual([true, false]);
+
+      broker.close();
+      expect(electronState.contents.slice(contentsOffset).map((contents) => contents.isDestroyed()))
+        .toEqual([true, true]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("answers a snapshot of a blank tab with the next step instead of an error", async () => {
     const { broker } = harness();
     const snapshot = await broker.perform(runIdentity, { action: "snapshot" });

@@ -655,11 +655,14 @@ export class PreviewBroker {
     }
     if (this.#idleSweep) clearTimeout(this.#idleSweep);
     this.#idleSweep = null;
-    if (remaining === 0) return;
+    const expiries = parked
+      .filter((session) => this.#sessions.get(session.contextId) === session)
+      .map((session) => (session.busy === 0 && session !== keep ? session.lastUsedAt : now) + PARKED_SESSION_IDLE_MS);
+    if (expiries.length === 0) return;
     this.#idleSweep = setTimeout(() => {
       this.#idleSweep = null;
       this.#evictParked();
-    }, PARKED_SESSION_IDLE_MS);
+    }, Math.max(1, Math.min(...expiries) - now));
     this.#idleSweep.unref();
   }
 

@@ -116,6 +116,56 @@ describe("conversation-owned Browser sessions", () => {
     }
   });
 
+  it("restores background throttling after a cancelled or timed-out command but not while the next one runs", async () => {
+    vi.useFakeTimers();
+    try {
+      const { broker } = harness();
+      const contentsOffset = electronState.contents.length;
+      await broker.perform(runIdentity, { action: "tabs" });
+      const contents = electronState.contents[contentsOffset]! as unknown as { throttling: boolean[] };
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(contents.throttling).toEqual([false, true]);
+
+      electronState.loadOverrides.push(async () => await new Promise<void>(() => undefined));
+      const controller = new AbortController();
+      const cancelled = broker.perform(runIdentity, {
+        action: "navigate",
+        url: "http://127.0.0.1:3000/cancelled",
+      }, controller.signal);
+      let finishNext = (): void => undefined;
+      electronState.loadOverrides.push(async () => {
+        await new Promise<void>((resolve) => { finishNext = resolve; });
+      });
+      const next = broker.perform(runIdentity, {
+        action: "navigate",
+        url: "http://127.0.0.1:3000/next",
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      controller.abort();
+      await expect(cancelled).resolves.toMatchObject({ ok: false, code: "cancelled" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(electronState.loadOverrides).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(contents.throttling.at(-1)).toBe(false);
+
+      finishNext();
+      await expect(next).resolves.toMatchObject({ ok: true });
+      expect(contents.throttling.at(-1)).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(contents.throttling.at(-1)).toBe(true);
+
+      pageTools.semanticPageSnapshot.mockImplementationOnce(async () => await new Promise<string>(() => undefined));
+      const stalled = broker.perform(runIdentity, { action: "snapshot" });
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(contents.throttling.at(-1)).toBe(false);
+      await vi.advanceTimersByTimeAsync(6_000);
+      await expect(stalled).resolves.toMatchObject({ ok: false, code: "timeout" });
+      expect(contents.throttling.at(-1)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("evicts the least recently used hidden Browser once five chats hold one", async () => {
     let now = 1_000;
     const window = harness().window;

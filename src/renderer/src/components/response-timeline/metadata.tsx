@@ -35,7 +35,7 @@ export function CopyAnswerButton({
 }): React.JSX.Element {
   const { copied, error, copy } = useCopiedState();
   const copiedAriaLabel = `${ariaLabel.replace(/^Copy\s+/u, "")} copied`;
-  const label = error ? `${ariaLabel} failed` : ariaLabel;
+  const label = error ? "Copy failed" : ariaLabel;
   return (
     <>
       <button

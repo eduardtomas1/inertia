@@ -38,7 +38,7 @@ describe("final answer copy feedback", () => {
     fireEvent.click(copy);
 
     await waitFor(() => expect(copyText).toHaveBeenCalled());
-    expect(await screen.findByRole("button", { name: "Copy answer failed" }))
+    expect(await screen.findByRole("button", { name: "Copy failed" }))
       .toBe(copy);
     expect(copy.querySelector("[data-icon-state]"))
       .toHaveAttribute("data-icon-state", "copy");

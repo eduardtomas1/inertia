@@ -709,10 +709,6 @@ export function installPreviewAgentPrivacyGuard(
         if (!inputsInspected) withhold("document-too-large");
         return;
       }
-      // A declarative shadow template is consumed by the HTML parser before
-      // ordinary page code can query it. Mutation records retain the added
-      // template node, so the document-start observer can taint the document
-      // without enumerating or serializing the closed subtree.
       if (descendant.matches?.("iframe,frame,object,embed")) state.framesObserved = true;
       if (descendant.matches?.("template[shadowrootmode]") || descendant.shadowRoot) {
         state.shadowRootsObserved = true;

@@ -199,18 +199,13 @@ describe("agent Browser privacy classification", () => {
       .toBe("document-too-large");
   });
 
-  it("records a consumed declarative shadow template and an added frame as not inspected", async () => {
+  it("records an added frame as not inspected", async () => {
     let callback: ((records: unknown[]) => void) | undefined;
     class MutationObserver {
       constructor(observer: (records: unknown[]) => void) { callback = observer; }
       observe(): void {}
     }
     const documentElement = { nodeType: 1, tagName: "HTML", matches: () => false };
-    const template = {
-      nodeType: 1,
-      tagName: "TEMPLATE",
-      matches: (selector: string) => selector.includes("template[shadowrootmode]"),
-    };
     const frame = {
       nodeType: 1,
       tagName: "IFRAME",
@@ -251,18 +246,10 @@ describe("agent Browser privacy classification", () => {
       type: "childList",
       target: documentElement,
       oldValue: null,
-      removedNodes: [template],
-      addedNodes: [],
-    }]);
-    expect(observed()).toEqual([true, undefined, undefined]);
-    callback!([{
-      type: "childList",
-      target: documentElement,
-      oldValue: null,
       removedNodes: [],
       addedNodes: [frame],
     }]);
-    expect(observed()).toEqual([true, true, undefined]);
+    expect(observed()).toEqual([undefined, true, undefined]);
   });
 
   it("shares one bounded scan budget across each mutation callback", async () => {

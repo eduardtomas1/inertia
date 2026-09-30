@@ -62,9 +62,12 @@ also passed. The installed application profile was not used as a test fixture.
 - The same negative-accessibility fixture passed on the reporter's physical GNOME
   X11 session, in an isolated Electron profile, without changing installed app
   preferences or enabling the desktop accessibility bus.
-- Full Electron UI in dark/light: actual native source selection, no attachment
-  before approval, coordinate masking/cropping, pointer coordinate mapping,
-  final attachment import, and 760×600 viewport checks.
+- Full Electron UI in dark/light: actual native screen source selection, no
+  attachment before approval, coordinate masking/cropping sized from the captured
+  image, pointer coordinate mapping, final attachment import, and 760×600 viewport
+  checks. The UI scenario selects the screen because hosted CI runs it on bare Xvfb,
+  where Chromium lists no windows without a window manager's `WM_STATE`; window
+  selection is covered by the Openbox fixture above.
 - Linux packaging contract tests: 13 passed.
 
 Physical GNOME/KDE Wayland selection, mixed-monitor scaling, and a newly packaged

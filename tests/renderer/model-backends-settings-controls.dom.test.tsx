@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -134,6 +134,28 @@ describe("model backend settings controls", () => {
       "The default could not be stored.",
     );
     expect(onSetDefault).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["Global default", null],
+    ["Project default", "11111111-1111-4111-8111-111111111111"],
+  ] as const)("keeps the %s select enabled and focused while its change is saved", async (label, projectId) => {
+    let finish!: () => void;
+    const onSetDefault = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const projects = [{ id: "11111111-1111-4111-8111-111111111111", name: "Inertia" }] as ComponentProps<typeof ModelBackendsSettings>["projects"];
+    render(<ModelBackendsSettings {...settingsProps({ onSetDefault, projects })} />);
+    await screen.findByText("custom-a.example.test");
+    const select = screen.getByLabelText(label);
+    select.focus();
+
+    fireEvent.change(select, { target: { value: "custom:a\0custom-a-model" } });
+    expect(onSetDefault).toHaveBeenCalledExactlyOnceWith(projectId, expect.objectContaining({ modelId: "custom-a-model" }));
+    expect(select).toBeEnabled();
+    expect(select).toHaveFocus();
+
+    fireEvent.change(select, { target: { value: "" } });
+    expect(onSetDefault).toHaveBeenCalledOnce();
+    await act(async () => finish());
   });
 
   it("reports a rejected default reset", async () => {

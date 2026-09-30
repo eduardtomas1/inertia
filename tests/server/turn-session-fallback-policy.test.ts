@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentHarness,
@@ -7,6 +7,7 @@ import type {
   AgentHarnessStartOptions,
 } from "../../src/server/provider/agent-harness";
 import {
+  ProviderSteerDeliveryUnknownError,
   providerRunTerminal,
   type ProviderRunCallbacks,
   type ProviderRunInput,
@@ -205,6 +206,82 @@ describe("fresh-session fallback through the real wrapper and turn controller", 
         providerSessionBefore: "saved-session",
       });
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+});
+
+describe("follow-ups and the in-turn restart", () => {
+  async function runningResume(providerId: "codex" | "claude" = "claude") {
+    const { runtime } = await establishedChat(providerId);
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+    return runtime;
+  }
+
+  async function sendFollowUp(runtime: Awaited<ReturnType<typeof runningResume>>) {
+    const admission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
+    try {
+      return await runtime.controller.steer(admission, { content: "Also cover CSV.", imagePaths: [] });
+    } finally {
+      admission.release();
+    }
+  }
+
+  it("keeps the restart available when the provider refused the follow-up", async () => {
+    const runtime = await runningResume();
+    try {
+      runtime.provider.steerSupported = false;
+      expect(await sendFollowUp(runtime)).toBeNull();
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("switches the restart off once the provider accepted the follow-up", async () => {
+    const runtime = await runningResume();
+    try {
+      expect(await sendFollowUp(runtime)).not.toBeNull();
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the restart off when the provider may have received the follow-up", async () => {
+    const runtime = await runningResume();
+    try {
+      runtime.provider.steer = async () => {
+        throw new ProviderSteerDeliveryUnknownError();
+      };
+      await expect(sendFollowUp(runtime)).rejects.toThrow("did not confirm whether it received this follow-up");
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("holds the restart while the provider is still deciding and restores it after a refusal", async () => {
+    const runtime = await runningResume();
+    try {
+      let answer!: (accepted: boolean) => void;
+      runtime.provider.steer = async (_conversationId, input) => {
+        runtime.provider.steerCalls.push(input.content);
+        return await new Promise<boolean>((resolve) => { answer = resolve; });
+      };
+      const pending = sendFollowUp(runtime);
+      await vi.waitFor(() => expect(runtime.provider.steerCalls).toHaveLength(1));
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      answer(false);
+      expect(await pending).toBeNull();
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).not.toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

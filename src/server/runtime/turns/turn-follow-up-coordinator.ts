@@ -109,6 +109,7 @@ export class TurnFollowUpCoordinator {
     if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
       throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
     }
+    const freshSessionRequest = active.freshSessionRequest;
     active.freshSessionRequest = null;
     let accepted: boolean;
     try {
@@ -118,11 +119,17 @@ export class TurnFollowUpCoordinator {
         { runId: active.turn.runId, turnId: active.turn.id },
       );
     } catch (error) {
-      if (!(error instanceof ProviderSteerDeliveryUnknownError)) throw error;
+      if (!(error instanceof ProviderSteerDeliveryUnknownError)) {
+        active.freshSessionRequest ??= freshSessionRequest;
+        throw error;
+      }
       onProviderAcknowledged?.();
       throw new RuntimeRequestError("The provider did not confirm whether it received this follow-up. Check this chat before retrying.", undefined, "ambiguous");
     }
-    if (!accepted) return null;
+    if (!accepted) {
+      active.freshSessionRequest ??= freshSessionRequest;
+      return null;
+    }
     onProviderAcknowledged?.();
     const ownerAfterSteer = this.options.activeForConversation(
       lease.conversationId,

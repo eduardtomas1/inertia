@@ -5,9 +5,11 @@ import type { Conversation } from "../../shared/contracts.js";
 import {
   DEFAULT_AGENT_BROWSER_WAIT_MS,
   MAX_AGENT_BROWSER_TYPE_CHARS,
+  MAX_AGENT_BROWSER_URL_CHARS,
   MAX_AGENT_BROWSER_WAIT_MS,
   MAX_AGENT_BROWSER_WAIT_TEXT_CHARS,
   MIN_AGENT_BROWSER_WAIT_MS,
+  agentBrowserTextLength,
   type AgentBrowserCommand,
   type AgentBrowserKey,
   type AgentBrowserRunIdentity,
@@ -31,10 +33,14 @@ const BROWSER_KEYS = [
   "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
 ] as const satisfies readonly AgentBrowserKey[];
 
+const boundedText = (maximum: number) => z.string().refine(
+  (value) => agentBrowserTextLength(value) <= maximum,
+  `Too long: expected at most ${maximum} Unicode code points`,
+);
 const tabIdSchema = z.string().uuid();
 const refSchema = z.string().regex(new RegExp(REF_PATTERN, "u"));
-const urlSchema = z.string().min(1).max(4_096).regex(new RegExp(NUL_FREE_PATTERN, "u"));
-const textSchema = z.string().max(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NUL_FREE_PATTERN, "u"));
+const urlSchema = boundedText(MAX_AGENT_BROWSER_URL_CHARS).min(1).regex(new RegExp(NUL_FREE_PATTERN, "u"));
+const textSchema = boundedText(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NUL_FREE_PATTERN, "u"));
 const keySchema = z.enum(BROWSER_KEYS);
 const deltaSchema = z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0);
 const emptySchema = z.object({}).strict();
@@ -48,7 +54,7 @@ const typeSchema = z.object({
 const pressSchema = z.object({ key: keySchema }).strict();
 const scrollSchema = z.object({ deltaY: deltaSchema }).strict();
 const waitSchema = z.object({
-  text: z.string().min(1).max(MAX_AGENT_BROWSER_WAIT_TEXT_CHARS)
+  text: boundedText(MAX_AGENT_BROWSER_WAIT_TEXT_CHARS).min(1)
     .refine((value) => value.trim().length > 0 && !/[\0\r\n]/u.test(value)).optional(),
   state: z.enum(["present", "absent"]).default("present"),
   timeoutMs: z.number().int().min(MIN_AGENT_BROWSER_WAIT_MS).max(MAX_AGENT_BROWSER_WAIT_MS)
@@ -84,7 +90,7 @@ const objectSchema = (
   ...(required.length > 0 ? { required: [...required] } : {}),
 });
 const refProperty = { type: "string", pattern: REF_PATTERN, description: "An element ref from the latest inertia_browser_snapshot." };
-const urlProperty = { type: "string", minLength: 1, maxLength: 4_096, pattern: NUL_FREE_PATTERN, description: "A local development URL such as http://localhost:3000." };
+const urlProperty = { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_URL_CHARS, pattern: NUL_FREE_PATTERN, description: `A local development URL such as http://localhost:3000. At most ${MAX_AGENT_BROWSER_URL_CHARS} Unicode code points.` };
 const tabIdProperty = { type: "string", format: "uuid", description: "A tab id from inertia_browser_tabs." };
 
 export const AGENT_BROWSER_TOOL_DEFINITIONS:
@@ -115,7 +121,7 @@ readonly ProviderHostToolDefinition[] = [
     description: "Type text into one editable element in the active Inertia Browser page by its ref from the latest inertia_browser_snapshot. Replaces the existing value unless replace is false.",
     inputSchema: objectSchema({
       ref: refProperty,
-      text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS, pattern: NUL_FREE_PATTERN },
+      text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS, pattern: NUL_FREE_PATTERN, description: `The text to type. At most ${MAX_AGENT_BROWSER_TYPE_CHARS} Unicode code points.` },
       replace: { type: "boolean", default: true, description: "Replace the current value (default) or append to it." },
     }, ["ref", "text"]),
     inputValidator: typeSchema,
@@ -141,7 +147,7 @@ readonly ProviderHostToolDefinition[] = [
     name: "inertia_browser_wait_for",
     description: "Wait for the active Inertia Browser page to reach a state before continuing. With text, waits until that visible text or control name is present, or absent when state is absent. Without text, waits until the page finishes loading. Returns matched true or false; it never fails just because the condition was not reached.",
     inputSchema: objectSchema({
-      text: { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_WAIT_TEXT_CHARS, description: "Visible text or a control name to look for, matched case-insensitively." },
+      text: { type: "string", minLength: 1, maxLength: MAX_AGENT_BROWSER_WAIT_TEXT_CHARS, description: `Visible text or a control name to look for, matched case-insensitively. At most ${MAX_AGENT_BROWSER_WAIT_TEXT_CHARS} Unicode code points.` },
       state: { type: "string", enum: ["present", "absent"], default: "present" },
       timeoutMs: { type: "integer", minimum: MIN_AGENT_BROWSER_WAIT_MS, maximum: MAX_AGENT_BROWSER_WAIT_MS, default: DEFAULT_AGENT_BROWSER_WAIT_MS },
     }),

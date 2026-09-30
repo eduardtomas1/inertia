@@ -69,6 +69,20 @@ it.each(["escape", "unmount", "chat-change"])("cancels the exact review on %s an
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+it("keeps keyboard focus in the dialog when the chosen source is replaced by its preview or an error", async () => {
+  render(<ReviewedScreenshotControl conversationId={chat} />);
+  const id = await start();
+  await deliver({ reviewId: id, stage: "sources", sources: [{ id: "source", name: "Example window", preview: "data:image/png;base64,fixture" }] });
+  const choice = screen.getByRole("button", { name: "Example window" });
+  choice.focus(); fireEvent.click(choice);
+  await deliver(preview(id));
+  expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+  screen.getByRole("button", { name: "Crop to area" }).focus();
+  await deliver({ reviewId: id, stage: "closed", message: "Screenshot could not be prepared." });
+  expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+  expect(screen.getByRole("button", { name: "Cancel screenshot" })).toHaveFocus();
+});
+
 it("keeps denied capture visible without asking for approval or silently retrying", async () => {
   render(<ReviewedScreenshotControl conversationId={chat} />);
   const id = await start();

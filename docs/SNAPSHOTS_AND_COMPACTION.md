@@ -75,6 +75,10 @@ or quitting revokes it. Approvals are checked against the originating document,
 chat, review identifier and current image revision. Attachment imports use the
 existing leases and rollback handling. Images are bounded to 2048 pixels per edge
 and 8 MiB. The X11 list shows up to 48 sources within a 4 MiB preview budget.
+A selected screen is captured at its display's native resolution, scaled down to
+fit 2048 pixels. Electron does not report a window's native size, so a selected
+window, and the Wayland system selection, are scaled to fit 2048 pixels per
+edge; a smaller window is enlarged to that size.
 
 System selection has a two-minute deadline; ordinary X11 acquisition has a
 15-second deadline. Electron does not expose a cancellation API for an open

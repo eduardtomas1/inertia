@@ -81,8 +81,11 @@ test("selects custom colors per appearance, follows System, and restores them af
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     const path = info.outputPath("custom-theme-failure.png");
-    await page.screenshot({ path, animations: "disabled" });
-    await info.attach("Custom theme failure", { path, contentType: "image/png" });
+    if (!page.isClosed()) {
+      await page.screenshot({ path, animations: "disabled" })
+        .then(() => info.attach("Custom theme failure", { path, contentType: "image/png" }))
+        .catch(() => undefined);
+    }
     throw error;
   } finally {
     await app.close();

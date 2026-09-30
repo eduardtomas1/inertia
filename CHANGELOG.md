@@ -2,6 +2,93 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.65 — 2026-09-30
+
+Find help inside Inertia, hear when a task ends, keep each chat with the
+provider it started on, and use Codex 0.159.0, with a broad round of
+reliability and safety fixes.
+
+### New
+
+- Open **Help** at any time from the question-mark button in the sidebar
+  footer, or with **Open help** in the command palette. Its topics explain
+  each part of the app and can jump straight to the right setting or action.
+  The first-run welcome guide is unchanged.
+- Hear a sound when a task ends. Turn on **Sound when a task ends** in the new
+  **Notifications** card in **Settings → General**, choose one of six built-in
+  sounds or import up to eight named clips of your own, and use **Only after
+  long tasks** to stay quiet for quick questions. It is off by default, and
+  snoozed chats stay silent.
+- With more than one project, the sidebar's **New chat** button asks which
+  project to use. The current project is selected, so Enter still starts right
+  away. The command palette also offers **New chat in…**, and ⌘N / Ctrl+N is
+  unchanged.
+- Pin the mascot to one of your eight most recent chats with its **Auto /
+  Pinned** switch or **Show chat** in its menu. Its bubble now shows the
+  project, the elapsed or finished time and plan progress.
+
+### Chats keep their provider
+
+- A chat that has started stays with its provider. Choosing another provider
+  offers a new chat, which keeps the chat's access and interaction mode unless
+  you change them. Unused drafts can still switch provider, and model and
+  reasoning changes within a provider still work.
+- An older chat whose turns ran on more than one provider stays readable, and
+  you can still rename or archive it, but it cannot continue. Its controls
+  explain why and offer **Start a new chat**.
+
+### Providers
+
+- Use Codex 0.159.0, including GPT-6.1 Sol with its reasoning levels and Fast
+  mode when Codex offers it for your account.
+- When Codex stops a turn after repeated approval denials, Inertia reports it
+  as failed with that reason instead of as cancelled. Codex sends this reason
+  only when its strict auto-review setting is on.
+- Update Codex from Settings when it is installed in its own npm location,
+  such as `~/.local` or `~/.npm-global` on Linux. The update status, **Check**
+  and **Instructions** stay visible even when the latest-version lookup fails.
+- OpenCode no longer loses a permission request or question that arrives as a
+  turn starts, and a turn whose OpenCode server has stopped ends promptly
+  instead of waiting 30 minutes.
+- Claude installed with npm now runs on Windows. Cursor and Kimi Code redact
+  credentials even when a streamed reply splits them across chunks.
+
+### Reliability and safety
+
+- File references in the composer are refused when they would read a file
+  outside the workspace, including through a folder swapped for a link. Disk
+  images, `.jar` files and macro-enabled Office files are shown in the file
+  manager instead of opened.
+- Installing an app update on macOS no longer leaves Inertia unable to quit
+  when preparing the update is slow. An interrupted Windows update no longer
+  blocks the next launch, and rollback works after the system clock moves
+  back.
+- Git treats file names such as `docs/[a].md` literally, so committing,
+  comparing or reverting one file no longer touches another. Changes review
+  reads removed lines starting with `--` and added lines starting with `++`
+  correctly, and handles non-ASCII file names.
+- Inertia confirms more carefully that terminals and agent processes have
+  stopped on Linux, macOS and Windows, and starting a process in a deleted
+  worktree no longer restarts the runtime. Queued messages no longer retry in a
+  busy loop while an update is being prepared.
+- Recover from a first launch that was interrupted before the database was
+  set up. Removing another project no longer switches away from the current
+  one, and Linux keeps attachments in your profile instead of the shared
+  `/tmp`.
+- Settings keeps focus in the Model ID field while you type and supports arrow
+  keys in its option groups and menus. Dialogs keep focus after **Refresh** or
+  **Delete**, and **Restore defaults** asks first when confirmations are on
+  and keeps your imported sounds.
+- In the workspace, the review comment you are typing and the loaded diff
+  survive a refresh, failed review actions keep your draft and show the error,
+  and open terminals keep their shell when a project is renamed.
+- Images pasted into a follow-up while a turn runs are no longer dropped, and a
+  failed send no longer leaves attachments that the next send loses. The
+  response timeline stays steadier while streaming, and a failed copy says
+  **Copy failed**.
+- Many intermittent test and CI failures were traced to their cause and
+  fixed, and lucide-react is updated to 1.48.0.
+
 ## 0.0.64 — 2026-09-27
 
 Sign in to every provider from inside Inertia, keep large conversations and

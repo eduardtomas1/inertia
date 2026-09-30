@@ -298,6 +298,7 @@ export function createTurnInteractionCommandHandler(
                 dependencies.conversationAttachments.acceptRetention(retentionId);
                 retentionAccepted = true;
               },
+              AbortSignal.timeout(Math.max(0, preparationDeadlineAt - Date.now())),
             );
             if (!followUpMessage?.turnId) {
               throw new RuntimeRequestError(

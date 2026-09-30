@@ -13,7 +13,14 @@ const flushPromises = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-function activeTurn(): ActiveTurn {
+function activeTurn(transport: "starting" | "running" = "running"): ActiveTurn {
+  const runState = new AuthoritativeRunStateEngine({
+    conversationId: "conversation-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    providerId: "codex",
+  });
+  runState.setTransport(transport);
   return {
     conversation: { id: "conversation-1" },
     turn: {
@@ -21,12 +28,7 @@ function activeTurn(): ActiveTurn {
       runId: "run-1",
       harnessId: "codex-app-server",
     },
-    runState: new AuthoritativeRunStateEngine({
-      conversationId: "conversation-1",
-      runId: "run-1",
-      turnId: "turn-1",
-      providerId: "codex",
-    }),
+    runState,
     supportsFollowUpImages: true,
     followUpAdmissions: new Set<Promise<void>>(),
     followUpAdmissionTail: Promise.resolve(),
@@ -102,6 +104,66 @@ describe("TurnFollowUpCoordinator", () => {
         "2026-08-18T00:00:00.000Z",
         "2026-08-18T00:00:00.001Z",
       ]);
+  });
+
+  it("delivers a follow-up admitted while the provider turn is starting once it runs", async () => {
+    const active = activeTurn("starting");
+    const steer = vi.fn(async () => active.runState.snapshot().state === "running");
+    const persist = vi.fn((
+      _conversationId: string,
+      turnId: string,
+      content: string,
+    ) => ({ turnId, content }) as ChatMessage);
+    const coordinator = new TurnFollowUpCoordinator({
+      providers: { steer } as unknown as TurnProviderRuntime,
+      store: { createAcknowledgedFollowUpMessage: persist } as unknown as RuntimeStore,
+      now: () => "2026-09-30T09:00:00.000Z",
+      activeForConversation: () => active,
+    });
+    const admission = coordinator.acquire(active)!;
+    const pending = coordinator.steer(admission, {
+      content: "Steer with this image.",
+      imagePaths: ["/trusted/steer.png"],
+    }, []);
+
+    await flushPromises();
+    expect(steer).not.toHaveBeenCalled();
+    active.runState.setTransport("running");
+
+    await expect(pending).resolves.toMatchObject({
+      turnId: "turn-1",
+      content: "Steer with this image.",
+    });
+    expect(steer).toHaveBeenCalledOnce();
+    admission.release();
+  });
+
+  it.each(["abort", "cancel"] as const)("stops waiting for a starting provider turn on %s", async (ending) => {
+    const active = activeTurn("starting");
+    const steer = vi.fn(async () => true);
+    const coordinator = new TurnFollowUpCoordinator({
+      providers: { steer } as unknown as TurnProviderRuntime,
+      store: { createAcknowledgedFollowUpMessage: vi.fn() } as unknown as RuntimeStore,
+      now: () => "2026-09-30T09:00:00.000Z",
+      activeForConversation: () => active,
+    });
+    const admission = coordinator.acquire(active)!;
+    const controller = new AbortController();
+    const pending = coordinator.steer(
+      admission,
+      { content: "Never reaches a started turn", imagePaths: [] },
+      [],
+      undefined,
+      controller.signal,
+    );
+
+    await flushPromises();
+    if (ending === "abort") controller.abort();
+    else active.runState.requestTerminal("cancelled", "test-cancelled");
+
+    await expect(pending).resolves.toBeNull();
+    expect(steer).not.toHaveBeenCalled();
+    admission.release();
   });
 
   it("does not dispatch a queued follow-up after its owner is cancelled", async () => {

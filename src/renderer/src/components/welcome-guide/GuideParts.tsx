@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -79,19 +80,36 @@ export function GuideDialog({
   );
 }
 
+export function useLeavingTransition<Value>(
+  durationMs: number,
+): [Value | null, (previous: Value) => void] {
+  const [leaving, setLeaving] = useState<Value | null>(null);
+  const timerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+  }, []);
+  const leave = (previous: Value): void => {
+    setLeaving(previous);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      setLeaving((value) => (value === previous ? null : value));
+    }, durationMs);
+  };
+  return [leaving, leave];
+}
+
 export function useGuideTopic<Id extends string>(initial: Id): {
   topic: Id;
   leaving: Id | null;
   choose: (next: Id) => void;
 } {
   const [topic, setTopic] = useState<Id>(initial);
-  const [leaving, setLeaving] = useState<Id | null>(null);
+  const [leaving, leave] = useLeavingTransition<Id>(160);
   const choose = (next: Id): void => {
     if (next === topic) return;
-    const previous = topic;
-    setLeaving(previous);
+    leave(topic);
     setTopic(next);
-    window.setTimeout(() => setLeaving((value) => (value === previous ? null : value)), 160);
   };
   return { topic, leaving, choose };
 }

@@ -2,9 +2,11 @@ import {
   createSdkMcpServer,
   type McpSdkServerConfigWithInstance,
 } from "@anthropic-ai/claude-agent-sdk";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import { providerMcpTools } from "./host-tool-mcp-protocol";
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -85,6 +87,9 @@ export function createClaudeHostTools(
       },
     );
   }
+  config.instance.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: providerMcpTools(runtime.definitions()),
+  }));
   let closePromise: Promise<void> | undefined;
   return {
     config,

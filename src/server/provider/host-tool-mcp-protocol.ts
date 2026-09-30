@@ -1,3 +1,5 @@
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { ProviderHostToolDefinition } from "./contracts";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 
 const MCP_DEFAULT_PROTOCOL_VERSION = "2025-11-25";
@@ -21,6 +23,25 @@ type ParsedMessage =
 export interface ProviderMcpProtocolResult {
   status: number;
   body?: JsonRpcResponse | JsonRpcResponse[];
+}
+
+export function providerMcpTools(definitions: readonly ProviderHostToolDefinition[]): Tool[] {
+  return definitions.map(({ name, description, inputSchema, readOnly }) => {
+    if (inputSchema.type !== "object") {
+      throw new Error(`Inertia host tool '${name}' must accept an object.`);
+    }
+    return {
+      name,
+      description,
+      inputSchema: { ...inputSchema, type: "object" },
+      annotations: {
+        readOnlyHint: readOnly,
+        destructiveHint: false,
+        idempotentHint: readOnly,
+        openWorldHint: false,
+      },
+    };
+  });
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -97,17 +118,7 @@ async function handleRequest(
       return response(message.id, {});
     case "tools/list":
       return response(message.id, {
-        tools: runtime.definitions().map(({ name, description, inputSchema, readOnly }) => ({
-          name,
-          description,
-          inputSchema,
-          annotations: {
-            readOnlyHint: readOnly,
-            destructiveHint: false,
-            idempotentHint: readOnly,
-            openWorldHint: false,
-          },
-        })),
+        tools: providerMcpTools(runtime.definitions()),
       });
     case "tools/call": {
       const tool = message.params.name;

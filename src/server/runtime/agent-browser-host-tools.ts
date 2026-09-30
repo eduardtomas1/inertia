@@ -25,6 +25,7 @@ import { withFrontendBrowserAudit } from "./frontend-browser-audit.js";
 import { isSafeApprovalDisplayText } from "../provider/approval-display.js";
 
 const REF_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
+const NUL_FREE_PATTERN = "^[^\\u0000]*$";
 const BROWSER_KEYS = [
   "Enter", "Tab", "Escape", "Backspace", "ArrowUp", "ArrowDown",
   "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
@@ -32,8 +33,8 @@ const BROWSER_KEYS = [
 
 const tabIdSchema = z.string().uuid();
 const refSchema = z.string().regex(new RegExp(REF_PATTERN, "u"));
-const urlSchema = z.string().min(1).max(4_096).refine((value) => !value.includes("\0"));
-const textSchema = z.string().max(MAX_AGENT_BROWSER_TYPE_CHARS).refine((value) => !value.includes("\0"));
+const urlSchema = z.string().min(1).max(4_096).regex(new RegExp(NUL_FREE_PATTERN, "u"));
+const textSchema = z.string().max(MAX_AGENT_BROWSER_TYPE_CHARS).regex(new RegExp(NUL_FREE_PATTERN, "u"));
 const keySchema = z.enum(BROWSER_KEYS);
 const deltaSchema = z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0);
 const emptySchema = z.object({}).strict();
@@ -83,7 +84,7 @@ const objectSchema = (
   ...(required.length > 0 ? { required: [...required] } : {}),
 });
 const refProperty = { type: "string", pattern: REF_PATTERN, description: "An element ref from the latest inertia_browser_snapshot." };
-const urlProperty = { type: "string", minLength: 1, maxLength: 4_096, description: "A local development URL such as http://localhost:3000." };
+const urlProperty = { type: "string", minLength: 1, maxLength: 4_096, pattern: NUL_FREE_PATTERN, description: "A local development URL such as http://localhost:3000." };
 const tabIdProperty = { type: "string", format: "uuid", description: "A tab id from inertia_browser_tabs." };
 
 export const AGENT_BROWSER_TOOL_DEFINITIONS:
@@ -114,7 +115,7 @@ readonly ProviderHostToolDefinition[] = [
     description: "Type text into one editable element in the active Inertia Browser page by its ref from the latest inertia_browser_snapshot. Replaces the existing value unless replace is false.",
     inputSchema: objectSchema({
       ref: refProperty,
-      text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS },
+      text: { type: "string", maxLength: MAX_AGENT_BROWSER_TYPE_CHARS, pattern: NUL_FREE_PATTERN },
       replace: { type: "boolean", default: true, description: "Replace the current value (default) or append to it." },
     }, ["ref", "text"]),
     inputValidator: typeSchema,

@@ -53,6 +53,9 @@ reliability and safety fixes.
   instead of waiting 30 minutes.
 - Claude installed with npm now runs on Windows. Cursor and Kimi Code redact
   credentials even when a streamed reply splits them across chunks.
+- Providers get complete Browser tool instructions, including the fields each
+  action needs, such as the element to click or the tab to switch to. Claude
+  now receives these fields instead of empty lists.
 
 ### Reliability and safety
 

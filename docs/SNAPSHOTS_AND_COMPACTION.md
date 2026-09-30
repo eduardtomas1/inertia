@@ -1,5 +1,7 @@
 # Snapshots and compaction receipts
 
+## Protected snapshots
+
 Snapshots is experimental. Open **Settings → Snapshots** and enable capture. Return to your chat and focus its message box before switching to the window you want to share. On macOS and
 Windows, press both physical Shift keys together while another application is
 foreground. You can instead select Cmd+Option+S on macOS or Ctrl+Alt+S on Windows.
@@ -10,8 +12,7 @@ accessibility data before sending. Capture does not send a message automatically
 macOS requires Accessibility and Screen Recording permission; the Snapshots settings page
 opens the relevant system settings only after an explicit click. Snapshots starts
 disabled and saves the chosen setting locally. Linux requires an X11 desktop and
-working AT-SPI accessibility. Inertia matches the X11 foreground process, window title, and geometry to one accessibility window, including Chromium windows that omit the accessibility active-window flag. Wayland is reported as unavailable because reliable
-foreground-window cropping is not available through the selected native backend.
+working AT-SPI accessibility. Inertia matches the X11 foreground process, window title, and geometry to one accessibility window, including Chromium windows that omit the accessibility active-window flag. Protected foreground capture remains unavailable on Wayland. Use the reviewed screenshot workflow below instead.
 Applications that omit accessibility information can provide incomplete context.
 On Linux, Chromium and Electron apps can expose an empty accessibility tree until
 their accessibility bridge is enabled. Snapshots refuses to capture such a window,
@@ -20,7 +21,7 @@ because it cannot locate fields to mask, and suggests restarting the app with
 app-level permission that Inertia can check. Elsewhere access is established per
 window at capture time, so the permission state is reported as unverified.
 
-The capture worker reads the current window once. It masks detected editable
+The protected capture worker verifies the window before and after taking pixels. It masks detected editable
 controls and protected fields in the image and omits their text and descendants
 from context. Screenshots and accessibility context may still contain sensitive
 information. The [backend captures pixels under the window bounds](https://xa11y.dev/guides/screenshots/),
@@ -51,6 +52,38 @@ work cannot attach or focus a window, even after re-enabling. Sending resolves t
 main/runtime broker; renderer-supplied snapshot substitutions are ignored. The
 provider receives the accessibility tree as quoted, untrusted attachment context.
 Visible user text and diagnostic execution manifests exclude that content.
+
+## Reviewed screenshots on Linux
+
+Click **Take reviewed screenshot** beside the composer attachment button. This
+manual action works independently of the protected snapshot setting and shortcut.
+On X11, choose a window or screen from the previews. On Wayland, Electron uses
+PipeWire and the desktop's system picker; this requires a working desktop portal.
+A cancelled, denied, empty, or ambiguous system selection stops the operation.
+Inertia does not try another capture method after that outcome.
+
+The selected image opens in a local review dialog. Automatic masking is **not
+verified** in this mode. Drag a rectangle or enter its pixel coordinates, then
+choose **Crop to area** or **Mask area**. Each edit produces a new preview. Only
+**Attach reviewed image** imports those exact reviewed bytes into the originating
+chat. The image has no inferred application identity or accessibility context.
+Sending remains a separate composer action.
+
+Unapproved pixels remain in memory. Review expires after three minutes without activity; changing
+the selected chat, closing/navigating its window, discarding, disabling capture,
+or quitting revokes it. Approvals are checked against the originating document,
+chat, review identifier and current image revision. Attachment imports use the
+existing leases and rollback handling. Images are bounded to 2048 pixels per edge
+and 8 MiB. The X11 list shows up to 48 sources within a 4 MiB preview budget.
+
+System selection has a two-minute deadline; ordinary X11 acquisition has a
+15-second deadline. Electron does not expose a cancellation API for an open
+system picker. Close that system dialog when cancelling; Inertia discards late
+results and prevents a second picker until the native request settles. Disable
+and shutdown report unconfirmed cleanup if it remains open. No desktop-specific
+GNOME extension, KDE helper, or Wayland global shortcut is added by this workflow.
+
+## Compaction receipts
 
 Successful explicit `/compact` operations leave a persistent timeline separator,
 with the provider's before/after context counts when both are known. For example:
@@ -85,7 +118,7 @@ Source was inspected at T3 Code revision
   and compaction change
   [`c5ba51d629b3813182cf3e161cc3f23b1e541dc3`](https://github.com/pingdotgg/t3code/commit/c5ba51d629b3813182cf3e161cc3f23b1e541dc3).
 
-Inertia currently uses the pinned native packages (`@crowecawcaw/xa11y` 0.14.0 and
+Inertia currently uses the pinned native packages (`@crowecawcaw/xa11y` 0.15.0 and
 `ffi-rs` 1.3.7), included in generated third-party notices and native/package
 verification. The UI follows the compact preview and separator treatment using
 Inertia's existing attachment modal, composer, timeline and focus rules. Arrival

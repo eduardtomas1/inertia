@@ -1,3 +1,4 @@
+import { verifyReviewedNativeScreenshot } from "./snapshot-reviewed-native";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -39,7 +40,8 @@ async function run(): Promise<void> {
       console.log("NATIVE_SNAPSHOT_EVIDENCE masked-capture"); finish();
     } catch (error) {
       if (negative && error instanceof Error && error.message.includes("not exposing its accessibility tree")) {
-        console.log("NATIVE_SNAPSHOT_EVIDENCE accessibility-refused"); finish();
+        console.log("NATIVE_SNAPSHOT_EVIDENCE accessibility-refused");
+        try { await verifyReviewedNativeScreenshot(window); finish(); } catch (cause) { fail(cause); }
       } else fail(error);
     }
   });

@@ -119,7 +119,7 @@ export function ChatGoalControl({
   const label = source ? routeLabel(source) : "Goal";
   const stateLabel = goal ? goalStatusLabel(goal.status) : null;
   const controlsBusy = busy || executionStatus === "starting";
-  const ownerKey = workflow ? `${workflow.conversationId}:${source}` : null;
+  const ownerKey = workflow ? `${workflow.conversationId}:${capability?.kind ?? null}` : null;
   const ownerKeyRef = useRef(ownerKey);
   // A status action replaces the button that had focus (Pause becomes Resume,
   // the recovery section unmounts). Only an action from this control arms a

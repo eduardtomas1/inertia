@@ -702,4 +702,25 @@ describe("ChatGoalControl", () => {
     fireEvent.click(within(surface).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(onRetry).toHaveBeenCalledTimes(1));
   });
+
+  it("keeps an open goal control open and offers New chat when the chat becomes unable to continue", () => {
+    const onDismiss = vi.fn();
+    const onStartNewChat = vi.fn();
+    const state = workflow(nativeCapability, [goal("codex-native", "Ship it")]);
+    const view = render(
+      <ChatGoalControl {...props(state, { onStartNewChat })} {...openProps(onDismiss)} />,
+    );
+    expect(screen.getByRole("button", { name: "Pause" })).toHaveFocus();
+
+    view.rerender(
+      <ChatGoalControl
+        {...props(state, { onStartNewChat, continuationRefusal: "This chat cannot continue." })}
+        {...openProps(onDismiss)}
+      />,
+    );
+
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("This chat cannot continue.");
+    expect(screen.getByRole("button", { name: "New chat" })).toHaveFocus();
+  });
 });

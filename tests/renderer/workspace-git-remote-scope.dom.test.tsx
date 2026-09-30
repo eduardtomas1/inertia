@@ -234,4 +234,45 @@ describe("remote Git workspace scope", () => {
     }
   });
 
+  it("reports only failures of the workspace status refresh as workspace status errors", async () => {
+    let failWorkspace = false;
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") return result({ kind: "git.status", status: {
+        isRepository: true, authorityRef: "66666666-6666-4666-8666-666666666666", root: alpha.path, branch: "main",
+        upstream: null, ahead: 0, behind: 0, hasRemote: false, files: [], insertions: 0, deletions: 0,
+      } });
+      if (command.type === "git.workspace.refresh") {
+        if (failWorkspace) throw new Error("The workspace scan timed out.");
+        return result({ kind: "git.workspace.status", status: {
+          repositories: [], files: 0, insertions: 0, deletions: 0, scannedDirectories: 1, skippedDirectories: 0,
+          discoveredRepositories: 0, repositoryLimit: 16, partial: false, truncated: false, issues: [],
+        } });
+      }
+      if (command.type === "git.diff") throw new Error("The root diff could not be loaded.");
+      throw new Error(`Unexpected ${command.type}`);
+    });
+    const run = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      project: alpha, conversation: alphaChat, enabled: true, online: true, loadStatusOnMount: true,
+      loadWorkspaceOnMount: true, ignoreWhitespace: false, refreshVersion: 0, request, run,
+      subscribe: noopSubscribe, setActionError,
+    }));
+    await waitFor(() => expect(hook.result.current.loadError).toBe("The root diff could not be loaded."));
+    expect(hook.result.current.workspaceGitStatus).not.toBeNull();
+    expect(hook.result.current.workspaceLoadError).toBeNull();
+
+    failWorkspace = true;
+    await act(async () => {
+      await hook.result.current.loadGit({ authoritative: true }).catch(() => undefined);
+    });
+    expect(hook.result.current.loadError).toBe("The workspace scan timed out.");
+    expect(hook.result.current.workspaceLoadError).toBe("The workspace scan timed out.");
+
+    failWorkspace = false;
+    await act(async () => {
+      await hook.result.current.loadGit({ authoritative: true, scope: "workspace-status" });
+    });
+    expect(hook.result.current.workspaceLoadError).toBeNull();
+  });
 });

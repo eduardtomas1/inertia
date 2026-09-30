@@ -102,6 +102,7 @@ export function useWorkspaceGit({
   const [branches, setBranches] = useState<GitBranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(null);
   const [changesRequest, setChangesRequest] =
     useState<WorkspaceChangesRequest | null>(null);
   const changesRequestRevisionRef = useRef(0);
@@ -137,6 +138,7 @@ export function useWorkspaceGit({
       requestGenerationRef.current += 1;
       setLoading(true);
       setLoadError(null);
+      if (scope !== "status") setWorkspaceLoadError(null);
     }
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     const identity = `${owner}:${ignoreWhitespace ? "ignore" : "exact"}`;
@@ -190,6 +192,7 @@ export function useWorkspaceGit({
       authorityRef.current === owner
       && requestGenerationRef.current === generation
     );
+    let workspaceRefreshed = false;
     let promise: Promise<void>;
     promise = (async () => {
       const statusRequest = request({
@@ -230,8 +233,10 @@ export function useWorkspaceGit({
         throw new Error("Unexpected workspace Git response.");
       }
       if (!ownsResponse()) return;
+      workspaceRefreshed = true;
       setWorkspaceGitStatus(workspaceEvent.result.status);
       setWorkspaceGitOwner(`${owner}:${projectRefreshIdentity}`);
+      setWorkspaceLoadError(null);
       if (invalidationRef.current === invalidation) setWorkspaceGitStale(false);
       if (scope === "workspace-status") return;
       if (!status.isRepository) return;
@@ -252,7 +257,9 @@ export function useWorkspaceGit({
       }
     })().catch((error: unknown) => {
       if (ownsResponse()) {
-        setLoadError(gitErrorMessage(error, "Git changes could not be loaded."));
+        const message = gitErrorMessage(error, "Git changes could not be loaded.");
+        setLoadError(message);
+        if (scope !== "status" && !workspaceRefreshed) setWorkspaceLoadError(message);
       }
       throw error;
     }).finally(() => {
@@ -294,6 +301,7 @@ export function useWorkspaceGit({
     setBranchesError(null);
     setLoading(false);
     setLoadError(null);
+    setWorkspaceLoadError(null);
     setChangesRequest(null);
   }, [authority, enabled, projectRefreshIdentity]);
 
@@ -645,6 +653,7 @@ export function useWorkspaceGit({
     branchesError,
     loading,
     loadError,
+    workspaceLoadError,
     loadGit,
     loadWorkspaceRepositoryDiff,
     loadCommitReview,

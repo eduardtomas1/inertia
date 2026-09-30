@@ -236,6 +236,7 @@ export function ChangesPanel({
   const scope = reviewScope ?? JSON.stringify([selectedPath]);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const scopeGenerationRef = useRef(0);
   const dispatch = scopedReviewDispatch({
     onAsk,
     onRequestRevision,
@@ -288,6 +289,7 @@ export function ChangesPanel({
   };
 
   useEffect(() => {
+    scopeGenerationRef.current += 1;
     setNoteDraft(null);
     setSelection(null);
     setReviewAction(null);
@@ -373,6 +375,8 @@ export function ChangesPanel({
     const selected = reviewSelection(file, hunk);
     if (!selected || !reviewAction || submitting || reviewLocked) return;
     const submitted = draftRef.current;
+    const generation = scopeGenerationRef.current;
+    const current = () => scopeRef.current === scope && scopeGenerationRef.current === generation;
     setSubmitting(true);
     setSelectionError(null);
     try {
@@ -387,18 +391,18 @@ export function ChangesPanel({
         targetFingerprint: selectedLineFingerprint(file, hunk, selected.lineIds),
         body: comment,
       });
-      if (scopeRef.current !== scope) return;
-      const current = draftRef.current;
+      if (!current()) return;
+      const draft = draftRef.current;
       if (
-        current.selection === submitted.selection
-        && current.reviewAction === submitted.reviewAction
-        && current.comment === submitted.comment
+        draft.selection === submitted.selection
+        && draft.reviewAction === submitted.reviewAction
+        && draft.comment === submitted.comment
       ) clearSelection();
     } catch (error) {
-      if (scopeRef.current !== scope) return;
+      if (!current()) return;
       setSelectionError(error instanceof Error ? error.message : `${actionLabel(reviewAction)} failed.`);
     } finally {
-      if (scopeRef.current === scope) setSubmitting(false);
+      if (current()) setSubmitting(false);
     }
   };
   const addSelectionToPrompt = (file: DiffFile, hunk: DiffHunk, selected: DiffSelection) => {

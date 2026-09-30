@@ -20,7 +20,7 @@ import { isSafeApprovalDisplayText } from "../provider/approval-display.js";
 
 const tabIdSchema = z.string().uuid();
 const refSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
-const urlSchema = z.string().min(1).max(4_096).refine((value) => !value.includes("\0"));
+const urlSchema = z.string().min(1).max(4_096).regex(/^[^\u0000]*$/u);
 const emptySchema = z.object({}).strict();
 const navigateSchema = z.object({ url: urlSchema }).strict();
 const keySchema = z.enum([
@@ -32,13 +32,16 @@ const interactSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("type"),
     ref: refSchema,
-    text: z.string().max(4_000).refine((value) => !value.includes("\0")),
+    text: z.string().max(4_000).regex(/^[^\u0000]*$/u),
     replace: z.boolean().default(true),
   }).strict(),
   z.object({ action: z.literal("press"), key: keySchema }).strict(),
   z.object({
     action: z.literal("scroll"),
-    deltaY: z.number().int().min(-2_000).max(2_000).refine((value) => value !== 0),
+    deltaY: z.union([
+      z.number().int().min(-2_000).max(-1),
+      z.number().int().min(1).max(2_000),
+    ]),
   }).strict(),
 ]);
 const tabsSchema = z.discriminatedUnion("action", [
@@ -61,73 +64,42 @@ readonly ProviderHostToolDefinition[] = [
   {
     name: "inertia_browser_snapshot",
     description: "Inspect the active page in Inertia's visible Browser. Returns a bounded semantic page snapshot with stable element refs for later browser interactions. Use this native tool instead of launching Playwright when a live Inertia Browser is available.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
-    },
     inputValidator: emptySchema,
     readOnly: true,
   },
   {
     name: "inertia_browser_screenshot",
     description: "Capture the active visible Inertia Browser page into the bounded local Evidence timeline. Bitmap bytes stay on the user's device; use inertia_browser_snapshot for provider-visible page inspection.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {},
-    },
     inputValidator: emptySchema,
     readOnly: true,
   },
   {
     name: "inertia_browser_navigate",
     description: "Navigate the active Inertia Browser tab to a validated local development URL. Remote websites stay outside the embedded browser security boundary.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: { url: { type: "string", minLength: 1, maxLength: 4_096 } },
-      required: ["url"],
-    },
     inputValidator: navigateSchema,
     readOnly: false,
   },
   {
     name: "inertia_browser_interact",
     description: "Interact with the active visible Inertia Browser page using a semantic ref from inertia_browser_snapshot, a bounded key press, or a bounded scroll. Inertia shows the agent cursor and action in the Browser chrome.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        action: { enum: ["click", "type", "press", "scroll"] },
-        ref: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" },
-        text: { type: "string", maxLength: 4_000 },
-        replace: { type: "boolean", default: true },
-        key: { enum: [...keySchema.options] },
-        deltaY: { type: "integer", minimum: -2_000, maximum: 2_000 },
-      },
-      required: ["action"],
-    },
     inputValidator: interactSchema,
     readOnly: false,
   },
   {
     name: "inertia_browser_tabs",
     description: "List, open, activate, or close pages in the current chat's visible Inertia Browser. At most eight ephemeral tabs are allowed and they share only the Browser's non-persistent hardened session.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        action: { enum: ["list", "open", "activate", "close"] },
-        url: { type: "string", minLength: 1, maxLength: 4_096 },
-        tabId: { type: "string", format: "uuid" },
-      },
-      required: ["action"],
-    },
     inputValidator: tabsSchema,
     readOnly: false,
   },
-] as const;
+].map((definition) => ({
+  ...definition,
+  // Use input semantics so defaults remain optional for callers. Every branch
+  // is an object; the explicit root type also satisfies provider MCP schemas.
+  inputSchema: {
+    ...z.toJSONSchema(definition.inputValidator, { io: "input", target: "draft-7" }),
+    type: "object",
+  },
+}));
 
 function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };

@@ -2,6 +2,12 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+- Give providers complete Browser tool instructions, including the fields each
+  action needs. Claude now receives the interaction and tab schemas instead of
+  empty parameter lists.
+
 ## 0.0.64 — 2026-09-27
 
 Sign in to every provider from inside Inertia, keep large conversations and

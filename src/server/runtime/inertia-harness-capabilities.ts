@@ -62,7 +62,7 @@ export function createInertiaHarnessCapabilities(
   }];
   if (input.browserEnabled) packs.push({
     id: "inertia.frontend-workbench",
-    revision: 1,
+    revision: 2,
     title: "Inertia frontend workbench",
     summary: "Visible local-page interaction with bounded semantic inspection and deterministic frontend audit evidence.",
     instructions: [FRONTEND_INSTRUCTION],

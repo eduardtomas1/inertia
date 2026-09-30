@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -6,6 +7,7 @@ import {
 import type { CodexRunPhase } from "../../src/server/codex/app-server-config";
 import type { JsonObject } from "../../src/server/codex/protocol";
 import type { CodexAppServerOptions } from "../../src/server/codex/types";
+import { AGENT_BROWSER_TOOL_DEFINITIONS } from "../../src/server/runtime/agent-browser-host-tools";
 
 const THREAD_ID = "thread-host-tools";
 const TURN_ID = "turn-host-tools";
@@ -24,7 +26,7 @@ const hostTools: NonNullable<CodexAppServerOptions["hostTools"]> = {
   invoke: vi.fn(async () => ({ success: true, text: "{}" })),
 };
 
-function turnHarness(sessionId?: string): {
+function turnHarness(sessionId?: string, tools = hostTools): {
   calls: Array<{ method: string; params: JsonObject }>;
   run(): Promise<void>;
 } {
@@ -38,7 +40,7 @@ function turnHarness(sessionId?: string): {
     prompt: sessionId ? "Continue" : "Inspect chats",
     planMode: false,
     access: "supervised",
-    hostTools,
+    hostTools: tools,
     ...(sessionId ? { sessionId } : {}),
   };
   return {
@@ -82,6 +84,15 @@ function turnHarness(sessionId?: string): {
 }
 
 describe("Codex host-tool registration", () => {
+  it("preserves the browser action contracts in the dynamic tools sent to Codex", async () => {
+    const harness = turnHarness(undefined, { ...hostTools, definitions: AGENT_BROWSER_TOOL_DEFINITIONS });
+    await harness.run();
+    const started = harness.calls.find(({ method }) => method === "thread/start");
+    expect(started?.params.dynamicTools).toEqual(AGENT_BROWSER_TOOL_DEFINITIONS.map(
+      ({ name, description, inputSchema }) => ({ name, description, inputSchema }),
+    ));
+  });
+
   it("advertises exact dynamic tools when opening a new provider thread", async () => {
     const harness = turnHarness();
     await harness.run();

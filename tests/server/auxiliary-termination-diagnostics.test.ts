@@ -37,6 +37,7 @@ const runningThenGone: ProcessTable = (read) => ({
   stdout: read === 1 ? "4242 1 Ss\n" : "1 0 Ss\n",
 });
 const failedRead: ProcessTable = () => ({ status: 1, stdout: "" });
+const runningThenTimedOut: ProcessTable = (read) => read === 1 ? stoppedNeverObserved(read) : timedOutRead(read);
 
 function fakeChild(): ChildProcess {
   const child = new EventEmitter() as EventEmitter & Record<string, unknown>;
@@ -72,6 +73,8 @@ describe("POSIX cleanup rows", () => {
       expected: { row: "stop-never-observed", rootState: "running", snapshotReads: 9, snapshotTimeouts: 0 } },
     { name: "the root ran and then disappeared", table: runningThenGone,
       expected: { row: "running-then-gone", rootState: "absent", snapshotReads: 2, snapshotTimeouts: 0 } },
+    { name: "the root ran and every later ps read timed out", table: runningThenTimedOut,
+      expected: { row: "ps-read-timed-out", rootState: "running", snapshotReads: 9, snapshotTimeouts: 8 } },
     { name: "every ps read failed without a timeout", table: failedRead,
       expected: { row: "unknown-root-state", rootState: "unknown", snapshotReads: 8, snapshotTimeouts: 0 } },
   ])("records $name on the terminated child", async ({ table, expected }) => {

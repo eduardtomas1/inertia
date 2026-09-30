@@ -41,15 +41,20 @@ export interface PosixCleanupDiagnostic extends PosixCleanupFailure {
 
 function posixCleanupRow(
   failure: PosixCleanupFailure,
-  snapshotTimeouts: number | null,
+  snapshot: { snapshotReads: number; snapshotTimeouts: number } | null,
 ): PosixCleanupRow {
   if (failure.reason !== "exit-unconfirmed" && failure.reason !== "incomplete-scan") {
     return failure.reason;
   }
+  const snapshotTimeouts = snapshot?.snapshotTimeouts ?? 0;
   if (failure.rootState === "unknown") {
-    return (snapshotTimeouts ?? 0) > 0 ? "ps-read-timed-out" : "unknown-root-state";
+    return snapshotTimeouts > 0 ? "ps-read-timed-out" : "unknown-root-state";
   }
-  if (failure.rootState === "running") return "stop-never-observed";
+  if (failure.rootState === "running") {
+    return snapshot && snapshotTimeouts > 0 && snapshotTimeouts >= snapshot.snapshotReads - 1
+      ? "ps-read-timed-out"
+      : "stop-never-observed";
+  }
   if (
     failure.rootRunningObserved === true
     && (failure.rootState === "zombie" || failure.rootState === "absent")
@@ -62,12 +67,11 @@ export function posixCleanupDiagnostic(
   snapshot: { snapshotReads: number; snapshotTimeouts: number } | null,
   elapsedMs: number,
 ): PosixCleanupDiagnostic {
-  const snapshotTimeouts = snapshot?.snapshotTimeouts ?? null;
   return {
     ...failure,
-    row: posixCleanupRow(failure, snapshotTimeouts),
+    row: posixCleanupRow(failure, snapshot),
     snapshotReads: snapshot?.snapshotReads ?? null,
-    snapshotTimeouts,
+    snapshotTimeouts: snapshot?.snapshotTimeouts ?? null,
     elapsedMs: Math.max(0, Math.min(300_000, Math.trunc(elapsedMs))),
   };
 }

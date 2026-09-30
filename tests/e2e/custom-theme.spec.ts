@@ -54,7 +54,7 @@ test("selects custom colors per appearance, follows System, and restores them af
     await page.getByRole("radio", { name: "Dark", exact: true }).click();
     ({ page } = await app.restart());
     await expectPalette(page, "#f97316", "dark");
-    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
     await page.locator(".workspace-header").getByRole("button", { name: "custom-theme fixture", exact: true }).click();
     const opened = app.electronApp.waitForEvent("window");
     await page.getByRole("menuitem", { name: "Open chat in new window" }).click();

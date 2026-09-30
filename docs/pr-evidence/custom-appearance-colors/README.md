@@ -35,3 +35,27 @@ See [renderer bundle measurements](renderer-bundle.json) for a comparison with
 
 The standard captures are 1440 × 1100. These screenshots establish Linux Electron
 rendering; native Windows/macOS color dialogs and rendering were not exercised.
+
+## Verification
+
+- 435 focused tests pass across 12 unit/DOM test files, including palette contrast,
+  picker validation and commit behavior, cache/bootstrap, settings persistence,
+  schema upgrades and lineage, detached settings projection, and preset output.
+- Both Electron appearance scenarios pass: custom colors and existing preset
+  themes. Coverage includes System switching, restart persistence, detached-window
+  synchronization, returning to presets, and viewport overflow checks.
+- `npm run check:quality` and the production build/bundle-budget check pass.
+  The build used the cloud workspace's local native compiler wrapper for the
+  process guardian; application build settings and runtime guards were unchanged.
+- The full verification gate was exercised as separate quality, test, and build
+  stages because of that compiler setup. The full test run reported 11,410 passed,
+  83 failed, 106 skipped, and one unhandled Git error. Three migration-related
+  failures from that run were corrected and pass in focused reruns. The full
+  suite was not rerun after those corrections.
+- Other failures include native guardian/process lifecycle timeouts, filesystem
+  identity/permission behavior, and experimental proxy warnings in exact-output
+  tests. A representative selection on unchanged base `cb93b1f5` reproduced 15
+  failures across seven files (358 passed, 15 skipped). This does not establish
+  that every full-suite failure is pre-existing; the complete gate remains red.
+
+Windows/macOS native dialogs and rendering were not exercised.

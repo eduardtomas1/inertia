@@ -219,7 +219,10 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
       if (event.key === "Escape") { toggle(); picker.focus({ preventScroll: true }); return; }
       const rows = [...list.children] as HTMLElement[];
       const index = rows.indexOf(document.activeElement as HTMLElement);
-      rows[(index + (event.key === "ArrowUp" ? rows.length - 1 : 1)) % rows.length]?.focus({ preventScroll: true });
+      const next = index < 0
+        ? event.key === "ArrowUp" ? rows.length - 1 : 0
+        : (index + (event.key === "ArrowUp" ? rows.length - 1 : 1)) % rows.length;
+      rows[next]?.focus({ preventScroll: true });
       return;
     }
     const action = actions[event.key];

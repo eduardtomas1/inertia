@@ -235,6 +235,24 @@ describe("mascot chat context and chooser", () => {
     expect(document.activeElement).toBe(view.container.querySelector(".mascot-open"));
   });
 
+  it.each([
+    ["ArrowUp", "c"],
+    ["ArrowDown", ""],
+  ] as const)("moves %s from the open chooser's picker to the edge row", async (key, expected) => {
+    const app = fixture();
+    const view = renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const [a, b, c] = ["a", "b", "c"].map((id) => chat(id, "running"));
+    app.list(a!, [a!, b!, c!]);
+    const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
+    fireEvent.click(picker);
+    picker.focus();
+
+    fireEvent.keyDown(picker, { key });
+
+    expect(document.activeElement).toBe(view.container.querySelector(`.mascot-option[data-key="${expected}"]`));
+  });
+
   it("moves keyboard focus to the mascot when the hidden picker leaves no chat to open", async () => {
     const app = fixture();
     const view = renderMascot();

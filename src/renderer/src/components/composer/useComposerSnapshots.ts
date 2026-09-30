@@ -28,6 +28,10 @@ const report = (message: string, conversationId = focused?.conversationId): void
 
 // A window has one delivery subscriber even when two composers are mounted.
 function receive(bridge: DesktopBridge, event: SnapshotDelivery): void {
+  if (event.review) {
+    window.dispatchEvent(new CustomEvent("inertia:snapshot-review", { detail: event }));
+    return;
+  }
   const destination = focused?.conversationId === event.conversationId ? focused
     : [...composers].find(({ conversationId }) => conversationId === event.conversationId);
   if (destination) { destination.receive(event); return; }
@@ -56,6 +60,7 @@ export function useComposerSnapshots(
         void bridge.snapshot({ type: "bind", conversationId }).catch(() => undefined);
       },
       receive: (event) => {
+        if (event.review) return;
         if (!event.selection) { if (current.current.conversationId === event.conversationId) report(event.error, conversationId); return; }
         const selection = event.selection;
         if (current.current.conversationId !== event.conversationId) {

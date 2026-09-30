@@ -48,8 +48,14 @@ export function SnapshotSettings(): React.JSX.Element {
 
   if (!window.inertia?.snapshot) return <p role="status">Snapshots is available in the desktop app.</p>;
   return <div className="snapshot-settings">
+    {linux && <section className="settings-card" aria-labelledby="screenshot-reviewed-heading">
+      <h3 id="screenshot-reviewed-heading">Reviewed screenshots</h3>
+      <p className="settings-card-note">Use Take reviewed screenshot beside the chat attachment button. Choose a window or screen, review it, and crop or mask sensitive areas before attaching.</p>
+      <p className="settings-card-note">No accessibility tree or global shortcut is needed. Automatic masking is not verified. The image is attached only after you approve it.</p>
+      {state && <p role="status">Capture method: {state.reviewedBackend === "system-picker" ? "Wayland system picker (requires desktop portal and PipeWire support)" : state.reviewedBackend === "window-picker" ? "X11 window and screen picker" : "Unavailable in this session"}.</p>}
+    </section>}
     <section className="settings-card" aria-labelledby="snapshot-capture-heading">
-      <h3 id="snapshot-capture-heading">Foreground window capture</h3>
+      <h3 id="snapshot-capture-heading">Protected foreground capture</h3>
       <p className="settings-card-note">Experimental capture of the foreground window and its accessibility context. Review the attachment before sending.</p>
       <div className="setting-row">
         <span className="setting-copy"><strong>Enable Snapshots</strong><small>Use a global shortcut to attach the window you are working in to your selected chat.</small></span>
@@ -86,7 +92,7 @@ export function SnapshotSettings(): React.JSX.Element {
           <button type="button" className="secondary-button" disabled={pending} onClick={() => void request({ type: "permission", permission: "screen" })}>Screen Recording settings</button>
         </div>
       </> : <p className="settings-card-note">{state?.permission === "granted" ? "macOS capture permissions are granted." : "Capture access depends on the foreground app. Inertia checks that it can locate and mask editable fields before returning an image."}</p>}
-      {linux && <p className="settings-card-note">On Linux X11, Chromium apps must expose their accessibility tree. If capture reports that it is unavailable, restart the target app with <code>--force-renderer-accessibility</code> or <code>ACCESSIBILITY_ENABLED=1</code>. Wayland capture is not supported.</p>}
+      {linux && <p className="settings-card-note">On Linux X11, Chromium apps must expose their accessibility tree. If capture reports that it is unavailable, restart the target app with <code>--force-renderer-accessibility</code> or <code>ACCESSIBILITY_ENABLED=1</code>. On Wayland, use Take reviewed screenshot in the chat instead.</p>}
     </section>
   </div>;
 }

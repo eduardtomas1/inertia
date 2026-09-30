@@ -1,0 +1,42 @@
+{
+  "main": {
+    "deferredSnapshotSettingsJavaScript": {
+      "bytes": 5012,
+      "limitBytes": 5324
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "bytes": 851481,
+      "limitBytes": 851496
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "bytes": 658031,
+      "limitBytes": 658114
+    },
+    "coreJavaScript": {
+      "bytes": 2213166,
+      "limitBytes": 2213240
+    }
+  },
+  "reviewed_screenshots": {
+    "deferredSnapshotSettingsJavaScript": {
+      "bytes": 5898,
+      "limitBytes": 6144
+    },
+    "deferredSnapshotControlJavaScript": {
+      "bytes": 7151,
+      "limitBytes": 7270
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "bytes": 851659,
+      "limitBytes": 851674
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "bytes": 658209,
+      "limitBytes": 658292
+    },
+    "coreJavaScript": {
+      "bytes": 2211854,
+      "limitBytes": 2211928
+    }
+  }
+}

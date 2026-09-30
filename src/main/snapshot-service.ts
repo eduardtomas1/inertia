@@ -6,6 +6,8 @@ import {
   type SnapshotFailureCategory, type SnapshotFailureDiagnostic, type SnapshotSource, type SnapshotState,
 } from "../shared/snapshots.js";
 
+import { reviewedSnapshotBackend } from "../shared/snapshot-review.js";
+
 export function snapshotWorkerEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
   for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP", "HOME", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "LANG"]) {
@@ -56,6 +58,7 @@ export class SnapshotService {
   constructor(
     private readonly onCapture: () => Promise<void>,
     private readonly onFailure: (diagnostic: SnapshotFailureDiagnostic) => void = () => undefined,
+    private readonly stopReview: () => Promise<void> = async () => undefined,
   ) {}
 
   // Capture failures can disable the service without ending its reporting lifetime.
@@ -65,15 +68,15 @@ export class SnapshotService {
     const available = snapshotPlatformAvailable(process.platform, process.env);
     const permission = process.platform !== "darwin" ? "unverified"
       : systemPreferences.isTrustedAccessibilityClient(false) && systemPreferences.getMediaAccessStatus("screen") === "granted" ? "granted" : "required";
-    return { enabled: this.enabled, shortcut: this.shortcut, available, permission,
-      message: !available ? "Snapshots requires macOS, Windows, or a Linux X11 desktop with accessibility support." : this.message };
+    return { reviewedBackend: reviewedSnapshotBackend(process.platform, process.env), enabled: this.enabled, shortcut: this.shortcut, available, permission,
+      message: !available ? "Protected snapshots require macOS, Windows, or a Linux X11 desktop with accessibility support." : this.message };
   }
 
   // Revoke synchronously, including when IPC configuration is waiting behind a prior request.
   revokeCapture(): Promise<void> {
     this.enabled = false;
     this.captureGeneration += 1;
-    return this.cancelCapture?.() ?? Promise.resolve();
+    return Promise.all([this.cancelCapture?.() ?? Promise.resolve(), this.stopReview()]).then(() => undefined);
   }
 
   async configure(enabled: boolean, shortcut: SnapshotState["shortcut"]): Promise<SnapshotState> {
@@ -262,7 +265,7 @@ export class SnapshotService {
     this.disposalStarted = true;
     this.disposed = true; this.enabled = false;
     const results = await Promise.allSettled([
-      this.stopShortcut(),
+      this.stopShortcut(), this.stopReview(),
       ...(this.captureChild ? [this.stopWorker(this.captureChild)] : []),
     ]);
     if (results.some((result) => result.status === "rejected")) throw new SnapshotError("Snapshot worker cleanup is unconfirmed.");

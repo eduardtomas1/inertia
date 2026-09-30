@@ -63,13 +63,13 @@ const budgets = {
   // actual deferred consumers. Transfer 2,900 bytes of allowance from startup
   // and core to those deferred closures; the combined ceiling does not grow.
   // See docs/pr-evidence/workspace-surfaces/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 178,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 178,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte + 760,
@@ -85,8 +85,14 @@ const budgets = {
   deferredUsageLimitsJavaScript: 19.7 * kibibyte,
   deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
-  // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
-  deferredSnapshotSettingsJavaScript: 5.2 * kibibyte,
+  // Reviewed screenshots add 886 settings bytes. The 7,151-byte review dialog
+  // is separately capped; its former 1,490-byte error dialog moves out of core.
+  // Exact routing/disabled-state changes add 178 bytes per initial route and
+  // to the remaining core. Preserve their previous headroom; see
+  // docs/pr-evidence/linux-reviewed-screenshots/review.md.
+  deferredSnapshotSettingsJavaScript: 6 * kibibyte,
+  // The Linux source picker, crop/mask editor and approval dialog remain deferred.
+  deferredSnapshotControlJavaScript: 7.1 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172,
   deferredDiagnosticsJavaScript: 13 * kibibyte,
@@ -166,7 +172,7 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 - 1_490 + 178,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -651,6 +657,12 @@ if (entryJavaScriptClosure.has(snapshotSettingsEntry) || mainWorkbenchJavaScript
 }
 // Charge only this feature's new module separately. Shared helpers stay in core.
 const deferredSnapshotSettingsJavaScriptBytes = await assetBytes(`assets/${snapshotSettingsEntry}`);
+const snapshotControlEntry = assetNames.find((name) => /^SnapshotControl-.*\.js$/u.test(name));
+if (!snapshotControlEntry) throw new Error("Missing deferred screenshot review");
+if (entryJavaScriptClosure.has(snapshotControlEntry) || mainWorkbenchJavaScriptClosure.has(snapshotControlEntry) || detachedChatJavaScriptClosure.has(snapshotControlEntry)) {
+  throw new Error("Screenshot review must remain deferred from the initial chat routes");
+}
+const deferredSnapshotControlJavaScriptBytes = await assetBytes(`assets/${snapshotControlEntry}`);
 const attachmentStorageSettingsEntry = assetNames.find((name) => /^AttachmentStorageSettings-.*\.js$/u.test(name));
 if (!attachmentStorageSettingsEntry) throw new Error("Missing deferred attachment storage settings");
 if (entryJavaScriptClosure.has(attachmentStorageSettingsEntry) || mainWorkbenchJavaScriptClosure.has(attachmentStorageSettingsEntry) || detachedChatJavaScriptClosure.has(attachmentStorageSettingsEntry)) {
@@ -664,6 +676,7 @@ const coreJavaScriptBytes =
   - deferredWelcomeGuideJavaScriptBytes
   - deferredWorkingOrbJavaScriptBytes
   - deferredSnapshotSettingsJavaScriptBytes
+  - deferredSnapshotControlJavaScriptBytes
   - deferredAttachmentStorageSettingsJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
@@ -703,6 +716,7 @@ const measurements = {
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
+  deferredSnapshotControlJavaScript: deferredSnapshotControlJavaScriptBytes,
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,

@@ -136,3 +136,59 @@ test("loads snapshot native bindings in the Electron utility runtime without des
     expect(app.rendererErrors).toEqual([]);
   } finally { await app.close(); }
 });
+
+for (const theme of ["dark", "light"] as const) test(`reviews a real Linux screenshot in ${theme} before importing it`, async ({ browserName: _browserName }, testInfo) => {
+  test.skip(process.platform !== "linux", "Reviewed screenshots are currently Linux-only");
+  const app = await createAppFixture({ name: "reviewed-screenshot", initialState: "conversation", windowDisplay: "primary", beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+    const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, { recoverInterruptedRuns: false });
+    try { store.updateSettings({ theme }); } finally { store.close(); }
+  } });
+  let bodyFailure: { error: unknown } | undefined;
+  try {
+    const page = app.page;
+    await app.resizeWindow(1100, 850); await closeWorkspaceTools(page);
+    await app.electronApp.evaluate(async ({ BrowserWindow }) => {
+      const target = new BrowserWindow({ width: 640, height: 480, show: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      target.removeMenu();
+      await target.loadURL(`data:text/html,${encodeURIComponent('<title>Reviewed screenshot fixture</title><style>body{background:#f8f6f1;color:#242424;font:18px sans-serif;padding:24px}input{background:#ffcc00}</style><h1>Release checklist</h1><p>This is synthetic local test content.</p><label>Private note <input value="review-only-sentinel"></label>')}`);
+    });
+    await page.bringToFront();
+    await page.getByRole("textbox", { name: "Message" }).focus();
+    expect((await page.evaluate(() => window.inertia.snapshot({ type: "state" }))).enabled).toBe(false);
+    await page.getByRole("button", { name: "Take reviewed screenshot" }).click();
+    const dialog = page.getByRole("dialog", { name: "Review screenshot" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Reviewed screenshot fixture", exact: true }).click();
+    await expect(dialog.getByRole("img", { name: "Screenshot to review before attaching" })).toBeVisible();
+    await expect(page.locator(".composer-attachment")).toHaveCount(0);
+    await dialog.getByRole("spinbutton", { name: "Top", exact: true }).fill("420");
+    await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill("1600");
+    await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill("180");
+    await dialog.getByRole("button", { name: "Mask area", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Attach reviewed image" })).toBeEnabled();
+    await dialog.getByRole("spinbutton", { name: "Width", exact: true }).fill("1800");
+    await dialog.getByRole("spinbutton", { name: "Height", exact: true }).fill("1200");
+    await dialog.getByRole("button", { name: "Crop to area", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Attach reviewed image" })).toBeEnabled();
+    const preview = dialog.getByRole("img", { name: "Screenshot to review before attaching" });
+    await expect.poll(() => preview.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(1800);
+    const bounds = await preview.boundingBox(); expect(bounds).not.toBeNull();
+    await page.mouse.move(bounds!.x + bounds!.width * 0.25, bounds!.y + bounds!.height * 0.25);
+    await page.mouse.down();
+    await page.mouse.move(bounds!.x + bounds!.width * 0.75, bounds!.y + bounds!.height * 0.75);
+    await page.mouse.up();
+    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Left", exact: true }).inputValue()) - 450)).toBeLessThanOrEqual(3);
+    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Width", exact: true }).inputValue()) - 900)).toBeLessThanOrEqual(3);
+    const path = testInfo.outputPath(`reviewed-screenshot-${theme}.png`);
+    await page.screenshot({ path, animations: "disabled" }); await testInfo.attach("reviewed-screenshot", { path, contentType: "image/png" });
+    await app.resizeWindow(760, 600); await app.expectNoViewportOverflow();
+    await dialog.getByRole("button", { name: "Attach reviewed image" }).click();
+    await expect(dialog).toHaveCount(0);
+    const tile = page.locator(".composer-attachment"); await expect(tile).toHaveCount(1);
+    await expect(tile).not.toHaveAttribute("data-snapshot", "true");
+    await expect.poll(() => tile.locator("img").evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(1800);
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEmpty();
+    expect(app.rendererErrors).toEqual([]);
+  } catch (error) { bodyFailure = { error }; throw error; }
+  finally { await closeElectronAfterTest(() => app.close(), () => testInfo, bodyFailure); }
+});

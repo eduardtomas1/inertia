@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
 import type { SnapshotState } from "../../src/shared/snapshots";
 import type { ChatAttachment } from "../../src/shared/contracts";
-const native = vi.hoisted(() => ({ handle: vi.fn(), document: vi.fn(), write: vi.fn(), clear: vi.fn(), capture: vi.fn(), configure: vi.fn(), revoke: vi.fn(), trigger: null as (() => Promise<void>) | null }));
+const native = vi.hoisted(() => ({ review: vi.fn(), cancelReview: vi.fn(), handle: vi.fn(), document: vi.fn(), write: vi.fn(), clear: vi.fn(), capture: vi.fn(), configure: vi.fn(), revoke: vi.fn(), trigger: null as (() => Promise<void>) | null }));
 vi.mock("electron", () => ({ app: { getPath: () => "/private/fixture" }, ipcMain: { handle: native.handle }, shell: { openExternal: vi.fn() }, systemPreferences: { isTrustedAccessibilityClient: vi.fn() } }));
 vi.mock("../../src/main/snapshot-preferences", () => ({ readSnapshotPreferences: async () => ({ enabled: true, shortcut: "accelerator" }), writeSnapshotPreferences: native.write, clearSnapshotPreferences: native.clear }));
 vi.mock("../../src/main/attachment-import-ipc", async (original) => ({ ...await original<typeof import("../../src/main/attachment-import-ipc")>(), attachmentImportDocumentFromEvent: native.document }));
@@ -22,6 +22,11 @@ vi.mock("../../src/main/snapshot-service", () => ({
     capture = native.capture;
   },
 }));
+vi.mock("../../src/main/snapshot-review", () => ({ SnapshotReviewService: class {
+  request = native.review;
+  cancel = native.cancelReview;
+  stop = vi.fn(async () => undefined);
+} }));
 import { registerSnapshotIpc } from "../../src/main/snapshot-ipc";
 import { SnapshotError } from "../../src/main/snapshot-service";
 import { RendererAttachmentImportCoordinator } from "../../src/main/attachment-import-ipc";
@@ -352,4 +357,18 @@ describe("snapshot destination and preference boundaries", () => {
     await expect(handler({}, { type: "state", path: "/private" })).rejects.toThrow();
     expect(native.capture).not.toHaveBeenCalled();
   });
+});
+
+it("permits an explicit reviewed screenshot with protected capture disabled, scoped to the bound document", async () => {
+  const { handler, window } = await fixture();
+  const conversationId = "11111111-1111-4111-8111-111111111111";
+  const reviewId = "22222222-2222-4222-8222-222222222222";
+  await handler({}, { type: "configure", enabled: false, shortcut: "accelerator" });
+  await handler({}, { type: "bind", conversationId });
+  await handler({}, { type: "review-start", reviewId, conversationId });
+  expect(native.review).toHaveBeenCalledWith(expect.objectContaining({ window, conversationId }), { type: "review-start", reviewId, conversationId });
+  await expect(handler({ window: snapshotWindow() }, { type: "review-approve", reviewId, revision: 1 })).rejects.toThrow("Focus the chat");
+  expect(native.review).toHaveBeenCalledOnce();
+  await handler({}, { type: "bind", conversationId: "33333333-3333-4333-8333-333333333333" });
+  expect(native.cancelReview).toHaveBeenCalled();
 });

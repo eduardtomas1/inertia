@@ -77,6 +77,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
     if (reviewId) void window.inertia.snapshot({ type: "review-cancel", reviewId }).catch(() => undefined);
   };
   const start = (): void => {
+    if (open) return;
     id.current = crypto.randomUUID(); setOpen(true); setReview(null); setError(null);
     void request({ type: "review-start", reviewId: id.current, conversationId });
   };
@@ -88,7 +89,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
 
   if (!navigator.platform.toLowerCase().includes("linux") || !window.inertia?.snapshot) return null;
   return <>
-    <IconButton label="Take reviewed screenshot" disabled={disabled || open} onClick={start}><Camera size={16} /></IconButton>
+    <IconButton label="Take reviewed screenshot" disabled={disabled} aria-disabled={open} onClick={start}><Camera size={16} /></IconButton>
     {open && createPortal(<div className="snapshot-backdrop" role="presentation">
       <section className="snapshot-dialog screenshot-review" role="dialog" aria-modal="true" aria-labelledby="screenshot-review-title"
         onKeyDown={(event) => {

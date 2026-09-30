@@ -22,6 +22,10 @@ import {
   DEFAULT_WORKING_INDICATOR,
   type WorkingIndicatorSettings,
 } from "../working-indicator";
+import {
+  DEFAULT_COMPLETION_SOUND,
+  type CompletionSoundSettings,
+} from "../completion-sound";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
@@ -205,6 +209,7 @@ export interface AppSettings {
   /** App-local Cmd/Ctrl chords; the primary modifier is never remapped. */
   keybindings: AppKeybindings;
   workingIndicator: WorkingIndicatorSettings;
+  completionSound: CompletionSoundSettings;
   defaultReasoningEffort: string;
   defaultInteractionMode: InteractionMode;
   /** Empty uses automatic discovery; otherwise an explicitly validated Codex binary or shim. */
@@ -213,8 +218,9 @@ export interface AppSettings {
   discordReleaseRepositoryUrl: string;
 }
 
-export type AppSettingsUpdate = Omit<Partial<AppSettings>, "workingIndicator"> & {
+export type AppSettingsUpdate = Omit<Partial<AppSettings>, "workingIndicator" | "completionSound"> & {
   workingIndicator?: Partial<WorkingIndicatorSettings>;
+  completionSound?: Partial<CompletionSoundSettings>;
 };
 
 export interface Project {
@@ -264,6 +270,8 @@ export interface Conversation {
   pinnedAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */
   snoozedUntil?: string | null;
+  hasHistory?: boolean;
+  mixedProviderHistory?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -365,6 +373,7 @@ export const defaultSettings: AppSettings = {
   providerIdentityLabels: {},
   keybindings: DEFAULT_APP_KEYBINDINGS,
   workingIndicator: { ...DEFAULT_WORKING_INDICATOR },
+  completionSound: { ...DEFAULT_COMPLETION_SOUND, library: [] },
   defaultReasoningEffort: "",
   defaultInteractionMode: "build",
   codexBinaryPath: "",

@@ -34,6 +34,10 @@ Yes. Open two chats in [split view](working-side-by-side.md), move a chat into i
 
 Yes, with [Private Connect](../PRIVATE_CONNECT.md), which gives scoped access from another device over Tailscale while the desktop stays online.
 
+### Is there help inside the app?
+
+Yes. Choose **Help**, the question-mark button in the sidebar footer, or search for **Open help** with ⌘K (Ctrl+K elsewhere). It groups the app's features by topic, shows your current shortcuts, and links to the matching settings.
+
 ### How do I see the welcome guide again?
 
 Open **Settings → Report an issue** and choose **Show welcome guide**.

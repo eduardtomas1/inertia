@@ -12,7 +12,7 @@ import { writeClipboardText } from "../utils/clipboard";
 
 type UpdateState = (
   operation: () => Promise<PrivateConnectStateView>,
-  success: string,
+  success: string | (() => string),
 ) => Promise<void>;
 
 export function ConnectionsAndDevicesSettings({
@@ -35,9 +35,11 @@ export function ConnectionsAndDevicesSettings({
       setQr(null);
       return;
     }
+    let current = true;
     void QRCode.toDataURL(state.invitation.url, { width: 220, margin: 1 })
-      .then(setQr)
-      .catch(() => setQr(null));
+      .then((value) => { if (current) setQr(value); })
+      .catch(() => { if (current) setQr(null); });
+    return () => { current = false; };
   }, [state?.invitation?.url]);
 
   if (loaded.error) {
@@ -63,7 +65,7 @@ export function ConnectionsAndDevicesSettings({
     setMessage(null);
     try {
       setState(await operation());
-      setMessage(success);
+      setMessage(typeof success === "string" ? success : success());
     } catch (error) {
       setMessage(error instanceof Error
         ? error.message
@@ -73,13 +75,13 @@ export function ConnectionsAndDevicesSettings({
     }
   };
 
-  const createInvitation = (): Promise<void> => update(async () => {
-    const invitation = await window.inertia.createPrivateConnectInvitation();
-    setMessage(
-      `Pairing link ready until ${new Date(invitation.expiresAt).toLocaleTimeString(INTERFACE_LOCALE)}.`,
-    );
-    return await window.inertia.getPrivateConnectState();
-  }, "Pairing link ready.");
+  const createInvitation = (): Promise<void> => {
+    let expiresAt = "";
+    return update(async () => {
+      ({ expiresAt } = await window.inertia.createPrivateConnectInvitation());
+      return await window.inertia.getPrivateConnectState();
+    }, () => `Pairing link ready until ${new Date(expiresAt).toLocaleTimeString(INTERFACE_LOCALE)}.`);
+  };
 
   const copyInvitation = async (): Promise<void> => {
     if (!state.invitation) return;

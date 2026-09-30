@@ -3,6 +3,7 @@ import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagnosticSelection } from "./utils/diagnosticNavigation";
+import type { SettingsSection } from "./components/settingsSections";
 import { useDiagnosticNavigation } from "./hooks/useDiagnosticNavigation";
 import {
   type AgentApprovalDecision,
@@ -10,13 +11,12 @@ import {
   type AgentInputRequest,
   type AppSettings,
   type Conversation,
-  type ModelSelection,
   type Project,
   type ProviderId,
   type ProviderMaintenanceProviderId,
   type SubagentTrace,
 } from "@shared/contracts";
-import { defaultSettings } from "@shared/contracts/app";
+import type { MessageSearchHit } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
@@ -27,6 +27,7 @@ import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
+import { useHelpGuideOpen } from "./hooks/useHelpGuideOpen";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
@@ -51,15 +52,14 @@ import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
-import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
+import { type NewConversationLocation, type ReplacementChatRequest, replacementConversationPayload } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
   cacheColorTheme,
   cacheThemePreference,
-  cachedColorTheme,
-  cachedThemePreference,
 } from "./utils/theme";
+import { cachedAppSettings } from "./utils/cachedSettings";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
@@ -68,8 +68,8 @@ import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
-import { requestComposerPrefill } from "./utils/composerPrefill";
-import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
+import { persistComposerDraft } from "./utils/composerDraftPersistence";
+import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
 const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
@@ -112,7 +112,7 @@ export default function App(): React.JSX.Element {
   );
   const [view, setView] = useState<AppView>("workspace");
   const [settingsTarget, setSettingsTarget] = useState<{
-    section: "providers" | "backends" | "connections" | "discord" | "diagnostics" | "projects";
+    section: SettingsSection;
     projectId?: string;
     profileId?: string;
     selection?: DiagnosticSelection;
@@ -122,6 +122,7 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [dailyWorkOpen, setDailyWorkOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const helpOpen = useHelpGuideOpen();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
@@ -149,14 +150,7 @@ export default function App(): React.JSX.Element {
   const conversationSelectionGenerationRef = useRef(0);
   const pendingSeenRunsRef = useRef(new Set<string>());
   const settings = useMemo(
-    () => connection.snapshot?.settings ?? {
-      ...defaultSettings,
-      theme: cachedThemePreference(layoutStorage) ?? defaultSettings.theme,
-      colorTheme: cachedColorTheme(layoutStorage)
-        ?? defaultSettings.colorTheme,
-      lightColorTheme: cachedColorTheme(layoutStorage, "light") ?? defaultSettings.colorTheme,
-      darkColorTheme: cachedColorTheme(layoutStorage, "dark") ?? defaultSettings.colorTheme,
-    },
+    () => connection.snapshot?.settings ?? cachedAppSettings(),
     [connection.snapshot?.settings],
   );
   useTheme(settings.theme, settings.colorTheme, settings.lightColorTheme, settings.darkColorTheme);
@@ -472,6 +466,7 @@ export default function App(): React.JSX.Element {
           authProviderOpen: authProviderId !== null,
           multiSpawnOpen: multiSpawn.open,
           mobileSidebarOpen: mobileNavigation && sidebarOpen,
+          helpOpen,
         }),
       },
     );
@@ -489,6 +484,7 @@ export default function App(): React.JSX.Element {
     commitDialogOpen,
     dailyWorkOpen,
     conversation?.id,
+    helpOpen,
     latestContentVisible,
     mobileNavigation, multiSpawn.open,
     paletteOpen,
@@ -693,30 +689,24 @@ export default function App(): React.JSX.Element {
     setSidebarCollapsed,
     setSidebarOpen,
   });
-  const createConversationForSelection = async (
-    selection: ModelSelection,
-    options?: { prefillText?: string; configuration?: Pick<Conversation, "accessMode" | "interactionMode"> },
-  ): Promise<void> => {
-    if (draftConversation.chooseModel(selection, options?.configuration)) return;
+  const createConversationForSelection = async (request: ReplacementChatRequest): Promise<void> => {
+    if (draftConversation.chooseModel(request.selection, request.configuration)) return;
     if (!project) throw new Error("Select a project before creating a chat.");
     const selectionGeneration =
       conversationSelectionGenerationRef.current + 1;
     conversationSelectionGenerationRef.current = selectionGeneration;
     const event = await run("conversation.create", {
       type: "conversation.create",
-      payload: {
-        ...withNewConversationModelSelection(
-          buildNewConversationPayload(project, settings),
-          selection,
-        ),
-        ...options?.configuration,
-        activate: false,
-      },
+      payload: replacementConversationPayload(project, settings, request),
     });
     if (
       event.type !== "request.result"
       || event.result.kind !== "conversation.created"
     ) throw new Error("The new chat could not be identified.");
+    if (request.prefillText) {
+      persistComposerDraft(event.result.conversationId, request.prefillText);
+    }
+    request.onCreated?.(event.result.conversationId);
     if (
       selectionGeneration !== conversationSelectionGenerationRef.current
     ) return;
@@ -727,13 +717,6 @@ export default function App(): React.JSX.Element {
     if (
       selectionGeneration !== conversationSelectionGenerationRef.current
     ) return;
-    if (options?.prefillText) {
-      const conversationId = event.result.conversationId;
-      window.requestAnimationFrame(() => requestComposerPrefill({
-        conversationId,
-        text: options.prefillText!,
-      }));
-    }
     setView("workspace");
     setSidebarOpen(false);
   };
@@ -778,6 +761,10 @@ export default function App(): React.JSX.Element {
   }, [navigateToView]);
   const openProjectSettings = useCallback((projectId: string) => {
     setSettingsTarget({ section: "projects", projectId });
+    navigateToView("settings");
+  }, [navigateToView]);
+  const openSettingsSection = useCallback((section: SettingsSection) => {
+    setSettingsTarget({ section });
     navigateToView("settings");
   }, [navigateToView]);
 
@@ -838,15 +825,9 @@ export default function App(): React.JSX.Element {
       openUsageView: () => navigateToView("usage"),
       openProjectPath,
       followUpSubagent: (trace: SubagentTrace) => {
-        if (!conversation || !canFollowUpSubagentTrace(
-          trace,
-          conversationProjection.turns,
-        )) return;
-        const task = trace.description ?? trace.providerRole ?? "delegated task";
-        requestComposerPrefill({
-          conversationId: conversation.id,
-          text: `Please follow up on the delegated task “${task}” and incorporate its latest result.`,
-        });
+        if (conversation) {
+          requestSubagentFollowUp(conversation.id, trace, conversationProjection.turns);
+        }
       },
       ...turnSceneActions,
       stopSubagent: async (trace: SubagentTrace) => {
@@ -995,6 +976,89 @@ export default function App(): React.JSX.Element {
     splitPanes.splitScene,
     workspaceScene,
   ]);
+  const layoutUsage = useMemo(
+    () => ({ status: connection.status, request }),
+    [connection.status, request],
+  );
+  const layoutProviderAuth = useMemo(() => ({
+    provider: authProvider,
+    status: connection.status,
+    theme: settings.theme,
+    colorTheme: settings.colorTheme,
+    fontSize: settings.terminalFontSize,
+    sendCommand,
+    subscribe: connection.subscribe,
+    onClose: closeProviderAuth,
+  }), [
+    authProvider,
+    closeProviderAuth,
+    connection.status,
+    connection.subscribe,
+    sendCommand,
+    settings.colorTheme,
+    settings.terminalFontSize,
+    settings.theme,
+  ]);
+  const layoutCallbacks = useStableActions({
+    setView: navigateToView,
+    run: runUserCommand,
+    importProject,
+    openGlobalChat,
+    selectProject,
+    selectConversation,
+    selectMessage: (hit: MessageSearchHit, signal?: AbortSignal) =>
+      selectMessage(hit, () => setView("workspace"), signal),
+    openConversationInSplit,
+    openConversationInWindow,
+    closeConversationSplit: (target: Conversation) => {
+      const owner = splitOwnerOf(target.id);
+      if (owner) closeSplitPane(owner);
+    },
+    planConversationDrop,
+    dropConversationInSplit,
+    openProviderSetup,
+    openBackendSetup,
+    openProjectSettings,
+    openSettingsSection,
+    createConversation,
+    updateSettings,
+    openProjectPath,
+    loadBranches,
+    mutateBranch,
+    mutateRemote: workspaceTools.mutateRemote,
+    loadGit: () => loadGit({ authoritative: true }),
+    refreshGitStatus: () => {
+      void loadGit({ scope: "status" }).catch(() => undefined);
+    },
+    commit,
+    runProjectAction,
+    acknowledgeActivity,
+    dismissActivity,
+  });
+  const multiSpawnActions = useStableActions({
+    openDialog: multiSpawn.openDialog,
+    closeDialog: multiSpawn.closeDialog,
+    submit: multiSpawn.submit,
+    recheckRecovery: multiSpawn.recheckRecovery,
+    acknowledgeRecovery: multiSpawn.acknowledgeRecovery,
+    retryComparison: multiSpawn.retryComparison,
+    cancelComparison: multiSpawn.cancelComparison,
+  });
+  const layoutMultiSpawn = useStableController({
+    ...multiSpawn,
+    ...multiSpawnActions,
+  });
+  const layoutActions = useMemo(() => ({
+    ...layoutCallbacks,
+    loadCommitReview: workspaceTools.loadCommitReview,
+    discardCommitReview: workspaceTools.discardCommitReview,
+    commitReviewRevision: workspaceTools.commitReviewRevision,
+  }), [
+    layoutCallbacks,
+    workspaceTools.commitReviewRevision,
+    workspaceTools.discardCommitReview,
+    workspaceTools.loadCommitReview,
+  ]);
 
   if (!detachedChats.ready) {
     return (
@@ -1018,7 +1082,7 @@ export default function App(): React.JSX.Element {
       providerQuotaNotices={providerQuotaNotices}
       workspaceLayout={workspaceLayout}
       view={view}
-      setView={navigateToView}
+      setView={layoutCallbacks.setView}
       busyAction={busyAction}
       visibleError={visibleError}
       setActionError={setActionError}
@@ -1042,54 +1106,11 @@ export default function App(): React.JSX.Element {
       branches={branches} branchesLoading={workspaceTools.branchesLoading} branchesError={workspaceTools.branchesError}
       projectActions={projectActions}
       reviewStates={reviewStates}
-      multiSpawn={multiSpawn}
+      multiSpawn={layoutMultiSpawn}
       scene={visibleWorkspaceScene}
-      usage={{ status: connection.status, request }}
-      providerAuth={{
-        provider: authProvider,
-        status: connection.status,
-        theme: settings.theme,
-        colorTheme: settings.colorTheme,
-        fontSize: settings.terminalFontSize,
-        sendCommand,
-        subscribe: connection.subscribe,
-        onClose: closeProviderAuth,
-      }}
-      actions={{
-        run: runUserCommand,
-        importProject,
-        openGlobalChat,
-        selectProject,
-        selectConversation,
-        selectMessage: (hit, signal) => selectMessage(hit, () => setView("workspace"), signal),
-        openConversationInSplit,
-        openConversationInWindow,
-        closeConversationSplit: (target) => {
-          const owner = splitOwnerOf(target.id);
-          if (owner) closeSplitPane(owner);
-        },
-        planConversationDrop,
-        dropConversationInSplit,
-        openProviderSetup,
-        openBackendSetup,
-        openProjectSettings,
-        createConversation,
-        updateSettings,
-        openProjectPath,
-        loadBranches,
-        mutateBranch, mutateRemote: workspaceTools.mutateRemote,
-        loadGit: () => loadGit({ authoritative: true }),
-        refreshGitStatus: () => {
-          void loadGit({ scope: "status" }).catch(() => undefined);
-        },
-        loadCommitReview: workspaceTools.loadCommitReview,
-        discardCommitReview: workspaceTools.discardCommitReview,
-        commitReviewRevision: workspaceTools.commitReviewRevision,
-        commit,
-        runProjectAction,
-        acknowledgeActivity,
-        dismissActivity,
-      }}
+      usage={layoutUsage}
+      providerAuth={layoutProviderAuth}
+      actions={layoutActions}
     />
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>

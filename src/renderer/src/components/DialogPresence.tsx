@@ -2,13 +2,7 @@ import { useEffect, useState } from "react";
 
 const DIALOG_EXIT_MS = 90;
 
-export function DialogPresence({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: React.ReactNode;
-}): React.JSX.Element | null {
+export function useDialogPresence(open: boolean): boolean {
   const [mounted, setMounted] = useState(open);
 
   useEffect(() => {
@@ -25,7 +19,18 @@ export function DialogPresence({
     return () => window.clearTimeout(timer);
   }, [mounted, open]);
 
-  if (!mounted && !open) return null;
+  return mounted || open;
+}
+
+export function DialogPresence({
+  open,
+  children,
+}: {
+  open: boolean;
+  children: React.ReactNode;
+}): React.JSX.Element | null {
+  const present = useDialogPresence(open);
+  if (!present) return null;
 
   const closing = !open;
   return (

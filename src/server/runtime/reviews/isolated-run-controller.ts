@@ -31,6 +31,7 @@ import {
   hasExactProviderRunIdentity,
   isProviderRunRefusal,
   isUnreceiptedProviderRunRefusal,
+  isolatedProviderConversationId,
   providerRunIdentity,
 } from "../../provider/contracts";
 import { assembleTurnRequest } from "../turns/request-context";
@@ -345,7 +346,7 @@ export class IsolatedRunController<Owner extends object> {
     const taskId = this.id();
     const runId = this.id();
     const turnId = this.id();
-    const providerConversationId = `${request.conversationId}:isolated:${taskId}`;
+    const providerConversationId = isolatedProviderConversationId(request.conversationId, taskId);
     const active: ActiveIsolatedRun<Owner> = {
       kind: request.kind,
       taskId,

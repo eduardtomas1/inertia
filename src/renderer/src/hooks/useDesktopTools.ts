@@ -143,6 +143,7 @@ export function useDesktopTools({
   previewContextId = null,
 }: DesktopToolsOptions) {
   const previewConnectionRef = useRef<PreviewConnection | null>(null);
+  const previewBoundsRef = useRef<PreviewBounds | null>(null);
   const authorityRef = useRef({ previewOwnerId, previewContextId });
   authorityRef.current = { previewOwnerId, previewContextId };
   const previewIsCurrent = useCallback(() => {
@@ -184,6 +185,11 @@ export function useDesktopTools({
         url: state.url,
         navigation: state,
       });
+      const bounds = previewBoundsRef.current;
+      if (bounds) {
+        void window.inertia.previewSetBounds({ ...connection, bounds })
+          .catch(() => undefined);
+      }
     }).catch(() => undefined);
     return () => {
       unsubscribe();
@@ -370,6 +376,7 @@ export function useDesktopTools({
   }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => {
+    previewBoundsRef.current = bounds;
     const connection = previewConnectionRef.current;
     if (!connection) return;
     void window.inertia.previewSetBounds({

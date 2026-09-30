@@ -1,0 +1,207 @@
+.completion-sound-settings {
+  border-top: 1px solid var(--border);
+}
+
+.completion-sound-settings + .setting-row {
+  border-top: 1px solid var(--border);
+}
+
+.completion-sound-options {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 4px;
+  animation: completion-sound-reveal var(--motion-base) var(--motion-ease);
+}
+
+.completion-sound-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  font-size: var(--ui-font-secondary);
+  font-weight: 620;
+}
+
+.completion-sound-button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text-soft);
+  background: var(--surface-muted);
+  font-size: var(--ui-font-micro);
+  font-weight: 600;
+  transition:
+    background var(--motion-base) var(--motion-ease),
+    color var(--motion-base) var(--motion-ease);
+}
+
+.completion-sound-button:hover:not(:disabled):not([aria-disabled="true"]) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.completion-sound-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
+.completion-sound-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+}
+
+.completion-sound-choice {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-soft);
+  background: transparent;
+  text-align: left;
+  transition:
+    background var(--motion-base) var(--motion-ease),
+    border-color var(--motion-base) var(--motion-ease);
+}
+
+.completion-sound-choice:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.completion-sound-choice.is-active {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.completion-sound-choice:focus-visible,
+.completion-sound-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.completion-sound-choice strong,
+.completion-sound-choice small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completion-sound-choice strong {
+  font-size: var(--ui-font-secondary);
+  font-weight: 620;
+}
+
+.completion-sound-choice small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.completion-sound-library {
+  display: grid;
+  gap: 8px;
+}
+
+.completion-sound-library ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completion-sound-library li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
+.completion-sound-library li .icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.completion-sound-name {
+  min-width: 0;
+  height: 28px;
+  flex: 1;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--ui-font-secondary);
+  font-weight: 600;
+  transition:
+    background var(--motion-base) var(--motion-ease),
+    border-color var(--motion-base) var(--motion-ease);
+}
+
+.completion-sound-name:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.completion-sound-name:focus-visible {
+  border-color: var(--focus-ring);
+  outline: none;
+  background: var(--surface);
+}
+
+.completion-sound-library > small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.45;
+}
+
+.completion-sound-notice {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+  line-height: 1.45;
+}
+
+.completion-sound-notice.is-error {
+  color: var(--danger);
+}
+
+.completion-sound-options > .setting-row {
+  border-top: 1px solid var(--border);
+}
+
+.completion-sound-threshold {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding-top: 0;
+  border-bottom: 0;
+}
+
+@keyframes completion-sound-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .completion-sound-options {
+    animation: none;
+  }
+}

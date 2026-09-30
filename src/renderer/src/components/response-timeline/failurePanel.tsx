@@ -1,7 +1,7 @@
 import {
   memo,
   useCallback,
-  useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -21,7 +21,7 @@ import {
   failureDiagnosticsPresentation,
   type FailureDiagnosticFact,
 } from "../../utils/failureDiagnostics";
-import { writeClipboardText } from "../../utils/clipboard";
+import { useCopiedState } from "../../hooks/useCopiedState";
 import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
 import "./failureDiagnostics.css";
 
@@ -48,19 +48,14 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
   anchor: readonly [before?: () => void, after?: () => void];
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<number | null>(null);
+  const { copied, error: copyError, copy } = useCopiedState();
   const togglePrepared = useRef(false);
   const presentation = useMemo(
     () => failureDiagnosticsPresentation(turn, activity),
     [activity, turn],
   );
-  const panelId = `turn-failure-details-${turn.id}`;
-  const headingId = `turn-failure-heading-${turn.id}`;
-
-  useEffect(() => () => {
-    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-  }, []);
+  const panelId = useId();
+  const headingId = useId();
 
   const prepareToggle = useCallback(() => {
     if (togglePrepared.current) return;
@@ -74,12 +69,6 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       onAfterToggle?.();
       togglePrepared.current = false;
     });
-  };
-  const copyDiagnostics = async (): Promise<void> => {
-    if (!await writeClipboardText(presentation.copyText)) return;
-    setCopied(true);
-    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-    copyTimer.current = window.setTimeout(() => setCopied(false), 1_500);
   };
 
   return (
@@ -103,14 +92,14 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
           <button
             type="button"
             className="turn-failure-action"
-            aria-label={copied ? "Diagnostics copied" : "Copy diagnostics"}
-            title={copied ? "Diagnostics copied" : "Copy scrubbed diagnostics"}
-            onClick={() => void copyDiagnostics()}
+            aria-label={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy diagnostics"}
+            title={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy scrubbed diagnostics"}
+            onClick={() => void copy(presentation.copyText)}
           >
             {copied
               ? <Check size={12} aria-hidden="true" />
               : <Copy size={12} aria-hidden="true" />}
-            <span>{copied ? "Copied" : "Copy"}</span>
+            <span>{copied ? "Copied" : copyError ? "Copy failed" : "Copy"}</span>
           </button>
           <button
             type="button"
@@ -159,6 +148,7 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Diagnostics copied." : ""}
       </span>
+      {copyError && <span className="visually-hidden" role="alert">{copyError}</span>}
     </section>
   );
 });

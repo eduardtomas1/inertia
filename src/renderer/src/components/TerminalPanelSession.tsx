@@ -60,6 +60,8 @@ export function TerminalSession({
   fontSize,
   theme,
   colorTheme,
+  lightColorTheme,
+  darkColorTheme,
   sendCommand,
   subscribe,
   actionId,
@@ -87,6 +89,7 @@ export function TerminalSession({
   const actionInFlightRef = useRef<string | null>(null);
   const ownerRef = useRef(`${projectId}:${conversationId ?? ""}`);
   const statusRef = useRef(status);
+  const projectNameRef = useRef(projectName);
   const pendingOutputRef = useRef(new Map<string, string>());
   const pendingExitRef = useRef(new Map<string, number>());
   const operationInFlightRef = useRef(false);
@@ -143,6 +146,7 @@ export function TerminalSession({
   onProviderResumeStartedRef.current = onProviderResumeStarted;
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   statusRef.current = status;
+  projectNameRef.current = projectName;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -256,7 +260,7 @@ export function TerminalSession({
     update();
     if (theme === "system") media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
-  }, [colorTheme, fontSize, theme]);
+  }, [colorTheme, darkColorTheme, fontSize, lightColorTheme, theme]);
 
   useEffect(() => {
     if (!visible) return;
@@ -399,8 +403,8 @@ export function TerminalSession({
     terminal?.clear();
     terminal?.writeln(
       terminalIdRef.current
-        ? `\x1b[2mReconnecting the local terminal for ${projectName}…\x1b[0m`
-        : `\x1b[2mStarting a local terminal for ${projectName}…\x1b[0m`,
+        ? `\x1b[2mReconnecting the local terminal for ${projectNameRef.current}…\x1b[0m`
+        : `\x1b[2mStarting a local terminal for ${projectNameRef.current}…\x1b[0m`,
     );
 
     try {
@@ -639,7 +643,6 @@ export function TerminalSession({
     conversationId,
     instanceReady,
     projectId,
-    projectName,
     sendCommand,
     sessionKey,
     status,

@@ -89,6 +89,14 @@ export function safePreviewUrl(
   }
 }
 
+function previewTabHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 export function PreviewPanel({
   owner,
   contextId = "",
@@ -243,7 +251,7 @@ export function PreviewPanel({
                   }
                 }}
               >
-                <span>{tab.title || (tab.url ? new URL(tab.url).hostname : "New page")}</span>
+                <span>{tab.title || (tab.url ? previewTabHost(tab.url) : "New page")}</span>
               </button>
               {onCloseTab && (
                 <button

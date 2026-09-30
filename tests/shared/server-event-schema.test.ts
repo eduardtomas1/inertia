@@ -5,6 +5,8 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
+import { conversationHasHistory } from "../../src/shared/continuation-policy";
+import { modelRouteTransitionContext } from "../../src/renderer/src/utils/modelRouteTransition";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 const selection = providerNativeModelSelection({
@@ -970,6 +972,35 @@ describe("server event conversation discriminant boundary", () => {
       result: { kind: "conversation.detail", state: "ready" },
     });
   });
+  it("decodes shells from before history was published as established history", () => {
+    const decoded = parseServerEvent(snapshotEvent(conversationShell));
+    if (decoded.type !== "conversation.shell.updated") throw new Error("Expected a shell event.");
+    expect(decoded.conversation).not.toHaveProperty("hasHistory");
+    expect(conversationHasHistory(decoded.conversation)).toBe(true);
+    for (const hasHistory of [true, false]) {
+      const published = parseServerEvent(snapshotEvent({ ...conversationShell, hasHistory }));
+      if (published.type !== "conversation.shell.updated") throw new Error("Expected a shell event.");
+      expect(conversationHasHistory(published.conversation)).toBe(hasHistory);
+    }
+    expect(() => parseServerEvent(snapshotEvent({ ...conversationShell, hasHistory: "no" })))
+      .toThrow("Malformed server event");
+  });
+  it("decodes details from before mixed-provider history was published as single-provider history", () => {
+    const decoded = parseServerEvent(detailEvent(conversation));
+    if (decoded.type !== "request.result" || decoded.result.kind !== "conversation.detail"
+      || decoded.result.state !== "ready") throw new Error("Expected a ready detail.");
+    expect(decoded.result.detail.conversation).not.toHaveProperty("mixedProviderHistory");
+    expect(modelRouteTransitionContext(decoded.result.detail.conversation, null).mixedProviderHistory).toBe(false);
+    for (const mixedProviderHistory of [true, false]) {
+      const published = parseServerEvent(detailEvent({ ...conversation, mixedProviderHistory }));
+      if (published.type !== "request.result" || published.result.kind !== "conversation.detail"
+        || published.result.state !== "ready") throw new Error("Expected a ready detail.");
+      expect(modelRouteTransitionContext(published.result.detail.conversation, null).mixedProviderHistory)
+        .toBe(mixedProviderHistory);
+    }
+    expect(() => parseServerEvent(detailEvent({ ...conversation, mixedProviderHistory: 1 })))
+      .toThrow("Malformed server event");
+  });
   it("accepts only finite continuation reason codes in shell and turn projections", () => {
     expect(parseServerEvent(snapshotEvent({
       ...conversationShell,
@@ -1538,6 +1569,14 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent({ type: "agent.approval.requested", request: approval })).toBeTruthy();
     expect(parseServerEvent({ type: "agent.input.requested", request: input })).toBeTruthy();
     expect(parseServerEvent(event({ kind: "agent.workflow", workflow }))).toBeTruthy();
+    const unavailableGoals = { kind: "unavailable", available: false, label: "Goals unavailable", reason: "History belongs elsewhere." };
+    expect(parseServerEvent(event({ kind: "agent.workflow", workflow: { ...workflow, goalCapability: unavailableGoals } }))).toBeTruthy();
+    expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: {
+      ...workflow, goalCapability: { ...unavailableGoals, available: true },
+    } }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: {
+      ...workflow, goalCapability: { kind: "unavailable", available: false, label: "Goals unavailable" },
+    } }))).toThrow("Malformed server event");
     expect(parseServerEvent(event({
       kind: "agent.skills",
       conversationId: conversation.id,

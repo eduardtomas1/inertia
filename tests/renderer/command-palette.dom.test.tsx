@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
+import { CommandPalette, type CommandPaletteView } from "../../src/renderer/src/components/CommandPalette";
 import type { Conversation, Project } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
@@ -64,6 +64,8 @@ function palette(
       onSelectProject={noOp}
       onSelectConversation={noOp}
       onNewThread={noOp}
+      onNewThreadIn={noOp}
+      currentProjectId={null}
       onAddProject={noOp}
       onOpenSettings={noOp}
     />
@@ -86,6 +88,8 @@ function ResetHarness({ onOpenSettings }: {
         onSelectProject={noOp}
         onSelectConversation={noOp}
         onNewThread={noOp}
+        onNewThreadIn={noOp}
+        currentProjectId={null}
         onAddProject={noOp}
         onOpenSettings={onOpenSettings}
       />
@@ -108,6 +112,8 @@ function FocusHarness(): React.JSX.Element {
         onSelectProject={noOp}
         onSelectConversation={noOp}
         onNewThread={noOp}
+        onNewThreadIn={noOp}
+        currentProjectId={null}
         onAddProject={noOp}
         onOpenSettings={noOp}
       />
@@ -115,7 +121,93 @@ function FocusHarness(): React.JSX.Element {
   );
 }
 
+const studio: Project = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
+
+function ProjectChoiceHarness({ initialView, onClose }: {
+  initialView: CommandPaletteView;
+  onClose: () => void;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open palette</button>
+      {open && (
+        <CommandPalette
+          open
+          initialView={initialView}
+          currentProjectId={project.id}
+          projects={[project, studio]}
+          conversations={[conversation]}
+          newThreadShortcut="⌘N"
+          onClose={() => { onClose(); setOpen(false); }}
+          onSelectProject={noOp}
+          onSelectConversation={noOp}
+          onNewThread={noOp}
+          onNewThreadIn={noOp}
+          onAddProject={noOp}
+          onOpenSettings={noOp}
+        />
+      )}
+    </>
+  );
+}
+
+type PaletteUser = ReturnType<typeof userEvent.setup>;
+
+const projectChoiceControls: [string, (user: PaletteUser) => Promise<HTMLElement>][] = [
+  ["search input", async () => screen.getByRole("combobox", { name: "Search projects for the new chat" })],
+  ["Close button", async (user) => {
+    await user.tab();
+    return screen.getByRole("button", { name: "Close search" });
+  }],
+  ["project option", async (user) => {
+    await user.tab({ shift: true });
+    return screen.getByRole("option", { name: /Studio/u });
+  }],
+];
+
 describe("CommandPalette behavior", () => {
+  it.each(projectChoiceControls)("closes the New chat project choice with Escape from the %s", async (_name, reach) => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ProjectChoiceHarness initialView="new-chat" onClose={onClose} />);
+    const trigger = screen.getByRole("button", { name: "Open palette" });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+
+    const control = await reach(user);
+    expect(control).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it.each(projectChoiceControls)("steps back from the project choice to search with Escape from the %s", async (_name, reach) => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ProjectChoiceHarness initialView="search" onClose={onClose} />);
+    await user.click(screen.getByRole("button", { name: "Open palette" }));
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new chat in");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+
+    const control = await reach(user);
+    expect(control).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    const search = screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("shows the active platform shortcut for a remapped new-chat action", () => {
     render(palette(true, noOp, "Ctrl+Y"));
 
@@ -226,5 +318,72 @@ describe("CommandPalette behavior", () => {
     expect(screen.queryByRole("dialog", { name: "Search Inertia" }))
       .not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("opens on the new chat project choice with the current project first", async () => {
+    const user = userEvent.setup();
+    const studio = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
+    const launchpad = { ...project, id: "project-launchpad", name: "Launchpad", path: "/workspace/launchpad" };
+    const onNewThreadIn = vi.fn();
+    const onClose = vi.fn();
+    const view = render(
+      <CommandPalette open initialView="new-chat" currentProjectId={launchpad.id} projects={[project, studio, launchpad]}
+        conversations={[conversation]} newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={onNewThreadIn} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+    const search = screen.getByRole("combobox", { name: "Search projects for the new chat" });
+    expect(search).toHaveFocus();
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.querySelector("strong")?.textContent)).toEqual(["Launchpad", "Inertia", "Studio"]);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).toHaveTextContent("Current");
+
+    await user.type(search, "stu");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await user.keyboard("{Enter}");
+    expect(onNewThreadIn).toHaveBeenCalledExactlyOnceWith(studio);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <CommandPalette open initialView="new-chat" currentProjectId={null} projects={[project, studio]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={onNewThreadIn} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onNewThreadIn).toHaveBeenCalledTimes(1);
+    screen.getByRole("button", { name: "Close search" }).focus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("reaches the new chat project choice from search and steps back to it", async () => {
+    const user = userEvent.setup();
+    const studio = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
+    const onClose = vi.fn();
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project, studio]} conversations={[conversation]}
+        newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp} onSelectConversation={noOp}
+        onNewThread={noOp} onNewThreadIn={noOp} onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new chat in");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "New chat in project" })).toBeInTheDocument();
+    const search = screen.getByRole("combobox", { name: "Search projects for the new chat" });
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    expect(screen.getByText("Back")).toBeInTheDocument();
+
+    screen.getByRole("button", { name: "Close search" }).focus();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" })).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new chat in");
+    await user.keyboard("{Enter}{Backspace}");
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

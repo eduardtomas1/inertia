@@ -41,6 +41,7 @@ import {
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
+import { parseCompletionSoundJson } from "../../shared/completion-sound";
 import {
   continuationIdentityForSelection,
   currentKnownHarnessIdSchema,
@@ -343,8 +344,18 @@ function conversationTurnSummary(
   };
 }
 
+export function conversationDetailFromRow(
+  row: ConversationRow & { has_history: number; mixed_provider_history: number },
+): Conversation {
+  return {
+    ...conversationFromRow(row),
+    hasHistory: row.has_history === 1,
+    mixedProviderHistory: row.mixed_provider_history === 1,
+  };
+}
+
 export function conversationShellFromRow(
-  row: ConversationRow,
+  row: ConversationRow & { has_history: number },
   latestTurn: AgentTurn | null,
 ): ConversationShell {
   const conversation = conversationFromRow(row);
@@ -371,6 +382,7 @@ export function conversationShellFromRow(
     markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
+    hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     latestTurn: conversationTurnSummary(latestTurn),
@@ -435,6 +447,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
     workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
+    completionSound: parseCompletionSoundJson(state.completion_sound_json),
   };
 }
 

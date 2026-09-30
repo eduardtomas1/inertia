@@ -156,6 +156,7 @@ function renderSidebar(
     onOpenConversationInSplit: vi.fn(),
     onCloseConversationSplit: vi.fn(),
     onCreateConversation: vi.fn(),
+    onChooseNewChatProject: vi.fn(),
     onOpenMultiSpawn: vi.fn(),
     onOpenDailyWork,
     dailyWorkOpen: options.dailyWorkOpen ?? false,
@@ -189,6 +190,7 @@ function renderSidebar(
   );
   return {
     onCreateConversation: sidebarProps.onCreateConversation,
+    onChooseNewChatProject: sidebarProps.onChooseNewChatProject,
     onSelectConversation,
     onSnoozeConversation,
     onOpenDailyWork,
@@ -314,6 +316,7 @@ describe("compact Work sidebar", () => {
       "Daily work",
       "Usage",
       "Settings",
+      "Help",
     ]);
     const dailyWork = screen.getByRole("button", { name: "Daily work" });
     const mark = dailyWork.querySelector(".daily-work-mark");
@@ -1460,7 +1463,7 @@ describe("compact Work sidebar", () => {
     expect(scope).toHaveTextContent("Launchpad");
     expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
     expect(screen.getByText("No work yet")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }), { shiftKey: true });
     expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
   });
 
@@ -1513,7 +1516,29 @@ describe("compact Work sidebar", () => {
 
     expect(screen.getByRole("button", { name: "Filter work by project" })).toHaveTextContent("Launchpad");
     expect(screen.queryByText("Polish studio")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^New chat$/u }), { shiftKey: true });
     expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(launchpad);
+  });
+
+  it("starts a new chat directly when there is only one project", () => {
+    const view = renderSidebar([]);
+    const newChat = screen.getByRole("button", { name: /^New chat$/u });
+    expect(newChat).not.toHaveAttribute("aria-haspopup");
+    fireEvent.click(newChat);
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(project);
+    expect(view.onChooseNewChatProject).not.toHaveBeenCalled();
+  });
+
+  it("asks for the project when several exist unless Shift is held", () => {
+    const launchpad = otherProject("project-launchpad", "Launchpad");
+    const view = renderSidebar([], vi.fn(), [], { projects: [project, launchpad] });
+    const newChat = screen.getByRole("button", { name: /^New chat$/u });
+    expect(newChat).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(newChat);
+    expect(view.onChooseNewChatProject).toHaveBeenCalledTimes(1);
+    expect(view.onCreateConversation).not.toHaveBeenCalled();
+    fireEvent.click(newChat, { shiftKey: true });
+    expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(project);
+    expect(view.onChooseNewChatProject).toHaveBeenCalledTimes(1);
   });
 });

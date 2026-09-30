@@ -17,6 +17,7 @@ const MAX_ATTEMPT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const COMMON_SUITES = [
   "tests/main/app-update-handoff.test.ts",
   "tests/main/runtime-supervisor-lifecycle.test.ts",
+  "tests/server/process-lifecycle-posix-classification.test.ts",
   "tests/server/process-lifecycle.test.ts",
   "tests/server/runtime-shutdown-authority.test.ts",
 ];

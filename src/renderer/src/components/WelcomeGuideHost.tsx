@@ -11,7 +11,9 @@ import {
   welcomeGuideIsOpen,
   type WelcomeShortcut,
 } from "../utils/welcomeGuide";
-import { DialogPresence } from "./DialogPresence";
+import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { DialogPresence, useDialogPresence } from "./DialogPresence";
 import { loadWelcomeGuide } from "./lazySurfaceLoaders";
 
 const WelcomeGuide = lazy(async () => ({
@@ -34,18 +36,20 @@ export function WelcomeGuideHost({
   onAddProject: () => void;
 }): React.JSX.Element {
   const open = useSyncExternalStore(subscribeWelcomeGuide, welcomeGuideIsOpen);
+  const helpOpen = useHelpGuideOpen();
   const projectCount = snapshot ? snapshot.projects.length : null;
+  useNativePreviewSuspension(useDialogPresence(open));
 
   useEffect(() => {
     const gate = welcomeGuideGate({
       seen: readWelcomeGuideSeen(window.localStorage),
       projectCount,
-      blocked,
+      blocked: blocked || helpOpen,
       existingProfile,
     });
     if (gate === "open") openWelcomeGuide();
     if (gate === "mark-seen") markWelcomeGuideSeen(window.localStorage);
-  }, [blocked, existingProfile, projectCount]);
+  }, [blocked, existingProfile, helpOpen, projectCount]);
 
   const close = useCallback(() => {
     markWelcomeGuideSeen(window.localStorage);

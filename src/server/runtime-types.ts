@@ -31,7 +31,7 @@ import type {
 } from "./runtime/agent-browser-broker-client.js";
 
 export interface RuntimeOptions {
-  onMascotStatus?: (status: import("../shared/mascot").MascotStatus) => void;
+  onMascotStatus?: (status: import("../shared/mascot").MascotStatus, chats: import("../shared/mascot").MascotStatus[], focus: string | null, counts: import("../shared/mascot").MascotCounts | null, request: number | null) => void;
   onIncident?: IncidentSink;
   dataDirectory: string;
   defaultWorkspacePath: string;
@@ -100,6 +100,7 @@ export interface RunningRuntime {
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
   recordSystemSuspendInterval: (interval: RuntimeSystemSuspendInterval) => boolean;
+  focusMascotChat: (conversationId: string | null, request: number) => void;
   /**
    * Atomically closes runtime work admission and reports whether shutdown for
    * an application update can begin. A ready result deliberately keeps the

@@ -109,6 +109,8 @@ export interface ComposerInputZoneProps {
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
+  continuationRefusal: string | null;
+  continuationNoticeId: string;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -177,6 +179,8 @@ export function ComposerInputZone({
   onCompactCommand,
   compactUnavailableReason,
   compactNotice,
+  continuationRefusal,
+  continuationNoticeId,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -434,6 +438,11 @@ export function ComposerInputZone({
           pendingAttachmentIds={pendingAttachmentIds}
           onRemove={onRemoveAttachment}
         />
+        {continuationRefusal && (
+          <span id={continuationNoticeId} className="visually-hidden" data-continuation-refusal="">
+            {continuationRefusal}
+          </span>
+        )}
         {pendingRoute && (
           <RouteChangeConfirmation
             pendingRoute={pendingRoute}
@@ -570,7 +579,10 @@ export function ComposerInputZone({
               ? `${mentionListboxId}-${mentionOptions.indexOf(activeMention)}`
               : undefined}
           aria-label="Message"
-          placeholder={running
+          aria-describedby={continuationRefusal ? continuationNoticeId : undefined}
+          placeholder={continuationRefusal
+            ? "This chat can't continue here. Start a new chat to keep working."
+            : running
             ? "Enter sends · Tab queues"
             : imageInputUnavailable
               ? "Ask for follow-up changes"

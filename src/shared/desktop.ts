@@ -13,6 +13,7 @@ import type {
 } from "./browser-evidence";
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./application-diagnostics";
+import type { CompletionSoundImport } from "./completion-sound";
 import type { RuntimeStartupBlockerCode } from
   "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -676,6 +677,9 @@ export interface DesktopBridge {
   openExternal: (url: string) => Promise<void>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */
   showThreadNotification: (request: DesktopNotificationRequest) => Promise<boolean>;
+  importCompletionSound: (keep: readonly string[]) => Promise<CompletionSoundImport>;
+  readCompletionSound: (file: string) => Promise<Uint8Array | null>;
+  removeCompletionSound: (file: string) => Promise<void>;
   onThreadNotificationActivated: (listener: (conversationId: string) => void) => () => void;
   /** Samples aggregate local app resource use and fixed Inertia-owned storage paths. */
   getAppHealth: () => Promise<AppHealthSnapshot>;

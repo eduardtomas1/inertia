@@ -3,9 +3,10 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 import type {
   AppSettings,
+  AppSnapshot,
   Conversation,
   GitBranchInfo,
   GitDiffSnapshot,
@@ -34,6 +35,7 @@ import type { SplitDropZone } from "../utils/splitConversation";
 import type { SplitDropPlan, SplitPaneOwner } from "../utils/splitLayout";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
+import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
@@ -42,6 +44,10 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
+import { HelpGuideHost } from "./HelpGuideHost";
+import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
+import type { SettingsSection } from "./settingsSections";
+import { openWelcomeGuide } from "../utils/welcomeGuide";
 import { WorkspaceHeader, type HeaderConversationMenu } from "./WorkspaceHeader";
 import { PanelLayoutControls } from "./workspace-header/PanelLayoutControls";
 import {
@@ -72,6 +78,9 @@ const MultiSpawnDialog = lazy(async () => ({
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
+}));
+const CompletionSounds = lazy(async () => ({
+  default: (await import("../hooks/useCompletionSounds")).CompletionSounds,
 }));
 const Sidebar = lazy(async () => ({
   default: (await import("./Sidebar")).Sidebar,
@@ -107,6 +116,7 @@ interface AppLayoutActions {
   openProviderSetup: (providerId: Conversation["providerId"]) => void;
   openBackendSetup: (profileId: string) => void;
   openProjectSettings?: (projectId: string) => void;
+  openSettingsSection: (section: SettingsSection) => void;
   createConversation: (
     project?: Project | null,
     location?: NewConversationLocation,
@@ -212,6 +222,14 @@ export function formatAppShortcutLabel(
   return `${platform === "darwin" ? "⌘" : "Ctrl+"}${key.toUpperCase()}`;
 }
 
+export function paletteCurrentProjectId(
+  snapshot: AppSnapshot | null,
+  projectScopeId: string | null,
+): string | null {
+  const scoped = projectScopeId && snapshot?.projects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
+  return scoped ?? snapshot?.activeProjectId ?? null;
+}
+
 export function activeConversationIsVisible(input: {
   view: AppView;
   commitDialogOpen: boolean;
@@ -221,6 +239,7 @@ export function activeConversationIsVisible(input: {
   paletteOpen: boolean;
   providerAuthOpen: boolean;
   mobileSidebarOpen: boolean;
+  helpOpen?: boolean;
 }): boolean {
   return input.view === "workspace"
     && !input.commitDialogOpen
@@ -229,10 +248,11 @@ export function activeConversationIsVisible(input: {
     && !input.multiSpawnOpen
     && !input.paletteOpen
     && !input.providerAuthOpen
-    && !input.mobileSidebarOpen;
+    && !input.mobileSidebarOpen
+    && !input.helpOpen;
 }
 
-export function AppLayout({
+export const AppLayout = memo(function AppLayout({
   platform,
   documentActive,
   documentVisible,
@@ -277,6 +297,8 @@ export function AppLayout({
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
+  const [paletteView, setPaletteView] = useState<CommandPaletteView>("search");
+  useEffect(() => { if (!paletteOpen) setPaletteView("search"); }, [paletteOpen]);
   const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
   const {
@@ -318,6 +340,10 @@ export function AppLayout({
     openConversationInWindow: actions.openConversationInWindow,
     closeConversationSplit: actions.closeConversationSplit,
     createConversation: actions.createConversation,
+    chooseNewChatProject: () => {
+      setPaletteView("new-chat");
+      setPaletteOpen(true);
+    },
     openMultiSpawn: multiSpawn.openDialog,
     openDailyWork: () => setDailyWorkOpen(true),
     renameConversation: (thread: Conversation, title: string) => {
@@ -449,6 +475,7 @@ export function AppLayout({
     if (connection.status !== "online") return;
     return scheduleFrequentSurfacePrefetch();
   }, [connection.status]);
+  const helpOpen = useHelpGuideOpen();
   const activeConversationVisible = !conversationSuppressedInMain
     && activeConversationIsVisible({
     view,
@@ -459,6 +486,7 @@ export function AppLayout({
     paletteOpen,
     providerAuthOpen: Boolean(providerAuth.provider),
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
+    helpOpen,
     });
 
   const splitActive = splitConversationIds.size > 0;
@@ -554,6 +582,7 @@ export function AppLayout({
           enabled={settings.desktopNotifications}
           onActivate={notificationActions.activate}
         />
+        {settings.completionSound.enabled && <CompletionSounds snapshot={connection.snapshot} settings={settings.completionSound} />}
       </Suspense>
       {(mobileNavigation || !sidebarCollapsed) && (
         <Suspense
@@ -590,6 +619,7 @@ export function AppLayout({
             onOpenConversationInWindow={sidebarActions.openConversationInWindow}
             onCloseConversationSplit={sidebarActions.closeConversationSplit}
             onCreateConversation={sidebarActions.createConversation}
+            onChooseNewChatProject={sidebarActions.chooseNewChatProject}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
             dailyWorkOpen={dailyWorkOpen}
@@ -851,6 +881,8 @@ export function AppLayout({
       <AppNavigationOverlays
         snapshot={connection.snapshot}
         paletteOpen={paletteOpen}
+        paletteView={paletteView}
+        currentProjectId={paletteCurrentProjectId(connection.snapshot, projectScopeId)}
         newThreadShortcut={formatAppShortcutLabel(
           platform,
           settings.keybindings["new-chat"],
@@ -862,6 +894,7 @@ export function AppLayout({
         selectMessage={actions.selectMessage}
         sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
+        createConversationIn={(project) => actions.createConversation(project)}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}
       />
@@ -902,6 +935,19 @@ export function AppLayout({
         onOpenProviderSetup={actions.openProviderSetup}
         onAddProject={() => void actions.importProject()}
       />
+      <HelpGuideHost
+        shortcutLabel={(action) => formatAppShortcutLabel(platform, settings.keybindings[action])}
+        commands={{
+          "add-project": () => void actions.importProject(),
+          search: () => setPaletteOpen(true),
+          usage: () => setView("usage"),
+          "daily-work": () => setDailyWorkOpen(true),
+          "welcome-guide": openWelcomeGuide,
+        }}
+        onOpenSettings={actions.openSettingsSection}
+        onLeave={() => setSidebarOpen(false)}
+        onLoadError={setActionError}
+      />
     </div>
   );
-}
+});

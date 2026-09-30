@@ -1,3 +1,5 @@
+import { readComposerDraft } from "./composerDraftPersistence";
+
 export type ComposerDetachmentBlocker =
   | "mutation-in-flight"
   | "pending-model-route"
@@ -27,14 +29,6 @@ interface ComposerOwner {
 // ownership or lifecycle coupling.
 const composerOwners = new Map<string, ComposerOwner>();
 
-function persistedDraft(conversationId: string): string {
-  try {
-    return window.localStorage.getItem(`inertia:draft:${conversationId}`) ?? "";
-  } catch {
-    return "";
-  }
-}
-
 export function registerComposerOwnership(
   conversationId: string,
   prepare: ComposerDetachmentPrepare,
@@ -57,6 +51,6 @@ export function prepareComposerDetachment(
   const owner = composerOwners.get(conversationId);
   return owner?.prepare() ?? {
     status: "ready",
-    draft: persistedDraft(conversationId),
+    draft: readComposerDraft(conversationId),
   };
 }

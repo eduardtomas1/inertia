@@ -138,6 +138,7 @@ type ProviderManagerConstructionOptions = ProviderManagerOptions & {
 export type ProductionProviderManagerOptions =
   ProviderManagerConstructionOptions & {
     installationLeases: ProviderInstallationLeaseCoordinator;
+    conversationProviderGate: NonNullable<ProviderManagerOptions["conversationProviderGate"]>;
   };
 
 export class ProviderManager {
@@ -156,6 +157,7 @@ export class ProviderManager {
   private readonly backendProbeNow: () => Date;
   private readonly protectedBackendProfileIds = new Set<string>();
   private readonly resolveBackendLaunchOptions: ProviderManagerOptions["resolveBackendLaunchOptions"];
+  private readonly conversationProviderGate: ProviderManagerOptions["conversationProviderGate"];
   private readonly installationLeases?: ProviderInstallationLeaseCoordinator;
   private readonly installationAuthority: ProviderManagerInstallationAuthority;
   private readonly capabilityAuthority: ProviderCapabilityAuthority;
@@ -171,6 +173,9 @@ export class ProviderManager {
       throw new Error(
         "Production ProviderManager construction requires installation authority.",
       );
+    }
+    if (!options.conversationProviderGate) {
+      throw new Error("Production ProviderManager construction requires a conversation provider gate.");
     }
     return new ProviderManager(
       options,
@@ -265,11 +270,13 @@ export class ProviderManager {
     this.lifetimeSignal = options.lifetimeSignal
       ?? this.ownedLifetimeAbort!.signal;
     this.resolveBackendLaunchOptions = options.resolveBackendLaunchOptions;
+    this.conversationProviderGate = options.conversationProviderGate;
     this.runCoordinator = new ProviderRunCoordinator({
       cancelGraceMs: this.cancelGraceMs,
       harnessRegistry: this.harnessRegistry,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
+      conversationProviderGate: this.conversationProviderGate,
       commandFor: (providerId) => this.commandFor(providerId),
       resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),
       rememberResolvedCommand: (providerId, executable) => {
@@ -851,10 +858,12 @@ export class ProviderManager {
   }
 
   async terminalResumeLaunch(
+    conversationId: string,
     providerId: ProviderId,
     sessionId: string,
     cwd: string,
   ): Promise<ProviderTerminalResumeLaunch> {
+    this.conversationProviderGate?.(conversationId, providerId);
     const detection = await this.detect(providerId, {
       cwd,
       refreshEnvironment: true,

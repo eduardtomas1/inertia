@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   modelSelectionSchema,
   providerNativeBackendProfile,
+  providerIdForHarness,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentityForSelection,
@@ -53,6 +54,7 @@ function context(
 ): ModelRouteTransitionContext {
   return {
     projectId,
+    providerId: providerIdForHarness(selection.harnessId) ?? "codex",
     selection,
     continuationIdentity: candidate.continuationIdentity,
     latestTurn: {
@@ -60,6 +62,8 @@ function context(
       continuationIdentity: candidate.continuationIdentity,
     },
     hasProviderSession: true,
+    hasHistory: true,
+    mixedProviderHistory: false,
     ...update,
   };
 }
@@ -246,12 +250,6 @@ describe("model route transition policy", () => {
 
   it.each([
     [
-      "harness",
-      { harnessId: "claude-agent-sdk" },
-      "harness-changed",
-      "agent harness changed",
-    ],
-    [
       "backend-profile",
       { backendProfileId: "custom:other-gateway" },
       "backend-profile-changed",
@@ -293,6 +291,53 @@ describe("model route transition policy", () => {
         continuationAction: "start-session",
       });
       expect(transition.reason).toContain(truthfulReason);
+    },
+  );
+
+  it.each(["session", "turn", "restored-history", "unused-draft"] as const)(
+    "requires a new chat for another provider unless this is an unused draft: %s",
+    (evidence) => {
+      const selection = providerNativeModelSelection({ providerId: "codex" });
+      const current = nativeCandidate(selection);
+      const next = nativeCandidate(providerNativeModelSelection({ providerId: "claude" }));
+      const transition = resolveModelRouteTransition(context(selection, current, {
+        continuationIdentity: null,
+        latestTurn: evidence === "turn" ? { selection, continuationIdentity: current.continuationIdentity } : null,
+        hasProviderSession: evidence === "session",
+        hasHistory: evidence === "restored-history",
+      }), next);
+      expect(transition).toMatchObject(evidence === "unused-draft" ? {
+        kind: "update-current-conversation",
+        reasonCode: "first-turn",
+      } : {
+        kind: "create-new-conversation",
+        continuationAction: "new-conversation-required",
+        reason: expect.stringContaining("Start a new chat to use a different provider."),
+      });
+    },
+  );
+
+  it.each(["session", "turn", "history"] as const)(
+    "uses the persisted provider for an unknown historical harness with %s evidence",
+    (evidence) => {
+      const native = providerNativeModelSelection({ providerId: "codex" });
+      const selection = { ...native, harnessId: "historical:retired-codex" };
+      const identity = { ...nativeCandidate(native).continuationIdentity, harnessId: selection.harnessId };
+      const transition = resolveModelRouteTransition({
+        projectId,
+        providerId: "codex",
+        selection,
+        continuationIdentity: evidence === "session" ? identity : null,
+        latestTurn: evidence === "turn" ? { selection, continuationIdentity: identity } : null,
+        hasProviderSession: evidence === "session",
+        hasHistory: evidence === "history",
+        mixedProviderHistory: false,
+      }, nativeCandidate(providerNativeModelSelection({ providerId: "claude" })));
+      expect(transition).toMatchObject({
+        kind: "create-new-conversation",
+        continuationAction: "new-conversation-required",
+        reason: expect.stringContaining("Start a new chat to use a different provider."),
+      });
     },
   );
 
@@ -375,6 +420,7 @@ describe("model route transition policy", () => {
       continuationIdentity: null,
       latestTurn: null,
       hasProviderSession: false,
+      hasHistory: false,
     }, nextCandidate)).toMatchObject({
       kind: "update-current-conversation",
       reasonCode: "first-turn",

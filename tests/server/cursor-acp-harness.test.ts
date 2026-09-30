@@ -343,6 +343,7 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
       {
         commands: { cursor: command },
         installationLeases: new ProviderInstallationLeaseCoordinator(),
+        conversationProviderGate: () => undefined,
         detectProvider: async () => ({
           provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
           available: true,
@@ -487,6 +488,7 @@ describe("Cursor ACP harness", { concurrent: false }, () => {
       {
         commands: { cursor: command },
         installationLeases: new ProviderInstallationLeaseCoordinator(),
+        conversationProviderGate: () => undefined,
         detectProvider: async () => ({
           provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
           available: true,
@@ -848,6 +850,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       {
         commands: { cursor: command },
         installationLeases: new ProviderInstallationLeaseCoordinator(),
+        conversationProviderGate: () => undefined,
         detectProvider: async () => ({
           provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
           available: true,

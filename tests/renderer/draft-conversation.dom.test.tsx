@@ -10,6 +10,7 @@ import {
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "../../src/renderer/src/hooks/useWorkspaceLayout";
 import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConversation";
 import { useProjectChatNavigation } from "../../src/renderer/src/hooks/useProjectChatNavigation";
+import { conversationHasHistory } from "../../src/shared/continuation-policy";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
@@ -570,6 +571,7 @@ describe("useDraftConversation", () => {
       status: "idle",
       providerSessionId: null,
     });
+    expect(conversationHasHistory(hook.result.current.conversation!)).toBe(false);
     expect(hook.result.current.requiresWorkspaceMaterialization).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
@@ -604,6 +606,7 @@ describe("useDraftConversation", () => {
       turnId: "turn-1",
     });
     expect(hook.result.current.conversation?.id).toBe(draftId);
+    expect(conversationHasHistory(hook.result.current.conversation!)).toBe(true);
     expect(hook.result.current.layoutConversationId).toBe(conversationId);
     expect(readPersistedMaterializedDraftConversation()).toMatchObject({
       acceptedTurnId: "turn-1",

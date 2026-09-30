@@ -318,6 +318,7 @@ describe("detached chat leaf controls", () => {
         onOpenConversationInWindow={noOp}
         onCloseConversationSplit={noOp}
         onCreateConversation={noOp}
+        onChooseNewChatProject={noOp}
         onOpenMultiSpawn={noOp}
         onOpenDailyWork={noOp}
         onRenameConversation={noOp}

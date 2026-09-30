@@ -24,7 +24,7 @@ import type { QueueCommandRunner } from "../components/composer/runtimeQueueClie
 export interface AppRuntimeActions {
   runQueueCommand: QueueCommandRunner;
   sendingConversationIds: ReadonlySet<string>;
-  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
   ) => void;
@@ -99,10 +99,13 @@ export function useAppRuntimeActions(options: {
   const run = useCallback(async (
     key: string,
     command: CommandWithoutId,
-    runOptions?: { reportError?: boolean },
+    runOptions?: { reportError?: boolean; passive?: boolean },
   ): Promise<ServerEvent> => {
-    setBusyAction(key);
-    setActionError(null);
+    const passive = runOptions?.passive === true;
+    if (!passive) {
+      setBusyAction(key);
+      setActionError(null);
+    }
     try {
       const event = await sendCommand(withRequestId(command));
       if (commandRefreshesConversationDetail(command, event)) refreshDetail();
@@ -115,7 +118,7 @@ export function useAppRuntimeActions(options: {
       );
       throw error;
     } finally {
-      setBusyAction((current) => current === key ? null : current);
+      if (!passive) setBusyAction((current) => current === key ? null : current);
     }
   }, [refreshDetail, sendCommand, setActionError, setBusyAction]);
   const openProjectPath = useCallback((

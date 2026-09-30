@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../src/server/database";
+import { formatElectronConsoleError } from "./support/electron-app-lifecycle";
 import { waitForViewportToMatchWindow } from "./support/stable-sample";
 import { ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -101,7 +102,7 @@ test.beforeAll(async () => {
   });
   page = await application.firstWindow();
   page.on("console", (message) => {
-    if (message.type() === "error") rendererErrors.push(message.text());
+    if (message.type() === "error") rendererErrors.push(formatElectronConsoleError(message));
   });
   page.on("pageerror", (error) => rendererErrors.push(error.message));
   await page.getByRole("heading", { name: "Nested repositories", level: 1 }).waitFor();

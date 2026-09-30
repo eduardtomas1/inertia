@@ -314,6 +314,28 @@ describe("DailyWorkDialog", () => {
     expect(latestClose).toHaveBeenCalledOnce();
   });
 
+  it("keeps keyboard focus inside the dialog while a focused refresh is running", async () => {
+    let finishRefresh!: (event: ServerEvent) => void;
+    const request = vi.fn<DailyWorkDialogProps["request"]>()
+      .mockResolvedValueOnce(result(dashboard()))
+      .mockImplementationOnce(() => new Promise<ServerEvent>((resolve) => {
+        finishRefresh = resolve;
+      }));
+    renderDialog({ request });
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    const refresh = within(dialog).getByRole("button", { name: "Refresh daily work" });
+    await waitFor(() => expect(refresh).toBeEnabled());
+    refresh.focus();
+
+    fireEvent.click(refresh);
+
+    await waitFor(() => expect(refresh).toBeDisabled());
+    expect(within(dialog).getByRole("button", { name: "Close daily work" })).toHaveFocus();
+
+    finishRefresh(result(dashboard()));
+    await waitFor(() => expect(refresh).toHaveFocus());
+  });
+
   it("shows an offline error without issuing a request", async () => {
     const request = vi.fn<DailyWorkDialogProps["request"]>();
     renderDialog({ status: "offline", request });

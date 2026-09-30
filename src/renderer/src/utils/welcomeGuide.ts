@@ -1,3 +1,5 @@
+import { createDialogSwitch } from "./dialogSwitch";
+
 export const WELCOME_GUIDE_STORAGE_KEY = "inertia:welcome-guide:v1";
 
 export type WelcomeGuideGate = "open" | "mark-seen" | "wait";
@@ -39,30 +41,9 @@ export function welcomeGuideGate({
   return blocked ? "wait" : "open";
 }
 
-const listeners = new Set<() => void>();
-let open = false;
+const welcomeGuide = createDialogSwitch();
 
-function publish(next: boolean): void {
-  if (open === next) return;
-  open = next;
-  for (const listener of listeners) listener();
-}
-
-export function subscribeWelcomeGuide(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-export function welcomeGuideIsOpen(): boolean {
-  return open;
-}
-
-export function openWelcomeGuide(): void {
-  publish(true);
-}
-
-export function closeWelcomeGuide(): void {
-  publish(false);
-}
+export const subscribeWelcomeGuide = welcomeGuide.subscribe;
+export const welcomeGuideIsOpen = welcomeGuide.isOpen;
+export const openWelcomeGuide = welcomeGuide.open;
+export const closeWelcomeGuide = welcomeGuide.close;

@@ -36,6 +36,7 @@ it.each([
   const manager = ProviderManager.createProduction({
     commands: { claude: process.execPath },
     installationLeases: leases,
+    conversationProviderGate: () => undefined,
   });
   vi.mocked(readClaudeAgentSdkSkills)
     .mockRejectedValueOnce(failure())

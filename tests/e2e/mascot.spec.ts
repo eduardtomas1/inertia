@@ -249,6 +249,37 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await expect.poll(() => store.shellSnapshot().activeConversationId).toBe(chat.id);
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "idle");
 
+    const second = store.createConversation(project.id, "Second mascot chat", { activate: false });
+    const secondTurn = store.beginAgentTurn({
+      conversationId: second.id, runId: "mascot-second-run", content: "Keep another chat busy.",
+      providerId: "codex", modelSelection: selection, reasoningEffort: "high", interactionMode: "build",
+      accessMode: "supervised", configurationRevision: 0, association: "authoritative", requestedAt: new Date().toISOString(),
+    });
+    store.updateAgentTurnLifecycle(secondTurn.turn.id, {
+      status: agentTurnStatusForRunState("running"), runState: { state: "running", providerState: null, revision: 1 },
+      startedAt: secondTurn.turn.requestedAt, updatedAt: new Date().toISOString(),
+    });
+    store.selectConversation(originalConversationId);
+    await main.reload();
+    await expect(overlay.locator(".mascot-title")).toHaveText("Second mascot chat");
+    await expect(overlay.locator(".mascot-project")).toHaveText(project.name);
+    const picker = overlay.locator(".mascot-picker");
+    await expect(picker).toHaveText("Auto");
+    await picker.click();
+    const chooser = overlay.getByRole("group", { name: "Show chat" });
+    await expect(chooser.getByRole("button")).toHaveCount(3);
+    await capture(overlay, "chooser", info);
+    await chooser.getByRole("button", { name: /Mascot runtime fixture/ }).click();
+    await expect(picker).toHaveText("Pinned");
+    await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "failed");
+    await expect(overlay.locator(".mascot-title")).toHaveText("Mascot runtime fixture");
+    await capture(overlay, "pinned", info);
+    await overlay.getByRole("button", { name: /Something went wrong.*View issue/ }).click();
+    await expect(main.getByRole("heading", { name: "Mascot runtime fixture", level: 1 })).toBeVisible();
+    await picker.click();
+    await chooser.getByRole("button", { name: /Most urgent chat/ }).click();
+    await expect(overlay.locator(".mascot-title")).toHaveText("Second mascot chat");
+
     store.close();
     closeStore = () => undefined;
     const position = await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === "Inertia mascot")!.getPosition());
@@ -306,8 +337,9 @@ test("mascot previews provider progress, opens questions and approvals, and show
     });
     await expect(turn, "The submitted request must be accepted into a real turn").toBeVisible();
     await expect(overlay.locator(".mascot-message")).toHaveText("Check the question and approval flow");
-    await expect(overlay.locator(".mascot-detail")).toHaveText("1 of 3 steps complete");
-    await expect(overlay.locator(".mascot-chat")).toHaveText("Make the mascot more useful");
+    await expect(overlay.locator(".mascot-detail")).toHaveText("1 of 3 steps");
+    await expect(overlay.locator(".mascot-steps")).toBeVisible();
+    await expect(overlay.locator(".mascot-title")).toHaveText("Make the mascot more useful");
     expect(await overlay.locator(".mascot-action").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await capture(overlay, "working", info);
     await switchAway();

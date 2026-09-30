@@ -5,6 +5,10 @@ import {
 } from "node:child_process";
 import { win32 } from "node:path";
 import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
+import type {
+  PosixCleanupFailure,
+  PosixCleanupFailureReason,
+} from "./posix-cleanup-diagnostics";
 import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
 import {
@@ -42,6 +46,7 @@ export interface AwaitableProcessLifecycleDependencies
   waitMs?: number;
   processCanExecute?: (pid: number) => boolean | null;
   processGroupCanExecute?: (processGroupId: number) => boolean | null;
+  onPosixCleanupFailure?: (failure: PosixCleanupFailure) => void;
 }
 
 export type WaitForProcessExit = (waitMs: number) => Promise<boolean>;
@@ -55,7 +60,10 @@ export type OwnedProcessTreeTermination = (
   force: boolean,
 ) => Promise<void>;
 
-export type OwnedPidProcessTreeTermination = () => Promise<boolean>;
+export interface OwnedPidProcessTreeTermination {
+  (): Promise<boolean>;
+  readonly posixCleanupFailure?: PosixCleanupFailure | null;
+}
 
 interface ProcessTreeTerminationErrorOptions extends ErrorOptions {
   priorError?: unknown;
@@ -469,8 +477,10 @@ function posixTreeEnumeration(
     return "root-authorized";
   }
   const rootAbsenceObserved = killed.rootStop === "absent"
-    || killed.rootState === "absent"
-    || killed.rootState === "zombie";
+    || (
+      (killed.rootState === "absent" || killed.rootState === "zombie")
+      && !killed.rootRunningObserved
+    );
   return rootGoneAccepted && rootAbsenceObserved ? "root-gone" : "incomplete";
 }
 
@@ -481,6 +491,37 @@ function posixTreeTerminationConfirmed(
     && evidence.groupExited
     && evidence.descendantsExited
     && evidence.rootExited;
+}
+
+function posixCleanupFailure(
+  scope: "child" | "pid",
+  reason: PosixCleanupFailureReason,
+  killed: PosixProcessTreeKillResult | null,
+  evidence: PosixTreeTerminationEvidence | null,
+): PosixCleanupFailure {
+  return {
+    scope,
+    reason,
+    rootStop: killed?.rootStop ?? null,
+    rootState: killed?.rootState ?? null,
+    rootRunningObserved: killed?.rootRunningObserved ?? null,
+    scanStabilized: killed?.scanStabilized ?? null,
+    groupExited: evidence?.groupExited ?? null,
+    descendantsExited: evidence?.descendantsExited ?? null,
+    rootExited: evidence?.rootExited ?? null,
+  };
+}
+
+function reportPosixTreeTermination(
+  report: (failure: PosixCleanupFailure) => void,
+  scope: "child" | "pid",
+  reason: PosixCleanupFailureReason,
+  killed: PosixProcessTreeKillResult | null,
+  evidence: PosixTreeTerminationEvidence | null,
+): boolean {
+  const confirmed = evidence !== null && posixTreeTerminationConfirmed(evidence);
+  if (!confirmed) report(posixCleanupFailure(scope, reason, killed, evidence));
+  return confirmed;
 }
 
 function nativePosixProcessObserver(
@@ -642,10 +683,25 @@ export function createOwnedPidProcessTreeTermination(
   let started = false;
   let treeTerminationConfirmed = false;
   let enumeration: PosixTreeEnumeration = "incomplete";
+  let observation: PosixProcessTreeKillResult | null = null;
   let descendants: readonly number[] = [];
+  const state: { posixCleanupFailure: PosixCleanupFailure | null } = {
+    posixCleanupFailure: null,
+  };
+  const report = (failure: PosixCleanupFailure): void => {
+    state.posixCleanupFailure = failure;
+    dependencies.onPosixCleanupFailure?.(failure);
+  };
+  const unconfirmed = (reason: PosixCleanupFailureReason): false => {
+    report(posixCleanupFailure("pid", reason, observation, null));
+    return false;
+  };
 
-  return async () => {
-    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+  const terminate = async (): Promise<boolean> => {
+    state.posixCleanupFailure = null;
+    if (!Number.isSafeInteger(pid) || pid <= 1) {
+      return platform === "win32" ? false : unconfirmed("invalid-pid");
+    }
     const deadlineAt = Date.now() + waitMs;
     const startedAt = performance.now();
 
@@ -697,11 +753,12 @@ export function createOwnedPidProcessTreeTermination(
         deadlineAt,
       });
       enumeration = posixTreeEnumeration(killed, false);
+      observation = killed;
       descendants = killed.descendants;
     }
-    if (enumeration === "incomplete") return false;
+    if (enumeration === "incomplete") return unconfirmed("incomplete-scan");
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
-    if (exitWaitMs <= 0) return false;
+    if (exitWaitMs <= 0) return unconfirmed("no-exit-budget");
     const [groupExited, descendantsExited, rootExited] = await Promise.all([
       waitForPosixProcessGroupExit(
         pid,
@@ -717,10 +774,13 @@ export function createOwnedPidProcessTreeTermination(
       ),
       waitForRootExit(exitWaitMs),
     ]);
-    return posixTreeTerminationConfirmed({
+    return reportPosixTreeTermination(report, "pid", "exit-unconfirmed", observation, {
       enumeration, groupExited, descendantsExited, rootExited,
     });
   };
+  return Object.defineProperty(terminate, "posixCleanupFailure", {
+    get: () => state.posixCleanupFailure,
+  }) as OwnedPidProcessTreeTermination;
 }
 
 /**
@@ -744,11 +804,22 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  const report = dependencies.onPosixCleanupFailure ?? (() => undefined);
+  const reported = (
+    confirmed: boolean,
+    reason: PosixCleanupFailureReason,
+    evidence: PosixTreeTerminationEvidence | null = null,
+  ): boolean => {
+    if (!confirmed && platform !== "win32") {
+      report(posixCleanupFailure("child", reason, null, evidence));
+    }
+    return confirmed;
+  };
   if (!pid) {
-    return await confirmedBefore(
+    return reported(await confirmedBefore(
       awaitRuntimeOwnedProcessStopped(child),
       Date.now() + waitMs,
-    );
+    ), "owned-stop-unconfirmed");
   }
   const processCanExecute = nativePosixProcessObserver(platform, dependencies);
   const processGroupCanExecute = nativePosixProcessGroupObserver(
@@ -831,7 +902,10 @@ export async function terminateProcessTreeAndWait(
       // A released runtime-owned claim is an exact, durable cleanup receipt.
       // Conversely, map presence without release must stay fail-closed; never
       // reinterpret the now-reapable numeric PGID as ownership evidence.
-      return ownedStopConfirmation || await awaitRuntimeOwnedProcessStopped(child);
+      return reported(
+        ownedStopConfirmation || await awaitRuntimeOwnedProcessStopped(child),
+        "owned-stop-unconfirmed",
+      );
     }
     // A no-signal existence probe can still prove that the owned group is
     // already gone for an untracked child. Never signal a group after this
@@ -846,10 +920,15 @@ export async function terminateProcessTreeAndWait(
       // unconfirmed rather than releasing ownership unsafely.
       groupExited = (error as NodeJS.ErrnoException).code === "ESRCH";
     }
-    return posixTreeTerminationConfirmed({
+    const evidence: PosixTreeTerminationEvidence = {
       enumeration: "root-gone", groupExited,
       descendantsExited: true, rootExited: true,
-    });
+    };
+    return reported(
+      posixTreeTerminationConfirmed(evidence),
+      "closed-unconfirmed",
+      evidence,
+    );
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
   const deadlineAt = Date.now() + waitMs;
@@ -863,11 +942,11 @@ export async function terminateProcessTreeAndWait(
     // PID/PGID signal while this guardian owns the request.
     await guardianStopBarrier;
     const childClosed = await waitForObservedDirectChildClose(waitMs);
-    if (!childClosed) return false;
+    if (!childClosed) return reported(false, "owned-stop-unconfirmed");
     const ownershipDeadline = Date.now() + waitMs;
     while (!confirmRuntimeOwnedProcessStopped(child)) {
       const remainingMs = ownershipDeadline - Date.now();
-      if (remainingMs <= 0) return false;
+      if (remainingMs <= 0) return reported(false, "owned-stop-unconfirmed");
       await new Promise<void>((resolve) => {
         setTimeout(resolve, Math.min(PROCESS_GROUP_POLL_MS, remainingMs));
       });
@@ -892,6 +971,7 @@ export async function terminateProcessTreeAndWait(
         scanStabilized: false,
         rootStop: "absent",
         rootState: "absent",
+        rootRunningObserved: false,
       };
     const enumeration = posixTreeEnumeration(killed, true);
     const { descendants } = killed;
@@ -912,7 +992,7 @@ export async function terminateProcessTreeAndWait(
       ),
       waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return posixTreeTerminationConfirmed({
+    return reportPosixTreeTermination(report, "child", "exit-unconfirmed", killed, {
       enumeration, groupExited, descendantsExited, rootExited: childClosed,
     });
   }
@@ -928,18 +1008,28 @@ export async function terminateProcessTreeAndWait(
       ),
       waitForObservedDirectChildClose(exitWaitMs),
     ]);
-    return posixTreeTerminationConfirmed({
+    const evidence: PosixTreeTerminationEvidence = {
       enumeration: "root-gone", groupExited,
       descendantsExited: true, rootExited: childClosed,
-    });
+    };
+    return reported(
+      posixTreeTerminationConfirmed(evidence),
+      "graceful-unconfirmed",
+      evidence,
+    );
   } catch (error) {
     killDirectChild(child, false);
     const groupExited = (error as NodeJS.ErrnoException).code === "ESRCH"
       || processGroupCanExecute?.(pid) === false;
     const childClosed = await waitForObservedDirectChildClose(remainingMs());
-    return posixTreeTerminationConfirmed({
+    const evidence: PosixTreeTerminationEvidence = {
       enumeration: "root-gone", groupExited,
       descendantsExited: true, rootExited: childClosed,
-    });
+    };
+    return reported(
+      posixTreeTerminationConfirmed(evidence),
+      "graceful-unconfirmed",
+      evidence,
+    );
   }
 }

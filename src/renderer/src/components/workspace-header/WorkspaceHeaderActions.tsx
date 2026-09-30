@@ -4,6 +4,7 @@ import type {
 } from "@shared/contracts";
 
 import type { WorkspaceRunsModel } from "../../utils/workspaceRuns";
+import { FocusFirstMenuItem } from "./FocusFirstMenuItem";
 import { GitActionsControl } from "./GitActionsControl";
 import { OpenInControl } from "./OpenInControl";
 import {
@@ -13,6 +14,7 @@ import {
 
 export interface WorkspaceHeaderActionsProps {
   presentation: HeaderControlPresentation;
+  focusMenuId: string | null;
   projectId: string;
   projectName: string;
   actions: readonly ProjectAction[];
@@ -40,6 +42,7 @@ export interface WorkspaceHeaderActionsProps {
 
 export function WorkspaceHeaderActions({
   presentation,
+  focusMenuId,
   projectId,
   projectName,
   actions,
@@ -106,6 +109,7 @@ export function WorkspaceHeaderActions({
           onRequestMenuClose={onRequestMenuClose}
         />
       )}
+      {focusMenuId && <FocusFirstMenuItem menuId={focusMenuId} />}
     </>
   );
 }

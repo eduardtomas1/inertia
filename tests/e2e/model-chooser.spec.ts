@@ -488,6 +488,20 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     /Current selection: Codex .* Model Codex Beta \(codex-beta\)/u,
   );
 
+  const sourceStore = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  const { id, projectId, providerId, modelSelection, providerSessionId, continuationIdentity } =
+    sourceStore.conversation(currentConversation.id);
+  const sourceBeforeChange = { id, projectId, providerId, modelSelection, providerSessionId, continuationIdentity };
+  const sourceHistory = sourceStore.conversationDetail(currentConversation.id)!;
+  sourceStore.close();
+  const expectSourcePreserved = (store: RuntimeStore): void => {
+    expect(store.conversation(currentConversation.id)).toMatchObject(sourceBeforeChange);
+    const history = store.conversationDetail(currentConversation.id)!;
+    expect(history.messages).toEqual(sourceHistory.messages);
+    expect(history.agentTurns).toEqual(sourceHistory.agentTurns);
+  };
   await modelTrigger.click();
   await searchModels.fill("Kimi K3");
   const kimi = modelOptions
@@ -496,7 +510,21 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(kimi).toBeEnabled();
   await kimi.click();
   await expect(modelChooser).toBeHidden();
-  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  const newChatPrompt = page.getByRole("alertdialog");
+  await expect(newChatPrompt).toContainText("Start a new chat to use a different provider.");
+  await expect(page.getByText("Keep the authoritative Codex route.", { exact: true }))
+    .toBeVisible();
+  const pendingStore = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  try {
+    expectSourcePreserved(pendingStore);
+    expect(pendingStore.snapshot().conversations).toHaveLength(conversationCountBefore);
+  } finally {
+    pendingStore.close();
+  }
+  await newChatPrompt.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(newChatPrompt).toBeHidden();
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -534,17 +562,26 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
       database.close();
     }
   }).toEqual({
-    activeId: currentConversation.id,
+    activeId: expect.any(String),
     backendProfileId: "builtin:kimi-code",
     modelId: "k3",
     providerSessionId: null,
     continuationIdentity: null,
-    conversationCount: conversationCountBefore,
+    conversationCount: conversationCountBefore + 1,
   });
   const preservedStore = new RuntimeStore(databasePath, workspaceDirectory, {
     recoverInterruptedRuns: false,
   });
   try {
+    expectSourcePreserved(preservedStore);
+    const destinationId = preservedStore.snapshot().activeConversationId!;
+    expect(destinationId).not.toBe(currentConversation.id);
+    expect(preservedStore.conversation(destinationId)).toMatchObject({
+      projectId: sourceBeforeChange.projectId,
+      providerId: "claude", providerSessionId: null, continuationIdentity: null,
+    });
+    expect(preservedStore.hasConversationMessages(destinationId)).toBe(false);
+    expect(preservedStore.hasConversationTurns(destinationId)).toBe(false);
     expect(preservedStore.agentTurn(turn.id)).toMatchObject({
       conversationId: currentConversation.id,
       providerSessionAfter: "composer-e2e-session",
@@ -555,7 +592,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     preservedStore.close();
   }
   await expect(page.getByText("Keep the authoritative Codex route.", { exact: true }))
-    .toBeVisible();
+    .toHaveCount(0);
   await expect(modelTrigger).toHaveAccessibleName(
     /Current selection: Claude .* Kimi .* Model K3 \(k3\)/u,
   );

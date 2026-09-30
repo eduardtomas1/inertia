@@ -36,3 +36,34 @@ it("keeps the initiating nonce across a browser retry and uses it to poll approv
   expect(polls[0]).toEqual({ requestId: "33333333-3333-4333-8333-333333333333", browserNonce: starts[0]!.browserNonce });
   expect(document.body.textContent).not.toContain(starts[0]!.browserNonce);
 });
+
+it("reports a session failure after approval once instead of leaving it unhandled", async () => {
+  let sessionRequests = 0;
+  let polls = 0;
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    if (path === "/api/session/csrf") {
+      sessionRequests += 1;
+      return sessionRequests === 1
+        ? new Response("{}", { status: 401 })
+        : new Response("{}", { status: 503 });
+    }
+    if (path === "/api/pair/start") {
+      return new Response(JSON.stringify({ requestId: "33333333-3333-4333-8333-333333333333", comparisonCode: "123456" }), { status: 202 });
+    }
+    if (path === "/api/pair/status") {
+      polls += 1;
+      return new Response(JSON.stringify({ status: "approved" }));
+    }
+    throw new Error(`Unexpected endpoint ${path}`);
+  }));
+  const invitation = createPrivateConnectInvitation("11111111-1111-4111-8111-111111111111");
+  const fragment = new URL(createPrivateConnectPairingLink("https://host.example", invitation)).hash;
+  render(<App initialPairingFragment={fragment} />);
+  await screen.findByRole("heading", { name: "Waiting for approval" });
+
+  await screen.findByRole("heading", { name: "Your Inertia computer is offline" }, { timeout: 2_500 });
+  const settledPolls = polls;
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+  expect(polls).toBe(settledPolls);
+  expect(sessionRequests).toBe(2);
+});

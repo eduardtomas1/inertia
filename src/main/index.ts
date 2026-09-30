@@ -86,6 +86,7 @@ import {
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { registerApplicationDiagnosticsIpc } from "./application-diagnostics-ipc.js";
+import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DIAGNOSTICS_IPC } from "../shared/application-diagnostics-ipc.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
@@ -371,6 +372,13 @@ function registerIpcHandlers(): void {
       });
       return result.canceled ? null : result.filePath ?? null;
     },
+  });
+  registerCompletionSoundIpc({
+    ipcMain, assertTrusted: assertTrustedIpc,
+    window: () => mainWindow,
+    dialog,
+    directory: join(app.getPath("userData"), "completion-sounds"),
+    defaultPath: () => app.getPath("music"),
   });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
@@ -786,7 +794,7 @@ async function createMainWindow(): Promise<void> {
       if (detachedChatMain?.focusForNotification(conversationId)) return;
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
     },
-    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`,
+    spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`, focusChat: (conversationId, request) => runtimeSupervisor?.focusMascotChat(conversationId, request),
   });
   mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
@@ -1089,7 +1097,7 @@ async function bootstrap(): Promise<void> {
         serviceName: "Inertia Runtime",
       },
     ),
-    onMascotStatus: (status) => mascotMain?.observe(status),
+    onMascotStatus: (status, chats, focus, counts, request) => mascotMain?.observe(status, chats, focus, counts, request),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

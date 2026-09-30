@@ -9,6 +9,13 @@ import {
   WORKING_INDICATOR_SPEEDS,
   WORKING_INDICATOR_STYLES,
 } from "../../working-indicator";
+import {
+  COMPLETION_SOUND_LONG_RUN_MAX_SECONDS,
+  COMPLETION_SOUND_LONG_RUN_MIN_SECONDS,
+  isBuiltInCompletionSound,
+  isCompletionSoundFile,
+  isCompletionSoundLibrary,
+} from "../../completion-sound";
 import { RUNTIME_DETAIL_SUBSCRIPTION_OWNERS } from "../../runtime-detail-subscriptions";
 
 import {
@@ -409,6 +416,21 @@ export const configurationCommandSchemas = [
             glow: z.boolean().optional(),
             activity: z.boolean().optional(),
             speed: z.enum(WORKING_INDICATOR_SPEEDS).optional(),
+          }).strict().optional(),
+          completionSound: z.object({
+            enabled: z.boolean().optional(),
+            sound: z.string().refine(
+              (value) => isBuiltInCompletionSound(value) || isCompletionSoundFile(value),
+              "Completion sounds must be built in or imported.",
+            ).optional(),
+            library: z.unknown().refine(
+              isCompletionSoundLibrary,
+              "Imported completion sounds must be unique, named files.",
+            ).optional(),
+            longRunsOnly: z.boolean().optional(),
+            longRunSeconds: z.number().int()
+              .min(COMPLETION_SOUND_LONG_RUN_MIN_SECONDS)
+              .max(COMPLETION_SOUND_LONG_RUN_MAX_SECONDS).optional(),
           }).strict().optional(),
         })
         .strict(),

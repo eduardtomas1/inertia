@@ -2140,6 +2140,7 @@ describe("runtime migration catalog", () => {
       { version: 80 },
       { version: 81 },
       { version: 82 },
+      { version: 83 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2167,6 +2168,9 @@ describe("runtime migration catalog", () => {
     expect((migrated.prepare(
       "SELECT working_indicator_json AS workingIndicator FROM app_state WHERE id = 1",
     ).get() as { workingIndicator: string }).workingIndicator).toBe("{}");
+    expect((migrated.prepare(
+      "SELECT completion_sound_json AS completionSound FROM app_state WHERE id = 1",
+    ).get() as { completionSound: string }).completionSound).toBe("{}");
     migrated.close();
   });
 });

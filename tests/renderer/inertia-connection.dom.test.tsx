@@ -171,6 +171,36 @@ describe("useInertiaConnection", () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
+  it("does not schedule a retry when the runtime reports unavailable after unmount", async () => {
+    let resolveConnection: ((value: unknown) => void) | undefined;
+    const getRuntimeConnection = vi.fn(() => new Promise((resolve) => {
+      resolveConnection = resolve;
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const { unmount } = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(1));
+    vi.useFakeTimers();
+    unmount();
+    await act(async () => {
+      resolveConnection?.({
+        unavailable: true,
+        code: "runtime-starting",
+        retryable: true,
+        message: "The local service is starting.",
+      });
+    });
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("does not lose runtime readiness announced during an in-flight connection attempt", async () => {
     let announceReady: (() => void) | undefined;
     let rejectFirstConnection: ((error: Error) => void) | undefined;

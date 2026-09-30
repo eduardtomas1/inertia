@@ -21,6 +21,7 @@ import type {
   GitPreMergeEvidenceState,
   ServerEvent,
 } from "@shared/contracts";
+import { useBusyTriggerFocus } from "../hooks/useBusyTriggerFocus";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
@@ -160,6 +161,8 @@ export function PreMergeConfidenceDialog({
   const [clock, setClock] = useState(() => Date.now());
   const requestRevision = useRef(0);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
+  const holdRefreshFocus = useBusyTriggerFocus(loading, closeRef, refreshRef);
   useNativePreviewSuspension(open);
 
   const load = useCallback(async (): Promise<void> => {
@@ -265,8 +268,12 @@ export function PreMergeConfidenceDialog({
           </div>
           <span className="pre-merge-header-actions">
             <IconButton
+              ref={refreshRef}
               label="Refresh pre-merge evidence"
-              onClick={() => void load()}
+              onClick={(event) => {
+                holdRefreshFocus(event.currentTarget);
+                void load();
+              }}
               disabled={loading}
             >
               {loading ? <LoadingMark label="Refreshing pre-merge evidence" /> : <RefreshCw size={15} />}

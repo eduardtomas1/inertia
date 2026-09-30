@@ -612,6 +612,36 @@ describe("ChatGoalControl", () => {
     expect(dismissSecondary).not.toHaveBeenCalled();
   });
 
+  it("leaves an Escape already handled by an open dialog to that dialog", () => {
+    const onDismiss = vi.fn();
+    const closeDialog = vi.fn();
+    render(
+      <>
+        <ChatGoalControl
+          {...props(workflow(nativeCapability))}
+          {...openProps(onDismiss)}
+        />
+        <section
+          role="dialog"
+          aria-label="Open dialog"
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            closeDialog();
+          }}
+        />
+      </>,
+    );
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Open dialog" }), {
+      key: "Escape",
+    });
+
+    expect(closeDialog).toHaveBeenCalledOnce();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
   it("stays integrated while the user interacts elsewhere in the chat", () => {
     const onDismiss = vi.fn();
     render(
@@ -671,5 +701,26 @@ describe("ChatGoalControl", () => {
       .toHaveTextContent("The workflow request failed.");
     fireEvent.click(within(surface).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(onRetry).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps an open goal control open and offers New chat when the chat becomes unable to continue", () => {
+    const onDismiss = vi.fn();
+    const onStartNewChat = vi.fn();
+    const state = workflow(nativeCapability, [goal("codex-native", "Ship it")]);
+    const view = render(
+      <ChatGoalControl {...props(state, { onStartNewChat })} {...openProps(onDismiss)} />,
+    );
+    expect(screen.getByRole("button", { name: "Pause" })).toHaveFocus();
+
+    view.rerender(
+      <ChatGoalControl
+        {...props(state, { onStartNewChat, continuationRefusal: "This chat cannot continue." })}
+        {...openProps(onDismiss)}
+      />,
+    );
+
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("This chat cannot continue.");
+    expect(screen.getByRole("button", { name: "New chat" })).toHaveFocus();
   });
 });

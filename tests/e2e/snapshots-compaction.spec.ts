@@ -196,8 +196,8 @@ for (const theme of ["dark", "light"] as const) test(`reviews a real Linux scree
     await page.mouse.down();
     await page.mouse.move(bounds!.x + bounds!.width * 0.75, bounds!.y + bounds!.height * 0.75);
     await page.mouse.up();
-    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Left", exact: true }).inputValue()) - crop.width / 4)).toBeLessThanOrEqual(3);
-    expect(Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Width", exact: true }).inputValue()) - crop.width / 2)).toBeLessThanOrEqual(3);
+    await expect.poll(async () => Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Left", exact: true }).inputValue()) - crop.width / 4)).toBeLessThanOrEqual(3);
+    await expect.poll(async () => Math.abs(Number(await dialog.getByRole("spinbutton", { name: "Width", exact: true }).inputValue()) - crop.width / 2)).toBeLessThanOrEqual(3);
     const path = testInfo.outputPath(`reviewed-screenshot-${theme}.png`);
     await page.screenshot({ path, animations: "disabled" }); await testInfo.attach("reviewed-screenshot", { path, contentType: "image/png" });
     await app.resizeWindow(760, 600); await app.expectNoViewportOverflow();

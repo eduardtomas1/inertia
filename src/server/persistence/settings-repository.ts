@@ -37,9 +37,13 @@ export class SettingsRepository {
     // A legacy whole-family selection still updates both halves atomically.
     const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
     const darkColorTheme = update.darkColorTheme ?? update.colorTheme ?? current.darkColorTheme ?? current.colorTheme;
+    const lightCustomColor = update.lightCustomColor !== undefined ? update.lightCustomColor
+      : update.lightColorTheme !== undefined || update.colorTheme !== undefined ? null : current.lightCustomColor;
+    const darkCustomColor = update.darkCustomColor !== undefined ? update.darkCustomColor
+      : update.darkColorTheme !== undefined || update.colorTheme !== undefined ? null : current.darkCustomColor;
     this.context.database.prepare(`
       UPDATE app_state SET
-        theme = ?, color_theme = ?, light_color_theme = ?, dark_color_theme = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
+        theme = ?, color_theme = ?, light_color_theme = ?, dark_color_theme = ?, light_custom_color = ?, dark_custom_color = ?, compact_sidebar = ?, show_timestamps = ?, terminal_font_size = ?,
         default_provider = ?, default_model = ?, default_access_mode = ?,
         new_thread_mode = ?, wrap_diffs = ?, ignore_whitespace = ?, show_thinking = ?,
         show_usage = ?, usage_display_mode = ?, interface_scale = ?, response_density = ?,
@@ -63,6 +67,8 @@ export class SettingsRepository {
       next.colorTheme,
       lightColorTheme,
       darkColorTheme,
+      lightCustomColor ?? null,
+      darkCustomColor ?? null,
       Number(next.compactSidebar),
       Number(next.showTimestamps),
       next.terminalFontSize,

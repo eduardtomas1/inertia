@@ -311,6 +311,8 @@ export interface StateRow {
   color_theme: ColorThemeId;
   light_color_theme?: ColorThemeId | null;
   dark_color_theme?: ColorThemeId | null;
+  light_custom_color?: string | null;
+  dark_custom_color?: string | null;
   compact_sidebar: 0 | 1;
   show_timestamps: 0 | 1;
   terminal_font_size: number;

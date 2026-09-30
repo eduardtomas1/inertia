@@ -32,7 +32,7 @@ describe("turn session recovery persistence", () => {
     const { databasePath } = await workspace();
     const database = new Database(databasePath);
     try {
-      migrateRuntimeDatabase(database, CURRENT_DATABASE_SCHEMA_VERSION - 1);
+      migrateRuntimeDatabase(database, 83);
       const columns = () => (database.prepare("PRAGMA table_info(agent_turns)").all() as Array<{ name: string }>)
         .map(({ name }) => name);
       expect(columns()).not.toContain("session_recovery_json");

@@ -341,6 +341,7 @@ function appSettings(value: unknown): boolean {
   return strings.every((key) => stringField(value, key))
     && (value.lightColorTheme === undefined || oneOf(value, "lightColorTheme", COLOR_THEME_IDS))
     && (value.darkColorTheme === undefined || oneOf(value, "darkColorTheme", COLOR_THEME_IDS))
+    && [value.lightCustomColor, value.darkCustomColor].every((color) => color == null || (typeof color === "string" && /^#[0-9a-f]{6}$/iu.test(color)))
     && Object.entries(enums).every(([key, options]) => oneOf(value, key, options))
     && booleans.every((key) => booleanField(value, key))
     && integerField(value, "terminalFontSize")

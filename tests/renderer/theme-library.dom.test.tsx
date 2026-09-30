@@ -40,7 +40,7 @@ describe("Theme library", () => {
       />,
     );
 
-    for (const choice of [...screen.getAllByRole("radio"), ...screen.getAllByRole("button")]) {
+    for (const choice of [...screen.getAllByRole("radio"), ...screen.getAllByRole("button"), ...screen.getAllByRole("textbox"), screen.getByLabelText("Light color picker"), screen.getByLabelText("Dark color picker")]) {
       expect(choice).toBeDisabled();
     }
   });
@@ -56,5 +56,30 @@ describe("Theme library", () => {
     onUpdate.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Use Ember for dark" }));
     expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ darkColorTheme: "ember" });
+  });
+  it("validates keyboard hex input and changes only the requested appearance", () => {
+    const onUpdate = vi.fn();
+    render(<ThemeLibrary settings={{ theme: "light", colorTheme: "inertia", lightCustomColor: "#3a86ff" }} disabled={false} onUpdate={onUpdate} />);
+    expect(screen.getByRole("button", { name: "Use custom color for light" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Use Inertia for light" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Use Inertia for dark" })).toHaveAttribute("aria-pressed", "true");
+    const hex = screen.getByRole("textbox", { name: "Dark hex color" });
+    fireEvent.change(hex, { target: { value: "oops" } });
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(hex).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a hex color");
+    fireEvent.keyDown(hex, { key: "Escape" });
+    expect(hex).toHaveValue("#a3a3fa");
+    fireEvent.change(hex, { target: { value: "F80" } });
+    fireEvent.keyDown(hex, { key: "Enter" });
+    expect(onUpdate).toHaveBeenLastCalledWith({ darkCustomColor: "#ff8800" });
+    onUpdate.mockClear();
+    fireEvent.input(screen.getByLabelText("Light color picker"), { target: { value: "#009688" } });
+    expect(onUpdate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Light color picker"), { target: { value: "#009688" } });
+    expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: "#009688" });
+    fireEvent.click(screen.getByRole("button", { name: "Reset light custom color" }));
+    expect(onUpdate).toHaveBeenLastCalledWith({ lightCustomColor: null });
   });
 });

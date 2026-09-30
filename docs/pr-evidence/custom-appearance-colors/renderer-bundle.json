@@ -1,0 +1,47 @@
+{
+  "baseline": "cb93b1f5bda2bbde5510bb893f71777ee6270342",
+  "platform": "Linux x64, Node 22.23.2, same package-lock.json",
+  "note": "Palette generation is loaded dynamically when a custom seed is present, or with the deferred Settings UI. Budget adjustments preserve existing headroom.",
+  "measurements": {
+    "mainWorkbenchFirstLoadJavaScript": {
+      "beforeBytes": 851481,
+      "afterBytes": 853048,
+      "deltaBytes": 1567
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "beforeBytes": 658031,
+      "afterBytes": 659578,
+      "deltaBytes": 1547
+    },
+    "settingsJavaScript": {
+      "beforeBytes": 65624,
+      "afterBytes": 68582,
+      "deltaBytes": 2958
+    },
+    "deferredCanaryRollbackJavaScript": {
+      "beforeBytes": 2406,
+      "afterBytes": 2428,
+      "deltaBytes": 22
+    },
+    "deferredProviderAuthJavaScript": {
+      "beforeBytes": 10833,
+      "afterBytes": 10992,
+      "deltaBytes": 159
+    },
+    "deferredTerminalJavaScript": {
+      "beforeBytes": 26616,
+      "afterBytes": 26775,
+      "deltaBytes": 159
+    },
+    "detachedChatJavaScript": {
+      "beforeBytes": 11639,
+      "afterBytes": 11582,
+      "deltaBytes": -57
+    },
+    "coreJavaScript": {
+      "beforeBytes": 2213166,
+      "afterBytes": 2225406,
+      "deltaBytes": 12240
+    }
+  }
+}

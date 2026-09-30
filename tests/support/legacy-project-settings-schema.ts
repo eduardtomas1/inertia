@@ -7,6 +7,8 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
     ALTER TABLE conversations DROP COLUMN marked_unread_at;
     ALTER TABLE app_state DROP COLUMN light_color_theme;
     ALTER TABLE app_state DROP COLUMN dark_color_theme;
+    ALTER TABLE app_state DROP COLUMN light_custom_color;
+    ALTER TABLE app_state DROP COLUMN dark_custom_color;
     DELETE FROM schema_migrations WHERE version >= 72;
   `);
   const operationColumns = database.pragma("table_info(agent_thread_operations)") as Array<{ name: string }>;

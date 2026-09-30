@@ -181,7 +181,6 @@ export interface AppSettings {
   /** Legacy snapshots fall back to colorTheme for both appearances. */
   lightColorTheme?: ColorThemeId;
   darkColorTheme?: ColorThemeId;
-  /** A custom palette seed overrides the preset for that appearance. */
   lightCustomColor?: string | null;
   darkCustomColor?: string | null;
   compactSidebar: boolean;

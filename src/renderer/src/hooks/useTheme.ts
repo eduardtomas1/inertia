@@ -28,7 +28,6 @@ export function useTheme({
 
     applyTheme();
     if (lightCustomColor || darkCustomColor) {
-      // Preset users need no palette generator in either window's startup bundle.
       void import("@shared/theme/color-theme-spec").then(({ buildCustomPaletteTokens }) => {
         if (cancelled) return;
         for (const [mode, color] of [["light", lightCustomColor], ["dark", darkCustomColor]] as const) {
@@ -36,7 +35,7 @@ export function useTheme({
           cacheCustomColor(layoutStorage, color, mode, palettes[mode] ?? []);
         }
         applyTheme();
-      }).catch(() => { /* Keep the cached palette or preset if loading is unavailable. */ });
+      }).catch(() => undefined);
     }
     media.addEventListener("change", applyTheme);
     return () => { cancelled = true; media.removeEventListener("change", applyTheme); };

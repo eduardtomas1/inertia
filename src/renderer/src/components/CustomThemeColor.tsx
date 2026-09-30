@@ -20,8 +20,6 @@ export function CustomThemeColor({ mode, value, disabled, onChange }: {
   useEffect(() => {
     const input = colorInput.current;
     if (!input) return;
-    // Like the project color picker, save the native dialog's committed change,
-    // not each intermediate input event while the user moves through colors.
     const commitColor = (): void => {
       if (input.disabled) return;
       setDraft(null);

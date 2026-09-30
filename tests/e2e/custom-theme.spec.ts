@@ -29,7 +29,6 @@ test("selects custom colors per appearance, follows System, and restores them af
     const dark = page.getByRole("textbox", { name: "Dark hex color" });
     await dark.fill("#f97316");
     await dark.press("Enter");
-    // Editing the inactive appearance must leave the current palette alone.
     await expectPalette(page, "#0d9488", "light");
     for (const mode of ["light", "dark"] as const) {
       await page.getByRole("radio", { name: mode === "light" ? "Light" : "Dark", exact: true }).click();

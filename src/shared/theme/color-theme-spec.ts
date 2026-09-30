@@ -337,7 +337,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
   ];
 }
 
-/** A user color supplies hue and tint; Inertia still owns elevation and contrast. */
 export function buildCustomPaletteTokens(hex: string, appearance: PaletteAppearance): (readonly [string, string])[] {
   if (!/^#[0-9a-f]{6}$/iu.test(hex)) throw new Error("Expected a six-digit hex color.");
   const { h, c } = hexToOklch(hex);

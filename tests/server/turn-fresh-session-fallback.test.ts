@@ -208,6 +208,43 @@ describe("fresh session fallback guards", () => {
     }
   });
 
+  it("does not restart a turn whose rejected session already accepted a follow-up", async () => {
+    const { runtime } = await establishedChat("claude");
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      const admission = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
+      const followUp = await runtime.controller.steer(admission, {
+        content: "Also cover the CSV export.",
+        imagePaths: [],
+      });
+      admission.release();
+      expect(followUp).toMatchObject({ role: "user", turnId: queued.turn.id });
+      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
+        providerSessionBefore: "saved-session",
+        continuationReasonCode: "same-continuation",
+      });
+      runtime.provider.resolve({
+        status: "failed",
+        sessionId: "saved-session",
+        error: unavailable.message,
+        failure: unavailable,
+      });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+      const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try again." });
+      runtime.controller.start(retry.turn.id);
+      const prompt = runtime.provider.input!.prompt;
+      expect(prompt.indexOf("Continue.")).toBeGreaterThan(-1);
+      expect(prompt.indexOf("Continue.")).toBeLessThan(prompt.indexOf("Also cover the CSV export."));
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
   it("does not offer a fallback to a turn that already starts fresh", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {

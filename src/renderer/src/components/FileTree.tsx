@@ -45,7 +45,7 @@ export const FileTree = memo(function FileTree({
   onKeyDown,
 }: FileTreeProps): React.JSX.Element {
   const baseId = useId();
-  const statuses: { id: string; text: string; error: boolean }[] = [];
+  const statuses: { id: string; path: string; text: string; error: boolean }[] = [];
   const items = rows.map((row, index) => {
     const { entry } = row;
     const name = workspacePathName(entry.path);
@@ -80,7 +80,7 @@ export const FileTree = memo(function FileTree({
           ? `More in ${name}.`
           : `${name} is empty.`;
     if (showDirectoryStatus) {
-      statuses.push({ id: statusId, text: statusText, error: Boolean(directoryError) });
+      statuses.push({ id: statusId, path: entry.path, text: statusText, error: Boolean(directoryError) });
     }
     return (
       <div className="file-tree-row-group" role="none" key={`${searchActive ? "search" : "tree"}:${entry.path}`}>
@@ -161,7 +161,7 @@ export const FileTree = memo(function FileTree({
       </div>
       <div className="visually-hidden">
         {statuses.map((status) => (
-          <p id={status.id} role={status.error ? "alert" : "status"} key={status.id}>
+          <p id={status.id} role={status.error ? "alert" : "status"} key={status.path}>
             {status.text}
           </p>
         ))}

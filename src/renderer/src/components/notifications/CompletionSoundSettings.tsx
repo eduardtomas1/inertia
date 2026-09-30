@@ -90,6 +90,9 @@ export function CompletionSoundSettings({
   const [named, setNamed] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null);
   const latest = useRef<SoundSettings>(saved);
+  const importRef = useRef<HTMLButtonElement>(null);
+  const removeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const removalFocus = useRef<string | null | undefined>(undefined);
   const value = pending ?? saved;
   latest.current = value;
   const canImport = Boolean(window.inertia?.importCompletionSound);
@@ -98,6 +101,13 @@ export function CompletionSoundSettings({
   useEffect(() => {
     if (pending && sameSettings(pending, saved)) setPending(null);
   }, [pending, saved]);
+
+  useLayoutEffect(() => {
+    const target = removalFocus.current;
+    if (target === undefined) return;
+    removalFocus.current = undefined;
+    (target === null ? importRef.current : removeButtons.current.get(target))?.focus();
+  }, [value.library]);
 
   const commit = (patch: Partial<SoundSettings>): Promise<boolean> => {
     const next = { ...latest.current, ...patch };
@@ -171,10 +181,12 @@ export function CompletionSoundSettings({
     void commit({ library: latest.current.library.map((sound) => (sound.file === file ? { ...sound, name } : sound)) });
   };
 
-  const removeSound = async (sound: CustomCompletionSound): Promise<void> => {
+  const removeSound = async (sound: CustomCompletionSound, focused: boolean): Promise<void> => {
     setNotice(null);
     setRemoving((count) => count + 1);
+    const index = latest.current.library.findIndex(({ file }) => file === sound.file);
     const library = latest.current.library.filter(({ file }) => file !== sound.file);
+    if (focused) removalFocus.current = (library[index] ?? library[index - 1])?.file ?? null;
     const saved = await commit({ library, sound: latest.current.sound === sound.file ? "chime" : latest.current.sound });
     if (saved) {
       forgetCustomCompletionSound(sound.file);
@@ -220,7 +232,8 @@ export function CompletionSoundSettings({
             <div className="completion-sound-library">
               <div className="completion-sound-heading">
                 <span id="completion-sound-library-label">Your sounds</span>
-                <button type="button" className="completion-sound-button" disabled={disabled || importing || removing > 0 || full} onClick={() => void importSound()}>
+                <button ref={importRef} type="button" className="completion-sound-button" disabled={disabled || full}
+                  aria-disabled={importing || removing > 0 || undefined} onClick={() => void importSound()}>
                   <Upload size={12} aria-hidden="true" />{importing ? "Importing…" : "Import sound…"}
                 </button>
               </div>
@@ -231,7 +244,12 @@ export function CompletionSoundSettings({
                       <SoundName sound={sound} disabled={disabled} focusRequest={named === sound.file}
                         onRename={(name) => rename(sound.file, name)} />
                       <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={13} /></IconButton>
-                      <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing} onClick={() => void removeSound(sound)}><Trash2 size={13} /></IconButton>
+                      <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing}
+                        ref={(node) => {
+                          if (node) removeButtons.current.set(sound.file, node);
+                          else removeButtons.current.delete(sound.file);
+                        }}
+                        onClick={(event) => void removeSound(sound, document.activeElement === event.currentTarget)}><Trash2 size={13} /></IconButton>
                     </li>
                   ))}
                 </ul>

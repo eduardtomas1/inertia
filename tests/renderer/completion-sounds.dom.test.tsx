@@ -243,10 +243,47 @@ describe("completion sound settings", () => {
     expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, sound: "chime", library: [] } });
   });
 
+  it.each([
+    ["the next sound's Remove button", [ding, rain], "Remove Ding", "Remove Rain"],
+    ["the previous sound's Remove button", [ding, rain], "Remove Rain", "Remove Ding"],
+    ["Import", [ding], "Remove Ding", "Import sound…"],
+  ] as const)("moves keyboard focus to %s after removing a focused sound", async (_target, library, removed, expected) => {
+    renderSettings({ ...enabled, library: [...library] }, {
+      importCompletionSound: vi.fn(),
+      removeCompletionSound: vi.fn(async () => undefined),
+    });
+    const remove = screen.getByRole("button", { name: removed });
+    remove.focus();
+    await act(async () => { fireEvent.click(remove); });
+    expect(screen.getByRole("button", { name: expected })).toHaveFocus();
+  });
+
+  it("keeps Import focusable while its file dialog is open", async () => {
+    let settle!: () => void;
+    const importCompletionSound = vi.fn(() => new Promise((resolve) => { settle = () => resolve({ status: "cancelled" }); }));
+    renderSettings({ ...enabled, library: [ding] }, { importCompletionSound, removeCompletionSound: vi.fn() });
+    const importButton = screen.getByRole("button", { name: "Import sound…" });
+    importButton.focus();
+    fireEvent.click(importButton);
+
+    const importing = screen.getByRole("button", { name: "Importing…" });
+    expect(importing).toBe(importButton);
+    expect(importing).toBeEnabled();
+    expect(importing).toHaveAttribute("aria-disabled", "true");
+    expect(importing).toHaveFocus();
+    fireEvent.click(importing);
+    expect(importCompletionSound).toHaveBeenCalledOnce();
+
+    await act(async () => settle());
+    expect(importButton).not.toHaveAttribute("aria-disabled");
+    expect(importButton).toHaveFocus();
+  });
+
   it("deletes a removed sound's file only after the removal is saved", async () => {
     const removeCompletionSound = vi.fn(async () => undefined);
+    const importCompletionSound = vi.fn();
     const { onUpdate } = renderSettings({ ...enabled, sound: ding.file, library: [ding, rain] }, {
-      importCompletionSound: vi.fn(),
+      importCompletionSound,
       removeCompletionSound,
     });
     let save!: () => void;
@@ -254,10 +291,13 @@ describe("completion sound settings", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remove Ding" })); });
     expect(onUpdate).toHaveBeenLastCalledWith({ completionSound: { ...enabled, sound: "chime", library: [rain] } });
     expect(removeCompletionSound).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Import sound…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Import sound…" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Import sound…" }));
+    expect(importCompletionSound).not.toHaveBeenCalled();
     await act(async () => { save(); });
     expect(removeCompletionSound).toHaveBeenCalledExactlyOnceWith(ding.file);
     expect(screen.getByRole("button", { name: "Import sound…" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Import sound…" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("keeps the file and its reference when the removal cannot be saved", async () => {

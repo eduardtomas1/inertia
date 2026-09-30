@@ -40,9 +40,14 @@
     color var(--motion-base) var(--motion-ease);
 }
 
-.completion-sound-button:hover:not(:disabled) {
+.completion-sound-button:hover:not(:disabled):not([aria-disabled="true"]) {
   color: var(--text);
   background: var(--surface-hover);
+}
+
+.completion-sound-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
 }
 
 .completion-sound-choices {
